@@ -1,0 +1,35 @@
+AITrain Studio uses a harness-first development workflow.
+
+At the beginning of every new task, automatically read:
+
+- HARNESS.md
+- docs/harness/project-context.md
+- docs/harness/implementation-checklist.md
+- docs/harness/quality-gates.md
+
+For UI work, also read:
+
+- docs/harness/ui-guidelines.md
+
+For large implementation work, also inspect:
+
+- AITrainStudio_后续实施方案.md
+
+Rules:
+
+- Keep changes scoped.
+- Preserve the Qt Widgets workbench architecture.
+- Do not put long-running work in the GUI thread.
+- Do not put training logic in MainWindow.
+- Route long tasks through aitrain_worker.
+- Use ProjectRepository for SQLite.
+- Use plugin interfaces for model/dataset/export/inference behavior.
+- Keep Qt 5.12+ compatibility unless explicitly changed.
+- Use QStringLiteral for UI text.
+- Avoid Chinese mojibake.
+- Do not represent scaffold behavior as complete YOLO/OCR training.
+
+Before finalizing code changes, run:
+
+.\tools\harness-check.ps1
+

@@ -1,0 +1,11 @@
+build/
+build-*/
+.vs/
+*.user
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.VC.opendb
+demo_project/
+

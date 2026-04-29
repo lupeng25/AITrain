@@ -1,0 +1,98 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Configure AITrain",
+      "type": "shell",
+      "command": "cmd",
+      "args": [
+        "/c",
+        "call \"C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && cmake -S . -B build-vscode -G \"NMake Makefiles\" -DCMAKE_PREFIX_PATH=C:\\Qt\\Qt5.12.9\\5.12.9\\msvc2015_64 -DAITRAIN_BUILD_TESTS=ON"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "Build AITrain",
+      "type": "shell",
+      "command": "cmd",
+      "args": [
+        "/c",
+        "call \"C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && cmake --build build-vscode"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": "Configure AITrain",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "Test AITrain",
+      "type": "shell",
+      "command": "cmd",
+      "args": [
+        "/c",
+        "call \"C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && ctest --test-dir build-vscode --output-on-failure"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "PATH": "C:\\Qt\\Qt5.12.9\\5.12.9\\msvc2015_64\\bin;${env:PATH}"
+        }
+      },
+      "dependsOn": "Build AITrain",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run AITrain",
+      "type": "shell",
+      "command": "${workspaceFolder}\\build-vscode\\bin\\AITrainStudio.exe",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "PATH": "C:\\Qt\\Qt5.12.9\\5.12.9\\msvc2015_64\\bin;${env:PATH}"
+        }
+      },
+      "dependsOn": "Build AITrain",
+      "problemMatcher": []
+    },
+    {
+      "label": "Harness Context",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\tools\\harness-context.ps1"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Harness Check",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\tools\\harness-check.ps1"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "test",
+      "problemMatcher": "$msCompile"
+    }
+  ]
+}

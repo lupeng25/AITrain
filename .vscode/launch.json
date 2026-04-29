@@ -1,0 +1,43 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug AITrainStudio",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build-vscode/bin/AITrainStudio.exe",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [
+        {
+          "name": "PATH",
+          "value": "C:/Qt/Qt5.12.9/5.12.9/msvc2015_64/bin;${env:PATH}"
+        }
+      ],
+      "console": "integratedTerminal",
+      "preLaunchTask": "Build AITrain"
+    },
+    {
+      "name": "Debug Worker",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build-vscode/bin/aitrain_worker.exe",
+      "args": [
+        "--server",
+        "manual_debug_server"
+      ],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [
+        {
+          "name": "PATH",
+          "value": "C:/Qt/Qt5.12.9/5.12.9/msvc2015_64/bin;${env:PATH}"
+        }
+      ],
+      "console": "integratedTerminal",
+      "preLaunchTask": "Build AITrain"
+    }
+  ]
+}
+

@@ -1,0 +1,22 @@
+{
+  "cmake.generator": "NMake Makefiles",
+  "cmake.buildDirectory": "${workspaceFolder}/build-vscode",
+  "cmake.configureArgs": [
+    "-DCMAKE_PREFIX_PATH=C:/Qt/Qt5.12.9/5.12.9/msvc2015_64",
+    "-DAITRAIN_BUILD_TESTS=ON"
+  ],
+  "cmake.configureEnvironment": {
+    "PATH": "C:/Qt/Qt5.12.9/5.12.9/msvc2015_64/bin;${env:PATH}"
+  },
+  "cmake.buildEnvironment": {
+    "PATH": "C:/Qt/Qt5.12.9/5.12.9/msvc2015_64/bin;${env:PATH}"
+  },
+  "cmake.testEnvironment": {
+    "PATH": "C:/Qt/Qt5.12.9/5.12.9/msvc2015_64/bin;${env:PATH}"
+  },
+  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+  "files.associations": {
+    "*.ipp": "cpp"
+  }
+}
+
