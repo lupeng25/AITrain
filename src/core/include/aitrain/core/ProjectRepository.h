@@ -24,10 +24,15 @@ public:
     bool markInterruptedTasksFailed(const QString& message, QString* error = nullptr);
     bool insertMetric(const MetricPoint& metric, QString* error = nullptr);
     bool insertArtifact(const ArtifactRecord& artifact, QString* error = nullptr);
+    bool insertExport(const ExportRecord& exportRecord, QString* error = nullptr);
     bool insertEnvironmentCheck(const EnvironmentCheckRecord& check, QString* error = nullptr);
+    bool upsertDatasetValidation(const DatasetRecord& dataset, QString* error = nullptr);
 
     QVector<TaskRecord> recentTasks(int limit, QString* error = nullptr) const;
+    QVector<ExportRecord> recentExports(int limit, QString* error = nullptr) const;
     QVector<EnvironmentCheckRecord> recentEnvironmentChecks(int limit, QString* error = nullptr) const;
+    QVector<DatasetRecord> recentDatasets(int limit, QString* error = nullptr) const;
+    DatasetRecord datasetByRootPath(const QString& rootPath, QString* error = nullptr) const;
 
 private:
     QString connectionName_;

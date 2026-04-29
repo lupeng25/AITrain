@@ -1,5 +1,6 @@
 build/
 build-*/
+.deps/
 .vs/
 *.user
 *.suo
@@ -8,4 +9,3 @@ build-*/
 *.VC.db
 *.VC.VC.opendb
 demo_project/
-

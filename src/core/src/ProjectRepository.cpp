@@ -149,6 +149,10 @@ bool ProjectRepository::initialize(QString* error)
                        "name text not null,"
                        "format text not null,"
                        "root_path text not null,"
+                       "validation_status text,"
+                       "sample_count integer not null default 0,"
+                       "last_report_json text,"
+                       "last_validated_at text,"
                        "created_at text not null,"
                        "updated_at text not null)"),
         QStringLiteral("create table if not exists dataset_versions ("
@@ -161,9 +165,12 @@ bool ProjectRepository::initialize(QString* error)
         QStringLiteral("create table if not exists exports ("
                        "id integer primary key autoincrement,"
                        "task_id text not null,"
+                       "source_checkpoint_path text,"
                        "format text not null,"
                        "path text not null,"
                        "config_json text,"
+                       "input_shape_json text,"
+                       "output_shape_json text,"
                        "created_at text not null)"),
         QStringLiteral("create table if not exists plugin_configs ("
                        "id integer primary key autoincrement,"
@@ -193,7 +200,14 @@ bool ProjectRepository::initialize(QString* error)
 
     if (!ensureColumn(db_, QStringLiteral("tasks"), QStringLiteral("started_at text"), error)
         || !ensureColumn(db_, QStringLiteral("tasks"), QStringLiteral("finished_at text"), error)
-        || !ensureColumn(db_, QStringLiteral("artifacts"), QStringLiteral("message text"), error)) {
+        || !ensureColumn(db_, QStringLiteral("artifacts"), QStringLiteral("message text"), error)
+        || !ensureColumn(db_, QStringLiteral("datasets"), QStringLiteral("validation_status text"), error)
+        || !ensureColumn(db_, QStringLiteral("datasets"), QStringLiteral("sample_count integer not null default 0"), error)
+        || !ensureColumn(db_, QStringLiteral("datasets"), QStringLiteral("last_report_json text"), error)
+        || !ensureColumn(db_, QStringLiteral("datasets"), QStringLiteral("last_validated_at text"), error)
+        || !ensureColumn(db_, QStringLiteral("exports"), QStringLiteral("source_checkpoint_path text"), error)
+        || !ensureColumn(db_, QStringLiteral("exports"), QStringLiteral("input_shape_json text"), error)
+        || !ensureColumn(db_, QStringLiteral("exports"), QStringLiteral("output_shape_json text"), error)) {
         return false;
     }
     return true;
@@ -360,6 +374,28 @@ bool ProjectRepository::insertArtifact(const ArtifactRecord& artifact, QString* 
     return true;
 }
 
+bool ProjectRepository::insertExport(const ExportRecord& exportRecord, QString* error)
+{
+    QSqlQuery query(db_);
+    query.prepare(QStringLiteral("insert into exports(task_id, source_checkpoint_path, format, path, config_json, input_shape_json, output_shape_json, created_at) "
+                                 "values(?, ?, ?, ?, ?, ?, ?, ?)"));
+    query.addBindValue(exportRecord.taskId);
+    query.addBindValue(exportRecord.sourceCheckpointPath);
+    query.addBindValue(exportRecord.format);
+    query.addBindValue(exportRecord.path);
+    query.addBindValue(exportRecord.configJson);
+    query.addBindValue(exportRecord.inputShapeJson);
+    query.addBindValue(exportRecord.outputShapeJson);
+    query.addBindValue(exportRecord.createdAt.isValid() ? exportRecord.createdAt.toUTC().toString(Qt::ISODateWithMs) : nowIso());
+    if (!query.exec()) {
+        if (error) {
+            *error = sqlError(query);
+        }
+        return false;
+    }
+    return true;
+}
+
 bool ProjectRepository::insertEnvironmentCheck(const EnvironmentCheckRecord& check, QString* error)
 {
     QSqlQuery query(db_);
@@ -372,6 +408,75 @@ bool ProjectRepository::insertEnvironmentCheck(const EnvironmentCheckRecord& che
     if (!query.exec()) {
         if (error) {
             *error = sqlError(query);
+        }
+        return false;
+    }
+    return true;
+}
+
+bool ProjectRepository::upsertDatasetValidation(const DatasetRecord& dataset, QString* error)
+{
+    QSqlQuery findQuery(db_);
+    findQuery.prepare(QStringLiteral("select id, created_at from datasets where root_path = ? limit 1"));
+    findQuery.addBindValue(dataset.rootPath);
+    if (!findQuery.exec()) {
+        if (error) {
+            *error = sqlError(findQuery);
+        }
+        return false;
+    }
+
+    const QString timestamp = nowIso();
+    const QString validatedAt = dataset.lastValidatedAt.isValid()
+        ? dataset.lastValidatedAt.toUTC().toString(Qt::ISODateWithMs)
+        : timestamp;
+    const bool exists = findQuery.next();
+    const int datasetId = exists ? findQuery.value(0).toInt() : 0;
+    const QString createdAt = exists ? findQuery.value(1).toString() : timestamp;
+
+    QSqlQuery query(db_);
+    if (exists) {
+        query.prepare(QStringLiteral("update datasets set name = ?, format = ?, validation_status = ?, sample_count = ?, "
+                                     "last_report_json = ?, last_validated_at = ?, updated_at = ? where id = ?"));
+        query.addBindValue(dataset.name);
+        query.addBindValue(dataset.format);
+        query.addBindValue(dataset.validationStatus);
+        query.addBindValue(dataset.sampleCount);
+        query.addBindValue(dataset.lastReportJson);
+        query.addBindValue(validatedAt);
+        query.addBindValue(timestamp);
+        query.addBindValue(datasetId);
+    } else {
+        query.prepare(QStringLiteral("insert into datasets(name, format, root_path, validation_status, sample_count, last_report_json, last_validated_at, created_at, updated_at) "
+                                     "values(?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+        query.addBindValue(dataset.name);
+        query.addBindValue(dataset.format);
+        query.addBindValue(dataset.rootPath);
+        query.addBindValue(dataset.validationStatus);
+        query.addBindValue(dataset.sampleCount);
+        query.addBindValue(dataset.lastReportJson);
+        query.addBindValue(validatedAt);
+        query.addBindValue(createdAt);
+        query.addBindValue(timestamp);
+    }
+    if (!query.exec()) {
+        if (error) {
+            *error = sqlError(query);
+        }
+        return false;
+    }
+
+    const int versionDatasetId = exists ? datasetId : query.lastInsertId().toInt();
+    QSqlQuery versionQuery(db_);
+    versionQuery.prepare(QStringLiteral("insert into dataset_versions(dataset_id, version, root_path, metadata_json, created_at) values(?, ?, ?, ?, ?)"));
+    versionQuery.addBindValue(versionDatasetId);
+    versionQuery.addBindValue(validatedAt);
+    versionQuery.addBindValue(dataset.rootPath);
+    versionQuery.addBindValue(dataset.lastReportJson);
+    versionQuery.addBindValue(timestamp);
+    if (!versionQuery.exec()) {
+        if (error) {
+            *error = sqlError(versionQuery);
         }
         return false;
     }
@@ -409,6 +514,96 @@ QVector<TaskRecord> ProjectRepository::recentTasks(int limit, QString* error) co
         tasks.append(task);
     }
     return tasks;
+}
+
+QVector<ExportRecord> ProjectRepository::recentExports(int limit, QString* error) const
+{
+    QVector<ExportRecord> exports;
+    QSqlQuery query(db_);
+    query.prepare(QStringLiteral("select id, task_id, source_checkpoint_path, format, path, config_json, input_shape_json, output_shape_json, created_at "
+                                 "from exports order by created_at desc limit ?"));
+    query.addBindValue(limit);
+    if (!query.exec()) {
+        if (error) {
+            *error = sqlError(query);
+        }
+        return exports;
+    }
+
+    while (query.next()) {
+        ExportRecord record;
+        record.id = query.value(0).toInt();
+        record.taskId = query.value(1).toString();
+        record.sourceCheckpointPath = query.value(2).toString();
+        record.format = query.value(3).toString();
+        record.path = query.value(4).toString();
+        record.configJson = query.value(5).toString();
+        record.inputShapeJson = query.value(6).toString();
+        record.outputShapeJson = query.value(7).toString();
+        record.createdAt = dateTimeFromIso(query.value(8).toString());
+        exports.append(record);
+    }
+    return exports;
+}
+
+QVector<DatasetRecord> ProjectRepository::recentDatasets(int limit, QString* error) const
+{
+    QVector<DatasetRecord> datasets;
+    QSqlQuery query(db_);
+    query.prepare(QStringLiteral("select id, name, format, root_path, validation_status, sample_count, last_report_json, created_at, updated_at, last_validated_at "
+                                 "from datasets order by updated_at desc limit ?"));
+    query.addBindValue(limit);
+    if (!query.exec()) {
+        if (error) {
+            *error = sqlError(query);
+        }
+        return datasets;
+    }
+
+    while (query.next()) {
+        DatasetRecord dataset;
+        dataset.id = query.value(0).toInt();
+        dataset.name = query.value(1).toString();
+        dataset.format = query.value(2).toString();
+        dataset.rootPath = query.value(3).toString();
+        dataset.validationStatus = query.value(4).toString();
+        dataset.sampleCount = query.value(5).toInt();
+        dataset.lastReportJson = query.value(6).toString();
+        dataset.createdAt = dateTimeFromIso(query.value(7).toString());
+        dataset.updatedAt = dateTimeFromIso(query.value(8).toString());
+        dataset.lastValidatedAt = dateTimeFromIso(query.value(9).toString());
+        datasets.append(dataset);
+    }
+    return datasets;
+}
+
+DatasetRecord ProjectRepository::datasetByRootPath(const QString& rootPath, QString* error) const
+{
+    DatasetRecord dataset;
+    QSqlQuery query(db_);
+    query.prepare(QStringLiteral("select id, name, format, root_path, validation_status, sample_count, last_report_json, created_at, updated_at, last_validated_at "
+                                 "from datasets where root_path = ? order by updated_at desc limit 1"));
+    query.addBindValue(rootPath);
+    if (!query.exec()) {
+        if (error) {
+            *error = sqlError(query);
+        }
+        return dataset;
+    }
+    if (!query.next()) {
+        return dataset;
+    }
+    dataset.id = query.value(0).toInt();
+    dataset.name = query.value(1).toString();
+    dataset.format = query.value(2).toString();
+    dataset.rootPath = query.value(3).toString();
+    dataset.validationStatus = query.value(4).toString();
+    dataset.sampleCount = query.value(5).toInt();
+    dataset.lastReportJson = query.value(6).toString();
+    dataset.createdAt = dateTimeFromIso(query.value(7).toString());
+    dataset.updatedAt = dateTimeFromIso(query.value(8).toString());
+    dataset.lastValidatedAt = dateTimeFromIso(query.value(9).toString());
+    return dataset;
 }
 
 QVector<EnvironmentCheckRecord> ProjectRepository::recentEnvironmentChecks(int limit, QString* error) const

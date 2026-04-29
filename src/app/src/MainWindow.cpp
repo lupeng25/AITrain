@@ -4,11 +4,13 @@
 #include "aitrain/core/PluginInterfaces.h"
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QDateTime>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QFrame>
 #include <QGridLayout>
 #include <QHeaderView>
 #include <QHBoxLayout>
@@ -17,6 +19,7 @@
 #include <QJsonObject>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QPixmap>
 #include <QPushButton>
 #include <QSplitter>
 #include <QStatusBar>
@@ -88,6 +91,17 @@ QString environmentStatusLabel(const QString& status)
     return QStringLiteral("未知");
 }
 
+QString issueSeverityLabel(const QString& severity)
+{
+    if (severity == QStringLiteral("error")) {
+        return QStringLiteral("错误");
+    }
+    if (severity == QStringLiteral("warning")) {
+        return QStringLiteral("警告");
+    }
+    return QStringLiteral("信息");
+}
+
 } // namespace
 
 MainWindow::MainWindow(QWidget* parent)
@@ -148,11 +162,27 @@ MainWindow::MainWindow(QWidget* parent)
         workerPill_->setStatus(ok ? QStringLiteral("任务完成") : QStringLiteral("任务失败"),
             ok ? StatusPill::Tone::Success : StatusPill::Tone::Error);
         appendLog(ok ? QStringLiteral("任务完成：%1").arg(message) : QStringLiteral("任务失败：%1").arg(message));
+        const QString kind;
+        const QString path;
         if (!currentTaskId_.isEmpty()) {
             QString error;
             repository_.updateTaskState(currentTaskId_, ok ? aitrain::TaskState::Completed : aitrain::TaskState::Failed, message, &error);
             currentTaskId_.clear();
             updateRecentTasks();
+        } else if (kind == QStringLiteral("export") && exportResultLabel_) {
+            exportResultLabel_->setText(QStringLiteral("导出完成：%1").arg(QDir::toNativeSeparators(path)));
+        } else if (kind == QStringLiteral("inference_overlay") && inferenceOverlayLabel_) {
+            QPixmap overlay(path);
+            if (!overlay.isNull()) {
+                inferenceOverlayLabel_->setPixmap(overlay.scaled(
+                    inferenceOverlayLabel_->size().boundedTo(QSize(520, 360)),
+                    Qt::KeepAspectRatio,
+                    Qt::SmoothTransformation));
+            } else {
+                inferenceOverlayLabel_->setText(QStringLiteral("推理 overlay 加载失败"));
+            }
+        } else if (kind == QStringLiteral("inference_predictions") && inferenceResultLabel_) {
+            inferenceResultLabel_->setText(QStringLiteral("预测结果：%1").arg(QDir::toNativeSeparators(path)));
         }
         startNextQueuedTask();
     });
@@ -336,22 +366,56 @@ QWidget* MainWindow::buildDatasetPage()
     connect(validateButton, &QPushButton::clicked, this, &MainWindow::validateDataset);
     form->addRow(QStringLiteral("数据集目录"), pathRow);
     form->addRow(QStringLiteral("格式"), datasetFormatCombo_);
+
+    splitOutputEdit_ = new QLineEdit;
+    splitOutputEdit_->setPlaceholderText(QStringLiteral("默认输出到当前项目 datasets/normalized"));
+    splitTrainRatioEdit_ = new QLineEdit(QStringLiteral("0.8"));
+    splitValRatioEdit_ = new QLineEdit(QStringLiteral("0.2"));
+    splitTestRatioEdit_ = new QLineEdit(QStringLiteral("0.0"));
+    splitSeedEdit_ = new QLineEdit(QStringLiteral("42"));
+    auto* splitButton = new QPushButton(QStringLiteral("划分数据集"));
+    connect(splitButton, &QPushButton::clicked, this, &MainWindow::splitDataset);
+    auto* ratioRow = new QWidget;
+    auto* ratioLayout = new QHBoxLayout(ratioRow);
+    ratioLayout->setContentsMargins(0, 0, 0, 0);
+    ratioLayout->addWidget(splitTrainRatioEdit_);
+    ratioLayout->addWidget(splitValRatioEdit_);
+    ratioLayout->addWidget(splitTestRatioEdit_);
+    ratioLayout->addWidget(splitSeedEdit_);
+    form->addRow(QStringLiteral("输出目录"), splitOutputEdit_);
+    form->addRow(QStringLiteral("train / val / test / seed"), ratioRow);
     inputPanel->bodyLayout()->addLayout(form);
     inputPanel->bodyLayout()->addWidget(validateButton);
+    inputPanel->bodyLayout()->addWidget(splitButton);
 
     auto* splitter = new QSplitter(Qt::Horizontal);
     auto* resultPanel = new InfoPanel(QStringLiteral("校验结果"));
+    validationSummaryLabel_ = mutedLabel(QStringLiteral("请选择数据集目录和格式，然后执行校验。"));
+    validationIssuesTable_ = new QTableWidget(0, 5);
+    validationIssuesTable_->setHorizontalHeaderLabels(QStringList()
+        << QStringLiteral("级别")
+        << QStringLiteral("代码")
+        << QStringLiteral("文件")
+        << QStringLiteral("行号")
+        << QStringLiteral("说明"));
+    configureTable(validationIssuesTable_);
     validationOutput_ = new QPlainTextEdit;
     validationOutput_->setReadOnly(true);
-    validationOutput_->setPlainText(QStringLiteral("请选择数据集目录和格式，然后执行校验。"));
+    validationOutput_->setPlainText(QStringLiteral("校验报告 JSON 会显示在这里。"));
+    resultPanel->bodyLayout()->addWidget(validationSummaryLabel_);
+    resultPanel->bodyLayout()->addWidget(validationIssuesTable_, 2);
     resultPanel->bodyLayout()->addWidget(validationOutput_);
 
     auto* toolsPanel = new InfoPanel(QStringLiteral("标注工具与预览"));
     auto* toolPath = new QLineEdit;
     toolPath->setPlaceholderText(QStringLiteral("LabelMe / AnyLabeling 可执行文件路径"));
+    datasetPreviewTable_ = new QTableWidget(0, 2);
+    datasetPreviewTable_->setHorizontalHeaderLabels(QStringList() << QStringLiteral("样本") << QStringLiteral("标签 / 说明"));
+    configureTable(datasetPreviewTable_);
     toolsPanel->bodyLayout()->addWidget(toolPath);
     toolsPanel->bodyLayout()->addWidget(new QPushButton(QStringLiteral("启动标注工具")));
-    toolsPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("第一轮 UI 重构保留外部标注工具入口，后续数据集阶段再实现样本预览和错误定位。")));
+    toolsPanel->bodyLayout()->addWidget(datasetPreviewTable_, 1);
+    toolsPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("划分会复制到新目录，不修改原始数据；当前划分先支持 YOLO 检测格式。")));
     toolsPanel->bodyLayout()->addStretch();
 
     splitter->addWidget(resultPanel);
@@ -380,6 +444,11 @@ QWidget* MainWindow::buildTrainingPage()
     epochsEdit_ = new QLineEdit(QStringLiteral("20"));
     batchEdit_ = new QLineEdit(QStringLiteral("8"));
     imageSizeEdit_ = new QLineEdit(QStringLiteral("640"));
+    gridSizeEdit_ = new QLineEdit(QStringLiteral("4"));
+    resumeCheckpointEdit_ = new QLineEdit;
+    resumeCheckpointEdit_->setPlaceholderText(QStringLiteral("可选：选择已有 tiny detector checkpoint 继续训练"));
+    horizontalFlipCheck_ = new QCheckBox(QStringLiteral("水平翻转增强"));
+    colorJitterCheck_ = new QCheckBox(QStringLiteral("亮度扰动增强"));
     connect(pluginCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
         taskTypeCombo_->clear();
         auto* plugin = pluginManager_.pluginById(pluginCombo_->currentData().toString());
@@ -392,6 +461,10 @@ QWidget* MainWindow::buildTrainingPage()
     form->addRow(QStringLiteral("Epochs"), epochsEdit_);
     form->addRow(QStringLiteral("Batch Size"), batchEdit_);
     form->addRow(QStringLiteral("Image Size"), imageSizeEdit_);
+    form->addRow(QStringLiteral("Grid Size"), gridSizeEdit_);
+    form->addRow(QStringLiteral("Resume"), resumeCheckpointEdit_);
+    form->addRow(QStringLiteral("Augment"), horizontalFlipCheck_);
+    form->addRow(QString(), colorJitterCheck_);
     auto* startButton = primaryButton(QStringLiteral("启动训练"));
     auto* pauseButton = new QPushButton(QStringLiteral("暂停任务"));
     auto* resumeButton = new QPushButton(QStringLiteral("继续任务"));
@@ -417,7 +490,18 @@ QWidget* MainWindow::buildTrainingPage()
 
     auto* artifactPanel = new InfoPanel(QStringLiteral("任务与产物"));
     artifactPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("运行后将显示 checkpoint、request.json、metrics 和导出产物。")));
-    artifactPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("当前训练核心仍为 Worker 流程模拟，真实 LibTorch 训练将在后续阶段接入。")));
+    artifactPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("Detection 已接入 tiny linear detector 占位训练；完整 LibTorch YOLO 训练将在后续接入。")));
+    latestCheckpointLabel_ = mutedLabel(QStringLiteral("最新 checkpoint：暂无"));
+    latestPreviewPathLabel_ = mutedLabel(QStringLiteral("最新预览：暂无"));
+    latestPreviewImageLabel_ = new QLabel(QStringLiteral("暂无预览图"));
+    latestPreviewImageLabel_->setObjectName(QStringLiteral("MutedText"));
+    latestPreviewImageLabel_->setAlignment(Qt::AlignCenter);
+    latestPreviewImageLabel_->setMinimumHeight(120);
+    latestPreviewImageLabel_->setFrameShape(QFrame::StyledPanel);
+    latestPreviewImageLabel_->setScaledContents(false);
+    artifactPanel->bodyLayout()->addWidget(latestCheckpointLabel_);
+    artifactPanel->bodyLayout()->addWidget(latestPreviewPathLabel_);
+    artifactPanel->bodyLayout()->addWidget(latestPreviewImageLabel_);
     artifactPanel->bodyLayout()->addStretch();
 
     topSplitter->addWidget(configPanel);
@@ -483,17 +567,38 @@ QWidget* MainWindow::buildConversionPage()
     layout->setSpacing(16);
 
     auto* inputPanel = new InfoPanel(QStringLiteral("输入模型"));
-    inputPanel->bodyLayout()->addWidget(new QLineEdit);
-    inputPanel->bodyLayout()->addWidget(new QPushButton(QStringLiteral("选择 checkpoint")));
+    conversionCheckpointEdit_ = new QLineEdit;
+    conversionCheckpointEdit_->setPlaceholderText(QStringLiteral("tiny detector checkpoint path"));
+    auto* chooseCheckpointButton = new QPushButton(QStringLiteral("选择 checkpoint"));
+    connect(chooseCheckpointButton, &QPushButton::clicked, this, [this]() {
+        const QString file = QFileDialog::getOpenFileName(this, QStringLiteral("选择 checkpoint"), currentProjectPath_, QStringLiteral("AITrain checkpoint (*.aitrain);;All files (*.*)"));
+        if (!file.isEmpty()) {
+            conversionCheckpointEdit_->setText(QDir::toNativeSeparators(file));
+        }
+    });
+    inputPanel->bodyLayout()->addWidget(conversionCheckpointEdit_);
+    inputPanel->bodyLayout()->addWidget(chooseCheckpointButton);
     inputPanel->bodyLayout()->addStretch();
 
     auto* exportPanel = new InfoPanel(QStringLiteral("导出配置"));
-    exportPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("后续将在 IExporter 中接入 ONNX 和 TensorRT 真实导出。")));
-    exportPanel->bodyLayout()->addWidget(new QPushButton(QStringLiteral("导出模型")));
+    exportPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("当前支持 tiny detector JSON 和 tiny detector ONNX；ONNX Runtime 推理已接入 tiny detector，TensorRT 后续接入。")));
+    conversionFormatCombo_ = new QComboBox;
+    conversionFormatCombo_->addItem(QStringLiteral("Tiny detector JSON 占位"), QStringLiteral("tiny_detector_json"));
+    conversionFormatCombo_->addItem(QStringLiteral("ONNX 模型核心"), QStringLiteral("onnx"));
+    conversionOutputEdit_ = new QLineEdit;
+    conversionOutputEdit_->setPlaceholderText(QStringLiteral("输出路径；留空则输出到 checkpoint 同目录"));
+    auto* exportButton = primaryButton(QStringLiteral("导出模型"));
+    connect(exportButton, &QPushButton::clicked, this, &MainWindow::startModelExport);
+    exportPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("ONNX 产物包含 tiny detector 模型核心；图片预处理和 NMS 由 AITrain runtime 执行，完整 YOLO 后处理后续接入。")));
+    exportPanel->bodyLayout()->addWidget(conversionFormatCombo_);
+    exportPanel->bodyLayout()->addWidget(conversionOutputEdit_);
+    exportPanel->bodyLayout()->addWidget(exportButton);
     exportPanel->bodyLayout()->addStretch();
 
     auto* resultPanel = new InfoPanel(QStringLiteral("导出结果"));
-    resultPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("ONNX / TensorRT engine / 校验报告会显示在这里。")));
+    resultPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("导出产物、ONNX shape 校验报告和后续 TensorRT engine 会显示在这里。")));
+    exportResultLabel_ = mutedLabel(QStringLiteral("暂无导出结果。"));
+    resultPanel->bodyLayout()->addWidget(exportResultLabel_);
     resultPanel->bodyLayout()->addStretch();
 
     layout->addWidget(inputPanel);
@@ -510,18 +615,58 @@ QWidget* MainWindow::buildInferencePage()
     layout->setSpacing(16);
 
     auto* toolbar = new InfoPanel(QStringLiteral("推理输入"));
-    auto* row = new QHBoxLayout;
-    row->addWidget(new QLineEdit);
-    row->addWidget(new QPushButton(QStringLiteral("选择模型")));
-    row->addWidget(new QPushButton(QStringLiteral("选择图片 / 视频")));
-    row->addWidget(primaryButton(QStringLiteral("开始推理")));
-    toolbar->bodyLayout()->addLayout(row);
+    auto* inferForm = new QFormLayout;
+    inferenceCheckpointEdit_ = new QLineEdit;
+    inferenceImageEdit_ = new QLineEdit;
+    inferenceOutputEdit_ = new QLineEdit;
+    inferenceCheckpointEdit_->setPlaceholderText(QStringLiteral("tiny detector checkpoint/export JSON/ONNX path"));
+    inferenceImageEdit_->setPlaceholderText(QStringLiteral("image path"));
+    inferenceOutputEdit_->setPlaceholderText(QStringLiteral("输出目录；留空则输出到 checkpoint 同目录 inference"));
+    auto* chooseModelButton = new QPushButton(QStringLiteral("选择模型文件"));
+    auto* chooseImageButton = new QPushButton(QStringLiteral("选择图片"));
+    auto* inferButton = primaryButton(QStringLiteral("开始推理"));
+    connect(chooseModelButton, &QPushButton::clicked, this, [this]() {
+        const QString file = QFileDialog::getOpenFileName(this, QStringLiteral("选择模型文件"), currentProjectPath_, QStringLiteral("AITrain model (*.aitrain *.json *.onnx);;All files (*.*)"));
+        if (!file.isEmpty()) {
+            inferenceCheckpointEdit_->setText(QDir::toNativeSeparators(file));
+        }
+    });
+    connect(chooseImageButton, &QPushButton::clicked, this, [this]() {
+        const QString file = QFileDialog::getOpenFileName(this, QStringLiteral("选择图片"), currentProjectPath_, QStringLiteral("Images (*.png *.jpg *.jpeg *.bmp);;All files (*.*)"));
+        if (!file.isEmpty()) {
+            inferenceImageEdit_->setText(QDir::toNativeSeparators(file));
+        }
+    });
+    connect(inferButton, &QPushButton::clicked, this, &MainWindow::startInference);
+    auto* modelRow = new QWidget;
+    auto* modelLayout = new QHBoxLayout(modelRow);
+    modelLayout->setContentsMargins(0, 0, 0, 0);
+    modelLayout->addWidget(inferenceCheckpointEdit_);
+    modelLayout->addWidget(chooseModelButton);
+    auto* imageRow = new QWidget;
+    auto* imageLayout = new QHBoxLayout(imageRow);
+    imageLayout->setContentsMargins(0, 0, 0, 0);
+    imageLayout->addWidget(inferenceImageEdit_);
+    imageLayout->addWidget(chooseImageButton);
+    inferForm->addRow(QStringLiteral("Checkpoint"), modelRow);
+    inferForm->addRow(QStringLiteral("Image"), imageRow);
+    inferForm->addRow(QStringLiteral("Output"), inferenceOutputEdit_);
+    toolbar->bodyLayout()->addLayout(inferForm);
+    toolbar->bodyLayout()->addWidget(inferButton);
 
     auto* preview = new QSplitter(Qt::Horizontal);
     auto* sourcePanel = new InfoPanel(QStringLiteral("输入预览"));
     sourcePanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("原图、视频帧或 OCR 输入图像。")));
     auto* resultPanel = new InfoPanel(QStringLiteral("结果预览"));
     resultPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("检测框、分割 mask、OCR 文本和耗时会显示在这里。")));
+    inferenceResultLabel_ = mutedLabel(QStringLiteral("暂无推理结果。"));
+    sourcePanel->bodyLayout()->addWidget(inferenceResultLabel_);
+    inferenceOverlayLabel_ = new QLabel(QStringLiteral("暂无 overlay"));
+    inferenceOverlayLabel_->setObjectName(QStringLiteral("MutedText"));
+    inferenceOverlayLabel_->setAlignment(Qt::AlignCenter);
+    inferenceOverlayLabel_->setMinimumHeight(240);
+    inferenceOverlayLabel_->setFrameShape(QFrame::StyledPanel);
+    resultPanel->bodyLayout()->addWidget(inferenceOverlayLabel_);
     preview->addWidget(sourcePanel);
     preview->addWidget(resultPanel);
 
@@ -665,28 +810,199 @@ void MainWindow::browseDataset()
     const QString directory = QFileDialog::getExistingDirectory(this, QStringLiteral("选择数据集目录"));
     if (!directory.isEmpty()) {
         datasetPathEdit_->setText(QDir::toNativeSeparators(directory));
+        if (splitOutputEdit_ && currentProjectPath_.isEmpty()) {
+            splitOutputEdit_->setText(QDir::toNativeSeparators(QDir(directory).absoluteFilePath(QStringLiteral("../normalized"))));
+        }
+        currentDatasetValid_ = false;
     }
 }
 
 void MainWindow::validateDataset()
 {
-    validationOutput_->clear();
-    const QString format = datasetFormatCombo_->currentText();
-    const QString path = QDir::fromNativeSeparators(datasetPathEdit_->text());
-    if (format.isEmpty() || path.isEmpty()) {
-        validationOutput_->setPlainText(QStringLiteral("请选择数据集目录和格式。"));
+    if (worker_.isRunning()) {
+        QMessageBox::warning(this, QStringLiteral("数据集校验"), QStringLiteral("Worker 正在执行任务，稍后再校验数据集。"));
         return;
     }
 
-    for (auto* plugin : pluginManager_.plugins()) {
-        if (auto* adapter = plugin->datasetAdapter(format)) {
-            const aitrain::DatasetValidationResult result = adapter->validateDataset(path, {});
-            validationOutput_->setPlainText(QString::fromUtf8(QJsonDocument(result.toJson()).toJson(QJsonDocument::Indented)));
-            statusBar()->showMessage(result.ok ? QStringLiteral("数据集校验通过") : QStringLiteral("数据集校验发现问题"), 5000);
+    const QString format = datasetFormatCombo_->currentText();
+    const QString path = QDir::fromNativeSeparators(datasetPathEdit_->text());
+    if (format.isEmpty() || path.isEmpty()) {
+        validationSummaryLabel_->setText(QStringLiteral("请选择数据集目录和格式。"));
+        return;
+    }
+
+    currentDatasetValid_ = false;
+    currentDatasetPath_ = path;
+    currentDatasetFormat_ = format;
+    if (validationIssuesTable_) {
+        validationIssuesTable_->setRowCount(0);
+    }
+    validationSummaryLabel_->setText(QStringLiteral("正在通过 Worker 校验数据集。"));
+    validationOutput_->setPlainText(QStringLiteral("等待校验结果。"));
+
+    QJsonObject options;
+    options.insert(QStringLiteral("maxIssues"), 200);
+    options.insert(QStringLiteral("maxFiles"), 5000);
+    options.insert(QStringLiteral("allowEmptyLabels"), false);
+    options.insert(QStringLiteral("maxTextLength"), 25);
+
+    QString error;
+    if (!worker_.requestDatasetValidation(workerExecutablePath(), path, format, options, &error)) {
+        validationSummaryLabel_->setText(QStringLiteral("无法启动数据集校验：%1").arg(error));
+        QMessageBox::critical(this, QStringLiteral("数据集校验"), error);
+        return;
+    }
+    workerPill_->setStatus(QStringLiteral("数据集校验中"), StatusPill::Tone::Info);
+}
+
+void MainWindow::splitDataset()
+{
+    if (worker_.isRunning()) {
+        QMessageBox::warning(this, QStringLiteral("数据集划分"), QStringLiteral("Worker 正在执行任务，稍后再划分数据集。"));
+        return;
+    }
+
+    const QString format = datasetFormatCombo_->currentText();
+    const QString path = QDir::fromNativeSeparators(datasetPathEdit_->text());
+    if (path.isEmpty() || format.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("数据集划分"), QStringLiteral("请先选择数据集目录和格式。"));
+        return;
+    }
+    if (format != QStringLiteral("yolo_detection") && format != QStringLiteral("yolo_txt")) {
+        QMessageBox::warning(this, QStringLiteral("数据集划分"), QStringLiteral("当前划分先支持 YOLO 检测格式。"));
+        return;
+    }
+
+    bool datasetReady = currentDatasetValid_ && currentDatasetPath_ == path && currentDatasetFormat_ == format;
+    if (!datasetReady && repository_.isOpen()) {
+        QString error;
+        const aitrain::DatasetRecord dataset = repository_.datasetByRootPath(path, &error);
+        datasetReady = dataset.rootPath == path
+            && dataset.format == format
+            && dataset.validationStatus == QStringLiteral("valid");
+    }
+    if (!datasetReady) {
+        QMessageBox::warning(this, QStringLiteral("数据集划分"), QStringLiteral("请先通过当前格式的数据集校验。"));
+        return;
+    }
+
+    QString outputPath = QDir::fromNativeSeparators(splitOutputEdit_->text().trimmed());
+    if (outputPath.isEmpty()) {
+        const QString datasetName = QFileInfo(path).fileName();
+        const QString basePath = currentProjectPath_.isEmpty()
+            ? QDir(path).absoluteFilePath(QStringLiteral("../normalized"))
+            : QDir(currentProjectPath_).filePath(QStringLiteral("datasets/normalized/%1").arg(datasetName));
+        outputPath = QDir::cleanPath(basePath);
+        splitOutputEdit_->setText(QDir::toNativeSeparators(outputPath));
+    }
+
+    QJsonObject options;
+    options.insert(QStringLiteral("trainRatio"), splitTrainRatioEdit_->text().toDouble());
+    options.insert(QStringLiteral("valRatio"), splitValRatioEdit_->text().toDouble());
+    options.insert(QStringLiteral("testRatio"), splitTestRatioEdit_->text().toDouble());
+    options.insert(QStringLiteral("seed"), splitSeedEdit_->text().toInt());
+    options.insert(QStringLiteral("maxIssues"), 200);
+    options.insert(QStringLiteral("allowEmptyLabels"), false);
+
+    QString error;
+    if (!worker_.requestDatasetSplit(workerExecutablePath(), path, outputPath, format, options, &error)) {
+        QMessageBox::critical(this, QStringLiteral("数据集划分"), error);
+        return;
+    }
+    workerPill_->setStatus(QStringLiteral("数据集划分中"), StatusPill::Tone::Info);
+    statusBar()->showMessage(QStringLiteral("正在划分数据集"), 3000);
+}
+
+void MainWindow::startModelExport()
+{
+    if (worker_.isRunning()) {
+        QMessageBox::warning(this, QStringLiteral("模型导出"), QStringLiteral("Worker 正在执行任务，稍后再导出模型。"));
+        return;
+    }
+    const QString checkpointPath = QDir::fromNativeSeparators(conversionCheckpointEdit_ ? conversionCheckpointEdit_->text().trimmed() : QString());
+    if (checkpointPath.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("模型导出"), QStringLiteral("请选择 checkpoint。"));
+        return;
+    }
+    const QString format = conversionFormatCombo_
+        ? conversionFormatCombo_->currentData().toString()
+        : QStringLiteral("tiny_detector_json");
+    QString outputPath = QDir::fromNativeSeparators(conversionOutputEdit_ ? conversionOutputEdit_->text().trimmed() : QString());
+    if (outputPath.isEmpty()) {
+        outputPath = QFileInfo(checkpointPath).absoluteDir().filePath(
+            format == QStringLiteral("onnx") ? QStringLiteral("model.onnx") : QStringLiteral("model.aitrain-export.json"));
+    }
+
+    QString taskId;
+    if (repository_.isOpen()) {
+        taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        aitrain::TaskRecord record;
+        record.id = taskId;
+        record.projectName = currentProjectName_.isEmpty() ? QStringLiteral("manual") : currentProjectName_;
+        record.pluginId = QStringLiteral("com.aitrain.plugins.yolo_native");
+        record.taskType = QStringLiteral("model_export");
+        record.kind = aitrain::TaskKind::Export;
+        record.state = aitrain::TaskState::Queued;
+        record.workDir = QFileInfo(outputPath).absolutePath();
+        record.message = QStringLiteral("等待 Worker 导出模型。");
+        record.createdAt = QDateTime::currentDateTimeUtc();
+        record.updatedAt = record.createdAt;
+        QString taskError;
+        if (!repository_.insertTask(record, &taskError)) {
+            QMessageBox::critical(this, QStringLiteral("模型导出"), taskError);
             return;
         }
+        if (!repository_.updateTaskState(taskId, aitrain::TaskState::Running, QStringLiteral("模型导出中。"), &taskError)) {
+            QMessageBox::critical(this, QStringLiteral("模型导出"), taskError);
+            return;
+        }
+        currentTaskId_ = taskId;
+        updateRecentTasks();
     }
-    validationOutput_->setPlainText(QStringLiteral("没有插件支持该数据集格式。"));
+
+    QString error;
+    if (!worker_.requestModelExport(workerExecutablePath(), checkpointPath, outputPath, format, &error, taskId)) {
+        if (!taskId.isEmpty() && repository_.isOpen()) {
+            QString taskError;
+            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
+            currentTaskId_.clear();
+            updateRecentTasks();
+        }
+        QMessageBox::critical(this, QStringLiteral("模型导出"), error);
+        return;
+    }
+    if (exportResultLabel_) {
+        exportResultLabel_->setText(QStringLiteral("正在导出：%1").arg(QDir::toNativeSeparators(outputPath)));
+    }
+    workerPill_->setStatus(QStringLiteral("模型导出中"), StatusPill::Tone::Info);
+}
+
+void MainWindow::startInference()
+{
+    if (worker_.isRunning()) {
+        QMessageBox::warning(this, QStringLiteral("推理"), QStringLiteral("Worker 正在执行任务，稍后再推理。"));
+        return;
+    }
+    const QString checkpointPath = QDir::fromNativeSeparators(inferenceCheckpointEdit_ ? inferenceCheckpointEdit_->text().trimmed() : QString());
+    const QString imagePath = QDir::fromNativeSeparators(inferenceImageEdit_ ? inferenceImageEdit_->text().trimmed() : QString());
+    QString outputPath = QDir::fromNativeSeparators(inferenceOutputEdit_ ? inferenceOutputEdit_->text().trimmed() : QString());
+    if (checkpointPath.isEmpty() || imagePath.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("推理"), QStringLiteral("请选择模型文件和图片。"));
+        return;
+    }
+    if (outputPath.isEmpty()) {
+        outputPath = QFileInfo(checkpointPath).absoluteDir().filePath(QStringLiteral("inference"));
+    }
+
+    QString error;
+    if (!worker_.requestInference(workerExecutablePath(), checkpointPath, imagePath, outputPath, &error)) {
+        QMessageBox::critical(this, QStringLiteral("推理"), error);
+        return;
+    }
+    if (inferenceResultLabel_) {
+        inferenceResultLabel_->setText(QStringLiteral("正在推理：%1").arg(QDir::toNativeSeparators(imagePath)));
+    }
+    workerPill_->setStatus(QStringLiteral("推理中"), StatusPill::Tone::Info);
 }
 
 void MainWindow::startTraining()
@@ -701,6 +1017,29 @@ void MainWindow::startTraining()
         QMessageBox::warning(this, QStringLiteral("训练"), QStringLiteral("请选择可用插件和任务类型。"));
         return;
     }
+    const QString datasetPath = QDir::fromNativeSeparators(datasetPathEdit_->text());
+    const QString datasetFormat = datasetFormatCombo_->currentText();
+    if (datasetPath.isEmpty() || datasetFormat.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("训练"), QStringLiteral("请先选择并校验数据集。"));
+        return;
+    }
+    auto* selectedPlugin = pluginManager_.pluginById(pluginCombo_->currentData().toString());
+    if (!selectedPlugin || !selectedPlugin->datasetAdapter(datasetFormat)) {
+        QMessageBox::warning(this, QStringLiteral("训练"), QStringLiteral("当前训练插件不支持所选数据集格式。"));
+        return;
+    }
+    bool datasetReady = currentDatasetValid_ && currentDatasetPath_ == datasetPath && currentDatasetFormat_ == datasetFormat;
+    if (!datasetReady && repository_.isOpen()) {
+        QString error;
+        const aitrain::DatasetRecord dataset = repository_.datasetByRootPath(datasetPath, &error);
+        datasetReady = dataset.rootPath == datasetPath
+            && dataset.format == datasetFormat
+            && dataset.validationStatus == QStringLiteral("valid");
+    }
+    if (!datasetReady) {
+        QMessageBox::warning(this, QStringLiteral("训练"), QStringLiteral("数据集未通过当前格式校验，不能启动训练。"));
+        return;
+    }
 
     const QString taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     const QString runDir = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(taskId));
@@ -710,13 +1049,17 @@ void MainWindow::startTraining()
     parameters.insert(QStringLiteral("epochs"), epochsEdit_->text().toInt());
     parameters.insert(QStringLiteral("batchSize"), batchEdit_->text().toInt());
     parameters.insert(QStringLiteral("imageSize"), imageSizeEdit_->text().toInt());
+    parameters.insert(QStringLiteral("gridSize"), gridSizeEdit_->text().toInt());
+    parameters.insert(QStringLiteral("resumeCheckpointPath"), QDir::fromNativeSeparators(resumeCheckpointEdit_->text().trimmed()));
+    parameters.insert(QStringLiteral("horizontalFlip"), horizontalFlipCheck_ && horizontalFlipCheck_->isChecked());
+    parameters.insert(QStringLiteral("colorJitter"), colorJitterCheck_ && colorJitterCheck_->isChecked());
 
     aitrain::TrainingRequest request;
     request.taskId = taskId;
     request.projectPath = currentProjectPath_;
     request.pluginId = pluginCombo_->currentData().toString();
     request.taskType = taskTypeCombo_->currentText();
-    request.datasetPath = QDir::fromNativeSeparators(datasetPathEdit_->text());
+    request.datasetPath = datasetPath;
     request.outputPath = runDir;
     request.parameters = parameters;
 
@@ -821,7 +1164,13 @@ void MainWindow::runEnvironmentCheck()
 void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& payload)
 {
     if (type == QStringLiteral("progress")) {
-        progressBar_->setValue(payload.value(QStringLiteral("percent")).toInt());
+        if (!currentTaskId_.isEmpty()) {
+            progressBar_->setValue(payload.value(QStringLiteral("percent")).toInt());
+        }
+        const QString message = payload.value(QStringLiteral("message")).toString();
+        if (!message.isEmpty()) {
+            statusBar()->showMessage(message, 3000);
+        }
     } else if (type == QStringLiteral("metric")) {
         const QString name = payload.value(QStringLiteral("name")).toString();
         const double value = payload.value(QStringLiteral("value")).toDouble();
@@ -838,11 +1187,43 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
         repository_.insertMetric(point, &error);
     } else if (type == QStringLiteral("artifact")) {
         const QString path = payload.value(QStringLiteral("path")).toString();
+        const QString kind = payload.value(QStringLiteral("kind")).toString();
         appendLog(QStringLiteral("产物：%1").arg(path));
+        if (kind == QStringLiteral("checkpoint") && latestCheckpointLabel_) {
+            latestCheckpointLabel_->setText(QStringLiteral("最新 checkpoint：%1").arg(QDir::toNativeSeparators(path)));
+        } else if (kind == QStringLiteral("preview") && latestPreviewPathLabel_) {
+            latestPreviewPathLabel_->setText(QStringLiteral("最新预览：%1").arg(QDir::toNativeSeparators(path)));
+            if (latestPreviewImageLabel_) {
+                QPixmap preview(path);
+                if (!preview.isNull()) {
+                    latestPreviewImageLabel_->setPixmap(preview.scaled(
+                        latestPreviewImageLabel_->size().boundedTo(QSize(320, 220)),
+                        Qt::KeepAspectRatio,
+                        Qt::SmoothTransformation));
+                } else {
+                    latestPreviewImageLabel_->setText(QStringLiteral("预览图加载失败"));
+                }
+            }
+        }
+        if (kind == QStringLiteral("export") && exportResultLabel_) {
+            exportResultLabel_->setText(QStringLiteral("导出完成：%1").arg(QDir::toNativeSeparators(path)));
+        } else if (kind == QStringLiteral("inference_overlay") && inferenceOverlayLabel_) {
+            QPixmap overlay(path);
+            if (!overlay.isNull()) {
+                inferenceOverlayLabel_->setPixmap(overlay.scaled(
+                    inferenceOverlayLabel_->size().boundedTo(QSize(520, 360)),
+                    Qt::KeepAspectRatio,
+                    Qt::SmoothTransformation));
+            } else {
+                inferenceOverlayLabel_->setText(QStringLiteral("推理 overlay 加载失败"));
+            }
+        } else if (kind == QStringLiteral("inference_predictions") && inferenceResultLabel_) {
+            inferenceResultLabel_->setText(QStringLiteral("预测结果：%1").arg(QDir::toNativeSeparators(path)));
+        }
         if (repository_.isOpen()) {
             aitrain::ArtifactRecord artifact;
             artifact.taskId = payload.value(QStringLiteral("taskId")).toString(currentTaskId_);
-            artifact.kind = payload.value(QStringLiteral("kind")).toString();
+            artifact.kind = kind;
             artifact.path = path;
             artifact.message = QStringLiteral("Worker 上报产物");
             artifact.createdAt = QDateTime::currentDateTimeUtc();
@@ -869,6 +1250,39 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
         startNextQueuedTask();
     } else if (type == QStringLiteral("environmentCheck")) {
         updateEnvironmentTable(payload);
+    } else if (type == QStringLiteral("datasetValidation")) {
+        updateDatasetValidationResult(payload);
+    } else if (type == QStringLiteral("datasetSplit")) {
+        updateDatasetSplitResult(payload);
+    } else if (type == QStringLiteral("modelExport")) {
+        if (exportResultLabel_) {
+            const QString exportPath = payload.value(QStringLiteral("exportPath")).toString();
+            const QString reportPath = payload.value(QStringLiteral("reportPath")).toString();
+            exportResultLabel_->setText(reportPath.isEmpty()
+                ? QStringLiteral("导出完成：%1").arg(QDir::toNativeSeparators(exportPath))
+                : QStringLiteral("导出完成：%1；报告：%2").arg(QDir::toNativeSeparators(exportPath), QDir::toNativeSeparators(reportPath)));
+        }
+        if (repository_.isOpen()) {
+            const QJsonObject config = payload.value(QStringLiteral("config")).toObject();
+            aitrain::ExportRecord exportRecord;
+            exportRecord.taskId = payload.value(QStringLiteral("taskId")).toString(currentTaskId_);
+            exportRecord.sourceCheckpointPath = payload.value(QStringLiteral("checkpointPath")).toString();
+            exportRecord.format = payload.value(QStringLiteral("format")).toString();
+            exportRecord.path = payload.value(QStringLiteral("exportPath")).toString();
+            exportRecord.configJson = QString::fromUtf8(QJsonDocument(config).toJson(QJsonDocument::Compact));
+            exportRecord.inputShapeJson = QString::fromUtf8(QJsonDocument(config.value(QStringLiteral("input")).toObject()).toJson(QJsonDocument::Compact));
+            exportRecord.outputShapeJson = QString::fromUtf8(QJsonDocument(QJsonObject{{QStringLiteral("outputs"), config.value(QStringLiteral("outputs")).toArray()}}).toJson(QJsonDocument::Compact));
+            exportRecord.createdAt = QDateTime::currentDateTimeUtc();
+            QString error;
+            repository_.insertExport(exportRecord, &error);
+        }
+    } else if (type == QStringLiteral("inferenceResult")) {
+        if (inferenceResultLabel_) {
+            inferenceResultLabel_->setText(QStringLiteral("推理完成：%1（%2 个结果，%3 ms）")
+                .arg(QDir::toNativeSeparators(payload.value(QStringLiteral("predictionsPath")).toString()))
+                .arg(payload.value(QStringLiteral("predictionCount")).toInt())
+                .arg(payload.value(QStringLiteral("elapsedMs")).toInt()));
+        }
     }
 }
 
@@ -1111,6 +1525,146 @@ void MainWindow::updateEnvironmentTable(const QJsonObject& payload)
     workerPill_->setStatus(QStringLiteral("Worker 空闲"), StatusPill::Tone::Neutral);
     gpuLabel_->setText(QStringLiteral("GPU / 运行时：%1").arg(text));
     statusBar()->showMessage(QStringLiteral("环境自检完成"), 5000);
+}
+
+void MainWindow::updateDatasetValidationResult(const QJsonObject& payload)
+{
+    const bool ok = payload.value(QStringLiteral("ok")).toBool();
+    const int sampleCount = payload.value(QStringLiteral("sampleCount")).toInt();
+    const QString datasetPath = payload.value(QStringLiteral("datasetPath")).toString();
+    const QString format = payload.value(QStringLiteral("format")).toString();
+    const QJsonArray issues = payload.value(QStringLiteral("issues")).toArray();
+
+    currentDatasetPath_ = datasetPath;
+    currentDatasetFormat_ = format;
+    currentDatasetValid_ = ok;
+
+    if (validationSummaryLabel_) {
+        validationSummaryLabel_->setText(ok
+            ? QStringLiteral("校验通过：%1 个样本。").arg(sampleCount)
+            : QStringLiteral("校验失败：发现 %1 个问题，训练已被阻止。").arg(issues.size()));
+    }
+    if (validationOutput_) {
+        validationOutput_->setPlainText(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Indented)));
+    }
+    if (datasetPreviewTable_) {
+        datasetPreviewTable_->setRowCount(0);
+        const QJsonArray previewSamples = payload.value(QStringLiteral("previewSamples")).toArray();
+        if (previewSamples.isEmpty()) {
+            datasetPreviewTable_->insertRow(0);
+            datasetPreviewTable_->setItem(0, 0, new QTableWidgetItem(QStringLiteral("暂无样本预览")));
+            datasetPreviewTable_->setItem(0, 1, new QTableWidgetItem(QString()));
+        } else {
+            for (const QJsonValue& sampleValue : previewSamples) {
+                const QString sample = sampleValue.toString();
+                const QStringList parts = sample.split(QLatin1Char('\t'));
+                const int row = datasetPreviewTable_->rowCount();
+                datasetPreviewTable_->insertRow(row);
+                datasetPreviewTable_->setItem(row, 0, new QTableWidgetItem(parts.value(0)));
+                datasetPreviewTable_->setItem(row, 1, new QTableWidgetItem(parts.size() > 1 ? parts.mid(1).join(QStringLiteral("\t")) : QStringLiteral("标注文件已匹配")));
+            }
+        }
+    }
+    if (validationIssuesTable_) {
+        validationIssuesTable_->setRowCount(0);
+        if (issues.isEmpty()) {
+            validationIssuesTable_->insertRow(0);
+            validationIssuesTable_->setItem(0, 0, new QTableWidgetItem(QStringLiteral("通过")));
+            validationIssuesTable_->setItem(0, 1, new QTableWidgetItem(QStringLiteral("ok")));
+            validationIssuesTable_->setItem(0, 2, new QTableWidgetItem(datasetPath));
+            validationIssuesTable_->setItem(0, 3, new QTableWidgetItem(QString()));
+            validationIssuesTable_->setItem(0, 4, new QTableWidgetItem(QStringLiteral("未发现数据集问题。")));
+        } else {
+            for (const QJsonValue& value : issues) {
+                const QJsonObject issue = value.toObject();
+                const int row = validationIssuesTable_->rowCount();
+                validationIssuesTable_->insertRow(row);
+                validationIssuesTable_->setItem(row, 0, new QTableWidgetItem(issueSeverityLabel(issue.value(QStringLiteral("severity")).toString())));
+                validationIssuesTable_->setItem(row, 1, new QTableWidgetItem(issue.value(QStringLiteral("code")).toString()));
+                validationIssuesTable_->setItem(row, 2, new QTableWidgetItem(issue.value(QStringLiteral("filePath")).toString()));
+                const int line = issue.value(QStringLiteral("line")).toInt();
+                validationIssuesTable_->setItem(row, 3, new QTableWidgetItem(line > 0 ? QString::number(line) : QString()));
+                validationIssuesTable_->setItem(row, 4, new QTableWidgetItem(issue.value(QStringLiteral("message")).toString()));
+            }
+        }
+    }
+
+    if (repository_.isOpen()) {
+        aitrain::DatasetRecord dataset;
+        dataset.name = QFileInfo(datasetPath).fileName();
+        dataset.format = format;
+        dataset.rootPath = datasetPath;
+        dataset.validationStatus = ok ? QStringLiteral("valid") : QStringLiteral("invalid");
+        dataset.sampleCount = sampleCount;
+        dataset.lastReportJson = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        dataset.lastValidatedAt = QDateTime::fromString(payload.value(QStringLiteral("checkedAt")).toString(), Qt::ISODateWithMs);
+        QString error;
+        repository_.upsertDatasetValidation(dataset, &error);
+    }
+
+    workerPill_->setStatus(QStringLiteral("Worker 空闲"), StatusPill::Tone::Neutral);
+    statusBar()->showMessage(ok ? QStringLiteral("数据集校验通过") : QStringLiteral("数据集校验失败"), 5000);
+}
+
+void MainWindow::updateDatasetSplitResult(const QJsonObject& payload)
+{
+    const bool ok = payload.value(QStringLiteral("ok")).toBool();
+    const QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
+    const int trainCount = payload.value(QStringLiteral("trainCount")).toInt();
+    const int valCount = payload.value(QStringLiteral("valCount")).toInt();
+    const int testCount = payload.value(QStringLiteral("testCount")).toInt();
+    const QJsonArray errors = payload.value(QStringLiteral("errors")).toArray();
+
+    if (validationSummaryLabel_) {
+        validationSummaryLabel_->setText(ok
+            ? QStringLiteral("划分完成：train %1 / val %2 / test %3。").arg(trainCount).arg(valCount).arg(testCount)
+            : QStringLiteral("划分失败：%1 个错误。").arg(errors.size()));
+    }
+    if (validationOutput_) {
+        validationOutput_->setPlainText(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Indented)));
+    }
+    if (validationIssuesTable_) {
+        validationIssuesTable_->setRowCount(0);
+        if (ok) {
+            validationIssuesTable_->insertRow(0);
+            validationIssuesTable_->setItem(0, 0, new QTableWidgetItem(QStringLiteral("通过")));
+            validationIssuesTable_->setItem(0, 1, new QTableWidgetItem(QStringLiteral("split_ok")));
+            validationIssuesTable_->setItem(0, 2, new QTableWidgetItem(outputPath));
+            validationIssuesTable_->setItem(0, 3, new QTableWidgetItem(QString()));
+            validationIssuesTable_->setItem(0, 4, new QTableWidgetItem(QStringLiteral("数据集已复制到标准划分目录。")));
+        } else {
+            for (const QJsonValue& value : errors) {
+                const int row = validationIssuesTable_->rowCount();
+                validationIssuesTable_->insertRow(row);
+                validationIssuesTable_->setItem(row, 0, new QTableWidgetItem(QStringLiteral("错误")));
+                validationIssuesTable_->setItem(row, 1, new QTableWidgetItem(QStringLiteral("split_error")));
+                validationIssuesTable_->setItem(row, 2, new QTableWidgetItem(outputPath));
+                validationIssuesTable_->setItem(row, 3, new QTableWidgetItem(QString()));
+                validationIssuesTable_->setItem(row, 4, new QTableWidgetItem(value.toString()));
+            }
+        }
+    }
+
+    if (ok && repository_.isOpen()) {
+        aitrain::DatasetRecord dataset;
+        dataset.name = QFileInfo(outputPath).fileName();
+        dataset.format = QStringLiteral("yolo_detection");
+        dataset.rootPath = outputPath;
+        dataset.validationStatus = QStringLiteral("valid");
+        dataset.sampleCount = trainCount + valCount + testCount;
+        dataset.lastReportJson = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        dataset.lastValidatedAt = QDateTime::fromString(payload.value(QStringLiteral("checkedAt")).toString(), Qt::ISODateWithMs);
+        QString error;
+        repository_.upsertDatasetValidation(dataset, &error);
+        datasetPathEdit_->setText(QDir::toNativeSeparators(outputPath));
+        datasetFormatCombo_->setCurrentText(QStringLiteral("yolo_detection"));
+        currentDatasetPath_ = outputPath;
+        currentDatasetFormat_ = QStringLiteral("yolo_detection");
+        currentDatasetValid_ = true;
+    }
+
+    workerPill_->setStatus(QStringLiteral("Worker 空闲"), StatusPill::Tone::Neutral);
+    statusBar()->showMessage(ok ? QStringLiteral("数据集划分完成") : QStringLiteral("数据集划分失败"), 5000);
 }
 
 void MainWindow::startQueuedTraining(const QString& taskId, const aitrain::TrainingRequest& request)

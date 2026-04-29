@@ -51,6 +51,23 @@ QJsonObject DatasetValidationResult::toJson() const
     object.insert(QStringLiteral("sampleCount"), sampleCount);
     object.insert(QStringLiteral("errors"), QJsonArray::fromStringList(errors));
     object.insert(QStringLiteral("warnings"), QJsonArray::fromStringList(warnings));
+    object.insert(QStringLiteral("previewSamples"), QJsonArray::fromStringList(previewSamples));
+    QJsonArray issueArray;
+    for (const DatasetValidationResult::Issue& issue : issues) {
+        issueArray.append(issue.toJson());
+    }
+    object.insert(QStringLiteral("issues"), issueArray);
+    return object;
+}
+
+QJsonObject DatasetValidationResult::Issue::toJson() const
+{
+    QJsonObject object;
+    object.insert(QStringLiteral("severity"), severity);
+    object.insert(QStringLiteral("code"), code);
+    object.insert(QStringLiteral("filePath"), filePath);
+    object.insert(QStringLiteral("line"), line);
+    object.insert(QStringLiteral("message"), message);
     return object;
 }
 
@@ -125,4 +142,3 @@ QStringList PluginManager::errors() const
 }
 
 } // namespace aitrain
-

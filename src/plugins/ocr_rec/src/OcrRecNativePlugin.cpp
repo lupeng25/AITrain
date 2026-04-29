@@ -1,11 +1,8 @@
+#include "aitrain/core/DatasetValidators.h"
 #include "aitrain/core/PluginInterfaces.h"
 
-#include <QDir>
-#include <QFile>
-#include <QFileInfo>
 #include <QJsonObject>
 #include <QObject>
-#include <QSet>
 
 namespace {
 
@@ -15,81 +12,7 @@ public:
 
     aitrain::DatasetValidationResult validateDataset(const QString& datasetPath, const QJsonObject& options) override
     {
-        aitrain::DatasetValidationResult result;
-        const QDir root(datasetPath);
-        if (!root.exists()) {
-            result.ok = false;
-            result.errors.append(QStringLiteral("Dataset path does not exist."));
-            return result;
-        }
-
-        const QString labelFilePath = options.value(QStringLiteral("labelFile")).toString(
-            root.filePath(QStringLiteral("rec_gt.txt")));
-        QFile labelFile(labelFilePath);
-        if (!labelFile.exists()) {
-            result.ok = false;
-            result.errors.append(QStringLiteral("Missing PaddleOCR rec label file: %1").arg(labelFilePath));
-            return result;
-        }
-        if (!labelFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            result.ok = false;
-            result.errors.append(QStringLiteral("Cannot open label file."));
-            return result;
-        }
-
-        QSet<QChar> dictionary;
-        const QString dictFilePath = options.value(QStringLiteral("dictionaryFile")).toString();
-        if (!dictFilePath.isEmpty()) {
-            QFile dictFile(dictFilePath);
-            if (dictFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-                while (!dictFile.atEnd()) {
-                    const QString line = QString::fromUtf8(dictFile.readLine()).trimmed();
-                    if (!line.isEmpty()) {
-                        dictionary.insert(line.at(0));
-                    }
-                }
-            }
-        }
-
-        int lineNumber = 0;
-        while (!labelFile.atEnd()) {
-            ++lineNumber;
-            const QString line = QString::fromUtf8(labelFile.readLine()).trimmed();
-            if (line.isEmpty()) {
-                continue;
-            }
-            const int split = line.indexOf(QLatin1Char('\t'));
-            if (split <= 0) {
-                result.ok = false;
-                result.errors.append(QStringLiteral("Line %1 must be '<image path>\\t<label>'.").arg(lineNumber));
-                continue;
-            }
-            const QString imagePath = line.left(split);
-            const QString text = line.mid(split + 1);
-            if (!QFileInfo::exists(root.filePath(imagePath))) {
-                result.warnings.append(QStringLiteral("Missing image: %1").arg(imagePath));
-            }
-            if (!dictionary.isEmpty()) {
-                for (const QChar ch : text) {
-                    if (!dictionary.contains(ch)) {
-                        result.ok = false;
-                        result.errors.append(QStringLiteral("Line %1 contains char not in dictionary: %2").arg(lineNumber).arg(ch));
-                        break;
-                    }
-                }
-            }
-            ++result.sampleCount;
-            if (result.errors.size() > 50) {
-                result.warnings.append(QStringLiteral("Too many errors; validation truncated."));
-                break;
-            }
-        }
-
-        if (result.sampleCount == 0) {
-            result.ok = false;
-            result.errors.append(QStringLiteral("No OCR recognition samples found."));
-        }
-        return result;
+        return aitrain::validatePaddleOcrRecDataset(datasetPath, options);
     }
 };
 
@@ -105,7 +28,7 @@ public:
 
 class NativeExporter final : public aitrain::IExporter {
 public:
-    QStringList supportedFormats() const override { return QStringList() << QStringLiteral("onnx") << QStringLiteral("tensorrt"); }
+    QStringList supportedFormats() const override { return {}; }
 };
 
 class NativeInferencer final : public aitrain::IInferencer {

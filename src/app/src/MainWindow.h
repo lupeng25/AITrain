@@ -8,6 +8,7 @@
 #include "aitrain/core/ProjectRepository.h"
 
 #include <QComboBox>
+#include <QCheckBox>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMainWindow>
@@ -30,7 +31,10 @@ private slots:
     void createProject();
     void browseDataset();
     void validateDataset();
+    void splitDataset();
     void startTraining();
+    void startModelExport();
+    void startInference();
     void cancelSelectedTask();
     void runEnvironmentCheck();
     void handleWorkerMessage(const QString& type, const QJsonObject& payload);
@@ -72,6 +76,8 @@ private:
     void updateTaskTable(QTableWidget* table, const QVector<aitrain::TaskRecord>& tasks);
     void updateHeaderState();
     void updateEnvironmentTable(const QJsonObject& payload);
+    void updateDatasetValidationResult(const QJsonObject& payload);
+    void updateDatasetSplitResult(const QJsonObject& payload);
     void startQueuedTraining(const QString& taskId, const aitrain::TrainingRequest& request);
     void startNextQueuedTask();
     void configureTable(QTableWidget* table) const;
@@ -83,6 +89,9 @@ private:
     QString currentProjectPath_;
     QString currentProjectName_;
     QString currentTaskId_;
+    QString currentDatasetPath_;
+    QString currentDatasetFormat_;
+    bool currentDatasetValid_ = false;
 
     struct PendingTrainingTask {
         QString taskId;
@@ -111,14 +120,38 @@ private:
     QLineEdit* projectNameEdit_ = nullptr;
     QLineEdit* projectRootEdit_ = nullptr;
     QLineEdit* datasetPathEdit_ = nullptr;
+    QLineEdit* splitOutputEdit_ = nullptr;
+    QLineEdit* splitTrainRatioEdit_ = nullptr;
+    QLineEdit* splitValRatioEdit_ = nullptr;
+    QLineEdit* splitTestRatioEdit_ = nullptr;
+    QLineEdit* splitSeedEdit_ = nullptr;
     QComboBox* datasetFormatCombo_ = nullptr;
     QComboBox* pluginCombo_ = nullptr;
     QComboBox* taskTypeCombo_ = nullptr;
+    QLabel* validationSummaryLabel_ = nullptr;
+    QTableWidget* validationIssuesTable_ = nullptr;
+    QTableWidget* datasetPreviewTable_ = nullptr;
     QPlainTextEdit* validationOutput_ = nullptr;
     QLineEdit* epochsEdit_ = nullptr;
     QLineEdit* batchEdit_ = nullptr;
     QLineEdit* imageSizeEdit_ = nullptr;
+    QLineEdit* gridSizeEdit_ = nullptr;
+    QLineEdit* resumeCheckpointEdit_ = nullptr;
+    QLineEdit* conversionCheckpointEdit_ = nullptr;
+    QComboBox* conversionFormatCombo_ = nullptr;
+    QLineEdit* conversionOutputEdit_ = nullptr;
+    QLabel* exportResultLabel_ = nullptr;
+    QLineEdit* inferenceCheckpointEdit_ = nullptr;
+    QLineEdit* inferenceImageEdit_ = nullptr;
+    QLineEdit* inferenceOutputEdit_ = nullptr;
+    QLabel* inferenceResultLabel_ = nullptr;
+    QLabel* inferenceOverlayLabel_ = nullptr;
+    QCheckBox* horizontalFlipCheck_ = nullptr;
+    QCheckBox* colorJitterCheck_ = nullptr;
     QProgressBar* progressBar_ = nullptr;
+    QLabel* latestCheckpointLabel_ = nullptr;
+    QLabel* latestPreviewPathLabel_ = nullptr;
+    QLabel* latestPreviewImageLabel_ = nullptr;
     QTextEdit* logEdit_ = nullptr;
     MetricsWidget* metricsWidget_ = nullptr;
 };

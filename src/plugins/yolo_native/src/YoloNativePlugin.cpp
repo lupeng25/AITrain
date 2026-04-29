@@ -1,102 +1,31 @@
+#include "aitrain/core/DatasetValidators.h"
 #include "aitrain/core/PluginInterfaces.h"
 
-#include <QDir>
-#include <QFile>
-#include <QFileInfo>
 #include <QJsonObject>
 #include <QObject>
-#include <QRegularExpression>
-#include <QTextStream>
+
+#include <utility>
 
 namespace {
 
 class YoloDatasetAdapter final : public aitrain::IDatasetAdapter {
 public:
-    QString formatId() const override { return QStringLiteral("yolo_txt"); }
+    explicit YoloDatasetAdapter(QString formatId)
+        : formatId_(std::move(formatId))
+    {
+    }
+
+    QString formatId() const override { return formatId_; }
 
     aitrain::DatasetValidationResult validateDataset(const QString& datasetPath, const QJsonObject& options) override
     {
-        Q_UNUSED(options)
-        aitrain::DatasetValidationResult result;
-        const QDir root(datasetPath);
-        const QDir labels(root.filePath(QStringLiteral("labels")));
-        const QDir images(root.filePath(QStringLiteral("images")));
-
-        if (!root.exists()) {
-            result.ok = false;
-            result.errors.append(QStringLiteral("Dataset path does not exist."));
-            return result;
-        }
-        if (!labels.exists()) {
-            result.ok = false;
-            result.errors.append(QStringLiteral("Missing labels directory."));
-        }
-        if (!images.exists()) {
-            result.warnings.append(QStringLiteral("Missing images directory; validation only checks labels."));
-        }
-
-        const QFileInfoList labelFiles = labels.entryInfoList({QStringLiteral("*.txt")}, QDir::Files);
-        result.sampleCount = labelFiles.size();
-        if (labelFiles.isEmpty()) {
-            result.ok = false;
-            result.errors.append(QStringLiteral("No YOLO label files found."));
-            return result;
-        }
-
-        int inspected = 0;
-        for (const QFileInfo& fileInfo : labelFiles) {
-            if (++inspected > 500) {
-                result.warnings.append(QStringLiteral("Validation stopped after 500 label files."));
-                break;
-            }
-            QFile file(fileInfo.absoluteFilePath());
-            if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-                result.ok = false;
-                result.errors.append(QStringLiteral("Cannot open %1").arg(fileInfo.fileName()));
-                continue;
-            }
-            int lineNumber = 0;
-            while (!file.atEnd()) {
-                ++lineNumber;
-                const QString line = QString::fromUtf8(file.readLine()).trimmed();
-                if (line.isEmpty()) {
-                    continue;
-                }
-                const QStringList parts = line.split(QRegularExpression(QStringLiteral("\\s+")),
-#if QT_VERSION < QT_VERSION_CHECK(5, 15, 0)
-                    QString::SkipEmptyParts
-#else
-                    Qt::SkipEmptyParts
-#endif
-                );
-                if (parts.size() != 5 && parts.size() < 7) {
-                    result.ok = false;
-                    result.errors.append(QStringLiteral("%1:%2 invalid YOLO row").arg(fileInfo.fileName()).arg(lineNumber));
-                    continue;
-                }
-                bool classOk = false;
-                parts.first().toInt(&classOk);
-                if (!classOk) {
-                    result.ok = false;
-                    result.errors.append(QStringLiteral("%1:%2 class id is not integer").arg(fileInfo.fileName()).arg(lineNumber));
-                }
-                for (int i = 1; i < parts.size(); ++i) {
-                    bool ok = false;
-                    const double value = parts.at(i).toDouble(&ok);
-                    if (!ok || value < 0.0 || value > 1.0) {
-                        result.ok = false;
-                        result.errors.append(QStringLiteral("%1:%2 coordinate out of [0,1]").arg(fileInfo.fileName()).arg(lineNumber));
-                        break;
-                    }
-                }
-                if (result.errors.size() > 50) {
-                    result.warnings.append(QStringLiteral("Too many errors; validation truncated."));
-                    return result;
-                }
-            }
-        }
-        return result;
+        return formatId_ == QStringLiteral("yolo_segmentation")
+            ? aitrain::validateYoloSegmentationDataset(datasetPath, options)
+            : aitrain::validateYoloDetectionDataset(datasetPath, options);
     }
+
+private:
+    QString formatId_;
 };
 
 class NativeTrainer final : public aitrain::ITrainer {
@@ -111,12 +40,12 @@ public:
 
 class NativeExporter final : public aitrain::IExporter {
 public:
-    QStringList supportedFormats() const override { return QStringList() << QStringLiteral("onnx") << QStringLiteral("tensorrt"); }
+    QStringList supportedFormats() const override { return QStringList() << QStringLiteral("tiny_detector_json") << QStringLiteral("onnx"); }
 };
 
 class NativeInferencer final : public aitrain::IInferencer {
 public:
-    QString backendName() const override { return QStringLiteral("ONNX Runtime/TensorRT YOLO inferencer scaffold"); }
+    QString backendName() const override { return QStringLiteral("Tiny detector checkpoint inferencer scaffold; ONNX Runtime/TensorRT pending"); }
 };
 
 } // namespace
@@ -127,6 +56,12 @@ class YoloNativePlugin final : public QObject, public aitrain::IModelPlugin {
     Q_INTERFACES(aitrain::IModelPlugin)
 
 public:
+    YoloNativePlugin()
+        : detectionAdapter_(QStringLiteral("yolo_detection"))
+        , segmentationAdapter_(QStringLiteral("yolo_segmentation"))
+    {
+    }
+
     aitrain::PluginManifest manifest() const override
     {
         aitrain::PluginManifest manifest;
@@ -135,7 +70,7 @@ public:
         manifest.version = QStringLiteral("0.1.0");
         manifest.description = QStringLiteral("C++ native YOLO-style detection and segmentation plugin scaffold.");
         manifest.taskTypes = QStringList() << QStringLiteral("detection") << QStringLiteral("segmentation");
-        manifest.datasetFormats = QStringList() << QStringLiteral("yolo_txt");
+        manifest.datasetFormats = QStringList() << QStringLiteral("yolo_detection") << QStringLiteral("yolo_segmentation");
         manifest.exportFormats = exporter_.supportedFormats();
         manifest.requiresGpu = true;
 
@@ -156,7 +91,9 @@ public:
 
     aitrain::IDatasetAdapter* datasetAdapter(const QString& formatId) override
     {
-        return formatId == adapter_.formatId() ? &adapter_ : nullptr;
+        if (formatId == detectionAdapter_.formatId() || formatId == QStringLiteral("yolo_txt")) return &detectionAdapter_;
+        if (formatId == segmentationAdapter_.formatId()) return &segmentationAdapter_;
+        return nullptr;
     }
 
     aitrain::ITrainer* trainer() override { return &trainer_; }
@@ -165,7 +102,8 @@ public:
     aitrain::IInferencer* inferencer() override { return &inferencer_; }
 
 private:
-    YoloDatasetAdapter adapter_;
+    YoloDatasetAdapter detectionAdapter_;
+    YoloDatasetAdapter segmentationAdapter_;
     NativeTrainer trainer_;
     NativeValidator validator_;
     NativeExporter exporter_;

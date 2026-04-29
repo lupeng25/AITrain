@@ -28,3 +28,5 @@ target_link_libraries(AITrainStudio
 set_target_properties(AITrainStudio PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
+
+aitrain_copy_onnxruntime_runtime(AITrainStudio)

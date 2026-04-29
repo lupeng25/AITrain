@@ -1,16 +1,21 @@
 #include "WorkerSession.h"
 
+#include "aitrain/core/DatasetValidators.h"
+#include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/JsonProtocol.h"
 
 #include <QDateTime>
 #include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QLibrary>
 #include <QProcess>
 #include <QRandomGenerator>
+#include <QThread>
 
 namespace {
 
@@ -167,9 +172,18 @@ void WorkerSession::handleMessage(const QString& type, const QJsonObject& payloa
         sendHeartbeat();
     } else if (type == QStringLiteral("environmentCheck")) {
         runEnvironmentCheck(payload);
+    } else if (type == QStringLiteral("validateDataset")) {
+        validateDataset(payload);
+    } else if (type == QStringLiteral("splitDataset")) {
+        splitDataset(payload);
+    } else if (type == QStringLiteral("exportModel")) {
+        exportModel(payload);
+    } else if (type == QStringLiteral("infer")) {
+        runInference(payload);
     } else if (type == QStringLiteral("cancel")) {
         running_ = false;
         paused_ = false;
+        canceled_ = true;
         timer_.stop();
         QJsonObject payloadObject;
         payloadObject.insert(QStringLiteral("taskId"), request_.taskId);
@@ -188,6 +202,7 @@ void WorkerSession::startTraining(const aitrain::TrainingRequest& request)
     maxSteps_ = qMax(4, request.parameters.value(QStringLiteral("epochs")).toInt(20));
     running_ = true;
     paused_ = false;
+    canceled_ = false;
 
     QDir().mkpath(request_.outputPath);
     QFile configFile(QDir(request_.outputPath).filePath(QStringLiteral("request.json")));
@@ -198,6 +213,12 @@ void WorkerSession::startTraining(const aitrain::TrainingRequest& request)
     QJsonObject payload;
     payload.insert(QStringLiteral("message"), QStringLiteral("Worker accepted task %1 for plugin %2").arg(request_.taskId, request_.pluginId));
     send(QStringLiteral("log"), payload);
+
+    if (request_.taskType.compare(QStringLiteral("detection"), Qt::CaseInsensitive) == 0) {
+        runDetectionTraining();
+        return;
+    }
+
     timer_.start();
 }
 
@@ -270,6 +291,496 @@ void WorkerSession::runEnvironmentCheck(const QJsonObject& payload)
     send(QStringLiteral("environmentCheck"), result);
     socket_.waitForBytesWritten(1000);
     qApp->quit();
+}
+
+void WorkerSession::validateDataset(const QJsonObject& payload)
+{
+    const QString datasetPath = payload.value(QStringLiteral("datasetPath")).toString();
+    const QString format = payload.value(QStringLiteral("format")).toString();
+    const QJsonObject options = payload.value(QStringLiteral("options")).toObject();
+
+    QJsonObject startProgress;
+    startProgress.insert(QStringLiteral("percent"), 0);
+    startProgress.insert(QStringLiteral("message"), QStringLiteral("开始校验数据集。"));
+    send(QStringLiteral("progress"), startProgress);
+
+    aitrain::DatasetValidationResult result;
+    if (format == QStringLiteral("yolo_detection") || format == QStringLiteral("yolo_txt")) {
+        result = aitrain::validateYoloDetectionDataset(datasetPath, options);
+    } else if (format == QStringLiteral("yolo_segmentation")) {
+        result = aitrain::validateYoloSegmentationDataset(datasetPath, options);
+    } else if (format == QStringLiteral("paddleocr_rec")) {
+        result = aitrain::validatePaddleOcrRecDataset(datasetPath, options);
+    } else {
+        result.ok = false;
+        aitrain::DatasetValidationResult::Issue issue;
+        issue.severity = QStringLiteral("error");
+        issue.code = QStringLiteral("unsupported_format");
+        issue.filePath = datasetPath;
+        issue.message = QStringLiteral("Worker 不支持该数据集格式：%1。").arg(format);
+        result.issues.append(issue);
+        result.errors.append(issue.message);
+    }
+
+    QJsonObject progressPayload;
+    progressPayload.insert(QStringLiteral("percent"), 100);
+    progressPayload.insert(QStringLiteral("message"), QStringLiteral("数据集校验完成。"));
+    send(QStringLiteral("progress"), progressPayload);
+
+    QJsonObject response = result.toJson();
+    response.insert(QStringLiteral("datasetPath"), datasetPath);
+    response.insert(QStringLiteral("format"), format);
+    response.insert(QStringLiteral("checkedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    send(QStringLiteral("datasetValidation"), response);
+    socket_.waitForBytesWritten(1000);
+    qApp->quit();
+}
+
+void WorkerSession::splitDataset(const QJsonObject& payload)
+{
+    const QString datasetPath = payload.value(QStringLiteral("datasetPath")).toString();
+    const QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
+    const QString format = payload.value(QStringLiteral("format")).toString();
+    const QJsonObject options = payload.value(QStringLiteral("options")).toObject();
+
+    QJsonObject startProgress;
+    startProgress.insert(QStringLiteral("percent"), 0);
+    startProgress.insert(QStringLiteral("message"), QStringLiteral("开始划分数据集。"));
+    send(QStringLiteral("progress"), startProgress);
+
+    aitrain::DatasetSplitResult result;
+    if (format == QStringLiteral("yolo_detection") || format == QStringLiteral("yolo_txt")) {
+        result = aitrain::splitYoloDetectionDataset(datasetPath, outputPath, options);
+    } else {
+        result.ok = false;
+        result.outputPath = outputPath;
+        result.errors.append(QStringLiteral("当前仅支持 YOLO 检测数据集划分。"));
+    }
+
+    QJsonObject progressPayload;
+    progressPayload.insert(QStringLiteral("percent"), 100);
+    progressPayload.insert(QStringLiteral("message"), QStringLiteral("数据集划分完成。"));
+    send(QStringLiteral("progress"), progressPayload);
+
+    QJsonObject response = result.toJson();
+    response.insert(QStringLiteral("datasetPath"), datasetPath);
+    response.insert(QStringLiteral("format"), format);
+    response.insert(QStringLiteral("checkedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    send(QStringLiteral("datasetSplit"), response);
+    socket_.waitForBytesWritten(1000);
+    qApp->quit();
+}
+
+void WorkerSession::exportModel(const QJsonObject& payload)
+{
+    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
+    const QString checkpointPath = payload.value(QStringLiteral("checkpointPath")).toString();
+    const QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
+    const QString format = payload.value(QStringLiteral("format")).toString(QStringLiteral("tiny_detector_json"));
+
+    QJsonObject startProgress;
+    startProgress.insert(QStringLiteral("percent"), 0);
+    startProgress.insert(QStringLiteral("message"), QStringLiteral("开始导出模型。"));
+    send(QStringLiteral("progress"), startProgress);
+
+    const aitrain::DetectionExportResult result = aitrain::exportDetectionCheckpoint(checkpointPath, outputPath, format);
+    if (!result.ok) {
+        fail(result.error);
+        return;
+    }
+
+    QJsonObject progressPayload;
+    progressPayload.insert(QStringLiteral("percent"), 100);
+    progressPayload.insert(QStringLiteral("message"), QStringLiteral("模型导出完成。"));
+    send(QStringLiteral("progress"), progressPayload);
+
+    QJsonObject artifact;
+    artifact.insert(QStringLiteral("taskId"), taskId);
+    artifact.insert(QStringLiteral("kind"), QStringLiteral("export"));
+    artifact.insert(QStringLiteral("path"), result.exportPath);
+    artifact.insert(QStringLiteral("message"), result.format == QStringLiteral("onnx")
+        ? QStringLiteral("Tiny detector ONNX model core export")
+        : QStringLiteral("Tiny detector JSON scaffold export"));
+    send(QStringLiteral("artifact"), artifact);
+
+    QJsonObject response;
+    response.insert(QStringLiteral("ok"), true);
+    response.insert(QStringLiteral("format"), result.format);
+    response.insert(QStringLiteral("taskId"), taskId);
+    response.insert(QStringLiteral("checkpointPath"), checkpointPath);
+    response.insert(QStringLiteral("exportPath"), result.exportPath);
+    response.insert(QStringLiteral("reportPath"), result.reportPath);
+    response.insert(QStringLiteral("config"), result.config);
+    response.insert(QStringLiteral("exportedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    send(QStringLiteral("modelExport"), response);
+
+    QJsonObject completed;
+    completed.insert(QStringLiteral("message"), QStringLiteral("Model export completed"));
+    send(QStringLiteral("completed"), completed);
+    socket_.waitForBytesWritten(1000);
+    qApp->quit();
+}
+
+void WorkerSession::runInference(const QJsonObject& payload)
+{
+    const QString checkpointPath = payload.value(QStringLiteral("checkpointPath")).toString();
+    const QString imagePath = payload.value(QStringLiteral("imagePath")).toString();
+    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
+    aitrain::DetectionInferenceOptions options;
+    options.confidenceThreshold = payload.value(QStringLiteral("confidenceThreshold")).toDouble(options.confidenceThreshold);
+    options.iouThreshold = payload.value(QStringLiteral("iouThreshold")).toDouble(options.iouThreshold);
+    options.maxDetections = payload.value(QStringLiteral("maxDetections")).toInt(options.maxDetections);
+    if (outputPath.isEmpty()) {
+        outputPath = QFileInfo(checkpointPath).absoluteDir().filePath(QStringLiteral("inference"));
+    }
+    if (!QDir().mkpath(outputPath)) {
+        fail(QStringLiteral("Cannot create inference output directory: %1").arg(outputPath));
+        return;
+    }
+
+    QJsonObject startProgress;
+    startProgress.insert(QStringLiteral("percent"), 0);
+    startProgress.insert(QStringLiteral("message"), QStringLiteral("开始推理。"));
+    send(QStringLiteral("progress"), startProgress);
+
+    QElapsedTimer elapsed;
+    elapsed.start();
+    QString error;
+    QVector<aitrain::DetectionPrediction> predictions;
+    const bool onnxModel = QFileInfo(checkpointPath).suffix().compare(QStringLiteral("onnx"), Qt::CaseInsensitive) == 0;
+    if (onnxModel) {
+        predictions = aitrain::predictDetectionOnnxRuntime(checkpointPath, imagePath, options, &error);
+        if (!error.isEmpty()) {
+            fail(error);
+            return;
+        }
+    } else {
+        aitrain::DetectionBaselineCheckpoint checkpoint;
+        if (!aitrain::loadDetectionBaselineCheckpoint(checkpointPath, &checkpoint, &error)) {
+            fail(error);
+            return;
+        }
+        predictions = aitrain::predictDetectionBaseline(checkpoint, imagePath, options, &error);
+        if (!error.isEmpty()) {
+            fail(error);
+            return;
+        }
+    }
+
+    QJsonArray predictionArray;
+    for (const aitrain::DetectionPrediction& prediction : predictions) {
+        predictionArray.append(aitrain::detectionPredictionToJson(prediction));
+    }
+
+    const QString predictionsPath = QDir(outputPath).filePath(QStringLiteral("inference_predictions.json"));
+    QFile predictionsFile(predictionsPath);
+    if (!predictionsFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        fail(QStringLiteral("Cannot write inference predictions: %1").arg(predictionsPath));
+        return;
+    }
+    QJsonObject predictionsDocument;
+    predictionsDocument.insert(QStringLiteral("checkpointPath"), checkpointPath);
+    predictionsDocument.insert(QStringLiteral("imagePath"), imagePath);
+    predictionsDocument.insert(QStringLiteral("runtime"), onnxModel ? QStringLiteral("onnxruntime") : QStringLiteral("tiny_detector"));
+    predictionsDocument.insert(QStringLiteral("elapsedMs"), static_cast<int>(elapsed.elapsed()));
+    predictionsDocument.insert(QStringLiteral("postprocess"), QJsonObject{
+        {QStringLiteral("confidenceThreshold"), options.confidenceThreshold},
+        {QStringLiteral("iouThreshold"), options.iouThreshold},
+        {QStringLiteral("maxDetections"), options.maxDetections}
+    });
+    predictionsDocument.insert(QStringLiteral("predictions"), predictionArray);
+    predictionsFile.write(QJsonDocument(predictionsDocument).toJson(QJsonDocument::Indented));
+    predictionsFile.close();
+
+    QJsonObject renderLog;
+    renderLog.insert(QStringLiteral("message"), QStringLiteral("Rendering inference overlay."));
+    send(QStringLiteral("log"), renderLog);
+
+    const QImage overlay = aitrain::renderDetectionPredictions(imagePath, predictions, &error);
+    if (overlay.isNull()) {
+        fail(error);
+        return;
+    }
+    QJsonObject saveLog;
+    saveLog.insert(QStringLiteral("message"), QStringLiteral("Saving inference overlay."));
+    send(QStringLiteral("log"), saveLog);
+    const QString overlayPath = QDir(outputPath).filePath(QStringLiteral("inference_overlay.png"));
+    if (!overlay.save(overlayPath)) {
+        fail(QStringLiteral("Cannot write inference overlay: %1").arg(overlayPath));
+        return;
+    }
+    const int elapsedMs = static_cast<int>(elapsed.elapsed());
+
+    QJsonObject progressPayload;
+    progressPayload.insert(QStringLiteral("percent"), 100);
+    progressPayload.insert(QStringLiteral("message"), QStringLiteral("推理完成。"));
+    send(QStringLiteral("progress"), progressPayload);
+
+    QJsonObject predictionsArtifact;
+    predictionsArtifact.insert(QStringLiteral("kind"), QStringLiteral("inference_predictions"));
+    predictionsArtifact.insert(QStringLiteral("path"), predictionsPath);
+    predictionsArtifact.insert(QStringLiteral("message"), QStringLiteral("Tiny detector inference predictions"));
+    send(QStringLiteral("artifact"), predictionsArtifact);
+
+    QJsonObject overlayArtifact;
+    overlayArtifact.insert(QStringLiteral("kind"), QStringLiteral("inference_overlay"));
+    overlayArtifact.insert(QStringLiteral("path"), overlayPath);
+    overlayArtifact.insert(QStringLiteral("message"), QStringLiteral("Tiny detector inference overlay"));
+    send(QStringLiteral("artifact"), overlayArtifact);
+
+    QJsonObject response;
+    response.insert(QStringLiteral("ok"), true);
+    response.insert(QStringLiteral("checkpointPath"), checkpointPath);
+    response.insert(QStringLiteral("imagePath"), imagePath);
+    response.insert(QStringLiteral("predictionsPath"), predictionsPath);
+    response.insert(QStringLiteral("overlayPath"), overlayPath);
+    response.insert(QStringLiteral("elapsedMs"), elapsedMs);
+    response.insert(QStringLiteral("predictionCount"), predictions.size());
+    response.insert(QStringLiteral("finishedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    send(QStringLiteral("inferenceResult"), response);
+
+    QJsonObject completed;
+    completed.insert(QStringLiteral("message"), QStringLiteral("Inference completed"));
+    send(QStringLiteral("completed"), completed);
+    socket_.waitForBytesWritten(1000);
+    qApp->quit();
+}
+
+void WorkerSession::runDetectionTraining()
+{
+    aitrain::DetectionTrainingOptions options;
+    options.epochs = qMax(1, request_.parameters.value(QStringLiteral("epochs")).toInt(1));
+    options.batchSize = qMax(1, request_.parameters.value(QStringLiteral("batchSize")).toInt(1));
+    const int imageSize = qMax(1, request_.parameters.value(QStringLiteral("imageSize")).toInt(320));
+    options.imageSize = QSize(imageSize, imageSize);
+    options.gridSize = qBound(1, request_.parameters.value(QStringLiteral("gridSize")).toInt(4), 16);
+    options.horizontalFlip = request_.parameters.value(QStringLiteral("horizontalFlip")).toBool(false);
+    options.colorJitter = request_.parameters.value(QStringLiteral("colorJitter")).toBool(false);
+    options.resumeCheckpointPath = request_.parameters.value(QStringLiteral("resumeCheckpointPath")).toString();
+    options.outputPath = request_.outputPath;
+
+    QJsonObject startProgress;
+    startProgress.insert(QStringLiteral("taskId"), request_.taskId);
+    startProgress.insert(QStringLiteral("percent"), 0);
+    startProgress.insert(QStringLiteral("step"), 0);
+    startProgress.insert(QStringLiteral("epoch"), 0);
+    send(QStringLiteral("progress"), startProgress);
+
+    QJsonObject logPayload;
+    logPayload.insert(QStringLiteral("message"), QStringLiteral("Starting tiny linear detection training. This is a scaffold detector, not full YOLO training."));
+    send(QStringLiteral("log"), logPayload);
+
+    const aitrain::DetectionTrainingResult result = aitrain::trainDetectionBaseline(
+        request_.datasetPath,
+        options,
+        [this](const aitrain::DetectionTrainingMetrics& metrics) {
+            QCoreApplication::processEvents();
+            while (paused_) {
+                QThread::msleep(50);
+                QCoreApplication::processEvents();
+            }
+            if (!running_) {
+                return false;
+            }
+
+            step_ = metrics.step;
+            const int progressBase = qMax(1, metrics.totalSteps);
+            const int percent = qMin(99, qMax(1, qRound(100.0 * static_cast<double>(metrics.step) / static_cast<double>(progressBase))));
+
+            QJsonObject progressPayload;
+            progressPayload.insert(QStringLiteral("taskId"), request_.taskId);
+            progressPayload.insert(QStringLiteral("percent"), percent);
+            progressPayload.insert(QStringLiteral("step"), metrics.step);
+            progressPayload.insert(QStringLiteral("epoch"), metrics.epoch);
+            send(QStringLiteral("progress"), progressPayload);
+
+            QJsonObject lossPayload;
+            lossPayload.insert(QStringLiteral("taskId"), request_.taskId);
+            lossPayload.insert(QStringLiteral("name"), QStringLiteral("loss"));
+            lossPayload.insert(QStringLiteral("value"), metrics.loss);
+            lossPayload.insert(QStringLiteral("step"), metrics.step);
+            lossPayload.insert(QStringLiteral("epoch"), metrics.epoch);
+            send(QStringLiteral("metric"), lossPayload);
+
+            QJsonObject objectnessLossPayload;
+            objectnessLossPayload.insert(QStringLiteral("taskId"), request_.taskId);
+            objectnessLossPayload.insert(QStringLiteral("name"), QStringLiteral("objectnessLoss"));
+            objectnessLossPayload.insert(QStringLiteral("value"), metrics.objectnessLoss);
+            objectnessLossPayload.insert(QStringLiteral("step"), metrics.step);
+            objectnessLossPayload.insert(QStringLiteral("epoch"), metrics.epoch);
+            send(QStringLiteral("metric"), objectnessLossPayload);
+
+            QJsonObject classLossPayload;
+            classLossPayload.insert(QStringLiteral("taskId"), request_.taskId);
+            classLossPayload.insert(QStringLiteral("name"), QStringLiteral("classLoss"));
+            classLossPayload.insert(QStringLiteral("value"), metrics.classLoss);
+            classLossPayload.insert(QStringLiteral("step"), metrics.step);
+            classLossPayload.insert(QStringLiteral("epoch"), metrics.epoch);
+            send(QStringLiteral("metric"), classLossPayload);
+
+            QJsonObject boxLossPayload;
+            boxLossPayload.insert(QStringLiteral("taskId"), request_.taskId);
+            boxLossPayload.insert(QStringLiteral("name"), QStringLiteral("boxLoss"));
+            boxLossPayload.insert(QStringLiteral("value"), metrics.boxLoss);
+            boxLossPayload.insert(QStringLiteral("step"), metrics.step);
+            boxLossPayload.insert(QStringLiteral("epoch"), metrics.epoch);
+            send(QStringLiteral("metric"), boxLossPayload);
+
+            QJsonObject stepLogPayload;
+            stepLogPayload.insert(QStringLiteral("message"), QStringLiteral("epoch=%1 step=%2 loss=%3 objLoss=%4 classLoss=%5 boxLoss=%6")
+                .arg(metrics.epoch)
+                .arg(metrics.step)
+                .arg(metrics.loss, 0, 'f', 4)
+                .arg(metrics.objectnessLoss, 0, 'f', 4)
+                .arg(metrics.classLoss, 0, 'f', 4)
+                .arg(metrics.boxLoss, 0, 'f', 4));
+            send(QStringLiteral("log"), stepLogPayload);
+            return true;
+        });
+
+    if (!result.ok) {
+        if (canceled_) {
+            socket_.waitForBytesWritten(1000);
+            return;
+        }
+        fail(result.error);
+        return;
+    }
+
+    running_ = false;
+    paused_ = false;
+
+    QJsonObject progressPayload;
+    progressPayload.insert(QStringLiteral("taskId"), request_.taskId);
+    progressPayload.insert(QStringLiteral("percent"), 100);
+    progressPayload.insert(QStringLiteral("step"), result.steps);
+    progressPayload.insert(QStringLiteral("epoch"), options.epochs);
+    send(QStringLiteral("progress"), progressPayload);
+
+    QJsonObject artifact;
+    artifact.insert(QStringLiteral("taskId"), request_.taskId);
+    artifact.insert(QStringLiteral("kind"), QStringLiteral("checkpoint"));
+    artifact.insert(QStringLiteral("path"), result.checkpointPath);
+    artifact.insert(QStringLiteral("message"), QStringLiteral("Tiny linear detector checkpoint"));
+    send(QStringLiteral("artifact"), artifact);
+
+    emitDetectionPreviewArtifacts(result.checkpointPath);
+
+    QJsonObject precisionPayload;
+    precisionPayload.insert(QStringLiteral("taskId"), request_.taskId);
+    precisionPayload.insert(QStringLiteral("name"), QStringLiteral("precision"));
+    precisionPayload.insert(QStringLiteral("value"), result.precision);
+    precisionPayload.insert(QStringLiteral("step"), result.steps);
+    precisionPayload.insert(QStringLiteral("epoch"), options.epochs);
+    send(QStringLiteral("metric"), precisionPayload);
+
+    QJsonObject recallPayload;
+    recallPayload.insert(QStringLiteral("taskId"), request_.taskId);
+    recallPayload.insert(QStringLiteral("name"), QStringLiteral("recall"));
+    recallPayload.insert(QStringLiteral("value"), result.recall);
+    recallPayload.insert(QStringLiteral("step"), result.steps);
+    recallPayload.insert(QStringLiteral("epoch"), options.epochs);
+    send(QStringLiteral("metric"), recallPayload);
+
+    QJsonObject mapPayload;
+    mapPayload.insert(QStringLiteral("taskId"), request_.taskId);
+    mapPayload.insert(QStringLiteral("name"), QStringLiteral("mAP50"));
+    mapPayload.insert(QStringLiteral("value"), result.map50);
+    mapPayload.insert(QStringLiteral("step"), result.steps);
+    mapPayload.insert(QStringLiteral("epoch"), options.epochs);
+    send(QStringLiteral("metric"), mapPayload);
+
+    QJsonObject payload;
+    payload.insert(QStringLiteral("message"), QStringLiteral("Tiny linear detection training completed"));
+    send(QStringLiteral("completed"), payload);
+    socket_.waitForBytesWritten(1000);
+    qApp->quit();
+}
+
+void WorkerSession::emitDetectionPreviewArtifacts(const QString& checkpointPath)
+{
+    QString error;
+    aitrain::DetectionBaselineCheckpoint checkpoint;
+    if (!aitrain::loadDetectionBaselineCheckpoint(checkpointPath, &checkpoint, &error)) {
+        QJsonObject payload;
+        payload.insert(QStringLiteral("message"), QStringLiteral("Could not load detection checkpoint for preview: %1").arg(error));
+        send(QStringLiteral("log"), payload);
+        return;
+    }
+
+    aitrain::DetectionDataset dataset;
+    if (!dataset.load(request_.datasetPath, QStringLiteral("val"), &error)
+        && !dataset.load(request_.datasetPath, QStringLiteral("train"), &error)) {
+        QJsonObject payload;
+        payload.insert(QStringLiteral("message"), QStringLiteral("Could not load detection dataset for preview: %1").arg(error));
+        send(QStringLiteral("log"), payload);
+        return;
+    }
+    if (dataset.samples().isEmpty()) {
+        QJsonObject payload;
+        payload.insert(QStringLiteral("message"), QStringLiteral("Could not create detection preview because the dataset split is empty."));
+        send(QStringLiteral("log"), payload);
+        return;
+    }
+
+    const QString imagePath = dataset.samples().first().imagePath;
+    const QVector<aitrain::DetectionPrediction> predictions = aitrain::predictDetectionBaseline(checkpoint, imagePath, &error);
+    if (!error.isEmpty()) {
+        QJsonObject payload;
+        payload.insert(QStringLiteral("message"), QStringLiteral("Could not create detection predictions: %1").arg(error));
+        send(QStringLiteral("log"), payload);
+        return;
+    }
+
+    QJsonArray predictionArray;
+    for (const aitrain::DetectionPrediction& prediction : predictions) {
+        predictionArray.append(aitrain::detectionPredictionToJson(prediction));
+    }
+
+    const QString predictionsPath = QDir(request_.outputPath).filePath(QStringLiteral("predictions_latest.json"));
+    QFile predictionsFile(predictionsPath);
+    if (predictionsFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        QJsonObject document;
+        document.insert(QStringLiteral("taskId"), request_.taskId);
+        document.insert(QStringLiteral("checkpointPath"), checkpointPath);
+        document.insert(QStringLiteral("imagePath"), imagePath);
+        document.insert(QStringLiteral("predictions"), predictionArray);
+        predictionsFile.write(QJsonDocument(document).toJson(QJsonDocument::Indented));
+        predictionsFile.close();
+
+        QJsonObject artifact;
+        artifact.insert(QStringLiteral("taskId"), request_.taskId);
+        artifact.insert(QStringLiteral("kind"), QStringLiteral("predictions"));
+        artifact.insert(QStringLiteral("path"), predictionsPath);
+        artifact.insert(QStringLiteral("message"), QStringLiteral("Tiny linear detector predictions"));
+        send(QStringLiteral("artifact"), artifact);
+    } else {
+        QJsonObject payload;
+        payload.insert(QStringLiteral("message"), QStringLiteral("Could not write detection predictions: %1").arg(predictionsPath));
+        send(QStringLiteral("log"), payload);
+    }
+
+    const QImage preview = aitrain::renderDetectionPredictions(imagePath, predictions, &error);
+    if (preview.isNull()) {
+        QJsonObject payload;
+        payload.insert(QStringLiteral("message"), QStringLiteral("Could not render detection preview: %1").arg(error));
+        send(QStringLiteral("log"), payload);
+        return;
+    }
+
+    const QString previewPath = QDir(request_.outputPath).filePath(QStringLiteral("preview_latest.png"));
+    if (preview.save(previewPath)) {
+        QJsonObject artifact;
+        artifact.insert(QStringLiteral("taskId"), request_.taskId);
+        artifact.insert(QStringLiteral("kind"), QStringLiteral("preview"));
+        artifact.insert(QStringLiteral("path"), previewPath);
+        artifact.insert(QStringLiteral("message"), QStringLiteral("Tiny linear detector preview"));
+        send(QStringLiteral("artifact"), artifact);
+    } else {
+        QJsonObject payload;
+        payload.insert(QStringLiteral("message"), QStringLiteral("Could not write detection preview: %1").arg(previewPath));
+        send(QStringLiteral("log"), payload);
+    }
 }
 
 void WorkerSession::send(const QString& type, const QJsonObject& payload)

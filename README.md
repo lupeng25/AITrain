@@ -12,7 +12,7 @@ This repository implements the first usable platform layer from the requested pl
 - Dataset validation helpers for YOLO txt and PaddleOCR recognition label files.
 - QtTest coverage for JSONL protocol and project repository behavior.
 
-The current training implementation is an executable workflow scaffold: the worker simulates training metrics, checkpoints, and export artifacts so the GUI, protocol, task lifecycle, and plugin architecture can be exercised end to end. Full LibTorch/CUDA YOLO and OCR training kernels are intentionally left behind the plugin interfaces instead of being represented as finished model training code.
+The current training implementation is an executable workflow scaffold: the worker can run a tiny detector placeholder, produce checkpoints, export a tiny detector ONNX model, and validate it through ONNX Runtime so the GUI, protocol, task lifecycle, and plugin architecture can be exercised end to end. Full LibTorch/CUDA YOLO and OCR training kernels remain intentionally behind the plugin interfaces instead of being represented as finished model training code.
 
 ## Build
 

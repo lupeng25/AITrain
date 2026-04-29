@@ -15,3 +15,4 @@ set_target_properties(aitrain_worker PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
 
+aitrain_copy_onnxruntime_runtime(aitrain_worker)

@@ -75,12 +75,37 @@ struct ArtifactRecord {
     QDateTime createdAt;
 };
 
+struct ExportRecord {
+    int id = 0;
+    QString taskId;
+    QString sourceCheckpointPath;
+    QString format;
+    QString path;
+    QString configJson;
+    QString inputShapeJson;
+    QString outputShapeJson;
+    QDateTime createdAt;
+};
+
 struct EnvironmentCheckRecord {
     QString name;
     QString status;
     QString message;
     QString detailsJson;
     QDateTime checkedAt;
+};
+
+struct DatasetRecord {
+    int id = 0;
+    QString name;
+    QString format;
+    QString rootPath;
+    QString validationStatus;
+    int sampleCount = 0;
+    QString lastReportJson;
+    QDateTime createdAt;
+    QDateTime updatedAt;
+    QDateTime lastValidatedAt;
 };
 
 } // namespace aitrain

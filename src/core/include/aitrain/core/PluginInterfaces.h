@@ -6,6 +6,7 @@
 #include <QObject>
 #include <QString>
 #include <QStringList>
+#include <QVector>
 
 namespace aitrain {
 
@@ -25,10 +26,22 @@ struct PluginManifest {
 };
 
 struct DatasetValidationResult {
+    struct Issue {
+        QString severity;
+        QString code;
+        QString filePath;
+        int line = 0;
+        QString message;
+
+        QJsonObject toJson() const;
+    };
+
     bool ok = true;
     int sampleCount = 0;
     QStringList errors;
     QStringList warnings;
+    QStringList previewSamples;
+    QVector<Issue> issues;
 
     QJsonObject toJson() const;
 };
@@ -84,4 +97,3 @@ public:
 
 #define AITrainModelPluginInterface_iid "com.aitrainstudio.IModelPlugin/1.0"
 Q_DECLARE_INTERFACE(aitrain::IModelPlugin, AITrainModelPluginInterface_iid)
-

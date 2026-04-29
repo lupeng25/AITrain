@@ -29,12 +29,12 @@
 - 真实 YOLO 检测训练网络、loss、dataloader。
 - 真实 YOLO 分割训练网络、mask head、mask loss。
 - 真实 OCR CTC 训练网络。
-- ONNX/TensorRT 真实导出。
-- ONNX Runtime/TensorRT 推理后处理。
+- 完整 YOLO/OCR ONNX 导出和 TensorRT 真实导出。
+- 完整 YOLO/OCR ONNX Runtime/TensorRT 推理后处理。
 - GPU/CUDA/TensorRT/LibTorch 环境自检。
 - Windows 安装包和部署流程。
 
-当前 Worker 是训练流程模拟，用于验证 GUI、协议、插件和任务生命周期。后续需要逐步替换为真实 C++/CUDA/LibTorch 训练实现。
+当前 Worker 已能执行 tiny detector 占位训练、导出 tiny detector ONNX，并通过 ONNX Runtime 做推理验证；训练核心仍不是完整 YOLO/OCR。后续需要逐步替换为真实 C++/CUDA/LibTorch 训练实现，并扩展完整 YOLO/OCR 的 ONNX/TensorRT 后处理。
 
 ## 2. 总体实施原则
 
@@ -347,6 +347,8 @@ GUI 支持：
 
 目标：让训练产物可以用于部署验证。
 
+当前状态：tiny detector 已完成 ONNX 导出、ONNX Runtime 推理、checkpoint/ONNX 一致性测试、Worker 端到端推理、预测 JSON 和 overlay 输出。完整 YOLO/OCR ONNX 后处理和 TensorRT 仍属于后续阶段能力。
+
 ### 7.1 ONNX 导出
 
 每个插件实现 `IExporter`：
@@ -521,4 +523,3 @@ AITrainStudio/
 6. 增加对应 QtTest 单元测试。
 
 完成阶段 1 后，再进入数据集系统；数据集系统稳定后，再开始真实 YOLO 检测训练核心。
-

@@ -29,6 +29,44 @@ bool WorkerClient::requestEnvironmentCheck(const QString& workerProgram, QString
     return startWorkerCommand(workerProgram, QStringLiteral("environmentCheck"), {}, error);
 }
 
+bool WorkerClient::requestDatasetValidation(const QString& workerProgram, const QString& datasetPath, const QString& format, const QJsonObject& options, QString* error)
+{
+    QJsonObject payload;
+    payload.insert(QStringLiteral("datasetPath"), datasetPath);
+    payload.insert(QStringLiteral("format"), format);
+    payload.insert(QStringLiteral("options"), options);
+    return startWorkerCommand(workerProgram, QStringLiteral("validateDataset"), payload, error);
+}
+
+bool WorkerClient::requestDatasetSplit(const QString& workerProgram, const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error)
+{
+    QJsonObject payload;
+    payload.insert(QStringLiteral("datasetPath"), datasetPath);
+    payload.insert(QStringLiteral("outputPath"), outputPath);
+    payload.insert(QStringLiteral("format"), format);
+    payload.insert(QStringLiteral("options"), options);
+    return startWorkerCommand(workerProgram, QStringLiteral("splitDataset"), payload, error);
+}
+
+bool WorkerClient::requestModelExport(const QString& workerProgram, const QString& checkpointPath, const QString& outputPath, const QString& format, QString* error, const QString& taskId)
+{
+    QJsonObject payload;
+    payload.insert(QStringLiteral("taskId"), taskId);
+    payload.insert(QStringLiteral("checkpointPath"), checkpointPath);
+    payload.insert(QStringLiteral("outputPath"), outputPath);
+    payload.insert(QStringLiteral("format"), format);
+    return startWorkerCommand(workerProgram, QStringLiteral("exportModel"), payload, error);
+}
+
+bool WorkerClient::requestInference(const QString& workerProgram, const QString& checkpointPath, const QString& imagePath, const QString& outputPath, QString* error)
+{
+    QJsonObject payload;
+    payload.insert(QStringLiteral("checkpointPath"), checkpointPath);
+    payload.insert(QStringLiteral("imagePath"), imagePath);
+    payload.insert(QStringLiteral("outputPath"), outputPath);
+    return startWorkerCommand(workerProgram, QStringLiteral("infer"), payload, error);
+}
+
 void WorkerClient::cancel()
 {
     send(QStringLiteral("cancel"), {});

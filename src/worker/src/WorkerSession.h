@@ -24,6 +24,12 @@ private:
     void resumeTraining();
     void sendHeartbeat();
     void runEnvironmentCheck(const QJsonObject& payload);
+    void validateDataset(const QJsonObject& payload);
+    void splitDataset(const QJsonObject& payload);
+    void exportModel(const QJsonObject& payload);
+    void runInference(const QJsonObject& payload);
+    void runDetectionTraining();
+    void emitDetectionPreviewArtifacts(const QString& checkpointPath);
     void send(const QString& type, const QJsonObject& payload);
     void fail(const QString& message);
     void complete();
@@ -36,4 +42,5 @@ private:
     int maxSteps_ = 20;
     bool running_ = false;
     bool paused_ = false;
+    bool canceled_ = false;
 };
