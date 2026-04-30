@@ -3,6 +3,7 @@
 #include "aitrain/core/DatasetValidators.h"
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/JsonProtocol.h"
+#include "aitrain/core/SegmentationTrainer.h"
 
 #include <QDateTime>
 #include <QCoreApplication>
@@ -216,6 +217,10 @@ void WorkerSession::startTraining(const aitrain::TrainingRequest& request)
 
     if (request_.taskType.compare(QStringLiteral("detection"), Qt::CaseInsensitive) == 0) {
         runDetectionTraining();
+        return;
+    }
+    if (request_.taskType.compare(QStringLiteral("segmentation"), Qt::CaseInsensitive) == 0) {
+        runSegmentationTraining();
         return;
     }
 
@@ -692,6 +697,143 @@ void WorkerSession::runDetectionTraining()
 
     QJsonObject payload;
     payload.insert(QStringLiteral("message"), QStringLiteral("Tiny linear detection training completed"));
+    send(QStringLiteral("completed"), payload);
+    socket_.waitForBytesWritten(1000);
+    qApp->quit();
+}
+
+void WorkerSession::runSegmentationTraining()
+{
+    aitrain::SegmentationTrainingOptions options;
+    options.epochs = qMax(1, request_.parameters.value(QStringLiteral("epochs")).toInt(1));
+    options.batchSize = qMax(1, request_.parameters.value(QStringLiteral("batchSize")).toInt(1));
+    const int imageSize = qMax(1, request_.parameters.value(QStringLiteral("imageSize")).toInt(320));
+    options.imageSize = QSize(imageSize, imageSize);
+    options.learningRate = qMax(0.001, request_.parameters.value(QStringLiteral("learningRate")).toDouble(0.05));
+    options.outputPath = request_.outputPath;
+
+    QJsonObject startProgress;
+    startProgress.insert(QStringLiteral("taskId"), request_.taskId);
+    startProgress.insert(QStringLiteral("percent"), 0);
+    startProgress.insert(QStringLiteral("step"), 0);
+    startProgress.insert(QStringLiteral("epoch"), 0);
+    send(QStringLiteral("progress"), startProgress);
+
+    QJsonObject logPayload;
+    logPayload.insert(QStringLiteral("message"), QStringLiteral("Starting tiny mask segmentation scaffold. This is not full YOLO segmentation training."));
+    send(QStringLiteral("log"), logPayload);
+
+    const aitrain::SegmentationTrainingResult result = aitrain::trainSegmentationBaseline(
+        request_.datasetPath,
+        options,
+        [this](const aitrain::SegmentationTrainingMetrics& metrics) {
+            QCoreApplication::processEvents();
+            while (paused_) {
+                QThread::msleep(50);
+                QCoreApplication::processEvents();
+            }
+            if (!running_) {
+                return false;
+            }
+
+            step_ = metrics.step;
+            const int progressBase = qMax(1, metrics.totalSteps);
+            const int percent = qMin(99, qMax(1, qRound(100.0 * static_cast<double>(metrics.step) / static_cast<double>(progressBase))));
+
+            QJsonObject progressPayload;
+            progressPayload.insert(QStringLiteral("taskId"), request_.taskId);
+            progressPayload.insert(QStringLiteral("percent"), percent);
+            progressPayload.insert(QStringLiteral("step"), metrics.step);
+            progressPayload.insert(QStringLiteral("epoch"), metrics.epoch);
+            send(QStringLiteral("progress"), progressPayload);
+
+            QJsonObject lossPayload;
+            lossPayload.insert(QStringLiteral("taskId"), request_.taskId);
+            lossPayload.insert(QStringLiteral("name"), QStringLiteral("loss"));
+            lossPayload.insert(QStringLiteral("value"), metrics.loss);
+            lossPayload.insert(QStringLiteral("step"), metrics.step);
+            lossPayload.insert(QStringLiteral("epoch"), metrics.epoch);
+            send(QStringLiteral("metric"), lossPayload);
+
+            QJsonObject maskLossPayload;
+            maskLossPayload.insert(QStringLiteral("taskId"), request_.taskId);
+            maskLossPayload.insert(QStringLiteral("name"), QStringLiteral("maskLoss"));
+            maskLossPayload.insert(QStringLiteral("value"), metrics.maskLoss);
+            maskLossPayload.insert(QStringLiteral("step"), metrics.step);
+            maskLossPayload.insert(QStringLiteral("epoch"), metrics.epoch);
+            send(QStringLiteral("metric"), maskLossPayload);
+
+            QJsonObject coveragePayload;
+            coveragePayload.insert(QStringLiteral("taskId"), request_.taskId);
+            coveragePayload.insert(QStringLiteral("name"), QStringLiteral("maskCoverage"));
+            coveragePayload.insert(QStringLiteral("value"), metrics.maskCoverage);
+            coveragePayload.insert(QStringLiteral("step"), metrics.step);
+            coveragePayload.insert(QStringLiteral("epoch"), metrics.epoch);
+            send(QStringLiteral("metric"), coveragePayload);
+
+            QJsonObject stepLogPayload;
+            stepLogPayload.insert(QStringLiteral("message"), QStringLiteral("epoch=%1 step=%2 maskLoss=%3 maskCoverage=%4")
+                .arg(metrics.epoch)
+                .arg(metrics.step)
+                .arg(metrics.maskLoss, 0, 'f', 4)
+                .arg(metrics.maskCoverage, 0, 'f', 4));
+            send(QStringLiteral("log"), stepLogPayload);
+            return true;
+        });
+
+    if (!result.ok) {
+        if (canceled_) {
+            socket_.waitForBytesWritten(1000);
+            return;
+        }
+        fail(result.error);
+        return;
+    }
+
+    running_ = false;
+    paused_ = false;
+
+    QJsonObject progressPayload;
+    progressPayload.insert(QStringLiteral("taskId"), request_.taskId);
+    progressPayload.insert(QStringLiteral("percent"), 100);
+    progressPayload.insert(QStringLiteral("step"), result.steps);
+    progressPayload.insert(QStringLiteral("epoch"), options.epochs);
+    send(QStringLiteral("progress"), progressPayload);
+
+    QJsonObject checkpointArtifact;
+    checkpointArtifact.insert(QStringLiteral("taskId"), request_.taskId);
+    checkpointArtifact.insert(QStringLiteral("kind"), QStringLiteral("checkpoint"));
+    checkpointArtifact.insert(QStringLiteral("path"), result.checkpointPath);
+    checkpointArtifact.insert(QStringLiteral("message"), QStringLiteral("Tiny mask segmentation scaffold checkpoint"));
+    send(QStringLiteral("artifact"), checkpointArtifact);
+
+    if (!result.previewPath.isEmpty()) {
+        QJsonObject previewArtifact;
+        previewArtifact.insert(QStringLiteral("taskId"), request_.taskId);
+        previewArtifact.insert(QStringLiteral("kind"), QStringLiteral("preview"));
+        previewArtifact.insert(QStringLiteral("path"), result.previewPath);
+        previewArtifact.insert(QStringLiteral("message"), QStringLiteral("Tiny mask segmentation scaffold preview"));
+        send(QStringLiteral("artifact"), previewArtifact);
+    }
+
+    QJsonObject finalLossPayload;
+    finalLossPayload.insert(QStringLiteral("taskId"), request_.taskId);
+    finalLossPayload.insert(QStringLiteral("name"), QStringLiteral("maskLoss"));
+    finalLossPayload.insert(QStringLiteral("value"), result.finalLoss);
+    finalLossPayload.insert(QStringLiteral("step"), result.steps);
+    finalLossPayload.insert(QStringLiteral("epoch"), options.epochs);
+    send(QStringLiteral("metric"), finalLossPayload);
+
+    QJsonObject coveragePayload;
+    coveragePayload.insert(QStringLiteral("taskId"), request_.taskId);
+    coveragePayload.insert(QStringLiteral("name"), QStringLiteral("maskCoverage"));
+    coveragePayload.insert(QStringLiteral("value"), result.maskCoverage);
+    coveragePayload.insert(QStringLiteral("step"), result.steps);
+    coveragePayload.insert(QStringLiteral("epoch"), options.epochs);
+    send(QStringLiteral("metric"), coveragePayload);
+
+    QJsonObject payload;
+    payload.insert(QStringLiteral("message"), QStringLiteral("Tiny mask segmentation scaffold completed"));
     send(QStringLiteral("completed"), payload);
     socket_.waitForBytesWritten(1000);
     qApp->quit();

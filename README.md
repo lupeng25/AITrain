@@ -9,10 +9,11 @@ This repository implements the first usable platform layer from the requested pl
 - SQLite-backed project/task/artifact metadata.
 - Qt plugin interfaces for model, dataset, training, validation, export, and inference extensions.
 - Built-in plugin manifests for YOLO-style detection/segmentation, PaddleOCR-style recognition, and dataset interop.
-- Dataset validation helpers for YOLO txt and PaddleOCR recognition label files.
-- QtTest coverage for JSONL protocol and project repository behavior.
+- Dataset validation helpers for YOLO txt, YOLO segmentation, and PaddleOCR recognition label files.
+- Segmentation admission scaffold with dataset loading, polygon-to-mask conversion, overlay preview, Worker metrics, and scaffold checkpoints.
+- QtTest coverage for JSONL protocol, project repository behavior, detection workflow, and segmentation admission behavior.
 
-The current training implementation is an executable workflow scaffold: the worker can run a tiny detector placeholder, produce checkpoints, export a tiny detector ONNX model, and validate it through ONNX Runtime so the GUI, protocol, task lifecycle, and plugin architecture can be exercised end to end. Full LibTorch/CUDA YOLO and OCR training kernels remain intentionally behind the plugin interfaces instead of being represented as finished model training code.
+The current training implementation is an executable workflow scaffold: the worker can run a tiny detector placeholder, produce checkpoints, export a tiny detector ONNX model, validate it through ONNX Runtime, and run a tiny mask segmentation admission scaffold. This lets the GUI, protocol, task lifecycle, dataset, and plugin architecture be exercised end to end. Full LibTorch/CUDA YOLO detection, YOLO segmentation, and OCR training kernels remain intentionally behind the plugin interfaces instead of being represented as finished model training code.
 
 ## Build
 

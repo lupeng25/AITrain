@@ -29,6 +29,7 @@ private:
     void exportModel(const QJsonObject& payload);
     void runInference(const QJsonObject& payload);
     void runDetectionTraining();
+    void runSegmentationTraining();
     void emitDetectionPreviewArtifacts(const QString& checkpointPath);
     void send(const QString& type, const QJsonObject& payload);
     void fail(const QString& message);

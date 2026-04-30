@@ -21,6 +21,7 @@
   - `DatasetInteropPlugin`
 - 数据集格式校验的初版实现。
 - 训练任务事件链路、日志输出、指标曲线、checkpoint 占位产物。
+- YOLO 分割准入 scaffold：数据读取、polygon-to-mask、mask overlay 预览、Worker 端 maskLoss/maskCoverage 指标和 scaffold checkpoint。
 - VSCode 编译、运行、调试和测试配置。
 - 基础 QtTest 测试通过。
 
@@ -34,7 +35,7 @@
 - GPU/CUDA/TensorRT/LibTorch 环境自检。
 - Windows 安装包和部署流程。
 
-当前 Worker 已能执行 tiny detector 占位训练、导出 tiny detector ONNX，并通过 ONNX Runtime 做推理验证；训练核心仍不是完整 YOLO/OCR。后续需要逐步替换为真实 C++/CUDA/LibTorch 训练实现，并扩展完整 YOLO/OCR 的 ONNX/TensorRT 后处理。
+当前 Worker 已能执行 tiny detector 占位训练、导出 tiny detector ONNX，并通过 ONNX Runtime 做推理验证；也已具备 YOLO 分割训练的准入 scaffold，可以读取 segmentation 数据、生成 mask 预览并输出 mask 指标。训练核心仍不是完整 YOLO/OCR。后续需要逐步替换为真实 C++/CUDA/LibTorch 训练实现，并扩展完整 YOLO/OCR 的 ONNX/TensorRT 后处理。
 
 ## 2. 总体实施原则
 

@@ -5,6 +5,8 @@
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/JsonProtocol.h"
 #include "aitrain/core/ProjectRepository.h"
+#include "aitrain/core/SegmentationDataset.h"
+#include "aitrain/core/SegmentationTrainer.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -42,6 +44,15 @@ void writeTinyDetectionDataset(const QString& root)
     writeTinyPng(QDir(root).filePath(QStringLiteral("images/val/a.png")));
     writeTextFile(QDir(root).filePath(QStringLiteral("labels/train/a.txt")), QStringLiteral("0 0.5 0.5 0.25 0.25\n"));
     writeTextFile(QDir(root).filePath(QStringLiteral("labels/val/a.txt")), QStringLiteral("0 0.5 0.5 0.25 0.25\n"));
+}
+
+void writeTinySegmentationDataset(const QString& root)
+{
+    writeTextFile(QDir(root).filePath(QStringLiteral("data.yaml")), QStringLiteral("nc: 1\nnames: [part]\n"));
+    writeTinyPng(QDir(root).filePath(QStringLiteral("images/train/a.png")));
+    writeTinyPng(QDir(root).filePath(QStringLiteral("images/val/a.png")));
+    writeTextFile(QDir(root).filePath(QStringLiteral("labels/train/a.txt")), QStringLiteral("0 0.125 0.125 0.875 0.125 0.875 0.875 0.125 0.875\n"));
+    writeTextFile(QDir(root).filePath(QStringLiteral("labels/val/a.txt")), QStringLiteral("0 0.125 0.125 0.875 0.125 0.875 0.875 0.125 0.875\n"));
 }
 
 QString workerExecutablePath()
@@ -932,6 +943,147 @@ private slots:
         writeTextFile(QDir(root).filePath(QStringLiteral("labels/val/b.txt")), QStringLiteral("0 0.1 0.1 0.2\n"));
         const aitrain::DatasetValidationResult invalid = aitrain::validateYoloSegmentationDataset(root);
         QVERIFY(!invalid.ok);
+    }
+
+    void segmentationDatasetLoadsMasksAndOverlay()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("dataset"));
+        writeTinySegmentationDataset(root);
+
+        QString error;
+        aitrain::SegmentationDataset dataset;
+        QVERIFY2(dataset.load(root, QStringLiteral("train"), &error), qPrintable(error));
+        QCOMPARE(dataset.size(), 1);
+        QCOMPARE(dataset.info().classCount, 1);
+        QCOMPARE(dataset.samples().first().polygons.size(), 1);
+        QCOMPARE(dataset.samples().first().polygons.first().points.size(), 4);
+
+        const QImage mask = aitrain::polygonToMask(dataset.samples().first().polygons.first().points, QSize(8, 8));
+        QVERIFY(!mask.isNull());
+        QCOMPARE(mask.size(), QSize(8, 8));
+        QVERIFY(qAlpha(mask.pixel(4, 4)) > 0);
+        QCOMPARE(qAlpha(mask.pixel(0, 0)), 0);
+
+        const QImage overlay = aitrain::renderSegmentationOverlay(
+            dataset.samples().first().imagePath,
+            dataset.samples().first().polygons,
+            &error);
+        QVERIFY2(!overlay.isNull(), qPrintable(error));
+        QCOMPARE(overlay.size(), QSize(8, 8));
+    }
+
+    void segmentationTrainerWritesScaffoldCheckpointAndPreview()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("dataset"));
+        writeTinySegmentationDataset(root);
+
+        aitrain::SegmentationTrainingOptions options;
+        options.epochs = 3;
+        options.batchSize = 1;
+        options.imageSize = QSize(16, 16);
+        options.learningRate = 0.1;
+        options.outputPath = dir.filePath(QStringLiteral("run"));
+
+        double firstLoss = -1.0;
+        double lastLoss = -1.0;
+        int callbackCount = 0;
+        const aitrain::SegmentationTrainingResult result = aitrain::trainSegmentationBaseline(
+            root,
+            options,
+            [&firstLoss, &lastLoss, &callbackCount](const aitrain::SegmentationTrainingMetrics& metrics) {
+                ++callbackCount;
+                if (firstLoss < 0.0) {
+                    firstLoss = metrics.loss;
+                }
+                lastLoss = metrics.loss;
+                return metrics.maskCoverage > 0.0;
+            });
+
+        QVERIFY2(result.ok, qPrintable(result.error));
+        QCOMPARE(result.steps, 3);
+        QCOMPARE(callbackCount, 3);
+        QVERIFY(firstLoss >= 0.0);
+        QVERIFY(lastLoss >= 0.0);
+        QVERIFY(lastLoss < firstLoss);
+        QVERIFY(result.maskCoverage > 0.0);
+        QVERIFY(QFileInfo::exists(result.checkpointPath));
+        QVERIFY(QFileInfo::exists(result.previewPath));
+
+        QFile checkpoint(result.checkpointPath);
+        QVERIFY(checkpoint.open(QIODevice::ReadOnly));
+        const QJsonObject json = QJsonDocument::fromJson(checkpoint.readAll()).object();
+        QCOMPARE(json.value(QStringLiteral("type")).toString(), QStringLiteral("tiny_mask_segmentation_scaffold"));
+        QVERIFY(json.value(QStringLiteral("note")).toString().contains(QStringLiteral("Scaffold")));
+        QCOMPARE(json.value(QStringLiteral("steps")).toInt(), 3);
+        QVERIFY(json.value(QStringLiteral("maskCoverage")).toDouble() > 0.0);
+        QVERIFY(!json.value(QStringLiteral("previewPolygons")).toArray().isEmpty());
+    }
+
+    void workerRunsSegmentationTrainingScaffoldEndToEnd()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("dataset"));
+        writeTinySegmentationDataset(root);
+        const QString outputPath = dir.filePath(QStringLiteral("worker-segmentation"));
+
+        aitrain::TrainingRequest request;
+        request.taskId = QStringLiteral("seg-task");
+        request.projectPath = dir.path();
+        request.pluginId = QStringLiteral("com.aitrain.plugins.yolo_native");
+        request.taskType = QStringLiteral("segmentation");
+        request.datasetPath = root;
+        request.outputPath = outputPath;
+        request.parameters.insert(QStringLiteral("epochs"), 2);
+        request.parameters.insert(QStringLiteral("batchSize"), 1);
+        request.parameters.insert(QStringLiteral("imageSize"), 16);
+
+        WorkerClient client;
+        QVector<QPair<QString, QJsonObject>> messages;
+        bool finished = false;
+        bool ok = false;
+        QString finishedMessage;
+        connect(&client, &WorkerClient::messageReceived, this, [&messages](const QString& type, const QJsonObject& payload) {
+            messages.append(qMakePair(type, payload));
+        });
+        connect(&client, &WorkerClient::finished, this, [&finished, &ok, &finishedMessage](bool result, const QString& message) {
+            finished = true;
+            ok = result;
+            finishedMessage = message;
+        });
+
+        QString error;
+        QVERIFY2(client.startTraining(workerExecutablePath(), request, &error), qPrintable(error));
+        QTRY_VERIFY_WITH_TIMEOUT(finished, 15000);
+        QVERIFY2(ok, qPrintable(finishedMessage));
+        QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
+
+        bool sawCheckpoint = false;
+        bool sawPreview = false;
+        bool sawMaskLoss = false;
+        bool sawMaskCoverage = false;
+        for (const auto& message : messages) {
+            if (message.first == QStringLiteral("artifact")) {
+                const QString kind = message.second.value(QStringLiteral("kind")).toString();
+                sawCheckpoint = sawCheckpoint || kind == QStringLiteral("checkpoint");
+                sawPreview = sawPreview || kind == QStringLiteral("preview");
+            } else if (message.first == QStringLiteral("metric")) {
+                const QString name = message.second.value(QStringLiteral("name")).toString();
+                sawMaskLoss = sawMaskLoss || name == QStringLiteral("maskLoss");
+                sawMaskCoverage = sawMaskCoverage || name == QStringLiteral("maskCoverage");
+            }
+        }
+        QVERIFY(sawCheckpoint);
+        QVERIFY(sawPreview);
+        QVERIFY(sawMaskLoss);
+        QVERIFY(sawMaskCoverage);
+        QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("checkpoint_latest.aitrain"))));
+        QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("preview_latest.png"))));
+        QCOMPARE(messages.last().first, QStringLiteral("completed"));
     }
 
     void paddleOcrDatasetValidation()
