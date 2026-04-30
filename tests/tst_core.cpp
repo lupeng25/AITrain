@@ -4,6 +4,8 @@
 #include "aitrain/core/DetectionDataset.h"
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/JsonProtocol.h"
+#include "aitrain/core/OcrRecDataset.h"
+#include "aitrain/core/OcrRecTrainer.h"
 #include "aitrain/core/ProjectRepository.h"
 #include "aitrain/core/SegmentationDataset.h"
 #include "aitrain/core/SegmentationTrainer.h"
@@ -53,6 +55,14 @@ void writeTinySegmentationDataset(const QString& root)
     writeTinyPng(QDir(root).filePath(QStringLiteral("images/val/a.png")));
     writeTextFile(QDir(root).filePath(QStringLiteral("labels/train/a.txt")), QStringLiteral("0 0.125 0.125 0.875 0.125 0.875 0.875 0.125 0.875\n"));
     writeTextFile(QDir(root).filePath(QStringLiteral("labels/val/a.txt")), QStringLiteral("0 0.125 0.125 0.875 0.125 0.875 0.875 0.125 0.875\n"));
+}
+
+void writeTinyOcrRecDataset(const QString& root)
+{
+    writeTextFile(QDir(root).filePath(QStringLiteral("dict.txt")), QStringLiteral("a\nb\n1\n2\n"));
+    writeTinyPng(QDir(root).filePath(QStringLiteral("images/a.png")));
+    writeTinyPng(QDir(root).filePath(QStringLiteral("images/b.png")));
+    writeTextFile(QDir(root).filePath(QStringLiteral("rec_gt.txt")), QStringLiteral("images/a.png\tab12\nimages/b.png\tba\n"));
 }
 
 QString workerExecutablePath()
@@ -945,6 +955,135 @@ private slots:
         QVERIFY(!invalid.ok);
     }
 
+    void ocrRecDatasetLoadsDictionaryAndLabels()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("dataset"));
+        writeTinyOcrRecDataset(root);
+
+        QString error;
+        aitrain::OcrRecDataset dataset;
+        QVERIFY2(dataset.load(root, QString(), QString(), 8, &error), qPrintable(error));
+        QCOMPARE(dataset.size(), 2);
+        QCOMPARE(dataset.dictionary().characters.size(), 4);
+        QCOMPARE(dataset.samples().first().label, QStringLiteral("ab12"));
+        QCOMPARE(dataset.samples().first().encodedLabel.size(), 4);
+        QCOMPARE(dataset.samples().first().encodedLabel.at(0), 1);
+        QCOMPARE(dataset.samples().first().encodedLabel.at(1), 2);
+        QCOMPARE(dataset.samples().first().encodedLabel.at(2), 3);
+        QCOMPARE(dataset.samples().first().encodedLabel.at(3), 4);
+        QCOMPARE(aitrain::decodeOcrText(dataset.samples().first().encodedLabel, dataset.dictionary()), QStringLiteral("ab12"));
+    }
+
+    void ocrRecDatasetRejectsUnknownDictionaryCharacter()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("dataset"));
+        writeTinyOcrRecDataset(root);
+        writeTextFile(QDir(root).filePath(QStringLiteral("rec_gt.txt")), QStringLiteral("images/a.png\taz\n"));
+
+        QString error;
+        aitrain::OcrRecDataset dataset;
+        QVERIFY(!dataset.load(root, QString(), QString(), 8, &error));
+        QVERIFY(error.contains(QStringLiteral("dictionary")));
+    }
+
+    void ocrRecDataLoaderBuildsPaddedBatch()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("dataset"));
+        writeTextFile(QDir(root).filePath(QStringLiteral("dict.txt")), QStringLiteral("a\nb\n"));
+
+        QDir().mkpath(QDir(root).filePath(QStringLiteral("images")));
+        QImage wideImage(16, 8, QImage::Format_RGB888);
+        wideImage.fill(Qt::black);
+        QVERIFY(wideImage.save(QDir(root).filePath(QStringLiteral("images/a.png"))));
+        QImage tallImage(8, 16, QImage::Format_RGB888);
+        tallImage.fill(Qt::black);
+        QVERIFY(tallImage.save(QDir(root).filePath(QStringLiteral("images/b.png"))));
+        writeTextFile(QDir(root).filePath(QStringLiteral("rec_gt.txt")), QStringLiteral("images/a.png\tab\nimages/b.png\tba\n"));
+
+        QString error;
+        aitrain::OcrRecDataset dataset;
+        QVERIFY2(dataset.load(root, QString(), QString(), 8, &error), qPrintable(error));
+
+        aitrain::OcrRecDataLoader loader(dataset, 2, QSize(32, 16));
+        aitrain::OcrRecBatch batch;
+        QVERIFY2(loader.next(&batch, &error), qPrintable(error));
+        QCOMPARE(batch.images.size(), 2);
+        QCOMPARE(batch.labels.size(), 2);
+        QCOMPARE(batch.labelLengths.size(), 2);
+        QCOMPARE(batch.labelLengths.at(0), 2);
+        QCOMPARE(batch.labelLengths.at(1), 2);
+        QCOMPARE(batch.texts.first(), QStringLiteral("ab"));
+        QCOMPARE(batch.images.first().size(), QSize(32, 16));
+        QCOMPARE(qRed(batch.images.first().pixel(31, 15)), 0);
+        QCOMPARE(qRed(batch.images.at(1).pixel(0, 15)), 0);
+        QCOMPARE(qRed(batch.images.at(1).pixel(31, 15)), 255);
+        QVERIFY(!loader.hasNext());
+    }
+
+    void ocrRecTrainerWritesScaffoldCheckpointAndPreview()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("dataset"));
+        writeTinyOcrRecDataset(root);
+
+        aitrain::OcrRecTrainingOptions options;
+        options.epochs = 3;
+        options.batchSize = 1;
+        options.imageSize = QSize(32, 16);
+        options.learningRate = 0.1;
+        options.maxTextLength = 8;
+        options.outputPath = dir.filePath(QStringLiteral("run"));
+
+        double firstLoss = -1.0;
+        double lastLoss = -1.0;
+        int callbackCount = 0;
+        const aitrain::OcrRecTrainingResult result = aitrain::trainOcrRecBaseline(
+            root,
+            options,
+            [&firstLoss, &lastLoss, &callbackCount](const aitrain::OcrRecTrainingMetrics& metrics) {
+                ++callbackCount;
+                if (firstLoss < 0.0) {
+                    firstLoss = metrics.loss;
+                }
+                lastLoss = metrics.loss;
+                return metrics.accuracy > 0.0;
+            });
+
+        QVERIFY2(result.ok, qPrintable(result.error));
+        QCOMPARE(result.steps, 6);
+        QCOMPARE(callbackCount, 6);
+        QVERIFY(firstLoss >= 0.0);
+        QVERIFY(lastLoss >= 0.0);
+        QVERIFY(lastLoss < firstLoss);
+        QCOMPARE(result.accuracy, 1.0);
+        QCOMPARE(result.editDistance, 0.0);
+        QVERIFY(QFileInfo::exists(result.checkpointPath));
+        QVERIFY(QFileInfo::exists(result.previewPath));
+
+        QFile checkpoint(result.checkpointPath);
+        QVERIFY(checkpoint.open(QIODevice::ReadOnly));
+        const QJsonObject json = QJsonDocument::fromJson(checkpoint.readAll()).object();
+        QCOMPARE(json.value(QStringLiteral("type")).toString(), QStringLiteral("tiny_ocr_recognition_scaffold"));
+        QVERIFY(json.value(QStringLiteral("note")).toString().contains(QStringLiteral("Scaffold")));
+        QCOMPARE(json.value(QStringLiteral("steps")).toInt(), 6);
+        QCOMPARE(json.value(QStringLiteral("accuracy")).toDouble(), 1.0);
+        QCOMPARE(json.value(QStringLiteral("editDistance")).toDouble(), 0.0);
+        QCOMPARE(json.value(QStringLiteral("modelHead")).toString(), QStringLiteral("label_echo_ctc_scaffold"));
+
+        QFile preview(result.previewPath);
+        QVERIFY(preview.open(QIODevice::ReadOnly));
+        const QJsonObject previewJson = QJsonDocument::fromJson(preview.readAll()).object();
+        QCOMPARE(previewJson.value(QStringLiteral("label")).toString(), QStringLiteral("ab12"));
+        QCOMPARE(previewJson.value(QStringLiteral("prediction")).toString(), QStringLiteral("ab12"));
+    }
+
     void segmentationDatasetLoadsMasksAndOverlay()
     {
         QTemporaryDir dir;
@@ -1207,6 +1346,73 @@ private slots:
         const aitrain::DatasetValidationResult invalid = aitrain::validatePaddleOcrRecDataset(root);
         QVERIFY(!invalid.ok);
         QVERIFY(invalid.errors.join(QStringLiteral("\n")).contains(QStringLiteral("字典")));
+    }
+    void workerRunsOcrRecognitionTrainingScaffoldEndToEnd()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("dataset"));
+        writeTinyOcrRecDataset(root);
+        const QString outputPath = dir.filePath(QStringLiteral("worker-ocr"));
+
+        aitrain::TrainingRequest request;
+        request.taskId = QStringLiteral("ocr-task");
+        request.projectPath = dir.path();
+        request.pluginId = QStringLiteral("com.aitrain.plugins.ocr_rec_native");
+        request.taskType = QStringLiteral("ocr_recognition");
+        request.datasetPath = root;
+        request.outputPath = outputPath;
+        request.parameters.insert(QStringLiteral("epochs"), 2);
+        request.parameters.insert(QStringLiteral("batchSize"), 1);
+        request.parameters.insert(QStringLiteral("imageWidth"), 32);
+        request.parameters.insert(QStringLiteral("imageHeight"), 16);
+        request.parameters.insert(QStringLiteral("maxTextLength"), 8);
+
+        WorkerClient client;
+        QVector<QPair<QString, QJsonObject>> messages;
+        bool finished = false;
+        bool ok = false;
+        QString finishedMessage;
+        connect(&client, &WorkerClient::messageReceived, this, [&messages](const QString& type, const QJsonObject& payload) {
+            messages.append(qMakePair(type, payload));
+        });
+        connect(&client, &WorkerClient::finished, this, [&finished, &ok, &finishedMessage](bool result, const QString& message) {
+            finished = true;
+            ok = result;
+            finishedMessage = message;
+        });
+
+        QString error;
+        QVERIFY2(client.startTraining(workerExecutablePath(), request, &error), qPrintable(error));
+        QTRY_VERIFY_WITH_TIMEOUT(finished, 15000);
+        QVERIFY2(ok, qPrintable(finishedMessage));
+        QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
+
+        bool sawCheckpoint = false;
+        bool sawPreview = false;
+        bool sawCtcLoss = false;
+        bool sawAccuracy = false;
+        bool sawEditDistance = false;
+        for (const auto& message : messages) {
+            if (message.first == QStringLiteral("artifact")) {
+                const QString kind = message.second.value(QStringLiteral("kind")).toString();
+                sawCheckpoint = sawCheckpoint || kind == QStringLiteral("checkpoint");
+                sawPreview = sawPreview || kind == QStringLiteral("preview");
+            } else if (message.first == QStringLiteral("metric")) {
+                const QString name = message.second.value(QStringLiteral("name")).toString();
+                sawCtcLoss = sawCtcLoss || name == QStringLiteral("ctcLoss");
+                sawAccuracy = sawAccuracy || name == QStringLiteral("accuracy");
+                sawEditDistance = sawEditDistance || name == QStringLiteral("editDistance");
+            }
+        }
+        QVERIFY(sawCheckpoint);
+        QVERIFY(sawPreview);
+        QVERIFY(sawCtcLoss);
+        QVERIFY(sawAccuracy);
+        QVERIFY(sawEditDistance);
+        QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("checkpoint_latest.aitrain"))));
+        QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("preview_latest.json"))));
+        QCOMPARE(messages.last().first, QStringLiteral("completed"));
     }
 };
 

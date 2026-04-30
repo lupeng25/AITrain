@@ -30,6 +30,7 @@ private:
     void runInference(const QJsonObject& payload);
     void runDetectionTraining();
     void runSegmentationTraining();
+    void runOcrRecTraining();
     void emitDetectionPreviewArtifacts(const QString& checkpointPath);
     void send(const QString& type, const QJsonObject& payload);
     void fail(const QString& message);

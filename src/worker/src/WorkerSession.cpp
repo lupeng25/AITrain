@@ -3,6 +3,7 @@
 #include "aitrain/core/DatasetValidators.h"
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/JsonProtocol.h"
+#include "aitrain/core/OcrRecTrainer.h"
 #include "aitrain/core/SegmentationTrainer.h"
 
 #include <QDateTime>
@@ -221,6 +222,11 @@ void WorkerSession::startTraining(const aitrain::TrainingRequest& request)
     }
     if (request_.taskType.compare(QStringLiteral("segmentation"), Qt::CaseInsensitive) == 0) {
         runSegmentationTraining();
+        return;
+    }
+    if (request_.taskType.compare(QStringLiteral("ocr_recognition"), Qt::CaseInsensitive) == 0
+        || request_.taskType.compare(QStringLiteral("ocr"), Qt::CaseInsensitive) == 0) {
+        runOcrRecTraining();
         return;
     }
 
@@ -838,6 +844,135 @@ void WorkerSession::runSegmentationTraining()
 
     QJsonObject payload;
     payload.insert(QStringLiteral("message"), QStringLiteral("Tiny mask segmentation scaffold completed"));
+    send(QStringLiteral("completed"), payload);
+    socket_.waitForBytesWritten(1000);
+    qApp->quit();
+}
+
+void WorkerSession::runOcrRecTraining()
+{
+    aitrain::OcrRecTrainingOptions options;
+    options.epochs = qMax(1, request_.parameters.value(QStringLiteral("epochs")).toInt(1));
+    options.batchSize = qMax(1, request_.parameters.value(QStringLiteral("batchSize")).toInt(1));
+    const int imageWidth = qMax(1, request_.parameters.value(QStringLiteral("imageWidth")).toInt(100));
+    const int imageHeight = qMax(1, request_.parameters.value(QStringLiteral("imageHeight")).toInt(32));
+    options.imageSize = QSize(imageWidth, imageHeight);
+    options.learningRate = qMax(0.001, request_.parameters.value(QStringLiteral("learningRate")).toDouble(0.05));
+    options.maxTextLength = qMax(1, request_.parameters.value(QStringLiteral("maxTextLength")).toInt(25));
+    options.labelFilePath = request_.parameters.value(QStringLiteral("labelFilePath")).toString();
+    options.dictionaryFilePath = request_.parameters.value(QStringLiteral("dictionaryFilePath")).toString();
+    options.outputPath = request_.outputPath;
+
+    QJsonObject startProgress;
+    startProgress.insert(QStringLiteral("taskId"), request_.taskId);
+    startProgress.insert(QStringLiteral("percent"), 0);
+    startProgress.insert(QStringLiteral("step"), 0);
+    startProgress.insert(QStringLiteral("epoch"), 0);
+    send(QStringLiteral("progress"), startProgress);
+
+    QJsonObject logPayload;
+    logPayload.insert(QStringLiteral("message"), QStringLiteral("Starting OCR recognition scaffold. This is not real CRNN/CTC OCR training."));
+    send(QStringLiteral("log"), logPayload);
+
+    const aitrain::OcrRecTrainingResult result = aitrain::trainOcrRecBaseline(
+        request_.datasetPath,
+        options,
+        [this](const aitrain::OcrRecTrainingMetrics& metrics) {
+            QCoreApplication::processEvents();
+            while (paused_) {
+                QThread::msleep(50);
+                QCoreApplication::processEvents();
+            }
+            if (!running_) {
+                return false;
+            }
+
+            step_ = metrics.step;
+            const int progressBase = qMax(1, metrics.totalSteps);
+            const int percent = qMin(99, qMax(1, qRound(100.0 * static_cast<double>(metrics.step) / static_cast<double>(progressBase))));
+
+            QJsonObject progressPayload;
+            progressPayload.insert(QStringLiteral("taskId"), request_.taskId);
+            progressPayload.insert(QStringLiteral("percent"), percent);
+            progressPayload.insert(QStringLiteral("step"), metrics.step);
+            progressPayload.insert(QStringLiteral("epoch"), metrics.epoch);
+            send(QStringLiteral("progress"), progressPayload);
+
+            const auto sendMetric = [this, &metrics](const QString& name, double value) {
+                QJsonObject payload;
+                payload.insert(QStringLiteral("taskId"), request_.taskId);
+                payload.insert(QStringLiteral("name"), name);
+                payload.insert(QStringLiteral("value"), value);
+                payload.insert(QStringLiteral("step"), metrics.step);
+                payload.insert(QStringLiteral("epoch"), metrics.epoch);
+                send(QStringLiteral("metric"), payload);
+            };
+            sendMetric(QStringLiteral("loss"), metrics.loss);
+            sendMetric(QStringLiteral("ctcLoss"), metrics.ctcLoss);
+            sendMetric(QStringLiteral("accuracy"), metrics.accuracy);
+            sendMetric(QStringLiteral("editDistance"), metrics.editDistance);
+
+            QJsonObject stepLogPayload;
+            stepLogPayload.insert(QStringLiteral("message"), QStringLiteral("epoch=%1 step=%2 ctcLoss=%3 accuracy=%4 editDistance=%5")
+                .arg(metrics.epoch)
+                .arg(metrics.step)
+                .arg(metrics.ctcLoss, 0, 'f', 4)
+                .arg(metrics.accuracy, 0, 'f', 4)
+                .arg(metrics.editDistance, 0, 'f', 4));
+            send(QStringLiteral("log"), stepLogPayload);
+            return true;
+        });
+
+    if (!result.ok) {
+        if (canceled_) {
+            socket_.waitForBytesWritten(1000);
+            return;
+        }
+        fail(result.error);
+        return;
+    }
+
+    running_ = false;
+    paused_ = false;
+
+    QJsonObject progressPayload;
+    progressPayload.insert(QStringLiteral("taskId"), request_.taskId);
+    progressPayload.insert(QStringLiteral("percent"), 100);
+    progressPayload.insert(QStringLiteral("step"), result.steps);
+    progressPayload.insert(QStringLiteral("epoch"), options.epochs);
+    send(QStringLiteral("progress"), progressPayload);
+
+    QJsonObject checkpointArtifact;
+    checkpointArtifact.insert(QStringLiteral("taskId"), request_.taskId);
+    checkpointArtifact.insert(QStringLiteral("kind"), QStringLiteral("checkpoint"));
+    checkpointArtifact.insert(QStringLiteral("path"), result.checkpointPath);
+    checkpointArtifact.insert(QStringLiteral("message"), QStringLiteral("OCR recognition scaffold checkpoint"));
+    send(QStringLiteral("artifact"), checkpointArtifact);
+
+    if (!result.previewPath.isEmpty()) {
+        QJsonObject previewArtifact;
+        previewArtifact.insert(QStringLiteral("taskId"), request_.taskId);
+        previewArtifact.insert(QStringLiteral("kind"), QStringLiteral("preview"));
+        previewArtifact.insert(QStringLiteral("path"), result.previewPath);
+        previewArtifact.insert(QStringLiteral("message"), QStringLiteral("OCR recognition scaffold preview"));
+        send(QStringLiteral("artifact"), previewArtifact);
+    }
+
+    const auto sendFinalMetric = [this, &result, &options](const QString& name, double value) {
+        QJsonObject payload;
+        payload.insert(QStringLiteral("taskId"), request_.taskId);
+        payload.insert(QStringLiteral("name"), name);
+        payload.insert(QStringLiteral("value"), value);
+        payload.insert(QStringLiteral("step"), result.steps);
+        payload.insert(QStringLiteral("epoch"), options.epochs);
+        send(QStringLiteral("metric"), payload);
+    };
+    sendFinalMetric(QStringLiteral("ctcLoss"), result.finalLoss);
+    sendFinalMetric(QStringLiteral("accuracy"), result.accuracy);
+    sendFinalMetric(QStringLiteral("editDistance"), result.editDistance);
+
+    QJsonObject payload;
+    payload.insert(QStringLiteral("message"), QStringLiteral("OCR recognition scaffold completed"));
     send(QStringLiteral("completed"), payload);
     socket_.waitForBytesWritten(1000);
     qApp->quit();

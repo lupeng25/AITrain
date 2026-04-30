@@ -22,6 +22,7 @@
 - 数据集格式校验的初版实现。
 - 训练任务事件链路、日志输出、指标曲线、checkpoint 占位产物。
 - YOLO 分割 scaffold：数据读取、SegmentationDataLoader、polygon-to-mask、letterbox 对齐 mask、多 polygon / 多 class mask、mask overlay 预览、mask preview 产物、Worker 端 maskLoss/maskCoverage/maskIoU/segmentationMap50 指标和 scaffold checkpoint。
+- OCR recognition scaffold：PaddleOCR Rec 数据读取、字符字典加载、label encode/decode、resize/pad batching、Worker 端 ctcLoss/accuracy/editDistance 指标、scaffold checkpoint 和 preview artifact。
 - VSCode 编译、运行、调试和测试配置。
 - 基础 QtTest 测试通过。
 
@@ -29,13 +30,13 @@
 
 - 真实 YOLO 检测训练网络、loss、dataloader。
 - 真实 YOLO 分割训练网络、真实 mask head、真实 mask loss。
-- 真实 OCR CTC 训练网络。
+- 真实 OCR CRNN/CTC 训练网络。
 - 完整 YOLO/OCR ONNX 导出和 TensorRT 真实导出。
 - 完整 YOLO/OCR ONNX Runtime/TensorRT 推理后处理。
 - GPU/CUDA/TensorRT/LibTorch 环境自检。
 - Windows 安装包和部署流程。
 
-当前 Worker 已能执行 tiny detector 占位训练、导出 tiny detector ONNX，并通过 ONNX Runtime 做推理验证；也已具备 YOLO 分割训练 scaffold，可以读取 segmentation 数据、生成 letterbox 对齐 mask、输出 mask preview，并上报 maskLoss、maskCoverage、maskIoU 和 segmentationMap50。训练核心仍不是完整 YOLO/OCR。后续需要逐步替换为真实 C++/CUDA/LibTorch 训练实现，并扩展完整 YOLO/OCR 的 ONNX/TensorRT 后处理。
+当前 Worker 已能执行 tiny detector 占位训练、导出 tiny detector ONNX，并通过 ONNX Runtime 做推理验证；也已具备 YOLO 分割训练 scaffold，可以读取 segmentation 数据、生成 letterbox 对齐 mask、输出 mask preview，并上报 maskLoss、maskCoverage、maskIoU 和 segmentationMap50；OCR recognition scaffold 可以读取 PaddleOCR Rec 数据、生成 resize/pad batch、输出 checkpoint 和 preview，并上报 ctcLoss、accuracy 和 editDistance。训练核心仍不是完整 YOLO/OCR。后续需要逐步替换为真实 C++/CUDA/LibTorch 训练实现，并扩展完整 YOLO/OCR 的 ONNX/TensorRT 后处理。
 
 ## 2. 总体实施原则
 
@@ -523,12 +524,12 @@ AITrainStudio/
 - 阶段 3 YOLO 检测训练：tiny linear detector scaffold 已完成，可训练小数据、输出指标、checkpoint、preview；不是真实 LibTorch/CUDA YOLO。
 - 阶段 4 ONNX 导出与推理：tiny detector ONNX/ONNX Runtime/Worker 推理链路已完成；完整 YOLO/OCR 后处理和 TensorRT 未完成。
 - 阶段 5 YOLO 分割训练：scaffold/baseline 闭环已完成，已有 `SegmentationDataset`、`SegmentationDataLoader`、polygon-to-mask、letterbox 对齐 mask、多 polygon / 多 class mask、overlay preview、mask preview、Worker 端 mask 指标、scaffold `segmentationMap50` 和 checkpoint；真实 mask head、真实 mask loss、CUDA 训练仍未完成。
+- 阶段 6 OCR 字符识别训练：scaffold/baseline 闭环已完成，已有 `OcrRecDataset`、字典加载、label encode/decode、resize/pad batching、Worker 端 OCR 指标、scaffold checkpoint 和 preview；真实 CRNN/CTC loss、真实 OCR 训练和 OCR ONNX 导出仍未完成。
 
-下一步建议进入阶段 6，先做 OCR recognition admission scaffold，具体任务：
+下一步建议进入阶段 7，先做 TensorRT 与打包 admission scaffold，具体任务：
 
-1. 实现 `OcrRecDataset`。
-2. 加载 PaddleOCR Rec label 文件和字符字典。
-3. 实现 label encode/decode 与未知字符校验。
-4. 实现 OCR 图片 resize/pad batching scaffold。
-5. 覆盖合法标签、未知字符、batch padding 和 Worker `taskType=ocr` 测试。
+1. 梳理 Windows 安装目录结构和 CMake install 规则。
+2. 明确 TensorRT 当前 unsupported/export placeholder 行为。
+3. 扩展环境自检的 runtime DLL 路径提示。
+4. 增加打包路径和 TensorRT unsupported 行为测试。
 5. 每完成一小步运行 `.\tools\harness-check.ps1`。

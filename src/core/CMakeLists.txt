@@ -3,6 +3,8 @@ add_library(aitrain_core STATIC
     include/aitrain/core/DatasetValidators.h
     include/aitrain/core/DetectionDataset.h
     include/aitrain/core/DetectionTrainer.h
+    include/aitrain/core/OcrRecDataset.h
+    include/aitrain/core/OcrRecTrainer.h
     include/aitrain/core/SegmentationDataset.h
     include/aitrain/core/SegmentationTrainer.h
     include/aitrain/core/JsonProtocol.h
@@ -13,6 +15,8 @@ add_library(aitrain_core STATIC
     src/DatasetValidators.cpp
     src/DetectionDataset.cpp
     src/DetectionTrainer.cpp
+    src/OcrRecDataset.cpp
+    src/OcrRecTrainer.cpp
     src/SegmentationDataset.cpp
     src/SegmentationTrainer.cpp
     src/PluginManager.cpp
