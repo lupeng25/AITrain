@@ -16,6 +16,18 @@ For Phase 9 official YOLO detection training, Worker routes `trainingBackend=ult
 python python_trainers/detection/ultralytics_trainer.py --request <request-json>
 ```
 
+For official YOLO segmentation training, Worker routes `trainingBackend=ultralytics_yolo_segment` to:
+
+```powershell
+python python_trainers/segmentation/ultralytics_trainer.py --request <request-json>
+```
+
+For PaddlePaddle OCR Rec training, Worker routes `trainingBackend=paddleocr_rec` to:
+
+```powershell
+python python_trainers/ocr_rec/paddleocr_trainer.py --request <request-json>
+```
+
 Request shape:
 
 ```json
@@ -59,8 +71,8 @@ The Worker owns cancellation. If the GUI sends `cancel`, the Worker terminates t
 Official Python packages are adapted behind this protocol:
 
 - `ultralytics_yolo_detect`: Ultralytics YOLO detection training. The adapter writes normalized `aitrain_yolo_data.yaml`, calls official `YOLO(...).train()`, exports ONNX, and forwards `best.pt`, `last.pt`, `results.csv`, `args.yaml`, `model.onnx`, and `ultralytics_training_report.json`.
-- Ultralytics YOLO segmentation, subject to AGPL-3.0 / Enterprise license constraints.
-- PaddleOCR / PaddlePaddle for OCR recognition, subject to their package and runtime compatibility constraints.
+- `ultralytics_yolo_segment`: Ultralytics YOLO segmentation training. It reuses the detection adapter with segmentation defaults such as `yolov8n-seg.yaml` and forwards mask metrics when the official results expose them.
+- `paddleocr_rec`: PaddlePaddle CTC OCR recognition training for PaddleOCR-style Rec data. It produces `paddleocr_rec_ctc.pdparams`, `dict.txt`, and `paddleocr_rec_training_report.json`. This is not a full PP-OCRv4 official config/export pipeline yet.
 
 Common Phase 9 detection parameters:
 
@@ -73,3 +85,20 @@ Common Phase 9 detection parameters:
 - `runName`: optional Ultralytics run name
 - `exportOnnx`: default `true`
 - `pythonPathPrepend`: optional test/dev-only module path injection
+
+Common Phase 11 segmentation parameters are the same as detection, with default `model=yolov8n-seg.yaml`.
+
+Common Phase 12 OCR Rec parameters:
+
+- `epochs`: default `1`
+- `batchSize`: default `2`
+- `imageWidth`: default `96`
+- `imageHeight`: default `32`
+- `maxTextLength`: default `32`
+- `learningRate`: default `0.001`
+
+Generate minimal smoke datasets and request JSON files with:
+
+```powershell
+python examples\create-minimal-datasets.py --output .deps\examples-smoke
+```

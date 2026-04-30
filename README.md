@@ -11,9 +11,10 @@ This repository implements the first usable platform layer from the requested pl
 - Built-in plugin manifests for YOLO-style detection/segmentation, PaddleOCR-style recognition, and dataset interop.
 - Dataset validation helpers for YOLO txt, YOLO segmentation, and PaddleOCR recognition label files.
 - Segmentation admission scaffold with dataset loading, polygon-to-mask conversion, overlay preview, Worker metrics, and scaffold checkpoints.
+- Worker-managed Python trainer adapters for Ultralytics YOLO detection, Ultralytics YOLO segmentation, and PaddlePaddle OCR Rec CPU smoke training.
 - QtTest coverage for JSONL protocol, project repository behavior, detection workflow, and segmentation admission behavior.
 
-The current training implementation is an executable workflow scaffold: the worker can run a tiny detector placeholder, produce checkpoints, export a tiny detector ONNX model, validate it through ONNX Runtime, and run a tiny mask segmentation admission scaffold. This lets the GUI, protocol, task lifecycle, dataset, and plugin architecture be exercised end to end. Full LibTorch/CUDA YOLO detection, YOLO segmentation, and OCR training kernels remain intentionally behind the plugin interfaces instead of being represented as finished model training code.
+The native C++ training implementation remains an executable workflow scaffold: the worker can run a tiny detector placeholder, produce checkpoints, export a tiny detector ONNX model, validate it through ONNX Runtime, and run tiny segmentation/OCR admission scaffolds. Real model training is now routed through Worker-managed Python trainer subprocesses. Ultralytics YOLO detection and segmentation have CPU smoke coverage, and PaddlePaddle OCR Rec has a small CTC smoke trainer. Full PP-OCRv4 training/export, C++ segmentation mask ONNX postprocess, C++ OCR ONNX decode, and external TensorRT acceptance remain future work.
 
 ## Build
 
@@ -75,3 +76,17 @@ Print the project context:
 ```powershell
 .\tools\harness-context.ps1
 ```
+
+## Python Training Backends
+
+Environment and backend notes are documented in `docs/training-backends.md`.
+
+Minimal sample datasets can be generated with:
+
+```powershell
+python examples\create-minimal-datasets.py --output .deps\examples-smoke
+```
+
+The generated requests can be passed directly to the Python trainers for smoke validation. These datasets are intentionally tiny and are only meant to verify trainer wiring and artifact creation.
+
+Hardware support and TensorRT acceptance requirements are documented in `docs/hardware-compatibility.md`.

@@ -11,6 +11,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLibrary>
+#include <QMap>
+#include <QRegularExpression>
 #include <QtEndian>
 #include <QtMath>
 #include <algorithm>
@@ -30,6 +32,8 @@
 
 namespace aitrain {
 namespace {
+
+QJsonObject loadOnnxExportConfig(const QString& onnxPath);
 
 double clamp01(double value)
 {
@@ -605,6 +609,223 @@ QVector<DetectionPrediction> tinyDetectorPredictionsFromOutputs(
         prediction.className = bestClassIndex >= 0 && bestClassIndex < classNames.size()
             ? classNames.at(bestClassIndex)
             : QStringLiteral("class_%1").arg(bestClassIndex);
+        predictions.append(prediction);
+    }
+    return postProcessDetectionPredictions(predictions, options);
+}
+
+QString unquoteYamlScalar(QString value)
+{
+    value = value.trimmed();
+    if ((value.startsWith(QLatin1Char('"')) && value.endsWith(QLatin1Char('"')))
+        || (value.startsWith(QLatin1Char('\'')) && value.endsWith(QLatin1Char('\'')))) {
+        value = value.mid(1, value.size() - 2);
+    }
+    return value;
+}
+
+QStringList classNamesFromYoloDataYaml(const QString& yamlPath)
+{
+    QFile file(yamlPath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return {};
+    }
+    const QString text = QString::fromUtf8(file.readAll());
+    QRegularExpression inlineNames(QStringLiteral("(?m)^\\s*names\\s*:\\s*\\[([^\\]]*)\\]"));
+    const QRegularExpressionMatch inlineMatch = inlineNames.match(text);
+    if (inlineMatch.hasMatch()) {
+        QStringList names;
+        for (const QString& raw : inlineMatch.captured(1).split(QLatin1Char(','))) {
+            const QString name = unquoteYamlScalar(raw);
+            if (!name.isEmpty()) {
+                names.append(name);
+            }
+        }
+        return names;
+    }
+
+    QStringList names;
+    QRegularExpression blockItem(QStringLiteral("(?m)^\\s*(\\d+)\\s*:\\s*(.+)\\s*$"));
+    QRegularExpressionMatchIterator iterator = blockItem.globalMatch(text);
+    QMap<int, QString> indexedNames;
+    while (iterator.hasNext()) {
+        const QRegularExpressionMatch match = iterator.next();
+        indexedNames.insert(match.captured(1).toInt(), unquoteYamlScalar(match.captured(2)));
+    }
+    for (auto it = indexedNames.constBegin(); it != indexedNames.constEnd(); ++it) {
+        names.append(it.value());
+    }
+    return names;
+}
+
+QJsonObject loadUltralyticsTrainingReport(const QString& onnxPath)
+{
+    const QFileInfo onnxInfo(onnxPath);
+    const QDir weightsDir = onnxInfo.absoluteDir();
+    const QStringList candidates = {
+        weightsDir.absoluteFilePath(QStringLiteral("ultralytics_training_report.json")),
+        weightsDir.absoluteFilePath(QStringLiteral("../ultralytics_training_report.json")),
+        weightsDir.absoluteFilePath(QStringLiteral("../../ultralytics_training_report.json")),
+        weightsDir.absoluteFilePath(QStringLiteral("../../../ultralytics_training_report.json")),
+        weightsDir.absoluteFilePath(QStringLiteral("../../../../ultralytics_training_report.json"))
+    };
+    for (const QString& candidate : candidates) {
+        QFile file(QDir::cleanPath(candidate));
+        if (!file.open(QIODevice::ReadOnly)) {
+            continue;
+        }
+        const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+        if (document.isObject()
+            && document.object().value(QStringLiteral("backend")).toString() == QStringLiteral("ultralytics_yolo_detect")) {
+            return document.object();
+        }
+    }
+    return {};
+}
+
+QStringList ultralyticsClassNames(const QString& onnxPath)
+{
+    const QJsonObject tinyConfig = loadOnnxExportConfig(onnxPath);
+    QStringList classNames = stringListFromArray(tinyConfig.value(QStringLiteral("classNames")).toArray());
+    if (!classNames.isEmpty()) {
+        return classNames;
+    }
+
+    const QJsonObject report = loadUltralyticsTrainingReport(onnxPath);
+    const QString dataYaml = report.value(QStringLiteral("dataYaml")).toString();
+    if (!dataYaml.isEmpty()) {
+        classNames = classNamesFromYoloDataYaml(dataYaml);
+    }
+    if (classNames.isEmpty()) {
+        classNames.append(QStringLiteral("class_0"));
+    }
+    return classNames;
+}
+
+QVector<float> yoloImageTensorFromLetterbox(const QImage& image, const QSize& inputSize, LetterboxTransform* transform)
+{
+    const QImage letterboxed = letterboxImage(image, inputSize, transform).convertToFormat(QImage::Format_RGB888);
+    QVector<float> tensor;
+    tensor.resize(3 * inputSize.width() * inputSize.height());
+    const int planeSize = inputSize.width() * inputSize.height();
+    for (int y = 0; y < inputSize.height(); ++y) {
+        const uchar* scanline = letterboxed.constScanLine(y);
+        for (int x = 0; x < inputSize.width(); ++x) {
+            const int pixelIndex = y * inputSize.width() + x;
+            tensor[pixelIndex] = static_cast<float>(scanline[x * 3]) / 255.0f;
+            tensor[planeSize + pixelIndex] = static_cast<float>(scanline[x * 3 + 1]) / 255.0f;
+            tensor[planeSize * 2 + pixelIndex] = static_cast<float>(scanline[x * 3 + 2]) / 255.0f;
+        }
+    }
+    return tensor;
+}
+
+DetectionBox yoloBoxFromInputPixels(
+    double xCenter,
+    double yCenter,
+    double width,
+    double height,
+    int classId,
+    const QSize& inputSize,
+    const LetterboxTransform& transform)
+{
+    const double x1 = (xCenter - width / 2.0 - transform.padX) / qMax(1.0e-12, transform.scale);
+    const double y1 = (yCenter - height / 2.0 - transform.padY) / qMax(1.0e-12, transform.scale);
+    const double x2 = (xCenter + width / 2.0 - transform.padX) / qMax(1.0e-12, transform.scale);
+    const double y2 = (yCenter + height / 2.0 - transform.padY) / qMax(1.0e-12, transform.scale);
+    Q_UNUSED(inputSize)
+
+    const double sourceWidth = qMax(1, transform.sourceSize.width());
+    const double sourceHeight = qMax(1, transform.sourceSize.height());
+    const double clampedX1 = qBound(0.0, x1, sourceWidth);
+    const double clampedY1 = qBound(0.0, y1, sourceHeight);
+    const double clampedX2 = qBound(0.0, x2, sourceWidth);
+    const double clampedY2 = qBound(0.0, y2, sourceHeight);
+
+    DetectionBox box;
+    box.classId = classId;
+    box.xCenter = clamp01((clampedX1 + clampedX2) / 2.0 / sourceWidth);
+    box.yCenter = clamp01((clampedY1 + clampedY2) / 2.0 / sourceHeight);
+    box.width = qBound(1.0e-6, (clampedX2 - clampedX1) / sourceWidth, 1.0);
+    box.height = qBound(1.0e-6, (clampedY2 - clampedY1) / sourceHeight, 1.0);
+    return box;
+}
+
+QVector<DetectionPrediction> yoloPredictionsFromOutput(
+    const float* output,
+    const std::vector<int64_t>& shape,
+    const QStringList& classNames,
+    const QSize& inputSize,
+    const LetterboxTransform& transform,
+    const DetectionInferenceOptions& options,
+    QString* error)
+{
+    if (shape.size() != 3 || shape.at(0) != 1) {
+        if (error) {
+            *error = QStringLiteral("YOLO detection ONNX output shape must be [1, attributes, anchors] or [1, anchors, attributes]");
+        }
+        return {};
+    }
+
+    const int classCount = qMax(1, classNames.size());
+    int anchorCount = 0;
+    int attributeCount = 0;
+    bool attributesFirst = false;
+    if (shape.at(1) >= 4 + classCount && shape.at(2) > 0) {
+        attributesFirst = true;
+        attributeCount = static_cast<int>(shape.at(1));
+        anchorCount = static_cast<int>(shape.at(2));
+    } else if (shape.at(2) >= 4 + classCount && shape.at(1) > 0) {
+        attributesFirst = false;
+        anchorCount = static_cast<int>(shape.at(1));
+        attributeCount = static_cast<int>(shape.at(2));
+    } else {
+        if (error) {
+            *error = QStringLiteral("YOLO detection ONNX output does not contain box and class attributes");
+        }
+        return {};
+    }
+
+    auto valueAt = [output, anchorCount, attributeCount, attributesFirst](int anchor, int attribute) -> float {
+        return attributesFirst
+            ? output[attribute * anchorCount + anchor]
+            : output[anchor * attributeCount + attribute];
+    };
+
+    QVector<DetectionPrediction> predictions;
+    predictions.reserve(anchorCount);
+    for (int anchor = 0; anchor < anchorCount; ++anchor) {
+        int bestClassIndex = 0;
+        double bestClassScore = static_cast<double>(valueAt(anchor, 4));
+        for (int classIndex = 1; classIndex < classCount && 4 + classIndex < attributeCount; ++classIndex) {
+            const double score = static_cast<double>(valueAt(anchor, 4 + classIndex));
+            if (score > bestClassScore) {
+                bestClassScore = score;
+                bestClassIndex = classIndex;
+            }
+        }
+        const double objectness = attributeCount > 4 + classCount
+            ? qBound(0.0, static_cast<double>(valueAt(anchor, 4 + classCount)), 1.0)
+            : 1.0;
+        const double confidence = qBound(0.0, bestClassScore * objectness, 1.0);
+        if (confidence < options.confidenceThreshold) {
+            continue;
+        }
+
+        DetectionPrediction prediction;
+        prediction.box = yoloBoxFromInputPixels(
+            static_cast<double>(valueAt(anchor, 0)),
+            static_cast<double>(valueAt(anchor, 1)),
+            qMax(0.0, static_cast<double>(valueAt(anchor, 2))),
+            qMax(0.0, static_cast<double>(valueAt(anchor, 3))),
+            bestClassIndex,
+            inputSize,
+            transform);
+        prediction.className = bestClassIndex >= 0 && bestClassIndex < classNames.size()
+            ? classNames.at(bestClassIndex)
+            : QStringLiteral("class_%1").arg(bestClassIndex);
+        prediction.objectness = objectness;
+        prediction.confidence = confidence;
         predictions.append(prediction);
     }
     return postProcessDetectionPredictions(predictions, options);
@@ -2014,15 +2235,81 @@ QVector<DetectionPrediction> predictDetectionOnnxRuntime(
 #endif
         Ort::AllocatorWithDefaultOptions allocator;
 
-        if (session.GetInputCount() != 1 || session.GetOutputCount() < 3) {
+        if (session.GetInputCount() != 1) {
             if (error) {
-                *error = QStringLiteral("ONNX tiny detector expects one input and at least three outputs");
+                *error = QStringLiteral("ONNX detection inference expects exactly one input tensor");
             }
             return {};
         }
-
         Ort::TypeInfo inputType = session.GetInputTypeInfo(0);
         const std::vector<int64_t> inputShape = inputType.GetTensorTypeAndShapeInfo().GetShape();
+        if (inputShape.size() == 4) {
+            const int channels = static_cast<int>(inputShape.at(1));
+            const int inputHeight = static_cast<int>(inputShape.at(2));
+            const int inputWidth = static_cast<int>(inputShape.at(3));
+            if (channels != 3 || inputHeight <= 0 || inputWidth <= 0) {
+                if (error) {
+                    *error = QStringLiteral("YOLO detection ONNX input shape must be [1, 3, height, width]");
+                }
+                return {};
+            }
+
+            LetterboxTransform transform;
+            const QSize inputSize(inputWidth, inputHeight);
+            QVector<float> input = yoloImageTensorFromLetterbox(image, inputSize, &transform);
+            std::vector<int64_t> tensorShape = inputShape;
+            Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+            Ort::Value inputTensor = Ort::Value::CreateTensor<float>(
+                memoryInfo,
+                input.data(),
+                static_cast<size_t>(input.size()),
+                tensorShape.data(),
+                tensorShape.size());
+
+            auto inputName = session.GetInputNameAllocated(0, allocator);
+            std::vector<Ort::AllocatedStringPtr> outputNameHolders;
+            std::vector<const char*> outputNames;
+            const size_t outputCount = session.GetOutputCount();
+            outputNameHolders.reserve(outputCount);
+            outputNames.reserve(outputCount);
+            for (size_t outputIndex = 0; outputIndex < outputCount; ++outputIndex) {
+                outputNameHolders.emplace_back(session.GetOutputNameAllocated(outputIndex, allocator));
+                outputNames.push_back(outputNameHolders.back().get());
+            }
+            if (outputNames.empty()) {
+                if (error) {
+                    *error = QStringLiteral("YOLO detection ONNX model has no outputs");
+                }
+                return {};
+            }
+
+            const char* inputNames[] = { inputName.get() };
+            std::vector<Ort::Value> outputs = session.Run(
+                Ort::RunOptions{nullptr},
+                inputNames,
+                &inputTensor,
+                1,
+                outputNames.data(),
+                outputNames.size());
+
+            const QStringList classNames = ultralyticsClassNames(onnxPath);
+            const std::vector<int64_t> outputShape = outputs.front().GetTensorTypeAndShapeInfo().GetShape();
+            return yoloPredictionsFromOutput(
+                outputs.front().GetTensorData<float>(),
+                outputShape,
+                classNames,
+                inputSize,
+                transform,
+                options,
+                error);
+        }
+
+        if (session.GetOutputCount() < 3) {
+            if (error) {
+                *error = QStringLiteral("ONNX tiny detector expects at least three outputs; YOLO detection expects a 4D image input.");
+            }
+            return {};
+        }
         if (inputShape.size() != 2 || inputShape.at(0) <= 0 || inputShape.at(1) <= 0) {
             if (error) {
                 *error = QStringLiteral("ONNX tiny detector input shape must be [cells, features]");
@@ -2231,6 +2518,28 @@ QImage renderDetectionPredictions(
     return output;
 }
 
+QJsonObject yoloOnnxExportConfig(const QString& sourceOnnxPath, const QString& exportPath, const QString& format)
+{
+    const QStringList classNames = ultralyticsClassNames(sourceOnnxPath);
+    QJsonObject report = loadUltralyticsTrainingReport(sourceOnnxPath);
+    return QJsonObject{
+        {QStringLiteral("format"), format},
+        {QStringLiteral("backend"), QStringLiteral("ultralytics_yolo_detect")},
+        {QStringLiteral("modelFamily"), QStringLiteral("yolo_detection")},
+        {QStringLiteral("scaffold"), false},
+        {QStringLiteral("sourceCheckpoint"), sourceOnnxPath},
+        {QStringLiteral("sourceOnnx"), sourceOnnxPath},
+        {QStringLiteral("exportPath"), exportPath},
+        {QStringLiteral("classNames"), QJsonArray::fromStringList(classNames)},
+        {QStringLiteral("trainingReport"), report},
+        {QStringLiteral("postprocess"), QJsonObject{
+            {QStringLiteral("decoder"), QStringLiteral("yolo_v8_detection")},
+            {QStringLiteral("nms"), QStringLiteral("AITrain runtime")},
+            {QStringLiteral("coordinates"), QStringLiteral("letterbox_to_original_image")}
+        }}
+    };
+}
+
 DetectionExportResult exportDetectionCheckpoint(
     const QString& checkpointPath,
     const QString& outputPath,
@@ -2251,6 +2560,77 @@ DetectionExportResult exportDetectionCheckpoint(
             result.error = QStringLiteral("Unsupported detection export format: %1").arg(normalizedFormat);
         }
         return result;
+    }
+
+    const bool sourceIsOnnx = QFileInfo(checkpointPath).suffix().toLower() == QStringLiteral("onnx");
+    if (sourceIsOnnx) {
+        QString finalOutputPath = outputPath;
+        if (finalOutputPath.isEmpty()) {
+            finalOutputPath = QFileInfo(checkpointPath).absoluteDir().filePath(
+                tensorRtFormat ? QStringLiteral("model.engine") : QFileInfo(checkpointPath).fileName());
+        }
+        if (QFileInfo(finalOutputPath).isDir()) {
+            finalOutputPath = QDir(finalOutputPath).filePath(
+                tensorRtFormat ? QStringLiteral("model.engine") : QFileInfo(checkpointPath).fileName());
+        }
+        if (!QDir().mkpath(QFileInfo(finalOutputPath).absolutePath())) {
+            result.error = QStringLiteral("Cannot create export directory: %1").arg(QFileInfo(finalOutputPath).absolutePath());
+            return result;
+        }
+
+        if (normalizedFormat == QStringLiteral("onnx")) {
+            if (QFileInfo(checkpointPath).absoluteFilePath() != QFileInfo(finalOutputPath).absoluteFilePath()) {
+                QFile::remove(finalOutputPath);
+                if (!QFile::copy(checkpointPath, finalOutputPath)) {
+                    result.error = QStringLiteral("Cannot copy ONNX model to export path: %1").arg(finalOutputPath);
+                    return result;
+                }
+            }
+            const QString reportPath = onnxExportReportPath(finalOutputPath);
+            const QJsonObject config = yoloOnnxExportConfig(checkpointPath, finalOutputPath, normalizedFormat);
+            if (!writeJsonObject(reportPath, config, &result.error)) {
+                return result;
+            }
+            result.ok = true;
+            result.exportPath = finalOutputPath;
+            result.reportPath = reportPath;
+            result.config = config;
+            return result;
+        }
+
+        if (tensorRtFormat) {
+#ifndef AITRAIN_WITH_TENSORRT_SDK
+            result.error = QStringLiteral("TensorRT export is not available: %1").arg(tensorRtBackendStatus().message);
+            return result;
+#else
+            QFile onnxFile(checkpointPath);
+            if (!onnxFile.open(QIODevice::ReadOnly)) {
+                result.error = QStringLiteral("Cannot read source ONNX model for TensorRT export: %1").arg(checkpointPath);
+                return result;
+            }
+            const QByteArray onnxModel = onnxFile.readAll();
+            const bool fp16 = normalizedFormat == QStringLiteral("tensorrt_fp16");
+            if (!writeTensorRtEngineFromOnnx(onnxModel, finalOutputPath, fp16, &result.error)) {
+                return result;
+            }
+            const QString reportPath = onnxExportReportPath(finalOutputPath);
+            QJsonObject config = yoloOnnxExportConfig(checkpointPath, finalOutputPath, normalizedFormat);
+            config.insert(QStringLiteral("backend"), QStringLiteral("tensorrt_ultralytics_yolo_detect"));
+            config.insert(QStringLiteral("tensorRt"), QJsonObject{
+                {QStringLiteral("precision"), fp16 ? QStringLiteral("fp16") : QStringLiteral("fp32")},
+                {QStringLiteral("workspaceBytes"), static_cast<double>(size_t{1} << 30)},
+                {QStringLiteral("sourceOnnx"), checkpointPath}
+            });
+            if (!writeJsonObject(reportPath, config, &result.error)) {
+                return result;
+            }
+            result.ok = true;
+            result.exportPath = finalOutputPath;
+            result.reportPath = reportPath;
+            result.config = config;
+            return result;
+#endif
+        }
     }
 
     QString error;

@@ -1,0 +1,4 @@
+paddlepaddle>=3.3,<4
+paddleocr>=3.5,<4
+numpy>=1.26
+Pillow>=10

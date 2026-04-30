@@ -108,6 +108,12 @@ QString pythonTrainerScriptFileForBackend(const QString& backend)
     if (normalized == QStringLiteral("ultralytics_yolo") || normalized == QStringLiteral("ultralytics_yolo_detect")) {
         return QStringLiteral("python_trainers/detection/ultralytics_trainer.py");
     }
+    if (normalized == QStringLiteral("ultralytics_yolo_segment")) {
+        return QStringLiteral("python_trainers/segmentation/ultralytics_trainer.py");
+    }
+    if (normalized == QStringLiteral("paddleocr_rec")) {
+        return QStringLiteral("python_trainers/ocr_rec/paddleocr_trainer.py");
+    }
     return QStringLiteral("python_trainers/mock_trainer.py");
 }
 
@@ -784,6 +790,9 @@ void WorkerSession::runPythonTrainer()
         pythonTrainerProcess_.waitForReadyRead(50);
         drainPythonTrainerOutput(&stdoutBuffer, &terminalMessageSeen);
         drainPythonTrainerErrors(&stderrBuffer);
+        if (pythonTrainerProcess_.state() != QProcess::NotRunning) {
+            pythonTrainerProcess_.waitForFinished(1);
+        }
         QCoreApplication::processEvents();
         if (canceled_) {
             return;

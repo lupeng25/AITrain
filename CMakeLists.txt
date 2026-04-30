@@ -267,9 +267,14 @@ add_dependencies(aitrain_worker aitrain_python_trainers_copy)
 install(DIRECTORY DESTINATION plugins/models)
 install(DIRECTORY DESTINATION runtimes/onnxruntime)
 install(DIRECTORY DESTINATION runtimes/tensorrt)
-install(DIRECTORY DESTINATION examples)
 install(DIRECTORY DESTINATION docs)
 install(DIRECTORY docs/harness DESTINATION docs)
+install(DIRECTORY examples DESTINATION .)
+install(FILES
+    docs/training-backends.md
+    docs/hardware-compatibility.md
+    DESTINATION docs
+)
 install(DIRECTORY python_trainers DESTINATION .)
 
 if(AITRAIN_WITH_ONNXRUNTIME)

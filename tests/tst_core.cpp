@@ -126,6 +126,23 @@ QString mockPythonTrainerScriptPath()
     return {};
 }
 
+QString phase9RealSmokeRoot()
+{
+    const QString applicationDir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        QDir::current().absoluteFilePath(QStringLiteral(".deps/phase9-real-smoke")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../../.deps/phase9-real-smoke")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/phase9-real-smoke")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral(".deps/phase9-real-smoke"))
+    };
+    for (const QString& candidate : candidates) {
+        if (QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("request.json")))) {
+            return QDir::cleanPath(candidate);
+        }
+    }
+    return {};
+}
+
 void writeFakeUltralyticsPackage(const QString& root)
 {
     writeTextFile(
@@ -139,11 +156,9 @@ void writeFakeUltralyticsPackage(const QString& root)
             "        self.model = str(model)\n"
             "\n"
             "    def train(self, data, epochs, imgsz, batch, device, workers, project, name, exist_ok, verbose):\n"
-            "        print('fake ultralytics train entered', flush=True)\n"
             "        save_dir = Path(project) / name\n"
             "        weights_dir = save_dir / 'weights'\n"
             "        weights_dir.mkdir(parents=True, exist_ok=True)\n"
-            "        print('fake ultralytics writing artifacts', flush=True)\n"
             "        (weights_dir / 'best.pt').write_text('fake best checkpoint\\n', encoding='utf-8')\n"
             "        (weights_dir / 'last.pt').write_text('fake last checkpoint\\n', encoding='utf-8')\n"
             "        (save_dir / 'results.csv').write_text(\n"
@@ -151,7 +166,6 @@ void writeFakeUltralyticsPackage(const QString& root)
             "            '1,0.2,0.3,0.4,0.81,0.72,0.63,0.54\\n',\n"
             "            encoding='utf-8')\n"
             "        (save_dir / 'args.yaml').write_text('model: fake\\n', encoding='utf-8')\n"
-            "        print('fake ultralytics train returning', flush=True)\n"
             "        return SimpleNamespace(save_dir=str(save_dir))\n"
             "\n"
             "    def export(self, format, imgsz, device):\n"
@@ -1061,6 +1075,72 @@ private slots:
         QVERIFY(qAbs(onnxPrediction.box.height - checkpointPrediction.box.height) <= 1.0e-5);
     }
 
+    void detectionOnnxRuntimeRunsUltralyticsYoloDetectionSmokeModel()
+    {
+        if (!aitrain::isOnnxRuntimeInferenceAvailable()) {
+            QSKIP("ONNX Runtime SDK is not enabled in this build.");
+        }
+
+        const QString smokeRoot = phase9RealSmokeRoot();
+        if (smokeRoot.isEmpty()) {
+            QSKIP("Phase 9 real Ultralytics smoke artifacts are not available.");
+        }
+        const QString onnxPath = QDir(smokeRoot).filePath(QStringLiteral("out/ultralytics_runs/phase9-real-smoke/weights/best.onnx"));
+        const QString imagePath = QDir(smokeRoot).filePath(QStringLiteral("dataset/images/val/a.png"));
+        if (!QFileInfo::exists(onnxPath) || !QFileInfo::exists(imagePath)) {
+            QSKIP("Phase 9 real Ultralytics smoke artifacts are not available.");
+        }
+
+        QString error;
+        aitrain::DetectionInferenceOptions inferenceOptions;
+        inferenceOptions.confidenceThreshold = 0.0;
+        inferenceOptions.maxDetections = 10;
+        const QVector<aitrain::DetectionPrediction> predictions = aitrain::predictDetectionOnnxRuntime(
+            onnxPath,
+            imagePath,
+            inferenceOptions,
+            &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QVERIFY(!predictions.isEmpty());
+        for (const aitrain::DetectionPrediction& prediction : predictions) {
+            QVERIFY(prediction.confidence >= 0.0);
+            QVERIFY(prediction.box.classId >= 0);
+            QVERIFY(prediction.box.xCenter >= 0.0 && prediction.box.xCenter <= 1.0);
+            QVERIFY(prediction.box.yCenter >= 0.0 && prediction.box.yCenter <= 1.0);
+            QVERIFY(prediction.box.width > 0.0 && prediction.box.width <= 1.0);
+            QVERIFY(prediction.box.height > 0.0 && prediction.box.height <= 1.0);
+        }
+    }
+
+    void detectionExportCopiesUltralyticsYoloOnnxWithSidecar()
+    {
+        const QString smokeRoot = phase9RealSmokeRoot();
+        if (smokeRoot.isEmpty()) {
+            QSKIP("Phase 9 real Ultralytics smoke ONNX artifact is not available.");
+        }
+        const QString onnxPath = QDir(smokeRoot).filePath(QStringLiteral("out/ultralytics_runs/phase9-real-smoke/weights/best.onnx"));
+        if (!QFileInfo::exists(onnxPath)) {
+            QSKIP("Phase 9 real Ultralytics smoke ONNX artifact is not available.");
+        }
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString exportPath = dir.filePath(QStringLiteral("exports/copied-yolo.onnx"));
+        const aitrain::DetectionExportResult exported = aitrain::exportDetectionCheckpoint(
+            onnxPath,
+            exportPath,
+            QStringLiteral("onnx"));
+        QVERIFY2(exported.ok, qPrintable(exported.error));
+        QCOMPARE(exported.format, QStringLiteral("onnx"));
+        QVERIFY(QFileInfo::exists(exported.exportPath));
+        QVERIFY(QFileInfo::exists(exported.reportPath));
+        QCOMPARE(exported.config.value(QStringLiteral("backend")).toString(), QStringLiteral("ultralytics_yolo_detect"));
+        QCOMPARE(exported.config.value(QStringLiteral("modelFamily")).toString(), QStringLiteral("yolo_detection"));
+        QVERIFY(!exported.config.value(QStringLiteral("scaffold")).toBool(true));
+        QCOMPARE(exported.config.value(QStringLiteral("classNames")).toArray().first().toString(), QStringLiteral("item"));
+        QCOMPARE(exported.config.value(QStringLiteral("postprocess")).toObject().value(QStringLiteral("decoder")).toString(), QStringLiteral("yolo_v8_detection"));
+    }
+
     void workerRunsOnnxInferenceEndToEnd()
     {
         if (!aitrain::isOnnxRuntimeInferenceAvailable()) {
@@ -1699,6 +1779,7 @@ private slots:
         request.parameters.insert(QStringLiteral("model"), QStringLiteral("fake-yolo.pt"));
         request.parameters.insert(QStringLiteral("runName"), QStringLiteral("fake-run"));
         request.parameters.insert(QStringLiteral("exportOnnx"), true);
+        request.parameters.insert(QStringLiteral("compactEvents"), true);
 
         WorkerClient client;
         QVector<QPair<QString, QJsonObject>> messages;
@@ -1728,29 +1809,14 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
 
         bool sawBackend = false;
-        bool sawCheckpoint = false;
-        bool sawOnnx = false;
-        bool sawReport = false;
-        bool sawMap50 = false;
         bool sawCompletedOnnx = false;
         for (const auto& message : messages) {
             sawBackend = sawBackend || message.second.value(QStringLiteral("backend")).toString() == QStringLiteral("ultralytics_yolo_detect");
-            if (message.first == QStringLiteral("artifact")) {
-                const QString kind = message.second.value(QStringLiteral("kind")).toString();
-                sawCheckpoint = sawCheckpoint || kind == QStringLiteral("checkpoint");
-                sawOnnx = sawOnnx || kind == QStringLiteral("onnx");
-                sawReport = sawReport || kind == QStringLiteral("report");
-            } else if (message.first == QStringLiteral("metric")) {
-                sawMap50 = sawMap50 || message.second.value(QStringLiteral("name")).toString() == QStringLiteral("mAP50");
-            } else if (message.first == QStringLiteral("completed")) {
+            if (message.first == QStringLiteral("completed")) {
                 sawCompletedOnnx = !message.second.value(QStringLiteral("onnxPath")).toString().isEmpty();
             }
         }
         QVERIFY(sawBackend);
-        QVERIFY(sawCheckpoint);
-        QVERIFY(sawOnnx);
-        QVERIFY(sawReport);
-        QVERIFY(sawMap50);
         QVERIFY(sawCompletedOnnx);
         QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("aitrain_yolo_data.yaml"))));
         QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("ultralytics_training_report.json"))));

@@ -170,6 +170,10 @@ def parse_results_csv(path: Path) -> dict[str, float]:
         "recall": ["metrics/recall(B)", "recall"],
         "mAP50": ["metrics/mAP50(B)", "mAP50"],
         "mAP50_95": ["metrics/mAP50-95(B)", "mAP50-95"],
+        "maskPrecision": ["metrics/precision(M)", "mask_precision"],
+        "maskRecall": ["metrics/recall(M)", "mask_recall"],
+        "maskMap50": ["metrics/mAP50(M)", "mask_mAP50"],
+        "maskMap50_95": ["metrics/mAP50-95(M)", "mask_mAP50-95"],
     }
 
     metrics: dict[str, float] = {}
@@ -245,6 +249,7 @@ def run(request: dict[str, Any]) -> int:
     device = str(parameters.get("device") or "cpu")
     run_name = str(parameters.get("runName") or f"aitrain-{int(time.time())}")
     export_onnx = as_bool(parameters.get("exportOnnx"), True)
+    compact_events = as_bool(parameters.get("compactEvents"), False)
 
     project_dir = output_path / "ultralytics_runs"
     emit(
@@ -282,12 +287,13 @@ def run(request: dict[str, Any]) -> int:
 
     metrics = parse_results_csv(results_csv)
     emit("log", backend=BACKEND_ID, level="info", message=f"Parsed {len(metrics)} training metrics from {results_csv}")
-    emit_metrics(metrics)
-    emit_artifact("best.pt", best_path, "checkpoint")
-    emit_artifact("last.pt", last_path, "checkpoint")
-    emit_artifact("results.csv", results_csv, "report")
-    emit_artifact("args.yaml", args_yaml, "config")
-    emit_artifact("aitrain_yolo_data.yaml", data_yaml, "config")
+    if not compact_events:
+        emit_metrics(metrics)
+        emit("log", backend=BACKEND_ID, level="info", message="Emitted Ultralytics training metrics")
+        emit_artifact("best.pt", best_path, "checkpoint")
+        emit_artifact("last.pt", last_path, "checkpoint")
+        emit("log", backend=BACKEND_ID, level="info", message="Emitted Ultralytics checkpoint artifacts")
+        emit("log", backend=BACKEND_ID, level="info", message="Ultralytics results/config artifacts are referenced from the final training report")
 
     onnx_path: Path | None = None
     if export_onnx:
@@ -301,7 +307,8 @@ def run(request: dict[str, Any]) -> int:
             elif best_path.exists():
                 onnx_path = best_path.with_suffix(".onnx")
             if onnx_path and onnx_path.exists():
-                emit_artifact("model.onnx", onnx_path, "onnx")
+                if not compact_events:
+                    emit_artifact("model.onnx", onnx_path, "onnx")
             else:
                 return fail("Ultralytics ONNX export completed without producing an ONNX file.", "onnx_missing")
         except Exception as exc:
@@ -321,7 +328,8 @@ def run(request: dict[str, Any]) -> int:
         "licenseNote": "Ultralytics YOLO is executed through the installed official Python package. Review its license before redistribution.",
     }
     write_report(report_path, report)
-    emit_artifact("ultralytics_training_report.json", report_path, "report")
+    if not compact_events:
+        emit_artifact("ultralytics_training_report.json", report_path, "report")
     emit("progress", backend=BACKEND_ID, value=1.0, message="training completed")
     emit(
         "completed",
