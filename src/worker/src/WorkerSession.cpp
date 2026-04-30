@@ -1,6 +1,7 @@
 #include "WorkerSession.h"
 
 #include "aitrain/core/DatasetValidators.h"
+#include "aitrain/core/Deployment.h"
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/JsonProtocol.h"
 #include "aitrain/core/OcrRecTrainer.h"
@@ -14,9 +15,10 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonArray>
-#include <QLibrary>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QRandomGenerator>
+#include <QStandardPaths>
 #include <QThread>
 
 namespace {
@@ -29,16 +31,6 @@ QJsonObject checkObject(const QString& name, const QString& status, const QStrin
     object.insert(QStringLiteral("message"), message);
     object.insert(QStringLiteral("details"), details);
     return object;
-}
-
-bool canLoadLibrary(const QString& libraryName)
-{
-    QLibrary library(libraryName);
-    const bool loaded = library.load();
-    if (loaded) {
-        library.unload();
-    }
-    return loaded;
 }
 
 QJsonObject nvidiaSmiCheck()
@@ -68,11 +60,146 @@ QJsonObject nvidiaSmiCheck()
     return checkObject(QStringLiteral("NVIDIA Driver"), QStringLiteral("ok"), QStringLiteral("检测到 NVIDIA GPU：%1").arg(output.split(QLatin1Char('\n')).first()), details);
 }
 
-QJsonObject dllCheck(const QString& name, const QString& libraryName, const QString& missingMessage)
+QString firstUsablePythonExecutable(const QJsonObject& parameters = {})
 {
-    return canLoadLibrary(libraryName)
-        ? checkObject(name, QStringLiteral("ok"), QStringLiteral("可加载 %1。").arg(libraryName))
-        : checkObject(name, QStringLiteral("missing"), missingMessage);
+    QStringList candidates;
+    const QString requested = parameters.value(QStringLiteral("pythonExecutable")).toString().trimmed();
+    if (!requested.isEmpty()) {
+        candidates.append(requested);
+    }
+    const QString envRequested = QString::fromLocal8Bit(qgetenv("AITRAIN_PYTHON_EXECUTABLE")).trimmed();
+    if (!envRequested.isEmpty()) {
+        candidates.append(envRequested);
+    }
+
+    const QString applicationDir = QCoreApplication::applicationDirPath();
+    candidates.append(QDir(applicationDir).absoluteFilePath(QStringLiteral("../../.deps/python-3.13.13-embed-amd64/python.exe")));
+    candidates.append(QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/python-3.13.13-embed-amd64/python.exe")));
+    candidates.append(QDir::current().absoluteFilePath(QStringLiteral(".deps/python-3.13.13-embed-amd64/python.exe")));
+    candidates.append(QStandardPaths::findExecutable(QStringLiteral("python")));
+    candidates.append(QStandardPaths::findExecutable(QStringLiteral("python3")));
+
+    QStringList seen;
+    for (const QString& candidate : candidates) {
+        if (candidate.trimmed().isEmpty() || seen.contains(candidate)) {
+            continue;
+        }
+        seen.append(candidate);
+        QProcess process;
+        process.start(candidate, QStringList() << QStringLiteral("--version"));
+        if (!process.waitForStarted(1500)) {
+            continue;
+        }
+        if (!process.waitForFinished(2500)) {
+            process.kill();
+            process.waitForFinished();
+            continue;
+        }
+        if (process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0) {
+            return candidate;
+        }
+    }
+    return {};
+}
+
+QString pythonTrainerScriptFileForBackend(const QString& backend)
+{
+    const QString normalized = backend.trimmed().toLower();
+    if (normalized == QStringLiteral("ultralytics_yolo") || normalized == QStringLiteral("ultralytics_yolo_detect")) {
+        return QStringLiteral("python_trainers/detection/ultralytics_trainer.py");
+    }
+    return QStringLiteral("python_trainers/mock_trainer.py");
+}
+
+QString pythonTrainerScriptPath(const QJsonObject& parameters, const QString& backend)
+{
+    const QString requested = parameters.value(QStringLiteral("pythonTrainerScript")).toString().trimmed();
+    if (!requested.isEmpty()) {
+        return QFileInfo(requested).absoluteFilePath();
+    }
+    const QString envRequested = QString::fromLocal8Bit(qgetenv("AITRAIN_PYTHON_TRAINER_SCRIPT")).trimmed();
+    if (!envRequested.isEmpty()) {
+        return QFileInfo(envRequested).absoluteFilePath();
+    }
+
+    const QString trainerFile = pythonTrainerScriptFileForBackend(backend);
+    const QString applicationDir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        QDir(applicationDir).absoluteFilePath(trainerFile),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../%1").arg(trainerFile)),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../../%1").arg(trainerFile)),
+        QDir::current().absoluteFilePath(trainerFile)
+    };
+    for (const QString& candidate : candidates) {
+        if (QFileInfo::exists(candidate)) {
+            return QFileInfo(candidate).absoluteFilePath();
+        }
+    }
+    return candidates.first();
+}
+
+QString requestedTrainingBackend(const aitrain::TrainingRequest& request)
+{
+    const QString backend = request.parameters.value(QStringLiteral("trainingBackend")).toString().trimmed();
+    return backend.isEmpty() ? QStringLiteral("tiny_linear_detector") : backend;
+}
+
+bool isPythonTrainingBackendId(const QString& backend, const QJsonObject& parameters)
+{
+    const QString normalized = backend.trimmed().toLower();
+    return parameters.contains(QStringLiteral("pythonTrainerScript"))
+        || normalized == QStringLiteral("python_mock")
+        || normalized == QStringLiteral("python_trainer_mock")
+        || normalized == QStringLiteral("ultralytics_yolo")
+        || normalized == QStringLiteral("ultralytics_yolo_detect")
+        || normalized == QStringLiteral("ultralytics_yolo_segment")
+        || normalized == QStringLiteral("paddleocr_rec");
+}
+
+QJsonObject runPythonCommandCheck(
+    const QString& name,
+    const QString& executable,
+    const QStringList& arguments,
+    int timeoutMs,
+    const QString& missingMessage)
+{
+    if (executable.isEmpty()) {
+        return checkObject(name, QStringLiteral("missing"), missingMessage);
+    }
+
+    QProcess process;
+    process.start(executable, arguments);
+    if (!process.waitForStarted(1500)) {
+        return checkObject(name, QStringLiteral("missing"), QStringLiteral("%1: %2").arg(missingMessage, process.errorString()));
+    }
+    if (!process.waitForFinished(timeoutMs)) {
+        process.kill();
+        process.waitForFinished();
+        return checkObject(name, QStringLiteral("warning"), QStringLiteral("%1 check timed out.").arg(name));
+    }
+
+    const QString stdoutText = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
+    const QString stderrText = QString::fromUtf8(process.readAllStandardError()).trimmed();
+    QJsonObject details;
+    details.insert(QStringLiteral("stdout"), stdoutText);
+    details.insert(QStringLiteral("stderr"), stderrText);
+    details.insert(QStringLiteral("executable"), executable);
+    if (process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0) {
+        return checkObject(name, QStringLiteral("ok"), stdoutText.isEmpty() ? QStringLiteral("%1 is available.").arg(name) : stdoutText, details);
+    }
+    return checkObject(name, QStringLiteral("missing"), stderrText.isEmpty() ? missingMessage : stderrText, details);
+}
+
+QJsonObject pythonModuleCheck(const QString& executable, const QString& displayName, const QString& moduleName, const QString& missingMessage)
+{
+    return runPythonCommandCheck(
+        displayName,
+        executable,
+        QStringList()
+            << QStringLiteral("-c")
+            << QStringLiteral("import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('%1') else 3)").arg(moduleName),
+        5000,
+        missingMessage);
 }
 
 } // namespace
@@ -187,6 +314,13 @@ void WorkerSession::handleMessage(const QString& type, const QJsonObject& payloa
         paused_ = false;
         canceled_ = true;
         timer_.stop();
+        if (pythonTrainerProcess_.state() != QProcess::NotRunning) {
+            pythonTrainerProcess_.terminate();
+            if (!pythonTrainerProcess_.waitForFinished(1500)) {
+                pythonTrainerProcess_.kill();
+                pythonTrainerProcess_.waitForFinished(1500);
+            }
+        }
         QJsonObject payloadObject;
         payloadObject.insert(QStringLiteral("taskId"), request_.taskId);
         payloadObject.insert(QStringLiteral("message"), QStringLiteral("Canceled by user"));
@@ -284,16 +418,33 @@ void WorkerSession::runEnvironmentCheck(const QJsonObject& payload)
 
     QJsonArray checks;
     checks.append(nvidiaSmiCheck());
-    checks.append(dllCheck(QStringLiteral("CUDA Driver"), QStringLiteral("nvcuda"),
-        QStringLiteral("无法加载 nvcuda，CUDA 驱动运行时不可用。")));
-    checks.append(dllCheck(QStringLiteral("cuDNN"), QStringLiteral("cudnn64_8"),
-        QStringLiteral("无法加载 cudnn64_8，后续真实训练需要配置 cuDNN DLL。")));
-    checks.append(dllCheck(QStringLiteral("TensorRT"), QStringLiteral("nvinfer"),
-        QStringLiteral("无法加载 nvinfer，TensorRT 导出和推理暂不可用。")));
-    checks.append(dllCheck(QStringLiteral("ONNX Runtime"), QStringLiteral("onnxruntime"),
-        QStringLiteral("无法加载 onnxruntime，ONNX 推理暂不可用。")));
-    checks.append(dllCheck(QStringLiteral("LibTorch"), QStringLiteral("torch"),
-        QStringLiteral("无法加载 torch，真实 LibTorch 训练暂不可用。")));
+    const QVector<aitrain::RuntimeDependencyCheck> runtimeChecks =
+        aitrain::defaultRuntimeDependencyChecks(QCoreApplication::applicationDirPath());
+    for (const aitrain::RuntimeDependencyCheck& check : runtimeChecks) {
+        checks.append(check.toJson());
+    }
+    const QString pythonExecutable = firstUsablePythonExecutable();
+    checks.append(runPythonCommandCheck(
+        QStringLiteral("Python"),
+        pythonExecutable,
+        QStringList() << QStringLiteral("--version"),
+        5000,
+        QStringLiteral("Python executable is not available. Configure pythonExecutable or install Python before using official Python trainers.")));
+    checks.append(pythonModuleCheck(
+        pythonExecutable,
+        QStringLiteral("Ultralytics YOLO"),
+        QStringLiteral("ultralytics"),
+        QStringLiteral("Ultralytics is not installed. The official YOLO detection/segmentation trainer backend will be unavailable.")));
+    checks.append(pythonModuleCheck(
+        pythonExecutable,
+        QStringLiteral("PaddleOCR"),
+        QStringLiteral("paddleocr"),
+        QStringLiteral("PaddleOCR is not installed. The official OCR recognition trainer backend will be unavailable.")));
+    checks.append(pythonModuleCheck(
+        pythonExecutable,
+        QStringLiteral("PaddlePaddle"),
+        QStringLiteral("paddle"),
+        QStringLiteral("PaddlePaddle is not installed. PaddleOCR training will be unavailable.")));
     checks.append(checkObject(QStringLiteral("Worker"), QStringLiteral("ok"), QStringLiteral("Worker 环境自检命令可用。")));
 
     QJsonObject result;
@@ -458,9 +609,17 @@ void WorkerSession::runInference(const QJsonObject& payload)
     elapsed.start();
     QString error;
     QVector<aitrain::DetectionPrediction> predictions;
-    const bool onnxModel = QFileInfo(checkpointPath).suffix().compare(QStringLiteral("onnx"), Qt::CaseInsensitive) == 0;
+    const QString modelSuffix = QFileInfo(checkpointPath).suffix().toLower();
+    const bool onnxModel = modelSuffix == QStringLiteral("onnx");
+    const bool tensorRtModel = modelSuffix == QStringLiteral("engine") || modelSuffix == QStringLiteral("plan");
     if (onnxModel) {
         predictions = aitrain::predictDetectionOnnxRuntime(checkpointPath, imagePath, options, &error);
+        if (!error.isEmpty()) {
+            fail(error);
+            return;
+        }
+    } else if (tensorRtModel) {
+        predictions = aitrain::predictDetectionTensorRt(checkpointPath, imagePath, options, &error);
         if (!error.isEmpty()) {
             fail(error);
             return;
@@ -492,7 +651,9 @@ void WorkerSession::runInference(const QJsonObject& payload)
     QJsonObject predictionsDocument;
     predictionsDocument.insert(QStringLiteral("checkpointPath"), checkpointPath);
     predictionsDocument.insert(QStringLiteral("imagePath"), imagePath);
-    predictionsDocument.insert(QStringLiteral("runtime"), onnxModel ? QStringLiteral("onnxruntime") : QStringLiteral("tiny_detector"));
+    predictionsDocument.insert(QStringLiteral("runtime"), onnxModel
+        ? QStringLiteral("onnxruntime")
+        : (tensorRtModel ? QStringLiteral("tensorrt") : QStringLiteral("tiny_detector")));
     predictionsDocument.insert(QStringLiteral("elapsedMs"), static_cast<int>(elapsed.elapsed()));
     predictionsDocument.insert(QStringLiteral("postprocess"), QJsonObject{
         {QStringLiteral("confidenceThreshold"), options.confidenceThreshold},
@@ -557,8 +718,191 @@ void WorkerSession::runInference(const QJsonObject& payload)
     qApp->quit();
 }
 
+bool WorkerSession::shouldUsePythonTrainer() const
+{
+    return isPythonTrainingBackendId(requestedTrainingBackend(request_), request_.parameters);
+}
+
+void WorkerSession::runPythonTrainer()
+{
+    const QString backend = requestedTrainingBackend(request_);
+    const QString pythonExecutable = firstUsablePythonExecutable(request_.parameters);
+    if (pythonExecutable.isEmpty()) {
+        fail(QStringLiteral("Python trainer backend '%1' requires a usable Python executable. Configure pythonExecutable or install Python.").arg(backend));
+        return;
+    }
+
+    const QString trainerScript = pythonTrainerScriptPath(request_.parameters, backend);
+    if (!QFileInfo::exists(trainerScript)) {
+        fail(QStringLiteral("Python trainer script not found: %1").arg(trainerScript));
+        return;
+    }
+
+    if (!QDir().mkpath(request_.outputPath)) {
+        fail(QStringLiteral("Cannot create Python trainer output directory: %1").arg(request_.outputPath));
+        return;
+    }
+
+    const QString requestPath = QDir(request_.outputPath).filePath(QStringLiteral("python_trainer_request.json"));
+    QJsonObject trainerRequest;
+    trainerRequest.insert(QStringLiteral("protocolVersion"), 1);
+    trainerRequest.insert(QStringLiteral("taskId"), request_.taskId);
+    trainerRequest.insert(QStringLiteral("taskType"), request_.taskType);
+    trainerRequest.insert(QStringLiteral("datasetPath"), request_.datasetPath);
+    trainerRequest.insert(QStringLiteral("outputPath"), request_.outputPath);
+    trainerRequest.insert(QStringLiteral("backend"), backend);
+    trainerRequest.insert(QStringLiteral("parameters"), request_.parameters);
+    trainerRequest.insert(QStringLiteral("request"), request_.toJson());
+
+    QFile requestFile(requestPath);
+    if (!requestFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        fail(QStringLiteral("Cannot write Python trainer request: %1").arg(requestPath));
+        return;
+    }
+    requestFile.write(QJsonDocument(trainerRequest).toJson(QJsonDocument::Indented));
+    requestFile.close();
+
+    QJsonObject adapterLog;
+    adapterLog.insert(QStringLiteral("taskId"), request_.taskId);
+    adapterLog.insert(QStringLiteral("message"), QStringLiteral("Launching Python trainer backend=%1").arg(backend));
+    adapterLog.insert(QStringLiteral("backend"), backend);
+    send(QStringLiteral("log"), adapterLog);
+
+    pythonTrainerProcess_.setProgram(pythonExecutable);
+    pythonTrainerProcess_.setArguments(QStringList() << trainerScript << QStringLiteral("--request") << requestPath);
+    pythonTrainerProcess_.setProcessChannelMode(QProcess::SeparateChannels);
+    pythonTrainerProcess_.start();
+    if (!pythonTrainerProcess_.waitForStarted(5000)) {
+        fail(QStringLiteral("Cannot start Python trainer: %1").arg(pythonTrainerProcess_.errorString()));
+        return;
+    }
+
+    QByteArray stdoutBuffer;
+    QByteArray stderrBuffer;
+    bool terminalMessageSeen = false;
+    while (pythonTrainerProcess_.state() != QProcess::NotRunning) {
+        pythonTrainerProcess_.waitForReadyRead(50);
+        drainPythonTrainerOutput(&stdoutBuffer, &terminalMessageSeen);
+        drainPythonTrainerErrors(&stderrBuffer);
+        QCoreApplication::processEvents();
+        if (canceled_) {
+            return;
+        }
+    }
+    drainPythonTrainerOutput(&stdoutBuffer, &terminalMessageSeen);
+    drainPythonTrainerErrors(&stderrBuffer);
+    if (!stdoutBuffer.trimmed().isEmpty()) {
+        forwardPythonTrainerLine(stdoutBuffer.trimmed(), &terminalMessageSeen);
+    }
+    if (!stderrBuffer.trimmed().isEmpty()) {
+        QJsonObject payload;
+        payload.insert(QStringLiteral("taskId"), request_.taskId);
+        payload.insert(QStringLiteral("message"), QString::fromUtf8(stderrBuffer.trimmed()));
+        payload.insert(QStringLiteral("backend"), backend);
+        send(QStringLiteral("log"), payload);
+    }
+
+    if (canceled_) {
+        return;
+    }
+    if (terminalMessageSeen) {
+        socket_.waitForBytesWritten(1000);
+        qApp->quit();
+        return;
+    }
+    if (pythonTrainerProcess_.exitStatus() != QProcess::NormalExit || pythonTrainerProcess_.exitCode() != 0) {
+        fail(QStringLiteral("Python trainer exited with code %1").arg(pythonTrainerProcess_.exitCode()));
+        return;
+    }
+    fail(QStringLiteral("Python trainer exited without a completed or failed message"));
+}
+
+void WorkerSession::drainPythonTrainerOutput(QByteArray* buffer, bool* terminalMessageSeen)
+{
+    buffer->append(pythonTrainerProcess_.readAllStandardOutput());
+    int newline = buffer->indexOf('\n');
+    while (newline >= 0) {
+        const QByteArray line = buffer->left(newline).trimmed();
+        buffer->remove(0, newline + 1);
+        if (!line.isEmpty()) {
+            forwardPythonTrainerLine(line, terminalMessageSeen);
+        }
+        newline = buffer->indexOf('\n');
+    }
+}
+
+void WorkerSession::drainPythonTrainerErrors(QByteArray* buffer)
+{
+    buffer->append(pythonTrainerProcess_.readAllStandardError());
+    int newline = buffer->indexOf('\n');
+    while (newline >= 0) {
+        const QByteArray line = buffer->left(newline).trimmed();
+        buffer->remove(0, newline + 1);
+        if (!line.isEmpty()) {
+            QJsonObject payload;
+            payload.insert(QStringLiteral("taskId"), request_.taskId);
+            payload.insert(QStringLiteral("message"), QString::fromUtf8(line));
+            payload.insert(QStringLiteral("backend"), requestedTrainingBackend(request_));
+            send(QStringLiteral("log"), payload);
+        }
+        newline = buffer->indexOf('\n');
+    }
+}
+
+bool WorkerSession::forwardPythonTrainerLine(const QByteArray& line, bool* terminalMessageSeen)
+{
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(line, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        QJsonObject payload;
+        payload.insert(QStringLiteral("taskId"), request_.taskId);
+        payload.insert(QStringLiteral("message"), QString::fromUtf8(line));
+        payload.insert(QStringLiteral("backend"), requestedTrainingBackend(request_));
+        send(QStringLiteral("log"), payload);
+        return true;
+    }
+
+    const QJsonObject object = document.object();
+    const QString type = object.value(QStringLiteral("type")).toString();
+    if (type.isEmpty()) {
+        QJsonObject payload;
+        payload.insert(QStringLiteral("taskId"), request_.taskId);
+        payload.insert(QStringLiteral("message"), QString::fromUtf8(line));
+        payload.insert(QStringLiteral("backend"), requestedTrainingBackend(request_));
+        send(QStringLiteral("log"), payload);
+        return true;
+    }
+
+    QJsonObject payload = object.value(QStringLiteral("payload")).toObject();
+    if (payload.isEmpty()) {
+        payload = object;
+        payload.remove(QStringLiteral("type"));
+    }
+    if (!payload.contains(QStringLiteral("taskId"))) {
+        payload.insert(QStringLiteral("taskId"), request_.taskId);
+    }
+    if (!payload.contains(QStringLiteral("backend"))) {
+        payload.insert(QStringLiteral("backend"), requestedTrainingBackend(request_));
+    }
+
+    send(type, payload);
+    if (type == QStringLiteral("completed") || type == QStringLiteral("failed")) {
+        running_ = false;
+        paused_ = false;
+        if (terminalMessageSeen) {
+            *terminalMessageSeen = true;
+        }
+    }
+    return true;
+}
+
 void WorkerSession::runDetectionTraining()
 {
+    if (shouldUsePythonTrainer()) {
+        runPythonTrainer();
+        return;
+    }
+
     aitrain::DetectionTrainingOptions options;
     options.epochs = qMax(1, request_.parameters.value(QStringLiteral("epochs")).toInt(1));
     options.batchSize = qMax(1, request_.parameters.value(QStringLiteral("batchSize")).toInt(1));
@@ -567,6 +911,7 @@ void WorkerSession::runDetectionTraining()
     options.gridSize = qBound(1, request_.parameters.value(QStringLiteral("gridSize")).toInt(4), 16);
     options.horizontalFlip = request_.parameters.value(QStringLiteral("horizontalFlip")).toBool(false);
     options.colorJitter = request_.parameters.value(QStringLiteral("colorJitter")).toBool(false);
+    options.trainingBackend = request_.parameters.value(QStringLiteral("trainingBackend")).toString();
     options.resumeCheckpointPath = request_.parameters.value(QStringLiteral("resumeCheckpointPath")).toString();
     options.outputPath = request_.outputPath;
 
@@ -578,7 +923,7 @@ void WorkerSession::runDetectionTraining()
     send(QStringLiteral("progress"), startProgress);
 
     QJsonObject logPayload;
-    logPayload.insert(QStringLiteral("message"), QStringLiteral("Starting tiny linear detection training. This is a scaffold detector, not full YOLO training."));
+    logPayload.insert(QStringLiteral("message"), QStringLiteral("Starting detection training with the tiny_linear_detector scaffold backend. Real YOLO-style LibTorch training is not implemented yet."));
     send(QStringLiteral("log"), logPayload);
 
     const aitrain::DetectionTrainingResult result = aitrain::trainDetectionBaseline(
@@ -672,7 +1017,10 @@ void WorkerSession::runDetectionTraining()
     artifact.insert(QStringLiteral("taskId"), request_.taskId);
     artifact.insert(QStringLiteral("kind"), QStringLiteral("checkpoint"));
     artifact.insert(QStringLiteral("path"), result.checkpointPath);
-    artifact.insert(QStringLiteral("message"), QStringLiteral("Tiny linear detector checkpoint"));
+    artifact.insert(QStringLiteral("message"), QStringLiteral("Tiny linear detector scaffold checkpoint"));
+    artifact.insert(QStringLiteral("trainingBackend"), result.trainingBackend);
+    artifact.insert(QStringLiteral("modelFamily"), result.modelFamily);
+    artifact.insert(QStringLiteral("scaffold"), result.scaffold);
     send(QStringLiteral("artifact"), artifact);
 
     emitDetectionPreviewArtifacts(result.checkpointPath);
@@ -703,6 +1051,9 @@ void WorkerSession::runDetectionTraining()
 
     QJsonObject payload;
     payload.insert(QStringLiteral("message"), QStringLiteral("Tiny linear detection training completed"));
+    payload.insert(QStringLiteral("trainingBackend"), result.trainingBackend);
+    payload.insert(QStringLiteral("modelFamily"), result.modelFamily);
+    payload.insert(QStringLiteral("scaffold"), result.scaffold);
     send(QStringLiteral("completed"), payload);
     socket_.waitForBytesWritten(1000);
     qApp->quit();
@@ -710,6 +1061,11 @@ void WorkerSession::runDetectionTraining()
 
 void WorkerSession::runSegmentationTraining()
 {
+    if (shouldUsePythonTrainer()) {
+        runPythonTrainer();
+        return;
+    }
+
     aitrain::SegmentationTrainingOptions options;
     options.epochs = qMax(1, request_.parameters.value(QStringLiteral("epochs")).toInt(1));
     options.batchSize = qMax(1, request_.parameters.value(QStringLiteral("batchSize")).toInt(1));
@@ -851,6 +1207,11 @@ void WorkerSession::runSegmentationTraining()
 
 void WorkerSession::runOcrRecTraining()
 {
+    if (shouldUsePythonTrainer()) {
+        runPythonTrainer();
+        return;
+    }
+
     aitrain::OcrRecTrainingOptions options;
     options.epochs = qMax(1, request_.parameters.value(QStringLiteral("epochs")).toInt(1));
     options.batchSize = qMax(1, request_.parameters.value(QStringLiteral("batchSize")).toInt(1));

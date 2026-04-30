@@ -1,6 +1,7 @@
 #include "WorkerClient.h"
 
 #include "aitrain/core/DatasetValidators.h"
+#include "aitrain/core/Deployment.h"
 #include "aitrain/core/DetectionDataset.h"
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/JsonProtocol.h"
@@ -17,6 +18,7 @@
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QUuid>
@@ -81,6 +83,85 @@ QString workerExecutablePath()
     return QDir(applicationDir).absoluteFilePath(QStringLiteral("aitrain_worker%1").arg(extension));
 }
 
+QString pythonExecutablePath()
+{
+    const QString applicationDir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../../.deps/python-3.13.13-embed-amd64/python.exe")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/python-3.13.13-embed-amd64/python.exe")),
+        QDir::current().absoluteFilePath(QStringLiteral(".deps/python-3.13.13-embed-amd64/python.exe")),
+        QStandardPaths::findExecutable(QStringLiteral("python")),
+        QStandardPaths::findExecutable(QStringLiteral("python3"))
+    };
+    for (const QString& candidate : candidates) {
+        if (candidate.isEmpty()) {
+            continue;
+        }
+        QProcess process;
+        process.start(candidate, QStringList() << QStringLiteral("--version"));
+        if (process.waitForStarted(1000)
+            && process.waitForFinished(2500)
+            && process.exitStatus() == QProcess::NormalExit
+            && process.exitCode() == 0) {
+            return candidate;
+        }
+    }
+    return {};
+}
+
+QString mockPythonTrainerScriptPath()
+{
+    const QString applicationDir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../bin/python_trainers/mock_trainer.py")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("python_trainers/mock_trainer.py")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../../python_trainers/mock_trainer.py")),
+        QDir::current().absoluteFilePath(QStringLiteral("python_trainers/mock_trainer.py"))
+    };
+    for (const QString& candidate : candidates) {
+        if (QFileInfo::exists(candidate)) {
+            return QFileInfo(candidate).absoluteFilePath();
+        }
+    }
+    return {};
+}
+
+void writeFakeUltralyticsPackage(const QString& root)
+{
+    writeTextFile(
+        QDir(root).filePath(QStringLiteral("ultralytics/__init__.py")),
+        QStringLiteral(
+            "from pathlib import Path\n"
+            "from types import SimpleNamespace\n"
+            "\n"
+            "class YOLO:\n"
+            "    def __init__(self, model):\n"
+            "        self.model = str(model)\n"
+            "\n"
+            "    def train(self, data, epochs, imgsz, batch, device, workers, project, name, exist_ok, verbose):\n"
+            "        print('fake ultralytics train entered', flush=True)\n"
+            "        save_dir = Path(project) / name\n"
+            "        weights_dir = save_dir / 'weights'\n"
+            "        weights_dir.mkdir(parents=True, exist_ok=True)\n"
+            "        print('fake ultralytics writing artifacts', flush=True)\n"
+            "        (weights_dir / 'best.pt').write_text('fake best checkpoint\\n', encoding='utf-8')\n"
+            "        (weights_dir / 'last.pt').write_text('fake last checkpoint\\n', encoding='utf-8')\n"
+            "        (save_dir / 'results.csv').write_text(\n"
+            "            'epoch,train/box_loss,train/cls_loss,train/dfl_loss,metrics/precision(B),metrics/recall(B),metrics/mAP50(B),metrics/mAP50-95(B)\\n'\n"
+            "            '1,0.2,0.3,0.4,0.81,0.72,0.63,0.54\\n',\n"
+            "            encoding='utf-8')\n"
+            "        (save_dir / 'args.yaml').write_text('model: fake\\n', encoding='utf-8')\n"
+            "        print('fake ultralytics train returning', flush=True)\n"
+            "        return SimpleNamespace(save_dir=str(save_dir))\n"
+            "\n"
+            "    def export(self, format, imgsz, device):\n"
+            "        model_path = Path(self.model)\n"
+            "        output_path = model_path.with_suffix('.onnx') if model_path.suffix else Path('model.onnx')\n"
+            "        output_path.parent.mkdir(parents=True, exist_ok=True)\n"
+            "        output_path.write_text('fake onnx\\n', encoding='utf-8')\n"
+            "        return str(output_path)\n"));
+}
+
 } // namespace
 
 class CoreTests : public QObject {
@@ -119,6 +200,58 @@ private slots:
         QCOMPARE(decodedPayload.value(QStringLiteral("taskId")).toString(), QStringLiteral("abc"));
         QCOMPARE(decodedPayload.value(QStringLiteral("value")).toInt(), 42);
         QVERIFY(error.isEmpty());
+    }
+
+    void packagingLayoutUsesPhaseSevenInstallShape()
+    {
+        const QString root = QDir::cleanPath(QDir(QDir::tempPath()).filePath(QStringLiteral("AITrainStudioPackage")));
+        const aitrain::PackagingLayout layout = aitrain::packagingLayoutForRoot(root);
+        const QString appExecutableName =
+#ifdef Q_OS_WIN
+            QStringLiteral("AITrainStudio.exe");
+#else
+            QStringLiteral("AITrainStudio");
+#endif
+        const QString workerExecutableName =
+#ifdef Q_OS_WIN
+            QStringLiteral("aitrain_worker.exe");
+#else
+            QStringLiteral("aitrain_worker");
+#endif
+
+        QCOMPARE(layout.rootPath, root);
+        QCOMPARE(layout.appExecutablePath, QDir(root).filePath(appExecutableName));
+        QCOMPARE(layout.workerExecutablePath, QDir(root).filePath(workerExecutableName));
+        QCOMPARE(layout.pluginModelsDirectory, QDir(root).filePath(QStringLiteral("plugins/models")));
+        QCOMPARE(layout.onnxRuntimeDirectory, QDir(root).filePath(QStringLiteral("runtimes/onnxruntime")));
+        QCOMPARE(layout.tensorRtRuntimeDirectory, QDir(root).filePath(QStringLiteral("runtimes/tensorrt")));
+        QCOMPARE(layout.examplesDirectory, QDir(root).filePath(QStringLiteral("examples")));
+        QCOMPARE(layout.docsDirectory, QDir(root).filePath(QStringLiteral("docs")));
+        QCOMPARE(layout.toJson().value(QStringLiteral("appExecutablePath")).toString(), layout.appExecutablePath);
+    }
+
+    void runtimeDependencyCheckReportsSearchPaths()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        const QStringList paths = aitrain::runtimeSearchPaths(dir.path());
+        QVERIFY(paths.contains(QDir(dir.path()).filePath(QStringLiteral("runtimes/onnxruntime"))));
+        QVERIFY(paths.contains(QDir(dir.path()).filePath(QStringLiteral("runtimes/tensorrt"))));
+
+        const aitrain::RuntimeDependencyCheck check = aitrain::checkRuntimeDependency(
+            QStringLiteral("Missing Runtime"),
+            QStringList() << QStringLiteral("aitrain_definitely_missing_runtime"),
+            QStringLiteral("expected missing runtime message."),
+            dir.path());
+        QCOMPARE(check.status, QStringLiteral("missing"));
+        QVERIFY(check.message.contains(QStringLiteral("Missing Runtime")));
+        QVERIFY(check.message.contains(QStringLiteral("expected missing runtime message")));
+
+        const QString json = QString::fromUtf8(QJsonDocument(check.toJson()).toJson(QJsonDocument::Compact));
+        QVERIFY(json.contains(QStringLiteral("runtimes/onnxruntime")));
+        QVERIFY(json.contains(QStringLiteral("runtimes/tensorrt")));
+        QVERIFY(json.contains(QStringLiteral("aitrain_definitely_missing_runtime")));
     }
 
     void repositoryStoresTasksAndMetrics()
@@ -393,6 +526,16 @@ private slots:
         QVERIFY(!loader.hasNext());
     }
 
+    void detectionTrainingBackendStatusMarksPhase8Scaffold()
+    {
+        const QJsonObject status = aitrain::detectionTrainingBackendStatus();
+        QCOMPARE(status.value(QStringLiteral("phase")).toInt(), 8);
+        QCOMPARE(status.value(QStringLiteral("activeBackend")).toString(), QStringLiteral("tiny_linear_detector"));
+        QVERIFY(status.value(QStringLiteral("activeBackendScaffold")).toBool());
+        QVERIFY(!status.value(QStringLiteral("realYoloStyleTrainingAvailable")).toBool(true));
+        QVERIFY(!status.value(QStringLiteral("availableBackends")).toArray().isEmpty());
+    }
+
     void detectionTrainerWritesTinyDetectorCheckpoint()
     {
         QTemporaryDir dir;
@@ -422,6 +565,10 @@ private slots:
             });
 
         QVERIFY2(result.ok, qPrintable(result.error));
+        QCOMPARE(result.trainingBackend, QStringLiteral("tiny_linear_detector"));
+        QCOMPARE(result.modelFamily, QStringLiteral("yolo_style_detection_scaffold"));
+        QVERIFY(result.scaffold);
+        QCOMPARE(result.modelArchitecture.value(QStringLiteral("family")).toString(), QStringLiteral("tiny_linear_detector_scaffold"));
         QCOMPARE(result.steps, 4);
         QCOMPARE(callbackCount, 4);
         QVERIFY(result.finalLoss >= 0.0);
@@ -431,6 +578,12 @@ private slots:
         QVERIFY(checkpoint.open(QIODevice::ReadOnly));
         const QJsonObject json = QJsonDocument::fromJson(checkpoint.readAll()).object();
         QCOMPARE(json.value(QStringLiteral("type")).toString(), QStringLiteral("tiny_linear_detector"));
+        QCOMPARE(json.value(QStringLiteral("checkpointSchemaVersion")).toInt(), 2);
+        QCOMPARE(json.value(QStringLiteral("trainingBackend")).toString(), QStringLiteral("tiny_linear_detector"));
+        QCOMPARE(json.value(QStringLiteral("modelFamily")).toString(), QStringLiteral("yolo_style_detection_scaffold"));
+        QVERIFY(json.value(QStringLiteral("scaffold")).toBool());
+        QCOMPARE(json.value(QStringLiteral("modelArchitecture")).toObject().value(QStringLiteral("family")).toString(), QStringLiteral("tiny_linear_detector_scaffold"));
+        QVERIFY(!json.value(QStringLiteral("phase8")).toObject().value(QStringLiteral("realYoloStyleTraining")).toBool(true));
         QCOMPARE(json.value(QStringLiteral("steps")).toInt(), 4);
         QCOMPARE(json.value(QStringLiteral("gridSize")).toInt(), 4);
         QVERIFY(json.value(QStringLiteral("featureCount")).toInt() > 0);
@@ -447,6 +600,11 @@ private slots:
         aitrain::DetectionBaselineCheckpoint loaded;
         QVERIFY2(aitrain::loadDetectionBaselineCheckpoint(result.checkpointPath, &loaded, &error), qPrintable(error));
         QCOMPARE(loaded.type, QStringLiteral("tiny_linear_detector"));
+        QCOMPARE(loaded.checkpointSchemaVersion, 2);
+        QCOMPARE(loaded.trainingBackend, QStringLiteral("tiny_linear_detector"));
+        QCOMPARE(loaded.modelFamily, QStringLiteral("yolo_style_detection_scaffold"));
+        QVERIFY(loaded.scaffold);
+        QCOMPARE(loaded.modelArchitecture.value(QStringLiteral("family")).toString(), QStringLiteral("tiny_linear_detector_scaffold"));
         QCOMPARE(loaded.steps, 4);
         QCOMPARE(loaded.gridSize, 4);
         QVERIFY(loaded.featureCount > 0);
@@ -471,6 +629,24 @@ private slots:
             &error);
         QVERIFY2(!rendered.isNull(), qPrintable(error));
         QCOMPARE(rendered.size(), QSize(8, 8));
+    }
+
+    void detectionTrainerRejectsUnavailableYoloStyleBackend()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("dataset"));
+        writeTinyDetectionDataset(root);
+
+        aitrain::DetectionTrainingOptions options;
+        options.trainingBackend = QStringLiteral("yolo_style_libtorch");
+        options.outputPath = dir.filePath(QStringLiteral("run"));
+
+        const aitrain::DetectionTrainingResult result = aitrain::trainDetectionBaseline(root, options);
+        QVERIFY(!result.ok);
+        QCOMPARE(result.trainingBackend, QStringLiteral("yolo_style_libtorch"));
+        QVERIFY(result.error.contains(QStringLiteral("not available")));
+        QVERIFY(result.error.contains(QStringLiteral("YOLO-style")));
     }
 
     void detectionPostProcessAppliesThresholdNmsAndLimit()
@@ -653,6 +829,8 @@ private slots:
         const QJsonObject json = QJsonDocument::fromJson(file.readAll()).object();
         QCOMPARE(json.value(QStringLiteral("format")).toString(), QStringLiteral("tiny_detector_json"));
         QCOMPARE(json.value(QStringLiteral("note")).toString(), QStringLiteral("Scaffold export for AITrain tiny detector. This is not ONNX."));
+        QCOMPARE(json.value(QStringLiteral("trainingBackend")).toString(), QStringLiteral("tiny_linear_detector"));
+        QVERIFY(json.value(QStringLiteral("scaffold")).toBool());
         QVERIFY(!json.value(QStringLiteral("objectnessWeights")).toArray().isEmpty());
         QVERIFY(!json.value(QStringLiteral("classLogits")).toArray().isEmpty());
         QVERIFY(json.value(QStringLiteral("priorBox")).isObject());
@@ -660,6 +838,8 @@ private slots:
         QString error;
         aitrain::DetectionBaselineCheckpoint loadedExport;
         QVERIFY2(aitrain::loadDetectionBaselineCheckpoint(exported.exportPath, &loadedExport, &error), qPrintable(error));
+        QCOMPARE(loadedExport.trainingBackend, QStringLiteral("tiny_linear_detector"));
+        QVERIFY(loadedExport.scaffold);
         const QVector<aitrain::DetectionPrediction> predictions = aitrain::predictDetectionBaseline(
             loadedExport,
             QDir(root).filePath(QStringLiteral("images/val/a.png")),
@@ -697,6 +877,8 @@ private slots:
         QVERIFY(QFileInfo::exists(exported.exportPath));
         QVERIFY(QFileInfo::exists(exported.reportPath));
         QCOMPARE(exported.config.value(QStringLiteral("format")).toString(), QStringLiteral("onnx"));
+        QCOMPARE(exported.config.value(QStringLiteral("trainingBackend")).toString(), QStringLiteral("tiny_linear_detector"));
+        QVERIFY(exported.config.value(QStringLiteral("scaffold")).toBool());
         QCOMPARE(exported.config.value(QStringLiteral("classNames")).toArray().first().toString(), QStringLiteral("item"));
         QCOMPARE(exported.config.value(QStringLiteral("input")).toObject().value(QStringLiteral("name")).toString(), QStringLiteral("features"));
         QCOMPARE(exported.config.value(QStringLiteral("outputs")).toArray().size(), 3);
@@ -713,16 +895,48 @@ private slots:
         QVERIFY(bytes.contains("boxes"));
     }
 
-    void detectionExportRejectsTensorRtUntilBackendExists()
+    void detectionTensorRtBackendStatusIsExplicit()
     {
+        const aitrain::TensorRtBackendStatus status = aitrain::tensorRtBackendStatus();
+        QVERIFY(!status.message.isEmpty());
+        QVERIFY(status.status == QStringLiteral("sdk_missing")
+            || status.status == QStringLiteral("backend_not_implemented")
+            || status.status == QStringLiteral("backend_available"));
+        QCOMPARE(status.toJson().value(QStringLiteral("inferenceAvailable")).toBool(), status.inferenceAvailable);
+
         const aitrain::DetectionExportResult exported = aitrain::exportDetectionCheckpoint(
             QStringLiteral("missing.aitrain"),
             QStringLiteral("model.engine"),
             QStringLiteral("tensorrt"));
         QVERIFY(!exported.ok);
         QCOMPARE(exported.format, QStringLiteral("tensorrt"));
-        QVERIFY(exported.error.contains(QStringLiteral("TensorRT")));
-        QVERIFY(exported.error.contains(QStringLiteral("not available")));
+        if (status.exportAvailable) {
+            QVERIFY(exported.error.contains(QStringLiteral("checkpoint"))
+                || exported.error.contains(QStringLiteral("Checkpoint")));
+        } else {
+            QVERIFY(exported.error.contains(QStringLiteral("TensorRT")));
+            QVERIFY(exported.error.contains(QStringLiteral("not available")));
+            QVERIFY(exported.error.contains(status.message));
+        }
+    }
+
+    void detectionTensorRtInferenceReportsClearMissingInput()
+    {
+        QString error;
+        aitrain::DetectionInferenceOptions options;
+        const QVector<aitrain::DetectionPrediction> predictions = aitrain::predictDetectionTensorRt(
+            QStringLiteral("model.engine"),
+            QStringLiteral("image.png"),
+            options,
+            &error);
+        QVERIFY(predictions.isEmpty());
+        QVERIFY(error.contains(QStringLiteral("TensorRT")));
+        if (aitrain::isTensorRtInferenceAvailable()) {
+            QVERIFY(error.contains(QStringLiteral("engine")));
+        } else {
+            QVERIFY(error.contains(QStringLiteral("not available")));
+            QVERIFY(error.contains(aitrain::tensorRtBackendStatus().message));
+        }
     }
 
     void detectionOnnxRuntimeReportsUnavailableWhenSdkMissing()
@@ -875,11 +1089,15 @@ private slots:
         const QString outputPath = dir.filePath(QStringLiteral("worker-inference"));
         WorkerClient client;
         QVector<QPair<QString, QJsonObject>> messages;
+        QStringList logs;
         bool finished = false;
         bool ok = false;
         QString finishedMessage;
         connect(&client, &WorkerClient::messageReceived, this, [&messages](const QString& type, const QJsonObject& payload) {
             messages.append(qMakePair(type, payload));
+        });
+        connect(&client, &WorkerClient::logLine, this, [&logs](const QString& line) {
+            logs.append(line);
         });
         connect(&client, &WorkerClient::finished, this, [&finished, &ok, &finishedMessage](bool result, const QString& message) {
             finished = true;
@@ -894,7 +1112,10 @@ private slots:
             QDir(root).filePath(QStringLiteral("images/val/a.png")),
             outputPath,
             &error), qPrintable(error));
-        QTRY_VERIFY_WITH_TIMEOUT(finished, 15000);
+        QTRY_VERIFY2_WITH_TIMEOUT(
+            finished,
+            qPrintable(QStringLiteral("Worker did not finish. Logs:\n%1").arg(logs.join(QStringLiteral("\n")))),
+            15000);
         QVERIFY2(ok, qPrintable(QStringLiteral("%1 messages=%2 outputExists=%3")
             .arg(finishedMessage)
             .arg(messages.size())
@@ -1326,6 +1547,255 @@ private slots:
         QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("checkpoint_latest.aitrain"))));
         QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("preview_latest.png"))));
         QCOMPARE(messages.last().first, QStringLiteral("completed"));
+    }
+
+    void workerRunsPythonTrainerMockEndToEnd()
+    {
+        const QString python = pythonExecutablePath();
+        if (python.isEmpty()) {
+            QSKIP("Python executable is not available.");
+        }
+        const QString trainerScript = mockPythonTrainerScriptPath();
+        QVERIFY2(!trainerScript.isEmpty(), "Mock Python trainer script is not available.");
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("dataset"));
+        writeTinyDetectionDataset(root);
+        const QString outputPath = dir.filePath(QStringLiteral("worker-python-mock"));
+
+        aitrain::TrainingRequest request;
+        request.taskId = QStringLiteral("python-mock-task");
+        request.projectPath = dir.path();
+        request.pluginId = QStringLiteral("com.aitrain.plugins.yolo_native");
+        request.taskType = QStringLiteral("detection");
+        request.datasetPath = root;
+        request.outputPath = outputPath;
+        request.parameters.insert(QStringLiteral("trainingBackend"), QStringLiteral("python_mock"));
+        request.parameters.insert(QStringLiteral("pythonExecutable"), python);
+        request.parameters.insert(QStringLiteral("pythonTrainerScript"), trainerScript);
+        request.parameters.insert(QStringLiteral("epochs"), 1);
+        request.parameters.insert(QStringLiteral("mockStepsPerEpoch"), 2);
+        request.parameters.insert(QStringLiteral("mockSleepMs"), 0);
+
+        WorkerClient client;
+        QVector<QPair<QString, QJsonObject>> messages;
+        bool finished = false;
+        bool ok = false;
+        QString finishedMessage;
+        connect(&client, &WorkerClient::messageReceived, this, [&messages](const QString& type, const QJsonObject& payload) {
+            messages.append(qMakePair(type, payload));
+        });
+        connect(&client, &WorkerClient::finished, this, [&finished, &ok, &finishedMessage](bool success, const QString& message) {
+            finished = true;
+            ok = success;
+            finishedMessage = message;
+        });
+
+        QString error;
+        QVERIFY2(client.startTraining(workerExecutablePath(), request, &error), qPrintable(error));
+        QTRY_VERIFY_WITH_TIMEOUT(finished, 15000);
+        QVERIFY2(ok, qPrintable(finishedMessage));
+        QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
+
+        bool sawLoss = false;
+        bool sawCheckpoint = false;
+        bool sawReport = false;
+        bool sawPythonBackend = false;
+        for (const auto& message : messages) {
+            if (message.first == QStringLiteral("metric")) {
+                sawLoss = sawLoss || message.second.value(QStringLiteral("name")).toString() == QStringLiteral("loss");
+            } else if (message.first == QStringLiteral("artifact")) {
+                const QString kind = message.second.value(QStringLiteral("kind")).toString();
+                sawCheckpoint = sawCheckpoint || kind == QStringLiteral("checkpoint");
+                sawReport = sawReport || kind == QStringLiteral("training_report");
+                sawPythonBackend = sawPythonBackend || message.second.value(QStringLiteral("backend")).toString() == QStringLiteral("python_mock");
+            } else if (message.first == QStringLiteral("completed")) {
+                sawPythonBackend = sawPythonBackend || message.second.value(QStringLiteral("backend")).toString() == QStringLiteral("python_mock");
+            }
+        }
+        QVERIFY(sawLoss);
+        QVERIFY(sawCheckpoint);
+        QVERIFY(sawReport);
+        QVERIFY(sawPythonBackend);
+        QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("python_trainer_request.json"))));
+        QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("python_mock_checkpoint.json"))));
+        QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("python_mock_training_report.json"))));
+    }
+
+    void workerPropagatesPythonTrainerMockFailure()
+    {
+        const QString python = pythonExecutablePath();
+        if (python.isEmpty()) {
+            QSKIP("Python executable is not available.");
+        }
+        const QString trainerScript = mockPythonTrainerScriptPath();
+        QVERIFY2(!trainerScript.isEmpty(), "Mock Python trainer script is not available.");
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("dataset"));
+        writeTinyDetectionDataset(root);
+
+        aitrain::TrainingRequest request;
+        request.taskId = QStringLiteral("python-mock-fail-task");
+        request.projectPath = dir.path();
+        request.pluginId = QStringLiteral("com.aitrain.plugins.yolo_native");
+        request.taskType = QStringLiteral("detection");
+        request.datasetPath = root;
+        request.outputPath = dir.filePath(QStringLiteral("worker-python-mock-fail"));
+        request.parameters.insert(QStringLiteral("trainingBackend"), QStringLiteral("python_mock"));
+        request.parameters.insert(QStringLiteral("pythonExecutable"), python);
+        request.parameters.insert(QStringLiteral("pythonTrainerScript"), trainerScript);
+        request.parameters.insert(QStringLiteral("mockMode"), QStringLiteral("fail"));
+
+        WorkerClient client;
+        bool finished = false;
+        bool ok = true;
+        QString finishedMessage;
+        connect(&client, &WorkerClient::finished, this, [&finished, &ok, &finishedMessage](bool success, const QString& message) {
+            finished = true;
+            ok = success;
+            finishedMessage = message;
+        });
+
+        QString error;
+        QVERIFY2(client.startTraining(workerExecutablePath(), request, &error), qPrintable(error));
+        QTRY_VERIFY_WITH_TIMEOUT(finished, 15000);
+        QVERIFY(!ok);
+        QVERIFY(finishedMessage.contains(QStringLiteral("Mock Python trainer failure requested")));
+        QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
+    }
+
+    void workerRunsUltralyticsYoloDetectionAdapterWithFakeOfficialPackage()
+    {
+        const QString python = pythonExecutablePath();
+        if (python.isEmpty()) {
+            QSKIP("Python executable is not available.");
+        }
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("dataset"));
+        writeTinyDetectionDataset(root);
+        const QString fakePackageRoot = dir.filePath(QStringLiteral("fake-pythonpath"));
+        writeFakeUltralyticsPackage(fakePackageRoot);
+        const QString outputPath = dir.filePath(QStringLiteral("worker-ultralytics-yolo"));
+
+        aitrain::TrainingRequest request;
+        request.taskId = QStringLiteral("ultralytics-yolo-task");
+        request.projectPath = dir.path();
+        request.pluginId = QStringLiteral("com.aitrain.plugins.yolo_native");
+        request.taskType = QStringLiteral("detection");
+        request.datasetPath = root;
+        request.outputPath = outputPath;
+        request.parameters.insert(QStringLiteral("trainingBackend"), QStringLiteral("ultralytics_yolo_detect"));
+        request.parameters.insert(QStringLiteral("pythonExecutable"), python);
+        request.parameters.insert(QStringLiteral("pythonPathPrepend"), fakePackageRoot);
+        request.parameters.insert(QStringLiteral("epochs"), 1);
+        request.parameters.insert(QStringLiteral("batchSize"), 1);
+        request.parameters.insert(QStringLiteral("imageSize"), 64);
+        request.parameters.insert(QStringLiteral("device"), QStringLiteral("cpu"));
+        request.parameters.insert(QStringLiteral("model"), QStringLiteral("fake-yolo.pt"));
+        request.parameters.insert(QStringLiteral("runName"), QStringLiteral("fake-run"));
+        request.parameters.insert(QStringLiteral("exportOnnx"), true);
+
+        WorkerClient client;
+        QVector<QPair<QString, QJsonObject>> messages;
+        QStringList logs;
+        bool finished = false;
+        bool ok = false;
+        QString finishedMessage;
+        connect(&client, &WorkerClient::messageReceived, this, [&messages](const QString& type, const QJsonObject& payload) {
+            messages.append(qMakePair(type, payload));
+        });
+        connect(&client, &WorkerClient::logLine, this, [&logs](const QString& line) {
+            logs.append(line);
+        });
+        connect(&client, &WorkerClient::finished, this, [&finished, &ok, &finishedMessage](bool result, const QString& message) {
+            finished = true;
+            ok = result;
+            finishedMessage = message;
+        });
+
+        QString error;
+        QVERIFY2(client.startTraining(workerExecutablePath(), request, &error), qPrintable(error));
+        QTRY_VERIFY2_WITH_TIMEOUT(
+            finished,
+            qPrintable(QStringLiteral("Worker did not finish. Logs:\n%1").arg(logs.join(QStringLiteral("\n")))),
+            15000);
+        QVERIFY2(ok, qPrintable(QStringList({finishedMessage, logs.join(QStringLiteral("\n"))}).join(QStringLiteral("\n"))));
+        QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
+
+        bool sawBackend = false;
+        bool sawCheckpoint = false;
+        bool sawOnnx = false;
+        bool sawReport = false;
+        bool sawMap50 = false;
+        bool sawCompletedOnnx = false;
+        for (const auto& message : messages) {
+            sawBackend = sawBackend || message.second.value(QStringLiteral("backend")).toString() == QStringLiteral("ultralytics_yolo_detect");
+            if (message.first == QStringLiteral("artifact")) {
+                const QString kind = message.second.value(QStringLiteral("kind")).toString();
+                sawCheckpoint = sawCheckpoint || kind == QStringLiteral("checkpoint");
+                sawOnnx = sawOnnx || kind == QStringLiteral("onnx");
+                sawReport = sawReport || kind == QStringLiteral("report");
+            } else if (message.first == QStringLiteral("metric")) {
+                sawMap50 = sawMap50 || message.second.value(QStringLiteral("name")).toString() == QStringLiteral("mAP50");
+            } else if (message.first == QStringLiteral("completed")) {
+                sawCompletedOnnx = !message.second.value(QStringLiteral("onnxPath")).toString().isEmpty();
+            }
+        }
+        QVERIFY(sawBackend);
+        QVERIFY(sawCheckpoint);
+        QVERIFY(sawOnnx);
+        QVERIFY(sawReport);
+        QVERIFY(sawMap50);
+        QVERIFY(sawCompletedOnnx);
+        QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("aitrain_yolo_data.yaml"))));
+        QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("ultralytics_training_report.json"))));
+        QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("ultralytics_runs/fake-run/weights/best.pt"))));
+        QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("ultralytics_runs/fake-run/weights/best.onnx"))));
+    }
+
+    void workerEnvironmentCheckReportsPythonTrainerBackends()
+    {
+        WorkerClient client;
+        QVector<QPair<QString, QJsonObject>> messages;
+        bool finished = false;
+        connect(&client, &WorkerClient::messageReceived, this, [&messages](const QString& type, const QJsonObject& payload) {
+            messages.append(qMakePair(type, payload));
+        });
+        connect(&client, &WorkerClient::idle, this, [&finished]() {
+            finished = true;
+        });
+
+        QString error;
+        QVERIFY2(client.requestEnvironmentCheck(workerExecutablePath(), &error), qPrintable(error));
+        QTRY_VERIFY_WITH_TIMEOUT(finished, 15000);
+
+        bool sawPython = false;
+        bool sawUltralytics = false;
+        bool sawPaddleOcr = false;
+        bool sawPaddle = false;
+        for (const auto& message : messages) {
+            if (message.first != QStringLiteral("environmentCheck")) {
+                continue;
+            }
+            const QJsonArray checks = message.second.value(QStringLiteral("checks")).toArray();
+            for (const QJsonValue& value : checks) {
+                const QJsonObject check = value.toObject();
+                const QString name = check.value(QStringLiteral("name")).toString();
+                sawPython = sawPython || name == QStringLiteral("Python");
+                sawUltralytics = sawUltralytics || name == QStringLiteral("Ultralytics YOLO");
+                sawPaddleOcr = sawPaddleOcr || name == QStringLiteral("PaddleOCR");
+                sawPaddle = sawPaddle || name == QStringLiteral("PaddlePaddle");
+            }
+        }
+        QVERIFY(sawPython);
+        QVERIFY(sawUltralytics);
+        QVERIFY(sawPaddleOcr);
+        QVERIFY(sawPaddle);
     }
 
     void paddleOcrDatasetValidation()

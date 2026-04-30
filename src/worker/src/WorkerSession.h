@@ -4,6 +4,7 @@
 
 #include <QLocalSocket>
 #include <QObject>
+#include <QProcess>
 #include <QTimer>
 
 class WorkerSession : public QObject {
@@ -31,6 +32,11 @@ private:
     void runDetectionTraining();
     void runSegmentationTraining();
     void runOcrRecTraining();
+    bool shouldUsePythonTrainer() const;
+    void runPythonTrainer();
+    void drainPythonTrainerOutput(QByteArray* buffer, bool* terminalMessageSeen);
+    void drainPythonTrainerErrors(QByteArray* buffer);
+    bool forwardPythonTrainerLine(const QByteArray& line, bool* terminalMessageSeen);
     void emitDetectionPreviewArtifacts(const QString& checkpointPath);
     void send(const QString& type, const QJsonObject& payload);
     void fail(const QString& message);
@@ -45,4 +51,5 @@ private:
     bool running_ = false;
     bool paused_ = false;
     bool canceled_ = false;
+    QProcess pythonTrainerProcess_;
 };

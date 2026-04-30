@@ -20,6 +20,7 @@ struct DetectionTrainingOptions {
     int gridSize = 4;
     bool horizontalFlip = false;
     bool colorJitter = false;
+    QString trainingBackend;
     QString outputPath;
     QString resumeCheckpointPath;
 };
@@ -38,6 +39,10 @@ struct DetectionTrainingResult {
     bool ok = false;
     QString error;
     QString checkpointPath;
+    QString trainingBackend;
+    QString modelFamily;
+    bool scaffold = false;
+    QJsonObject modelArchitecture;
     int steps = 0;
     double finalLoss = 0.0;
     double precision = 0.0;
@@ -61,8 +66,24 @@ struct DetectionExportResult {
     QJsonObject config;
 };
 
+struct TensorRtBackendStatus {
+    bool sdkAvailable = false;
+    bool exportAvailable = false;
+    bool inferenceAvailable = false;
+    QString status;
+    QString message;
+
+    QJsonObject toJson() const;
+};
+
 struct DetectionBaselineCheckpoint {
     QString type;
+    int checkpointSchemaVersion = 1;
+    QString trainingBackend;
+    QString modelFamily;
+    bool scaffold = false;
+    QJsonObject modelArchitecture;
+    QJsonObject phase8;
     QString datasetPath;
     QSize imageSize;
     int gridSize = 1;
@@ -111,9 +132,18 @@ QVector<DetectionPrediction> predictDetectionBaseline(
     QString* error = nullptr);
 
 bool isOnnxRuntimeInferenceAvailable();
+QJsonObject detectionTrainingBackendStatus();
+TensorRtBackendStatus tensorRtBackendStatus();
+bool isTensorRtInferenceAvailable();
 
 QVector<DetectionPrediction> predictDetectionOnnxRuntime(
     const QString& onnxPath,
+    const QString& imagePath,
+    const DetectionInferenceOptions& options,
+    QString* error = nullptr);
+
+QVector<DetectionPrediction> predictDetectionTensorRt(
+    const QString& enginePath,
     const QString& imagePath,
     const DetectionInferenceOptions& options,
     QString* error = nullptr);

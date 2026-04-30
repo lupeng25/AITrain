@@ -1,5 +1,6 @@
 add_library(aitrain_core STATIC
     include/aitrain/core/PluginInterfaces.h
+    include/aitrain/core/Deployment.h
     include/aitrain/core/DatasetValidators.h
     include/aitrain/core/DetectionDataset.h
     include/aitrain/core/DetectionTrainer.h
@@ -12,6 +13,7 @@ add_library(aitrain_core STATIC
     include/aitrain/core/ProjectRepository.h
     include/aitrain/core/TaskModels.h
     src/JsonProtocol.cpp
+    src/Deployment.cpp
     src/DatasetValidators.cpp
     src/DetectionDataset.cpp
     src/DetectionTrainer.cpp
@@ -54,5 +56,18 @@ if(AITRAIN_WITH_ONNXRUNTIME)
     target_link_libraries(aitrain_core
         PRIVATE
             ${AITRAIN_ONNXRUNTIME_LIBRARY}
+    )
+endif()
+
+if(AITRAIN_WITH_TENSORRT_SDK)
+    target_compile_definitions(aitrain_core
+        PUBLIC
+            AITRAIN_WITH_TENSORRT_SDK
+    )
+    target_include_directories(aitrain_core
+        PRIVATE
+            ${AITRAIN_TENSORRT_INCLUDE_DIR}
+            ${AITRAIN_CUDA_INCLUDE_DIR}
+            ${AITRAIN_CUDA_CRT_INCLUDE_DIR}
     )
 endif()

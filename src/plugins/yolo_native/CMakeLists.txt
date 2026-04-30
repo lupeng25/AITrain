@@ -16,3 +16,7 @@ set_target_properties(YoloNativePlugin PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugins/models
 )
 
+install(TARGETS YoloNativePlugin
+    LIBRARY DESTINATION plugins/models
+    RUNTIME DESTINATION plugins/models
+)

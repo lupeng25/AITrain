@@ -16,3 +16,7 @@ set_target_properties(DatasetInteropPlugin PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugins/models
 )
 
+install(TARGETS DatasetInteropPlugin
+    LIBRARY DESTINATION plugins/models
+    RUNTIME DESTINATION plugins/models
+)

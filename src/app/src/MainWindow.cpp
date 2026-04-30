@@ -581,10 +581,11 @@ QWidget* MainWindow::buildConversionPage()
     inputPanel->bodyLayout()->addStretch();
 
     auto* exportPanel = new InfoPanel(QStringLiteral("导出配置"));
-    exportPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("当前支持 tiny detector JSON 和 tiny detector ONNX；ONNX Runtime 推理已接入 tiny detector，TensorRT 后续接入。")));
+    exportPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("当前支持 tiny detector JSON 和 tiny detector ONNX；TensorRT 为占位入口，会返回未支持。")));
     conversionFormatCombo_ = new QComboBox;
     conversionFormatCombo_->addItem(QStringLiteral("Tiny detector JSON 占位"), QStringLiteral("tiny_detector_json"));
     conversionFormatCombo_->addItem(QStringLiteral("ONNX 模型核心"), QStringLiteral("onnx"));
+    conversionFormatCombo_->addItem(QStringLiteral("TensorRT Engine 占位"), QStringLiteral("tensorrt"));
     conversionOutputEdit_ = new QLineEdit;
     conversionOutputEdit_->setPlaceholderText(QStringLiteral("输出路径；留空则输出到 checkpoint 同目录"));
     auto* exportButton = primaryButton(QStringLiteral("导出模型"));
@@ -619,14 +620,14 @@ QWidget* MainWindow::buildInferencePage()
     inferenceCheckpointEdit_ = new QLineEdit;
     inferenceImageEdit_ = new QLineEdit;
     inferenceOutputEdit_ = new QLineEdit;
-    inferenceCheckpointEdit_->setPlaceholderText(QStringLiteral("tiny detector checkpoint/export JSON/ONNX path"));
+    inferenceCheckpointEdit_->setPlaceholderText(QStringLiteral("tiny detector checkpoint/export JSON/ONNX/engine path"));
     inferenceImageEdit_->setPlaceholderText(QStringLiteral("image path"));
     inferenceOutputEdit_->setPlaceholderText(QStringLiteral("输出目录；留空则输出到 checkpoint 同目录 inference"));
     auto* chooseModelButton = new QPushButton(QStringLiteral("选择模型文件"));
     auto* chooseImageButton = new QPushButton(QStringLiteral("选择图片"));
     auto* inferButton = primaryButton(QStringLiteral("开始推理"));
     connect(chooseModelButton, &QPushButton::clicked, this, [this]() {
-        const QString file = QFileDialog::getOpenFileName(this, QStringLiteral("选择模型文件"), currentProjectPath_, QStringLiteral("AITrain model (*.aitrain *.json *.onnx);;All files (*.*)"));
+        const QString file = QFileDialog::getOpenFileName(this, QStringLiteral("选择模型文件"), currentProjectPath_, QStringLiteral("AITrain model (*.aitrain *.json *.onnx *.engine *.plan);;All files (*.*)"));
         if (!file.isEmpty()) {
             inferenceCheckpointEdit_->setText(QDir::toNativeSeparators(file));
         }
@@ -930,7 +931,9 @@ void MainWindow::startModelExport()
     QString outputPath = QDir::fromNativeSeparators(conversionOutputEdit_ ? conversionOutputEdit_->text().trimmed() : QString());
     if (outputPath.isEmpty()) {
         outputPath = QFileInfo(checkpointPath).absoluteDir().filePath(
-            format == QStringLiteral("onnx") ? QStringLiteral("model.onnx") : QStringLiteral("model.aitrain-export.json"));
+            format == QStringLiteral("onnx")
+                ? QStringLiteral("model.onnx")
+                : (format == QStringLiteral("tensorrt") ? QStringLiteral("model.engine") : QStringLiteral("model.aitrain-export.json")));
     }
 
     QString taskId;

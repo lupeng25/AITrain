@@ -16,3 +16,7 @@ set_target_properties(OcrRecNativePlugin PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugins/models
 )
 
+install(TARGETS OcrRecNativePlugin
+    LIBRARY DESTINATION plugins/models
+    RUNTIME DESTINATION plugins/models
+)
