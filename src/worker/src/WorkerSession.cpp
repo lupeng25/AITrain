@@ -747,36 +747,31 @@ void WorkerSession::runSegmentationTraining()
             progressPayload.insert(QStringLiteral("epoch"), metrics.epoch);
             send(QStringLiteral("progress"), progressPayload);
 
-            QJsonObject lossPayload;
-            lossPayload.insert(QStringLiteral("taskId"), request_.taskId);
-            lossPayload.insert(QStringLiteral("name"), QStringLiteral("loss"));
-            lossPayload.insert(QStringLiteral("value"), metrics.loss);
-            lossPayload.insert(QStringLiteral("step"), metrics.step);
-            lossPayload.insert(QStringLiteral("epoch"), metrics.epoch);
-            send(QStringLiteral("metric"), lossPayload);
-
-            QJsonObject maskLossPayload;
-            maskLossPayload.insert(QStringLiteral("taskId"), request_.taskId);
-            maskLossPayload.insert(QStringLiteral("name"), QStringLiteral("maskLoss"));
-            maskLossPayload.insert(QStringLiteral("value"), metrics.maskLoss);
-            maskLossPayload.insert(QStringLiteral("step"), metrics.step);
-            maskLossPayload.insert(QStringLiteral("epoch"), metrics.epoch);
-            send(QStringLiteral("metric"), maskLossPayload);
-
-            QJsonObject coveragePayload;
-            coveragePayload.insert(QStringLiteral("taskId"), request_.taskId);
-            coveragePayload.insert(QStringLiteral("name"), QStringLiteral("maskCoverage"));
-            coveragePayload.insert(QStringLiteral("value"), metrics.maskCoverage);
-            coveragePayload.insert(QStringLiteral("step"), metrics.step);
-            coveragePayload.insert(QStringLiteral("epoch"), metrics.epoch);
-            send(QStringLiteral("metric"), coveragePayload);
+            const auto sendMetric = [this, &metrics](const QString& name, double value) {
+                QJsonObject payload;
+                payload.insert(QStringLiteral("taskId"), request_.taskId);
+                payload.insert(QStringLiteral("name"), name);
+                payload.insert(QStringLiteral("value"), value);
+                payload.insert(QStringLiteral("step"), metrics.step);
+                payload.insert(QStringLiteral("epoch"), metrics.epoch);
+                send(QStringLiteral("metric"), payload);
+            };
+            sendMetric(QStringLiteral("loss"), metrics.loss);
+            sendMetric(QStringLiteral("maskLoss"), metrics.maskLoss);
+            sendMetric(QStringLiteral("maskCoverage"), metrics.maskCoverage);
+            sendMetric(QStringLiteral("maskIoU"), metrics.maskIou);
+            sendMetric(QStringLiteral("precision"), metrics.precision);
+            sendMetric(QStringLiteral("recall"), metrics.recall);
+            sendMetric(QStringLiteral("segmentationMap50"), metrics.map50);
 
             QJsonObject stepLogPayload;
-            stepLogPayload.insert(QStringLiteral("message"), QStringLiteral("epoch=%1 step=%2 maskLoss=%3 maskCoverage=%4")
+            stepLogPayload.insert(QStringLiteral("message"), QStringLiteral("epoch=%1 step=%2 maskLoss=%3 maskCoverage=%4 maskIoU=%5 segmentationMap50=%6")
                 .arg(metrics.epoch)
                 .arg(metrics.step)
                 .arg(metrics.maskLoss, 0, 'f', 4)
-                .arg(metrics.maskCoverage, 0, 'f', 4));
+                .arg(metrics.maskCoverage, 0, 'f', 4)
+                .arg(metrics.maskIou, 0, 'f', 4)
+                .arg(metrics.map50, 0, 'f', 4));
             send(QStringLiteral("log"), stepLogPayload);
             return true;
         });
@@ -816,21 +811,30 @@ void WorkerSession::runSegmentationTraining()
         send(QStringLiteral("artifact"), previewArtifact);
     }
 
-    QJsonObject finalLossPayload;
-    finalLossPayload.insert(QStringLiteral("taskId"), request_.taskId);
-    finalLossPayload.insert(QStringLiteral("name"), QStringLiteral("maskLoss"));
-    finalLossPayload.insert(QStringLiteral("value"), result.finalLoss);
-    finalLossPayload.insert(QStringLiteral("step"), result.steps);
-    finalLossPayload.insert(QStringLiteral("epoch"), options.epochs);
-    send(QStringLiteral("metric"), finalLossPayload);
+    if (!result.maskPreviewPath.isEmpty()) {
+        QJsonObject maskPreviewArtifact;
+        maskPreviewArtifact.insert(QStringLiteral("taskId"), request_.taskId);
+        maskPreviewArtifact.insert(QStringLiteral("kind"), QStringLiteral("mask_preview"));
+        maskPreviewArtifact.insert(QStringLiteral("path"), result.maskPreviewPath);
+        maskPreviewArtifact.insert(QStringLiteral("message"), QStringLiteral("Tiny mask segmentation scaffold mask preview"));
+        send(QStringLiteral("artifact"), maskPreviewArtifact);
+    }
 
-    QJsonObject coveragePayload;
-    coveragePayload.insert(QStringLiteral("taskId"), request_.taskId);
-    coveragePayload.insert(QStringLiteral("name"), QStringLiteral("maskCoverage"));
-    coveragePayload.insert(QStringLiteral("value"), result.maskCoverage);
-    coveragePayload.insert(QStringLiteral("step"), result.steps);
-    coveragePayload.insert(QStringLiteral("epoch"), options.epochs);
-    send(QStringLiteral("metric"), coveragePayload);
+    const auto sendFinalMetric = [this, &result, &options](const QString& name, double value) {
+        QJsonObject payload;
+        payload.insert(QStringLiteral("taskId"), request_.taskId);
+        payload.insert(QStringLiteral("name"), name);
+        payload.insert(QStringLiteral("value"), value);
+        payload.insert(QStringLiteral("step"), result.steps);
+        payload.insert(QStringLiteral("epoch"), options.epochs);
+        send(QStringLiteral("metric"), payload);
+    };
+    sendFinalMetric(QStringLiteral("maskLoss"), result.finalLoss);
+    sendFinalMetric(QStringLiteral("maskCoverage"), result.maskCoverage);
+    sendFinalMetric(QStringLiteral("maskIoU"), result.maskIou);
+    sendFinalMetric(QStringLiteral("precision"), result.precision);
+    sendFinalMetric(QStringLiteral("recall"), result.recall);
+    sendFinalMetric(QStringLiteral("segmentationMap50"), result.map50);
 
     QJsonObject payload;
     payload.insert(QStringLiteral("message"), QStringLiteral("Tiny mask segmentation scaffold completed"));

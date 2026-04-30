@@ -974,6 +974,78 @@ private slots:
         QCOMPARE(overlay.size(), QSize(8, 8));
     }
 
+    void segmentationDataLoaderBuildsAlignedBatchMasks()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("dataset"));
+        writeTextFile(QDir(root).filePath(QStringLiteral("data.yaml")), QStringLiteral("nc: 2\nnames: [part, edge]\n"));
+
+        QDir().mkpath(QDir(root).filePath(QStringLiteral("images/train")));
+        QImage wideImage(16, 8, QImage::Format_RGB888);
+        wideImage.fill(Qt::white);
+        QVERIFY(wideImage.save(QDir(root).filePath(QStringLiteral("images/train/a.png"))));
+        QImage tallImage(8, 16, QImage::Format_RGB888);
+        tallImage.fill(Qt::white);
+        QVERIFY(tallImage.save(QDir(root).filePath(QStringLiteral("images/train/b.png"))));
+
+        writeTextFile(
+            QDir(root).filePath(QStringLiteral("labels/train/a.txt")),
+            QStringLiteral("0 0.25 0.25 0.75 0.25 0.75 0.75 0.25 0.75\n"
+                           "1 0.05 0.05 0.15 0.05 0.15 0.20 0.05 0.20\n"));
+        writeTextFile(
+            QDir(root).filePath(QStringLiteral("labels/train/b.txt")),
+            QStringLiteral("1 0.25 0.25 0.75 0.25 0.75 0.75 0.25 0.75\n"));
+
+        QString error;
+        aitrain::SegmentationDataset dataset;
+        QVERIFY2(dataset.load(root, QStringLiteral("train"), &error), qPrintable(error));
+
+        aitrain::SegmentationDataLoader loader(dataset, 2, QSize(32, 32));
+        QVERIFY(loader.hasNext());
+        aitrain::SegmentationBatch batch;
+        QVERIFY2(loader.next(&batch, &error), qPrintable(error));
+        QCOMPARE(batch.images.size(), 2);
+        QCOMPARE(batch.masks.size(), 2);
+        QCOMPARE(batch.polygons.size(), 2);
+        QCOMPARE(batch.imagePaths.size(), 2);
+        QCOMPARE(batch.images.first().size(), QSize(32, 32));
+        QCOMPARE(batch.masks.first().size(), QSize(32, 32));
+
+        QCOMPARE(batch.polygons.first().size(), 2);
+        QCOMPARE(batch.polygons.first().first().classId, 0);
+        QVERIFY(qAbs(batch.polygons.first().first().points.first().x() - 0.25) < 0.001);
+        QVERIFY(qAbs(batch.polygons.first().first().points.first().y() - 0.375) < 0.001);
+        QCOMPARE(qAlpha(batch.masks.first().pixel(16, 4)), 0);
+        QCOMPARE(qRed(batch.masks.first().pixel(16, 16)), 1);
+        QVERIFY(qAlpha(batch.masks.first().pixel(16, 16)) > 0);
+        QCOMPARE(qRed(batch.masks.first().pixel(3, 10)), 2);
+
+        QCOMPARE(batch.polygons.at(1).first().classId, 1);
+        QCOMPARE(qAlpha(batch.masks.at(1).pixel(4, 16)), 0);
+        QCOMPARE(qRed(batch.masks.at(1).pixel(16, 16)), 2);
+        QVERIFY(!loader.hasNext());
+    }
+
+    void segmentationDataLoaderRejectsInvalidPolygons()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("dataset"));
+        writeTextFile(QDir(root).filePath(QStringLiteral("data.yaml")), QStringLiteral("nc: 1\nnames: [part]\n"));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("images/train/a.png")));
+        writeTextFile(QDir(root).filePath(QStringLiteral("labels/train/a.txt")), QStringLiteral("0 0.1 0.1 0.2 0.2 0.3 0.3\n"));
+
+        QString error;
+        aitrain::SegmentationDataset dataset;
+        QVERIFY2(dataset.load(root, QStringLiteral("train"), &error), qPrintable(error));
+
+        aitrain::SegmentationDataLoader loader(dataset, 1, QSize(16, 16));
+        aitrain::SegmentationBatch batch;
+        QVERIFY(!loader.next(&batch, &error));
+        QVERIFY(error.contains(QStringLiteral("Invalid segmentation polygon")));
+    }
+
     void segmentationTrainerWritesScaffoldCheckpointAndPreview()
     {
         QTemporaryDir dir;
@@ -991,15 +1063,19 @@ private slots:
         double firstLoss = -1.0;
         double lastLoss = -1.0;
         int callbackCount = 0;
+        double lastMaskIou = 0.0;
+        double lastMap50 = 0.0;
         const aitrain::SegmentationTrainingResult result = aitrain::trainSegmentationBaseline(
             root,
             options,
-            [&firstLoss, &lastLoss, &callbackCount](const aitrain::SegmentationTrainingMetrics& metrics) {
+            [&firstLoss, &lastLoss, &callbackCount, &lastMaskIou, &lastMap50](const aitrain::SegmentationTrainingMetrics& metrics) {
                 ++callbackCount;
                 if (firstLoss < 0.0) {
                     firstLoss = metrics.loss;
                 }
                 lastLoss = metrics.loss;
+                lastMaskIou = metrics.maskIou;
+                lastMap50 = metrics.map50;
                 return metrics.maskCoverage > 0.0;
             });
 
@@ -1009,9 +1085,16 @@ private slots:
         QVERIFY(firstLoss >= 0.0);
         QVERIFY(lastLoss >= 0.0);
         QVERIFY(lastLoss < firstLoss);
+        QVERIFY(lastMaskIou > 0.0);
+        QVERIFY(lastMap50 > 0.0);
         QVERIFY(result.maskCoverage > 0.0);
+        QVERIFY(result.maskIou > 0.0);
+        QVERIFY(result.precision > 0.0);
+        QVERIFY(result.recall > 0.0);
+        QVERIFY(result.map50 > 0.0);
         QVERIFY(QFileInfo::exists(result.checkpointPath));
         QVERIFY(QFileInfo::exists(result.previewPath));
+        QVERIFY(QFileInfo::exists(result.maskPreviewPath));
 
         QFile checkpoint(result.checkpointPath);
         QVERIFY(checkpoint.open(QIODevice::ReadOnly));
@@ -1020,6 +1103,11 @@ private slots:
         QVERIFY(json.value(QStringLiteral("note")).toString().contains(QStringLiteral("Scaffold")));
         QCOMPARE(json.value(QStringLiteral("steps")).toInt(), 3);
         QVERIFY(json.value(QStringLiteral("maskCoverage")).toDouble() > 0.0);
+        QVERIFY(json.value(QStringLiteral("maskIoU")).toDouble() > 0.0);
+        QVERIFY(json.value(QStringLiteral("precision")).toDouble() > 0.0);
+        QVERIFY(json.value(QStringLiteral("recall")).toDouble() > 0.0);
+        QVERIFY(json.value(QStringLiteral("segmentationMap50")).toDouble() > 0.0);
+        QCOMPARE(json.value(QStringLiteral("maskHead")).toString(), QStringLiteral("label_rasterization_scaffold"));
         QVERIFY(!json.value(QStringLiteral("previewPolygons")).toArray().isEmpty());
     }
 
@@ -1064,23 +1152,38 @@ private slots:
 
         bool sawCheckpoint = false;
         bool sawPreview = false;
+        bool sawMaskPreview = false;
         bool sawMaskLoss = false;
         bool sawMaskCoverage = false;
+        bool sawMaskIou = false;
+        bool sawPrecision = false;
+        bool sawRecall = false;
+        bool sawSegmentationMap50 = false;
         for (const auto& message : messages) {
             if (message.first == QStringLiteral("artifact")) {
                 const QString kind = message.second.value(QStringLiteral("kind")).toString();
                 sawCheckpoint = sawCheckpoint || kind == QStringLiteral("checkpoint");
                 sawPreview = sawPreview || kind == QStringLiteral("preview");
+                sawMaskPreview = sawMaskPreview || kind == QStringLiteral("mask_preview");
             } else if (message.first == QStringLiteral("metric")) {
                 const QString name = message.second.value(QStringLiteral("name")).toString();
                 sawMaskLoss = sawMaskLoss || name == QStringLiteral("maskLoss");
                 sawMaskCoverage = sawMaskCoverage || name == QStringLiteral("maskCoverage");
+                sawMaskIou = sawMaskIou || name == QStringLiteral("maskIoU");
+                sawPrecision = sawPrecision || name == QStringLiteral("precision");
+                sawRecall = sawRecall || name == QStringLiteral("recall");
+                sawSegmentationMap50 = sawSegmentationMap50 || name == QStringLiteral("segmentationMap50");
             }
         }
         QVERIFY(sawCheckpoint);
         QVERIFY(sawPreview);
+        QVERIFY(sawMaskPreview);
         QVERIFY(sawMaskLoss);
         QVERIFY(sawMaskCoverage);
+        QVERIFY(sawMaskIou);
+        QVERIFY(sawPrecision);
+        QVERIFY(sawRecall);
+        QVERIFY(sawSegmentationMap50);
         QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("checkpoint_latest.aitrain"))));
         QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("preview_latest.png"))));
         QCOMPARE(messages.last().first, QStringLiteral("completed"));

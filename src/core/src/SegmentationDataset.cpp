@@ -134,6 +134,21 @@ QColor classColor(int classId, int alpha)
     return color;
 }
 
+double polygonArea(const QVector<QPointF>& polygon)
+{
+    if (polygon.size() < 3) {
+        return 0.0;
+    }
+
+    double area = 0.0;
+    for (int index = 0; index < polygon.size(); ++index) {
+        const QPointF& a = polygon.at(index);
+        const QPointF& b = polygon.at((index + 1) % polygon.size());
+        area += a.x() * b.y() - b.x() * a.y();
+    }
+    return qAbs(area) * 0.5;
+}
+
 } // namespace
 
 bool SegmentationDataset::load(const QString& datasetPath, const QString& split, QString* error)
@@ -239,6 +254,53 @@ QImage polygonToMask(const QVector<QPointF>& normalizedPolygon, const QSize& tar
     return mask;
 }
 
+QImage segmentationPolygonsToMask(const QVector<SegmentationPolygon>& polygons, const QSize& targetSize)
+{
+    if (!targetSize.isValid() || targetSize.isEmpty()) {
+        return {};
+    }
+
+    QImage mask(targetSize, QImage::Format_ARGB32);
+    mask.fill(Qt::transparent);
+    QPainter painter(&mask);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setPen(Qt::NoPen);
+    for (const SegmentationPolygon& polygon : polygons) {
+        if (polygon.points.size() < 3 || polygonArea(polygon.points) <= 0.0) {
+            continue;
+        }
+        const int value = qBound(1, polygon.classId + 1, 255);
+        painter.setBrush(QColor(value, value, value, 255));
+        painter.drawPolygon(toPixelPolygon(polygon.points, targetSize));
+    }
+    painter.end();
+    return mask;
+}
+
+SegmentationPolygon mapPolygonToLetterbox(
+    const SegmentationPolygon& polygon,
+    const QSize& sourceSize,
+    const LetterboxTransform& transform)
+{
+    SegmentationPolygon mapped;
+    mapped.classId = polygon.classId;
+    if (!sourceSize.isValid() || sourceSize.isEmpty() || !transform.targetSize.isValid() || transform.targetSize.isEmpty()) {
+        mapped.points = polygon.points;
+        return mapped;
+    }
+
+    const double sourceWidth = static_cast<double>(sourceSize.width());
+    const double sourceHeight = static_cast<double>(sourceSize.height());
+    const double targetWidth = static_cast<double>(transform.targetSize.width());
+    const double targetHeight = static_cast<double>(transform.targetSize.height());
+    for (const QPointF& point : polygon.points) {
+        const double x = (point.x() * sourceWidth * transform.scale + transform.padX) / targetWidth;
+        const double y = (point.y() * sourceHeight * transform.scale + transform.padY) / targetHeight;
+        mapped.points.append(QPointF(qBound(0.0, x, 1.0), qBound(0.0, y, 1.0)));
+    }
+    return mapped;
+}
+
 QImage renderSegmentationOverlay(
     const QString& imagePath,
     const QVector<SegmentationPolygon>& polygons,
@@ -266,6 +328,91 @@ QImage renderSegmentationOverlay(
     }
     painter.end();
     return output;
+}
+
+SegmentationDataLoader::SegmentationDataLoader() = default;
+
+SegmentationDataLoader::SegmentationDataLoader(const SegmentationDataset& dataset, int batchSize, QSize imageSize)
+    : dataset_(dataset)
+    , batchSize_(qMax(1, batchSize))
+    , imageSize_(imageSize)
+{
+}
+
+void SegmentationDataLoader::reset()
+{
+    cursor_ = 0;
+}
+
+bool SegmentationDataLoader::hasNext() const
+{
+    return cursor_ < dataset_.samples().size();
+}
+
+bool SegmentationDataLoader::next(SegmentationBatch* batch, QString* error)
+{
+    if (!batch) {
+        if (error) {
+            *error = QStringLiteral("SegmentationBatch output is null");
+        }
+        return false;
+    }
+    batch->images.clear();
+    batch->masks.clear();
+    batch->polygons.clear();
+    batch->imagePaths.clear();
+
+    const QVector<SegmentationSample> samples = dataset_.samples();
+    if (cursor_ >= samples.size()) {
+        return true;
+    }
+
+    const int end = qMin(samples.size(), cursor_ + batchSize_);
+    for (; cursor_ < end; ++cursor_) {
+        const SegmentationSample& sample = samples.at(cursor_);
+        QImage image(sample.imagePath);
+        if (image.isNull()) {
+            if (error) {
+                *error = QStringLiteral("Cannot load segmentation image: %1").arg(sample.imagePath);
+            }
+            return false;
+        }
+
+        LetterboxTransform transform;
+        QImage processed = letterboxImage(image, imageSize_, &transform);
+        if (processed.isNull()) {
+            if (error) {
+                *error = QStringLiteral("Cannot preprocess segmentation image: %1").arg(sample.imagePath);
+            }
+            return false;
+        }
+
+        QVector<SegmentationPolygon> mappedPolygons;
+        for (const SegmentationPolygon& polygon : sample.polygons) {
+            const SegmentationPolygon mapped = mapPolygonToLetterbox(polygon, image.size(), transform);
+            if (mapped.points.size() < 3 || polygonArea(mapped.points) <= 0.0) {
+                if (error) {
+                    *error = QStringLiteral("Invalid segmentation polygon in label: %1").arg(sample.labelPath);
+                }
+                return false;
+            }
+            mappedPolygons.append(mapped);
+        }
+
+        const QImage mask = segmentationPolygonsToMask(mappedPolygons, imageSize_);
+        if (mask.isNull()) {
+            if (error) {
+                *error = QStringLiteral("Cannot build segmentation mask: %1").arg(sample.labelPath);
+            }
+            return false;
+        }
+
+        batch->images.append(processed);
+        batch->masks.append(mask);
+        batch->polygons.append(mappedPolygons);
+        batch->imagePaths.append(sample.imagePath);
+    }
+    return true;
 }
 
 } // namespace aitrain

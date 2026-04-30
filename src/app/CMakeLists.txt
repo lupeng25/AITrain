@@ -14,6 +14,8 @@ add_executable(AITrainStudio WIN32
     src/StatusPill.cpp
     src/WorkerClient.h
     src/WorkerClient.cpp
+    resources/app.qrc
+    resources/app.rc
 )
 
 target_link_libraries(AITrainStudio

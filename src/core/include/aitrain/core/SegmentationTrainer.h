@@ -23,6 +23,10 @@ struct SegmentationTrainingMetrics {
     double loss = 0.0;
     double maskLoss = 0.0;
     double maskCoverage = 0.0;
+    double maskIou = 0.0;
+    double precision = 0.0;
+    double recall = 0.0;
+    double map50 = 0.0;
 };
 
 struct SegmentationTrainingResult {
@@ -30,9 +34,14 @@ struct SegmentationTrainingResult {
     QString error;
     QString checkpointPath;
     QString previewPath;
+    QString maskPreviewPath;
     int steps = 0;
     double finalLoss = 0.0;
     double maskCoverage = 0.0;
+    double maskIou = 0.0;
+    double precision = 0.0;
+    double recall = 0.0;
+    double map50 = 0.0;
 };
 
 using SegmentationTrainingCallback = std::function<bool(const SegmentationTrainingMetrics&)>;
