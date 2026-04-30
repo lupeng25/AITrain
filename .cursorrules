@@ -3,6 +3,7 @@ AITrain Studio uses a harness-first development workflow.
 At the beginning of every new task, automatically read:
 
 - HARNESS.md
+- docs/harness/current-status.md
 - docs/harness/project-context.md
 - docs/harness/implementation-checklist.md
 - docs/harness/quality-gates.md
@@ -32,4 +33,3 @@ Rules:
 Before finalizing code changes, run:
 
 .\tools\harness-check.ps1
-

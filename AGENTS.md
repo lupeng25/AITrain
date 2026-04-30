@@ -3,17 +3,18 @@
 This repository uses a harness-first workflow. In every new AI coding conversation, read these files before making a plan or editing code:
 
 1. `HARNESS.md`
-2. `docs/harness/project-context.md`
-3. `docs/harness/implementation-checklist.md`
-4. `docs/harness/quality-gates.md`
+2. `docs/harness/current-status.md`
+3. `docs/harness/project-context.md`
+4. `docs/harness/implementation-checklist.md`
+5. `docs/harness/quality-gates.md`
 
 If the task touches UI, also read:
 
-5. `docs/harness/ui-guidelines.md`
+6. `docs/harness/ui-guidelines.md`
 
 If the task is broad or implementation-heavy, also inspect:
 
-6. `AITrainStudio_后续实施方案.md`
+7. `AITrainStudio_后续实施方案.md`
 
 ## Operating Rules
 
@@ -54,4 +55,3 @@ Final responses should include:
 - Key files changed.
 - Verification command and result.
 - Any known scaffold or unfinished part.
-

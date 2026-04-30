@@ -512,15 +512,22 @@ AITrainStudio/
 | P2 | OCR 识别训练 | 单独网络链路，放在检测闭环稳定之后 |
 | P3 | TensorRT 和安装包 | 最后做产品化部署 |
 
-## 13. 下一步建议
+## 13. 当前阶段状态与下一步建议
 
-下一阶段建议直接进入阶段 1，具体任务如下：
+阶段状态的权威入口是 `docs/harness/current-status.md`。新 AI 对话必须先读取该文件，再参考本路线图。
 
-1. 扩展 `TaskState` 和任务状态迁移校验。
-2. 扩展 Worker 协议，加入 `pause`、`resume`、`heartbeat`、`environmentCheck`。
-3. GUI 增加任务队列页面。
-4. SQLite 增加 datasets、artifacts、exports、environment_checks 表。
-5. 实现环境自检 Worker 命令。
-6. 增加对应 QtTest 单元测试。
+当前状态：
 
-完成阶段 1 后，再进入数据集系统；数据集系统稳定后，再开始真实 YOLO 检测训练核心。
+- 阶段 1 平台稳定化：平台 scaffold 已完成。
+- 阶段 2 数据集系统：初版已完成，YOLO 检测、YOLO 分割、PaddleOCR Rec 校验可用；数据集划分目前主要覆盖 YOLO 检测。
+- 阶段 3 YOLO 检测训练：tiny linear detector scaffold 已完成，可训练小数据、输出指标、checkpoint、preview；不是真实 LibTorch/CUDA YOLO。
+- 阶段 4 ONNX 导出与推理：tiny detector ONNX/ONNX Runtime/Worker 推理链路已完成；完整 YOLO/OCR 后处理和 TensorRT 未完成。
+- 阶段 5 YOLO 分割训练：准入 scaffold 已开始，已有 `SegmentationDataset`、polygon-to-mask、overlay preview、Worker 端 mask 指标和 scaffold checkpoint；真实 mask head、真实 mask loss、segmentation mAP 未完成。
+
+下一步建议继续阶段 5，具体任务：
+
+1. 实现 `SegmentationDataLoader`。
+2. 输出 batch images、batch masks 和 class/polygon metadata。
+3. 支持 resize/letterbox 后 polygon 与 mask 对齐。
+4. 覆盖多 polygon、多类别、batch size > 1、mask 对齐和非法 polygon 测试。
+5. 每完成一小步运行 `.\tools\harness-check.ps1`。

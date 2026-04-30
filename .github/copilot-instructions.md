@@ -3,6 +3,7 @@
 This project uses a harness-first workflow. Before generating substantial code, use these files as the source of truth:
 
 - `HARNESS.md`
+- `docs/harness/current-status.md`
 - `docs/harness/project-context.md`
 - `docs/harness/implementation-checklist.md`
 - `docs/harness/quality-gates.md`
@@ -36,4 +37,3 @@ Expected successful result:
 ```text
 Harness check passed.
 ```
-
