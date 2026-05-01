@@ -82,6 +82,16 @@ images/sample.png<TAB>label
 
 Dataset validation and split are Worker-backed flows. The GUI can now auto-detect YOLO detection, YOLO segmentation, and PaddleOCR Rec layouts; split outputs are recorded as SQLite dataset versions and task artifacts. PaddleOCR Rec split writes `rec_gt_train.txt`, `rec_gt_val.txt`, `rec_gt_test.txt`, and keeps a compatible `rec_gt.txt`.
 
+## Model Export Formats
+
+The GUI model export page routes conversion through `aitrain_worker`; conversion logic must not run in `MainWindow`.
+
+- `onnx`: copies or creates an ONNX model and writes an AITrain sidecar report.
+- `ncnn`: converts an ONNX source or generated tiny-detector ONNX into NCNN `.param` and `.bin` files through the external `onnx2ncnn` tool. Configure it with `AITRAIN_NCNN_ONNX2NCNN` or an NCNN install root in `AITRAIN_NCNN_ROOT`.
+- `tensorrt`: remains RTX / SM 75+ external acceptance only on this hardware baseline.
+
+NCNN export creates deployment artifacts only. AITrain Studio does not yet run NCNN inference in the C++ inference page.
+
 ## Acceptance Smoke
 
 The unified Phase 17-21 acceptance entry point is:

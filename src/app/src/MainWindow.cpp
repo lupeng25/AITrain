@@ -1233,20 +1233,21 @@ QWidget* MainWindow::buildConversionPage()
     exportPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("模型输入优先从“任务与产物”带入，也可以手动选择。不同后端会在任务日志中写明可导出的真实格式。")));
     conversionFormatCombo_ = new QComboBox;
     conversionFormatCombo_->addItem(QStringLiteral("ONNX 模型"), QStringLiteral("onnx"));
+    conversionFormatCombo_->addItem(QStringLiteral("NCNN param/bin（onnx2ncnn）"), QStringLiteral("ncnn"));
     conversionFormatCombo_->addItem(QStringLiteral("AITrain JSON（诊断）"), QStringLiteral("tiny_detector_json"));
     conversionFormatCombo_->addItem(QStringLiteral("TensorRT Engine（RTX / SM 75+ 外部验收）"), QStringLiteral("tensorrt"));
     conversionOutputEdit_ = new QLineEdit;
     conversionOutputEdit_->setPlaceholderText(QStringLiteral("输出路径；留空则输出到输入模型同目录"));
     auto* exportButton = primaryButton(QStringLiteral("导出模型"));
     connect(exportButton, &QPushButton::clicked, this, &MainWindow::startModelExport);
-    exportPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("TensorRT 需要 RTX / SM 75+ 真机外部验收；当前 GTX 1060 / SM 61 环境应保持 hardware-blocked 状态。")));
+    exportPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("NCNN 导出需要 onnx2ncnn，可通过 AITRAIN_NCNN_ONNX2NCNN 或 AITRAIN_NCNN_ROOT 配置；TensorRT 需要 RTX / SM 75+ 真机外部验收。")));
     exportPanel->bodyLayout()->addWidget(conversionFormatCombo_);
     exportPanel->bodyLayout()->addWidget(conversionOutputEdit_);
     exportPanel->bodyLayout()->addWidget(exportButton);
     exportPanel->bodyLayout()->addStretch();
 
     auto* resultPanel = new InfoPanel(QStringLiteral("导出结果"));
-    resultPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("导出产物、ONNX shape 校验报告和后续 TensorRT engine 会显示在这里。")));
+    resultPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("导出产物、ONNX shape 校验报告、NCNN param/bin 和后续 TensorRT engine 会显示在这里。")));
     exportResultLabel_ = mutedLabel(QStringLiteral("暂无导出结果。"));
     resultPanel->bodyLayout()->addWidget(exportResultLabel_);
     resultPanel->bodyLayout()->addStretch();
@@ -1640,7 +1641,9 @@ void MainWindow::startModelExport()
         outputPath = QFileInfo(checkpointPath).absoluteDir().filePath(
             format == QStringLiteral("onnx")
                 ? QStringLiteral("model.onnx")
-                : (format == QStringLiteral("tensorrt") ? QStringLiteral("model.engine") : QStringLiteral("model.aitrain-export.json")));
+                : (format == QStringLiteral("ncnn")
+                    ? QStringLiteral("model.param")
+                    : (format == QStringLiteral("tensorrt") ? QStringLiteral("model.engine") : QStringLiteral("model.aitrain-export.json"))));
     }
 
     QString taskId;
@@ -2513,7 +2516,8 @@ void MainWindow::previewArtifactPath(const QString& path)
             .arg(info.size()));
         return;
     }
-    if (suffix == QStringLiteral("engine") || suffix == QStringLiteral("plan") || suffix == QStringLiteral("pdparams") || suffix == QStringLiteral("aitrain")) {
+    if (suffix == QStringLiteral("engine") || suffix == QStringLiteral("plan") || suffix == QStringLiteral("pdparams")
+        || suffix == QStringLiteral("aitrain") || suffix == QStringLiteral("param") || suffix == QStringLiteral("bin")) {
         artifactPreviewText_->setPlainText(QStringLiteral("模型产物\n路径：%1\n类型：%2\n大小：%3 bytes")
             .arg(QDir::toNativeSeparators(path), suffix)
             .arg(info.size()));

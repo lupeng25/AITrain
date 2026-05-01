@@ -18,6 +18,7 @@
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QProcess>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
@@ -32,6 +33,31 @@ void writeTextFile(const QString& path, const QString& content)
     QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text));
     file.write(content.toUtf8());
 }
+
+class ScopedEnvVar {
+public:
+    ScopedEnvVar(const QByteArray& name, const QByteArray& value)
+        : name_(name)
+        , hadValue_(qEnvironmentVariableIsSet(name.constData()))
+        , oldValue_(qgetenv(name.constData()))
+    {
+        qputenv(name_.constData(), value);
+    }
+
+    ~ScopedEnvVar()
+    {
+        if (hadValue_) {
+            qputenv(name_.constData(), oldValue_);
+        } else {
+            qunsetenv(name_.constData());
+        }
+    }
+
+private:
+    QByteArray name_;
+    bool hadValue_ = false;
+    QByteArray oldValue_;
+};
 
 void writeTinyPng(const QString& path)
 {
@@ -1011,6 +1037,90 @@ private slots:
         QVERIFY(bytes.contains("objectness"));
         QVERIFY(bytes.contains("class_probabilities"));
         QVERIFY(bytes.contains("boxes"));
+    }
+
+    void detectionExportWritesNcnnParamBinWithConfiguredConverter()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        const QString converterPath = dir.filePath(
+#ifdef Q_OS_WIN
+            QStringLiteral("onnx2ncnn.cmd")
+#else
+            QStringLiteral("onnx2ncnn")
+#endif
+        );
+#ifdef Q_OS_WIN
+        writeTextFile(converterPath,
+            QStringLiteral("@echo off\r\n"
+                           "echo fake ncnn param from %~1> \"%~2\"\r\n"
+                           "echo fake ncnn bin from %~1> \"%~3\"\r\n"
+                           "exit /b 0\r\n"));
+#else
+        writeTextFile(converterPath,
+            QStringLiteral("#!/bin/sh\n"
+                           "printf 'fake ncnn param from %s\\n' \"$1\" > \"$2\"\n"
+                           "printf 'fake ncnn bin from %s\\n' \"$1\" > \"$3\"\n"));
+        QFile::setPermissions(converterPath, QFile::permissions(converterPath)
+            | QFileDevice::ExeOwner | QFileDevice::ExeUser | QFileDevice::ExeGroup | QFileDevice::ExeOther);
+#endif
+        ScopedEnvVar converterEnv("AITRAIN_NCNN_ONNX2NCNN", QFile::encodeName(converterPath));
+
+        const QString root = dir.filePath(QStringLiteral("dataset"));
+        writeTextFile(QDir(root).filePath(QStringLiteral("data.yaml")), QStringLiteral("nc: 1\nnames: [item]\n"));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("images/train/a.png")));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("images/val/a.png")));
+        writeTextFile(QDir(root).filePath(QStringLiteral("labels/train/a.txt")), QStringLiteral("0 0.5 0.5 0.25 0.25\n"));
+        writeTextFile(QDir(root).filePath(QStringLiteral("labels/val/a.txt")), QStringLiteral("0 0.5 0.5 0.25 0.25\n"));
+
+        aitrain::DetectionTrainingOptions options;
+        options.epochs = 1;
+        options.batchSize = 1;
+        options.imageSize = QSize(32, 32);
+        options.outputPath = dir.filePath(QStringLiteral("run"));
+        const aitrain::DetectionTrainingResult training = aitrain::trainDetectionBaseline(root, options);
+        QVERIFY2(training.ok, qPrintable(training.error));
+
+        const QString exportPrefix = dir.filePath(QStringLiteral("exports/mobile-model"));
+        const aitrain::DetectionExportResult exported = aitrain::exportDetectionCheckpoint(
+            training.checkpointPath,
+            exportPrefix,
+            QStringLiteral("ncnn"));
+        QVERIFY2(exported.ok, qPrintable(exported.error));
+        QCOMPARE(exported.format, QStringLiteral("ncnn"));
+        QCOMPARE(exported.exportPath, QDir(dir.filePath(QStringLiteral("exports"))).filePath(QStringLiteral("mobile-model.param")));
+        QVERIFY(QFileInfo::exists(exported.exportPath));
+        QVERIFY(QFileInfo::exists(exported.reportPath));
+
+        const QJsonObject ncnn = exported.config.value(QStringLiteral("ncnn")).toObject();
+        const QString binPath = ncnn.value(QStringLiteral("binPath")).toString();
+        QCOMPARE(exported.config.value(QStringLiteral("format")).toString(), QStringLiteral("ncnn"));
+        QCOMPARE(ncnn.value(QStringLiteral("paramPath")).toString(), exported.exportPath);
+        QVERIFY(QFileInfo::exists(binPath));
+        QCOMPARE(QFileInfo(binPath).fileName(), QStringLiteral("mobile-model.bin"));
+
+        QFile paramFile(exported.exportPath);
+        QVERIFY(paramFile.open(QIODevice::ReadOnly));
+        QVERIFY(paramFile.readAll().contains("fake ncnn param"));
+    }
+
+    void detectionNcnnExportReportsMissingConverter()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const ScopedEnvVar converterEnv("AITRAIN_NCNN_ONNX2NCNN", QFile::encodeName(dir.filePath(QStringLiteral("missing-onnx2ncnn.exe"))));
+        const QString sourceOnnx = dir.filePath(QStringLiteral("source.onnx"));
+        writeTextFile(sourceOnnx, QStringLiteral("fake onnx\n"));
+
+        const aitrain::DetectionExportResult exported = aitrain::exportDetectionCheckpoint(
+            sourceOnnx,
+            dir.filePath(QStringLiteral("exports/model.param")),
+            QStringLiteral("ncnn"));
+        QVERIFY(!exported.ok);
+        QCOMPARE(exported.format, QStringLiteral("ncnn"));
+        QVERIFY(exported.error.contains(QStringLiteral("NCNN")));
+        QVERIFY(exported.error.contains(QStringLiteral("not found")));
     }
 
     void detectionTensorRtBackendStatusIsExplicit()

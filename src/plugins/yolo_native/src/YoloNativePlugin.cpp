@@ -40,7 +40,7 @@ public:
 
 class NativeExporter final : public aitrain::IExporter {
 public:
-    QStringList supportedFormats() const override { return QStringList() << QStringLiteral("tiny_detector_json") << QStringLiteral("onnx"); }
+    QStringList supportedFormats() const override { return QStringList() << QStringLiteral("tiny_detector_json") << QStringLiteral("onnx") << QStringLiteral("ncnn"); }
 };
 
 class NativeInferencer final : public aitrain::IInferencer {

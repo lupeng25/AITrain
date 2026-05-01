@@ -650,10 +650,27 @@ void WorkerSession::exportModel(const QJsonObject& payload)
     artifact.insert(QStringLiteral("taskId"), taskId);
     artifact.insert(QStringLiteral("kind"), QStringLiteral("export"));
     artifact.insert(QStringLiteral("path"), result.exportPath);
-    artifact.insert(QStringLiteral("message"), result.format == QStringLiteral("onnx")
-        ? QStringLiteral("Tiny detector ONNX model core export")
-        : QStringLiteral("Tiny detector JSON scaffold export"));
+    QString artifactMessage = QStringLiteral("Tiny detector JSON scaffold export");
+    if (result.format == QStringLiteral("onnx")) {
+        artifactMessage = QStringLiteral("ONNX model export");
+    } else if (result.format == QStringLiteral("ncnn")) {
+        artifactMessage = QStringLiteral("NCNN param export");
+    } else if (result.format.startsWith(QStringLiteral("tensorrt"))) {
+        artifactMessage = QStringLiteral("TensorRT engine export");
+    }
+    artifact.insert(QStringLiteral("message"), artifactMessage);
     send(QStringLiteral("artifact"), artifact);
+
+    const QJsonObject ncnnConfig = result.config.value(QStringLiteral("ncnn")).toObject();
+    const QString ncnnBinPath = ncnnConfig.value(QStringLiteral("binPath")).toString();
+    if (result.format == QStringLiteral("ncnn") && !ncnnBinPath.isEmpty()) {
+        QJsonObject binArtifact;
+        binArtifact.insert(QStringLiteral("taskId"), taskId);
+        binArtifact.insert(QStringLiteral("kind"), QStringLiteral("export_sidecar"));
+        binArtifact.insert(QStringLiteral("path"), ncnnBinPath);
+        binArtifact.insert(QStringLiteral("message"), QStringLiteral("NCNN binary weights"));
+        send(QStringLiteral("artifact"), binArtifact);
+    }
 
     QJsonObject response;
     response.insert(QStringLiteral("ok"), true);
