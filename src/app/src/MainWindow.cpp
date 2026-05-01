@@ -26,6 +26,7 @@
 #include <QPlainTextEdit>
 #include <QPixmap>
 #include <QPushButton>
+#include <QProcess>
 #include <QRegularExpression>
 #include <QScrollArea>
 #include <QSignalBlocker>
@@ -738,8 +739,60 @@ QWidget* MainWindow::buildDatasetPage()
     datasetPreviewTable_ = new QTableWidget(0, 2);
     datasetPreviewTable_->setHorizontalHeaderLabels(QStringList() << QStringLiteral("样本") << QStringLiteral("标签 / 说明"));
     configureTable(datasetPreviewTable_);
+    auto* annotationPanel = new QGroupBox(QStringLiteral("外部标注工具"));
+    auto* annotationLayout = new QGridLayout(annotationPanel);
+    annotationLayout->setContentsMargins(10, 12, 10, 10);
+    annotationLayout->setHorizontalSpacing(10);
+    annotationLayout->setVerticalSpacing(8);
+    auto* annotationSummary = mutedLabel(QStringLiteral("默认使用 X-AnyLabeling，支持 YOLO 检测/分割、OCR、COCO/YOLO 导入导出和自动标注。"));
+    auto* launchAnnotationToolButton = new QPushButton(QStringLiteral("启动 X-AnyLabeling"));
+    auto* openDatasetDirButton = new QPushButton(QStringLiteral("打开数据目录"));
+    connect(openDatasetDirButton, &QPushButton::clicked, this, [this]() {
+        const QString datasetPath = QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
+        if (datasetPath.isEmpty()) {
+            QMessageBox::information(this, QStringLiteral("标注工具"), QStringLiteral("请先选择数据集目录。"));
+            return;
+        }
+        QDesktopServices::openUrl(QUrl::fromLocalFile(datasetPath));
+    });
+    connect(launchAnnotationToolButton, &QPushButton::clicked, this, [this]() {
+        const QString datasetPath = QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
+        if (datasetPath.isEmpty()) {
+            QMessageBox::information(this, QStringLiteral("标注工具"), QStringLiteral("请先选择数据集目录。"));
+            return;
+        }
+        const QString envProgram = QString::fromLocal8Bit(qgetenv("AITRAIN_XANYLABELING_EXE")).trimmed();
+        const QString appDir = QApplication::applicationDirPath();
+        const QStringList candidates = {
+            envProgram,
+            QDir(appDir).filePath(QStringLiteral("X-AnyLabeling.exe")),
+            QDir(appDir).filePath(QStringLiteral("xanylabeling.exe")),
+            QDir(appDir).filePath(QStringLiteral("tools/x-anylabeling/X-AnyLabeling.exe")),
+            QDir(QDir::currentPath()).filePath(QStringLiteral(".deps/annotation-tools/X-AnyLabeling/X-AnyLabeling.exe")),
+            QStringLiteral("xanylabeling"),
+            QStringLiteral("X-AnyLabeling.exe")
+        };
+        const QStringList arguments = {QStringLiteral("--filename"), datasetPath, QStringLiteral("--no-auto-update-check")};
+        for (const QString& candidate : candidates) {
+            if (candidate.trimmed().isEmpty()) {
+                continue;
+            }
+            if (QProcess::startDetached(candidate, arguments)) {
+                statusBar()->showMessage(QStringLiteral("已启动 X-AnyLabeling：%1").arg(QDir::toNativeSeparators(datasetPath)), 4000);
+                return;
+            }
+        }
+        QMessageBox::warning(this,
+            QStringLiteral("X-AnyLabeling"),
+            QStringLiteral("未找到 X-AnyLabeling。请安装后确保 `xanylabeling` 在 PATH 中，或将 X-AnyLabeling.exe 放到程序目录 / tools/x-anylabeling / .deps/annotation-tools/X-AnyLabeling。"));
+    });
+    annotationLayout->addWidget(annotationSummary, 0, 0, 1, 4);
+    annotationLayout->addWidget(launchAnnotationToolButton, 1, 0);
+    annotationLayout->addWidget(openDatasetDirButton, 1, 1);
+    annotationLayout->setColumnStretch(2, 1);
     toolsPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("已登记数据集")));
     toolsPanel->bodyLayout()->addWidget(datasetListTable_, 1);
+    toolsPanel->bodyLayout()->addWidget(annotationPanel);
     toolsPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("样本预览")));
     toolsPanel->bodyLayout()->addWidget(datasetPreviewTable_, 1);
     toolsPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("划分会复制到新目录，不修改原始数据；支持 YOLO 检测、YOLO 分割和 PaddleOCR Rec。")));

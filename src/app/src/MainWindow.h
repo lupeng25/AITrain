@@ -91,6 +91,9 @@ private:
     void updateDashboardSummary();
     void updateTrainingSelectionSummary();
     void refreshTrainingDefaults();
+    void updateAnnotationToolStatus();
+    void refreshAfterAnnotation();
+    void applyTaskFilters();
     QString createRepositoryTask(aitrain::TaskKind kind, const QString& taskType, const QString& pluginId, const QString& workDir, const QString& message, const QString& requestedTaskId = {});
     QString selectedArtifactPath() const;
     void previewArtifactPath(const QString& path);
@@ -138,8 +141,11 @@ private:
     QTableWidget* datasetListTable_ = nullptr;
     QTableWidget* pluginTable_ = nullptr;
     QTableWidget* environmentTable_ = nullptr;
+    QComboBox* taskKindFilterCombo_ = nullptr;
+    QComboBox* taskStateFilterCombo_ = nullptr;
     QLineEdit* projectNameEdit_ = nullptr;
     QLineEdit* projectRootEdit_ = nullptr;
+    QLineEdit* taskSearchEdit_ = nullptr;
     QLineEdit* datasetPathEdit_ = nullptr;
     QLineEdit* splitOutputEdit_ = nullptr;
     QLineEdit* splitTrainRatioEdit_ = nullptr;
@@ -154,6 +160,7 @@ private:
     QLabel* validationSummaryLabel_ = nullptr;
     QLabel* selectedTaskSummaryLabel_ = nullptr;
     QLabel* datasetDetailLabel_ = nullptr;
+    QLabel* annotationToolStatusLabel_ = nullptr;
     QLabel* trainingDatasetSummaryLabel_ = nullptr;
     QLabel* trainingBackendHintLabel_ = nullptr;
     QLabel* trainingRunSummaryLabel_ = nullptr;
