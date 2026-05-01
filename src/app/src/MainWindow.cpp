@@ -82,6 +82,23 @@ QPushButton* dangerButton(const QString& text)
     return button;
 }
 
+InfoPanel* createCompactSummaryCard(const QString& label, const QString& value, const QString& caption)
+{
+    auto* panel = new InfoPanel(label);
+    panel->setObjectName(QStringLiteral("CompactMetricPanel"));
+    auto* valueLabel = new QLabel(value);
+    valueLabel->setObjectName(QStringLiteral("CompactMetricValue"));
+    valueLabel->setWordWrap(true);
+    valueLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    auto* captionLabel = new QLabel(caption);
+    captionLabel->setObjectName(QStringLiteral("CompactMetricCaption"));
+    captionLabel->setWordWrap(true);
+    panel->bodyLayout()->addWidget(valueLabel);
+    panel->bodyLayout()->addWidget(captionLabel);
+    panel->bodyLayout()->addStretch();
+    return panel;
+}
+
 QString taskStateLabel(aitrain::TaskState state)
 {
     switch (state) {
@@ -852,20 +869,16 @@ QWidget* MainWindow::buildProjectPage()
     auto* summaryGrid = new QGridLayout;
     summaryGrid->setHorizontalSpacing(12);
     summaryGrid->setVerticalSpacing(12);
-    auto* pathCard = createMetricCard(QStringLiteral("项目路径"), QStringLiteral("未打开"), QStringLiteral("当前项目根目录"));
-    projectPathSummaryLabel_ = pathCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
-    if (projectPathSummaryLabel_) {
-        projectPathSummaryLabel_->setWordWrap(true);
-        projectPathSummaryLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    }
-    auto* sqliteCard = createMetricCard(QStringLiteral("SQLite"), QStringLiteral("未连接"), QStringLiteral("项目元数据状态"));
-    projectSqliteSummaryLabel_ = sqliteCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
-    auto* datasetCard = createMetricCard(QStringLiteral("数据集"), QStringLiteral("0"), QStringLiteral("已登记数据集"));
-    projectDatasetSummaryLabel_ = datasetCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
-    auto* taskCard = createMetricCard(QStringLiteral("任务"), QStringLiteral("0"), QStringLiteral("训练、校验、导出、推理"));
-    projectTaskSummaryLabel_ = taskCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
-    auto* exportCard = createMetricCard(QStringLiteral("模型导出"), QStringLiteral("0"), QStringLiteral("已记录导出产物"));
-    projectExportSummaryLabel_ = exportCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
+    auto* pathCard = createCompactSummaryCard(QStringLiteral("项目路径"), QStringLiteral("未打开"), QStringLiteral("当前项目根目录"));
+    projectPathSummaryLabel_ = pathCard->findChild<QLabel*>(QStringLiteral("CompactMetricValue"));
+    auto* sqliteCard = createCompactSummaryCard(QStringLiteral("SQLite"), QStringLiteral("未连接"), QStringLiteral("项目元数据状态"));
+    projectSqliteSummaryLabel_ = sqliteCard->findChild<QLabel*>(QStringLiteral("CompactMetricValue"));
+    auto* datasetCard = createCompactSummaryCard(QStringLiteral("数据集"), QStringLiteral("0"), QStringLiteral("已登记数据集"));
+    projectDatasetSummaryLabel_ = datasetCard->findChild<QLabel*>(QStringLiteral("CompactMetricValue"));
+    auto* taskCard = createCompactSummaryCard(QStringLiteral("任务"), QStringLiteral("0"), QStringLiteral("训练、校验、导出、推理"));
+    projectTaskSummaryLabel_ = taskCard->findChild<QLabel*>(QStringLiteral("CompactMetricValue"));
+    auto* exportCard = createCompactSummaryCard(QStringLiteral("模型导出"), QStringLiteral("0"), QStringLiteral("已记录导出产物"));
+    projectExportSummaryLabel_ = exportCard->findChild<QLabel*>(QStringLiteral("CompactMetricValue"));
     summaryGrid->addWidget(pathCard, 0, 0, 1, 2);
     summaryGrid->addWidget(sqliteCard, 1, 0);
     summaryGrid->addWidget(datasetCard, 1, 1);

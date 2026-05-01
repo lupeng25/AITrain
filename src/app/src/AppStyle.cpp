@@ -89,6 +89,12 @@ void apply(QApplication& app)
             border-radius: 6px;
         }
 
+        QFrame#CompactMetricPanel {
+            background: #FFFFFF;
+            border: 1px solid #D8DEE6;
+            border-radius: 6px;
+        }
+
         QLabel#PanelTitle {
             color: #111827;
             font-size: 10pt;
@@ -156,6 +162,19 @@ void apply(QApplication& app)
         QLabel#MetricLabel {
             color: #6B7280;
             font-size: 8pt;
+        }
+
+        QLabel#CompactMetricValue {
+            color: #111827;
+            font-size: 11pt;
+            font-weight: 700;
+            min-height: 22px;
+        }
+
+        QLabel#CompactMetricCaption {
+            color: #6B7280;
+            font-size: 8pt;
+            min-height: 18px;
         }
 
         QLabel#StatusPill {
