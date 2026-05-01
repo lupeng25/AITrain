@@ -7,6 +7,7 @@
 #include <QCheckBox>
 #include <QDateTime>
 #include <QDir>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -36,7 +37,6 @@ QLabel* mutedLabel(const QString& text)
     label->setWordWrap(true);
     return label;
 }
-
 QPushButton* primaryButton(const QString& text)
 {
     auto* button = new QPushButton(text);
@@ -100,6 +100,79 @@ QString issueSeverityLabel(const QString& severity)
         return QStringLiteral("警告");
     }
     return QStringLiteral("信息");
+}
+
+QString inferenceTaskTypeLabel(const QString& taskType)
+{
+    if (taskType == QStringLiteral("segmentation")) {
+        return QStringLiteral("分割");
+    }
+    if (taskType == QStringLiteral("ocr_recognition")) {
+        return QStringLiteral("OCR 识别");
+    }
+    return QStringLiteral("检测");
+}
+
+QString confidencePercent(double confidence)
+{
+    return QStringLiteral("%1%").arg(QString::number(confidence * 100.0, 'f', 1));
+}
+
+QString inferenceSummaryFromPredictions(const QString& predictionsPath, const QJsonObject& fallback = {})
+{
+    const QString nativePath = QDir::toNativeSeparators(predictionsPath);
+    QFile file(predictionsPath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        const QString taskType = fallback.value(QStringLiteral("taskType")).toString(QStringLiteral("detection"));
+        return QStringLiteral("%1：%2 个结果，%3 ms\n结果文件：%4")
+            .arg(inferenceTaskTypeLabel(taskType))
+            .arg(fallback.value(QStringLiteral("predictionCount")).toInt())
+            .arg(fallback.value(QStringLiteral("elapsedMs")).toInt())
+            .arg(nativePath);
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        return QStringLiteral("预测结果 JSON 无法解析：%1").arg(nativePath);
+    }
+
+    const QJsonObject root = document.object();
+    const QString taskType = root.value(QStringLiteral("taskType")).toString(
+        fallback.value(QStringLiteral("taskType")).toString(QStringLiteral("detection")));
+    const QJsonArray predictions = root.value(QStringLiteral("predictions")).toArray();
+    const int elapsedMs = root.value(QStringLiteral("elapsedMs")).toInt(fallback.value(QStringLiteral("elapsedMs")).toInt());
+    QString detail;
+    if (!predictions.isEmpty()) {
+        const QJsonObject first = predictions.at(0).toObject();
+        if (taskType == QStringLiteral("ocr_recognition")) {
+            const QString text = first.value(QStringLiteral("text")).toString();
+            detail = text.isEmpty()
+                ? QStringLiteral("未识别出文本")
+                : QStringLiteral("文本 \"%1\"").arg(text);
+            if (first.contains(QStringLiteral("confidence"))) {
+                detail.append(QStringLiteral("，置信度 %1").arg(confidencePercent(first.value(QStringLiteral("confidence")).toDouble())));
+            }
+        } else {
+            const QString className = first.value(QStringLiteral("className")).toString(
+                QStringLiteral("class %1").arg(first.value(QStringLiteral("classId")).toInt()));
+            detail = QStringLiteral("首个 %1，置信度 %2")
+                .arg(className)
+                .arg(confidencePercent(first.value(QStringLiteral("confidence")).toDouble()));
+            if (taskType == QStringLiteral("segmentation")) {
+                detail.append(QStringLiteral("，mask area %1").arg(first.value(QStringLiteral("maskArea")).toInt()));
+            }
+        }
+    } else {
+        detail = QStringLiteral("无结果");
+    }
+
+    return QStringLiteral("%1：%2 个结果，%3，%4 ms\n结果文件：%5")
+        .arg(inferenceTaskTypeLabel(taskType))
+        .arg(predictions.size())
+        .arg(detail)
+        .arg(elapsedMs)
+        .arg(nativePath);
 }
 
 } // namespace
@@ -182,7 +255,7 @@ MainWindow::MainWindow(QWidget* parent)
                 inferenceOverlayLabel_->setText(QStringLiteral("推理 overlay 加载失败"));
             }
         } else if (kind == QStringLiteral("inference_predictions") && inferenceResultLabel_) {
-            inferenceResultLabel_->setText(QStringLiteral("预测结果：%1").arg(QDir::toNativeSeparators(path)));
+            inferenceResultLabel_->setText(inferenceSummaryFromPredictions(path));
         }
         startNextQueuedTask();
     });
@@ -1221,7 +1294,7 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
                 inferenceOverlayLabel_->setText(QStringLiteral("推理 overlay 加载失败"));
             }
         } else if (kind == QStringLiteral("inference_predictions") && inferenceResultLabel_) {
-            inferenceResultLabel_->setText(QStringLiteral("预测结果：%1").arg(QDir::toNativeSeparators(path)));
+            inferenceResultLabel_->setText(inferenceSummaryFromPredictions(path));
         }
         if (repository_.isOpen()) {
             aitrain::ArtifactRecord artifact;
@@ -1281,10 +1354,9 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
         }
     } else if (type == QStringLiteral("inferenceResult")) {
         if (inferenceResultLabel_) {
-            inferenceResultLabel_->setText(QStringLiteral("推理完成：%1（%2 个结果，%3 ms）")
-                .arg(QDir::toNativeSeparators(payload.value(QStringLiteral("predictionsPath")).toString()))
-                .arg(payload.value(QStringLiteral("predictionCount")).toInt())
-                .arg(payload.value(QStringLiteral("elapsedMs")).toInt()));
+            inferenceResultLabel_->setText(inferenceSummaryFromPredictions(
+                payload.value(QStringLiteral("predictionsPath")).toString(),
+                payload));
         }
     }
 }

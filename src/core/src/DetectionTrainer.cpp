@@ -12,11 +12,13 @@
 #include <QJsonObject>
 #include <QLibrary>
 #include <QMap>
+#include <QPainter>
 #include <QRegularExpression>
 #include <QtEndian>
 #include <QtMath>
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -34,6 +36,7 @@ namespace aitrain {
 namespace {
 
 QJsonObject loadOnnxExportConfig(const QString& onnxPath);
+QString onnxExportReportPath(const QString& onnxPath);
 
 double clamp01(double value)
 {
@@ -675,9 +678,12 @@ QJsonObject loadUltralyticsTrainingReport(const QString& onnxPath)
             continue;
         }
         const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
-        if (document.isObject()
-            && document.object().value(QStringLiteral("backend")).toString() == QStringLiteral("ultralytics_yolo_detect")) {
-            return document.object();
+        if (document.isObject()) {
+            const QString backend = document.object().value(QStringLiteral("backend")).toString();
+            if (backend == QStringLiteral("ultralytics_yolo_detect")
+                || backend == QStringLiteral("ultralytics_yolo_segment")) {
+                return document.object();
+            }
         }
     }
     return {};
@@ -829,6 +835,338 @@ QVector<DetectionPrediction> yoloPredictionsFromOutput(
         predictions.append(prediction);
     }
     return postProcessDetectionPredictions(predictions, options);
+}
+
+QColor overlayColorForClass(int classId, int alpha)
+{
+    static const QVector<QColor> colors = {
+        QColor(46, 204, 113),
+        QColor(52, 152, 219),
+        QColor(241, 196, 15),
+        QColor(231, 76, 60),
+        QColor(155, 89, 182),
+        QColor(26, 188, 156)
+    };
+    QColor color = colors.at(qAbs(classId) % colors.size());
+    color.setAlpha(alpha);
+    return color;
+}
+
+struct SegmentationCandidate {
+    DetectionPrediction detection;
+    QVector<float> maskCoefficients;
+};
+
+QVector<SegmentationCandidate> postProcessSegmentationCandidates(
+    QVector<SegmentationCandidate> candidates,
+    const DetectionInferenceOptions& options)
+{
+    candidates.erase(std::remove_if(candidates.begin(), candidates.end(), [options](const SegmentationCandidate& candidate) {
+        return candidate.detection.confidence < options.confidenceThreshold;
+    }), candidates.end());
+    std::sort(candidates.begin(), candidates.end(), [](const SegmentationCandidate& left, const SegmentationCandidate& right) {
+        return left.detection.confidence > right.detection.confidence;
+    });
+
+    QVector<SegmentationCandidate> selected;
+    for (const SegmentationCandidate& candidate : candidates) {
+        bool suppress = false;
+        for (const SegmentationCandidate& accepted : selected) {
+            if (candidate.detection.box.classId == accepted.detection.box.classId
+                && boxIou(candidate.detection.box, accepted.detection.box) > options.iouThreshold) {
+                suppress = true;
+                break;
+            }
+        }
+        if (!suppress) {
+            selected.append(candidate);
+            if (selected.size() >= options.maxDetections) {
+                break;
+            }
+        }
+    }
+    return selected;
+}
+
+QImage maskFromPrototype(
+    const QVector<float>& coefficients,
+    const float* prototypes,
+    const std::vector<int64_t>& prototypeShape,
+    const DetectionBox& box,
+    const QSize& inputSize,
+    const LetterboxTransform& transform,
+    double threshold,
+    double* maskArea)
+{
+    if (prototypeShape.size() != 4 || prototypeShape.at(0) != 1 || prototypeShape.at(1) <= 0
+        || prototypeShape.at(2) <= 0 || prototypeShape.at(3) <= 0) {
+        return {};
+    }
+
+    const int maskDim = static_cast<int>(prototypeShape.at(1));
+    const int protoHeight = static_cast<int>(prototypeShape.at(2));
+    const int protoWidth = static_cast<int>(prototypeShape.at(3));
+    if (coefficients.size() < maskDim || inputSize.isEmpty() || transform.sourceSize.isEmpty()) {
+        return {};
+    }
+
+    const int sourceWidth = qMax(1, transform.sourceSize.width());
+    const int sourceHeight = qMax(1, transform.sourceSize.height());
+    const int xMin = qBound(0, qFloor((box.xCenter - box.width / 2.0) * sourceWidth), sourceWidth - 1);
+    const int xMax = qBound(0, qCeil((box.xCenter + box.width / 2.0) * sourceWidth), sourceWidth);
+    const int yMin = qBound(0, qFloor((box.yCenter - box.height / 2.0) * sourceHeight), sourceHeight - 1);
+    const int yMax = qBound(0, qCeil((box.yCenter + box.height / 2.0) * sourceHeight), sourceHeight);
+
+    QImage mask(transform.sourceSize, QImage::Format_ARGB32);
+    mask.fill(Qt::transparent);
+    int activePixels = 0;
+    for (int y = yMin; y < yMax; ++y) {
+        QRgb* scanline = reinterpret_cast<QRgb*>(mask.scanLine(y));
+        const double inputY = static_cast<double>(y) * transform.scale + transform.padY;
+        const int protoY = qBound(0, qFloor(inputY / qMax(1, inputSize.height()) * protoHeight), protoHeight - 1);
+        for (int x = xMin; x < xMax; ++x) {
+            const double inputX = static_cast<double>(x) * transform.scale + transform.padX;
+            const int protoX = qBound(0, qFloor(inputX / qMax(1, inputSize.width()) * protoWidth), protoWidth - 1);
+            double logit = 0.0;
+            const int protoPixel = protoY * protoWidth + protoX;
+            for (int index = 0; index < maskDim; ++index) {
+                logit += static_cast<double>(coefficients.at(index))
+                    * static_cast<double>(prototypes[index * protoHeight * protoWidth + protoPixel]);
+            }
+            if (sigmoid(logit) >= threshold) {
+                scanline[x] = qRgba(255, 255, 255, 180);
+                ++activePixels;
+            }
+        }
+    }
+    if (maskArea) {
+        *maskArea = static_cast<double>(activePixels) / static_cast<double>(qMax(1, sourceWidth * sourceHeight));
+    }
+    return mask;
+}
+
+QVector<SegmentationPrediction> yoloSegmentationPredictionsFromOutputs(
+    const float* boxesAndMasks,
+    const std::vector<int64_t>& boxesShape,
+    const float* prototypes,
+    const std::vector<int64_t>& prototypeShape,
+    const QStringList& classNames,
+    const QSize& inputSize,
+    const LetterboxTransform& transform,
+    const DetectionInferenceOptions& options,
+    QString* error)
+{
+    if (boxesShape.size() != 3 || boxesShape.at(0) != 1 || prototypeShape.size() != 4 || prototypeShape.at(0) != 1) {
+        if (error) {
+            *error = QStringLiteral("YOLO segmentation ONNX outputs must be [1, attributes, anchors] and [1, maskDim, maskH, maskW]");
+        }
+        return {};
+    }
+
+    const int maskDim = static_cast<int>(prototypeShape.at(1));
+    int anchorCount = 0;
+    int attributeCount = 0;
+    bool attributesFirst = false;
+    if (boxesShape.at(1) >= 4 + maskDim && boxesShape.at(2) > 0) {
+        attributesFirst = true;
+        attributeCount = static_cast<int>(boxesShape.at(1));
+        anchorCount = static_cast<int>(boxesShape.at(2));
+    } else if (boxesShape.at(2) >= 4 + maskDim && boxesShape.at(1) > 0) {
+        attributesFirst = false;
+        anchorCount = static_cast<int>(boxesShape.at(1));
+        attributeCount = static_cast<int>(boxesShape.at(2));
+    } else {
+        if (error) {
+            *error = QStringLiteral("YOLO segmentation ONNX output does not contain box and mask attributes");
+        }
+        return {};
+    }
+
+    int classCount = attributeCount - 4 - maskDim;
+    if (!classNames.isEmpty()) {
+        classCount = qMin(classCount, classNames.size());
+    }
+    if (classCount <= 0) {
+        if (error) {
+            *error = QStringLiteral("YOLO segmentation ONNX output does not contain class scores");
+        }
+        return {};
+    }
+
+    auto valueAt = [boxesAndMasks, anchorCount, attributeCount, attributesFirst](int anchor, int attribute) -> float {
+        return attributesFirst
+            ? boxesAndMasks[attribute * anchorCount + anchor]
+            : boxesAndMasks[anchor * attributeCount + attribute];
+    };
+
+    QVector<SegmentationCandidate> candidates;
+    for (int anchor = 0; anchor < anchorCount; ++anchor) {
+        int bestClassIndex = 0;
+        double bestClassScore = static_cast<double>(valueAt(anchor, 4));
+        for (int classIndex = 1; classIndex < classCount; ++classIndex) {
+            const double score = static_cast<double>(valueAt(anchor, 4 + classIndex));
+            if (score > bestClassScore) {
+                bestClassScore = score;
+                bestClassIndex = classIndex;
+            }
+        }
+        const double confidence = qBound(0.0, bestClassScore, 1.0);
+        if (confidence < options.confidenceThreshold) {
+            continue;
+        }
+
+        SegmentationCandidate candidate;
+        candidate.detection.box = yoloBoxFromInputPixels(
+            static_cast<double>(valueAt(anchor, 0)),
+            static_cast<double>(valueAt(anchor, 1)),
+            qMax(0.0, static_cast<double>(valueAt(anchor, 2))),
+            qMax(0.0, static_cast<double>(valueAt(anchor, 3))),
+            bestClassIndex,
+            inputSize,
+            transform);
+        candidate.detection.className = bestClassIndex >= 0 && bestClassIndex < classNames.size()
+            ? classNames.at(bestClassIndex)
+            : QStringLiteral("class_%1").arg(bestClassIndex);
+        candidate.detection.objectness = 1.0;
+        candidate.detection.confidence = confidence;
+        candidate.maskCoefficients.reserve(maskDim);
+        for (int index = 0; index < maskDim; ++index) {
+            candidate.maskCoefficients.append(valueAt(anchor, 4 + classCount + index));
+        }
+        candidates.append(candidate);
+    }
+
+    const QVector<SegmentationCandidate> selected = postProcessSegmentationCandidates(candidates, options);
+    QVector<SegmentationPrediction> predictions;
+    predictions.reserve(selected.size());
+    constexpr double maskThreshold = 0.5;
+    for (const SegmentationCandidate& candidate : selected) {
+        SegmentationPrediction prediction;
+        prediction.detection = candidate.detection;
+        prediction.maskThreshold = maskThreshold;
+        prediction.mask = maskFromPrototype(
+            candidate.maskCoefficients,
+            prototypes,
+            prototypeShape,
+            candidate.detection.box,
+            inputSize,
+            transform,
+            maskThreshold,
+            &prediction.maskArea);
+        predictions.append(prediction);
+    }
+    return predictions;
+}
+
+QStringList readOcrDictionary(const QString& path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return {};
+    }
+    QStringList characters;
+    for (const QString& line : QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'))) {
+        const QString value = line.trimmed();
+        if (!value.isEmpty()) {
+            characters.append(value);
+        }
+    }
+    return characters;
+}
+
+QJsonObject loadOcrRecReport(const QString& onnxPath)
+{
+    const QFileInfo onnxInfo(onnxPath);
+    const QStringList candidates = {
+        onnxInfo.absoluteDir().filePath(QStringLiteral("paddleocr_rec_training_report.json")),
+        onnxExportReportPath(onnxPath),
+        QStringLiteral("%1.aitrain-export.json").arg(onnxPath)
+    };
+    for (const QString& candidate : candidates) {
+        QFile file(candidate);
+        if (!file.open(QIODevice::ReadOnly)) {
+            continue;
+        }
+        const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+        if (document.isObject()) {
+            const QJsonObject object = document.object();
+            if (object.value(QStringLiteral("backend")).toString() == QStringLiteral("paddleocr_rec")
+                || object.value(QStringLiteral("modelFamily")).toString() == QStringLiteral("ocr_recognition")) {
+                return object;
+            }
+        }
+    }
+    return {};
+}
+
+QVector<float> ocrImageTensor(const QImage& image, int width, int height)
+{
+    const QImage gray = image.convertToFormat(QImage::Format_Grayscale8).scaled(width, height, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    QVector<float> tensor;
+    tensor.resize(width * height);
+    for (int y = 0; y < height; ++y) {
+        const uchar* scanline = gray.constScanLine(y);
+        for (int x = 0; x < width; ++x) {
+            tensor[y * width + x] = static_cast<float>(scanline[x]) / 255.0f;
+        }
+    }
+    return tensor;
+}
+
+OcrRecPrediction ocrPredictionFromLogits(
+    const float* logits,
+    const std::vector<int64_t>& shape,
+    const QStringList& dictionary,
+    int blankIndex,
+    QString* error)
+{
+    int timesteps = 0;
+    int classCount = 0;
+    if (shape.size() == 3 && shape.at(0) == 1 && shape.at(1) > 0 && shape.at(2) > 0) {
+        timesteps = static_cast<int>(shape.at(1));
+        classCount = static_cast<int>(shape.at(2));
+    } else if (shape.size() == 2 && shape.at(0) > 0 && shape.at(1) > 0) {
+        timesteps = static_cast<int>(shape.at(0));
+        classCount = static_cast<int>(shape.at(1));
+    } else {
+        if (error) {
+            *error = QStringLiteral("OCR Rec ONNX output must be [1, timesteps, classes] or [timesteps, classes]");
+        }
+        return {};
+    }
+
+    OcrRecPrediction prediction;
+    prediction.blankIndex = blankIndex;
+    int previous = -1;
+    double confidenceSum = 0.0;
+    for (int step = 0; step < timesteps; ++step) {
+        const float* row = logits + step * classCount;
+        int bestIndex = 0;
+        float bestLogit = row[0];
+        float maxLogit = row[0];
+        for (int index = 1; index < classCount; ++index) {
+            maxLogit = qMax(maxLogit, row[index]);
+            if (row[index] > bestLogit) {
+                bestLogit = row[index];
+                bestIndex = index;
+            }
+        }
+        double denominator = 0.0;
+        for (int index = 0; index < classCount; ++index) {
+            denominator += qExp(static_cast<double>(row[index] - maxLogit));
+        }
+        confidenceSum += qExp(static_cast<double>(bestLogit - maxLogit)) / qMax(1.0e-12, denominator);
+        prediction.tokens.append(bestIndex);
+        if (bestIndex != blankIndex && bestIndex != previous) {
+            const int dictionaryIndex = bestIndex > blankIndex ? bestIndex - 1 : bestIndex;
+            if (dictionaryIndex >= 0 && dictionaryIndex < dictionary.size()) {
+                prediction.text.append(dictionary.at(dictionaryIndex));
+            }
+        }
+        previous = bestIndex;
+    }
+    prediction.confidence = timesteps > 0 ? confidenceSum / static_cast<double>(timesteps) : 0.0;
+    return prediction;
 }
 
 void appendProtoVarint(QByteArray* output, quint64 value)
@@ -2106,6 +2444,71 @@ bool isOnnxRuntimeInferenceAvailable()
 #endif
 }
 
+QString inferOnnxModelFamily(const QString& onnxPath)
+{
+    const QJsonObject config = loadOnnxExportConfig(onnxPath);
+    const QString configuredFamily = config.value(QStringLiteral("modelFamily")).toString();
+    const QString configuredBackend = config.value(QStringLiteral("backend")).toString();
+    if (configuredFamily == QStringLiteral("yolo_segmentation")
+        || configuredBackend == QStringLiteral("ultralytics_yolo_segment")) {
+        return QStringLiteral("yolo_segmentation");
+    }
+    if (configuredFamily == QStringLiteral("ocr_recognition")
+        || configuredBackend == QStringLiteral("paddleocr_rec")) {
+        return QStringLiteral("ocr_recognition");
+    }
+    if (configuredFamily == QStringLiteral("yolo_detection")
+        || configuredBackend == QStringLiteral("ultralytics_yolo_detect")) {
+        return QStringLiteral("yolo_detection");
+    }
+
+    const QJsonObject ocrReport = loadOcrRecReport(onnxPath);
+    if (!ocrReport.isEmpty()) {
+        return QStringLiteral("ocr_recognition");
+    }
+    const QJsonObject yoloReport = loadUltralyticsTrainingReport(onnxPath);
+    if (yoloReport.value(QStringLiteral("backend")).toString() == QStringLiteral("ultralytics_yolo_segment")) {
+        return QStringLiteral("yolo_segmentation");
+    }
+    if (yoloReport.value(QStringLiteral("backend")).toString() == QStringLiteral("ultralytics_yolo_detect")) {
+        return QStringLiteral("yolo_detection");
+    }
+
+#ifdef AITRAIN_WITH_ONNXRUNTIME
+    try {
+        Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "aitrain");
+        Ort::SessionOptions sessionOptions;
+        sessionOptions.SetIntraOpNumThreads(1);
+#ifdef Q_OS_WIN
+        const std::wstring modelPath = QDir::toNativeSeparators(onnxPath).toStdWString();
+        Ort::Session session(env, modelPath.c_str(), sessionOptions);
+#else
+        const QByteArray modelPath = QFile::encodeName(onnxPath);
+        Ort::Session session(env, modelPath.constData(), sessionOptions);
+#endif
+        if (session.GetInputCount() == 1) {
+            const std::vector<int64_t> inputShape = session.GetInputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape();
+            if (inputShape.size() == 4 && inputShape.at(1) == 1) {
+                return QStringLiteral("ocr_recognition");
+            }
+            if (session.GetOutputCount() >= 2) {
+                for (size_t index = 0; index < session.GetOutputCount(); ++index) {
+                    const std::vector<int64_t> outputShape = session.GetOutputTypeInfo(index).GetTensorTypeAndShapeInfo().GetShape();
+                    if (outputShape.size() == 4) {
+                        return QStringLiteral("yolo_segmentation");
+                    }
+                }
+            }
+            if (inputShape.size() == 4 && inputShape.at(1) == 3) {
+                return QStringLiteral("yolo_detection");
+            }
+        }
+    } catch (...) {
+    }
+#endif
+    return {};
+}
+
 QJsonObject detectionTrainingBackendStatus()
 {
     QJsonArray backends;
@@ -2411,6 +2814,240 @@ QVector<DetectionPrediction> predictDetectionOnnxRuntime(
 #endif
 }
 
+QVector<SegmentationPrediction> predictSegmentationOnnxRuntime(
+    const QString& onnxPath,
+    const QString& imagePath,
+    const DetectionInferenceOptions& options,
+    QString* error)
+{
+#ifndef AITRAIN_WITH_ONNXRUNTIME
+    Q_UNUSED(onnxPath)
+    Q_UNUSED(imagePath)
+    Q_UNUSED(options)
+    if (error) {
+        *error = QStringLiteral("ONNX Runtime inference is not enabled. Configure AITRAIN_ONNXRUNTIME_ROOT with an ONNX Runtime SDK to enable .onnx inference.");
+    }
+    return {};
+#else
+    if (!QFileInfo::exists(onnxPath)) {
+        if (error) {
+            *error = QStringLiteral("ONNX segmentation model does not exist: %1").arg(onnxPath);
+        }
+        return {};
+    }
+    QImage image(imagePath);
+    if (image.isNull()) {
+        if (error) {
+            *error = QStringLiteral("Cannot read image for ONNX segmentation prediction: %1").arg(imagePath);
+        }
+        return {};
+    }
+
+    try {
+        Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "aitrain");
+        Ort::SessionOptions sessionOptions;
+        sessionOptions.SetIntraOpNumThreads(1);
+        sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
+#ifdef Q_OS_WIN
+        const std::wstring modelPath = QDir::toNativeSeparators(onnxPath).toStdWString();
+        Ort::Session session(env, modelPath.c_str(), sessionOptions);
+#else
+        const QByteArray modelPath = QFile::encodeName(onnxPath);
+        Ort::Session session(env, modelPath.constData(), sessionOptions);
+#endif
+        Ort::AllocatorWithDefaultOptions allocator;
+        if (session.GetInputCount() != 1 || session.GetOutputCount() < 2) {
+            if (error) {
+                *error = QStringLiteral("YOLO segmentation ONNX expects one input and at least two outputs");
+            }
+            return {};
+        }
+        const std::vector<int64_t> inputShape = session.GetInputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape();
+        if (inputShape.size() != 4 || inputShape.at(1) != 3 || inputShape.at(2) <= 0 || inputShape.at(3) <= 0) {
+            if (error) {
+                *error = QStringLiteral("YOLO segmentation ONNX input shape must be [1, 3, height, width]");
+            }
+            return {};
+        }
+
+        const QSize inputSize(static_cast<int>(inputShape.at(3)), static_cast<int>(inputShape.at(2)));
+        LetterboxTransform transform;
+        QVector<float> input = yoloImageTensorFromLetterbox(image, inputSize, &transform);
+        std::vector<int64_t> tensorShape = {1, 3, inputSize.height(), inputSize.width()};
+        Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+        Ort::Value inputTensor = Ort::Value::CreateTensor<float>(
+            memoryInfo,
+            input.data(),
+            static_cast<size_t>(input.size()),
+            tensorShape.data(),
+            tensorShape.size());
+
+        auto inputName = session.GetInputNameAllocated(0, allocator);
+        std::vector<Ort::AllocatedStringPtr> outputNameHolders;
+        std::vector<const char*> outputNames;
+        const size_t outputCount = session.GetOutputCount();
+        outputNameHolders.reserve(outputCount);
+        outputNames.reserve(outputCount);
+        for (size_t outputIndex = 0; outputIndex < outputCount; ++outputIndex) {
+            outputNameHolders.emplace_back(session.GetOutputNameAllocated(outputIndex, allocator));
+            outputNames.push_back(outputNameHolders.back().get());
+        }
+        const char* inputNames[] = { inputName.get() };
+        std::vector<Ort::Value> outputs = session.Run(
+            Ort::RunOptions{nullptr},
+            inputNames,
+            &inputTensor,
+            1,
+            outputNames.data(),
+            outputNames.size());
+
+        int boxesIndex = 0;
+        int prototypeIndex = 1;
+        for (int index = 0; index < static_cast<int>(outputs.size()); ++index) {
+            const std::vector<int64_t> shape = outputs.at(index).GetTensorTypeAndShapeInfo().GetShape();
+            if (shape.size() == 4) {
+                prototypeIndex = index;
+            } else if (shape.size() == 3) {
+                boxesIndex = index;
+            }
+        }
+        const QStringList classNames = ultralyticsClassNames(onnxPath);
+        return yoloSegmentationPredictionsFromOutputs(
+            outputs.at(boxesIndex).GetTensorData<float>(),
+            outputs.at(boxesIndex).GetTensorTypeAndShapeInfo().GetShape(),
+            outputs.at(prototypeIndex).GetTensorData<float>(),
+            outputs.at(prototypeIndex).GetTensorTypeAndShapeInfo().GetShape(),
+            classNames,
+            inputSize,
+            transform,
+            options,
+            error);
+    } catch (const Ort::Exception& exception) {
+        if (error) {
+            *error = QStringLiteral("ONNX Runtime segmentation inference failed: %1").arg(QString::fromUtf8(exception.what()));
+        }
+        return {};
+    } catch (const std::exception& exception) {
+        if (error) {
+            *error = QStringLiteral("ONNX segmentation inference failed: %1").arg(QString::fromUtf8(exception.what()));
+        }
+        return {};
+    }
+#endif
+}
+
+OcrRecPrediction predictOcrRecOnnxRuntime(
+    const QString& onnxPath,
+    const QString& imagePath,
+    QString* error)
+{
+#ifndef AITRAIN_WITH_ONNXRUNTIME
+    Q_UNUSED(onnxPath)
+    Q_UNUSED(imagePath)
+    if (error) {
+        *error = QStringLiteral("ONNX Runtime inference is not enabled. Configure AITRAIN_ONNXRUNTIME_ROOT with an ONNX Runtime SDK to enable .onnx inference.");
+    }
+    return {};
+#else
+    if (!QFileInfo::exists(onnxPath)) {
+        if (error) {
+            *error = QStringLiteral("OCR Rec ONNX model does not exist: %1").arg(onnxPath);
+        }
+        return {};
+    }
+    QImage image(imagePath);
+    if (image.isNull()) {
+        if (error) {
+            *error = QStringLiteral("Cannot read image for OCR Rec ONNX prediction: %1").arg(imagePath);
+        }
+        return {};
+    }
+
+    const QJsonObject report = loadOcrRecReport(onnxPath);
+    const int reportWidth = report.value(QStringLiteral("imageWidth")).toInt(96);
+    const int reportHeight = report.value(QStringLiteral("imageHeight")).toInt(32);
+    const int blankIndex = report.value(QStringLiteral("blankIndex")).toInt(0);
+    QString dictPath = report.value(QStringLiteral("dictPath")).toString();
+    if (dictPath.isEmpty()) {
+        dictPath = QFileInfo(onnxPath).absoluteDir().filePath(QStringLiteral("dict.txt"));
+    }
+    const QStringList dictionary = readOcrDictionary(dictPath);
+    if (dictionary.isEmpty()) {
+        if (error) {
+            *error = QStringLiteral("Cannot read OCR dictionary for ONNX prediction: %1").arg(dictPath);
+        }
+        return {};
+    }
+
+    try {
+        Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "aitrain");
+        Ort::SessionOptions sessionOptions;
+        sessionOptions.SetIntraOpNumThreads(1);
+        sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
+#ifdef Q_OS_WIN
+        const std::wstring modelPath = QDir::toNativeSeparators(onnxPath).toStdWString();
+        Ort::Session session(env, modelPath.c_str(), sessionOptions);
+#else
+        const QByteArray modelPath = QFile::encodeName(onnxPath);
+        Ort::Session session(env, modelPath.constData(), sessionOptions);
+#endif
+        Ort::AllocatorWithDefaultOptions allocator;
+        if (session.GetInputCount() != 1 || session.GetOutputCount() < 1) {
+            if (error) {
+                *error = QStringLiteral("OCR Rec ONNX expects one input and at least one output");
+            }
+            return {};
+        }
+        const std::vector<int64_t> inputShape = session.GetInputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape();
+        if (inputShape.size() != 4 || inputShape.at(1) != 1) {
+            if (error) {
+                *error = QStringLiteral("OCR Rec ONNX input shape must be [1, 1, height, width]");
+            }
+            return {};
+        }
+        const int inputHeight = inputShape.at(2) > 0 ? static_cast<int>(inputShape.at(2)) : reportHeight;
+        const int inputWidth = inputShape.at(3) > 0 ? static_cast<int>(inputShape.at(3)) : reportWidth;
+        QVector<float> input = ocrImageTensor(image, inputWidth, inputHeight);
+        std::vector<int64_t> tensorShape = {1, 1, inputHeight, inputWidth};
+        Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+        Ort::Value inputTensor = Ort::Value::CreateTensor<float>(
+            memoryInfo,
+            input.data(),
+            static_cast<size_t>(input.size()),
+            tensorShape.data(),
+            tensorShape.size());
+
+        auto inputName = session.GetInputNameAllocated(0, allocator);
+        auto outputName = session.GetOutputNameAllocated(0, allocator);
+        const char* inputNames[] = { inputName.get() };
+        const char* outputNames[] = { outputName.get() };
+        std::vector<Ort::Value> outputs = session.Run(
+            Ort::RunOptions{nullptr},
+            inputNames,
+            &inputTensor,
+            1,
+            outputNames,
+            1);
+        return ocrPredictionFromLogits(
+            outputs.front().GetTensorData<float>(),
+            outputs.front().GetTensorTypeAndShapeInfo().GetShape(),
+            dictionary,
+            blankIndex,
+            error);
+    } catch (const Ort::Exception& exception) {
+        if (error) {
+            *error = QStringLiteral("ONNX Runtime OCR Rec inference failed: %1").arg(QString::fromUtf8(exception.what()));
+        }
+        return {};
+    } catch (const std::exception& exception) {
+        if (error) {
+            *error = QStringLiteral("ONNX OCR Rec inference failed: %1").arg(QString::fromUtf8(exception.what()));
+        }
+        return {};
+    }
+#endif
+}
+
 QVector<DetectionPrediction> postProcessDetectionPredictions(
     const QVector<DetectionPrediction>& predictions,
     const DetectionInferenceOptions& options)
@@ -2470,6 +3107,31 @@ QJsonObject detectionPredictionToJson(const DetectionPrediction& prediction)
     return object;
 }
 
+QJsonObject segmentationPredictionToJson(const SegmentationPrediction& prediction)
+{
+    QJsonObject object = detectionPredictionToJson(prediction.detection);
+    object.insert(QStringLiteral("taskType"), QStringLiteral("segmentation"));
+    object.insert(QStringLiteral("maskArea"), prediction.maskArea);
+    object.insert(QStringLiteral("maskThreshold"), prediction.maskThreshold);
+    object.insert(QStringLiteral("hasMask"), !prediction.mask.isNull());
+    return object;
+}
+
+QJsonObject ocrRecPredictionToJson(const OcrRecPrediction& prediction)
+{
+    QJsonArray tokens;
+    for (int token : prediction.tokens) {
+        tokens.append(token);
+    }
+    return QJsonObject{
+        {QStringLiteral("taskType"), QStringLiteral("ocr_recognition")},
+        {QStringLiteral("text"), prediction.text},
+        {QStringLiteral("confidence"), prediction.confidence},
+        {QStringLiteral("blankIndex"), prediction.blankIndex},
+        {QStringLiteral("tokens"), tokens}
+    };
+}
+
 QImage renderDetectionPredictions(
     const QString& imagePath,
     const QVector<DetectionPrediction>& predictions,
@@ -2518,14 +3180,168 @@ QImage renderDetectionPredictions(
     return output;
 }
 
+QImage renderSegmentationPredictions(
+    const QString& imagePath,
+    const QVector<SegmentationPrediction>& predictions,
+    QString* error)
+{
+    QImage image(imagePath);
+    if (image.isNull()) {
+        if (error) {
+            *error = QStringLiteral("Cannot render segmentation prediction image: %1").arg(imagePath);
+        }
+        return {};
+    }
+
+    QImage output = image.convertToFormat(QImage::Format_ARGB32);
+    QPainter painter(&output);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    for (const SegmentationPrediction& prediction : predictions) {
+        if (!prediction.mask.isNull()) {
+            const QColor fillColor = overlayColorForClass(prediction.detection.box.classId, 95);
+            const int maskHeight = qMin(output.height(), prediction.mask.height());
+            const int maskWidth = qMin(output.width(), prediction.mask.width());
+            for (int y = 0; y < maskHeight; ++y) {
+                const QRgb* maskLine = reinterpret_cast<const QRgb*>(prediction.mask.constScanLine(y));
+                for (int x = 0; x < maskWidth; ++x) {
+                    if (qAlpha(maskLine[x]) > 0) {
+                        painter.fillRect(QRect(x, y, 1, 1), fillColor);
+                    }
+                }
+            }
+        }
+
+        const double imageWidth = static_cast<double>(output.width());
+        const double imageHeight = static_cast<double>(output.height());
+        QRect rect(
+            qRound((prediction.detection.box.xCenter - prediction.detection.box.width / 2.0) * imageWidth),
+            qRound((prediction.detection.box.yCenter - prediction.detection.box.height / 2.0) * imageHeight),
+            qRound(prediction.detection.box.width * imageWidth),
+            qRound(prediction.detection.box.height * imageHeight));
+        rect = rect.intersected(output.rect());
+        if (rect.isEmpty()) {
+            continue;
+        }
+        painter.setPen(QPen(overlayColorForClass(prediction.detection.box.classId, 230), qMax(2, output.width() / 240)));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRect(rect);
+    }
+    painter.end();
+    return output;
+}
+
+QString pixelGlyph(QChar ch)
+{
+    ch = ch.toLower();
+    switch (ch.toLatin1()) {
+    case 'a': return QStringLiteral("01110""10001""10001""11111""10001""10001""10001");
+    case 'b': return QStringLiteral("11110""10001""10001""11110""10001""10001""11110");
+    case 'c': return QStringLiteral("01111""10000""10000""10000""10000""10000""01111");
+    case 'd': return QStringLiteral("11110""10001""10001""10001""10001""10001""11110");
+    case 'e': return QStringLiteral("11111""10000""10000""11110""10000""10000""11111");
+    case 'f': return QStringLiteral("11111""10000""10000""11110""10000""10000""10000");
+    case 'g': return QStringLiteral("01111""10000""10000""10111""10001""10001""01111");
+    case 'h': return QStringLiteral("10001""10001""10001""11111""10001""10001""10001");
+    case 'i': return QStringLiteral("11111""00100""00100""00100""00100""00100""11111");
+    case 'j': return QStringLiteral("00111""00010""00010""00010""00010""10010""01100");
+    case 'k': return QStringLiteral("10001""10010""10100""11000""10100""10010""10001");
+    case 'l': return QStringLiteral("10000""10000""10000""10000""10000""10000""11111");
+    case 'm': return QStringLiteral("10001""11011""10101""10101""10001""10001""10001");
+    case 'n': return QStringLiteral("10001""11001""10101""10011""10001""10001""10001");
+    case 'o': return QStringLiteral("01110""10001""10001""10001""10001""10001""01110");
+    case 'p': return QStringLiteral("11110""10001""10001""11110""10000""10000""10000");
+    case 'q': return QStringLiteral("01110""10001""10001""10001""10101""10010""01101");
+    case 'r': return QStringLiteral("11110""10001""10001""11110""10100""10010""10001");
+    case 's': return QStringLiteral("01111""10000""10000""01110""00001""00001""11110");
+    case 't': return QStringLiteral("11111""00100""00100""00100""00100""00100""00100");
+    case 'u': return QStringLiteral("10001""10001""10001""10001""10001""10001""01110");
+    case 'v': return QStringLiteral("10001""10001""10001""10001""10001""01010""00100");
+    case 'w': return QStringLiteral("10001""10001""10001""10101""10101""10101""01010");
+    case 'x': return QStringLiteral("10001""10001""01010""00100""01010""10001""10001");
+    case 'y': return QStringLiteral("10001""10001""01010""00100""00100""00100""00100");
+    case 'z': return QStringLiteral("11111""00001""00010""00100""01000""10000""11111");
+    case '0': return QStringLiteral("01110""10001""10011""10101""11001""10001""01110");
+    case '1': return QStringLiteral("00100""01100""00100""00100""00100""00100""01110");
+    case '2': return QStringLiteral("01110""10001""00001""00010""00100""01000""11111");
+    case '3': return QStringLiteral("11110""00001""00001""01110""00001""00001""11110");
+    case '4': return QStringLiteral("00010""00110""01010""10010""11111""00010""00010");
+    case '5': return QStringLiteral("11111""10000""10000""11110""00001""00001""11110");
+    case '6': return QStringLiteral("01110""10000""10000""11110""10001""10001""01110");
+    case '7': return QStringLiteral("11111""00001""00010""00100""01000""01000""01000");
+    case '8': return QStringLiteral("01110""10001""10001""01110""10001""10001""01110");
+    case '9': return QStringLiteral("01110""10001""10001""01111""00001""00001""01110");
+    default: return QStringLiteral("11111""10001""00010""00100""00000""00100""00100");
+    }
+}
+
+void drawPixelText(QImage* image, QPoint origin, const QString& text, const QColor& color, int scale)
+{
+    if (!image || image->isNull()) {
+        return;
+    }
+    int cursorX = origin.x();
+    for (const QChar ch : text.left(32)) {
+        if (ch.isSpace()) {
+            cursorX += 4 * scale;
+            continue;
+        }
+        const QString glyph = pixelGlyph(ch);
+        for (int row = 0; row < 7; ++row) {
+            for (int col = 0; col < 5; ++col) {
+                if (glyph.at(row * 5 + col) != QLatin1Char('1')) {
+                    continue;
+                }
+                for (int dy = 0; dy < scale; ++dy) {
+                    for (int dx = 0; dx < scale; ++dx) {
+                        const int x = cursorX + col * scale + dx;
+                        const int y = origin.y() + row * scale + dy;
+                        if (image->rect().contains(x, y)) {
+                            image->setPixelColor(x, y, color);
+                        }
+                    }
+                }
+            }
+        }
+        cursorX += 6 * scale;
+        if (cursorX >= image->width()) {
+            break;
+        }
+    }
+}
+
+QImage renderOcrRecPrediction(
+    const QString& imagePath,
+    const OcrRecPrediction& prediction,
+    QString* error)
+{
+    QImage image(imagePath);
+    if (image.isNull()) {
+        if (error) {
+            *error = QStringLiteral("Cannot render OCR Rec prediction image: %1").arg(imagePath);
+        }
+        return {};
+    }
+
+    QImage output(image.width(), image.height() + 40, QImage::Format_ARGB32);
+    output.fill(Qt::white);
+    QPainter painter(&output);
+    painter.drawImage(QPoint(0, 0), image.convertToFormat(QImage::Format_ARGB32));
+    painter.fillRect(QRect(0, image.height(), output.width(), 40), QColor(20, 20, 20));
+    painter.end();
+    const QString text = prediction.text.isEmpty() ? QStringLiteral("empty") : prediction.text;
+    drawPixelText(&output, QPoint(8, image.height() + 8), text, Qt::white, 3);
+    return output;
+}
+
 QJsonObject yoloOnnxExportConfig(const QString& sourceOnnxPath, const QString& exportPath, const QString& format)
 {
     const QStringList classNames = ultralyticsClassNames(sourceOnnxPath);
     QJsonObject report = loadUltralyticsTrainingReport(sourceOnnxPath);
+    const bool segmentation = report.value(QStringLiteral("backend")).toString() == QStringLiteral("ultralytics_yolo_segment");
     return QJsonObject{
         {QStringLiteral("format"), format},
-        {QStringLiteral("backend"), QStringLiteral("ultralytics_yolo_detect")},
-        {QStringLiteral("modelFamily"), QStringLiteral("yolo_detection")},
+        {QStringLiteral("backend"), segmentation ? QStringLiteral("ultralytics_yolo_segment") : QStringLiteral("ultralytics_yolo_detect")},
+        {QStringLiteral("modelFamily"), segmentation ? QStringLiteral("yolo_segmentation") : QStringLiteral("yolo_detection")},
         {QStringLiteral("scaffold"), false},
         {QStringLiteral("sourceCheckpoint"), sourceOnnxPath},
         {QStringLiteral("sourceOnnx"), sourceOnnxPath},
@@ -2533,7 +3349,7 @@ QJsonObject yoloOnnxExportConfig(const QString& sourceOnnxPath, const QString& e
         {QStringLiteral("classNames"), QJsonArray::fromStringList(classNames)},
         {QStringLiteral("trainingReport"), report},
         {QStringLiteral("postprocess"), QJsonObject{
-            {QStringLiteral("decoder"), QStringLiteral("yolo_v8_detection")},
+            {QStringLiteral("decoder"), segmentation ? QStringLiteral("yolo_v8_segmentation") : QStringLiteral("yolo_v8_detection")},
             {QStringLiteral("nms"), QStringLiteral("AITrain runtime")},
             {QStringLiteral("coordinates"), QStringLiteral("letterbox_to_original_image")}
         }}

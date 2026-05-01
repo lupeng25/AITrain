@@ -1,0 +1,119 @@
+# AITrain Studio Acceptance Runbook
+
+This runbook is the Phase 17-21 acceptance path. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, and runs small training smoke checks without adding new product features.
+
+## Acceptance Modes
+
+Run the unified smoke script from the repository root:
+
+```powershell
+.\tools\acceptance-smoke.ps1 -LocalBaseline
+.\tools\acceptance-smoke.ps1 -Package -SkipBuild
+.\tools\acceptance-smoke.ps1 -PublicDatasets
+.\tools\acceptance-smoke.ps1 -TensorRT
+```
+
+The same script is also installed into packaged builds under `tools\acceptance-smoke.ps1`. From a package root, run:
+
+```powershell
+.\tools\acceptance-smoke.ps1 -Package
+.\tools\acceptance-smoke.ps1 -TensorRT
+```
+
+All generated datasets, official downloads, trainer outputs, and smoke artifacts must stay under `.deps\` or another explicitly supplied work directory. Do not add them to source control.
+
+## Phase 17: Local Baseline Freeze
+
+Use this mode before changing release or acceptance documentation:
+
+```powershell
+.\tools\acceptance-smoke.ps1 -LocalBaseline
+```
+
+Expected result:
+
+- `harness-check.ps1` configures, builds, and passes CTest.
+- No build outputs, downloaded packages, model weights, datasets, or `.deps` files are staged.
+- Scaffold/baseline wording remains explicit in docs and UI text.
+
+For the isolated official PaddleOCR smoke, run:
+
+```powershell
+.\tools\phase16-ocr-official-smoke.ps1
+```
+
+This validates official PaddleOCR train/export wiring on a tiny generated dataset. It does not validate OCR accuracy.
+
+## Phase 18: Package Acceptance
+
+From the source tree, validate the install layout with:
+
+```powershell
+.\tools\acceptance-smoke.ps1 -Package -SkipBuild
+```
+
+From a packaged build directory, validate the already-installed layout with:
+
+```powershell
+.\tools\acceptance-smoke.ps1 -Package
+```
+
+Expected result:
+
+- `AITrainStudio.exe` and `aitrain_worker.exe` exist.
+- The three built-in plugins load through `aitrain_worker.exe --plugin-smoke`.
+- Runtime folders, docs, examples, Python trainers, requirements, and this acceptance script are present.
+- Worker self-check emits JSON and reports missing optional runtimes clearly.
+
+## Phase 19: TensorRT External Acceptance
+
+The current GTX 1060 / SM 61 laptop is not a valid TensorRT 10 acceptance machine. On this machine, `-TensorRT` should report `hardware-blocked` instead of pretending the engine path passed.
+
+Run on an RTX / SM 75+ Windows machine or matching cloud GPU:
+
+```powershell
+.\tools\acceptance-smoke.ps1 -TensorRT -WorkDir .deps\acceptance-tensorrt
+```
+
+Acceptance requires:
+
+- Worker self-check resolves CUDA, cuDNN, TensorRT, TensorRT Plugin, TensorRT ONNX Parser, and ONNX Runtime.
+- `aitrain_worker.exe --tensorrt-smoke <work-dir>` builds an engine and runs inference.
+- The result is recorded back in `docs\harness\current-status.md` only after a real RTX / SM 75+ pass.
+
+## Phase 20: Small Training Smoke
+
+Run:
+
+```powershell
+.\tools\acceptance-smoke.ps1 -PublicDatasets
+```
+
+The script tries to materialize Ultralytics official COCO8 / COCO8-seg datasets through the installed `ultralytics` package. If that fails, it falls back to the generated minimal datasets from `examples\create-minimal-datasets.py`.
+
+Expected artifacts:
+
+- YOLO detection: `best.pt`, ONNX export, and `ultralytics_training_report.json`.
+- YOLO segmentation: `best.pt`, ONNX export, and `ultralytics_training_report.json` with mask metrics when exposed.
+- OCR Rec small CTC: `paddleocr_rec_ctc.pdparams`, `paddleocr_rec_ctc.onnx`, `dict.txt`, and `paddleocr_rec_training_report.json`.
+- Official PaddleOCR Rec: `official_model\best_accuracy.pdparams`, `official_inference\inference.yml`, and `paddleocr_official_rec_report.json` when `phase16-ocr-official-smoke.ps1` is available.
+
+If a public dataset requires interactive registration, record it as an external dataset blocker. Do not block the required smoke path as long as the generated minimal dataset path passes.
+
+## Phase 21: Release Closeout
+
+Before marking a release baseline:
+
+```powershell
+.\tools\harness-context.ps1
+.\tools\harness-check.ps1
+.\tools\package-smoke.ps1 -SkipBuild
+.\tools\acceptance-smoke.ps1 -LocalBaseline -Package
+```
+
+Then check:
+
+- `docs\harness\current-status.md` remains the source of truth.
+- Phase 7 / Phase 10 TensorRT status stays external pending unless RTX / SM 75+ smoke passed.
+- Third-party backend license notes remain visible, especially Ultralytics AGPL / Enterprise constraints.
+- C++ tiny detector, segmentation baseline, and OCR baseline are still marked as scaffold/demo/test backends.

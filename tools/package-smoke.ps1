@@ -88,9 +88,12 @@ Assert-PathExists "examples\create-minimal-datasets.py" "minimal dataset generat
 Assert-PathExists "docs\harness\current-status.md" "harness docs"
 Assert-PathExists "docs\training-backends.md" "training backend docs"
 Assert-PathExists "docs\hardware-compatibility.md" "hardware compatibility docs"
+Assert-PathExists "docs\acceptance-runbook.md" "acceptance runbook"
 Assert-PathExists "python_trainers\mock_trainer.py" "Python trainer adapter mock"
 Assert-PathExists "python_trainers\requirements-yolo.txt" "YOLO Python requirements"
 Assert-PathExists "python_trainers\requirements-ocr.txt" "OCR Python requirements"
+Assert-PathExists "python_trainers\ocr_rec\paddleocr_official_adapter.py" "Official PaddleOCR adapter"
+Assert-PathExists "tools\acceptance-smoke.ps1" "acceptance smoke script"
 
 $onnxRuntimeRootDll = Join-Path $prefixFull "onnxruntime.dll"
 $onnxRuntimeFolderDll = Join-Path $prefixFull "runtimes\onnxruntime\onnxruntime.dll"

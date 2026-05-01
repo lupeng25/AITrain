@@ -18,9 +18,17 @@ This file is the source of truth for phase status in new AI coding conversations
 | Phase 8: Python Trainer Adapter and environment management | Done | Worker can launch a Python trainer subprocess, pass a JSON request, read JSON Lines log/progress/metric/artifact/completed/failed messages, propagate failures, and report Python/Ultralytics/PaddleOCR/PaddlePaddle availability in environment checks. The shipped `python_mock` trainer is a scaffold protocol fixture, not real model training. |
 | Phase 9: Official YOLO detection training integration | Done on local CPU smoke | Worker routes `trainingBackend=ultralytics_yolo_detect` / `ultralytics_yolo` to `python_trainers/detection/ultralytics_trainer.py`. The adapter normalizes YOLO data yaml, calls official `ultralytics.YOLO(...).train()`, exports ONNX, forwards metrics/artifacts, and has deterministic Worker coverage with a fake official API package. Local `.deps` Python has Ultralytics 8.4.45, Torch 2.11.0 CPU, ONNX 1.21.0, and ONNX Runtime 1.25.1; a 1-epoch CPU smoke with `yolov8n.yaml` produced `best.pt`, `best.onnx`, and `ultralytics_training_report.json`. |
 | Phase 10: Real detection ONNX inference and conversion | Done for ONNX Runtime; TensorRT external GPU pending | C++ ONNX Runtime can now run Ultralytics YOLO detection ONNX models with letterbox preprocessing, YOLOv8-style output decode, confidence filtering, NMS, class mapping from the Phase 9 data yaml/report, prediction JSON, and overlay rendering. `exportDetectionCheckpoint(..., format=onnx)` can also copy a real YOLO ONNX and write an AITrain sidecar; TensorRT conversion accepts ONNX sources but remains hardware-blocked on this GTX 1060 / SM 61 machine. |
-| Phase 11: Official YOLO segmentation training integration | Done on local CPU smoke | Worker routes `trainingBackend=ultralytics_yolo_segment` to `python_trainers/segmentation/ultralytics_trainer.py`, which reuses the official Ultralytics adapter with segmentation defaults. A 1-epoch CPU smoke with a minimal polygon dataset and `yolov8n-seg.yaml` produced `best.pt`, `best.onnx`, `ultralytics_training_report.json`, and mask metrics (`maskPrecision`, `maskRecall`, `maskMap50`, `maskMap50_95`). C++ segmentation ONNX mask postprocess is still a future enhancement; current C++ mask training remains scaffold. |
-| Phase 12: PaddlePaddle OCR Rec training integration | Done on local CPU smoke | Worker routes `trainingBackend=paddleocr_rec` to `python_trainers/ocr_rec/paddleocr_trainer.py`. Local `.deps` Python has PaddlePaddle 3.3.1 and PaddleOCR 3.5.0 installed. A minimal PaddleOCR-style Rec dataset trained for 1 epoch on CPU and produced `paddleocr_rec_ctc.pdparams`, `dict.txt`, `paddleocr_rec_training_report.json`, and real `loss`/`accuracy`/`editDistance` metrics. This is a small PaddlePaddle CTC Rec trainer compatible with PaddleOCR-style data, not a full PP-OCRv4 official config/export pipeline yet. |
+| Phase 11: Official YOLO segmentation training integration | Done on local CPU smoke | Worker routes `trainingBackend=ultralytics_yolo_segment` to `python_trainers/segmentation/ultralytics_trainer.py`, which reuses the official Ultralytics adapter with segmentation defaults. A 1-epoch CPU smoke with a minimal polygon dataset and `yolov8n-seg.yaml` produced `best.pt`, `best.onnx`, `ultralytics_training_report.json`, and mask metrics (`maskPrecision`, `maskRecall`, `maskMap50`, `maskMap50_95`). C++ ONNX Runtime now decodes YOLOv8-seg boxes, mask coefficients, prototype masks, NMS, prediction JSON, and mask overlay for local smoke artifacts; current C++ segmentation training remains scaffold. |
+| Phase 12: PaddlePaddle OCR Rec training integration | Done on local CPU smoke | Worker routes `trainingBackend=paddleocr_rec` to `python_trainers/ocr_rec/paddleocr_trainer.py`. Local `.deps` Python has PaddlePaddle 3.3.1 and PaddleOCR 3.5.0 installed. A minimal PaddleOCR-style Rec dataset trained for 1 epoch on CPU and produced `paddleocr_rec_ctc.pdparams`, `paddleocr_rec_ctc.onnx`, `dict.txt`, `paddleocr_rec_training_report.json`, and real `loss`/`accuracy`/`editDistance` metrics. C++ ONNX Runtime can run the exported CTC model and perform greedy decode. This remains a small PaddlePaddle CTC Rec trainer, not a full PP-OCRv4 official config/export pipeline yet. |
 | Phase 13: Productization and acceptance | Local package/docs/examples complete; external acceptance pending | Added Python requirements, training backend docs, hardware compatibility docs, minimal dataset generator, package layout checks for docs/examples/requirements, and README/protocol updates. Generated Phase 13 examples ran direct CPU trainer smoke for YOLO detection, YOLO segmentation, and PaddlePaddle OCR Rec. `harness-check.ps1` and `package-smoke.ps1 -SkipBuild` pass locally. Clean Windows machine validation and RTX / SM 75+ TensorRT acceptance remain external tasks. |
+| Phase 14: Official PaddleOCR Rec adapter | Done for adapter/config smoke; official long run environment-isolated | Worker routes `trainingBackend=paddleocr_rec_official` / `paddleocr_ppocrv4_rec` to `python_trainers/ocr_rec/paddleocr_official_adapter.py`. The adapter turns AITrain PaddleOCR-style Rec data into PP-OCRv4 train/val lists, dictionary copy, generated config, report, and reproducible train/export command files. `prepareOnly=true` passed locally. Full official `tools/train.py` is available through `runOfficial=true` and a PaddleOCR source checkout, but should be run in an isolated OCR Python environment; the shared `.deps` Python currently exposes a PaddlePaddle/PyTorch DLL conflict through `albumentations` when official training imports both stacks. |
+| Phase 15: Inference result UI summary | Done | GUI inference status now reads existing `inference_predictions.json` and summarizes task type, count, first detection/segmentation class and confidence, segmentation mask area, or OCR text/confidence. Worker inference protocol, overlay artifact paths, and model postprocess code are unchanged. |
+| Phase 16: Isolated official PaddleOCR Rec smoke | Done on local CPU smoke | Added `tools/phase16-ocr-official-smoke.ps1`, which creates/uses an isolated OCR Python 3.13 embeddable environment, installs PaddlePaddle plus the official PaddleOCR source requirements, verifies `tools/train.py`, generates a minimal OCR Rec dataset, runs official PP-OCRv4 Rec training for 1 epoch on CPU through `paddleocr_rec_official`, exports the official inference model with `tools/export_model.py`, and verifies `best_accuracy.pdparams`, `official_inference/inference.yml`, and report metrics. |
+| Phase 17: Local baseline freeze | Done locally | Reviewed the dirty worktree as Phase 16 / inference / docs work, checked key diffs, ran `git diff --check`, `tools\harness-check.ps1`, `tools\package-smoke.ps1 -SkipBuild`, and `tools\phase16-ocr-official-smoke.ps1`. Only real local passes are recorded; scaffold/baseline wording remains explicit and TensorRT stays external pending. |
+| Phase 18: Acceptance runbook and unified smoke script | Done locally | Added `docs\acceptance-runbook.md` and `tools\acceptance-smoke.ps1`, installed them into the package layout, and extended package smoke to assert their presence. Source and packaged `-Package` modes pass, and failure paths distinguish missing layout, missing Python modules, missing GPU, and hardware-blocked TensorRT. |
+| Phase 19: TensorRT external acceptance preparation | Prepared; local hardware-blocked | `tools\acceptance-smoke.ps1 -TensorRT` runs Worker self-check, detects GPU compute capability, and stops with `hardware-blocked` on the local GTX 1060 / SM 61. Phase 7 / Phase 10 TensorRT acceptance must remain pending until a real RTX / SM 75+ `--tensorrt-smoke` pass is recorded. |
+| Phase 20: Small training / inference / conversion acceptance | Done on generated local smoke; public dataset materialization fallback used locally | `tools\acceptance-smoke.ps1 -PublicDatasets` generates minimal datasets, attempts official Ultralytics COCO8 / COCO8-seg materialization, and falls back to generated datasets when materialization is unavailable. The local smoke trained YOLO detection and segmentation for 1 epoch through the official Ultralytics adapters, exported ONNX artifacts and reports, trained/exported the PaddlePaddle OCR CTC backend, ran C++ ONNX Runtime tests, and reran the isolated official PaddleOCR train/export smoke. |
+| Phase 21: Release closeout | Done locally; external machine checks pending | README, training backend docs, hardware compatibility notes, acceptance runbook, current status, and the long-range implementation plan now describe the Phase 17-21 delivery baseline. No Worker JSON protocol, SQLite schema, plugin interface, or GUI architecture changes were made for this phase set. Clean Windows packaged validation and RTX / SM 75+ TensorRT remain external acceptance items. |
 
 ## Local Hardware Note
 
@@ -44,22 +52,42 @@ Next external acceptance task: validate the packaged build on a clean Windows ma
 - Phase 9 is complete on this machine for a CPU smoke using the installed official Ultralytics package; keep license constraints visible before redistribution
 - Phase 10 ONNX Runtime inference is complete for real YOLO detection ONNX; TensorRT engine acceptance still needs RTX / SM 75+
 - Phase 11 official YOLO segmentation training is complete on local CPU smoke
-- Phase 12 PaddlePaddle OCR Rec training is complete on local CPU smoke; full PP-OCRv4 config/export is still future work
+- Phase 12 PaddlePaddle OCR Rec training and C++ ONNX CTC greedy decode are complete on local CPU smoke; full PP-OCRv4 config/export is still future work
 - Phase 13 local productization is complete: docs, generated sample datasets, Python dependency files, hardware compatibility notes, package smoke verification
+- Phase 14 official PaddleOCR Rec adapter/config generation is complete; full official training should use an isolated OCR Python environment or a clean machine to avoid PaddlePaddle/PyTorch DLL conflicts in the shared `.deps` Python
+- Phase 15 GUI inference summaries are complete for detection, segmentation, and OCR recognition prediction JSON
+- Phase 16 official PaddleOCR Rec train/export smoke is complete in an isolated OCR Python environment
+- Phase 17 local baseline freeze is complete; the checked worktree remains a local delivery baseline with TensorRT still external pending
+- Phase 18 acceptance runbook and `tools\acceptance-smoke.ps1` are complete and installed into the package layout
+- Phase 19 TensorRT preparation is complete; local `-TensorRT` correctly reports `hardware-blocked` on SM 61
+- Phase 20 generated-data training / inference / conversion acceptance is complete locally; public Ultralytics dataset materialization fell back to generated datasets on this machine
+- Phase 21 release closeout documentation is complete locally; clean Windows and RTX TensorRT remain external acceptance tasks
 - keep training logic inside core/plugin/Worker boundaries, not in `MainWindow`
 - keep C++ tiny detector as a scaffold/demo/test backend until the Python path is stable
 - preserve the external TensorRT acceptance checklist for a future RTX / SM 75+ machine
 
-After each small step, run:
+For local baseline acceptance, run:
 
 ```powershell
-.\tools\harness-check.ps1
+.\tools\acceptance-smoke.ps1 -LocalBaseline
 ```
 
 For packaging smoke checks, run:
 
 ```powershell
-.\tools\package-smoke.ps1
+.\tools\acceptance-smoke.ps1 -Package -SkipBuild
+```
+
+For small generated-data training smoke, run:
+
+```powershell
+.\tools\acceptance-smoke.ps1 -PublicDatasets
+```
+
+For official PaddleOCR Rec smoke in an isolated OCR environment, run:
+
+```powershell
+.\tools\phase16-ocr-official-smoke.ps1
 ```
 
 For ZIP package generation, run:
@@ -77,8 +105,7 @@ python examples\create-minimal-datasets.py --output .deps\examples-smoke
 When an RTX / SM 75+ machine is available, resume Phase 7 acceptance with:
 
 ```powershell
-.\aitrain_worker.exe --self-check
-.\aitrain_worker.exe --tensorrt-smoke <work-dir>
+.\tools\acceptance-smoke.ps1 -TensorRT -WorkDir .deps\acceptance-tensorrt
 ```
 
 ## Non-Negotiable Notes
@@ -89,8 +116,13 @@ When an RTX / SM 75+ machine is available, resume Phase 7 acceptance with:
 - Real training should now be implemented through Worker-managed Python trainer subprocesses; do not embed Python inside the GUI process.
 - Phase 5 is complete only as a segmentation scaffold/baseline loop; it is not real YOLO segmentation training.
 - Phase 6 is complete only as an OCR recognition scaffold/baseline loop; it is not real CRNN/CTC OCR training.
-- Phase 11 adds official YOLO segmentation training/export, but C++ segmentation ONNX mask postprocess is not complete yet.
-- Phase 12 adds a real PaddlePaddle CTC OCR Rec trainer for PaddleOCR-style data, but it is not a full PaddleOCR PP-OCRv4 official training/export pipeline yet.
+- Phase 11 adds official YOLO segmentation training/export and C++ ONNX Runtime mask postprocess for YOLOv8-seg smoke models.
+- Phase 12 adds a real PaddlePaddle CTC OCR Rec trainer and C++ ONNX CTC greedy decode for PaddleOCR-style data, but it is not a full PaddleOCR PP-OCRv4 official training/export pipeline yet.
 - Phase 13 local productization is complete, but clean-machine and RTX TensorRT acceptance still require external hardware/environment.
+- Phase 14 adds the official PaddleOCR PP-OCRv4 Rec adapter. Prepare-only artifacts are not trained model artifacts.
+- Phase 15 is UI-only and must continue to read Worker artifacts instead of duplicating inference logic in `MainWindow`.
+- Phase 16 validates official PaddleOCR train/export smoke only on a tiny dataset; it proves wiring and artifacts, not OCR accuracy.
+- Phase 17-21 add acceptance scripts, docs, and smoke coverage only; they do not change public Worker JSON protocol, SQLite schema, plugin interfaces, or GUI architecture.
+- Phase 20 generated-data smoke proves integration and artifacts, not useful model accuracy.
 - Keep long-running execution in `aitrain_worker`.
 - Keep model-specific behavior behind core/plugin/Worker boundaries, not in `MainWindow`.

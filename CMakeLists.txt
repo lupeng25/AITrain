@@ -273,9 +273,15 @@ install(DIRECTORY examples DESTINATION .)
 install(FILES
     docs/training-backends.md
     docs/hardware-compatibility.md
+    docs/acceptance-runbook.md
     DESTINATION docs
 )
 install(DIRECTORY python_trainers DESTINATION .)
+install(FILES
+    tools/acceptance-smoke.ps1
+    tools/phase16-ocr-official-smoke.ps1
+    DESTINATION tools
+)
 
 if(AITRAIN_WITH_ONNXRUNTIME)
     install(FILES ${AITRAIN_ONNXRUNTIME_DLL} DESTINATION .)

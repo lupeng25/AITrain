@@ -18,8 +18,8 @@ AITrain Studio 已具备可运行的平台骨架：Qt Widgets GUI、独立 Worke
 - 阶段 8 已完成 Python Trainer Adapter，真实训练优先通过 Worker 启动独立 Python 子进程实现。
 - 阶段 9 已接入 Ultralytics YOLO detection 官方训练，并完成本机 CPU 小数据 smoke。
 - 阶段 10 已完成真实 YOLO detection ONNX Runtime 推理和 ONNX 复制导出；TensorRT 转换仍需外部 RTX / SM 75+ 验收。
-- 阶段 11 已接入 Ultralytics YOLO segmentation 官方训练，并完成本机 CPU 小数据 smoke；C++ segmentation ONNX mask 后处理仍是后续增强。
-- 阶段 12 已接入 PaddlePaddle OCR Rec CTC 训练，并完成本机 CPU 小数据 smoke；它兼容 PaddleOCR-style Rec 数据，但还不是完整 PP-OCRv4 官方训练配置和导出链路。
+- 阶段 11 已接入 Ultralytics YOLO segmentation 官方训练，并完成本机 CPU 小数据 smoke；C++ ONNX Runtime 已补 YOLOv8-seg mask 后处理和 overlay。
+- 阶段 12 已接入 PaddlePaddle OCR Rec CTC 训练，并完成本机 CPU 小数据 smoke；C++ ONNX Runtime 已补 CTC greedy decode。它兼容 PaddleOCR-style Rec 数据，但还不是完整 PP-OCRv4 官方训练配置和导出链路。
 - 阶段 13 的本机产品化目标是文档、依赖、样例数据生成、硬件兼容矩阵、打包 smoke 和外部 RTX 验收清单。
 
 ## 2. 实施原则
@@ -50,7 +50,7 @@ AITrain Studio 已具备可运行的平台骨架：Qt Widgets GUI、独立 Worke
 | 阶段 9 | 已完成本机 CPU smoke | 官方 YOLO 检测训练接入 | Ultralytics detection 训练、ONNX 导出、report 产物可用 |
 | 阶段 10 | ONNX Runtime 已完成，TensorRT 外部 GPU 待验收 | 真实检测 ONNX 推理与转换 | YOLO decoder、NMS、类别映射、overlay、ONNX sidecar 可用 |
 | 阶段 11 | 已完成本机 CPU smoke | 官方 YOLO 分割训练接入 | Ultralytics segmentation 训练、ONNX 导出、mask 指标可用 |
-| 阶段 12 | 已完成本机 CPU smoke | PaddlePaddle OCR Rec 训练接入 | PaddlePaddle CTC Rec 训练、checkpoint、dict、accuracy 指标可用 |
+| 阶段 12 | 已完成本机 CPU smoke | PaddlePaddle OCR Rec 训练接入 | PaddlePaddle CTC Rec 训练、checkpoint、ONNX、dict、accuracy、C++ decode 可用 |
 | 阶段 13 | 本机产品化完成，外部验收待补 | 产品化与验收 | 样例数据、文档、兼容矩阵、打包 smoke 已完成；外部 GPU / 干净机器验收待补 |
 
 ## 4. 已完成阶段复盘
@@ -197,7 +197,8 @@ AITrain Studio 已具备可运行的平台骨架：Qt Widgets GUI、独立 Worke
 - trainer 复用 Ultralytics 官方 Python API，默认模型为 `yolov8n-seg.yaml`。
 - 已解析 mask 指标：`maskPrecision`、`maskRecall`、`maskMap50`、`maskMap50_95`。
 - 已用最小 polygon segmentation 数据集在 CPU 上跑通 1 epoch smoke，产出 `best.pt`、`best.onnx` 和 `ultralytics_training_report.json`。
-- C++ segmentation ONNX mask 后处理仍未完成，当前 C++ segmentation 训练后端仍是 scaffold。
+- C++ ONNX Runtime 已支持 YOLOv8-seg 后处理：boxes、mask coefficients、prototype masks、mask resize/crop、NMS、prediction JSON 和 overlay。
+- 当前 C++ segmentation 训练后端仍是 scaffold。
 
 验收状态：已完成本机 CPU smoke。
 
@@ -223,15 +224,17 @@ AITrain Studio 已具备可运行的平台骨架：Qt Widgets GUI、独立 Worke
 - 已输出 `loss`、`accuracy`、`editDistance`。
 - 已归一化 artifact：
   - `paddleocr_rec_ctc.pdparams`
+  - `paddleocr_rec_ctc.onnx`
   - `dict.txt`
   - `paddleocr_rec_training_report.json`
 - 已用最小 OCR Rec 数据集在 CPU 上跑通 1 epoch smoke。
+- C++ ONNX Runtime 已支持当前 CTC ONNX 模型的 resize / grayscale / logits decode / CTC greedy decode / preview overlay。
 
 明确边界：
 
 - 当前实现是 PaddlePaddle CTC Rec trainer，兼容 PaddleOCR-style 数据。
 - 当前实现不是完整 PP-OCRv4 官方训练配置。
-- 当前还未完成 PaddleOCR 官方 inference model 导出、ONNX 导出和 C++ OCR ONNX Runtime decode。
+- 当前还未完成 PaddleOCR 官方 inference model 导出和完整 PP-OCRv4 官方配置。
 
 验收状态：已完成本机 CPU smoke。
 
@@ -239,7 +242,7 @@ AITrain Studio 已具备可运行的平台骨架：Qt Widgets GUI、独立 Worke
 
 - 接入 PaddleOCR 官方训练配置生成。
 - 支持官方 inference model 导出。
-- 补 OCR ONNX Runtime 推理：resize / pad、logits decode、CTC greedy decode、preview。
+- 后续补完整 PaddleOCR 官方 inference model 导出和更完整的 OCR 预处理策略。
 - 支持 checkpoint resume。
 
 ## 11. 阶段 13：产品化与验收
@@ -345,3 +348,173 @@ AITrain Studio 已具备可运行的平台骨架：Qt Widgets GUI、独立 Worke
 - 找到 RTX / SM 75+ 机器后运行 `aitrain_worker.exe --self-check`。
 - 运行 `aitrain_worker.exe --tensorrt-smoke <work-dir>`。
 - 补记外部 GPU 验收结果，并把 `docs/harness/current-status.md` 中阶段 7/10 的 TensorRT 状态从 pending 更新为 accepted 或 done。
+
+## 15. 阶段 14：官方 PaddleOCR Rec 适配器
+
+目标：在保留现有 `paddleocr_rec` 小型 CTC 后端的前提下，新增官方 PaddleOCR / PP-OCRv4 Rec 链路适配层。
+
+已完成：
+
+- 新增 `python_trainers/ocr_rec/paddleocr_official_adapter.py`。
+- Worker 新增后端路由：`paddleocr_rec_official`、`paddleocr_ppocrv4_rec`。
+- adapter 可把 AITrain PaddleOCR-style Rec 数据转换为官方 PaddleOCR 训练需要的材料：`train_list.txt`、`val_list.txt`、`dict.txt`、`aitrain_ppocrv4_rec.yml`、`paddleocr_official_rec_report.json`、`run_official_train.ps1`、`run_official_export.ps1`。
+- `prepareOnly=true` 已完成本机 smoke，用于验证配置生成、数据列表、报告和 Worker 事件链路。
+- `runOfficial=true` 或 `prepareOnly=false` 时，可在提供 `paddleOcrRepoPath` 或 `AITRAIN_PADDLEOCR_REPO` 后调用官方 `tools/train.py` 与 `tools/export_model.py`。
+
+明确边界：
+
+- `prepareOnly=true` 只代表官方配置和命令准备完成，不代表已经训练出官方模型。
+- 当前共享 `.deps` Python 同时装有 PaddlePaddle 和 PyTorch；官方 PaddleOCR 训练脚本经 `albumentations` 导入 PyTorch 后会触发 Windows DLL 冲突。完整官方长训练应在隔离 OCR Python 环境或干净机器上运行。
+- 当前 `paddleocr_rec` 小型 CTC 后端仍保留，用于快速 smoke、C++ ONNX CTC decode 验证和不依赖官方仓库的本机闭环。
+
+验收：
+
+```powershell
+.\.deps\python-3.13.13-embed-amd64\python.exe -m py_compile python_trainers\ocr_rec\paddleocr_official_adapter.py
+.\.deps\python-3.13.13-embed-amd64\python.exe python_trainers\ocr_rec\paddleocr_official_adapter.py --request .deps\phase14-ocr-smoke\paddleocr_rec_official_request.json
+```
+
+## 16. 阶段 15：推理结果 UI 可读性增强
+
+目标：不改变 Worker 推理入口、不把推理逻辑放入 GUI，只让 GUI 更清楚地区分 detection、segmentation 和 OCR recognition 的结果类型。
+
+已完成：
+
+- `inferenceResult` 显示 `taskType`。
+- 读取 `inference_predictions.json` 后生成简短摘要：detection 显示目标数量和首个类别/置信度；segmentation 显示实例数量、首个类别/置信度和 mask area；OCR recognition 显示识别文本和置信度。
+- overlay 显示链路保持不变。
+- 若 JSON 缺失或格式异常，GUI 给出清晰提示，但不影响 artifact 记录。
+
+## 17. 阶段 16：隔离 OCR 官方训练环境验收
+
+目标：在不混用 YOLO / PyTorch 环境的前提下，验证官方 PaddleOCR PP-OCRv4 Rec 训练和导出链路可以真实跑通。
+
+已完成：
+
+- 新增 `tools/phase16-ocr-official-smoke.ps1`。
+- 脚本会创建或复用 `.deps/python-3.13.13-ocr-amd64` 隔离 Python。
+- 脚本会安装 PaddlePaddle 与官方 PaddleOCR 源码仓库 requirements。
+- 脚本会检查官方 `tools/train.py` 可导入。
+- 脚本会生成最小 OCR Rec 数据集，并通过 `paddleocr_rec_official` 后端运行 1 epoch CPU 官方训练。
+- 脚本会调用官方 `tools/export_model.py` 生成 `official_inference`。
+- adapter 已解析官方 stdout 指标并写入 report / Worker metric 事件：
+  - `loss`
+  - `ctcLoss`
+  - `nrtrLoss`
+  - `accuracy`
+  - `normalizedEditDistance`
+
+本机验收产物：
+
+- `official_model/best_accuracy.pdparams`
+- `official_inference/inference.yml`
+- `paddleocr_official_rec_report.json`
+
+验收命令：
+
+```powershell
+.\tools\phase16-ocr-official-smoke.ps1
+```
+
+明确边界：
+
+- 阶段 16 证明官方 PaddleOCR 训练/导出链路和 AITrain Worker adapter 能闭环。
+- 阶段 16 使用极小样例数据，只验证 wiring、artifact 和 report，不代表 OCR 精度。
+- 后续若要让 C++ 直接消费官方 Paddle inference model，还需要继续实现 Paddle inference runtime 或 Paddle2ONNX 转换链路。
+
+## 18. 阶段 17-21：交付验收基线
+
+目标：不新增产品训练功能，只把当前本机 smoke 成果收敛为可交付、可复现、可外部验收的基线。
+
+### 18.1 阶段 17：本机基线冻结
+
+已完成：
+
+- 审阅当前未提交改动，确认属于 Phase 16、推理增强、验收脚本和文档收口范围。
+- 运行 `git diff --check`，仅存在 Git 换行提示，无空白错误。
+- 运行 `.\tools\harness-check.ps1` 并通过。
+- 运行 `.\tools\package-smoke.ps1 -SkipBuild` 并通过。
+- 运行 `.\tools\phase16-ocr-official-smoke.ps1` 并通过，产出官方 PaddleOCR tiny smoke checkpoint、inference config 和 report。
+
+边界：
+
+- C++ tiny detector、segmentation baseline、OCR baseline 仍是 scaffold / baseline。
+- Phase 7 / Phase 10 TensorRT 不得标记为完成，仍需 RTX / SM 75+ 真机验收。
+
+### 18.2 阶段 18：验收包和一键验收脚本
+
+新增产物：
+
+- `docs/acceptance-runbook.md`：记录本机、包体、公开/生成数据、TensorRT 外部验收流程。
+- `tools/acceptance-smoke.ps1`：统一入口，支持 `-LocalBaseline`、`-Package`、`-PublicDatasets`、`-TensorRT`。
+- CMake install 和 `tools/package-smoke.ps1` 已补充验收脚本与 runbook 的包体检查。
+
+本机验收：
+
+```powershell
+.\tools\acceptance-smoke.ps1 -LocalBaseline
+.\tools\acceptance-smoke.ps1 -Package -SkipBuild
+.\tools\harness-check.ps1
+```
+
+包体目录也可直接运行：
+
+```powershell
+.\tools\acceptance-smoke.ps1 -Package
+```
+
+### 18.3 阶段 19：TensorRT 外部验收准备
+
+已完成：
+
+- `tools\acceptance-smoke.ps1 -TensorRT` 会先运行 Worker self-check。
+- 脚本会检测 `nvidia-smi` 和 GPU compute capability。
+- 当前 GTX 1060 / SM 61 上明确输出 `hardware-blocked`，不伪造通过。
+- 在 RTX / SM 75+ 上，脚本会继续运行 `aitrain_worker.exe --tensorrt-smoke <work-dir>`。
+
+外部验收命令：
+
+```powershell
+.\tools\acceptance-smoke.ps1 -TensorRT -WorkDir .deps\acceptance-tensorrt
+```
+
+### 18.4 阶段 20：小规模真实数据训练、推理、转换验收
+
+已完成：
+
+- `tools\acceptance-smoke.ps1 -PublicDatasets` 会生成最小 detection、segmentation、OCR Rec 数据集。
+- 脚本会尝试通过 Ultralytics 官方包 materialize COCO8 / COCO8-seg；当前本机 materialization 不可用时回退到生成数据集。
+- YOLO detection 通过 `ultralytics_yolo_detect` adapter 跑通 1 epoch CPU smoke，产出 `best.pt`、ONNX 和 `ultralytics_training_report.json`。
+- YOLO segmentation 通过 `ultralytics_yolo_segment` adapter 跑通 1 epoch CPU smoke，产出 `best.pt`、ONNX 和 mask 指标 report。
+- OCR Rec 小型 PaddlePaddle CTC backend 跑通 1 epoch CPU smoke，产出 `.pdparams`、ONNX、`dict.txt` 和 report。
+- C++ ONNX Runtime 相关 CTest 继续覆盖 detection、segmentation mask postprocess、OCR CTC decode 和 overlay 链路。
+- 隔离官方 PaddleOCR Rec train/export smoke 再次通过。
+
+边界：
+
+- 生成数据集和 tiny 官方数据集只验证 wiring、artifact、report、转换和推理链路，不代表真实精度。
+- 若 ICDAR2015 等公开数据集需要注册或交互下载，应记录为外部数据获取阻塞，不影响本阶段必过 smoke。
+
+### 18.5 阶段 21：发布前收口
+
+已完成：
+
+- README 增加 Phase 17-21 验收入口。
+- `docs/training-backends.md` 增加统一训练 smoke 和 PaddleOCR 官方隔离环境说明。
+- `docs/hardware-compatibility.md` 改为使用 `tools\acceptance-smoke.ps1 -TensorRT` 作为外部 TensorRT 验收入口。
+- `docs/harness/current-status.md` 增加 Phase 17-21 状态，并继续把 TensorRT 标记为 external pending / hardware-blocked。
+- `docs/acceptance-runbook.md` 作为交付验收 runbook 保留。
+
+最终本机验收命令：
+
+```powershell
+.\tools\harness-context.ps1
+.\tools\harness-check.ps1
+.\tools\package-smoke.ps1 -SkipBuild
+.\tools\acceptance-smoke.ps1 -LocalBaseline -Package
+```
+
+仍待外部完成：
+
+- 在干净 Windows 机器上验证 ZIP 包启动、Worker self-check、plugin smoke 和 Python 环境提示。
+- 在 RTX / SM 75+ 机器上运行真实 TensorRT smoke，并将结果回写 `docs/harness/current-status.md`。

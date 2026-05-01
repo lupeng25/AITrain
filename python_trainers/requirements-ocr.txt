@@ -1,4 +1,6 @@
 paddlepaddle>=3.3,<4
 paddleocr>=3.5,<4
+onnx>=1.16
 numpy>=1.26
 Pillow>=10
+PyYAML>=6

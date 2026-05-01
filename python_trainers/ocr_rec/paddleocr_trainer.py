@@ -91,6 +91,55 @@ def decode(sequence: list[int], chars: list[str]) -> str:
     return "".join(output)
 
 
+def create_model(paddle_module: Any, width: int, height: int, max_text_length: int, class_count: int) -> Any:
+    class OcrRecCtcModel(paddle_module.nn.Layer):
+        def __init__(self) -> None:
+            super().__init__()
+            self.flatten = paddle_module.nn.Flatten()
+            self.head = paddle_module.nn.Linear(width * height, max_text_length * class_count)
+
+        def forward(self, image: Any) -> Any:
+            logits = self.head(self.flatten(image))
+            return paddle_module.reshape(logits, [-1, max_text_length, class_count])
+
+    return OcrRecCtcModel()
+
+
+def export_linear_ctc_onnx(model: Any, path: Path, width: int, height: int, max_text_length: int, class_count: int) -> None:
+    import onnx
+    from onnx import TensorProto, helper, numpy_helper
+
+    state = model.state_dict()
+    weight = state["head.weight"].numpy().astype("float32")
+    bias = state["head.bias"].numpy().astype("float32")
+    shape = np.asarray([-1, max_text_length, class_count], dtype="int64")
+
+    graph = helper.make_graph(
+        [
+            helper.make_node("Flatten", ["image"], ["flat"], axis=1),
+            helper.make_node("MatMul", ["flat", "head.weight"], ["linear"]),
+            helper.make_node("Add", ["linear", "head.bias"], ["linear_bias"]),
+            helper.make_node("Reshape", ["linear_bias", "output_shape"], ["logits"]),
+        ],
+        "aitrain_paddleocr_rec_ctc",
+        [helper.make_tensor_value_info("image", TensorProto.FLOAT, ["batch", 1, height, width])],
+        [helper.make_tensor_value_info("logits", TensorProto.FLOAT, ["batch", max_text_length, class_count])],
+        [
+            numpy_helper.from_array(weight, name="head.weight"),
+            numpy_helper.from_array(bias, name="head.bias"),
+            numpy_helper.from_array(shape, name="output_shape"),
+        ],
+    )
+    model_proto = helper.make_model(
+        graph,
+        producer_name="AITrainStudio",
+        opset_imports=[helper.make_operatorsetid("", 11)],
+    )
+    model_proto.ir_version = 8
+    onnx.checker.check_model(model_proto)
+    onnx.save(model_proto, str(path))
+
+
 def run(request: dict[str, Any]) -> int:
     try:
         import paddle
@@ -130,10 +179,7 @@ def run(request: dict[str, Any]) -> int:
     label_lengths_np = np.asarray(label_lengths, dtype="int64")
 
     paddle.seed(2026)
-    model = paddle.nn.Sequential(
-        paddle.nn.Flatten(),
-        paddle.nn.Linear(width * height, max_text_length * class_count),
-    )
+    model = create_model(paddle, width, height, max_text_length, class_count)
     optimizer = paddle.optimizer.Adam(learning_rate=learning_rate, parameters=model.parameters())
     ctc_loss = paddle.nn.CTCLoss(blank=0, reduction="mean")
 
@@ -143,7 +189,7 @@ def run(request: dict[str, Any]) -> int:
     final_edit_distance = 0.0
     for epoch in range(1, epochs + 1):
         model.train()
-        logits = model(paddle.to_tensor(x_np)).reshape([len(samples), max_text_length, class_count])
+        logits = model(paddle.to_tensor(x_np))
         log_probs = paddle.nn.functional.log_softmax(logits, axis=2).transpose([1, 0, 2])
         loss = ctc_loss(
             log_probs,
@@ -157,7 +203,7 @@ def run(request: dict[str, Any]) -> int:
 
         model.eval()
         with paddle.no_grad():
-            eval_logits = model(paddle.to_tensor(x_np)).reshape([len(samples), max_text_length, class_count])
+            eval_logits = model(paddle.to_tensor(x_np))
             predicted = paddle.argmax(eval_logits, axis=2).numpy().astype("int64")
         correct = 0
         distances = 0
@@ -177,6 +223,15 @@ def run(request: dict[str, Any]) -> int:
     paddle.save(model.state_dict(), str(checkpoint_path))
     dict_path = output_path / "dict.txt"
     shutil.copyfile(dataset_path / "dict.txt", dict_path)
+    onnx_prefix = output_path / "paddleocr_rec_ctc"
+    onnx_path = output_path / "paddleocr_rec_ctc.onnx"
+    try:
+        model.eval()
+        export_linear_ctc_onnx(model, onnx_path, width, height, max_text_length, class_count)
+    except Exception as exc:
+        return fail("Paddle OCR Rec ONNX export failed.", "onnx_export_failed", {"exception": str(exc)})
+    if not onnx_path.exists():
+        return fail("Paddle OCR Rec ONNX export completed without producing an ONNX file.", "onnx_missing")
     report_path = output_path / "paddleocr_rec_training_report.json"
     report = {
         "ok": True,
@@ -184,7 +239,14 @@ def run(request: dict[str, Any]) -> int:
         "framework": "PaddlePaddle",
         "note": "Small PaddlePaddle CTC Rec trainer for PaddleOCR-style data; not a full PP-OCR training config.",
         "checkpointPath": str(checkpoint_path),
+        "onnxPath": str(onnx_path),
         "dictPath": str(dict_path),
+        "modelFamily": "ocr_recognition",
+        "imageWidth": width,
+        "imageHeight": height,
+        "maxTextLength": max_text_length,
+        "classCount": class_count,
+        "blankIndex": 0,
         "metrics": {
             "loss": final_loss,
             "accuracy": final_accuracy,
@@ -193,9 +255,10 @@ def run(request: dict[str, Any]) -> int:
     }
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     emit("artifact", name="paddleocr_rec_ctc.pdparams", path=str(checkpoint_path), kind="checkpoint")
+    emit("artifact", name="paddleocr_rec_ctc.onnx", path=str(onnx_path), kind="onnx")
     emit("artifact", name="dict.txt", path=str(dict_path), kind="dict")
     emit("artifact", name="paddleocr_rec_training_report.json", path=str(report_path), kind="report")
-    emit("completed", checkpointPath=str(checkpoint_path), reportPath=str(report_path), metrics=report["metrics"])
+    emit("completed", checkpointPath=str(checkpoint_path), onnxPath=str(onnx_path), reportPath=str(report_path), metrics=report["metrics"])
     return 0
 
 

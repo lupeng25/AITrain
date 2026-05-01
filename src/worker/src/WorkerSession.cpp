@@ -114,6 +114,9 @@ QString pythonTrainerScriptFileForBackend(const QString& backend)
     if (normalized == QStringLiteral("paddleocr_rec")) {
         return QStringLiteral("python_trainers/ocr_rec/paddleocr_trainer.py");
     }
+    if (normalized == QStringLiteral("paddleocr_rec_official") || normalized == QStringLiteral("paddleocr_ppocrv4_rec")) {
+        return QStringLiteral("python_trainers/ocr_rec/paddleocr_official_adapter.py");
+    }
     return QStringLiteral("python_trainers/mock_trainer.py");
 }
 
@@ -159,7 +162,9 @@ bool isPythonTrainingBackendId(const QString& backend, const QJsonObject& parame
         || normalized == QStringLiteral("ultralytics_yolo")
         || normalized == QStringLiteral("ultralytics_yolo_detect")
         || normalized == QStringLiteral("ultralytics_yolo_segment")
-        || normalized == QStringLiteral("paddleocr_rec");
+        || normalized == QStringLiteral("paddleocr_rec")
+        || normalized == QStringLiteral("paddleocr_rec_official")
+        || normalized == QStringLiteral("paddleocr_ppocrv4_rec");
 }
 
 QJsonObject runPythonCommandCheck(
@@ -614,38 +619,80 @@ void WorkerSession::runInference(const QJsonObject& payload)
     QElapsedTimer elapsed;
     elapsed.start();
     QString error;
-    QVector<aitrain::DetectionPrediction> predictions;
+    QJsonArray predictionArray;
+    QImage overlay;
+    QString taskType = QStringLiteral("detection");
+    int predictionCount = 0;
     const QString modelSuffix = QFileInfo(checkpointPath).suffix().toLower();
     const bool onnxModel = modelSuffix == QStringLiteral("onnx");
     const bool tensorRtModel = modelSuffix == QStringLiteral("engine") || modelSuffix == QStringLiteral("plan");
     if (onnxModel) {
-        predictions = aitrain::predictDetectionOnnxRuntime(checkpointPath, imagePath, options, &error);
-        if (!error.isEmpty()) {
-            fail(error);
-            return;
+        const QString modelFamily = aitrain::inferOnnxModelFamily(checkpointPath);
+        if (modelFamily == QStringLiteral("yolo_segmentation")) {
+            taskType = QStringLiteral("segmentation");
+            const QVector<aitrain::SegmentationPrediction> predictions = aitrain::predictSegmentationOnnxRuntime(checkpointPath, imagePath, options, &error);
+            if (!error.isEmpty()) {
+                fail(error);
+                return;
+            }
+            for (const aitrain::SegmentationPrediction& prediction : predictions) {
+                predictionArray.append(aitrain::segmentationPredictionToJson(prediction));
+            }
+            overlay = aitrain::renderSegmentationPredictions(imagePath, predictions, &error);
+            predictionCount = predictions.size();
+        } else if (modelFamily == QStringLiteral("ocr_recognition")) {
+            taskType = QStringLiteral("ocr_recognition");
+            const aitrain::OcrRecPrediction prediction = aitrain::predictOcrRecOnnxRuntime(checkpointPath, imagePath, &error);
+            if (!error.isEmpty()) {
+                fail(error);
+                return;
+            }
+            predictionArray.append(aitrain::ocrRecPredictionToJson(prediction));
+            overlay = aitrain::renderOcrRecPrediction(imagePath, prediction, &error);
+            predictionCount = 1;
+        } else {
+            const QVector<aitrain::DetectionPrediction> predictions = aitrain::predictDetectionOnnxRuntime(checkpointPath, imagePath, options, &error);
+            if (!error.isEmpty()) {
+                fail(error);
+                return;
+            }
+            for (const aitrain::DetectionPrediction& prediction : predictions) {
+                predictionArray.append(aitrain::detectionPredictionToJson(prediction));
+            }
+            overlay = aitrain::renderDetectionPredictions(imagePath, predictions, &error);
+            predictionCount = predictions.size();
         }
     } else if (tensorRtModel) {
-        predictions = aitrain::predictDetectionTensorRt(checkpointPath, imagePath, options, &error);
+        const QVector<aitrain::DetectionPrediction> predictions = aitrain::predictDetectionTensorRt(checkpointPath, imagePath, options, &error);
         if (!error.isEmpty()) {
             fail(error);
             return;
         }
+        for (const aitrain::DetectionPrediction& prediction : predictions) {
+            predictionArray.append(aitrain::detectionPredictionToJson(prediction));
+        }
+        overlay = aitrain::renderDetectionPredictions(imagePath, predictions, &error);
+        predictionCount = predictions.size();
     } else {
         aitrain::DetectionBaselineCheckpoint checkpoint;
         if (!aitrain::loadDetectionBaselineCheckpoint(checkpointPath, &checkpoint, &error)) {
             fail(error);
             return;
         }
-        predictions = aitrain::predictDetectionBaseline(checkpoint, imagePath, options, &error);
+        const QVector<aitrain::DetectionPrediction> predictions = aitrain::predictDetectionBaseline(checkpoint, imagePath, options, &error);
         if (!error.isEmpty()) {
             fail(error);
             return;
         }
+        for (const aitrain::DetectionPrediction& prediction : predictions) {
+            predictionArray.append(aitrain::detectionPredictionToJson(prediction));
+        }
+        overlay = aitrain::renderDetectionPredictions(imagePath, predictions, &error);
+        predictionCount = predictions.size();
     }
-
-    QJsonArray predictionArray;
-    for (const aitrain::DetectionPrediction& prediction : predictions) {
-        predictionArray.append(aitrain::detectionPredictionToJson(prediction));
+    if (overlay.isNull()) {
+        fail(error);
+        return;
     }
 
     const QString predictionsPath = QDir(outputPath).filePath(QStringLiteral("inference_predictions.json"));
@@ -657,6 +704,7 @@ void WorkerSession::runInference(const QJsonObject& payload)
     QJsonObject predictionsDocument;
     predictionsDocument.insert(QStringLiteral("checkpointPath"), checkpointPath);
     predictionsDocument.insert(QStringLiteral("imagePath"), imagePath);
+    predictionsDocument.insert(QStringLiteral("taskType"), taskType);
     predictionsDocument.insert(QStringLiteral("runtime"), onnxModel
         ? QStringLiteral("onnxruntime")
         : (tensorRtModel ? QStringLiteral("tensorrt") : QStringLiteral("tiny_detector")));
@@ -673,12 +721,6 @@ void WorkerSession::runInference(const QJsonObject& payload)
     QJsonObject renderLog;
     renderLog.insert(QStringLiteral("message"), QStringLiteral("Rendering inference overlay."));
     send(QStringLiteral("log"), renderLog);
-
-    const QImage overlay = aitrain::renderDetectionPredictions(imagePath, predictions, &error);
-    if (overlay.isNull()) {
-        fail(error);
-        return;
-    }
     QJsonObject saveLog;
     saveLog.insert(QStringLiteral("message"), QStringLiteral("Saving inference overlay."));
     send(QStringLiteral("log"), saveLog);
@@ -697,23 +739,24 @@ void WorkerSession::runInference(const QJsonObject& payload)
     QJsonObject predictionsArtifact;
     predictionsArtifact.insert(QStringLiteral("kind"), QStringLiteral("inference_predictions"));
     predictionsArtifact.insert(QStringLiteral("path"), predictionsPath);
-    predictionsArtifact.insert(QStringLiteral("message"), QStringLiteral("Tiny detector inference predictions"));
+    predictionsArtifact.insert(QStringLiteral("message"), QStringLiteral("Inference predictions"));
     send(QStringLiteral("artifact"), predictionsArtifact);
 
     QJsonObject overlayArtifact;
     overlayArtifact.insert(QStringLiteral("kind"), QStringLiteral("inference_overlay"));
     overlayArtifact.insert(QStringLiteral("path"), overlayPath);
-    overlayArtifact.insert(QStringLiteral("message"), QStringLiteral("Tiny detector inference overlay"));
+    overlayArtifact.insert(QStringLiteral("message"), QStringLiteral("Inference overlay"));
     send(QStringLiteral("artifact"), overlayArtifact);
 
     QJsonObject response;
     response.insert(QStringLiteral("ok"), true);
     response.insert(QStringLiteral("checkpointPath"), checkpointPath);
     response.insert(QStringLiteral("imagePath"), imagePath);
+    response.insert(QStringLiteral("taskType"), taskType);
     response.insert(QStringLiteral("predictionsPath"), predictionsPath);
     response.insert(QStringLiteral("overlayPath"), overlayPath);
     response.insert(QStringLiteral("elapsedMs"), elapsedMs);
-    response.insert(QStringLiteral("predictionCount"), predictions.size());
+    response.insert(QStringLiteral("predictionCount"), predictionCount);
     response.insert(QStringLiteral("finishedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     send(QStringLiteral("inferenceResult"), response);
 

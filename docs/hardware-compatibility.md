@@ -14,9 +14,8 @@ This matrix records what can be verified on the current development laptop and w
 Run these commands on an RTX / SM 75+ machine from a packaged build:
 
 ```powershell
-.\aitrain_worker.exe --self-check
-.\aitrain_worker.exe --tensorrt-smoke <work-dir>
-.\tools\package-smoke.ps1
+.\tools\acceptance-smoke.ps1 -Package
+.\tools\acceptance-smoke.ps1 -TensorRT -WorkDir .deps\acceptance-tensorrt
 ```
 
 Acceptance requires:
@@ -29,3 +28,5 @@ Acceptance requires:
 ## Current Local Hardware Note
 
 The current machine can continue development for Python trainers, ONNX Runtime inference, packaging, and Worker protocol validation. It should not be treated as the final TensorRT acceptance machine.
+
+On this GTX 1060 / SM 61 machine, `tools\acceptance-smoke.ps1 -TensorRT` is expected to stop with `hardware-blocked`. That is the correct local result and must not be recorded as TensorRT acceptance.

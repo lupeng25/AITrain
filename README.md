@@ -11,10 +11,10 @@ This repository implements the first usable platform layer from the requested pl
 - Built-in plugin manifests for YOLO-style detection/segmentation, PaddleOCR-style recognition, and dataset interop.
 - Dataset validation helpers for YOLO txt, YOLO segmentation, and PaddleOCR recognition label files.
 - Segmentation admission scaffold with dataset loading, polygon-to-mask conversion, overlay preview, Worker metrics, and scaffold checkpoints.
-- Worker-managed Python trainer adapters for Ultralytics YOLO detection, Ultralytics YOLO segmentation, and PaddlePaddle OCR Rec CPU smoke training.
+- Worker-managed Python trainer adapters for Ultralytics YOLO detection, Ultralytics YOLO segmentation, PaddlePaddle OCR Rec CPU smoke training, and official PaddleOCR PP-OCRv4 Rec config/export orchestration.
 - QtTest coverage for JSONL protocol, project repository behavior, detection workflow, and segmentation admission behavior.
 
-The native C++ training implementation remains an executable workflow scaffold: the worker can run a tiny detector placeholder, produce checkpoints, export a tiny detector ONNX model, validate it through ONNX Runtime, and run tiny segmentation/OCR admission scaffolds. Real model training is now routed through Worker-managed Python trainer subprocesses. Ultralytics YOLO detection and segmentation have CPU smoke coverage, and PaddlePaddle OCR Rec has a small CTC smoke trainer. Full PP-OCRv4 training/export, C++ segmentation mask ONNX postprocess, C++ OCR ONNX decode, and external TensorRT acceptance remain future work.
+The native C++ training implementation remains an executable workflow scaffold: the worker can run a tiny detector placeholder, produce checkpoints, export a tiny detector ONNX model, validate it through ONNX Runtime, and run tiny segmentation/OCR admission scaffolds. Real model training is now routed through Worker-managed Python trainer subprocesses. Ultralytics YOLO detection and segmentation have CPU smoke coverage, and PaddlePaddle OCR Rec has a small CTC smoke trainer. C++ ONNX Runtime now supports YOLO segmentation mask postprocess and OCR CTC greedy decode for those smoke models. The official PaddleOCR adapter can prepare PP-OCRv4 Rec configs and command files, and can run official PaddleOCR training/export in an isolated OCR Python environment. External TensorRT acceptance remains future work.
 
 ## Build
 
@@ -77,6 +77,29 @@ Print the project context:
 .\tools\harness-context.ps1
 ```
 
+## Acceptance
+
+Phase 17-21 delivery acceptance is documented in `docs/acceptance-runbook.md`.
+
+Run the local baseline and packaged layout smoke checks with:
+
+```powershell
+.\tools\acceptance-smoke.ps1 -LocalBaseline
+.\tools\acceptance-smoke.ps1 -Package -SkipBuild
+```
+
+Small generated-data training smoke can be run with:
+
+```powershell
+.\tools\acceptance-smoke.ps1 -PublicDatasets
+```
+
+TensorRT acceptance must be run on an RTX / SM 75+ machine:
+
+```powershell
+.\tools\acceptance-smoke.ps1 -TensorRT
+```
+
 ## Python Training Backends
 
 Environment and backend notes are documented in `docs/training-backends.md`.
@@ -90,3 +113,9 @@ python examples\create-minimal-datasets.py --output .deps\examples-smoke
 The generated requests can be passed directly to the Python trainers for smoke validation. These datasets are intentionally tiny and are only meant to verify trainer wiring and artifact creation.
 
 Hardware support and TensorRT acceptance requirements are documented in `docs/hardware-compatibility.md`.
+
+Official PaddleOCR Rec train/export smoke can be run in an isolated OCR Python environment with:
+
+```powershell
+.\tools\phase16-ocr-official-smoke.ps1
+```

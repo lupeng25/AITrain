@@ -108,6 +108,20 @@ struct DetectionPrediction {
     double confidence = 0.0;
 };
 
+struct SegmentationPrediction {
+    DetectionPrediction detection;
+    QImage mask;
+    double maskArea = 0.0;
+    double maskThreshold = 0.5;
+};
+
+struct OcrRecPrediction {
+    QString text;
+    double confidence = 0.0;
+    QVector<int> tokens;
+    int blankIndex = 0;
+};
+
 using DetectionTrainingCallback = std::function<bool(const DetectionTrainingMetrics&)>;
 
 DetectionTrainingResult trainDetectionBaseline(
@@ -132,6 +146,7 @@ QVector<DetectionPrediction> predictDetectionBaseline(
     QString* error = nullptr);
 
 bool isOnnxRuntimeInferenceAvailable();
+QString inferOnnxModelFamily(const QString& onnxPath);
 QJsonObject detectionTrainingBackendStatus();
 TensorRtBackendStatus tensorRtBackendStatus();
 bool isTensorRtInferenceAvailable();
@@ -140,6 +155,17 @@ QVector<DetectionPrediction> predictDetectionOnnxRuntime(
     const QString& onnxPath,
     const QString& imagePath,
     const DetectionInferenceOptions& options,
+    QString* error = nullptr);
+
+QVector<SegmentationPrediction> predictSegmentationOnnxRuntime(
+    const QString& onnxPath,
+    const QString& imagePath,
+    const DetectionInferenceOptions& options,
+    QString* error = nullptr);
+
+OcrRecPrediction predictOcrRecOnnxRuntime(
+    const QString& onnxPath,
+    const QString& imagePath,
     QString* error = nullptr);
 
 QVector<DetectionPrediction> predictDetectionTensorRt(
@@ -153,10 +179,22 @@ QVector<DetectionPrediction> postProcessDetectionPredictions(
     const DetectionInferenceOptions& options);
 
 QJsonObject detectionPredictionToJson(const DetectionPrediction& prediction);
+QJsonObject segmentationPredictionToJson(const SegmentationPrediction& prediction);
+QJsonObject ocrRecPredictionToJson(const OcrRecPrediction& prediction);
 
 QImage renderDetectionPredictions(
     const QString& imagePath,
     const QVector<DetectionPrediction>& predictions,
+    QString* error = nullptr);
+
+QImage renderSegmentationPredictions(
+    const QString& imagePath,
+    const QVector<SegmentationPrediction>& predictions,
+    QString* error = nullptr);
+
+QImage renderOcrRecPrediction(
+    const QString& imagePath,
+    const OcrRecPrediction& prediction,
     QString* error = nullptr);
 
 DetectionExportResult exportDetectionCheckpoint(
