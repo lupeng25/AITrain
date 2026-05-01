@@ -9,10 +9,12 @@ add_library(aitrain_core STATIC
     include/aitrain/core/SegmentationDataset.h
     include/aitrain/core/SegmentationTrainer.h
     include/aitrain/core/JsonProtocol.h
+    include/aitrain/core/LicenseManager.h
     include/aitrain/core/PluginManager.h
     include/aitrain/core/ProjectRepository.h
     include/aitrain/core/TaskModels.h
     src/JsonProtocol.cpp
+    src/LicenseManager.cpp
     src/Deployment.cpp
     src/DatasetValidators.cpp
     src/DetectionDataset.cpp
@@ -56,6 +58,13 @@ if(AITRAIN_WITH_ONNXRUNTIME)
     target_link_libraries(aitrain_core
         PRIVATE
             ${AITRAIN_ONNXRUNTIME_LIBRARY}
+    )
+endif()
+
+if(WIN32)
+    target_link_libraries(aitrain_core
+        PRIVATE
+            bcrypt
     )
 endif()
 

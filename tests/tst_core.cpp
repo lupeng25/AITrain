@@ -5,6 +5,7 @@
 #include "aitrain/core/DetectionDataset.h"
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/JsonProtocol.h"
+#include "aitrain/core/LicenseManager.h"
 #include "aitrain/core/OcrRecDataset.h"
 #include "aitrain/core/OcrRecTrainer.h"
 #include "aitrain/core/ProjectRepository.h"
@@ -117,6 +118,31 @@ QString workerExecutablePath()
         return QDir::cleanPath(siblingBin);
     }
     return QDir(applicationDir).absoluteFilePath(QStringLiteral("aitrain_worker%1").arg(extension));
+}
+
+QByteArray testBase64UrlEncode(const QByteArray& input)
+{
+    return input.toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals);
+}
+
+QByteArray testBase64UrlDecode(QByteArray input)
+{
+    while (input.size() % 4 != 0) {
+        input.append('=');
+    }
+    return QByteArray::fromBase64(input, QByteArray::Base64UrlEncoding);
+}
+
+QString tokenWithCustomer(const QString& token, const QString& customer)
+{
+    QList<QByteArray> parts = token.toLatin1().split('.');
+    if (parts.size() != 3) {
+        return token;
+    }
+    QJsonObject payload = QJsonDocument::fromJson(testBase64UrlDecode(parts.at(1))).object();
+    payload.insert(QStringLiteral("customer"), customer);
+    parts[1] = testBase64UrlEncode(QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    return QString::fromLatin1(parts.at(0) + QByteArrayLiteral(".") + parts.at(1) + QByteArrayLiteral(".") + parts.at(2));
 }
 
 QString pythonExecutablePath()
@@ -306,6 +332,59 @@ private slots:
         QCOMPARE(decodedPayload.value(QStringLiteral("taskId")).toString(), QStringLiteral("abc"));
         QCOMPARE(decodedPayload.value(QStringLiteral("value")).toInt(), 42);
         QVERIFY(error.isEmpty());
+    }
+
+    void offlineLicenseTokensValidate()
+    {
+        if (!aitrain::licenseCryptoAvailable()) {
+            QSKIP("Offline ECDSA license tests require the Windows CNG implementation");
+        }
+
+        QString error;
+        aitrain::LicenseKeyPair keyPair;
+        QVERIFY2(aitrain::generateLicenseKeyPair(&keyPair, &error), qPrintable(error));
+        QVERIFY(!keyPair.publicKeyBase64.isEmpty());
+        QVERIFY(!keyPair.privateKeyBase64.isEmpty());
+        QCOMPARE(aitrain::publicKeyFromPrivateKey(keyPair.privateKeyBase64, &error), keyPair.publicKeyBase64);
+
+        const QDateTime now = QDateTime::fromString(QStringLiteral("2026-05-01T00:00:00Z"), Qt::ISODate);
+        aitrain::LicensePayload payload;
+        payload.product = aitrain::licenseProductName();
+        payload.customer = QStringLiteral("Smoke Customer");
+        payload.machineCode = QStringLiteral("ABCD-EF12-3456-7890-CAFE");
+        payload.licenseId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        payload.issuedAt = now.addDays(-1);
+        payload.expiresAt = now.addDays(30);
+
+        const QString token = aitrain::createLicenseToken(payload, keyPair.privateKeyBase64, &error);
+        QVERIFY2(!token.isEmpty(), qPrintable(error));
+
+        const aitrain::LicenseValidationResult valid =
+            aitrain::validateLicenseToken(token, keyPair.publicKeyBase64, payload.machineCode, now);
+        QVERIFY2(valid.isValid(), qPrintable(valid.message));
+        QCOMPARE(valid.payload.customer, payload.customer);
+
+        const aitrain::LicenseValidationResult mismatch =
+            aitrain::validateLicenseToken(token, keyPair.publicKeyBase64, QStringLiteral("0000-0000-0000-0000-0000"), now);
+        QCOMPARE(static_cast<int>(mismatch.status), static_cast<int>(aitrain::LicenseStatus::MachineMismatch));
+
+        const aitrain::LicenseValidationResult tampered =
+            aitrain::validateLicenseToken(tokenWithCustomer(token, QStringLiteral("Mallory")), keyPair.publicKeyBase64, payload.machineCode, now);
+        QCOMPARE(static_cast<int>(tampered.status), static_cast<int>(aitrain::LicenseStatus::SignatureInvalid));
+
+        aitrain::LicensePayload expiredPayload = payload;
+        expiredPayload.licenseId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        expiredPayload.expiresAt = now.addSecs(-1);
+        const QString expiredToken = aitrain::createLicenseToken(expiredPayload, keyPair.privateKeyBase64, &error);
+        QVERIFY2(!expiredToken.isEmpty(), qPrintable(error));
+        const aitrain::LicenseValidationResult expired =
+            aitrain::validateLicenseToken(expiredToken, keyPair.publicKeyBase64, payload.machineCode, now);
+        QCOMPARE(static_cast<int>(expired.status), static_cast<int>(aitrain::LicenseStatus::Expired));
+
+        QCOMPARE(static_cast<int>(aitrain::validateLicenseToken(QString(), keyPair.publicKeyBase64, payload.machineCode, now).status),
+            static_cast<int>(aitrain::LicenseStatus::MissingToken));
+        QCOMPARE(static_cast<int>(aitrain::validateLicenseToken(QStringLiteral("bad-token"), keyPair.publicKeyBase64, payload.machineCode, now).status),
+            static_cast<int>(aitrain::LicenseStatus::MalformedToken));
     }
 
     void packagingLayoutUsesPhaseSevenInstallShape()

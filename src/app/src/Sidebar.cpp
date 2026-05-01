@@ -16,7 +16,7 @@ Sidebar::Sidebar(QWidget* parent)
 
     auto* brand = new QLabel(QStringLiteral("AITrain Studio"));
     brand->setObjectName(QStringLiteral("BrandTitle"));
-    auto* subtitle = new QLabel(QStringLiteral("Vision Training Workbench"));
+    auto* subtitle = new QLabel(tr("Vision Training Workbench"));
     subtitle->setObjectName(QStringLiteral("BrandSubtitle"));
 
     layout->addWidget(brand);

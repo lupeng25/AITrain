@@ -4,7 +4,7 @@ StatusPill::StatusPill(QWidget* parent)
     : QLabel(parent)
 {
     setObjectName(QStringLiteral("StatusPill"));
-    setStatus(QStringLiteral("未检测"), Tone::Neutral);
+    setStatus(tr("未检测"), Tone::Neutral);
 }
 
 void StatusPill::setStatus(const QString& text, Tone tone)
@@ -39,4 +39,3 @@ void StatusPill::setStatus(const QString& text, Tone tone)
 
     setStyleSheet(QStringLiteral("QLabel#StatusPill { background: %1; color: %2; }").arg(background, foreground));
 }
-

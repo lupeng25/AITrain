@@ -25,7 +25,7 @@ class MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget* parent = nullptr);
+    explicit MainWindow(const QString& licenseOwner = QString(), const QString& licenseExpiry = QString(), QWidget* parent = nullptr);
 
 private slots:
     void createProject();
@@ -78,6 +78,10 @@ private:
     void ensureProjectSubdirs(const QString& rootPath);
     void appendLog(const QString& text);
     void loadPluginCombos();
+    QString currentDatasetFormat() const;
+    QString currentTaskType() const;
+    QString currentTaskKindFilter() const;
+    QString currentTaskStateFilter() const;
     void updateRecentTasks();
     void updateDatasetList();
     void updateTaskTable(QTableWidget* table, const QVector<aitrain::TaskRecord>& tasks);
@@ -126,6 +130,9 @@ private:
     StatusPill* workerPill_ = nullptr;
     StatusPill* pluginPill_ = nullptr;
     StatusPill* gpuPill_ = nullptr;
+    StatusPill* licensePill_ = nullptr;
+    QString licenseOwner_;
+    QString licenseExpiry_;
 
     QLabel* projectLabel_ = nullptr;
     QLabel* gpuLabel_ = nullptr;

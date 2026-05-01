@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 
 #include "InfoPanel.h"
+#include "LanguageSupport.h"
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/PluginInterfaces.h"
 
@@ -29,12 +30,14 @@
 #include <QProcess>
 #include <QRegularExpression>
 #include <QScrollArea>
+#include <QSettings>
 #include <QSignalBlocker>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QStandardPaths>
 #include <QTableWidgetItem>
 #include <QTime>
+#include <QToolButton>
 #include <QVBoxLayout>
 #include <QUrl>
 #include <QUuid>
@@ -82,6 +85,85 @@ QPushButton* dangerButton(const QString& text)
     return button;
 }
 
+QString uiText(const char* source)
+{
+    return aitrain_app::translateText("MainWindow", QString::fromUtf8(source));
+}
+
+QString taskTypeLabel(const QString& taskType)
+{
+    if (taskType == QStringLiteral("detection")) {
+        return uiText("检测");
+    }
+    if (taskType == QStringLiteral("segmentation")) {
+        return uiText("分割");
+    }
+    if (taskType == QStringLiteral("ocr_detection")) {
+        return uiText("OCR 检测");
+    }
+    if (taskType == QStringLiteral("ocr_recognition")) {
+        return uiText("OCR 识别");
+    }
+    if (taskType == QStringLiteral("ocr")) {
+        return uiText("OCR 端到端");
+    }
+    return taskType.isEmpty() ? uiText("未选择") : taskType;
+}
+
+void addComboItem(QComboBox* combo, const QString& displayText, const QString& value)
+{
+    if (!combo) {
+        return;
+    }
+    combo->addItem(displayText, value);
+}
+
+QString backendLabel(const QString& backend)
+{
+    if (backend == QStringLiteral("ultralytics_yolo_detect")) {
+        return uiText("Ultralytics YOLO 检测（官方）");
+    }
+    if (backend == QStringLiteral("ultralytics_yolo_segment")) {
+        return uiText("Ultralytics YOLO 分割（官方）");
+    }
+    if (backend == QStringLiteral("paddleocr_det_official")) {
+        return uiText("PaddleOCR Det（官方/隔离环境）");
+    }
+    if (backend == QStringLiteral("paddleocr_rec")) {
+        return QStringLiteral("PaddlePaddle OCR Rec CTC");
+    }
+    if (backend == QStringLiteral("paddleocr_rec_official")) {
+        return uiText("PaddleOCR PP-OCRv4 Rec（官方/隔离环境）");
+    }
+    if (backend == QStringLiteral("paddleocr_system_official")) {
+        return uiText("PaddleOCR System 推理（官方）");
+    }
+    if (backend == QStringLiteral("tiny_linear_detector")) {
+        return uiText("Tiny detector（高级/占位）");
+    }
+    if (backend == QStringLiteral("python_mock")) {
+        return uiText("Python mock（高级/协议测试）");
+    }
+    return backend;
+}
+
+QString exportComboLabel(const QString& format)
+{
+    if (format == QStringLiteral("onnx")) {
+        return uiText("ONNX 模型");
+    }
+    if (format == QStringLiteral("ncnn")) {
+        return uiText("NCNN param/bin（onnx2ncnn）");
+    }
+    if (format == QStringLiteral("tiny_detector_json")) {
+        return uiText("AITrain JSON（诊断）");
+    }
+    if (format == QStringLiteral("tensorrt")) {
+        return uiText("TensorRT Engine（RTX / SM 75+ 外部验收）");
+    }
+    return format;
+}
+
 InfoPanel* createCompactSummaryCard(const QString& label, const QString& value, const QString& caption)
 {
     auto* panel = new InfoPanel(label);
@@ -102,76 +184,76 @@ InfoPanel* createCompactSummaryCard(const QString& label, const QString& value, 
 QString taskStateLabel(aitrain::TaskState state)
 {
     switch (state) {
-    case aitrain::TaskState::Queued: return QStringLiteral("排队中");
-    case aitrain::TaskState::Running: return QStringLiteral("运行中");
-    case aitrain::TaskState::Paused: return QStringLiteral("已暂停");
-    case aitrain::TaskState::Completed: return QStringLiteral("已完成");
-    case aitrain::TaskState::Failed: return QStringLiteral("失败");
-    case aitrain::TaskState::Canceled: return QStringLiteral("已取消");
+    case aitrain::TaskState::Queued: return uiText("排队中");
+    case aitrain::TaskState::Running: return uiText("运行中");
+    case aitrain::TaskState::Paused: return uiText("已暂停");
+    case aitrain::TaskState::Completed: return uiText("已完成");
+    case aitrain::TaskState::Failed: return uiText("失败");
+    case aitrain::TaskState::Canceled: return uiText("已取消");
     }
-    return QStringLiteral("未知");
+    return uiText("未知");
 }
 
 QString taskKindLabel(aitrain::TaskKind kind)
 {
     switch (kind) {
-    case aitrain::TaskKind::Train: return QStringLiteral("训练");
-    case aitrain::TaskKind::Validate: return QStringLiteral("校验");
-    case aitrain::TaskKind::Export: return QStringLiteral("导出");
-    case aitrain::TaskKind::Infer: return QStringLiteral("推理");
+    case aitrain::TaskKind::Train: return uiText("训练");
+    case aitrain::TaskKind::Validate: return uiText("校验");
+    case aitrain::TaskKind::Export: return uiText("导出");
+    case aitrain::TaskKind::Infer: return uiText("推理");
     }
-    return QStringLiteral("任务");
+    return uiText("任务");
 }
 
 QString environmentStatusLabel(const QString& status)
 {
     if (status == QStringLiteral("ok")) {
-        return QStringLiteral("通过");
+        return uiText("通过");
     }
     if (status == QStringLiteral("warning")) {
-        return QStringLiteral("警告");
+        return uiText("警告");
     }
     if (status == QStringLiteral("missing")) {
-        return QStringLiteral("缺失");
+        return uiText("缺失");
     }
-    return QStringLiteral("未知");
+    return uiText("未知");
 }
 
 QString issueSeverityLabel(const QString& severity)
 {
     if (severity == QStringLiteral("error")) {
-        return QStringLiteral("错误");
+        return uiText("错误");
     }
     if (severity == QStringLiteral("warning")) {
-        return QStringLiteral("警告");
+        return uiText("警告");
     }
-    return QStringLiteral("信息");
+    return uiText("信息");
 }
 
 QString inferenceTaskTypeLabel(const QString& taskType)
 {
     if (taskType == QStringLiteral("segmentation")) {
-        return QStringLiteral("分割");
+        return uiText("分割");
     }
     if (taskType == QStringLiteral("ocr_detection")) {
-        return QStringLiteral("OCR 检测");
+        return uiText("OCR 检测");
     }
     if (taskType == QStringLiteral("ocr_recognition")) {
-        return QStringLiteral("OCR 识别");
+        return uiText("OCR 识别");
     }
     if (taskType == QStringLiteral("ocr")) {
-        return QStringLiteral("OCR 端到端");
+        return uiText("OCR 端到端");
     }
-    return QStringLiteral("检测");
+    return uiText("检测");
 }
 
 QString datasetFormatLabel(const QString& format)
 {
     if (format == QStringLiteral("yolo_detection") || format == QStringLiteral("yolo_txt")) {
-        return QStringLiteral("YOLO 检测");
+        return uiText("YOLO 检测");
     }
     if (format == QStringLiteral("yolo_segmentation")) {
-        return QStringLiteral("YOLO 分割");
+        return uiText("YOLO 分割");
     }
     if (format == QStringLiteral("paddleocr_det")) {
         return QStringLiteral("PaddleOCR Det");
@@ -188,7 +270,7 @@ QString datasetFormatLabel(const QString& format)
     if (format == QStringLiteral("labelme_json")) {
         return QStringLiteral("LabelMe JSON");
     }
-    return format.isEmpty() ? QStringLiteral("未选择") : format;
+    return format.isEmpty() ? uiText("未选择") : format;
 }
 
 QString defaultBackendForTask(const QString& taskType)
@@ -234,36 +316,36 @@ QString defaultModelForBackend(const QString& backend)
 QString trainingBackendDescription(const QString& backend)
 {
     if (backend == QStringLiteral("ultralytics_yolo_detect")) {
-        return QStringLiteral("当前模型能力：官方 Ultralytics YOLO detection。适合 YOLO bbox 数据，输出 best.pt、ONNX、训练报告，可继续做 ONNX Runtime 推理和 overlay 验证。");
+        return uiText("当前模型能力：官方 Ultralytics YOLO detection。适合 YOLO bbox 数据，输出 best.pt、ONNX、训练报告，可继续做 ONNX Runtime 推理和 overlay 验证。");
     }
     if (backend == QStringLiteral("ultralytics_yolo_segment")) {
-        return QStringLiteral("当前模型能力：官方 Ultralytics YOLO segmentation。适合 YOLO polygon 数据，输出 mask 指标、best.pt、ONNX，并可生成 mask prediction JSON 与 overlay。");
+        return uiText("当前模型能力：官方 Ultralytics YOLO segmentation。适合 YOLO polygon 数据，输出 mask 指标、best.pt、ONNX，并可生成 mask prediction JSON 与 overlay。");
     }
     if (backend == QStringLiteral("paddleocr_rec")) {
-        return QStringLiteral("当前模型能力：PaddlePaddle CTC OCR Rec。适合 rec_gt.txt + dict.txt 小规模识别数据，可导出 ONNX 并走 C++ CTC greedy decode。");
+        return uiText("当前模型能力：PaddlePaddle CTC OCR Rec。适合 rec_gt.txt + dict.txt 小规模识别数据，可导出 ONNX 并走 C++ CTC greedy decode。");
     }
     if (backend == QStringLiteral("paddleocr_rec_official") || backend == QStringLiteral("paddleocr_ppocrv4_rec")) {
-        return QStringLiteral("当前模型能力：官方 PaddleOCR PP-OCRv4 Rec 适配器。适合隔离 OCR Python 环境，记录 train/export/predict 命令、checkpoint、inference model 和官方预测报告。");
+        return uiText("当前模型能力：官方 PaddleOCR PP-OCRv4 Rec 适配器。适合隔离 OCR Python 环境，记录 train/export/predict 命令、checkpoint、inference model 和官方预测报告。");
     }
     if (backend == QStringLiteral("paddleocr_det_official")) {
-        return QStringLiteral("当前模型能力：官方 PaddleOCR PP-OCRv4 Det 适配器。适合 PaddleOCR 原生 det_gt.txt 数据，输出官方配置、checkpoint、inference model 和报告。");
+        return uiText("当前模型能力：官方 PaddleOCR PP-OCRv4 Det 适配器。适合 PaddleOCR 原生 det_gt.txt 数据，输出官方配置、checkpoint、inference model 和报告。");
     }
     if (backend == QStringLiteral("paddleocr_system_official")) {
-        return QStringLiteral("当前模型能力：官方 PaddleOCR 端到端推理编排。使用已导出的 Det/Rec inference model 调用 predict_system.py；本阶段不做 C++ DB 后处理。");
+        return uiText("当前模型能力：官方 PaddleOCR 端到端推理编排。使用已导出的 Det/Rec inference model 调用 predict_system.py；本阶段不做 C++ DB 后处理。");
     }
     if (backend == QStringLiteral("tiny_linear_detector")) {
-        return QStringLiteral("高级/诊断：C++ tiny detector 占位训练，仅验证平台链路、checkpoint、ONNX 和回归测试，不代表真实 YOLO 能力。");
+        return uiText("高级/诊断：C++ tiny detector 占位训练，仅验证平台链路、checkpoint、ONNX 和回归测试，不代表真实 YOLO 能力。");
     }
     if (backend == QStringLiteral("python_mock")) {
-        return QStringLiteral("高级/诊断：Python 协议测试后端，只验证 Worker JSON Lines 协议，不产生真实模型。");
+        return uiText("高级/诊断：Python 协议测试后端，只验证 Worker JSON Lines 协议，不产生真实模型。");
     }
-    return QStringLiteral("当前模型能力：通过 Worker 执行，产物、指标和失败原因会写入任务历史。");
+    return uiText("当前模型能力：通过 Worker 执行，产物、指标和失败原因会写入任务历史。");
 }
 
 QString exportFormatLabel(const QString& format)
 {
     if (format == QStringLiteral("onnx")) {
-        return QStringLiteral("ONNX 模型");
+        return uiText("ONNX 模型");
     }
     if (format == QStringLiteral("ncnn")) {
         return QStringLiteral("NCNN param/bin");
@@ -271,7 +353,7 @@ QString exportFormatLabel(const QString& format)
     if (format == QStringLiteral("tensorrt")) {
         return QStringLiteral("TensorRT Engine");
     }
-    return QStringLiteral("AITrain JSON（诊断）");
+    return uiText("AITrain JSON（诊断）");
 }
 
 QString defaultExportFileName(const QString& format)
@@ -305,15 +387,15 @@ QString exportFileFilter(const QString& format)
 QString exportFormatNote(const QString& format)
 {
     if (format == QStringLiteral("onnx")) {
-        return QStringLiteral("主交付格式，可继续进入推理验证。");
+        return uiText("主交付格式，可继续进入推理验证。");
     }
     if (format == QStringLiteral("ncnn")) {
-        return QStringLiteral("需要配置 onnx2ncnn，输出 param/bin。");
+        return uiText("需要配置 onnx2ncnn，输出 param/bin。");
     }
     if (format == QStringLiteral("tensorrt")) {
-        return QStringLiteral("需要 RTX / SM 75+ 真机外部验收。");
+        return uiText("需要 RTX / SM 75+ 真机外部验收。");
     }
-    return QStringLiteral("仅用于 tiny detector 诊断，不代表真实 YOLO/OCR。");
+    return uiText("仅用于 tiny detector 诊断，不代表真实 YOLO/OCR。");
 }
 
 QString compactListSummary(const QStringList& values, int maxItems = 3)
@@ -326,12 +408,12 @@ QString compactListSummary(const QStringList& values, int maxItems = 3)
     }
     unique.sort(Qt::CaseInsensitive);
     if (unique.isEmpty()) {
-        return QStringLiteral("暂无");
+        return uiText("暂无");
     }
     const QString visible = unique.mid(0, maxItems).join(QStringLiteral(", "));
     const int remaining = unique.size() - qMin(unique.size(), maxItems);
     return remaining > 0
-        ? QStringLiteral("%1 等 %2 项").arg(visible).arg(unique.size())
+        ? uiText("%1 等 %2 项").arg(visible).arg(unique.size())
         : visible;
 }
 
@@ -434,9 +516,9 @@ QString xAnyLabelingStatusText()
 {
     const QString program = resolvedXAnyLabelingProgram();
     if (program.isEmpty()) {
-        return QStringLiteral("状态：未检测到 X-AnyLabeling。可放到 .deps/annotation-tools/X-AnyLabeling，或设置 AITRAIN_XANYLABELING_EXE。");
+        return uiText("状态：未检测到 X-AnyLabeling。可放到 .deps/annotation-tools/X-AnyLabeling，或设置 AITRAIN_XANYLABELING_EXE。");
     }
-    return QStringLiteral("状态：已安装 | %1").arg(QDir::toNativeSeparators(program));
+    return uiText("状态：已安装 | %1").arg(QDir::toNativeSeparators(program));
 }
 
 QString detectDatasetFormatFromPath(const QString& path)
@@ -502,13 +584,32 @@ QString formatJsonTextForPreview(const QByteArray& data)
     return QString::fromUtf8(document.toJson(QJsonDocument::Indented));
 }
 
+void addTaskTypeItems(QComboBox* combo, const QStringList& taskTypes)
+{
+    if (!combo) {
+        return;
+    }
+    for (const QString& taskType : taskTypes) {
+        combo->addItem(taskTypeLabel(taskType), taskType);
+    }
+}
+
+QString comboCurrentDataOrText(const QComboBox* combo)
+{
+    if (!combo) {
+        return QString();
+    }
+    const QString data = combo->currentData().toString();
+    return data.isEmpty() ? combo->currentText() : data;
+}
+
 QString inferenceSummaryFromPredictions(const QString& predictionsPath, const QJsonObject& fallback = {})
 {
     const QString nativePath = QDir::toNativeSeparators(predictionsPath);
     QFile file(predictionsPath);
     if (!file.open(QIODevice::ReadOnly)) {
         const QString taskType = fallback.value(QStringLiteral("taskType")).toString(QStringLiteral("detection"));
-        return QStringLiteral("%1：%2 个结果，%3 ms\n结果文件：%4")
+        return uiText("%1：%2 个结果，%3 ms\n结果文件：%4")
             .arg(inferenceTaskTypeLabel(taskType))
             .arg(fallback.value(QStringLiteral("predictionCount")).toInt())
             .arg(fallback.value(QStringLiteral("elapsedMs")).toInt())
@@ -518,7 +619,7 @@ QString inferenceSummaryFromPredictions(const QString& predictionsPath, const QJ
     QJsonParseError parseError;
     const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-        return QStringLiteral("预测结果 JSON 无法解析：%1").arg(nativePath);
+        return uiText("预测结果 JSON 无法解析：%1").arg(nativePath);
     }
 
     const QJsonObject root = document.object();
@@ -532,15 +633,15 @@ QString inferenceSummaryFromPredictions(const QString& predictionsPath, const QJ
         if (taskType == QStringLiteral("ocr_recognition")) {
             const QString text = first.value(QStringLiteral("text")).toString();
             detail = text.isEmpty()
-                ? QStringLiteral("未识别出文本")
-                : QStringLiteral("文本 \"%1\"").arg(text);
+                ? uiText("未识别出文本")
+                : uiText("文本 \"%1\"").arg(text);
             if (first.contains(QStringLiteral("confidence"))) {
-                detail.append(QStringLiteral("，置信度 %1").arg(confidencePercent(first.value(QStringLiteral("confidence")).toDouble())));
+                detail.append(uiText("，置信度 %1").arg(confidencePercent(first.value(QStringLiteral("confidence")).toDouble())));
             }
         } else {
             const QString className = first.value(QStringLiteral("className")).toString(
                 QStringLiteral("class %1").arg(first.value(QStringLiteral("classId")).toInt()));
-            detail = QStringLiteral("首个 %1，置信度 %2")
+            detail = uiText("首个 %1，置信度 %2")
                 .arg(className)
                 .arg(confidencePercent(first.value(QStringLiteral("confidence")).toDouble()));
             if (taskType == QStringLiteral("segmentation")) {
@@ -548,10 +649,10 @@ QString inferenceSummaryFromPredictions(const QString& predictionsPath, const QJ
             }
         }
     } else {
-        detail = QStringLiteral("无结果");
+        detail = uiText("无结果");
     }
 
-    return QStringLiteral("%1：%2 个结果，%3，%4 ms\n结果文件：%5")
+    return uiText("%1：%2 个结果，%3，%4 ms\n结果文件：%5")
         .arg(inferenceTaskTypeLabel(taskType))
         .arg(predictions.size())
         .arg(detail)
@@ -561,8 +662,10 @@ QString inferenceSummaryFromPredictions(const QString& predictionsPath, const QJ
 
 } // namespace
 
-MainWindow::MainWindow(QWidget* parent)
+MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry, QWidget* parent)
     : QMainWindow(parent)
+    , licenseOwner_(licenseOwner)
+    , licenseExpiry_(licenseExpiry)
 {
     setWindowTitle(QStringLiteral("AITrain Studio"));
     setMinimumSize(1180, 760);
@@ -573,19 +676,19 @@ MainWindow::MainWindow(QWidget* parent)
     rootLayout->setSpacing(0);
 
     sidebar_ = new Sidebar;
-    sidebar_->addSection(QStringLiteral("工作台"));
-    sidebar_->addItem(QStringLiteral("总览"), DashboardPage);
-    sidebar_->addItem(QStringLiteral("项目"), ProjectPage);
-    sidebar_->addSection(QStringLiteral("数据与训练"));
-    sidebar_->addItem(QStringLiteral("数据集"), DatasetPage);
-    sidebar_->addItem(QStringLiteral("训练实验"), TrainingPage);
-    sidebar_->addItem(QStringLiteral("任务与产物"), TaskQueuePage);
-    sidebar_->addSection(QStringLiteral("模型交付"));
-    sidebar_->addItem(QStringLiteral("模型导出"), ConversionPage);
-    sidebar_->addItem(QStringLiteral("推理验证"), InferencePage);
-    sidebar_->addSection(QStringLiteral("系统"));
-    sidebar_->addItem(QStringLiteral("插件"), PluginsPage);
-    sidebar_->addItem(QStringLiteral("环境"), EnvironmentPage);
+    sidebar_->addSection(tr("工作台"));
+    sidebar_->addItem(tr("总览"), DashboardPage);
+    sidebar_->addItem(tr("项目"), ProjectPage);
+    sidebar_->addSection(tr("数据与训练"));
+    sidebar_->addItem(tr("数据集"), DatasetPage);
+    sidebar_->addItem(tr("训练实验"), TrainingPage);
+    sidebar_->addItem(tr("任务与产物"), TaskQueuePage);
+    sidebar_->addSection(tr("模型交付"));
+    sidebar_->addItem(tr("模型导出"), ConversionPage);
+    sidebar_->addItem(tr("推理验证"), InferencePage);
+    sidebar_->addSection(tr("系统"));
+    sidebar_->addItem(tr("插件"), PluginsPage);
+    sidebar_->addItem(tr("环境"), EnvironmentPage);
     rootLayout->addWidget(sidebar_);
 
     auto* content = new QWidget;
@@ -609,20 +712,20 @@ MainWindow::MainWindow(QWidget* parent)
     rootLayout->addWidget(content, 1);
     setCentralWidget(central);
 
-    statusBar()->showMessage(QStringLiteral("就绪"));
+    statusBar()->showMessage(tr("就绪"));
 
     connect(sidebar_, &Sidebar::pageRequested, this, &MainWindow::showPage);
     connect(&worker_, &WorkerClient::messageReceived, this, &MainWindow::handleWorkerMessage);
     connect(&worker_, &WorkerClient::logLine, this, &MainWindow::appendLog);
     connect(&worker_, &WorkerClient::connected, this, [this]() {
-        workerPill_->setStatus(QStringLiteral("Worker 已连接"), StatusPill::Tone::Success);
+        workerPill_->setStatus(tr("Worker 已连接"), StatusPill::Tone::Success);
     });
     connect(&worker_, &WorkerClient::idle, this, &MainWindow::startNextQueuedTask);
     connect(&worker_, &WorkerClient::finished, this, [this](bool ok, const QString& message) {
         progressBar_->setValue(ok ? 100 : progressBar_->value());
-        workerPill_->setStatus(ok ? QStringLiteral("任务完成") : QStringLiteral("任务失败"),
+        workerPill_->setStatus(ok ? tr("任务完成") : tr("任务失败"),
             ok ? StatusPill::Tone::Success : StatusPill::Tone::Error);
-        appendLog(ok ? QStringLiteral("任务完成：%1").arg(message) : QStringLiteral("任务失败：%1").arg(message));
+        appendLog(ok ? tr("任务完成：%1").arg(message) : tr("任务失败：%1").arg(message));
         const QString kind;
         const QString path;
         if (!currentTaskId_.isEmpty()) {
@@ -632,7 +735,7 @@ MainWindow::MainWindow(QWidget* parent)
             updateRecentTasks();
             updateSelectedTaskDetails();
         } else if (kind == QStringLiteral("export") && exportResultLabel_) {
-            exportResultLabel_->setText(QStringLiteral("导出完成：%1").arg(QDir::toNativeSeparators(path)));
+            exportResultLabel_->setText(tr("导出完成：%1").arg(QDir::toNativeSeparators(path)));
         } else if (kind == QStringLiteral("inference_overlay") && inferenceOverlayLabel_) {
             QPixmap overlay(path);
             if (!overlay.isNull()) {
@@ -641,7 +744,7 @@ MainWindow::MainWindow(QWidget* parent)
                     Qt::KeepAspectRatio,
                     Qt::SmoothTransformation));
             } else {
-                inferenceOverlayLabel_->setText(QStringLiteral("推理 overlay 加载失败"));
+                inferenceOverlayLabel_->setText(tr("推理 overlay 加载失败"));
             }
         } else if (kind == QStringLiteral("inference_predictions") && inferenceResultLabel_) {
             inferenceResultLabel_->setText(inferenceSummaryFromPredictions(path));
@@ -650,7 +753,8 @@ MainWindow::MainWindow(QWidget* parent)
     });
 
     refreshPlugins();
-    showPage(DashboardPage, QStringLiteral("总览"));
+    aitrain_app::translateWidgetTree(this);
+    showPage(DashboardPage, tr("总览"));
     updateHeaderState();
     updateDashboardSummary();
 }
@@ -669,26 +773,73 @@ QWidget* MainWindow::buildTopBar()
     auto* titleLayout = new QVBoxLayout(titleBlock);
     titleLayout->setContentsMargins(0, 0, 0, 0);
     titleLayout->setSpacing(2);
-    pageTitle_ = new QLabel(QStringLiteral("首页"));
+    pageTitle_ = new QLabel(tr("首页"));
     pageTitle_->setObjectName(QStringLiteral("PageTitle"));
     pageCaption_ = new QLabel;
     pageCaption_->setObjectName(QStringLiteral("PageCaption"));
     titleLayout->addWidget(pageTitle_);
     titleLayout->addWidget(pageCaption_);
 
-    headerProjectLabel_ = new QLabel(QStringLiteral("项目：未打开"));
+    headerProjectLabel_ = new QLabel(tr("项目：未打开"));
     headerProjectLabel_->setObjectName(QStringLiteral("MutedText"));
     workerPill_ = new StatusPill;
-    workerPill_->setStatus(QStringLiteral("Worker 空闲"), StatusPill::Tone::Neutral);
+    workerPill_->setStatus(tr("Worker 空闲"), StatusPill::Tone::Neutral);
     pluginPill_ = new StatusPill;
     gpuPill_ = new StatusPill;
-    gpuPill_->setStatus(QStringLiteral("GPU 未检测"), StatusPill::Tone::Warning);
+    gpuPill_->setStatus(tr("GPU 未检测"), StatusPill::Tone::Warning);
+    licensePill_ = new StatusPill;
+    licensePill_->setStatus(licenseOwner_.isEmpty()
+            ? tr("已注册")
+            : tr("授权：%1").arg(licenseOwner_),
+        StatusPill::Tone::Success);
+    licensePill_->setToolTip(licenseExpiry_.isEmpty()
+            ? tr("离线授权已验证")
+            : tr("授权有效期：%1").arg(licenseExpiry_));
+    auto* languageSwitch = new QFrame;
+    languageSwitch->setObjectName(QStringLiteral("LanguageSwitch"));
+    auto* languageLayout = new QHBoxLayout(languageSwitch);
+    languageLayout->setContentsMargins(2, 2, 2, 2);
+    languageLayout->setSpacing(0);
+    auto* zhButton = new QToolButton;
+    zhButton->setObjectName(QStringLiteral("LanguageSwitchButton"));
+    zhButton->setText(QStringLiteral("中"));
+    zhButton->setCheckable(true);
+    zhButton->setCursor(Qt::PointingHandCursor);
+    zhButton->setToolTip(tr("切换到中文，重启后生效"));
+    auto* enButton = new QToolButton;
+    enButton->setObjectName(QStringLiteral("LanguageSwitchButton"));
+    enButton->setText(QStringLiteral("EN"));
+    enButton->setCheckable(true);
+    enButton->setCursor(Qt::PointingHandCursor);
+    enButton->setToolTip(tr("Switch to English after restart"));
+    const QString configuredLanguage = aitrain_app::configuredLanguageCode();
+    zhButton->setChecked(configuredLanguage == QStringLiteral("zh_CN"));
+    enButton->setChecked(configuredLanguage == QStringLiteral("en_US"));
+    languageLayout->addWidget(zhButton);
+    languageLayout->addWidget(enButton);
+    const auto storeLanguage = [this, zhButton, enButton](const QString& selected) {
+        const QString previous = aitrain_app::configuredLanguageCode();
+        aitrain_app::storeLanguageCode(selected);
+        zhButton->setChecked(selected == QStringLiteral("zh_CN"));
+        enButton->setChecked(selected == QStringLiteral("en_US"));
+        if (previous != selected) {
+            QMessageBox::information(this, tr("界面语言"), tr("语言设置已保存，重启 AITrain Studio 后生效。"));
+        }
+    };
+    connect(zhButton, &QToolButton::clicked, this, [storeLanguage]() {
+        storeLanguage(QStringLiteral("zh_CN"));
+    });
+    connect(enButton, &QToolButton::clicked, this, [storeLanguage]() {
+        storeLanguage(QStringLiteral("en_US"));
+    });
 
     layout->addWidget(titleBlock, 1);
     layout->addWidget(headerProjectLabel_);
     layout->addWidget(workerPill_);
     layout->addWidget(pluginPill_);
     layout->addWidget(gpuPill_);
+    layout->addWidget(licensePill_);
+    layout->addWidget(languageSwitch);
     return topBar;
 }
 
@@ -738,11 +889,11 @@ QWidget* MainWindow::buildDashboardPage()
     auto* trainingButton = new QPushButton(QStringLiteral("启动训练实验"));
     auto* artifactButton = new QPushButton(QStringLiteral("查看任务与产物"));
     auto* inferenceButton = new QPushButton(QStringLiteral("推理验证"));
-    connect(projectButton, &QPushButton::clicked, this, [this]() { showPage(ProjectPage, QStringLiteral("项目")); });
-    connect(datasetButton, &QPushButton::clicked, this, [this]() { showPage(DatasetPage, QStringLiteral("数据集")); });
-    connect(trainingButton, &QPushButton::clicked, this, [this]() { showPage(TrainingPage, QStringLiteral("训练实验")); });
-    connect(artifactButton, &QPushButton::clicked, this, [this]() { showPage(TaskQueuePage, QStringLiteral("任务与产物")); });
-    connect(inferenceButton, &QPushButton::clicked, this, [this]() { showPage(InferencePage, QStringLiteral("推理验证")); });
+    connect(projectButton, &QPushButton::clicked, this, [this]() { showPage(ProjectPage, uiText("项目")); });
+    connect(datasetButton, &QPushButton::clicked, this, [this]() { showPage(DatasetPage, uiText("数据集")); });
+    connect(trainingButton, &QPushButton::clicked, this, [this]() { showPage(TrainingPage, uiText("训练实验")); });
+    connect(artifactButton, &QPushButton::clicked, this, [this]() { showPage(TaskQueuePage, uiText("任务与产物")); });
+    connect(inferenceButton, &QPushButton::clicked, this, [this]() { showPage(InferencePage, uiText("推理验证")); });
     actionLayout->addWidget(projectButton, 0, 0);
     actionLayout->addWidget(datasetButton, 0, 1);
     actionLayout->addWidget(trainingButton, 1, 0);
@@ -833,13 +984,13 @@ QWidget* MainWindow::buildProjectPage()
     form->setFormAlignment(Qt::AlignTop);
     form->setHorizontalSpacing(14);
     form->setVerticalSpacing(10);
-    projectNameEdit_ = new QLineEdit(QStringLiteral("本地训练项目"));
+    projectNameEdit_ = new QLineEdit(uiText("本地训练项目"));
     projectRootEdit_ = new QLineEdit(QDir::toNativeSeparators(QDir::home().filePath(QStringLiteral("AITrainProjects/local_project"))));
     auto* browseButton = new QPushButton(QStringLiteral("选择目录"));
     auto* createButton = primaryButton(QStringLiteral("创建 / 打开项目"));
 
     connect(browseButton, &QPushButton::clicked, this, [this]() {
-        const QString directory = QFileDialog::getExistingDirectory(this, QStringLiteral("选择项目目录"));
+        const QString directory = QFileDialog::getExistingDirectory(this, uiText("选择项目目录"));
         if (!directory.isEmpty()) {
             projectRootEdit_->setText(QDir::toNativeSeparators(directory));
         }
@@ -928,7 +1079,7 @@ QWidget* MainWindow::buildDatasetPage()
 
     datasetFormatCombo_ = new QComboBox;
     connect(datasetFormatCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
-        currentDatasetFormat_ = datasetFormatCombo_ ? datasetFormatCombo_->currentText() : QString();
+        currentDatasetFormat_ = currentDatasetFormat();
         currentDatasetValid_ = false;
         updateTrainingSelectionSummary();
         refreshTrainingDefaults();
@@ -997,17 +1148,17 @@ QWidget* MainWindow::buildDatasetPage()
         }
         const int row = datasetListTable_->selectedItems().first()->row();
         const QString path = datasetListTable_->item(row, 4) ? datasetListTable_->item(row, 4)->data(Qt::UserRole).toString() : QString();
-        const QString format = datasetListTable_->item(row, 1) ? datasetListTable_->item(row, 1)->text() : QString();
+        const QString format = datasetListTable_->item(row, 1) ? datasetListTable_->item(row, 1)->data(Qt::UserRole).toString() : QString();
         if (!path.isEmpty()) {
             datasetPathEdit_->setText(QDir::toNativeSeparators(path));
-            const int formatIndex = datasetFormatCombo_->findText(format);
+            const int formatIndex = datasetFormatCombo_->findData(format);
             if (formatIndex >= 0) {
                 datasetFormatCombo_->setCurrentIndex(formatIndex);
             }
             currentDatasetPath_ = path;
             currentDatasetFormat_ = format;
             currentDatasetValid_ = datasetListTable_->item(row, 2)
-                && datasetListTable_->item(row, 2)->text() == QStringLiteral("通过");
+                && datasetListTable_->item(row, 2)->data(Qt::UserRole).toString() == QStringLiteral("valid");
             updateTrainingSelectionSummary();
             refreshTrainingDefaults();
         }
@@ -1031,7 +1182,7 @@ QWidget* MainWindow::buildDatasetPage()
     connect(openDatasetDirButton, &QPushButton::clicked, this, [this]() {
         const QString datasetPath = QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
         if (datasetPath.isEmpty()) {
-            QMessageBox::information(this, QStringLiteral("标注工具"), QStringLiteral("请先选择数据集目录。"));
+            QMessageBox::information(this, uiText("标注工具"), uiText("请先选择数据集目录。"));
             return;
         }
         QDesktopServices::openUrl(QUrl::fromLocalFile(datasetPath));
@@ -1039,7 +1190,7 @@ QWidget* MainWindow::buildDatasetPage()
     connect(launchAnnotationToolButton, &QPushButton::clicked, this, [this]() {
         const QString datasetPath = QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
         if (datasetPath.isEmpty()) {
-            QMessageBox::information(this, QStringLiteral("标注工具"), QStringLiteral("请先选择数据集目录。"));
+            QMessageBox::information(this, uiText("标注工具"), uiText("请先选择数据集目录。"));
             return;
         }
         const QString program = resolvedXAnyLabelingProgram();
@@ -1047,18 +1198,18 @@ QWidget* MainWindow::buildDatasetPage()
             updateAnnotationToolStatus();
             QMessageBox::warning(this,
                 QStringLiteral("X-AnyLabeling"),
-                QStringLiteral("未找到 X-AnyLabeling。请确保 xanylabeling 在 PATH 中，或将 X-AnyLabeling.exe 放到程序目录 / tools/x-anylabeling / .deps/annotation-tools/X-AnyLabeling。"));
+                uiText("未找到 X-AnyLabeling。请确保 xanylabeling 在 PATH 中，或将 X-AnyLabeling.exe 放到程序目录 / tools/x-anylabeling / .deps/annotation-tools/X-AnyLabeling。"));
             return;
         }
         const QStringList arguments = {QStringLiteral("--filename"), datasetPath, QStringLiteral("--no-auto-update-check")};
         if (QProcess::startDetached(program, arguments)) {
             updateAnnotationToolStatus();
-            statusBar()->showMessage(QStringLiteral("已启动 X-AnyLabeling：%1").arg(QDir::toNativeSeparators(datasetPath)), 4000);
+            statusBar()->showMessage(uiText("已启动 X-AnyLabeling：%1").arg(QDir::toNativeSeparators(datasetPath)), 4000);
             return;
         }
         QMessageBox::warning(this,
             QStringLiteral("X-AnyLabeling"),
-            QStringLiteral("X-AnyLabeling 启动失败：%1").arg(QDir::toNativeSeparators(program)));
+            uiText("X-AnyLabeling 启动失败：%1").arg(QDir::toNativeSeparators(program)));
     });
     annotationLayout->addWidget(annotationSummary, 0, 0, 1, 4);
     annotationLayout->addWidget(annotationToolStatusLabel_, 1, 0, 1, 4);
@@ -1095,14 +1246,14 @@ QWidget* MainWindow::buildTrainingPage()
     pluginCombo_ = new QComboBox;
     taskTypeCombo_ = new QComboBox;
     trainingBackendCombo_ = new QComboBox;
-    trainingBackendCombo_->addItem(QStringLiteral("Ultralytics YOLO 检测（官方）"), QStringLiteral("ultralytics_yolo_detect"));
-    trainingBackendCombo_->addItem(QStringLiteral("Ultralytics YOLO 分割（官方）"), QStringLiteral("ultralytics_yolo_segment"));
-    trainingBackendCombo_->addItem(QStringLiteral("PaddleOCR Det（官方/隔离环境）"), QStringLiteral("paddleocr_det_official"));
-    trainingBackendCombo_->addItem(QStringLiteral("PaddlePaddle OCR Rec CTC"), QStringLiteral("paddleocr_rec"));
-    trainingBackendCombo_->addItem(QStringLiteral("PaddleOCR PP-OCRv4 Rec（官方/隔离环境）"), QStringLiteral("paddleocr_rec_official"));
-    trainingBackendCombo_->addItem(QStringLiteral("PaddleOCR System 推理（官方）"), QStringLiteral("paddleocr_system_official"));
-    trainingBackendCombo_->addItem(QStringLiteral("Tiny detector（高级/占位）"), QStringLiteral("tiny_linear_detector"));
-    trainingBackendCombo_->addItem(QStringLiteral("Python mock（高级/协议测试）"), QStringLiteral("python_mock"));
+    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("ultralytics_yolo_detect")), QStringLiteral("ultralytics_yolo_detect"));
+    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("ultralytics_yolo_segment")), QStringLiteral("ultralytics_yolo_segment"));
+    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("paddleocr_det_official")), QStringLiteral("paddleocr_det_official"));
+    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("paddleocr_rec")), QStringLiteral("paddleocr_rec"));
+    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("paddleocr_rec_official")), QStringLiteral("paddleocr_rec_official"));
+    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("paddleocr_system_official")), QStringLiteral("paddleocr_system_official"));
+    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("tiny_linear_detector")), QStringLiteral("tiny_linear_detector"));
+    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("python_mock")), QStringLiteral("python_mock"));
     modelPresetCombo_ = new QComboBox;
     modelPresetCombo_->setEditable(true);
     modelPresetCombo_->addItems(QStringList()
@@ -1125,7 +1276,7 @@ QWidget* MainWindow::buildTrainingPage()
         taskTypeCombo_->clear();
         auto* plugin = pluginManager_.pluginById(pluginCombo_->currentData().toString());
         if (plugin) {
-            taskTypeCombo_->addItems(plugin->manifest().taskTypes);
+            addTaskTypeItems(taskTypeCombo_, plugin->manifest().taskTypes);
         }
         refreshTrainingDefaults();
     });
@@ -1307,18 +1458,18 @@ QWidget* MainWindow::buildTaskQueuePage()
     auto* refreshButton = primaryButton(QStringLiteral("刷新历史"));
     auto* cancelButton = dangerButton(QStringLiteral("取消选中任务"));
     taskKindFilterCombo_ = new QComboBox;
-    taskKindFilterCombo_->addItem(QStringLiteral("全部类别"), QString());
-    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Train), taskKindLabel(aitrain::TaskKind::Train));
-    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Validate), taskKindLabel(aitrain::TaskKind::Validate));
-    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Export), taskKindLabel(aitrain::TaskKind::Export));
-    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Infer), taskKindLabel(aitrain::TaskKind::Infer));
+    taskKindFilterCombo_->addItem(uiText("全部类别"), QString());
+    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Train), QStringLiteral("train"));
+    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Validate), QStringLiteral("validate"));
+    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Export), QStringLiteral("export"));
+    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Infer), QStringLiteral("infer"));
     taskStateFilterCombo_ = new QComboBox;
-    taskStateFilterCombo_->addItem(QStringLiteral("全部状态"), QString());
-    taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Queued), taskStateLabel(aitrain::TaskState::Queued));
-    taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Running), taskStateLabel(aitrain::TaskState::Running));
-    taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Completed), taskStateLabel(aitrain::TaskState::Completed));
-    taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Failed), taskStateLabel(aitrain::TaskState::Failed));
-    taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Canceled), taskStateLabel(aitrain::TaskState::Canceled));
+    taskStateFilterCombo_->addItem(uiText("全部状态"), QString());
+    taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Queued), QStringLiteral("queued"));
+    taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Running), QStringLiteral("running"));
+    taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Completed), QStringLiteral("completed"));
+    taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Failed), QStringLiteral("failed"));
+    taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Canceled), QStringLiteral("canceled"));
     taskSearchEdit_ = new QLineEdit;
     taskSearchEdit_->setPlaceholderText(QStringLiteral("搜索任务、后端、消息"));
     connect(refreshButton, &QPushButton::clicked, this, &MainWindow::updateRecentTasks);
@@ -1490,17 +1641,17 @@ QWidget* MainWindow::buildConversionPage()
     conversionCheckpointEdit_->setPlaceholderText(QStringLiteral("从任务产物带入，或选择 checkpoint / ONNX / AITrain export"));
     auto* chooseCheckpointButton = new QPushButton(QStringLiteral("选择模型产物"));
     connect(chooseCheckpointButton, &QPushButton::clicked, this, [this]() {
-        const QString file = QFileDialog::getOpenFileName(this, QStringLiteral("选择模型产物"), currentProjectPath_, QStringLiteral("AITrain model (*.aitrain *.json *.onnx *.pt *.pdparams *.engine *.plan);;All files (*.*)"));
+        const QString file = QFileDialog::getOpenFileName(this, uiText("选择模型产物"), currentProjectPath_, QStringLiteral("AITrain model (*.aitrain *.json *.onnx *.pt *.pdparams *.engine *.plan);;All files (*.*)"));
         if (!file.isEmpty()) {
             conversionCheckpointEdit_->setText(QDir::toNativeSeparators(file));
         }
     });
 
     conversionFormatCombo_ = new QComboBox;
-    conversionFormatCombo_->addItem(QStringLiteral("ONNX 模型"), QStringLiteral("onnx"));
-    conversionFormatCombo_->addItem(QStringLiteral("NCNN param/bin（onnx2ncnn）"), QStringLiteral("ncnn"));
-    conversionFormatCombo_->addItem(QStringLiteral("AITrain JSON（诊断）"), QStringLiteral("tiny_detector_json"));
-    conversionFormatCombo_->addItem(QStringLiteral("TensorRT Engine（RTX / SM 75+ 外部验收）"), QStringLiteral("tensorrt"));
+    conversionFormatCombo_->addItem(exportComboLabel(QStringLiteral("onnx")), QStringLiteral("onnx"));
+    conversionFormatCombo_->addItem(exportComboLabel(QStringLiteral("ncnn")), QStringLiteral("ncnn"));
+    conversionFormatCombo_->addItem(exportComboLabel(QStringLiteral("tiny_detector_json")), QStringLiteral("tiny_detector_json"));
+    conversionFormatCombo_->addItem(exportComboLabel(QStringLiteral("tensorrt")), QStringLiteral("tensorrt"));
 
     conversionOutputEdit_ = new QLineEdit;
     conversionOutputEdit_->setPlaceholderText(QStringLiteral("留空则输出到项目 models/exported；未打开项目时使用输入同目录"));
@@ -1515,7 +1666,7 @@ QWidget* MainWindow::buildConversionPage()
             : QFileInfo(inputPath).absolutePath();
         const QString selected = QFileDialog::getSaveFileName(
             this,
-            QStringLiteral("选择导出路径"),
+            uiText("选择导出路径"),
             QDir(defaultDir).filePath(defaultExportFileName(format)),
             exportFileFilter(format));
         if (!selected.isEmpty()) {
@@ -1595,7 +1746,7 @@ QWidget* MainWindow::buildConversionPage()
         matrixTable->setItem(row, 1, new QTableWidgetItem(
             format == QStringLiteral("tiny_detector_json")
                 ? QStringLiteral("tiny detector checkpoint")
-                : QStringLiteral("checkpoint 或 ONNX")));
+                : uiText("checkpoint 或 ONNX")));
         matrixTable->setItem(row, 2, new QTableWidgetItem(defaultExportFileName(format)));
         matrixTable->setItem(row, 3, new QTableWidgetItem(exportFormatNote(format)));
     }
@@ -1640,13 +1791,13 @@ QWidget* MainWindow::buildInferencePage()
     auto* chooseImageButton = new QPushButton(QStringLiteral("选择图片"));
     auto* inferButton = primaryButton(QStringLiteral("开始推理"));
     connect(chooseModelButton, &QPushButton::clicked, this, [this]() {
-        const QString file = QFileDialog::getOpenFileName(this, QStringLiteral("选择模型文件"), currentProjectPath_, QStringLiteral("AITrain model (*.aitrain *.json *.onnx *.engine *.plan);;All files (*.*)"));
+        const QString file = QFileDialog::getOpenFileName(this, uiText("选择模型文件"), currentProjectPath_, QStringLiteral("AITrain model (*.aitrain *.json *.onnx *.engine *.plan);;All files (*.*)"));
         if (!file.isEmpty()) {
             inferenceCheckpointEdit_->setText(QDir::toNativeSeparators(file));
         }
     });
     connect(chooseImageButton, &QPushButton::clicked, this, [this]() {
-        const QString file = QFileDialog::getOpenFileName(this, QStringLiteral("选择图片"), currentProjectPath_, QStringLiteral("Images (*.png *.jpg *.jpeg *.bmp);;All files (*.*)"));
+        const QString file = QFileDialog::getOpenFileName(this, uiText("选择图片"), currentProjectPath_, QStringLiteral("Images (*.png *.jpg *.jpeg *.bmp);;All files (*.*)"));
         if (!file.isEmpty()) {
             inferenceImageEdit_->setText(QDir::toNativeSeparators(file));
         }
@@ -1870,8 +2021,8 @@ QWidget* MainWindow::buildEnvironmentPage()
         const int row = environmentTable_->rowCount();
         environmentTable_->insertRow(row);
         environmentTable_->setItem(row, 0, new QTableWidgetItem(rowName));
-        environmentTable_->setItem(row, 1, new QTableWidgetItem(QStringLiteral("未检测")));
-        environmentTable_->setItem(row, 2, new QTableWidgetItem(QStringLiteral("点击执行环境自检。")));
+        environmentTable_->setItem(row, 1, new QTableWidgetItem(uiText("未检测")));
+        environmentTable_->setItem(row, 2, new QTableWidgetItem(uiText("点击执行环境自检。")));
     }
     panel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("TensorRT 真机验收仍需要 RTX / SM 75+。当前 GTX 1060 / SM 61 只能记录为 hardware-blocked。")));
     panel->bodyLayout()->addWidget(environmentTable_);
@@ -1898,15 +2049,15 @@ InfoPanel* MainWindow::createMetricCard(const QString& label, const QString& val
 QString MainWindow::pageCaption(int pageIndex) const
 {
     switch (pageIndex) {
-    case DashboardPage: return QStringLiteral("本机项目、数据、训练、模型交付状态总览");
-    case ProjectPage: return QStringLiteral("创建或打开本地训练项目，统一管理数据、运行和模型产物");
-    case DatasetPage: return QStringLiteral("管理数据集库，完成导入、校验、划分和样本预览");
-    case TrainingPage: return QStringLiteral("启动官方后端优先的训练实验，并监控指标、日志和产物");
-    case TaskQueuePage: return QStringLiteral("追踪历史任务、指标、导出记录和所有 Worker 产物");
-    case ConversionPage: return QStringLiteral("将训练产物导出为 ONNX 或外部 TensorRT 验收目标");
-    case InferencePage: return QStringLiteral("选择模型与样本图，验证 detection、segmentation 或 OCR 推理结果");
-    case PluginsPage: return QStringLiteral("扫描和诊断模型插件");
-    case EnvironmentPage: return QStringLiteral("检查 GPU、CUDA、TensorRT 和运行时依赖");
+    case DashboardPage: return tr("本机项目、数据、训练、模型交付状态总览");
+    case ProjectPage: return tr("创建或打开本地训练项目，统一管理数据、运行和模型产物");
+    case DatasetPage: return tr("管理数据集库，完成导入、校验、划分和样本预览");
+    case TrainingPage: return tr("启动官方后端优先的训练实验，并监控指标、日志和产物");
+    case TaskQueuePage: return tr("追踪历史任务、指标、导出记录和所有 Worker 产物");
+    case ConversionPage: return tr("将训练产物导出为 ONNX 或外部 TensorRT 验收目标");
+    case InferencePage: return tr("选择模型与样本图，验证 detection、segmentation 或 OCR 推理结果");
+    case PluginsPage: return tr("扫描和诊断模型插件");
+    case EnvironmentPage: return tr("检查 GPU、CUDA、TensorRT 和运行时依赖");
     default: return {};
     }
 }
@@ -1924,7 +2075,7 @@ void MainWindow::createProject()
     currentProjectName_ = projectNameEdit_->text().trimmed();
     currentProjectPath_ = QDir::fromNativeSeparators(projectRootEdit_->text().trimmed());
     if (currentProjectName_.isEmpty() || currentProjectPath_.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("项目"), QStringLiteral("项目名称和目录不能为空。"));
+        QMessageBox::warning(this, uiText("项目"), uiText("项目名称和目录不能为空。"));
         return;
     }
 
@@ -1932,12 +2083,12 @@ void MainWindow::createProject()
     QString error;
     if (!repository_.open(QDir(currentProjectPath_).filePath(QStringLiteral("project.sqlite")), &error)
         || !repository_.upsertProject(currentProjectName_, currentProjectPath_, &error)) {
-        QMessageBox::critical(this, QStringLiteral("项目"), error);
+        QMessageBox::critical(this, uiText("项目"), error);
         return;
     }
-    repository_.markInterruptedTasksFailed(QStringLiteral("上次会话结束时任务未正常完成，已标记为失败。"), &error);
+    repository_.markInterruptedTasksFailed(uiText("上次会话结束时任务未正常完成，已标记为失败。"), &error);
 
-    projectLabel_->setText(QStringLiteral("当前项目：%1").arg(currentProjectPath_));
+    projectLabel_->setText(uiText("当前项目：%1").arg(currentProjectPath_));
     if (dashboardProjectValue_) {
         dashboardProjectValue_->setText(currentProjectName_);
     }
@@ -1946,17 +2097,17 @@ void MainWindow::createProject()
     updateDatasetList();
     updateDashboardSummary();
     refreshTrainingDefaults();
-    statusBar()->showMessage(QStringLiteral("项目已打开：%1").arg(currentProjectName_), 5000);
+    statusBar()->showMessage(uiText("项目已打开：%1").arg(currentProjectName_), 5000);
 }
 
 void MainWindow::browseDataset()
 {
-    const QString directory = QFileDialog::getExistingDirectory(this, QStringLiteral("选择数据集目录"));
+    const QString directory = QFileDialog::getExistingDirectory(this, uiText("选择数据集目录"));
     if (!directory.isEmpty()) {
         datasetPathEdit_->setText(QDir::toNativeSeparators(directory));
         const QString detectedFormat = detectDatasetFormatFromPath(directory);
         if (!detectedFormat.isEmpty() && datasetFormatCombo_) {
-            const int index = datasetFormatCombo_->findText(detectedFormat);
+            const int index = datasetFormatCombo_->findData(detectedFormat);
             if (index >= 0) {
                 datasetFormatCombo_->setCurrentIndex(index);
             }
@@ -1965,7 +2116,8 @@ void MainWindow::browseDataset()
             splitOutputEdit_->setText(QDir::toNativeSeparators(QDir(directory).absoluteFilePath(QStringLiteral("../normalized"))));
         }
         currentDatasetPath_ = directory;
-        currentDatasetFormat_ = datasetFormatCombo_ ? datasetFormatCombo_->currentText() : detectedFormat;
+        const QString selectedFormat = currentDatasetFormat();
+        currentDatasetFormat_ = selectedFormat.isEmpty() ? detectedFormat : selectedFormat;
         currentDatasetValid_ = false;
         updateTrainingSelectionSummary();
         refreshTrainingDefaults();
@@ -1975,14 +2127,14 @@ void MainWindow::browseDataset()
 void MainWindow::validateDataset()
 {
     if (worker_.isRunning()) {
-        QMessageBox::warning(this, QStringLiteral("数据集校验"), QStringLiteral("Worker 正在执行任务，稍后再校验数据集。"));
+        QMessageBox::warning(this, uiText("数据集校验"), uiText("Worker 正在执行任务，稍后再校验数据集。"));
         return;
     }
 
-    const QString format = datasetFormatCombo_->currentText();
+    const QString format = currentDatasetFormat();
     const QString path = QDir::fromNativeSeparators(datasetPathEdit_->text());
     if (format.isEmpty() || path.isEmpty()) {
-        validationSummaryLabel_->setText(QStringLiteral("请选择数据集目录和格式。"));
+        validationSummaryLabel_->setText(uiText("请选择数据集目录和格式。"));
         return;
     }
 
@@ -1992,8 +2144,8 @@ void MainWindow::validateDataset()
     if (validationIssuesTable_) {
         validationIssuesTable_->setRowCount(0);
     }
-    validationSummaryLabel_->setText(QStringLiteral("正在通过 Worker 校验数据集。"));
-    validationOutput_->setPlainText(QStringLiteral("等待校验结果。"));
+    validationSummaryLabel_->setText(uiText("正在通过 Worker 校验数据集。"));
+    validationOutput_->setPlainText(uiText("等待校验结果。"));
 
     QJsonObject options;
     options.insert(QStringLiteral("maxIssues"), 200);
@@ -2011,7 +2163,7 @@ void MainWindow::validateDataset()
             QStringLiteral("dataset_validation"),
             QStringLiteral("com.aitrain.plugins.dataset_interop"),
             outputPath,
-            QStringLiteral("数据集校验中。"),
+            uiText("数据集校验中。"),
             taskId);
         if (taskId.isEmpty()) {
             return;
@@ -2026,31 +2178,31 @@ void MainWindow::validateDataset()
             currentTaskId_.clear();
             updateRecentTasks();
         }
-        validationSummaryLabel_->setText(QStringLiteral("无法启动数据集校验：%1").arg(error));
-        QMessageBox::critical(this, QStringLiteral("数据集校验"), error);
+        validationSummaryLabel_->setText(uiText("无法启动数据集校验：%1").arg(error));
+        QMessageBox::critical(this, uiText("数据集校验"), error);
         return;
     }
-    workerPill_->setStatus(QStringLiteral("数据集校验中"), StatusPill::Tone::Info);
+    workerPill_->setStatus(uiText("数据集校验中"), StatusPill::Tone::Info);
 }
 
 void MainWindow::splitDataset()
 {
     if (worker_.isRunning()) {
-        QMessageBox::warning(this, QStringLiteral("数据集划分"), QStringLiteral("Worker 正在执行任务，稍后再划分数据集。"));
+        QMessageBox::warning(this, uiText("数据集划分"), uiText("Worker 正在执行任务，稍后再划分数据集。"));
         return;
     }
 
-    const QString format = datasetFormatCombo_->currentText();
+    const QString format = currentDatasetFormat();
     const QString path = QDir::fromNativeSeparators(datasetPathEdit_->text());
     if (path.isEmpty() || format.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("数据集划分"), QStringLiteral("请先选择数据集目录和格式。"));
+        QMessageBox::warning(this, uiText("数据集划分"), uiText("请先选择数据集目录和格式。"));
         return;
     }
     if (format != QStringLiteral("yolo_detection") && format != QStringLiteral("yolo_txt")
         && format != QStringLiteral("yolo_segmentation")
         && format != QStringLiteral("paddleocr_det")
         && format != QStringLiteral("paddleocr_rec")) {
-        QMessageBox::warning(this, QStringLiteral("数据集划分"), QStringLiteral("当前划分支持 YOLO 检测、YOLO 分割、PaddleOCR Det 和 PaddleOCR Rec 格式。"));
+        QMessageBox::warning(this, uiText("数据集划分"), uiText("当前划分支持 YOLO 检测、YOLO 分割、PaddleOCR Det 和 PaddleOCR Rec 格式。"));
         return;
     }
 
@@ -2063,7 +2215,7 @@ void MainWindow::splitDataset()
             && dataset.validationStatus == QStringLiteral("valid");
     }
     if (!datasetReady) {
-        QMessageBox::warning(this, QStringLiteral("数据集划分"), QStringLiteral("请先通过当前格式的数据集校验。"));
+        QMessageBox::warning(this, uiText("数据集划分"), uiText("请先通过当前格式的数据集校验。"));
         return;
     }
 
@@ -2092,7 +2244,7 @@ void MainWindow::splitDataset()
             QStringLiteral("dataset_split"),
             QStringLiteral("com.aitrain.plugins.dataset_interop"),
             outputPath,
-            QStringLiteral("数据集划分中。"));
+            uiText("数据集划分中。"));
         if (taskId.isEmpty()) {
             return;
         }
@@ -2106,22 +2258,22 @@ void MainWindow::splitDataset()
             currentTaskId_.clear();
             updateRecentTasks();
         }
-        QMessageBox::critical(this, QStringLiteral("数据集划分"), error);
+        QMessageBox::critical(this, uiText("数据集划分"), error);
         return;
     }
-    workerPill_->setStatus(QStringLiteral("数据集划分中"), StatusPill::Tone::Info);
-    statusBar()->showMessage(QStringLiteral("正在划分数据集"), 3000);
+    workerPill_->setStatus(uiText("数据集划分中"), StatusPill::Tone::Info);
+    statusBar()->showMessage(uiText("正在划分数据集"), 3000);
 }
 
 void MainWindow::startModelExport()
 {
     if (worker_.isRunning()) {
-        QMessageBox::warning(this, QStringLiteral("模型导出"), QStringLiteral("Worker 正在执行任务，稍后再导出模型。"));
+        QMessageBox::warning(this, uiText("模型导出"), uiText("Worker 正在执行任务，稍后再导出模型。"));
         return;
     }
     const QString checkpointPath = QDir::fromNativeSeparators(conversionCheckpointEdit_ ? conversionCheckpointEdit_->text().trimmed() : QString());
     if (checkpointPath.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("模型导出"), QStringLiteral("请选择模型输入。"));
+        QMessageBox::warning(this, uiText("模型导出"), uiText("请选择模型输入。"));
         return;
     }
     const QString format = conversionFormatCombo_
@@ -2147,16 +2299,16 @@ void MainWindow::startModelExport()
         record.kind = aitrain::TaskKind::Export;
         record.state = aitrain::TaskState::Queued;
         record.workDir = QFileInfo(outputPath).absolutePath();
-        record.message = QStringLiteral("等待 Worker 导出模型。");
+        record.message = uiText("等待 Worker 导出模型。");
         record.createdAt = QDateTime::currentDateTimeUtc();
         record.updatedAt = record.createdAt;
         QString taskError;
         if (!repository_.insertTask(record, &taskError)) {
-            QMessageBox::critical(this, QStringLiteral("模型导出"), taskError);
+            QMessageBox::critical(this, uiText("模型导出"), taskError);
             return;
         }
-        if (!repository_.updateTaskState(taskId, aitrain::TaskState::Running, QStringLiteral("模型导出中。"), &taskError)) {
-            QMessageBox::critical(this, QStringLiteral("模型导出"), taskError);
+        if (!repository_.updateTaskState(taskId, aitrain::TaskState::Running, uiText("模型导出中。"), &taskError)) {
+            QMessageBox::critical(this, uiText("模型导出"), taskError);
             return;
         }
         currentTaskId_ = taskId;
@@ -2171,26 +2323,26 @@ void MainWindow::startModelExport()
             currentTaskId_.clear();
             updateRecentTasks();
         }
-        QMessageBox::critical(this, QStringLiteral("模型导出"), error);
+        QMessageBox::critical(this, uiText("模型导出"), error);
         return;
     }
     if (exportResultLabel_) {
-        exportResultLabel_->setText(QStringLiteral("正在导出：%1").arg(QDir::toNativeSeparators(outputPath)));
+        exportResultLabel_->setText(uiText("正在导出：%1").arg(QDir::toNativeSeparators(outputPath)));
     }
-    workerPill_->setStatus(QStringLiteral("模型导出中"), StatusPill::Tone::Info);
+    workerPill_->setStatus(uiText("模型导出中"), StatusPill::Tone::Info);
 }
 
 void MainWindow::startInference()
 {
     if (worker_.isRunning()) {
-        QMessageBox::warning(this, QStringLiteral("推理"), QStringLiteral("Worker 正在执行任务，稍后再推理。"));
+        QMessageBox::warning(this, uiText("推理"), uiText("Worker 正在执行任务，稍后再推理。"));
         return;
     }
     const QString checkpointPath = QDir::fromNativeSeparators(inferenceCheckpointEdit_ ? inferenceCheckpointEdit_->text().trimmed() : QString());
     const QString imagePath = QDir::fromNativeSeparators(inferenceImageEdit_ ? inferenceImageEdit_->text().trimmed() : QString());
     QString outputPath = QDir::fromNativeSeparators(inferenceOutputEdit_ ? inferenceOutputEdit_->text().trimmed() : QString());
     if (checkpointPath.isEmpty() || imagePath.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("推理"), QStringLiteral("请选择模型文件和图片。"));
+        QMessageBox::warning(this, uiText("推理"), uiText("请选择模型文件和图片。"));
         return;
     }
     if (outputPath.isEmpty()) {
@@ -2204,7 +2356,7 @@ void MainWindow::startInference()
             QStringLiteral("inference"),
             QStringLiteral("com.aitrain.plugins.yolo_native"),
             outputPath,
-            QStringLiteral("推理中。"));
+            uiText("推理中。"));
         if (taskId.isEmpty()) {
             return;
         }
@@ -2218,13 +2370,13 @@ void MainWindow::startInference()
             currentTaskId_.clear();
             updateRecentTasks();
         }
-        QMessageBox::critical(this, QStringLiteral("推理"), error);
+        QMessageBox::critical(this, uiText("推理"), error);
         return;
     }
     if (inferenceResultLabel_) {
-        inferenceResultLabel_->setText(QStringLiteral("正在推理：%1").arg(QDir::toNativeSeparators(imagePath)));
+        inferenceResultLabel_->setText(uiText("正在推理：%1").arg(QDir::toNativeSeparators(imagePath)));
     }
-    workerPill_->setStatus(QStringLiteral("推理中"), StatusPill::Tone::Info);
+    workerPill_->setStatus(uiText("推理中"), StatusPill::Tone::Info);
 }
 
 void MainWindow::startTraining()
@@ -2235,19 +2387,19 @@ void MainWindow::startTraining()
             return;
         }
     }
-    if (pluginCombo_->currentData().toString().isEmpty() || taskTypeCombo_->currentText().isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("训练"), QStringLiteral("请选择可用插件和任务类型。"));
+    if (pluginCombo_->currentData().toString().isEmpty() || currentTaskType().isEmpty()) {
+        QMessageBox::warning(this, uiText("训练"), uiText("请选择可用插件和任务类型。"));
         return;
     }
     const QString datasetPath = QDir::fromNativeSeparators(datasetPathEdit_->text());
-    const QString datasetFormat = datasetFormatCombo_->currentText();
+    const QString datasetFormat = currentDatasetFormat();
     if (datasetPath.isEmpty() || datasetFormat.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("训练"), QStringLiteral("请先选择并校验数据集。"));
+        QMessageBox::warning(this, uiText("训练"), uiText("请先选择并校验数据集。"));
         return;
     }
     auto* selectedPlugin = pluginManager_.pluginById(pluginCombo_->currentData().toString());
     if (!selectedPlugin || !selectedPlugin->datasetAdapter(datasetFormat)) {
-        QMessageBox::warning(this, QStringLiteral("训练"), QStringLiteral("当前训练插件不支持所选数据集格式。"));
+        QMessageBox::warning(this, uiText("训练"), uiText("当前训练插件不支持所选数据集格式。"));
         return;
     }
     bool datasetReady = currentDatasetValid_ && currentDatasetPath_ == datasetPath && currentDatasetFormat_ == datasetFormat;
@@ -2259,7 +2411,7 @@ void MainWindow::startTraining()
             && dataset.validationStatus == QStringLiteral("valid");
     }
     if (!datasetReady) {
-        QMessageBox::warning(this, QStringLiteral("训练"), QStringLiteral("数据集未通过当前格式校验，不能启动训练。"));
+        QMessageBox::warning(this, uiText("训练"), uiText("数据集未通过当前格式校验，不能启动训练。"));
         return;
     }
 
@@ -2277,8 +2429,8 @@ void MainWindow::startTraining()
     parameters.insert(QStringLiteral("colorJitter"), colorJitterCheck_ && colorJitterCheck_->isChecked());
     const QString trainingBackend = trainingBackendCombo_
         ? trainingBackendCombo_->currentData().toString().trimmed()
-        : defaultBackendForTask(taskTypeCombo_->currentText());
-    const QString backendForRequest = trainingBackend.isEmpty() ? defaultBackendForTask(taskTypeCombo_->currentText()) : trainingBackend;
+        : defaultBackendForTask(currentTaskType());
+    const QString backendForRequest = trainingBackend.isEmpty() ? defaultBackendForTask(currentTaskType()) : trainingBackend;
     const QString modelPreset = modelPresetCombo_ ? modelPresetCombo_->currentText().trimmed() : QString();
     parameters.insert(QStringLiteral("trainingBackend"), backendForRequest);
     if (!modelPreset.isEmpty()) {
@@ -2292,7 +2444,7 @@ void MainWindow::startTraining()
     request.taskId = taskId;
     request.projectPath = currentProjectPath_;
     request.pluginId = pluginCombo_->currentData().toString();
-    request.taskType = taskTypeCombo_->currentText();
+    request.taskType = currentTaskType();
     request.datasetPath = datasetPath;
     request.outputPath = runDir;
     request.parameters = parameters;
@@ -2305,19 +2457,19 @@ void MainWindow::startTraining()
     record.kind = aitrain::TaskKind::Train;
     record.state = aitrain::TaskState::Queued;
     record.workDir = runDir;
-    record.message = worker_.isRunning() ? QStringLiteral("等待当前任务完成。") : QStringLiteral("等待 Worker 启动。");
+    record.message = worker_.isRunning() ? uiText("等待当前任务完成。") : uiText("等待 Worker 启动。");
     record.createdAt = QDateTime::currentDateTimeUtc();
     record.updatedAt = record.createdAt;
     QString error;
     if (!repository_.insertTask(record, &error)) {
-        QMessageBox::critical(this, QStringLiteral("任务"), error);
+        QMessageBox::critical(this, uiText("任务"), error);
         return;
     }
 
     if (worker_.isRunning()) {
         pendingTrainingTasks_.append(PendingTrainingTask{taskId, request});
-        workerPill_->setStatus(QStringLiteral("任务已排队"), StatusPill::Tone::Info);
-        appendLog(QStringLiteral("任务已加入队列：%1").arg(taskId));
+        workerPill_->setStatus(uiText("任务已排队"), StatusPill::Tone::Info);
+        appendLog(uiText("任务已加入队列：%1").arg(taskId));
         updateRecentTasks();
         return;
     }
@@ -2333,7 +2485,7 @@ void MainWindow::cancelSelectedTask()
 
     const int row = taskQueueTable_->currentRow();
     if (row < 0 || !taskQueueTable_->item(row, 0)) {
-        QMessageBox::information(this, QStringLiteral("任务队列"), QStringLiteral("请先选择一个任务。"));
+        QMessageBox::information(this, uiText("任务队列"), uiText("请先选择一个任务。"));
         return;
     }
 
@@ -2356,8 +2508,8 @@ void MainWindow::cancelSelectedTask()
                     break;
                 }
             }
-            if (!repository_.updateTaskState(taskId, aitrain::TaskState::Canceled, QStringLiteral("用户取消排队任务。"), &error)) {
-                QMessageBox::warning(this, QStringLiteral("任务队列"), error);
+            if (!repository_.updateTaskState(taskId, aitrain::TaskState::Canceled, uiText("用户取消排队任务。"), &error)) {
+                QMessageBox::warning(this, uiText("任务队列"), error);
             }
             updateRecentTasks();
             return;
@@ -2368,7 +2520,7 @@ void MainWindow::cancelSelectedTask()
             return;
         }
 
-        QMessageBox::information(this, QStringLiteral("任务队列"), QStringLiteral("只能取消排队任务或当前 Worker 正在运行的任务。"));
+        QMessageBox::information(this, uiText("任务队列"), uiText("只能取消排队任务或当前 Worker 正在运行的任务。"));
         return;
     }
 }
@@ -2376,24 +2528,25 @@ void MainWindow::cancelSelectedTask()
 void MainWindow::runEnvironmentCheck()
 {
     if (worker_.isRunning()) {
-        QMessageBox::warning(this, QStringLiteral("环境自检"), QStringLiteral("Worker 正在执行任务，稍后再运行环境自检。"));
+        QMessageBox::warning(this, uiText("环境自检"), uiText("Worker 正在执行任务，稍后再运行环境自检。"));
         return;
     }
 
     if (environmentTable_) {
         for (int row = 0; row < environmentTable_->rowCount(); ++row) {
-            environmentTable_->setItem(row, 1, new QTableWidgetItem(QStringLiteral("检测中")));
-            environmentTable_->setItem(row, 2, new QTableWidgetItem(QStringLiteral("等待 Worker 返回结果。")));
+            auto* statusItem = new QTableWidgetItem(uiText("检测中"));
+            environmentTable_->setItem(row, 1, statusItem);
+            environmentTable_->setItem(row, 2, new QTableWidgetItem(uiText("等待 Worker 返回结果。")));
         }
     }
     updateEnvironmentSummary();
 
     QString error;
     if (!worker_.requestEnvironmentCheck(workerExecutablePath(), &error)) {
-        QMessageBox::critical(this, QStringLiteral("环境自检"), error);
+        QMessageBox::critical(this, uiText("环境自检"), error);
         return;
     }
-    workerPill_->setStatus(QStringLiteral("环境自检中"), StatusPill::Tone::Info);
+    workerPill_->setStatus(uiText("环境自检中"), StatusPill::Tone::Info);
 }
 
 void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& payload)
@@ -2423,11 +2576,11 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
     } else if (type == QStringLiteral("artifact")) {
         const QString path = payload.value(QStringLiteral("path")).toString();
         const QString kind = payload.value(QStringLiteral("kind")).toString();
-        appendLog(QStringLiteral("产物：%1").arg(path));
+        appendLog(uiText("产物：%1").arg(path));
         if (kind == QStringLiteral("checkpoint") && latestCheckpointLabel_) {
-            latestCheckpointLabel_->setText(QStringLiteral("最新 checkpoint：%1").arg(QDir::toNativeSeparators(path)));
+            latestCheckpointLabel_->setText(uiText("最新 checkpoint：%1").arg(QDir::toNativeSeparators(path)));
         } else if (kind == QStringLiteral("preview") && latestPreviewPathLabel_) {
-            latestPreviewPathLabel_->setText(QStringLiteral("最新预览：%1").arg(QDir::toNativeSeparators(path)));
+            latestPreviewPathLabel_->setText(uiText("最新预览：%1").arg(QDir::toNativeSeparators(path)));
             if (latestPreviewImageLabel_) {
                 QPixmap preview(path);
                 if (!preview.isNull()) {
@@ -2436,12 +2589,12 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
                         Qt::KeepAspectRatio,
                         Qt::SmoothTransformation));
                 } else {
-                    latestPreviewImageLabel_->setText(QStringLiteral("预览图加载失败"));
+                    latestPreviewImageLabel_->setText(uiText("预览图加载失败"));
                 }
             }
         }
         if (kind == QStringLiteral("export") && exportResultLabel_) {
-            exportResultLabel_->setText(QStringLiteral("导出完成：%1").arg(QDir::toNativeSeparators(path)));
+            exportResultLabel_->setText(uiText("导出完成：%1").arg(QDir::toNativeSeparators(path)));
         } else if (kind == QStringLiteral("inference_overlay") && inferenceOverlayLabel_) {
             QPixmap overlay(path);
             if (!overlay.isNull()) {
@@ -2450,7 +2603,7 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
                     Qt::KeepAspectRatio,
                     Qt::SmoothTransformation));
             } else {
-                inferenceOverlayLabel_->setText(QStringLiteral("推理 overlay 加载失败"));
+                inferenceOverlayLabel_->setText(uiText("推理 overlay 加载失败"));
             }
         } else if (kind == QStringLiteral("inference_predictions") && inferenceResultLabel_) {
             inferenceResultLabel_->setText(inferenceSummaryFromPredictions(path));
@@ -2460,7 +2613,7 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
             artifact.taskId = payload.value(QStringLiteral("taskId")).toString(currentTaskId_);
             artifact.kind = kind;
             artifact.path = path;
-            artifact.message = QStringLiteral("Worker 上报产物");
+            artifact.message = uiText("Worker 上报产物");
             artifact.createdAt = QDateTime::currentDateTimeUtc();
             QString error;
             repository_.insertArtifact(artifact, &error);
@@ -2468,18 +2621,18 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
     } else if (type == QStringLiteral("paused")) {
         QString error;
         repository_.updateTaskState(currentTaskId_, aitrain::TaskState::Paused, payload.value(QStringLiteral("message")).toString(), &error);
-        workerPill_->setStatus(QStringLiteral("任务已暂停"), StatusPill::Tone::Warning);
+        workerPill_->setStatus(uiText("任务已暂停"), StatusPill::Tone::Warning);
         updateRecentTasks();
     } else if (type == QStringLiteral("resumed")) {
         QString error;
         repository_.updateTaskState(currentTaskId_, aitrain::TaskState::Running, payload.value(QStringLiteral("message")).toString(), &error);
-        workerPill_->setStatus(QStringLiteral("训练运行中"), StatusPill::Tone::Info);
+        workerPill_->setStatus(uiText("训练运行中"), StatusPill::Tone::Info);
         updateRecentTasks();
     } else if (type == QStringLiteral("canceled")) {
         QString error;
         repository_.updateTaskState(currentTaskId_, aitrain::TaskState::Canceled, payload.value(QStringLiteral("message")).toString(), &error);
-        workerPill_->setStatus(QStringLiteral("任务已取消"), StatusPill::Tone::Warning);
-        appendLog(QStringLiteral("任务已取消：%1").arg(payload.value(QStringLiteral("message")).toString()));
+        workerPill_->setStatus(uiText("任务已取消"), StatusPill::Tone::Warning);
+        appendLog(uiText("任务已取消：%1").arg(payload.value(QStringLiteral("message")).toString()));
         currentTaskId_.clear();
         updateRecentTasks();
         startNextQueuedTask();
@@ -2494,8 +2647,8 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
             const QString exportPath = payload.value(QStringLiteral("exportPath")).toString();
             const QString reportPath = payload.value(QStringLiteral("reportPath")).toString();
             exportResultLabel_->setText(reportPath.isEmpty()
-                ? QStringLiteral("导出完成：%1").arg(QDir::toNativeSeparators(exportPath))
-                : QStringLiteral("导出完成：%1；报告：%2").arg(QDir::toNativeSeparators(exportPath), QDir::toNativeSeparators(reportPath)));
+                ? uiText("导出完成：%1").arg(QDir::toNativeSeparators(exportPath))
+                : uiText("导出完成：%1；报告：%2").arg(QDir::toNativeSeparators(exportPath), QDir::toNativeSeparators(reportPath)));
         }
         if (repository_.isOpen()) {
             const QJsonObject config = payload.value(QStringLiteral("config")).toObject();
@@ -2528,9 +2681,9 @@ void MainWindow::refreshPlugins()
         const QVector<aitrain::IModelPlugin*> plugins = pluginManager_.plugins();
         if (plugins.isEmpty()) {
             pluginTable_->setRowCount(1);
-            pluginTable_->setItem(0, 0, new QTableWidgetItem(QStringLiteral("暂无插件")));
+            pluginTable_->setItem(0, 0, new QTableWidgetItem(uiText("暂无插件")));
             for (int column = 1; column < pluginTable_->columnCount(); ++column) {
-                pluginTable_->setItem(0, column, new QTableWidgetItem(QStringLiteral("重新扫描或检查 plugins/models 目录。")));
+                pluginTable_->setItem(0, column, new QTableWidgetItem(uiText("重新扫描或检查 plugins/models 目录。")));
             }
         }
         for (auto* plugin : plugins) {
@@ -2543,7 +2696,7 @@ void MainWindow::refreshPlugins()
             pluginTable_->setItem(row, 3, new QTableWidgetItem(compactListSummary(manifest.taskTypes, 4)));
             pluginTable_->setItem(row, 4, new QTableWidgetItem(compactListSummary(manifest.datasetFormats, 4)));
             pluginTable_->setItem(row, 5, new QTableWidgetItem(compactListSummary(manifest.exportFormats, 4)));
-            pluginTable_->setItem(row, 6, new QTableWidgetItem(manifest.requiresGpu ? QStringLiteral("需要") : QStringLiteral("否")));
+            pluginTable_->setItem(row, 6, new QTableWidgetItem(manifest.requiresGpu ? uiText("需要") : uiText("否")));
         }
     }
     loadPluginCombos();
@@ -2624,7 +2777,9 @@ void MainWindow::loadPluginCombos()
         }
     }
     if (datasetFormatCombo_) {
-        datasetFormatCombo_->addItems(formats);
+        for (const QString& format : formats) {
+            datasetFormatCombo_->addItem(datasetFormatLabel(format), format);
+        }
     }
     if (pluginCombo_ && !currentPlugin.isEmpty()) {
         const int index = pluginCombo_->findData(currentPlugin);
@@ -2633,6 +2788,26 @@ void MainWindow::loadPluginCombos()
         }
     }
     refreshTrainingDefaults();
+}
+
+QString MainWindow::currentDatasetFormat() const
+{
+    return comboCurrentDataOrText(datasetFormatCombo_);
+}
+
+QString MainWindow::currentTaskType() const
+{
+    return comboCurrentDataOrText(taskTypeCombo_);
+}
+
+QString MainWindow::currentTaskKindFilter() const
+{
+    return comboCurrentDataOrText(taskKindFilterCombo_);
+}
+
+QString MainWindow::currentTaskStateFilter() const
+{
+    return comboCurrentDataOrText(taskStateFilterCombo_);
 }
 
 void MainWindow::updateRecentTasks()
@@ -2670,7 +2845,7 @@ void MainWindow::updateDatasetList()
     }
     if (datasetListTable_ && datasets.isEmpty()) {
         datasetListTable_->insertRow(0);
-        datasetListTable_->setItem(0, 0, new QTableWidgetItem(QStringLiteral("暂无数据集记录")));
+        datasetListTable_->setItem(0, 0, new QTableWidgetItem(uiText("暂无数据集记录")));
         for (int column = 1; column < datasetListTable_->columnCount(); ++column) {
             datasetListTable_->setItem(0, column, new QTableWidgetItem(QString()));
         }
@@ -2685,8 +2860,12 @@ void MainWindow::updateDatasetList()
             auto* nameItem = new QTableWidgetItem(dataset.name);
             nameItem->setData(Qt::UserRole, dataset.id);
             datasetListTable_->setItem(row, 0, nameItem);
-            datasetListTable_->setItem(row, 1, new QTableWidgetItem(dataset.format));
-            datasetListTable_->setItem(row, 2, new QTableWidgetItem(dataset.validationStatus == QStringLiteral("valid") ? QStringLiteral("通过") : QStringLiteral("未通过")));
+            auto* formatItem = new QTableWidgetItem(datasetFormatLabel(dataset.format));
+            formatItem->setData(Qt::UserRole, dataset.format);
+            datasetListTable_->setItem(row, 1, formatItem);
+            auto* statusItem = new QTableWidgetItem(dataset.validationStatus == QStringLiteral("valid") ? uiText("通过") : uiText("未通过"));
+            statusItem->setData(Qt::UserRole, dataset.validationStatus);
+            datasetListTable_->setItem(row, 2, statusItem);
             datasetListTable_->setItem(row, 3, new QTableWidgetItem(QString::number(dataset.sampleCount)));
             auto* pathItem = new QTableWidgetItem(QDir::toNativeSeparators(dataset.rootPath));
             pathItem->setData(Qt::UserRole, dataset.rootPath);
@@ -2707,19 +2886,20 @@ void MainWindow::refreshAfterAnnotation()
 {
     const QString datasetPath = QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
     if (datasetPath.isEmpty()) {
-        QMessageBox::information(this, QStringLiteral("标注后刷新"), QStringLiteral("请先选择数据集目录。"));
+        QMessageBox::information(this, uiText("标注后刷新"), uiText("请先选择数据集目录。"));
         return;
     }
 
     const QString detectedFormat = detectDatasetFormatFromPath(datasetPath);
     if (!detectedFormat.isEmpty() && datasetFormatCombo_) {
-        const int index = datasetFormatCombo_->findText(detectedFormat);
+        const int index = datasetFormatCombo_->findData(detectedFormat);
         if (index >= 0) {
             datasetFormatCombo_->setCurrentIndex(index);
         }
     }
     currentDatasetPath_ = datasetPath;
-    currentDatasetFormat_ = datasetFormatCombo_ ? datasetFormatCombo_->currentText() : detectedFormat;
+    const QString selectedFormat = currentDatasetFormat();
+    currentDatasetFormat_ = selectedFormat.isEmpty() ? detectedFormat : selectedFormat;
     currentDatasetValid_ = false;
     updateTrainingSelectionSummary();
     refreshTrainingDefaults();
@@ -2732,13 +2912,15 @@ void MainWindow::applyTaskFilters()
         return;
     }
 
-    const QString kind = taskKindFilterCombo_ ? taskKindFilterCombo_->currentData().toString() : QString();
-    const QString state = taskStateFilterCombo_ ? taskStateFilterCombo_->currentData().toString() : QString();
+    const QString kind = currentTaskKindFilter();
+    const QString state = currentTaskStateFilter();
     const QString query = taskSearchEdit_ ? taskSearchEdit_->text().trimmed() : QString();
 
     for (int row = 0; row < taskQueueTable_->rowCount(); ++row) {
-        const QString idText = taskQueueTable_->item(row, 0) ? taskQueueTable_->item(row, 0)->text() : QString();
-        if (idText == QStringLiteral("暂无任务记录")) {
+        const QString rowKind = taskQueueTable_->item(row, 0)
+            ? taskQueueTable_->item(row, 0)->data(Qt::UserRole + 1).toString()
+            : QString();
+        if (rowKind == QStringLiteral("empty")) {
             taskQueueTable_->setRowHidden(row, false);
             continue;
         }
@@ -2746,11 +2928,11 @@ void MainWindow::applyTaskFilters()
         bool visible = true;
         if (!kind.isEmpty()) {
             visible = visible && taskQueueTable_->item(row, 1)
-                && taskQueueTable_->item(row, 1)->text() == kind;
+                && taskQueueTable_->item(row, 1)->data(Qt::UserRole).toString() == kind;
         }
         if (!state.isEmpty()) {
             visible = visible && taskQueueTable_->item(row, 4)
-                && taskQueueTable_->item(row, 4)->text() == state;
+                && taskQueueTable_->item(row, 4)->data(Qt::UserRole).toString() == state;
         }
         if (!query.isEmpty()) {
             bool matched = false;
@@ -2776,7 +2958,8 @@ void MainWindow::updateTaskTable(QTableWidget* table, const QVector<aitrain::Tas
     table->setRowCount(0);
     if (tasks.isEmpty()) {
         table->insertRow(0);
-        auto* item = new QTableWidgetItem(QStringLiteral("暂无任务记录"));
+        auto* item = new QTableWidgetItem(uiText("暂无任务记录"));
+        item->setData(Qt::UserRole + 1, QStringLiteral("empty"));
         table->setItem(0, 0, item);
         for (int column = 1; column < table->columnCount(); ++column) {
             table->setItem(0, column, new QTableWidgetItem(QString()));
@@ -2792,14 +2975,40 @@ void MainWindow::updateTaskTable(QTableWidget* table, const QVector<aitrain::Tas
         table->setItem(row, 0, idItem);
         if (table->columnCount() == 5) {
             table->setItem(row, 1, new QTableWidgetItem(task.pluginId));
-            table->setItem(row, 2, new QTableWidgetItem(task.taskType));
-            table->setItem(row, 3, new QTableWidgetItem(taskStateLabel(task.state)));
+            auto* typeItem = new QTableWidgetItem(taskTypeLabel(task.taskType));
+            typeItem->setData(Qt::UserRole, task.taskType);
+            table->setItem(row, 2, typeItem);
+            auto* stateItem = new QTableWidgetItem(taskStateLabel(task.state));
+            stateItem->setData(Qt::UserRole, static_cast<int>(task.state));
+            table->setItem(row, 3, stateItem);
             table->setItem(row, 4, new QTableWidgetItem(task.message));
         } else {
-            table->setItem(row, 1, new QTableWidgetItem(taskKindLabel(task.kind)));
+            auto* kindItem = new QTableWidgetItem(taskKindLabel(task.kind));
+            QString kindData;
+            switch (task.kind) {
+            case aitrain::TaskKind::Train: kindData = QStringLiteral("train"); break;
+            case aitrain::TaskKind::Validate: kindData = QStringLiteral("validate"); break;
+            case aitrain::TaskKind::Export: kindData = QStringLiteral("export"); break;
+            case aitrain::TaskKind::Infer: kindData = QStringLiteral("infer"); break;
+            }
+            kindItem->setData(Qt::UserRole, kindData);
+            table->setItem(row, 1, kindItem);
             table->setItem(row, 2, new QTableWidgetItem(task.pluginId));
-            table->setItem(row, 3, new QTableWidgetItem(task.taskType));
-            table->setItem(row, 4, new QTableWidgetItem(taskStateLabel(task.state)));
+            auto* typeItem = new QTableWidgetItem(taskTypeLabel(task.taskType));
+            typeItem->setData(Qt::UserRole, task.taskType);
+            table->setItem(row, 3, typeItem);
+            auto* stateItem = new QTableWidgetItem(taskStateLabel(task.state));
+            QString stateData;
+            switch (task.state) {
+            case aitrain::TaskState::Queued: stateData = QStringLiteral("queued"); break;
+            case aitrain::TaskState::Running: stateData = QStringLiteral("running"); break;
+            case aitrain::TaskState::Paused: stateData = QStringLiteral("paused"); break;
+            case aitrain::TaskState::Completed: stateData = QStringLiteral("completed"); break;
+            case aitrain::TaskState::Failed: stateData = QStringLiteral("failed"); break;
+            case aitrain::TaskState::Canceled: stateData = QStringLiteral("canceled"); break;
+            }
+            stateItem->setData(Qt::UserRole, stateData);
+            table->setItem(row, 4, stateItem);
             table->setItem(row, 5, new QTableWidgetItem(task.updatedAt.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))));
             table->setItem(row, 6, new QTableWidgetItem(task.message));
         }
@@ -2834,11 +3043,11 @@ QString MainWindow::createRepositoryTask(aitrain::TaskKind kind,
 
     QString error;
     if (!repository_.insertTask(record, &error)) {
-        QMessageBox::critical(this, QStringLiteral("任务"), error);
+        QMessageBox::critical(this, uiText("任务"), error);
         return QString();
     }
     if (!repository_.updateTaskState(taskId, aitrain::TaskState::Running, message, &error)) {
-        QMessageBox::critical(this, QStringLiteral("任务"), error);
+        QMessageBox::critical(this, uiText("任务"), error);
         return QString();
     }
     currentTaskId_ = taskId;
@@ -2874,7 +3083,7 @@ void MainWindow::updateSelectedTaskDetails()
     const QString taskKind = taskQueueTable_->item(row, 1) ? taskQueueTable_->item(row, 1)->text() : QString();
     const QString taskBackend = taskQueueTable_->item(row, 2) ? taskQueueTable_->item(row, 2)->text() : QString();
     const QString taskType = taskQueueTable_->item(row, 3) ? taskQueueTable_->item(row, 3)->text() : QString();
-    const QString taskState = taskQueueTable_->item(row, 4) ? taskQueueTable_->item(row, 4)->text() : QString();
+    const QString taskState = taskQueueTable_->item(row, 4) ? taskQueueTable_->item(row, 4)->data(Qt::UserRole).toString() : QString();
     const QString taskMessage = taskQueueTable_->item(row, 6) ? taskQueueTable_->item(row, 6)->text() : QString();
 
     QString error;
@@ -2883,19 +3092,19 @@ void MainWindow::updateSelectedTaskDetails()
     const QVector<aitrain::ExportRecord> exports = repository_.exportsForTask(taskId, &error);
 
     if (selectedTaskSummaryLabel_) {
-        QString summary = QStringLiteral("任务 %1：%2 / %3 / %4，%5 个产物，%6 个指标点，%7 条导出记录")
+        QString summary = uiText("任务 %1：%2 / %3 / %4，%5 个产物，%6 个指标点，%7 条导出记录")
             .arg(taskId.left(8))
-            .arg(taskKind.isEmpty() ? QStringLiteral("任务") : taskKind)
-            .arg(taskType.isEmpty() ? QStringLiteral("未记录类型") : taskType)
-            .arg(taskBackend.isEmpty() ? QStringLiteral("未记录后端") : taskBackend)
+            .arg(taskKind.isEmpty() ? uiText("任务") : taskKind)
+            .arg(taskType.isEmpty() ? uiText("未记录类型") : taskType)
+            .arg(taskBackend.isEmpty() ? uiText("未记录后端") : taskBackend)
             .arg(artifacts.size())
             .arg(metrics.size())
             .arg(exports.size());
-        if (taskState == taskStateLabel(aitrain::TaskState::Failed)) {
-            summary.append(QStringLiteral("\n失败摘要：%1\n建议：优先查看 report/log 产物；若提示缺环境或缺 Python 包，进入“环境”页自检；若提示数据错误，回到“数据集”页重新校验。")
-                .arg(taskMessage.isEmpty() ? QStringLiteral("Worker 未返回详细消息。") : taskMessage));
+        if (taskState == QStringLiteral("failed")) {
+            summary.append(uiText("\n失败摘要：%1\n建议：优先查看 report/log 产物；若提示缺环境或缺 Python 包，进入“环境”页自检；若提示数据错误，回到“数据集”页重新校验。")
+                .arg(taskMessage.isEmpty() ? uiText("Worker 未返回详细消息。") : taskMessage));
         } else if (!taskMessage.isEmpty()) {
-            summary.append(QStringLiteral("\n最新消息：%1").arg(taskMessage));
+            summary.append(uiText("\n最新消息：%1").arg(taskMessage));
         }
         selectedTaskSummaryLabel_->setText(summary);
     }
@@ -2904,7 +3113,7 @@ void MainWindow::updateSelectedTaskDetails()
         taskArtifactTable_->setRowCount(0);
         if (artifacts.isEmpty()) {
             taskArtifactTable_->insertRow(0);
-            taskArtifactTable_->setItem(0, 0, new QTableWidgetItem(QStringLiteral("暂无产物")));
+            taskArtifactTable_->setItem(0, 0, new QTableWidgetItem(uiText("暂无产物")));
             for (int column = 1; column < taskArtifactTable_->columnCount(); ++column) {
                 taskArtifactTable_->setItem(0, column, new QTableWidgetItem(QString()));
             }
@@ -2926,7 +3135,7 @@ void MainWindow::updateSelectedTaskDetails()
         taskMetricTable_->setRowCount(0);
         if (metrics.isEmpty()) {
             taskMetricTable_->insertRow(0);
-            taskMetricTable_->setItem(0, 0, new QTableWidgetItem(QStringLiteral("暂无指标")));
+            taskMetricTable_->setItem(0, 0, new QTableWidgetItem(uiText("暂无指标")));
             for (int column = 1; column < taskMetricTable_->columnCount(); ++column) {
                 taskMetricTable_->setItem(0, column, new QTableWidgetItem(QString()));
             }
@@ -2946,7 +3155,7 @@ void MainWindow::updateSelectedTaskDetails()
         taskExportTable_->setRowCount(0);
         if (exports.isEmpty()) {
             taskExportTable_->insertRow(0);
-            taskExportTable_->setItem(0, 0, new QTableWidgetItem(QStringLiteral("暂无导出")));
+            taskExportTable_->setItem(0, 0, new QTableWidgetItem(uiText("暂无导出")));
             for (int column = 1; column < taskExportTable_->columnCount(); ++column) {
                 taskExportTable_->setItem(0, column, new QTableWidgetItem(QString()));
             }
@@ -2975,21 +3184,21 @@ void MainWindow::previewArtifactPath(const QString& path)
     }
 
     artifactImagePreviewLabel_->clear();
-    artifactImagePreviewLabel_->setText(QStringLiteral("暂无图片预览"));
+    artifactImagePreviewLabel_->setText(uiText("暂无图片预览"));
     artifactPreviewText_->clear();
     if (path.isEmpty()) {
-        artifactPreviewText_->setPlainText(QStringLiteral("请选择一个产物。"));
+        artifactPreviewText_->setPlainText(uiText("请选择一个产物。"));
         return;
     }
 
     const QFileInfo info(path);
     if (!info.exists()) {
-        artifactPreviewText_->setPlainText(QStringLiteral("产物不存在：%1").arg(QDir::toNativeSeparators(path)));
+        artifactPreviewText_->setPlainText(uiText("产物不存在：%1").arg(QDir::toNativeSeparators(path)));
         return;
     }
 
     if (info.isDir()) {
-        artifactPreviewText_->setPlainText(QStringLiteral("目录产物\n路径：%1\n修改时间：%2")
+        artifactPreviewText_->setPlainText(uiText("目录产物\n路径：%1\n修改时间：%2")
             .arg(QDir::toNativeSeparators(path), info.lastModified().toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))));
         return;
     }
@@ -3003,7 +3212,7 @@ void MainWindow::previewArtifactPath(const QString& path)
                 Qt::KeepAspectRatio,
                 Qt::SmoothTransformation));
         }
-        artifactPreviewText_->setPlainText(QStringLiteral("图片产物\n路径：%1\n尺寸：%2 x %3\n大小：%4 bytes")
+        artifactPreviewText_->setPlainText(uiText("图片产物\n路径：%1\n尺寸：%2 x %3\n大小：%4 bytes")
             .arg(QDir::toNativeSeparators(path))
             .arg(image.width())
             .arg(image.height())
@@ -3012,14 +3221,14 @@ void MainWindow::previewArtifactPath(const QString& path)
     }
 
     if (suffix == QStringLiteral("onnx")) {
-        artifactPreviewText_->setPlainText(QStringLiteral("ONNX 模型\n路径：%1\n模型族：%2\n大小：%3 bytes")
+        artifactPreviewText_->setPlainText(uiText("ONNX 模型\n路径：%1\n模型族：%2\n大小：%3 bytes")
             .arg(QDir::toNativeSeparators(path), aitrain::inferOnnxModelFamily(path))
             .arg(info.size()));
         return;
     }
     if (suffix == QStringLiteral("engine") || suffix == QStringLiteral("plan") || suffix == QStringLiteral("pdparams")
         || suffix == QStringLiteral("aitrain") || suffix == QStringLiteral("param") || suffix == QStringLiteral("bin")) {
-        artifactPreviewText_->setPlainText(QStringLiteral("模型产物\n路径：%1\n类型：%2\n大小：%3 bytes")
+        artifactPreviewText_->setPlainText(uiText("模型产物\n路径：%1\n类型：%2\n大小：%3 bytes")
             .arg(QDir::toNativeSeparators(path), suffix)
             .arg(info.size()));
         return;
@@ -3028,20 +3237,20 @@ void MainWindow::previewArtifactPath(const QString& path)
     if (QStringList{QStringLiteral("json"), QStringLiteral("yaml"), QStringLiteral("yml"), QStringLiteral("txt"), QStringLiteral("csv"), QStringLiteral("log")}.contains(suffix)) {
         QFile file(path);
         if (!file.open(QIODevice::ReadOnly)) {
-            artifactPreviewText_->setPlainText(QStringLiteral("无法读取文本产物：%1").arg(QDir::toNativeSeparators(path)));
+            artifactPreviewText_->setPlainText(uiText("无法读取文本产物：%1").arg(QDir::toNativeSeparators(path)));
             return;
         }
         const qint64 maxBytes = 256 * 1024;
         const QByteArray data = file.read(maxBytes);
         QString text = suffix == QStringLiteral("json") ? formatJsonTextForPreview(data) : QString::fromUtf8(data);
         if (info.size() > maxBytes) {
-            text.append(QStringLiteral("\n\n[文件超过 256KB，仅显示前部内容]\n路径：%1").arg(QDir::toNativeSeparators(path)));
+            text.append(uiText("\n\n[文件超过 256KB，仅显示前部内容]\n路径：%1").arg(QDir::toNativeSeparators(path)));
         }
         artifactPreviewText_->setPlainText(text);
         return;
     }
 
-    artifactPreviewText_->setPlainText(QStringLiteral("不支持内联预览的产物\n路径：%1\n大小：%2 bytes")
+    artifactPreviewText_->setPlainText(uiText("不支持内联预览的产物\n路径：%1\n大小：%2 bytes")
         .arg(QDir::toNativeSeparators(path))
         .arg(info.size()));
 }
@@ -3067,7 +3276,7 @@ void MainWindow::copySelectedArtifactPath()
     const QString path = selectedArtifactPath();
     if (!path.isEmpty()) {
         QApplication::clipboard()->setText(QDir::toNativeSeparators(path));
-        statusBar()->showMessage(QStringLiteral("产物路径已复制"), 3000);
+        statusBar()->showMessage(uiText("产物路径已复制"), 3000);
     }
 }
 
@@ -3076,7 +3285,7 @@ void MainWindow::useSelectedArtifactForInference()
     const QString path = selectedArtifactPath();
     if (!path.isEmpty() && inferenceCheckpointEdit_) {
         inferenceCheckpointEdit_->setText(QDir::toNativeSeparators(path));
-        showPage(InferencePage, QStringLiteral("推理验证"));
+        showPage(InferencePage, tr("推理验证"));
     }
 }
 
@@ -3085,17 +3294,17 @@ void MainWindow::useSelectedArtifactForExport()
     const QString path = selectedArtifactPath();
     if (!path.isEmpty() && conversionCheckpointEdit_) {
         conversionCheckpointEdit_->setText(QDir::toNativeSeparators(path));
-        showPage(ConversionPage, QStringLiteral("模型导出"));
+        showPage(ConversionPage, tr("模型导出"));
     }
 }
 
 void MainWindow::updateHeaderState()
 {
     headerProjectLabel_->setText(currentProjectPath_.isEmpty()
-        ? QStringLiteral("项目：未打开")
-        : QStringLiteral("项目：%1").arg(currentProjectName_));
+        ? tr("项目：未打开")
+        : tr("项目：%1").arg(currentProjectName_));
     const int pluginCount = pluginManager_.plugins().size();
-    pluginPill_->setStatus(QStringLiteral("插件 %1").arg(pluginCount), pluginCount > 0 ? StatusPill::Tone::Success : StatusPill::Tone::Warning);
+    pluginPill_->setStatus(tr("插件 %1").arg(pluginCount), pluginCount > 0 ? StatusPill::Tone::Success : StatusPill::Tone::Warning);
     if (dashboardPluginValue_) {
         dashboardPluginValue_->setText(QString::number(pluginCount));
     }
@@ -3126,7 +3335,9 @@ void MainWindow::updateEnvironmentTable(const QJsonObject& payload)
         const int row = environmentTable_->rowCount();
         environmentTable_->insertRow(row);
         environmentTable_->setItem(row, 0, new QTableWidgetItem(name));
-        environmentTable_->setItem(row, 1, new QTableWidgetItem(environmentStatusLabel(status)));
+        auto* statusItem = new QTableWidgetItem(environmentStatusLabel(status));
+        statusItem->setData(Qt::UserRole, status);
+        environmentTable_->setItem(row, 1, statusItem);
         environmentTable_->setItem(row, 2, new QTableWidgetItem(message));
 
         if (repository_.isOpen()) {
@@ -3145,19 +3356,21 @@ void MainWindow::updateEnvironmentTable(const QJsonObject& payload)
         const int pluginCount = pluginManager_.plugins().size();
         const QString status = pluginCount > 0 ? QStringLiteral("ok") : QStringLiteral("warning");
         const QString message = pluginCount > 0
-            ? QStringLiteral("已加载 %1 个 AITrain 插件。").arg(pluginCount)
-            : QStringLiteral("未加载 AITrain 插件，请检查 plugins/models 目录。");
+            ? uiText("已加载 %1 个 AITrain 插件。").arg(pluginCount)
+            : uiText("未加载 AITrain 插件，请检查 plugins/models 目录。");
         if (status == QStringLiteral("warning")) {
             hasWarning = true;
         }
         const int row = environmentTable_->rowCount();
         environmentTable_->insertRow(row);
-        environmentTable_->setItem(row, 0, new QTableWidgetItem(QStringLiteral("AITrain Plugins")));
-        environmentTable_->setItem(row, 1, new QTableWidgetItem(environmentStatusLabel(status)));
+        environmentTable_->setItem(row, 0, new QTableWidgetItem(uiText("AITrain Plugins")));
+        auto* statusItem = new QTableWidgetItem(environmentStatusLabel(status));
+        statusItem->setData(Qt::UserRole, status);
+        environmentTable_->setItem(row, 1, statusItem);
         environmentTable_->setItem(row, 2, new QTableWidgetItem(message));
         if (repository_.isOpen()) {
             aitrain::EnvironmentCheckRecord record;
-            record.name = QStringLiteral("AITrain Plugins");
+            record.name = uiText("AITrain Plugins");
             record.status = status;
             record.message = message;
             record.checkedAt = QDateTime::fromString(payload.value(QStringLiteral("checkedAt")).toString(), Qt::ISODateWithMs);
@@ -3167,16 +3380,16 @@ void MainWindow::updateEnvironmentTable(const QJsonObject& payload)
     }
 
     const StatusPill::Tone tone = hasMissing ? StatusPill::Tone::Error : (hasWarning ? StatusPill::Tone::Warning : StatusPill::Tone::Success);
-    const QString text = hasMissing ? QStringLiteral("环境缺失") : (hasWarning ? QStringLiteral("环境警告") : QStringLiteral("环境通过"));
+    const QString text = hasMissing ? uiText("环境缺失") : (hasWarning ? uiText("环境警告") : uiText("环境通过"));
     gpuPill_->setStatus(text, tone);
-    workerPill_->setStatus(QStringLiteral("Worker 空闲"), StatusPill::Tone::Neutral);
-    gpuLabel_->setText(QStringLiteral("GPU / 运行时：%1").arg(text));
+    workerPill_->setStatus(uiText("Worker 空闲"), StatusPill::Tone::Neutral);
+    gpuLabel_->setText(uiText("GPU / 运行时：%1").arg(text));
     if (dashboardEnvironmentValue_) {
-        dashboardEnvironmentValue_->setText(hasMissing ? QStringLiteral("缺失") : (hasWarning ? QStringLiteral("警告") : QStringLiteral("通过")));
+        dashboardEnvironmentValue_->setText(hasMissing ? uiText("缺失") : (hasWarning ? uiText("警告") : uiText("通过")));
     }
     updateEnvironmentSummary();
     updateDashboardSummary();
-    statusBar()->showMessage(QStringLiteral("环境自检完成"), 5000);
+    statusBar()->showMessage(uiText("环境自检完成"), 5000);
 }
 
 void MainWindow::updateDatasetValidationResult(const QJsonObject& payload)
@@ -3193,8 +3406,8 @@ void MainWindow::updateDatasetValidationResult(const QJsonObject& payload)
 
     if (validationSummaryLabel_) {
         validationSummaryLabel_->setText(ok
-            ? QStringLiteral("校验通过：%1 个样本。").arg(sampleCount)
-            : QStringLiteral("校验失败：发现 %1 个问题，训练已被阻止。").arg(issues.size()));
+            ? uiText("校验通过：%1 个样本。").arg(sampleCount)
+            : uiText("校验失败：发现 %1 个问题，训练已被阻止。").arg(issues.size()));
     }
     if (validationOutput_) {
         validationOutput_->setPlainText(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Indented)));
@@ -3204,7 +3417,7 @@ void MainWindow::updateDatasetValidationResult(const QJsonObject& payload)
         const QJsonArray previewSamples = payload.value(QStringLiteral("previewSamples")).toArray();
         if (previewSamples.isEmpty()) {
             datasetPreviewTable_->insertRow(0);
-            datasetPreviewTable_->setItem(0, 0, new QTableWidgetItem(QStringLiteral("暂无样本预览")));
+            datasetPreviewTable_->setItem(0, 0, new QTableWidgetItem(uiText("暂无样本预览")));
             datasetPreviewTable_->setItem(0, 1, new QTableWidgetItem(QString()));
         } else {
             for (const QJsonValue& sampleValue : previewSamples) {
@@ -3213,7 +3426,7 @@ void MainWindow::updateDatasetValidationResult(const QJsonObject& payload)
                 const int row = datasetPreviewTable_->rowCount();
                 datasetPreviewTable_->insertRow(row);
                 datasetPreviewTable_->setItem(row, 0, new QTableWidgetItem(parts.value(0)));
-                datasetPreviewTable_->setItem(row, 1, new QTableWidgetItem(parts.size() > 1 ? parts.mid(1).join(QStringLiteral("\t")) : QStringLiteral("标注文件已匹配")));
+                datasetPreviewTable_->setItem(row, 1, new QTableWidgetItem(parts.size() > 1 ? parts.mid(1).join(QStringLiteral("\t")) : uiText("标注文件已匹配")));
             }
         }
     }
@@ -3221,11 +3434,11 @@ void MainWindow::updateDatasetValidationResult(const QJsonObject& payload)
         validationIssuesTable_->setRowCount(0);
         if (issues.isEmpty()) {
             validationIssuesTable_->insertRow(0);
-            validationIssuesTable_->setItem(0, 0, new QTableWidgetItem(QStringLiteral("通过")));
+            validationIssuesTable_->setItem(0, 0, new QTableWidgetItem(uiText("通过")));
             validationIssuesTable_->setItem(0, 1, new QTableWidgetItem(QStringLiteral("ok")));
             validationIssuesTable_->setItem(0, 2, new QTableWidgetItem(datasetPath));
             validationIssuesTable_->setItem(0, 3, new QTableWidgetItem(QString()));
-            validationIssuesTable_->setItem(0, 4, new QTableWidgetItem(QStringLiteral("未发现数据集问题。")));
+            validationIssuesTable_->setItem(0, 4, new QTableWidgetItem(uiText("未发现数据集问题。")));
         } else {
             for (const QJsonValue& value : issues) {
                 const QJsonObject issue = value.toObject();
@@ -3258,8 +3471,8 @@ void MainWindow::updateDatasetValidationResult(const QJsonObject& payload)
     updateTrainingSelectionSummary();
     refreshTrainingDefaults();
     updateDashboardSummary();
-    workerPill_->setStatus(QStringLiteral("Worker 空闲"), StatusPill::Tone::Neutral);
-    statusBar()->showMessage(ok ? QStringLiteral("数据集校验通过") : QStringLiteral("数据集校验失败"), 5000);
+    workerPill_->setStatus(uiText("Worker 空闲"), StatusPill::Tone::Neutral);
+    statusBar()->showMessage(ok ? uiText("数据集校验通过") : uiText("数据集校验失败"), 5000);
 }
 
 void MainWindow::updateDatasetSplitResult(const QJsonObject& payload)
@@ -3274,8 +3487,8 @@ void MainWindow::updateDatasetSplitResult(const QJsonObject& payload)
 
     if (validationSummaryLabel_) {
         validationSummaryLabel_->setText(ok
-            ? QStringLiteral("划分完成：train %1 / val %2 / test %3。").arg(trainCount).arg(valCount).arg(testCount)
-            : QStringLiteral("划分失败：%1 个错误。").arg(errors.size()));
+            ? uiText("划分完成：train %1 / val %2 / test %3。").arg(trainCount).arg(valCount).arg(testCount)
+            : uiText("划分失败：%1 个错误。").arg(errors.size()));
     }
     if (validationOutput_) {
         validationOutput_->setPlainText(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Indented)));
@@ -3284,16 +3497,16 @@ void MainWindow::updateDatasetSplitResult(const QJsonObject& payload)
         validationIssuesTable_->setRowCount(0);
         if (ok) {
             validationIssuesTable_->insertRow(0);
-            validationIssuesTable_->setItem(0, 0, new QTableWidgetItem(QStringLiteral("通过")));
+            validationIssuesTable_->setItem(0, 0, new QTableWidgetItem(uiText("通过")));
             validationIssuesTable_->setItem(0, 1, new QTableWidgetItem(QStringLiteral("split_ok")));
             validationIssuesTable_->setItem(0, 2, new QTableWidgetItem(outputPath));
             validationIssuesTable_->setItem(0, 3, new QTableWidgetItem(QString()));
-            validationIssuesTable_->setItem(0, 4, new QTableWidgetItem(QStringLiteral("数据集已复制到标准划分目录。")));
+            validationIssuesTable_->setItem(0, 4, new QTableWidgetItem(uiText("数据集已复制到标准划分目录。")));
         } else {
             for (const QJsonValue& value : errors) {
                 const int row = validationIssuesTable_->rowCount();
                 validationIssuesTable_->insertRow(row);
-                validationIssuesTable_->setItem(row, 0, new QTableWidgetItem(QStringLiteral("错误")));
+                validationIssuesTable_->setItem(row, 0, new QTableWidgetItem(uiText("错误")));
                 validationIssuesTable_->setItem(row, 1, new QTableWidgetItem(QStringLiteral("split_error")));
                 validationIssuesTable_->setItem(row, 2, new QTableWidgetItem(outputPath));
                 validationIssuesTable_->setItem(row, 3, new QTableWidgetItem(QString()));
@@ -3315,7 +3528,7 @@ void MainWindow::updateDatasetSplitResult(const QJsonObject& payload)
         repository_.upsertDatasetValidation(dataset, &error);
         updateDatasetList();
         datasetPathEdit_->setText(QDir::toNativeSeparators(outputPath));
-        datasetFormatCombo_->setCurrentText(format);
+        setComboCurrentData(datasetFormatCombo_, format);
         currentDatasetPath_ = outputPath;
         currentDatasetFormat_ = format;
         currentDatasetValid_ = true;
@@ -3324,8 +3537,8 @@ void MainWindow::updateDatasetSplitResult(const QJsonObject& payload)
     updateTrainingSelectionSummary();
     refreshTrainingDefaults();
     updateDashboardSummary();
-    workerPill_->setStatus(QStringLiteral("Worker 空闲"), StatusPill::Tone::Neutral);
-    statusBar()->showMessage(ok ? QStringLiteral("数据集划分完成") : QStringLiteral("数据集划分失败"), 5000);
+    workerPill_->setStatus(uiText("Worker 空闲"), StatusPill::Tone::Neutral);
+    statusBar()->showMessage(ok ? uiText("数据集划分完成") : uiText("数据集划分失败"), 5000);
 }
 
 void MainWindow::startQueuedTraining(const QString& taskId, const aitrain::TrainingRequest& request)
@@ -3346,8 +3559,8 @@ void MainWindow::startQueuedTraining(const QString& taskId, const aitrain::Train
     }
 
     repository_.updateTaskState(taskId, aitrain::TaskState::Running, QStringLiteral("started"), &error);
-    workerPill_->setStatus(QStringLiteral("训练运行中"), StatusPill::Tone::Info);
-    appendLog(QStringLiteral("任务已启动：%1").arg(taskId));
+    workerPill_->setStatus(uiText("训练运行中"), StatusPill::Tone::Info);
+    appendLog(uiText("任务已启动：%1").arg(taskId));
     updateRecentTasks();
 }
 
@@ -3377,16 +3590,16 @@ void MainWindow::updateProjectSummary()
     const bool hasProject = !currentProjectPath_.isEmpty() && repository_.isOpen();
     if (projectConsoleStatusLabel_) {
         projectConsoleStatusLabel_->setText(hasProject
-            ? QStringLiteral("已打开：%1").arg(currentProjectName_)
-            : QStringLiteral("未打开项目。"));
+            ? uiText("已打开：%1").arg(currentProjectName_)
+            : uiText("未打开项目。"));
     }
     if (projectPathSummaryLabel_) {
         projectPathSummaryLabel_->setText(hasProject
             ? QDir::toNativeSeparators(currentProjectPath_)
-            : QStringLiteral("未打开"));
+            : uiText("未打开"));
     }
     if (projectSqliteSummaryLabel_) {
-        projectSqliteSummaryLabel_->setText(hasProject ? QStringLiteral("已连接") : QStringLiteral("未连接"));
+        projectSqliteSummaryLabel_->setText(hasProject ? uiText("已连接") : uiText("未连接"));
     }
 
     int datasetCount = 0;
@@ -3426,11 +3639,11 @@ void MainWindow::updatePluginSummary()
 
     if (pluginConsoleStatusLabel_) {
         pluginConsoleStatusLabel_->setText(plugins.isEmpty()
-            ? QStringLiteral("未加载插件，请检查插件目录。")
-            : QStringLiteral("已加载 %1 个插件。").arg(plugins.size()));
+            ? uiText("未加载插件，请检查插件目录。")
+            : uiText("已加载 %1 个插件。").arg(plugins.size()));
     }
     if (pluginSearchPathLabel_) {
-        pluginSearchPathLabel_->setText(QStringLiteral("插件搜索路径：%1").arg(pluginSearchPaths().join(QStringLiteral(" | "))));
+        pluginSearchPathLabel_->setText(uiText("插件搜索路径：%1").arg(pluginSearchPaths().join(QStringLiteral(" | "))));
     }
     if (pluginCountSummaryLabel_) {
         pluginCountSummaryLabel_->setText(QString::number(plugins.size()));
@@ -3456,12 +3669,12 @@ void MainWindow::updateEnvironmentSummary()
     int unchecked = 0;
     if (environmentTable_) {
         for (int row = 0; row < environmentTable_->rowCount(); ++row) {
-            const QString state = environmentTable_->item(row, 1) ? environmentTable_->item(row, 1)->text() : QString();
-            if (state == QStringLiteral("通过")) {
+            const QString state = environmentTable_->item(row, 1) ? environmentTable_->item(row, 1)->data(Qt::UserRole).toString() : QString();
+            if (state == QStringLiteral("ok")) {
                 ++ok;
-            } else if (state == QStringLiteral("警告")) {
+            } else if (state == QStringLiteral("warning")) {
                 ++warning;
-            } else if (state == QStringLiteral("缺失")) {
+            } else if (state == QStringLiteral("missing")) {
                 ++missing;
             } else {
                 ++unchecked;
@@ -3482,13 +3695,13 @@ void MainWindow::updateEnvironmentSummary()
     }
     if (environmentConsoleStatusLabel_) {
         if (missing > 0) {
-            environmentConsoleStatusLabel_->setText(QStringLiteral("发现 %1 项缺失，相关能力会被阻塞。").arg(missing));
+            environmentConsoleStatusLabel_->setText(uiText("发现 %1 项缺失，相关能力会被阻塞。").arg(missing));
         } else if (warning > 0) {
-            environmentConsoleStatusLabel_->setText(QStringLiteral("发现 %1 项警告，可继续但需要关注。").arg(warning));
+            environmentConsoleStatusLabel_->setText(uiText("发现 %1 项警告，可继续但需要关注。").arg(warning));
         } else if (unchecked > 0) {
-            environmentConsoleStatusLabel_->setText(QStringLiteral("尚有 %1 项未检测。").arg(unchecked));
+            environmentConsoleStatusLabel_->setText(uiText("尚有 %1 项未检测。").arg(unchecked));
         } else {
-            environmentConsoleStatusLabel_->setText(QStringLiteral("环境自检通过。"));
+            environmentConsoleStatusLabel_->setText(uiText("环境自检通过。"));
         }
     }
 }
@@ -3497,12 +3710,12 @@ void MainWindow::updateDashboardSummary()
 {
     const bool hasProject = !currentProjectPath_.isEmpty() && repository_.isOpen();
     if (dashboardProjectValue_) {
-        dashboardProjectValue_->setText(hasProject ? currentProjectName_ : QStringLiteral("未打开"));
+        dashboardProjectValue_->setText(hasProject ? currentProjectName_ : uiText("未打开"));
     }
     if (projectLabel_) {
         projectLabel_->setText(hasProject
-            ? QStringLiteral("当前项目：%1").arg(QDir::toNativeSeparators(currentProjectPath_))
-            : QStringLiteral("未打开项目。先创建或打开本地项目，后续数据集、任务和模型产物都会写入项目目录。"));
+            ? uiText("当前项目：%1").arg(QDir::toNativeSeparators(currentProjectPath_))
+            : uiText("未打开项目。先创建或打开本地项目，后续数据集、任务和模型产物都会写入项目目录。"));
     }
 
     int datasetCount = 0;
@@ -3537,20 +3750,20 @@ void MainWindow::updateDashboardSummary()
         dashboardPluginValue_->setText(QString::number(pluginManager_.plugins().size()));
     }
 
-    QString environmentText = QStringLiteral("待检测");
+    QString environmentText = uiText("待检测");
     if (environmentTable_ && environmentTable_->rowCount() > 0) {
         bool hasMissing = false;
         bool hasWarning = false;
         bool hasChecked = false;
         for (int row = 0; row < environmentTable_->rowCount(); ++row) {
-            const QString state = environmentTable_->item(row, 1) ? environmentTable_->item(row, 1)->text() : QString();
-            hasChecked = hasChecked || state != QStringLiteral("未检测");
-            hasMissing = hasMissing || state == QStringLiteral("缺失");
-            hasWarning = hasWarning || state == QStringLiteral("警告");
+            const QString state = environmentTable_->item(row, 1) ? environmentTable_->item(row, 1)->data(Qt::UserRole).toString() : QString();
+            hasChecked = hasChecked || !state.isEmpty();
+            hasMissing = hasMissing || state == QStringLiteral("missing");
+            hasWarning = hasWarning || state == QStringLiteral("warning");
         }
         if (hasChecked) {
-            environmentText = hasMissing ? QStringLiteral("缺失")
-                : (hasWarning ? QStringLiteral("警告") : QStringLiteral("通过"));
+            environmentText = hasMissing ? uiText("缺失")
+                : (hasWarning ? uiText("警告") : uiText("通过"));
         }
     }
     if (dashboardEnvironmentValue_) {
@@ -3563,15 +3776,15 @@ void MainWindow::updateDashboardSummary()
     if (dashboardNextStepLabel_) {
         QString nextStep;
         if (!hasProject) {
-            nextStep = QStringLiteral("先创建或打开一个本地项目。项目目录会集中保存数据集索引、任务历史、训练报告和模型产物。");
+            nextStep = uiText("先创建或打开一个本地项目。项目目录会集中保存数据集索引、任务历史、训练报告和模型产物。");
         } else if (validDatasetCount == 0) {
-            nextStep = QStringLiteral("下一步：导入并校验 detection、segmentation 或 OCR Rec 数据集。只有通过校验的数据集会进入训练主流程。");
+            nextStep = uiText("下一步：导入并校验 detection、segmentation 或 OCR Rec 数据集。只有通过校验的数据集会进入训练主流程。");
         } else if (taskCount == 0) {
-            nextStep = QStringLiteral("下一步：进入训练实验，选择已校验数据集。平台会按任务类型优先选择官方 YOLO / OCR 后端。");
+            nextStep = uiText("下一步：进入训练实验，选择已校验数据集。平台会按任务类型优先选择官方 YOLO / OCR 后端。");
         } else if (exportCount == 0) {
-            nextStep = QStringLiteral("下一步：在任务与产物中查看 checkpoint / report / ONNX，再进入模型导出或推理验证。");
+            nextStep = uiText("下一步：在任务与产物中查看 checkpoint / report / ONNX，再进入模型导出或推理验证。");
         } else {
-            nextStep = QStringLiteral("项目已具备可复验闭环：数据集、任务历史和模型导出均已记录。可继续运行推理验证或追加实验。");
+            nextStep = uiText("项目已具备可复验闭环：数据集、任务历史和模型导出均已记录。可继续运行推理验证或追加实验。");
         }
         dashboardNextStepLabel_->setText(nextStep);
     }
@@ -3584,20 +3797,20 @@ void MainWindow::updateTrainingSelectionSummary()
         : QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
     const QString datasetFormat = !currentDatasetFormat_.isEmpty()
         ? currentDatasetFormat_
-        : (datasetFormatCombo_ ? datasetFormatCombo_->currentText() : QString());
-    const QString state = currentDatasetValid_ ? QStringLiteral("已校验") : QStringLiteral("待校验");
-    const QString pathText = datasetPath.isEmpty() ? QStringLiteral("未选择") : QDir::toNativeSeparators(datasetPath);
+        : currentDatasetFormat();
+    const QString state = currentDatasetValid_ ? uiText("已校验") : uiText("待校验");
+    const QString pathText = datasetPath.isEmpty() ? uiText("未选择") : QDir::toNativeSeparators(datasetPath);
 
     if (trainingDatasetSummaryLabel_) {
         trainingDatasetSummaryLabel_->setText(datasetPath.isEmpty()
-            ? QStringLiteral("当前数据集：未选择。请先在数据集页导入并通过校验。")
-            : QStringLiteral("当前数据集：%1 | %2 | %3")
+            ? uiText("当前数据集：未选择。请先在数据集页导入并通过校验。")
+            : uiText("当前数据集：%1 | %2 | %3")
                 .arg(datasetFormatLabel(datasetFormat), state, pathText));
     }
     if (datasetDetailLabel_) {
         datasetDetailLabel_->setText(datasetPath.isEmpty()
-            ? QStringLiteral("选择或导入数据集后显示格式、样本数、校验状态和最近报告。")
-            : QStringLiteral("格式：%1 | 状态：%2 | 路径：%3")
+            ? uiText("选择或导入数据集后显示格式、样本数、校验状态和最近报告。")
+            : uiText("格式：%1 | 状态：%2 | 路径：%3")
                 .arg(datasetFormatLabel(datasetFormat), state, pathText));
     }
     if (trainingBackendHintLabel_ && trainingBackendCombo_) {
@@ -3606,12 +3819,12 @@ void MainWindow::updateTrainingSelectionSummary()
     if (trainingRunSummaryLabel_) {
         const QString backend = trainingBackendCombo_
             ? trainingBackendCombo_->currentData().toString()
-            : defaultBackendForTask(taskTypeCombo_ ? taskTypeCombo_->currentText() : QString());
+            : defaultBackendForTask(currentTaskType());
         const QString model = modelPresetCombo_ ? modelPresetCombo_->currentText().trimmed() : QString();
-        trainingRunSummaryLabel_->setText(QStringLiteral("运行摘要：%1 | 后端 %2 | 模型 %3 | epoch %4 / batch %5 / image %6")
-            .arg(taskTypeCombo_ ? taskTypeCombo_->currentText() : QStringLiteral("未选择"),
-                backend.isEmpty() ? QStringLiteral("未选择") : backend,
-                model.isEmpty() ? QStringLiteral("默认") : model,
+        trainingRunSummaryLabel_->setText(uiText("运行摘要：%1 | 后端 %2 | 模型 %3 | epoch %4 / batch %5 / image %6")
+            .arg(taskTypeLabel(currentTaskType()),
+                backend.isEmpty() ? uiText("未选择") : backend,
+                model.isEmpty() ? uiText("默认") : model,
                 epochsEdit_ ? epochsEdit_->text() : QStringLiteral("-"),
                 batchEdit_ ? batchEdit_->text() : QStringLiteral("-"),
                 imageSizeEdit_ ? imageSizeEdit_->text() : QStringLiteral("-")));
@@ -3627,7 +3840,7 @@ void MainWindow::refreshTrainingDefaults()
 
     const QString datasetFormat = !currentDatasetFormat_.isEmpty()
         ? currentDatasetFormat_
-        : (datasetFormatCombo_ ? datasetFormatCombo_->currentText() : QString());
+        : currentDatasetFormat();
     QString preferredPlugin;
     QString preferredTask;
     QString preferredBackend;
@@ -3656,15 +3869,15 @@ void MainWindow::refreshTrainingDefaults()
     }
 
     if (taskTypeCombo_) {
-        const QString currentTask = taskTypeCombo_->currentText();
+        const QString currentTask = currentTaskType();
         QSignalBlocker block(taskTypeCombo_);
         taskTypeCombo_->clear();
         auto* plugin = pluginCombo_ ? pluginManager_.pluginById(pluginCombo_->currentData().toString()) : nullptr;
         if (plugin) {
-            taskTypeCombo_->addItems(plugin->manifest().taskTypes);
+            addTaskTypeItems(taskTypeCombo_, plugin->manifest().taskTypes);
         }
         const QString targetTask = preferredTask.isEmpty() ? currentTask : preferredTask;
-        const int taskIndex = taskTypeCombo_->findText(targetTask);
+        const int taskIndex = taskTypeCombo_->findData(targetTask);
         if (taskIndex >= 0) {
             taskTypeCombo_->setCurrentIndex(taskIndex);
         } else if (taskTypeCombo_->count() > 0) {
@@ -3673,7 +3886,7 @@ void MainWindow::refreshTrainingDefaults()
     }
 
     if (preferredBackend.isEmpty()) {
-        preferredBackend = defaultBackendForTask(taskTypeCombo_ ? taskTypeCombo_->currentText() : QString());
+        preferredBackend = defaultBackendForTask(currentTaskType());
     }
     {
         QSignalBlocker block(trainingBackendCombo_);

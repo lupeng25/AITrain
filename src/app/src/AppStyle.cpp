@@ -184,6 +184,34 @@ void apply(QApplication& app)
             font-weight: 600;
         }
 
+        QFrame#LanguageSwitch {
+            background: #F3F5F8;
+            border: 1px solid #D8DEE6;
+            border-radius: 10px;
+        }
+
+        QToolButton#LanguageSwitchButton {
+            background: transparent;
+            border: none;
+            border-radius: 8px;
+            color: #6B7280;
+            font-size: 8pt;
+            font-weight: 700;
+            min-width: 30px;
+            min-height: 20px;
+            padding: 1px 6px;
+        }
+
+        QToolButton#LanguageSwitchButton:hover {
+            color: #111827;
+            background: #E8EDF5;
+        }
+
+        QToolButton#LanguageSwitchButton:checked {
+            color: #FFFFFF;
+            background: #111827;
+        }
+
         QPushButton {
             background: #FFFFFF;
             border: 1px solid #C9D1DB;
