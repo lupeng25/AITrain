@@ -135,8 +135,14 @@ QString inferenceTaskTypeLabel(const QString& taskType)
     if (taskType == QStringLiteral("segmentation")) {
         return QStringLiteral("分割");
     }
+    if (taskType == QStringLiteral("ocr_detection")) {
+        return QStringLiteral("OCR 检测");
+    }
     if (taskType == QStringLiteral("ocr_recognition")) {
         return QStringLiteral("OCR 识别");
+    }
+    if (taskType == QStringLiteral("ocr")) {
+        return QStringLiteral("OCR 端到端");
     }
     return QStringLiteral("检测");
 }
@@ -148,6 +154,9 @@ QString datasetFormatLabel(const QString& format)
     }
     if (format == QStringLiteral("yolo_segmentation")) {
         return QStringLiteral("YOLO 分割");
+    }
+    if (format == QStringLiteral("paddleocr_det")) {
+        return QStringLiteral("PaddleOCR Det");
     }
     if (format == QStringLiteral("paddleocr_rec")) {
         return QStringLiteral("PaddleOCR Rec");
@@ -169,8 +178,14 @@ QString defaultBackendForTask(const QString& taskType)
     if (taskType == QStringLiteral("segmentation")) {
         return QStringLiteral("ultralytics_yolo_segment");
     }
+    if (taskType == QStringLiteral("ocr_detection")) {
+        return QStringLiteral("paddleocr_det_official");
+    }
     if (taskType == QStringLiteral("ocr_recognition")) {
         return QStringLiteral("paddleocr_rec");
+    }
+    if (taskType == QStringLiteral("ocr")) {
+        return QStringLiteral("paddleocr_system_official");
     }
     return QStringLiteral("ultralytics_yolo_detect");
 }
@@ -189,6 +204,12 @@ QString defaultModelForBackend(const QString& backend)
     if (backend == QStringLiteral("paddleocr_rec_official") || backend == QStringLiteral("paddleocr_ppocrv4_rec")) {
         return QStringLiteral("PP-OCRv4_mobile_rec");
     }
+    if (backend == QStringLiteral("paddleocr_det_official")) {
+        return QStringLiteral("PP-OCRv4_mobile_det");
+    }
+    if (backend == QStringLiteral("paddleocr_system_official")) {
+        return QStringLiteral("PP-OCRv4_det_rec_system");
+    }
     return QStringLiteral("diagnostic");
 }
 
@@ -205,6 +226,12 @@ QString trainingBackendDescription(const QString& backend)
     }
     if (backend == QStringLiteral("paddleocr_rec_official") || backend == QStringLiteral("paddleocr_ppocrv4_rec")) {
         return QStringLiteral("当前模型能力：官方 PaddleOCR PP-OCRv4 Rec 适配器。适合隔离 OCR Python 环境，记录 train/export/predict 命令、checkpoint、inference model 和官方预测报告。");
+    }
+    if (backend == QStringLiteral("paddleocr_det_official")) {
+        return QStringLiteral("当前模型能力：官方 PaddleOCR PP-OCRv4 Det 适配器。适合 PaddleOCR 原生 det_gt.txt 数据，输出官方配置、checkpoint、inference model 和报告。");
+    }
+    if (backend == QStringLiteral("paddleocr_system_official")) {
+        return QStringLiteral("当前模型能力：官方 PaddleOCR 端到端推理编排。使用已导出的 Det/Rec inference model 调用 predict_system.py；本阶段不做 C++ DB 后处理。");
     }
     if (backend == QStringLiteral("tiny_linear_detector")) {
         return QStringLiteral("高级/诊断：C++ tiny detector 占位训练，仅验证平台链路、checkpoint、ONNX 和回归测试，不代表真实 YOLO 能力。");
@@ -311,6 +338,10 @@ QString xAnyLabelingStatusText()
 QString detectDatasetFormatFromPath(const QString& path)
 {
     const QDir root(path);
+    if (QFileInfo::exists(root.filePath(QStringLiteral("det_gt.txt")))
+        || QFileInfo::exists(root.filePath(QStringLiteral("det_gt_train.txt")))) {
+        return QStringLiteral("paddleocr_det");
+    }
     if (QFileInfo::exists(root.filePath(QStringLiteral("rec_gt.txt")))
         || QFileInfo::exists(root.filePath(QStringLiteral("rec_gt_train.txt")))) {
         if (QFileInfo::exists(root.filePath(QStringLiteral("dict.txt")))) {
@@ -799,7 +830,7 @@ QWidget* MainWindow::buildDatasetPage()
     annotationLayout->setContentsMargins(10, 12, 10, 10);
     annotationLayout->setHorizontalSpacing(10);
     annotationLayout->setVerticalSpacing(8);
-    auto* annotationSummary = mutedLabel(QStringLiteral("默认使用 X-AnyLabeling。推荐导出：检测使用 YOLO bbox，分割使用 YOLO polygon，COCO 可先在标注工具内转换；OCR Rec 当前仍以 rec_gt.txt + dict.txt 为训练入口。"));
+    auto* annotationSummary = mutedLabel(QStringLiteral("默认使用 X-AnyLabeling。推荐导出：检测使用 YOLO bbox，分割使用 YOLO polygon；PaddleOCR Det 使用 det_gt.txt，PaddleOCR Rec 使用 rec_gt.txt + dict.txt。"));
     annotationToolStatusLabel_ = inlineStatusLabel(xAnyLabelingStatusText());
     auto* launchAnnotationToolButton = new QPushButton(QStringLiteral("启动 X-AnyLabeling"));
     auto* refreshAnnotationStatusButton = new QPushButton(QStringLiteral("检测状态"));
@@ -851,7 +882,7 @@ QWidget* MainWindow::buildDatasetPage()
     toolsPanel->bodyLayout()->addWidget(annotationPanel);
     toolsPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("样本预览")));
     toolsPanel->bodyLayout()->addWidget(datasetPreviewTable_, 1);
-    toolsPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("划分会复制到新目录，不修改原始数据；支持 YOLO 检测、YOLO 分割和 PaddleOCR Rec。")));
+    toolsPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("划分会复制到新目录，不修改原始数据；支持 YOLO 检测、YOLO 分割、PaddleOCR Det 和 PaddleOCR Rec。")));
     toolsPanel->bodyLayout()->addStretch();
 
     splitter->addWidget(toolsPanel);
@@ -876,8 +907,10 @@ QWidget* MainWindow::buildTrainingPage()
     trainingBackendCombo_ = new QComboBox;
     trainingBackendCombo_->addItem(QStringLiteral("Ultralytics YOLO 检测（官方）"), QStringLiteral("ultralytics_yolo_detect"));
     trainingBackendCombo_->addItem(QStringLiteral("Ultralytics YOLO 分割（官方）"), QStringLiteral("ultralytics_yolo_segment"));
+    trainingBackendCombo_->addItem(QStringLiteral("PaddleOCR Det（官方/隔离环境）"), QStringLiteral("paddleocr_det_official"));
     trainingBackendCombo_->addItem(QStringLiteral("PaddlePaddle OCR Rec CTC"), QStringLiteral("paddleocr_rec"));
     trainingBackendCombo_->addItem(QStringLiteral("PaddleOCR PP-OCRv4 Rec（官方/隔离环境）"), QStringLiteral("paddleocr_rec_official"));
+    trainingBackendCombo_->addItem(QStringLiteral("PaddleOCR System 推理（官方）"), QStringLiteral("paddleocr_system_official"));
     trainingBackendCombo_->addItem(QStringLiteral("Tiny detector（高级/占位）"), QStringLiteral("tiny_linear_detector"));
     trainingBackendCombo_->addItem(QStringLiteral("Python mock（高级/协议测试）"), QStringLiteral("python_mock"));
     modelPresetCombo_ = new QComboBox;
@@ -885,8 +918,10 @@ QWidget* MainWindow::buildTrainingPage()
     modelPresetCombo_->addItems(QStringList()
         << QStringLiteral("yolov8n.yaml")
         << QStringLiteral("yolov8n-seg.yaml")
+        << QStringLiteral("PP-OCRv4_mobile_det")
         << QStringLiteral("paddle_ctc_smoke")
         << QStringLiteral("PP-OCRv4_mobile_rec")
+        << QStringLiteral("PP-OCRv4_det_rec_system")
         << QStringLiteral("diagnostic"));
     epochsEdit_ = new QLineEdit(QStringLiteral("20"));
     batchEdit_ = new QLineEdit(QStringLiteral("8"));
@@ -1026,7 +1061,7 @@ QWidget* MainWindow::buildTrainingPage()
 
     auto* artifactPanel = new InfoPanel(QStringLiteral("任务与产物"));
     artifactPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("运行后会记录 checkpoint、训练报告、ONNX、预览图和请求参数。完整产物浏览请进入“任务与产物”。")));
-    artifactPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("主流程优先使用官方 YOLO / OCR 后端；高级诊断后端会明确标注为占位或协议测试。")));
+    artifactPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("主流程优先使用官方 YOLO / PaddleOCR 后端；PaddleOCR System 产物来自官方工具链，不代表 C++ DB 后处理已经接入。")));
     latestCheckpointLabel_ = mutedLabel(QStringLiteral("最新 checkpoint：暂无"));
     latestPreviewPathLabel_ = mutedLabel(QStringLiteral("最新预览：暂无"));
     latestPreviewImageLabel_ = new QLabel(QStringLiteral("暂无预览图"));
@@ -1303,7 +1338,7 @@ QWidget* MainWindow::buildInferencePage()
     inferForm->addRow(QStringLiteral("图片"), imageRow);
     inferForm->addRow(QStringLiteral("输出"), inferenceOutputEdit_);
     toolbar->bodyLayout()->addLayout(inferForm);
-    toolbar->bodyLayout()->addWidget(mutedLabel(QStringLiteral("推理验证会根据 ONNX 模型族或 AITrain 导出信息选择 detection、segmentation 或 OCR 后处理；TensorRT 本机不可用时会明确提示硬件阻塞。")));
+    toolbar->bodyLayout()->addWidget(mutedLabel(QStringLiteral("推理验证会根据 ONNX 模型族或 AITrain 导出信息选择 detection、segmentation 或 OCR Rec 后处理；完整 PaddleOCR System 推理通过官方工具链任务产物查看。")));
     toolbar->bodyLayout()->addWidget(inferButton);
 
     auto* preview = new QSplitter(Qt::Horizontal);
@@ -1558,8 +1593,10 @@ void MainWindow::splitDataset()
         return;
     }
     if (format != QStringLiteral("yolo_detection") && format != QStringLiteral("yolo_txt")
-        && format != QStringLiteral("yolo_segmentation") && format != QStringLiteral("paddleocr_rec")) {
-        QMessageBox::warning(this, QStringLiteral("数据集划分"), QStringLiteral("当前划分支持 YOLO 检测、YOLO 分割和 PaddleOCR Rec 格式。"));
+        && format != QStringLiteral("yolo_segmentation")
+        && format != QStringLiteral("paddleocr_det")
+        && format != QStringLiteral("paddleocr_rec")) {
+        QMessageBox::warning(this, QStringLiteral("数据集划分"), QStringLiteral("当前划分支持 YOLO 检测、YOLO 分割、PaddleOCR Det 和 PaddleOCR Rec 格式。"));
         return;
     }
 
@@ -3013,6 +3050,10 @@ void MainWindow::refreshTrainingDefaults()
         preferredPlugin = QStringLiteral("com.aitrain.plugins.yolo_native");
         preferredTask = QStringLiteral("segmentation");
         preferredBackend = QStringLiteral("ultralytics_yolo_segment");
+    } else if (datasetFormat == QStringLiteral("paddleocr_det")) {
+        preferredPlugin = QStringLiteral("com.aitrain.plugins.ocr_rec_native");
+        preferredTask = QStringLiteral("ocr_detection");
+        preferredBackend = QStringLiteral("paddleocr_det_official");
     } else if (datasetFormat == QStringLiteral("paddleocr_rec")) {
         preferredPlugin = QStringLiteral("com.aitrain.plugins.ocr_rec_native");
         preferredTask = QStringLiteral("ocr_recognition");

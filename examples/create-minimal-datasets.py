@@ -71,6 +71,18 @@ def make_ocr_rec(root: Path) -> None:
     write_text(root / "rec_gt.txt", "images/a.png\tab12\nimages/b.png\tba\n")
 
 
+def make_ocr_det(root: Path) -> None:
+    write_png(root / "images/a.png", 96, 48, (8, 12, 42, 30), (40, 40, 40))
+    write_png(root / "images/b.png", 96, 48, (52, 12, 88, 30), (40, 40, 40))
+    label_a = [{"transcription": "ab12", "points": [[8, 12], [42, 12], [42, 30], [8, 30]]}]
+    label_b = [{"transcription": "###", "points": [[52, 12], [88, 12], [88, 30], [52, 30]]}]
+    write_text(
+        root / "det_gt.txt",
+        f"images/a.png\t{json.dumps(label_a, separators=(',', ':'))}\n"
+        f"images/b.png\t{json.dumps(label_b, separators=(',', ':'))}\n",
+    )
+
+
 def make_requests(root: Path) -> None:
     requests = {
         "yolo_detect_request.json": {
@@ -100,6 +112,32 @@ def make_requests(root: Path) -> None:
             "backend": "paddleocr_rec",
             "parameters": {"epochs": 1, "batchSize": 2, "imageWidth": 96, "imageHeight": 32, "maxTextLength": 8, "learningRate": 0.01},
         },
+        "paddleocr_det_official_request.json": {
+            "protocolVersion": 1,
+            "taskId": "example-paddleocr-det-official",
+            "taskType": "ocr_detection",
+            "datasetPath": str(root / "paddleocr_det"),
+            "outputPath": str(root / "runs/paddleocr_det_official"),
+            "backend": "paddleocr_det_official",
+            "parameters": {"trainingBackend": "paddleocr_det_official", "prepareOnly": True, "epochs": 1, "batchSize": 1, "imageSize": 64, "useGpu": False},
+        },
+        "paddleocr_system_official_request.json": {
+            "protocolVersion": 1,
+            "taskId": "example-paddleocr-system-official",
+            "taskType": "ocr",
+            "datasetPath": str(root / "paddleocr_det/images/a.png"),
+            "outputPath": str(root / "runs/paddleocr_system_official"),
+            "backend": "paddleocr_system_official",
+            "parameters": {
+                "trainingBackend": "paddleocr_system_official",
+                "prepareOnly": True,
+                "detModelDir": str(root / "runs/paddleocr_det_official/official_inference"),
+                "recModelDir": str(root / "runs/paddleocr_rec_official/official_inference"),
+                "dictionaryFile": str(root / "paddleocr_rec/dict.txt"),
+                "inferenceImage": str(root / "paddleocr_det/images/a.png"),
+                "useGpu": False,
+            },
+        },
     }
     for name, request in requests.items():
         write_text(root / name, json.dumps(request, indent=2) + "\n")
@@ -113,6 +151,7 @@ def main() -> int:
     root.mkdir(parents=True, exist_ok=True)
     make_yolo_detection(root / "yolo_detect")
     make_yolo_segmentation(root / "yolo_segment")
+    make_ocr_det(root / "paddleocr_det")
     make_ocr_rec(root / "paddleocr_rec")
     make_requests(root)
     print(root)

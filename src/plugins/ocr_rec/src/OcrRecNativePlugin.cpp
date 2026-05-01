@@ -16,6 +16,16 @@ public:
     }
 };
 
+class PaddleOcrDetAdapter final : public aitrain::IDatasetAdapter {
+public:
+    QString formatId() const override { return QStringLiteral("paddleocr_det"); }
+
+    aitrain::DatasetValidationResult validateDataset(const QString& datasetPath, const QJsonObject& options) override
+    {
+        return aitrain::validatePaddleOcrDetDataset(datasetPath, options);
+    }
+};
+
 class NativeTrainer final : public aitrain::ITrainer {
 public:
     QString backendName() const override { return QStringLiteral("LibTorch/CUDA CTC OCR scaffold"); }
@@ -50,9 +60,14 @@ public:
         manifest.id = QStringLiteral("com.aitrain.plugins.ocr_rec_native");
         manifest.name = QStringLiteral("PaddleOCR Rec Native");
         manifest.version = QStringLiteral("0.1.0");
-        manifest.description = QStringLiteral("PaddleOCR recognition-format compatible C++ CTC training plugin scaffold.");
-        manifest.taskTypes = QStringList() << QStringLiteral("ocr_recognition");
-        manifest.datasetFormats = QStringList() << QStringLiteral("paddleocr_rec");
+        manifest.description = QStringLiteral("PaddleOCR dataset adapters and OCR scaffold/plugin entry points.");
+        manifest.taskTypes = QStringList()
+            << QStringLiteral("ocr_detection")
+            << QStringLiteral("ocr_recognition")
+            << QStringLiteral("ocr");
+        manifest.datasetFormats = QStringList()
+            << QStringLiteral("paddleocr_det")
+            << QStringLiteral("paddleocr_rec");
         manifest.exportFormats = exporter_.supportedFormats();
         manifest.requiresGpu = true;
 
@@ -72,7 +87,10 @@ public:
 
     aitrain::IDatasetAdapter* datasetAdapter(const QString& formatId) override
     {
-        return formatId == adapter_.formatId() ? &adapter_ : nullptr;
+        if (formatId == detAdapter_.formatId()) {
+            return &detAdapter_;
+        }
+        return formatId == recAdapter_.formatId() ? &recAdapter_ : nullptr;
     }
 
     aitrain::ITrainer* trainer() override { return &trainer_; }
@@ -81,7 +99,8 @@ public:
     aitrain::IInferencer* inferencer() override { return &inferencer_; }
 
 private:
-    PaddleOcrRecAdapter adapter_;
+    PaddleOcrDetAdapter detAdapter_;
+    PaddleOcrRecAdapter recAdapter_;
     NativeTrainer trainer_;
     NativeValidator validator_;
     NativeExporter exporter_;

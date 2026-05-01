@@ -93,6 +93,16 @@ void writeTinyOcrRecDataset(const QString& root)
     writeTextFile(QDir(root).filePath(QStringLiteral("rec_gt.txt")), QStringLiteral("images/a.png\tab12\nimages/b.png\tba\n"));
 }
 
+void writeTinyOcrDetDataset(const QString& root)
+{
+    writeTinyPng(QDir(root).filePath(QStringLiteral("images/a.png")));
+    writeTinyPng(QDir(root).filePath(QStringLiteral("images/b.png")));
+    const QString boxA = QStringLiteral("[{\"transcription\":\"ab12\",\"points\":[[8,8],[42,8],[42,24],[8,24]]}]");
+    const QString boxB = QStringLiteral("[{\"transcription\":\"###\",\"points\":[[52,8],[88,8],[88,24],[52,24]]}]");
+    writeTextFile(QDir(root).filePath(QStringLiteral("det_gt.txt")),
+        QStringLiteral("images/a.png\t%1\nimages/b.png\t%2\n").arg(boxA, boxB));
+}
+
 QString workerExecutablePath()
 {
     const QString extension =
@@ -2279,6 +2289,143 @@ private slots:
         QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("paddleocr_official_rec_report.json"))));
     }
 
+    void workerRunsPaddleOcrDetOfficialAdapterPrepareOnly()
+    {
+        const QString python = pythonExecutablePath();
+        if (python.isEmpty()) {
+            QSKIP("Python executable is not available for the official PaddleOCR det adapter test.");
+        }
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString datasetPath = QDir(dir.path()).filePath(QStringLiteral("ocr-det"));
+        writeTinyOcrDetDataset(datasetPath);
+        const QString outputPath = QDir(dir.path()).filePath(QStringLiteral("official-det-output"));
+
+        aitrain::TrainingRequest request;
+        request.taskId = QStringLiteral("paddleocr-det-official-task");
+        request.projectPath = dir.path();
+        request.pluginId = QStringLiteral("com.aitrain.plugins.ocr_rec_native");
+        request.taskType = QStringLiteral("ocr_detection");
+        request.datasetPath = datasetPath;
+        request.outputPath = outputPath;
+        request.parameters.insert(QStringLiteral("trainingBackend"), QStringLiteral("paddleocr_det_official"));
+        request.parameters.insert(QStringLiteral("pythonExecutable"), python);
+        request.parameters.insert(QStringLiteral("prepareOnly"), true);
+        request.parameters.insert(QStringLiteral("epochs"), 1);
+        request.parameters.insert(QStringLiteral("batchSize"), 1);
+        request.parameters.insert(QStringLiteral("imageSize"), 64);
+
+        WorkerClient client;
+        QVector<QPair<QString, QJsonObject>> messages;
+        QStringList logs;
+        bool finished = false;
+        bool ok = false;
+        QString finishedMessage;
+        connect(&client, &WorkerClient::messageReceived, this, [&messages](const QString& type, const QJsonObject& payload) {
+            messages.append(qMakePair(type, payload));
+        });
+        connect(&client, &WorkerClient::logLine, this, [&logs](const QString& line) {
+            logs.append(line);
+        });
+        connect(&client, &WorkerClient::finished, this, [&finished, &ok, &finishedMessage](bool result, const QString& message) {
+            finished = true;
+            ok = result;
+            finishedMessage = message;
+        });
+
+        QString error;
+        QVERIFY2(client.startTraining(workerExecutablePath(), request, &error), qPrintable(error));
+        QTRY_VERIFY2_WITH_TIMEOUT(
+            finished,
+            qPrintable(QStringLiteral("Worker did not finish. Logs:\n%1").arg(logs.join(QStringLiteral("\n")))),
+            15000);
+        QVERIFY2(ok, qPrintable(QStringList({finishedMessage, logs.join(QStringLiteral("\n"))}).join(QStringLiteral("\n"))));
+        QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
+
+        bool sawBackend = false;
+        bool sawPrepareOnly = false;
+        for (const auto& message : messages) {
+            sawBackend = sawBackend || message.second.value(QStringLiteral("backend")).toString() == QStringLiteral("paddleocr_det_official");
+            if (message.first == QStringLiteral("completed")) {
+                sawPrepareOnly = message.second.value(QStringLiteral("mode")).toString() == QStringLiteral("prepareOnly");
+            }
+        }
+        QVERIFY(sawBackend);
+        QVERIFY(sawPrepareOnly);
+        QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("aitrain_ppocrv4_det.yml"))));
+        QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("official_data/train_det_list.txt"))));
+        QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("official_data/val_det_list.txt"))));
+        QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("paddleocr_official_det_report.json"))));
+    }
+
+    void workerRunsPaddleOcrSystemOfficialAdapterPrepareOnly()
+    {
+        const QString python = pythonExecutablePath();
+        if (python.isEmpty()) {
+            QSKIP("Python executable is not available for the official PaddleOCR system adapter test.");
+        }
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString outputPath = QDir(dir.path()).filePath(QStringLiteral("official-system-output"));
+
+        aitrain::TrainingRequest request;
+        request.taskId = QStringLiteral("paddleocr-system-official-task");
+        request.projectPath = dir.path();
+        request.pluginId = QStringLiteral("com.aitrain.plugins.ocr_rec_native");
+        request.taskType = QStringLiteral("ocr");
+        request.datasetPath = dir.filePath(QStringLiteral("image.png"));
+        request.outputPath = outputPath;
+        request.parameters.insert(QStringLiteral("trainingBackend"), QStringLiteral("paddleocr_system_official"));
+        request.parameters.insert(QStringLiteral("pythonExecutable"), python);
+        request.parameters.insert(QStringLiteral("prepareOnly"), true);
+        request.parameters.insert(QStringLiteral("detModelDir"), dir.filePath(QStringLiteral("det_model")));
+        request.parameters.insert(QStringLiteral("recModelDir"), dir.filePath(QStringLiteral("rec_model")));
+        request.parameters.insert(QStringLiteral("dictionaryFile"), dir.filePath(QStringLiteral("dict.txt")));
+        request.parameters.insert(QStringLiteral("inferenceImage"), dir.filePath(QStringLiteral("image.png")));
+
+        WorkerClient client;
+        QVector<QPair<QString, QJsonObject>> messages;
+        QStringList logs;
+        bool finished = false;
+        bool ok = false;
+        QString finishedMessage;
+        connect(&client, &WorkerClient::messageReceived, this, [&messages](const QString& type, const QJsonObject& payload) {
+            messages.append(qMakePair(type, payload));
+        });
+        connect(&client, &WorkerClient::logLine, this, [&logs](const QString& line) {
+            logs.append(line);
+        });
+        connect(&client, &WorkerClient::finished, this, [&finished, &ok, &finishedMessage](bool result, const QString& message) {
+            finished = true;
+            ok = result;
+            finishedMessage = message;
+        });
+
+        QString error;
+        QVERIFY2(client.startTraining(workerExecutablePath(), request, &error), qPrintable(error));
+        QTRY_VERIFY2_WITH_TIMEOUT(
+            finished,
+            qPrintable(QStringLiteral("Worker did not finish. Logs:\n%1").arg(logs.join(QStringLiteral("\n")))),
+            15000);
+        QVERIFY2(ok, qPrintable(QStringList({finishedMessage, logs.join(QStringLiteral("\n"))}).join(QStringLiteral("\n"))));
+        QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
+
+        bool sawBackend = false;
+        bool sawPrepareOnly = false;
+        for (const auto& message : messages) {
+            sawBackend = sawBackend || message.second.value(QStringLiteral("backend")).toString() == QStringLiteral("paddleocr_system_official");
+            if (message.first == QStringLiteral("completed")) {
+                sawPrepareOnly = message.second.value(QStringLiteral("mode")).toString() == QStringLiteral("prepareOnly");
+            }
+        }
+        QVERIFY(sawBackend);
+        QVERIFY(sawPrepareOnly);
+        QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("run_official_system_predict.ps1"))));
+        QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("paddleocr_official_system_report.json"))));
+    }
+
     void workerEnvironmentCheckReportsPythonTrainerBackends()
     {
         WorkerClient client;
@@ -2338,6 +2485,74 @@ private slots:
         QVERIFY(!invalid.ok);
         QVERIFY(invalid.errors.join(QStringLiteral("\n")).contains(QStringLiteral("字典")));
     }
+
+    void paddleOcrDetDatasetValidation()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.path();
+        writeTinyOcrDetDataset(root);
+
+        const aitrain::DatasetValidationResult valid = aitrain::validatePaddleOcrDetDataset(root);
+        QVERIFY2(valid.ok, qPrintable(valid.errors.join(QStringLiteral("\n"))));
+        QCOMPARE(valid.sampleCount, 2);
+        QVERIFY(!valid.previewSamples.isEmpty());
+
+        writeTextFile(QDir(root).filePath(QStringLiteral("det_gt.txt")),
+            QStringLiteral("images/missing.png\t[{\"transcription\":\"x\",\"points\":[[0,0],[1,0],[1,1],[0,1]]}]\n"));
+        const aitrain::DatasetValidationResult missing = aitrain::validatePaddleOcrDetDataset(root);
+        QVERIFY(!missing.ok);
+        QVERIFY(missing.errors.join(QStringLiteral("\n")).contains(QStringLiteral("不存在")));
+
+        writeTextFile(QDir(root).filePath(QStringLiteral("det_gt.txt")),
+            QStringLiteral("images/a.png\tbad-json\n"));
+        const aitrain::DatasetValidationResult badJson = aitrain::validatePaddleOcrDetDataset(root);
+        QVERIFY(!badJson.ok);
+        QVERIFY(badJson.errors.join(QStringLiteral("\n")).contains(QStringLiteral("JSON")));
+
+        writeTextFile(QDir(root).filePath(QStringLiteral("det_gt.txt")),
+            QStringLiteral("images/a.png\t[{\"transcription\":\"x\",\"points\":[[0,0],[1,0],[1,1]]}]\n"));
+        const aitrain::DatasetValidationResult tooFew = aitrain::validatePaddleOcrDetDataset(root);
+        QVERIFY(!tooFew.ok);
+        QVERIFY(tooFew.errors.join(QStringLiteral("\n")).contains(QStringLiteral("4")));
+
+        writeTextFile(QDir(root).filePath(QStringLiteral("det_gt.txt")),
+            QStringLiteral("images/a.png\t[{\"transcription\":\"x\",\"points\":[[0,0],[1,0],[1,1],[0,1]]}]\n"
+                           "images/a.png\t[{\"transcription\":\"y\",\"points\":[[0,0],[1,0],[1,1],[0,1]]}]\n"));
+        const aitrain::DatasetValidationResult duplicate = aitrain::validatePaddleOcrDetDataset(root);
+        QVERIFY(!duplicate.ok);
+        QVERIFY(duplicate.errors.join(QStringLiteral("\n")).contains(QStringLiteral("重复")));
+    }
+
+    void paddleOcrDetDatasetSplit()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("source"));
+        writeTinyOcrDetDataset(root);
+        const QString output = dir.filePath(QStringLiteral("split"));
+
+        QJsonObject options;
+        options.insert(QStringLiteral("trainRatio"), 0.5);
+        options.insert(QStringLiteral("valRatio"), 0.5);
+        options.insert(QStringLiteral("testRatio"), 0.0);
+        options.insert(QStringLiteral("seed"), 7);
+        const aitrain::DatasetSplitResult result = aitrain::splitPaddleOcrDetDataset(root, output, options);
+        QVERIFY2(result.ok, qPrintable(result.errors.join(QStringLiteral("\n"))));
+        QCOMPARE(result.trainCount, 1);
+        QCOMPARE(result.valCount, 1);
+        QCOMPARE(result.testCount, 0);
+        QVERIFY(QFileInfo::exists(QDir(output).filePath(QStringLiteral("det_gt.txt"))));
+        QVERIFY(QFileInfo::exists(QDir(output).filePath(QStringLiteral("det_gt_train.txt"))));
+        QVERIFY(QFileInfo::exists(QDir(output).filePath(QStringLiteral("det_gt_val.txt"))));
+        QVERIFY(QFileInfo::exists(QDir(output).filePath(QStringLiteral("det_gt_test.txt"))));
+        QVERIFY(QFileInfo::exists(QDir(output).filePath(QStringLiteral("split_report.json"))));
+
+        const aitrain::DatasetValidationResult validation = aitrain::validatePaddleOcrDetDataset(output);
+        QVERIFY2(validation.ok, qPrintable(validation.errors.join(QStringLiteral("\n"))));
+        QCOMPARE(validation.sampleCount, 2);
+    }
+
     void workerRunsOcrRecognitionTrainingScaffoldEndToEnd()
     {
         QTemporaryDir dir;

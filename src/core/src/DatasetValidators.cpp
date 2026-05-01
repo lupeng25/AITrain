@@ -6,6 +6,7 @@
 #include <QImageReader>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonParseError>
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSet>
@@ -27,6 +28,13 @@ struct YoloSample {
 struct OcrSample {
     QString imagePath;
     QString text;
+    QString fileName;
+};
+
+struct OcrDetSample {
+    QString imagePath;
+    QString relativeImagePath;
+    QString labelJson;
     QString fileName;
 };
 
@@ -454,7 +462,57 @@ QVector<OcrSample> collectOcrSamples(const QString& datasetPath, const QString& 
     return samples;
 }
 
+QVector<OcrDetSample> collectOcrDetSamples(const QString& datasetPath, const QString& labelFilePath, DatasetSplitResult& result)
+{
+    QVector<OcrDetSample> samples;
+    const QDir root(datasetPath);
+    QFile file(labelFilePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        result.ok = false;
+        result.errors.append(QStringLiteral("Cannot read PaddleOCR Det label file: %1").arg(labelFilePath));
+        return samples;
+    }
+
+    int lineNumber = 0;
+    while (!file.atEnd()) {
+        ++lineNumber;
+        const QString line = QString::fromUtf8(file.readLine()).trimmed();
+        if (line.isEmpty()) {
+            continue;
+        }
+        const int split = line.indexOf(QLatin1Char('\t'));
+        if (split <= 0) {
+            result.ok = false;
+            result.errors.append(QStringLiteral("%1:%2 PaddleOCR Det label row format is invalid.").arg(labelFilePath).arg(lineNumber));
+            continue;
+        }
+        const QString relativeImagePath = line.left(split).trimmed();
+        const QString absoluteImagePath = root.filePath(relativeImagePath);
+        if (!QFileInfo::exists(absoluteImagePath)) {
+            result.ok = false;
+            result.errors.append(QStringLiteral("PaddleOCR Det image does not exist: %1").arg(absoluteImagePath));
+            continue;
+        }
+        OcrDetSample sample;
+        sample.imagePath = absoluteImagePath;
+        sample.relativeImagePath = relativeImagePath;
+        sample.labelJson = line.mid(split + 1).trimmed();
+        sample.fileName = QFileInfo(relativeImagePath).fileName();
+        samples.append(sample);
+    }
+    return samples;
+}
+
 void shuffleSamples(QVector<YoloSample>& samples, quint32 seed)
+{
+    QRandomGenerator rng(seed);
+    for (int index = samples.size() - 1; index > 0; --index) {
+        const int swapIndex = static_cast<int>(rng.bounded(static_cast<quint32>(index + 1)));
+        qSwap(samples[index], samples[swapIndex]);
+    }
+}
+
+void shuffleSamples(QVector<OcrDetSample>& samples, quint32 seed)
 {
     QRandomGenerator rng(seed);
     for (int index = samples.size() - 1; index > 0; --index) {
@@ -636,6 +694,138 @@ DatasetValidationResult validateYoloSegmentationDataset(const QString& datasetPa
     return validateYoloDataset(datasetPath, options, true);
 }
 
+DatasetValidationResult validatePaddleOcrDetDataset(const QString& datasetPath, const QJsonObject& options)
+{
+    DatasetValidationResult result;
+    const int maxIssues = options.value(QStringLiteral("maxIssues")).toInt(kDefaultMaxIssues);
+    const int maxFiles = options.value(QStringLiteral("maxFiles")).toInt(kDefaultMaxFiles);
+    const QDir root(datasetPath);
+    if (!root.exists()) {
+        addIssue(result, QStringLiteral("error"), QStringLiteral("dataset_missing"), datasetPath, 0,
+            QStringLiteral("数据集目录不存在。"));
+        return result;
+    }
+
+    QString labelFilePath = options.value(QStringLiteral("labelFile")).toString();
+    if (labelFilePath.isEmpty()) {
+        labelFilePath = QFileInfo::exists(root.filePath(QStringLiteral("det_gt.txt")))
+            ? root.filePath(QStringLiteral("det_gt.txt"))
+            : root.filePath(QStringLiteral("det_gt_train.txt"));
+    }
+    QFile labelFile(labelFilePath);
+    if (!labelFile.exists()) {
+        addIssue(result, QStringLiteral("error"), QStringLiteral("missing_label_file"), labelFilePath, 0,
+            QStringLiteral("缺少 PaddleOCR Det 标签文件。"));
+        return result;
+    }
+    if (!labelFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        addIssue(result, QStringLiteral("error"), QStringLiteral("label_file_unreadable"), labelFilePath, 0,
+            QStringLiteral("无法读取 PaddleOCR Det 标签文件。"));
+        return result;
+    }
+
+    QSet<QString> seenImages;
+    int lineNumber = 0;
+    while (!labelFile.atEnd()) {
+        ++lineNumber;
+        if (result.sampleCount >= maxFiles) {
+            addIssue(result, QStringLiteral("warning"), QStringLiteral("file_limit"), datasetPath, 0,
+                QStringLiteral("数据集较大，已在 %1 个样本后截断校验。").arg(maxFiles));
+            return result;
+        }
+        const QString line = QString::fromUtf8(labelFile.readLine()).trimmed();
+        if (line.isEmpty()) {
+            continue;
+        }
+        const int split = line.indexOf(QLatin1Char('\t'));
+        if (split <= 0) {
+            addIssue(result, QStringLiteral("error"), QStringLiteral("invalid_det_row"), labelFilePath, lineNumber,
+                QStringLiteral("标签行必须是 '<image path>\\t<json boxes>'。"));
+            if (issueLimitReached(result, maxIssues)) return result;
+            continue;
+        }
+
+        const QString imagePath = line.left(split).trimmed();
+        const QString jsonText = line.mid(split + 1).trimmed();
+        if (imagePath.isEmpty() || jsonText.isEmpty()) {
+            addIssue(result, QStringLiteral("error"), QStringLiteral("empty_det_row"), labelFilePath, lineNumber,
+                QStringLiteral("PaddleOCR Det 图片路径和 JSON 标注不能为空。"));
+            if (issueLimitReached(result, maxIssues)) return result;
+            continue;
+        }
+        if (seenImages.contains(imagePath)) {
+            addIssue(result, QStringLiteral("error"), QStringLiteral("duplicate_det_sample"), labelFilePath, lineNumber,
+                QStringLiteral("存在重复 PaddleOCR Det 样本。"));
+        }
+        seenImages.insert(imagePath);
+
+        const QString absoluteImagePath = root.filePath(imagePath);
+        if (result.previewSamples.size() < 20) {
+            result.previewSamples.append(QStringLiteral("%1\t%2").arg(absoluteImagePath, jsonText.left(120)));
+        }
+        if (!QFileInfo::exists(absoluteImagePath)) {
+            addIssue(result, QStringLiteral("error"), QStringLiteral("missing_det_image"), absoluteImagePath, 0,
+                QStringLiteral("PaddleOCR Det 图片不存在。"));
+        }
+
+        QJsonParseError parseError;
+        const QJsonDocument document = QJsonDocument::fromJson(jsonText.toUtf8(), &parseError);
+        if (parseError.error != QJsonParseError::NoError || !document.isArray()) {
+            addIssue(result, QStringLiteral("error"), QStringLiteral("invalid_det_json"), labelFilePath, lineNumber,
+                QStringLiteral("PaddleOCR Det 标注必须是 JSON 数组。"));
+            if (issueLimitReached(result, maxIssues)) return result;
+            continue;
+        }
+        const QJsonArray boxes = document.array();
+        if (boxes.isEmpty()) {
+            addIssue(result, QStringLiteral("error"), QStringLiteral("empty_det_boxes"), labelFilePath, lineNumber,
+                QStringLiteral("PaddleOCR Det 标注至少需要一个文本框。"));
+        }
+        for (const QJsonValue& boxValue : boxes) {
+            const QJsonObject box = boxValue.toObject();
+            if (!box.contains(QStringLiteral("transcription"))) {
+                addIssue(result, QStringLiteral("error"), QStringLiteral("missing_transcription"), labelFilePath, lineNumber,
+                    QStringLiteral("PaddleOCR Det 文本框缺少 transcription。"));
+                break;
+            }
+            const QJsonArray points = box.value(QStringLiteral("points")).toArray();
+            if (points.size() < 4) {
+                addIssue(result, QStringLiteral("error"), QStringLiteral("det_points_too_few"), labelFilePath, lineNumber,
+                    QStringLiteral("PaddleOCR Det 文本框至少需要 4 个点。"));
+                break;
+            }
+            bool pointsOk = true;
+            for (const QJsonValue& pointValue : points) {
+                const QJsonArray point = pointValue.toArray();
+                if (point.size() < 2
+                    || !point.at(0).isDouble()
+                    || !point.at(1).isDouble()
+                    || point.at(0).toDouble() < 0.0
+                    || point.at(1).toDouble() < 0.0) {
+                    pointsOk = false;
+                    break;
+                }
+            }
+            if (!pointsOk) {
+                addIssue(result, QStringLiteral("error"), QStringLiteral("invalid_det_point"), labelFilePath, lineNumber,
+                    QStringLiteral("PaddleOCR Det 点坐标必须是非负数字。"));
+                break;
+            }
+        }
+
+        ++result.sampleCount;
+        if (issueLimitReached(result, maxIssues)) {
+            return result;
+        }
+    }
+
+    if (result.sampleCount == 0) {
+        addIssue(result, QStringLiteral("error"), QStringLiteral("no_det_samples"), labelFilePath, 0,
+            QStringLiteral("未找到 PaddleOCR Det 样本。"));
+    }
+    return result;
+}
+
 DatasetValidationResult validatePaddleOcrRecDataset(const QString& datasetPath, const QJsonObject& options)
 {
     DatasetValidationResult result;
@@ -752,6 +942,113 @@ DatasetSplitResult splitYoloDetectionDataset(const QString& datasetPath, const Q
 DatasetSplitResult splitYoloSegmentationDataset(const QString& datasetPath, const QString& outputPath, const QJsonObject& options)
 {
     return splitYoloDataset(datasetPath, outputPath, options, true);
+}
+
+DatasetSplitResult splitPaddleOcrDetDataset(const QString& datasetPath, const QString& outputPath, const QJsonObject& options)
+{
+    DatasetSplitResult result;
+    result.outputPath = outputPath;
+
+    const DatasetValidationResult validation = validatePaddleOcrDetDataset(datasetPath, options);
+    if (!validation.ok) {
+        result.ok = false;
+        result.errors.append(QStringLiteral("源数据集未通过 PaddleOCR Det 校验，已取消划分。"));
+        result.errors.append(validation.errors);
+        return result;
+    }
+
+    const double trainRatio = options.value(QStringLiteral("trainRatio")).toDouble(0.8);
+    const double valRatio = options.value(QStringLiteral("valRatio")).toDouble(0.2);
+    const double testRatio = options.value(QStringLiteral("testRatio")).toDouble(0.0);
+    if (!validateSplitRatios(trainRatio, valRatio, testRatio, result)) {
+        return result;
+    }
+
+    const QDir root(datasetPath);
+    const QString labelFilePath = QFileInfo::exists(root.filePath(QStringLiteral("det_gt.txt")))
+        ? root.filePath(QStringLiteral("det_gt.txt"))
+        : root.filePath(QStringLiteral("det_gt_train.txt"));
+    QVector<OcrDetSample> samples = collectOcrDetSamples(datasetPath, labelFilePath, result);
+    if (!result.ok) {
+        return result;
+    }
+    if (samples.isEmpty()) {
+        result.ok = false;
+        result.errors.append(QStringLiteral("没有可划分的 PaddleOCR Det 样本。"));
+        return result;
+    }
+
+    const quint32 seed = static_cast<quint32>(options.value(QStringLiteral("seed")).toInt(42));
+    shuffleSamples(samples, seed);
+    calculateSplitCounts(samples.size(), trainRatio, valRatio, testRatio, &result.trainCount, &result.valCount, &result.testCount);
+
+    const QDir outputRoot(outputPath);
+    QDir().mkpath(outputRoot.path());
+    for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
+        QDir().mkpath(outputRoot.filePath(QStringLiteral("images/%1").arg(split)));
+    }
+
+    QStringList allRows;
+    QStringList trainRows;
+    QStringList valRows;
+    QStringList testRows;
+    for (int index = 0; index < samples.size(); ++index) {
+        const QString split = splitNameForIndex(index, result.trainCount, result.valCount);
+        const OcrDetSample& sample = samples.at(index);
+        QString fileName = sample.fileName;
+        if (fileName.isEmpty()) {
+            fileName = QStringLiteral("sample_%1.png").arg(index + 1);
+        }
+        const QString targetRelative = QStringLiteral("images/%1/%2_%3").arg(split).arg(index + 1, 4, 10, QLatin1Char('0')).arg(fileName);
+        const QString targetPath = outputRoot.filePath(targetRelative);
+        copyFileReplacing(sample.imagePath, targetPath, result.errors);
+        const QString row = QStringLiteral("%1\t%2").arg(targetRelative, sample.labelJson);
+        allRows.append(row);
+        if (split == QStringLiteral("train")) {
+            trainRows.append(row);
+        } else if (split == QStringLiteral("val")) {
+            valRows.append(row);
+        } else {
+            testRows.append(row);
+        }
+    }
+
+    auto writeRows = [&result](const QString& path, const QStringList& rows) {
+        QFile file(path);
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+            result.errors.append(QStringLiteral("无法写入 PaddleOCR Det 标签文件：%1").arg(path));
+            result.ok = false;
+            return;
+        }
+        QTextStream stream(&file);
+        stream.setCodec("UTF-8");
+        for (const QString& row : rows) {
+            stream << row << '\n';
+        }
+    };
+    writeRows(outputRoot.filePath(QStringLiteral("det_gt.txt")), allRows);
+    writeRows(outputRoot.filePath(QStringLiteral("det_gt_train.txt")), trainRows);
+    writeRows(outputRoot.filePath(QStringLiteral("det_gt_val.txt")), valRows);
+    writeRows(outputRoot.filePath(QStringLiteral("det_gt_test.txt")), testRows);
+
+    QJsonObject report = result.toJson();
+    report.insert(QStringLiteral("sourcePath"), datasetPath);
+    report.insert(QStringLiteral("format"), QStringLiteral("paddleocr_det"));
+    report.insert(QStringLiteral("seed"), static_cast<int>(seed));
+    report.insert(QStringLiteral("trainRatio"), trainRatio);
+    report.insert(QStringLiteral("valRatio"), valRatio);
+    report.insert(QStringLiteral("testRatio"), testRatio);
+    QFile reportFile(outputRoot.filePath(QStringLiteral("split_report.json")));
+    if (reportFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        reportFile.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+    } else {
+        result.warnings.append(QStringLiteral("无法写入 split_report.json。"));
+    }
+    if (!result.errors.isEmpty()) {
+        result.ok = false;
+    }
+    return result;
 }
 
 DatasetSplitResult splitPaddleOcrRecDataset(const QString& datasetPath, const QString& outputPath, const QJsonObject& options)

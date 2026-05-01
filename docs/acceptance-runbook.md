@@ -1,6 +1,6 @@
 # AITrain Studio Acceptance Runbook
 
-This runbook is the Phase 17-30 acceptance path. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, and covers the current local usability additions for task history, artifact browsing, dataset management, public dataset materialization, official PaddleOCR inference smoke, annotation workflow, and release-candidate usability.
+This runbook is the Phase 17-31 acceptance path. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, and covers the current local usability additions for task history, artifact browsing, dataset management, public dataset materialization, official PaddleOCR inference smoke, annotation workflow, release-candidate usability, and the official PaddleOCR Det + Rec + System chain.
 
 ## Acceptance Modes
 
@@ -45,6 +45,14 @@ For the isolated official PaddleOCR smoke, run:
 ```
 
 This validates official PaddleOCR train/export/inference wiring on a tiny generated dataset. The script checks out a pinned PaddleOCR source ref and records the requested/resolved ref in the report. It does not validate OCR accuracy.
+
+For the full official PaddleOCR Det + Rec + System chain, run:
+
+```powershell
+.\tools\phase31-paddleocr-full-official-smoke.ps1
+```
+
+This validates official Det train/export, official Rec train/export, and official `predict_system.py` inference with `use_angle_cls=false`. It checks the Det and Rec inference configs, official reports, `official_system_prediction.json`, `system_results.txt`, and visualized output images. It is still a tiny CPU smoke run, so it validates wiring and artifacts rather than OCR quality.
 
 ## Phase 18: Package Acceptance
 
@@ -109,6 +117,7 @@ Expected artifacts:
 - YOLO segmentation: `best.pt`, ONNX export, and `ultralytics_training_report.json` with mask metrics when exposed.
 - OCR Rec small CTC: `paddleocr_rec_ctc.pdparams`, `paddleocr_rec_ctc.onnx`, `dict.txt`, and `paddleocr_rec_training_report.json`.
 - Official PaddleOCR Rec: `official_model\best_accuracy.pdparams`, `official_inference\inference.yml`, `official_prediction.json`, and `paddleocr_official_rec_report.json` when `phase16-ocr-official-smoke.ps1` is available.
+- Official PaddleOCR full chain: Det `official_model\best_accuracy.pdparams`, Det `official_inference\inference.yml`, Rec `official_inference\inference.yml`, `official_system_prediction.json`, `system_results.txt`, visualization images, `paddleocr_official_det_report.json`, `paddleocr_official_rec_report.json`, and `paddleocr_official_system_report.json` when `phase31-paddleocr-full-official-smoke.ps1` is run.
 
 If a public dataset requires interactive registration, record it as an external dataset blocker. Do not block the required smoke path as long as the generated minimal dataset path passes.
 
@@ -118,9 +127,10 @@ These phases do not change TensorRT acceptance. They make the local RC easier to
 
 - Task history: GUI-started inference, dataset validation, and dataset split create SQLite task records and record Worker artifacts.
 - Artifact browsing: task details show artifacts, metrics, and exports; JSON/text/image/ONNX/model-directory artifacts have a preview or a clear unsupported message.
-- Dataset management: the GUI auto-detects YOLO detection, YOLO segmentation, and PaddleOCR Rec layouts, and split supports all three.
+- Dataset management: the GUI auto-detects YOLO detection, YOLO segmentation, PaddleOCR Rec, and PaddleOCR Det layouts, and split supports all four.
+- PaddleOCR Det data: the GUI auto-detects `det_gt.txt` / `det_gt_train.txt`, validates PaddleOCR native detection rows, and split writes train/val/test label files plus `split_report.json`.
 - Public datasets: COCO8 / COCO8-seg materialization is a standalone machine-readable script with required and fallback modes.
-- Official OCR: `phase16-ocr-official-smoke.ps1` now covers official train, export, and recognition inference.
+- Official OCR: `phase16-ocr-official-smoke.ps1` covers official Rec train, export, and recognition inference. `phase31-paddleocr-full-official-smoke.ps1` covers official Det + Rec train/export and official System inference.
 - Annotation: the dataset page launches X-AnyLabeling as the default external annotation tool, detects its local path, and provides a post-labeling refresh/revalidation action.
 - UX closeout: task history can be filtered by category, status, and search text; failed tasks show a short diagnostic next-step summary.
 
@@ -131,7 +141,7 @@ python examples\create-minimal-datasets.py --output .deps\next-smoke
 .\build-vscode\bin\Release\AITrainStudio.exe
 ```
 
-In the GUI, create or open a project, import the generated detection, segmentation, and OCR Rec datasets, launch X-AnyLabeling from the dataset page, use "标注后刷新 / 重新校验", validate and split each dataset, run one training/export/inference path, then confirm the task queue detail view lists report, checkpoint/model, ONNX, overlay, and prediction JSON artifacts.
+In the GUI, create or open a project, import the generated detection, segmentation, OCR Rec, and OCR Det datasets, launch X-AnyLabeling from the dataset page, use "标注后刷新 / 重新校验", validate and split each dataset, run one training/export/inference path, then confirm the task queue detail view lists report, checkpoint/model, ONNX, overlay, visualized OCR image, and prediction JSON/TXT artifacts.
 
 X-AnyLabeling is detected from `AITRAIN_XANYLABELING_EXE`, the app directory, `tools\x-anylabeling`, `.deps\annotation-tools\X-AnyLabeling`, or `PATH`. Keep downloaded binaries in `.deps\` unless a separate redistribution review is completed.
 
@@ -144,6 +154,7 @@ Before marking a release baseline:
 .\tools\harness-check.ps1
 .\tools\package-smoke.ps1 -SkipBuild
 .\tools\acceptance-smoke.ps1 -LocalBaseline -Package
+.\tools\phase31-paddleocr-full-official-smoke.ps1
 ```
 
 Then check:
@@ -152,3 +163,4 @@ Then check:
 - Phase 7 / Phase 10 TensorRT status stays external pending unless RTX / SM 75+ smoke passed.
 - Third-party backend license notes remain visible, especially Ultralytics AGPL / Enterprise constraints.
 - C++ tiny detector, segmentation baseline, and OCR baseline are still marked as scaffold/demo/test backends.
+- C++ PaddleOCR Det DB ONNX postprocess remains out of scope; the full OCR acceptance path is official `predict_system.py`.

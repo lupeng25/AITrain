@@ -36,10 +36,32 @@ python python_trainers/ocr_rec/paddleocr_official_adapter.py --request <request-
 
 Use `prepareOnly=true` to generate and validate the PP-OCRv4 config, label lists, dictionary copy, report, and reproducible command files without running official training. Use `runOfficial=true` or `prepareOnly=false` with `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` pointing at a PaddleOCR source checkout to execute official `tools/train.py` and `tools/export_model.py`. Set `runInferenceAfterExport=true` with `inferenceImage` to run official `tools/infer/predict_rec.py` after export and write `official_prediction.json`.
 
+For the official PaddleOCR PP-OCRv4 Det adapter, Worker routes `trainingBackend=paddleocr_det_official` to:
+
+```powershell
+python python_trainers/ocr_det/paddleocr_det_official_adapter.py --request <request-json>
+```
+
+Use `prepareOnly=true` to generate and validate the PP-OCRv4 detection config, label lists, report, and reproducible command files without running official training. Use `runOfficial=true` or `prepareOnly=false` with `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` pointing at a PaddleOCR source checkout to execute official `tools/train.py` and `tools/export_model.py`.
+
+For official PaddleOCR end-to-end System inference, Worker routes `trainingBackend=paddleocr_system_official` to:
+
+```powershell
+python python_trainers/ocr_system/paddleocr_system_official_adapter.py --request <request-json>
+```
+
+This adapter does not train. It calls official `tools/infer/predict_system.py` with exported Det and Rec inference model directories, a recognition dictionary, and an image or image directory. The first version fixes `use_angle_cls=false` and defaults to CPU.
+
 The local isolated official smoke is:
 
 ```powershell
 .\tools\phase16-ocr-official-smoke.ps1
+```
+
+The full official PaddleOCR Det + Rec + System smoke is:
+
+```powershell
+.\tools\phase31-paddleocr-full-official-smoke.ps1
 ```
 
 Request shape:
@@ -89,6 +111,9 @@ Official Python packages are adapted behind this protocol:
 - `paddleocr_rec`: PaddlePaddle CTC OCR recognition training for PaddleOCR-style Rec data. It produces `paddleocr_rec_ctc.pdparams`, `dict.txt`, and `paddleocr_rec_training_report.json`. This is not a full PP-OCRv4 official config/export pipeline yet.
 - `paddleocr_rec_official` / `paddleocr_ppocrv4_rec`: PaddleOCR official-recognition adapter. It prepares a PP-OCRv4 config and can run official PaddleOCR training/export/inference from a source checkout. `prepareOnly` artifacts are configuration validation, not trained model artifacts.
   When official training runs, the adapter parses stdout metrics such as `loss`, `ctcLoss`, `nrtrLoss`, `accuracy`, and `normalizedEditDistance` into Worker `metric` events and the final report.
+- `paddleocr_det_official`: PaddleOCR official-detection adapter. It prepares a PP-OCRv4 Det config and can run official PaddleOCR training/export from a source checkout. `prepareOnly` artifacts are configuration validation, not trained model artifacts.
+  When official training runs, the adapter parses stdout metrics such as `loss`, `hmean`, `precision`, and `recall` into Worker `metric` events and the final report.
+- `paddleocr_system_official`: PaddleOCR official-system inference adapter. It calls official `predict_system.py` with exported Det and Rec inference model directories and emits `official_system_prediction.json`, `system_results.txt`, and visualization-image artifacts. It is the current full OCR acceptance path; it is not C++ DB detection ONNX postprocess.
 
 Common Phase 9 detection parameters:
 
@@ -125,6 +150,25 @@ Common official PaddleOCR Rec parameters:
 - `runInferenceAfterExport`: run official recognition inference after export.
 - `inferenceImage`: sample image for official recognition inference.
 - `recImageShape`: generated recognition image shape, for example `3,48,320`.
+
+Common official PaddleOCR Det parameters:
+
+- `trainLabelFile`: optional explicit training label file.
+- `valLabelFile`: optional explicit validation label file.
+- `officialConfig`: optional official config source path.
+- `pretrainedModel`: optional pretrained/export input checkpoint.
+- `resumeCheckpoint`: optional official resume checkpoint.
+- `exportOnly`: skip train and run export from an existing checkpoint.
+- `imageSize`: generated detection image size.
+
+Common official PaddleOCR System parameters:
+
+- `detModelDir`: exported official Det inference model directory.
+- `recModelDir`: exported official Rec inference model directory.
+- `dictionaryFile`: recognition dictionary file.
+- `inferenceImage`: image or directory for official system inference.
+- `dropScore`: optional recognition score threshold.
+- `useGpu`: defaults to `false`.
 
 Generate minimal smoke datasets and request JSON files with:
 

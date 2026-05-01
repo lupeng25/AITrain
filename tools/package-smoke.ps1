@@ -93,8 +93,11 @@ Assert-PathExists "python_trainers\mock_trainer.py" "Python trainer adapter mock
 Assert-PathExists "python_trainers\requirements-yolo.txt" "YOLO Python requirements"
 Assert-PathExists "python_trainers\requirements-ocr.txt" "OCR Python requirements"
 Assert-PathExists "python_trainers\ocr_rec\paddleocr_official_adapter.py" "Official PaddleOCR adapter"
+Assert-PathExists "python_trainers\ocr_det\paddleocr_det_official_adapter.py" "Official PaddleOCR Det adapter"
+Assert-PathExists "python_trainers\ocr_system\paddleocr_system_official_adapter.py" "Official PaddleOCR System adapter"
 Assert-PathExists "tools\acceptance-smoke.ps1" "acceptance smoke script"
 Assert-PathExists "tools\materialize-ultralytics-dataset.py" "Ultralytics dataset materializer"
+Assert-PathExists "tools\phase31-paddleocr-full-official-smoke.ps1" "Phase 31 PaddleOCR full smoke script"
 
 $onnxRuntimeRootDll = Join-Path $prefixFull "onnxruntime.dll"
 $onnxRuntimeFolderDll = Join-Path $prefixFull "runtimes\onnxruntime\onnxruntime.dll"

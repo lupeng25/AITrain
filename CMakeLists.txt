@@ -284,6 +284,7 @@ install(FILES
     tools/acceptance-smoke.ps1
     tools/materialize-ultralytics-dataset.py
     tools/phase16-ocr-official-smoke.ps1
+    tools/phase31-paddleocr-full-official-smoke.ps1
     DESTINATION tools
 )
 

@@ -11,6 +11,8 @@ AITrain Studio keeps training out of the GUI process. Real training is launched 
 | `ultralytics_yolo_segment` | Segmentation | Real Python backend | Uses Ultralytics YOLO segmentation training and ONNX export. C++ ONNX Runtime can decode boxes, mask coefficients, prototypes, and render mask overlays. |
 | `paddleocr_rec` | OCR recognition | Real PaddlePaddle CTC smoke backend | Trains a small PaddlePaddle CTC recognizer on PaddleOCR-style Rec data, exports ONNX, and supports C++ ONNX Runtime CTC greedy decode. Not a full PP-OCRv4 official config/export pipeline yet. |
 | `paddleocr_rec_official` / `paddleocr_ppocrv4_rec` | OCR recognition | Official PaddleOCR adapter | Generates a PP-OCRv4 recognition config from AITrain PaddleOCR-style Rec data and can run official PaddleOCR `tools/train.py`, `tools/export_model.py`, and optional `tools/infer/predict_rec.py` when `runOfficial=true` and `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` points to a checkout. `prepareOnly=true` validates config generation only. |
+| `paddleocr_det_official` | OCR detection | Official PaddleOCR adapter | Generates a PP-OCRv4 detection config from PaddleOCR Det data and can run official PaddleOCR `tools/train.py` and `tools/export_model.py`. Artifacts include `aitrain_ppocrv4_det.yml`, `official_model/best_accuracy.pdparams`, `official_inference/inference.yml`, and `paddleocr_official_det_report.json`. |
+| `paddleocr_system_official` | OCR system inference | Official PaddleOCR adapter | Runs official `tools/infer/predict_system.py` from a PaddleOCR source checkout using exported Det and Rec inference model directories. This is the current end-to-end PaddleOCR validation path; it is not C++ OCR Det ONNX postprocess. |
 | `python_mock` | Any | Protocol fixture | Used only to verify Worker subprocess handling. Not real training. |
 
 ## Environment Setup
@@ -31,7 +33,7 @@ python -m venv .venv-ocr
 .\.venv-ocr\Scripts\python.exe -m pip install -r python_trainers\requirements-ocr.txt
 ```
 
-Optional official PaddleOCR Rec training requires a PaddleOCR source checkout because the installed `paddleocr` package exposes inference pipelines, not the legacy `tools/train.py` training scripts:
+Optional official PaddleOCR Det/Rec training and System inference require a PaddleOCR source checkout because the installed `paddleocr` package exposes inference pipelines, not the legacy `tools/train.py` training scripts:
 
 ```powershell
 git clone --depth 1 https://github.com/PaddlePaddle/PaddleOCR.git .deps\PaddleOCR
@@ -45,6 +47,14 @@ The reproducible local smoke command is:
 ```
 
 That script uses an isolated OCR Python embeddable environment under `.deps\python-3.13.13-ocr-amd64`, checks out a pinned PaddleOCR source ref, installs pinned OCR smoke constraints unless disabled, runs official PP-OCRv4 Rec training for 1 epoch on CPU, exports the official inference model, runs official recognition inference on one generated sample image, and checks the checkpoint, inference config, prediction report, resolved source ref, and metrics report.
+
+The full official PaddleOCR Det + Rec + System smoke is:
+
+```powershell
+.\tools\phase31-paddleocr-full-official-smoke.ps1
+```
+
+That script reuses the isolated OCR environment and pinned PaddleOCR checkout, generates minimal PaddleOCR Det and Rec datasets, runs 1-epoch CPU official Det and Rec train/export, then calls official `predict_system.py` with `use_angle_cls=false`. It validates reports, exported `official_inference/inference.yml` files, `official_system_prediction.json`, and visualized system output images. The run proves toolchain wiring and task artifacts, not useful OCR accuracy.
 
 For offline deployment, build a wheelhouse on a connected machine:
 
@@ -80,7 +90,24 @@ dataset/
 images/sample.png<TAB>label
 ```
 
-Dataset validation and split are Worker-backed flows. The GUI can now auto-detect YOLO detection, YOLO segmentation, and PaddleOCR Rec layouts; split outputs are recorded as SQLite dataset versions and task artifacts. PaddleOCR Rec split writes `rec_gt_train.txt`, `rec_gt_val.txt`, `rec_gt_test.txt`, and keeps a compatible `rec_gt.txt`.
+OCR detection uses a PaddleOCR-style Det layout:
+
+```text
+dataset/
+  det_gt.txt
+  images/
+    sample.png
+```
+
+`det_gt.txt` contains one image path and one JSON array per line:
+
+```text
+images/sample.png<TAB>[{"transcription":"text","points":[[1,1],[30,1],[30,20],[1,20]]}]
+```
+
+`det_gt_train.txt` and `det_gt_val.txt` are also accepted. Validation checks that referenced images exist, the JSON parses as an array, each box has `transcription`, each box has at least four non-negative points, and duplicate image rows are rejected. `###` and `*` are preserved as PaddleOCR ignore transcriptions.
+
+Dataset validation and split are Worker-backed flows. The GUI can now auto-detect YOLO detection, YOLO segmentation, PaddleOCR Rec, and PaddleOCR Det layouts; split outputs are recorded as SQLite dataset versions and task artifacts. PaddleOCR Rec split writes `rec_gt_train.txt`, `rec_gt_val.txt`, `rec_gt_test.txt`, and keeps a compatible `rec_gt.txt`. PaddleOCR Det split writes `det_gt_train.txt`, `det_gt_val.txt`, `det_gt_test.txt`, keeps a compatible `det_gt.txt`, copies images into split folders, and writes `split_report.json`.
 
 ## Model Export Formats
 
@@ -112,7 +139,7 @@ Every `acceptance-smoke.ps1` run writes `acceptance_summary.json` into its work 
 
 ## Official PaddleOCR Adapter Parameters
 
-The official adapter accepts these extra parameters in addition to the common Python trainer request fields:
+The official Rec adapter accepts these extra parameters in addition to the common Python trainer request fields:
 
 - `trainLabelFile`, `valLabelFile`, and `dictionaryFile` to use explicit PaddleOCR Rec materials.
 - `officialConfig` to start from a specific PaddleOCR recognition config.
@@ -123,6 +150,27 @@ The official adapter accepts these extra parameters in addition to the common Py
 
 The final `paddleocr_official_rec_report.json` records PaddleOCR requested/resolved refs, Python/Paddle/PaddleOCR versions, train/export/predict commands, config and label paths, dictionary path, checkpoint and inference model paths, parsed metrics, exit codes, and failure log paths.
 
+The official Det adapter accepts these extra parameters:
+
+- `trainLabelFile` and `valLabelFile` to use explicit PaddleOCR Det label files.
+- `officialConfig` to start from a specific PaddleOCR detection config.
+- `pretrainedModel` and `resumeCheckpoint` for official train/export inputs.
+- `exportOnly=true` to skip training and export an existing checkpoint.
+- `imageSize` to override generated detection image size.
+
+The final `paddleocr_official_det_report.json` records PaddleOCR requested/resolved refs, Python/Paddle/PaddleOCR versions, train/export commands, config and label paths, checkpoint and inference model paths, parsed metrics, exit codes, and failure log paths.
+
+The official System adapter accepts these parameters:
+
+- `detModelDir`: exported PaddleOCR Det inference model directory.
+- `recModelDir`: exported PaddleOCR Rec inference model directory.
+- `dictionaryFile`: recognition dictionary file.
+- `inferenceImage`: image or directory to pass to official `predict_system.py`.
+- `dropScore`: optional recognition score threshold.
+- `useGpu`: default `false`.
+
+The final `paddleocr_official_system_report.json` records Python/Paddle/PaddleOCR versions, source checkout ref, command, exit code, log path, model directories, dictionary path, `official_system_prediction.json`, `system_results.txt`, and the visualization directory.
+
 If public dataset materialization fails or requires external interaction, the generated minimal datasets remain the required smoke baseline. The failure reason should be recorded as an external data acquisition blocker, not hidden as a successful public dataset run.
 
 ## Known Boundaries
@@ -130,6 +178,7 @@ If public dataset materialization fails or requires external interaction, the ge
 - TensorRT engine building is still pending external RTX / SM 75+ acceptance.
 - GTX 1060 / SM 61 can run CPU training smoke and ONNX Runtime checks, but it cannot validate TensorRT 10 engine building.
 - C++ segmentation mask ONNX postprocess and OCR ONNX CTC greedy decode are available for the current smoke models.
+- C++ OCR Det ONNX Runtime DB postprocess is not implemented. End-to-end PaddleOCR validation currently uses official `predict_system.py`.
 - Official third-party backend licensing must be reviewed before commercial redistribution.
 - The official PaddleOCR adapter should be run in an isolated OCR Python environment. Mixing PaddlePaddle and PyTorch in one Windows Python process can trigger DLL conflicts through newer `albumentations` builds.
 - The official PP-OCRv4 smoke uses a tiny generated dataset; it validates train/export/inference wiring and artifacts, not useful OCR accuracy.

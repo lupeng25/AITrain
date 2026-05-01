@@ -139,6 +139,12 @@ QString pythonTrainerScriptFileForBackend(const QString& backend)
     if (normalized == QStringLiteral("paddleocr_rec_official") || normalized == QStringLiteral("paddleocr_ppocrv4_rec")) {
         return QStringLiteral("python_trainers/ocr_rec/paddleocr_official_adapter.py");
     }
+    if (normalized == QStringLiteral("paddleocr_det_official")) {
+        return QStringLiteral("python_trainers/ocr_det/paddleocr_det_official_adapter.py");
+    }
+    if (normalized == QStringLiteral("paddleocr_system_official")) {
+        return QStringLiteral("python_trainers/ocr_system/paddleocr_system_official_adapter.py");
+    }
     return QStringLiteral("python_trainers/mock_trainer.py");
 }
 
@@ -186,7 +192,9 @@ bool isPythonTrainingBackendId(const QString& backend, const QJsonObject& parame
         || normalized == QStringLiteral("ultralytics_yolo_segment")
         || normalized == QStringLiteral("paddleocr_rec")
         || normalized == QStringLiteral("paddleocr_rec_official")
-        || normalized == QStringLiteral("paddleocr_ppocrv4_rec");
+        || normalized == QStringLiteral("paddleocr_ppocrv4_rec")
+        || normalized == QStringLiteral("paddleocr_det_official")
+        || normalized == QStringLiteral("paddleocr_system_official");
 }
 
 QJsonObject runPythonCommandCheck(
@@ -392,6 +400,7 @@ void WorkerSession::startTraining(const aitrain::TrainingRequest& request)
         return;
     }
     if (request_.taskType.compare(QStringLiteral("ocr_recognition"), Qt::CaseInsensitive) == 0
+        || request_.taskType.compare(QStringLiteral("ocr_detection"), Qt::CaseInsensitive) == 0
         || request_.taskType.compare(QStringLiteral("ocr"), Qt::CaseInsensitive) == 0) {
         runOcrRecTraining();
         return;
@@ -472,12 +481,12 @@ void WorkerSession::runEnvironmentCheck(const QJsonObject& payload)
         pythonExecutable,
         QStringLiteral("PaddleOCR"),
         QStringLiteral("paddleocr"),
-        QStringLiteral("PaddleOCR is not installed. The official OCR recognition trainer backend will be unavailable.")));
+        QStringLiteral("PaddleOCR is not installed. Official OCR detection, recognition, and system adapters will be unavailable.")));
     checks.append(pythonModuleCheck(
         pythonExecutable,
         QStringLiteral("PaddlePaddle"),
         QStringLiteral("paddle"),
-        QStringLiteral("PaddlePaddle is not installed. PaddleOCR training will be unavailable.")));
+        QStringLiteral("PaddlePaddle is not installed. Official PaddleOCR Det/Rec/System workflows will be unavailable.")));
     checks.append(checkObject(QStringLiteral("Worker"), QStringLiteral("ok"), QStringLiteral("Worker 环境自检命令可用。")));
 
     QJsonObject result;
@@ -510,6 +519,8 @@ void WorkerSession::validateDataset(const QJsonObject& payload)
         result = aitrain::validateYoloDetectionDataset(datasetPath, options);
     } else if (format == QStringLiteral("yolo_segmentation")) {
         result = aitrain::validateYoloSegmentationDataset(datasetPath, options);
+    } else if (format == QStringLiteral("paddleocr_det")) {
+        result = aitrain::validatePaddleOcrDetDataset(datasetPath, options);
     } else if (format == QStringLiteral("paddleocr_rec")) {
         result = aitrain::validatePaddleOcrRecDataset(datasetPath, options);
     } else {
@@ -578,12 +589,14 @@ void WorkerSession::splitDataset(const QJsonObject& payload)
         result = aitrain::splitYoloDetectionDataset(datasetPath, outputPath, options);
     } else if (format == QStringLiteral("yolo_segmentation")) {
         result = aitrain::splitYoloSegmentationDataset(datasetPath, outputPath, options);
+    } else if (format == QStringLiteral("paddleocr_det")) {
+        result = aitrain::splitPaddleOcrDetDataset(datasetPath, outputPath, options);
     } else if (format == QStringLiteral("paddleocr_rec")) {
         result = aitrain::splitPaddleOcrRecDataset(datasetPath, outputPath, options);
     } else {
         result.ok = false;
         result.outputPath = outputPath;
-        result.errors.append(QStringLiteral("当前仅支持 YOLO 检测、YOLO 分割和 PaddleOCR Rec 数据集划分。"));
+        result.errors.append(QStringLiteral("当前仅支持 YOLO 检测、YOLO 分割、PaddleOCR Det 和 PaddleOCR Rec 数据集划分。"));
     }
 
     QJsonObject progressPayload;
