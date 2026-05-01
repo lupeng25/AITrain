@@ -5,6 +5,8 @@ AITrain Studio is a C++/Qt desktop foundation for managing local computer-vision
 This repository implements the first usable platform layer from the requested plan:
 
 - Qt Widgets GUI organized as a local training workbench with project dashboard, dataset library, training experiments, task/artifact history, model export, inference validation, plugin, and environment views.
+- Chinese/English GUI language switching through Qt translation resources, with language settings persisted in `QSettings` and applied after restart.
+- Offline machine-bound license verification before the main window opens, plus a separate Qt license generator tool for issuing signed license codes.
 - Isolated `aitrain_worker` process using JSON Lines over `QLocalSocket`.
 - SQLite-backed project/task/artifact metadata with task detail queries for artifacts, metrics, exports, and dataset versions.
 - Qt plugin interfaces for model, dataset, training, validation, export, and inference extensions.
@@ -47,10 +49,25 @@ For single-config generators such as NMake, use:
 
 Plugins are built under `build\plugins\models`. The GUI scans that directory and the application-local `plugins\models` directory.
 
+## Localization and Offline Licensing
+
+The main GUI and registration dialog support Chinese and English. The selected language is stored in `QSettings` and takes effect after restarting AITrain Studio. Translation resources are built from `src/app/translations/*.ts` into `.qm` files and copied beside the application under `translations`.
+
+AITrain Studio performs offline license validation before showing the main window. Licenses are signed tokens bound to the local machine code; the app stores accepted license data in `QSettings`, not in the project SQLite database.
+
+Build-time licensing knobs:
+
+- `AITRAIN_LICENSE_PUBLIC_KEY`: base64 public key compiled into the main application.
+- `AITRAIN_BUILD_LICENSE_GENERATOR`: builds `AITrainLicenseGenerator.exe` when enabled.
+- `AITRAIN_INSTALL_LICENSE_GENERATOR`: installs the generator only when explicitly enabled; it defaults off so customer packages do not accidentally include it.
+
+The generator uses a private key file to issue customer license codes. Keep private keys local and out of customer packages and source control.
+
 ## Project Layout
 
 - `src/core`: shared interfaces, plugin contracts, protocol, SQLite repository.
 - `src/app`: Qt Widgets desktop app.
+- `src/license_generator`: internal Qt license generator tool.
 - `src/worker`: isolated task runner.
 - `src/plugins`: built-in plugin DLLs.
 - `tests`: QtTest tests.

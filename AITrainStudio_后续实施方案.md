@@ -749,3 +749,61 @@ python examples\create-minimal-datasets.py --output .deps\next-smoke
 - 在数据集页确认 X-AnyLabeling 状态为已安装，启动标注工具，返回后执行“标注后刷新 / 重新校验”。
 - 校验、划分、训练、导出、推理各跑一次。
 - 在任务与产物页使用类别、状态和搜索过滤；失败任务应显示明确排查建议。
+
+## 22. 阶段 31-32：官方 OCR 工具链与产品壳能力
+
+目标：在不改变 Worker JSON 协议、SQLite schema、插件接口、训练/导出/推理实现的前提下，补齐官方 PaddleOCR Det/System 工具链入口，并加入面向交付的语言切换与离线授权能力。
+
+### 22.1 阶段 31：官方 PaddleOCR Det 与 System 链路
+
+已完成：
+
+- 增加 PaddleOCR Det 数据集校验和划分支持。
+- 增加官方 Det adapter。
+- 增加官方 System `predict_system.py` 编排入口。
+- GUI/backend 默认选择覆盖 PaddleOCR Det、Rec、System。
+- 增加 example requests、package 检查和 `tools\phase31-paddleocr-full-official-smoke.ps1`。
+- 本机隔离 OCR 环境 CPU smoke 已通过，覆盖官方 Det 1 epoch train/export、官方 Rec 1 epoch train/export 和官方 System inference。
+
+边界：
+
+- `paddleocr_system_official` 是官方工具链推理编排，不代表 C++ DB detection ONNX 后处理已经接入。
+- 官方 smoke 使用极小样例，只证明 wiring、artifact 和 report，不代表 OCR 精度。
+
+### 22.2 阶段 32：中英文切换与离线注册码
+
+已完成：
+
+- GUI 主界面和注册窗口支持中文/英文切换。
+- 语言设置通过 `QSettings` 持久化，切换后重启生效。
+- Qt 翻译资源从 `src/app/translations/*.ts` 构建 `.qm`，并复制/安装到应用 `translations` 目录。
+- `LanguageSupport` 统一处理控件树翻译，覆盖 label、button、group box、line edit placeholder、combo item、只读 text edit/plain text edit 正文、表格 header/body 单元格。
+- 主窗口动态文案通过 `translateText()` / fallback 英文词典补齐，包括任务状态、数据集状态、导出/推理/环境摘要、空状态和运行提示。
+- 启动时先执行离线授权校验；无效或缺失注册码时只显示注册窗口，验证通过后才进入主界面。
+- 注册码为签名 token，绑定 `QSysInfo::machineUniqueId()` 派生的机器码。
+- 授权信息存入 `QSettings`，不写入项目 SQLite。
+- 主应用只内置公钥；私钥只用于独立 `AITrainLicenseGenerator.exe`。
+- 新增独立 Qt Widgets 注册码生成器，支持生成/加载私钥、输入客户名称和机器码、可选到期日期、生成/复制/保存注册码。
+- CMake 提供 `AITRAIN_LICENSE_PUBLIC_KEY`、`AITRAIN_BUILD_LICENSE_GENERATOR`、`AITRAIN_INSTALL_LICENSE_GENERATOR`；生成器默认可构建但不默认安装到客户包。
+
+边界：
+
+- 本阶段不新增训练、推理、导出能力。
+- 不修改 Worker JSON 协议、SQLite schema、插件接口。
+- 第一版翻译范围覆盖 Qt GUI shell 和注册窗口；core/Worker/Python trainer 日志、训练报告字段、插件 manifest 动态文本可保留原文。
+- 私钥文件必须本地保管，不随客户包分发，不提交生产私钥。
+- 机器码绑定意味着其他机器需要用该机器的机器码重新签发注册码，不能只复用另一台机器的注册码。
+
+验收：
+
+```powershell
+.\tools\harness-check.ps1
+git diff --check
+```
+
+手工 GUI 验收：
+
+- 无注册码启动时只显示注册窗口，取消后退出。
+- 复制机器码到生成器，签发注册码，粘贴后进入主界面。
+- 切换语言并重启后，注册窗口、侧边栏、顶部状态区、主要页面控件、表格空状态和动态摘要切换到对应语言。
+- 确认训练、导出、推理入口在注册后行为不变。
