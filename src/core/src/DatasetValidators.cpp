@@ -24,6 +24,12 @@ struct YoloSample {
     QString baseName;
 };
 
+struct OcrSample {
+    QString imagePath;
+    QString text;
+    QString fileName;
+};
+
 void addIssue(DatasetValidationResult& result,
     const QString& severity,
     const QString& code,
@@ -379,7 +385,7 @@ DatasetValidationResult validateYoloDataset(const QString& datasetPath, const QJ
     return result;
 }
 
-QVector<YoloSample> collectYoloDetectionSamples(const QString& datasetPath, DatasetSplitResult& result)
+QVector<YoloSample> collectYoloSamples(const QString& datasetPath, DatasetSplitResult& result)
 {
     QVector<YoloSample> samples;
     const QDir root(datasetPath);
@@ -404,6 +410,46 @@ QVector<YoloSample> collectYoloDetectionSamples(const QString& datasetPath, Data
             sample.baseName = imageInfo.completeBaseName();
             samples.append(sample);
         }
+    }
+    return samples;
+}
+
+QVector<OcrSample> collectOcrSamples(const QString& datasetPath, const QString& labelFilePath, DatasetSplitResult& result)
+{
+    QVector<OcrSample> samples;
+    const QDir root(datasetPath);
+    QFile file(labelFilePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        result.ok = false;
+        result.errors.append(QStringLiteral("无法读取 OCR 标签文件：%1").arg(labelFilePath));
+        return samples;
+    }
+
+    int lineNumber = 0;
+    while (!file.atEnd()) {
+        ++lineNumber;
+        const QString line = QString::fromUtf8(file.readLine()).trimmed();
+        if (line.isEmpty()) {
+            continue;
+        }
+        const int split = line.indexOf(QLatin1Char('\t'));
+        if (split <= 0) {
+            result.ok = false;
+            result.errors.append(QStringLiteral("%1:%2 OCR 标签行格式错误。").arg(labelFilePath).arg(lineNumber));
+            continue;
+        }
+        const QString relativeImagePath = line.left(split).trimmed();
+        const QString absoluteImagePath = root.filePath(relativeImagePath);
+        if (!QFileInfo::exists(absoluteImagePath)) {
+            result.ok = false;
+            result.errors.append(QStringLiteral("OCR 图片不存在：%1").arg(absoluteImagePath));
+            continue;
+        }
+        OcrSample sample;
+        sample.imagePath = absoluteImagePath;
+        sample.text = line.mid(split + 1);
+        sample.fileName = QFileInfo(relativeImagePath).fileName();
+        samples.append(sample);
     }
     return samples;
 }
@@ -440,6 +486,129 @@ QString splitNameForIndex(int index, int trainCount, int valCount)
         return QStringLiteral("val");
     }
     return QStringLiteral("test");
+}
+
+void calculateSplitCounts(int total,
+    double trainRatio,
+    double valRatio,
+    double testRatio,
+    int* trainCount,
+    int* valCount,
+    int* testCount)
+{
+    const double ratioSum = trainRatio + valRatio + testRatio;
+    *trainCount = qRound((trainRatio / ratioSum) * total);
+    *valCount = qRound((valRatio / ratioSum) * total);
+    if (*trainCount <= 0 && total > 0) {
+        *trainCount = 1;
+    }
+    if (*trainCount + *valCount > total) {
+        *valCount = qMax(0, total - *trainCount);
+    }
+    *testCount = total - *trainCount - *valCount;
+    if (testRatio > 0.0 && *testCount <= 0 && total >= 3) {
+        if (*valCount > 1) {
+            --(*valCount);
+        } else if (*trainCount > 1) {
+            --(*trainCount);
+        }
+        *testCount = total - *trainCount - *valCount;
+    }
+}
+
+bool validateSplitRatios(double trainRatio, double valRatio, double testRatio, DatasetSplitResult& result)
+{
+    const double ratioSum = trainRatio + valRatio + testRatio;
+    if (trainRatio <= 0.0 || valRatio < 0.0 || testRatio < 0.0 || ratioSum <= 0.0) {
+        result.ok = false;
+        result.errors.append(QStringLiteral("划分比例不合法。"));
+        return false;
+    }
+    return true;
+}
+
+DatasetSplitResult splitYoloDataset(const QString& datasetPath,
+    const QString& outputPath,
+    const QJsonObject& options,
+    bool segmentation)
+{
+    DatasetSplitResult result;
+    result.outputPath = outputPath;
+
+    const DatasetValidationResult validation = segmentation
+        ? validateYoloSegmentationDataset(datasetPath, options)
+        : validateYoloDetectionDataset(datasetPath, options);
+    if (!validation.ok) {
+        result.ok = false;
+        result.errors.append(segmentation
+            ? QStringLiteral("源数据集未通过 YOLO 分割校验，已取消划分。")
+            : QStringLiteral("源数据集未通过 YOLO 检测校验，已取消划分。"));
+        result.errors.append(validation.errors);
+        return result;
+    }
+
+    const double trainRatio = options.value(QStringLiteral("trainRatio")).toDouble(0.8);
+    const double valRatio = options.value(QStringLiteral("valRatio")).toDouble(0.2);
+    const double testRatio = options.value(QStringLiteral("testRatio")).toDouble(0.0);
+    if (!validateSplitRatios(trainRatio, valRatio, testRatio, result)) {
+        return result;
+    }
+
+    QVector<YoloSample> samples = collectYoloSamples(datasetPath, result);
+    if (!result.ok) {
+        return result;
+    }
+    if (samples.isEmpty()) {
+        result.ok = false;
+        result.errors.append(segmentation
+            ? QStringLiteral("没有可划分的 YOLO 分割样本。")
+            : QStringLiteral("没有可划分的 YOLO 检测样本。"));
+        return result;
+    }
+
+    const quint32 seed = static_cast<quint32>(options.value(QStringLiteral("seed")).toInt(42));
+    shuffleSamples(samples, seed);
+
+    calculateSplitCounts(samples.size(), trainRatio, valRatio, testRatio, &result.trainCount, &result.valCount, &result.testCount);
+
+    const QDir outputRoot(outputPath);
+    QDir().mkpath(outputRoot.path());
+    for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
+        QDir().mkpath(outputRoot.filePath(QStringLiteral("images/%1").arg(split)));
+        QDir().mkpath(outputRoot.filePath(QStringLiteral("labels/%1").arg(split)));
+    }
+
+    for (int index = 0; index < samples.size(); ++index) {
+        const QString split = splitNameForIndex(index, result.trainCount, result.valCount);
+        const YoloSample& sample = samples.at(index);
+        const QString imageTarget = outputRoot.filePath(QStringLiteral("images/%1/%2").arg(split, sample.fileName));
+        const QString labelTarget = outputRoot.filePath(QStringLiteral("labels/%1/%2.txt").arg(split, sample.baseName));
+        copyFileReplacing(sample.imagePath, imageTarget, result.errors);
+        copyFileReplacing(sample.labelPath, labelTarget, result.errors);
+    }
+
+    const QString sourceYaml = QDir(datasetPath).filePath(QStringLiteral("data.yaml"));
+    copyFileReplacing(sourceYaml, outputRoot.filePath(QStringLiteral("data.yaml")), result.errors);
+
+    if (!result.errors.isEmpty()) {
+        result.ok = false;
+    }
+
+    QJsonObject report = result.toJson();
+    report.insert(QStringLiteral("sourcePath"), datasetPath);
+    report.insert(QStringLiteral("format"), segmentation ? QStringLiteral("yolo_segmentation") : QStringLiteral("yolo_detection"));
+    report.insert(QStringLiteral("seed"), static_cast<int>(seed));
+    report.insert(QStringLiteral("trainRatio"), trainRatio);
+    report.insert(QStringLiteral("valRatio"), valRatio);
+    report.insert(QStringLiteral("testRatio"), testRatio);
+    QFile reportFile(outputRoot.filePath(QStringLiteral("split_report.json")));
+    if (reportFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        reportFile.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+    } else {
+        result.warnings.append(QStringLiteral("无法写入 split_report.json。"));
+    }
+
+    return result;
 }
 
 } // namespace
@@ -479,7 +648,12 @@ DatasetValidationResult validatePaddleOcrRecDataset(const QString& datasetPath, 
         return result;
     }
 
-    const QString labelFilePath = options.value(QStringLiteral("labelFile")).toString(root.filePath(QStringLiteral("rec_gt.txt")));
+    QString labelFilePath = options.value(QStringLiteral("labelFile")).toString();
+    if (labelFilePath.isEmpty()) {
+        labelFilePath = QFileInfo::exists(root.filePath(QStringLiteral("rec_gt.txt")))
+            ? root.filePath(QStringLiteral("rec_gt.txt"))
+            : root.filePath(QStringLiteral("rec_gt_train.txt"));
+    }
     QFile labelFile(labelFilePath);
     if (!labelFile.exists()) {
         addIssue(result, QStringLiteral("error"), QStringLiteral("missing_label_file"), labelFilePath, 0,
@@ -572,13 +746,23 @@ DatasetValidationResult validatePaddleOcrRecDataset(const QString& datasetPath, 
 
 DatasetSplitResult splitYoloDetectionDataset(const QString& datasetPath, const QString& outputPath, const QJsonObject& options)
 {
+    return splitYoloDataset(datasetPath, outputPath, options, false);
+}
+
+DatasetSplitResult splitYoloSegmentationDataset(const QString& datasetPath, const QString& outputPath, const QJsonObject& options)
+{
+    return splitYoloDataset(datasetPath, outputPath, options, true);
+}
+
+DatasetSplitResult splitPaddleOcrRecDataset(const QString& datasetPath, const QString& outputPath, const QJsonObject& options)
+{
     DatasetSplitResult result;
     result.outputPath = outputPath;
 
-    const DatasetValidationResult validation = validateYoloDetectionDataset(datasetPath, options);
+    const DatasetValidationResult validation = validatePaddleOcrRecDataset(datasetPath, options);
     if (!validation.ok) {
         result.ok = false;
-        result.errors.append(QStringLiteral("源数据集未通过 YOLO 检测校验，已取消划分。"));
+        result.errors.append(QStringLiteral("源数据集未通过 PaddleOCR Rec 校验，已取消划分。"));
         result.errors.append(validation.errors);
         return result;
     }
@@ -586,73 +770,87 @@ DatasetSplitResult splitYoloDetectionDataset(const QString& datasetPath, const Q
     const double trainRatio = options.value(QStringLiteral("trainRatio")).toDouble(0.8);
     const double valRatio = options.value(QStringLiteral("valRatio")).toDouble(0.2);
     const double testRatio = options.value(QStringLiteral("testRatio")).toDouble(0.0);
-    const double ratioSum = trainRatio + valRatio + testRatio;
-    if (trainRatio <= 0.0 || valRatio < 0.0 || testRatio < 0.0 || ratioSum <= 0.0) {
-        result.ok = false;
-        result.errors.append(QStringLiteral("划分比例不合法。"));
+    if (!validateSplitRatios(trainRatio, valRatio, testRatio, result)) {
         return result;
     }
 
-    QVector<YoloSample> samples = collectYoloDetectionSamples(datasetPath, result);
+    const QDir root(datasetPath);
+    const QString labelFilePath = QFileInfo::exists(root.filePath(QStringLiteral("rec_gt.txt")))
+        ? root.filePath(QStringLiteral("rec_gt.txt"))
+        : root.filePath(QStringLiteral("rec_gt_train.txt"));
+    QVector<OcrSample> samples = collectOcrSamples(datasetPath, labelFilePath, result);
     if (!result.ok) {
         return result;
     }
     if (samples.isEmpty()) {
         result.ok = false;
-        result.errors.append(QStringLiteral("没有可划分的 YOLO 检测样本。"));
+        result.errors.append(QStringLiteral("没有可划分的 PaddleOCR Rec 样本。"));
         return result;
     }
 
     const quint32 seed = static_cast<quint32>(options.value(QStringLiteral("seed")).toInt(42));
-    shuffleSamples(samples, seed);
-
-    const int total = samples.size();
-    int trainCount = qRound((trainRatio / ratioSum) * total);
-    int valCount = qRound((valRatio / ratioSum) * total);
-    if (trainCount <= 0 && total > 0) {
-        trainCount = 1;
+    QRandomGenerator rng(seed);
+    for (int index = samples.size() - 1; index > 0; --index) {
+        const int swapIndex = static_cast<int>(rng.bounded(static_cast<quint32>(index + 1)));
+        qSwap(samples[index], samples[swapIndex]);
     }
-    if (trainCount + valCount > total) {
-        valCount = qMax(0, total - trainCount);
-    }
-    int testCount = total - trainCount - valCount;
-    if (testRatio > 0.0 && testCount <= 0 && total >= 3) {
-        if (valCount > 1) {
-            --valCount;
-        } else if (trainCount > 1) {
-            --trainCount;
-        }
-        testCount = total - trainCount - valCount;
-    }
+    calculateSplitCounts(samples.size(), trainRatio, valRatio, testRatio, &result.trainCount, &result.valCount, &result.testCount);
 
     const QDir outputRoot(outputPath);
     QDir().mkpath(outputRoot.path());
     for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
         QDir().mkpath(outputRoot.filePath(QStringLiteral("images/%1").arg(split)));
-        QDir().mkpath(outputRoot.filePath(QStringLiteral("labels/%1").arg(split)));
     }
 
+    QStringList allRows;
+    QStringList trainRows;
+    QStringList valRows;
+    QStringList testRows;
     for (int index = 0; index < samples.size(); ++index) {
-        const QString split = splitNameForIndex(index, trainCount, valCount);
-        const YoloSample& sample = samples.at(index);
-        const QString imageTarget = outputRoot.filePath(QStringLiteral("images/%1/%2").arg(split, sample.fileName));
-        const QString labelTarget = outputRoot.filePath(QStringLiteral("labels/%1/%2.txt").arg(split, sample.baseName));
-        copyFileReplacing(sample.imagePath, imageTarget, result.errors);
-        copyFileReplacing(sample.labelPath, labelTarget, result.errors);
+        const QString split = splitNameForIndex(index, result.trainCount, result.valCount);
+        const OcrSample& sample = samples.at(index);
+        QString fileName = sample.fileName;
+        if (fileName.isEmpty()) {
+            fileName = QStringLiteral("sample_%1.png").arg(index + 1);
+        }
+        const QString targetRelative = QStringLiteral("images/%1/%2_%3").arg(split).arg(index + 1, 4, 10, QLatin1Char('0')).arg(fileName);
+        const QString targetPath = outputRoot.filePath(targetRelative);
+        copyFileReplacing(sample.imagePath, targetPath, result.errors);
+        const QString row = QStringLiteral("%1\t%2").arg(targetRelative, sample.text);
+        allRows.append(row);
+        if (split == QStringLiteral("train")) {
+            trainRows.append(row);
+        } else if (split == QStringLiteral("val")) {
+            valRows.append(row);
+        } else {
+            testRows.append(row);
+        }
     }
 
-    const QString sourceYaml = QDir(datasetPath).filePath(QStringLiteral("data.yaml"));
-    copyFileReplacing(sourceYaml, outputRoot.filePath(QStringLiteral("data.yaml")), result.errors);
+    auto writeRows = [&result](const QString& path, const QStringList& rows) {
+        QFile file(path);
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+            result.errors.append(QStringLiteral("无法写入 OCR 标签文件：%1").arg(path));
+            result.ok = false;
+            return;
+        }
+        QTextStream stream(&file);
+        stream.setCodec("UTF-8");
+        for (const QString& row : rows) {
+            stream << row << '\n';
+        }
+    };
+    writeRows(outputRoot.filePath(QStringLiteral("rec_gt.txt")), allRows);
+    writeRows(outputRoot.filePath(QStringLiteral("rec_gt_train.txt")), trainRows);
+    writeRows(outputRoot.filePath(QStringLiteral("rec_gt_val.txt")), valRows);
+    writeRows(outputRoot.filePath(QStringLiteral("rec_gt_test.txt")), testRows);
 
-    result.trainCount = trainCount;
-    result.valCount = valCount;
-    result.testCount = testCount;
-    if (!result.errors.isEmpty()) {
-        result.ok = false;
-    }
+    copyFileReplacing(root.filePath(QStringLiteral("dict.txt")), outputRoot.filePath(QStringLiteral("dict.txt")), result.errors);
 
     QJsonObject report = result.toJson();
     report.insert(QStringLiteral("sourcePath"), datasetPath);
+    report.insert(QStringLiteral("format"), QStringLiteral("paddleocr_rec"));
     report.insert(QStringLiteral("seed"), static_cast<int>(seed));
     report.insert(QStringLiteral("trainRatio"), trainRatio);
     report.insert(QStringLiteral("valRatio"), valRatio);
@@ -663,7 +861,9 @@ DatasetSplitResult splitYoloDetectionDataset(const QString& datasetPath, const Q
     } else {
         result.warnings.append(QStringLiteral("无法写入 split_report.json。"));
     }
-
+    if (!result.errors.isEmpty()) {
+        result.ok = false;
+    }
     return result;
 }
 

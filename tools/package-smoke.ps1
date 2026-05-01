@@ -94,6 +94,7 @@ Assert-PathExists "python_trainers\requirements-yolo.txt" "YOLO Python requireme
 Assert-PathExists "python_trainers\requirements-ocr.txt" "OCR Python requirements"
 Assert-PathExists "python_trainers\ocr_rec\paddleocr_official_adapter.py" "Official PaddleOCR adapter"
 Assert-PathExists "tools\acceptance-smoke.ps1" "acceptance smoke script"
+Assert-PathExists "tools\materialize-ultralytics-dataset.py" "Ultralytics dataset materializer"
 
 $onnxRuntimeRootDll = Join-Path $prefixFull "onnxruntime.dll"
 $onnxRuntimeFolderDll = Join-Path $prefixFull "runtimes\onnxruntime\onnxruntime.dll"

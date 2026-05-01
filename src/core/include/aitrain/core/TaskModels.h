@@ -59,6 +59,7 @@ struct TaskRecord {
 };
 
 struct MetricPoint {
+    int id = 0;
     QString taskId;
     QString name;
     double value = 0.0;
@@ -68,6 +69,7 @@ struct MetricPoint {
 };
 
 struct ArtifactRecord {
+    int id = 0;
     QString taskId;
     QString kind;
     QString path;
@@ -106,6 +108,15 @@ struct DatasetRecord {
     QDateTime createdAt;
     QDateTime updatedAt;
     QDateTime lastValidatedAt;
+};
+
+struct DatasetVersionRecord {
+    int id = 0;
+    int datasetId = 0;
+    QString version;
+    QString rootPath;
+    QString metadataJson;
+    QDateTime createdAt;
 };
 
 } // namespace aitrain

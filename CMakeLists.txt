@@ -276,9 +276,13 @@ install(FILES
     docs/acceptance-runbook.md
     DESTINATION docs
 )
-install(DIRECTORY python_trainers DESTINATION .)
+install(DIRECTORY python_trainers DESTINATION .
+    PATTERN "__pycache__" EXCLUDE
+    PATTERN "*.pyc" EXCLUDE
+)
 install(FILES
     tools/acceptance-smoke.ps1
+    tools/materialize-ultralytics-dataset.py
     tools/phase16-ocr-official-smoke.ps1
     DESTINATION tools
 )

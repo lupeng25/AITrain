@@ -114,6 +114,30 @@ def split_samples(samples: list[tuple[str, str]], validation_ratio: float) -> tu
     return samples[:-val_count], samples[-val_count:]
 
 
+def resolve_dataset_file(dataset_path: Path, value: Any, default_name: str) -> Path:
+    text = str(value or "").strip()
+    if not text:
+        return dataset_path / default_name
+    path = Path(text)
+    return path if path.is_absolute() else dataset_path / path
+
+
+def parse_rec_image_shape(parameters: dict[str, Any]) -> tuple[int, int, int]:
+    raw = parameters.get("recImageShape")
+    if raw is None:
+        return 3, max(16, int(parameters.get("imageHeight", 48))), max(32, int(parameters.get("imageWidth", 320)))
+    if isinstance(raw, str):
+        parts = [part.strip() for part in raw.split(",") if part.strip()]
+        values = [int(part) for part in parts]
+    elif isinstance(raw, list):
+        values = [int(part) for part in raw]
+    else:
+        raise ValueError("recImageShape must be a list or comma-separated string")
+    if len(values) != 3:
+        raise ValueError("recImageShape must contain channel,height,width")
+    return values[0], max(16, values[1]), max(32, values[2])
+
+
 def write_label_file(path: Path, samples: list[tuple[str, str]]) -> None:
     path.write_text("".join(f"{image}\t{text}\n" for image, text in samples), encoding="utf-8")
 
@@ -122,6 +146,21 @@ def yaml_dump(value: Any) -> str:
     import yaml
 
     return yaml.safe_dump(value, allow_unicode=True, sort_keys=False)
+
+
+def prepare_predict_model_dir(source_dir: Path, target_dir: Path) -> Path:
+    import yaml
+
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
+    shutil.copytree(source_dir, target_dir)
+    inference_yml = target_dir / "inference.yml"
+    if inference_yml.exists():
+        config = yaml.safe_load(inference_yml.read_text(encoding="utf-8")) or {}
+        if isinstance(config, dict) and isinstance(config.get("Global"), dict):
+            config["Global"].pop("model_name", None)
+            inference_yml.write_text(yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return target_dir
 
 
 def build_config(
@@ -157,8 +196,7 @@ def build_config(
 
     epochs = max(1, int(parameters.get("epochs", 1)))
     batch_size = max(1, int(parameters.get("batchSize", 1)))
-    image_height = max(16, int(parameters.get("imageHeight", 48)))
-    image_width = max(32, int(parameters.get("imageWidth", 320)))
+    _, image_height, image_width = parse_rec_image_shape(parameters)
     max_text_length = max(1, int(parameters.get("maxTextLength", 25)))
     use_gpu = bool_param(parameters, "useGpu", False)
     save_model_dir = output_path / "official_model"
@@ -239,7 +277,14 @@ def parse_official_metrics(backend: str, line: str, metrics: dict[str, float]) -
         emit(backend, "metric", name=name, value=value)
 
 
-def run_process(backend: str, command: list[str], cwd: Path, env: dict[str, str], metrics: dict[str, float] | None = None) -> int:
+def run_process(
+    backend: str,
+    command: list[str],
+    cwd: Path,
+    env: dict[str, str],
+    metrics: dict[str, float] | None = None,
+    log_path: Path | None = None,
+) -> tuple[int, list[str]]:
     emit(backend, "log", level="info", message=f"Running official PaddleOCR command: {' '.join(command)}")
     process = subprocess.Popen(
         command,
@@ -252,13 +297,46 @@ def run_process(backend: str, command: list[str], cwd: Path, env: dict[str, str]
         errors="replace",
     )
     assert process.stdout is not None
+    lines: list[str] = []
     for line in process.stdout:
         if line.strip():
             stripped = line.rstrip()
+            lines.append(stripped)
             emit(backend, "log", level="info", message=stripped)
             if metrics is not None:
                 parse_official_metrics(backend, stripped, metrics)
-    return process.wait()
+    exit_code = process.wait()
+    if log_path is not None:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return exit_code, lines
+
+
+def git_head(repo: Path | None) -> str:
+    if repo is None:
+        return ""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except Exception:
+        return ""
+    return result.stdout.strip()
+
+
+def module_version(module_name: str) -> str:
+    try:
+        import importlib.metadata
+
+        return importlib.metadata.version(module_name)
+    except Exception:
+        return ""
 
 
 def run(request: dict[str, Any]) -> int:
@@ -269,8 +347,17 @@ def run(request: dict[str, Any]) -> int:
     output_path.mkdir(parents=True, exist_ok=True)
 
     try:
-        chars = read_dictionary(dataset_path / "dict.txt")
-        samples = read_labels(dataset_path / "rec_gt.txt")
+        dict_source_path = resolve_dataset_file(dataset_path, parameters.get("dictionaryFile"), "dict.txt")
+        chars = read_dictionary(dict_source_path)
+        train_label_source = resolve_dataset_file(dataset_path, parameters.get("trainLabelFile"), "rec_gt.txt")
+        train_samples_source = read_labels(train_label_source)
+        val_label_value = str(parameters.get("valLabelFile") or "").strip()
+        if val_label_value:
+            val_label_source = resolve_dataset_file(dataset_path, val_label_value, "rec_gt_val.txt")
+            val_samples_source = read_labels(val_label_source)
+            samples = train_samples_source + val_samples_source
+        else:
+            samples = train_samples_source
     except Exception as exc:
         return fail(backend, str(exc), "bad_dataset")
 
@@ -286,13 +373,16 @@ def run(request: dict[str, Any]) -> int:
 
     official_data_dir = output_path / "official_data"
     official_data_dir.mkdir(parents=True, exist_ok=True)
-    train_samples, val_samples = split_samples(samples, float(parameters.get("validationRatio", 0.2)))
+    if "val_samples_source" in locals():
+        train_samples, val_samples = train_samples_source, val_samples_source
+    else:
+        train_samples, val_samples = split_samples(samples, float(parameters.get("validationRatio", 0.2)))
     train_list_path = official_data_dir / "train_list.txt"
     val_list_path = official_data_dir / "val_list.txt"
     dict_path = official_data_dir / "dict.txt"
     write_label_file(train_list_path, train_samples)
     write_label_file(val_list_path, val_samples)
-    shutil.copyfile(dataset_path / "dict.txt", dict_path)
+    shutil.copyfile(dict_source_path, dict_path)
 
     try:
         config = build_config(repo, parameters, dataset_path, output_path, dict_path, train_list_path, val_list_path, samples[0][0])
@@ -301,6 +391,13 @@ def run(request: dict[str, Any]) -> int:
 
     config_path = output_path / "aitrain_ppocrv4_rec.yml"
     config_path.write_text(yaml_dump(config), encoding="utf-8")
+    export_only = bool_param(parameters, "exportOnly", False)
+    run_inference_after_export = bool_param(parameters, "runInferenceAfterExport", False)
+    _, image_height, image_width = parse_rec_image_shape(parameters)
+    rec_image_shape = f"3,{image_height},{image_width}"
+    pretrained_base = Path(str(parameters.get("pretrainedModel") or (output_path / "official_model" / "best_accuracy")))
+    inference_image = resolve_dataset_file(dataset_path, parameters.get("inferenceImage"), samples[0][0])
+    predict_model_dir = output_path / "official_inference_predict"
     train_command = [sys.executable, "tools/train.py", "-c", str(config_path)]
     export_command = [
         sys.executable,
@@ -308,29 +405,55 @@ def run(request: dict[str, Any]) -> int:
         "-c",
         str(config_path),
         "-o",
-        f"Global.pretrained_model={output_path / 'official_model' / 'best_accuracy'}",
+        f"Global.pretrained_model={pretrained_base}",
         f"Global.save_inference_dir={output_path / 'official_inference'}",
+    ]
+    predict_command = [
+        sys.executable,
+        "tools/infer/predict_rec.py",
+        f"--image_dir={inference_image}",
+        f"--rec_model_dir={predict_model_dir}",
+        f"--rec_char_dict_path={dict_path}",
+        f"--rec_image_shape={rec_image_shape}",
+        f"--use_gpu={str(bool_param(parameters, 'useGpu', False))}",
     ]
     write_command_file(output_path / "run_official_train.ps1", train_command, repo)
     write_command_file(output_path / "run_official_export.ps1", export_command, repo)
+    write_command_file(output_path / "run_official_predict.ps1", predict_command, repo)
 
     report_path = output_path / "paddleocr_official_rec_report.json"
+    train_log_path = output_path / "official_train.log"
+    export_log_path = output_path / "official_export.log"
+    predict_log_path = output_path / "official_predict.log"
     report: dict[str, Any] = {
         "ok": True,
         "backend": backend,
         "framework": "PaddleOCR official tools",
         "modelFamily": "ocr_recognition",
-        "mode": "prepareOnly" if prepare_only else "officialTrain",
+        "mode": "prepareOnly" if prepare_only else ("exportOnly" if export_only else "officialTrain"),
         "note": "PP-OCRv4 official config adapter. prepareOnly=true validates dataset/config generation without running official training.",
+        "pythonVersion": sys.version.split()[0],
+        "paddleVersion": module_version("paddlepaddle"),
+        "paddleOcrPackageVersion": module_version("paddleocr"),
         "paddleOcrRepoPath": str(repo) if repo else "",
+        "paddleOcrRequestedRef": str(parameters.get("paddleOcrRef") or ""),
+        "paddleOcrResolvedRef": git_head(repo),
         "configPath": str(config_path),
         "trainListPath": str(train_list_path),
         "valListPath": str(val_list_path),
         "dictPath": str(dict_path),
+        "sourceDictionaryPath": str(dict_source_path),
+        "sourceTrainLabelPath": str(train_label_source),
+        "sourceValLabelPath": str(val_label_source) if "val_label_source" in locals() else "",
         "classCount": len(chars) + 1,
         "blankIndex": 0,
         "trainCommand": train_command,
         "exportCommand": export_command,
+        "predictCommand": predict_command,
+        "predictModelDir": str(predict_model_dir),
+        "trainLogPath": str(train_log_path),
+        "exportLogPath": str(export_log_path),
+        "predictLogPath": str(predict_log_path),
         "metrics": {},
     }
 
@@ -344,25 +467,49 @@ def run(request: dict[str, Any]) -> int:
         env = os.environ.copy()
         env["PYTHONPATH"] = str(repo) + os.pathsep + env.get("PYTHONPATH", "")
         official_metrics: dict[str, float] = {}
-        train_exit = run_process(backend, train_command, repo, env, official_metrics)
-        report["metrics"] = official_metrics
-        if train_exit != 0:
-            report["ok"] = False
+        if not export_only:
+            train_exit, _ = run_process(backend, train_command, repo, env, official_metrics, train_log_path)
+            report["metrics"] = official_metrics
             report["trainExitCode"] = train_exit
-            report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            emit(backend, "artifact", name="paddleocr_official_rec_report.json", path=str(report_path), kind="report")
-            return fail(backend, "Official PaddleOCR training failed.", "official_train_failed", {"exitCode": train_exit})
-        export_exit = run_process(backend, export_command, repo, env)
+            if train_exit != 0:
+                report["ok"] = False
+                report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                emit(backend, "artifact", name="paddleocr_official_rec_report.json", path=str(report_path), kind="report")
+                return fail(backend, "Official PaddleOCR training failed.", "official_train_failed", {"exitCode": train_exit, "logPath": str(train_log_path)})
+        export_exit, _ = run_process(backend, export_command, repo, env, log_path=export_log_path)
+        report["exportExitCode"] = export_exit
         if export_exit != 0:
             report["ok"] = False
-            report["exportExitCode"] = export_exit
             report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             emit(backend, "artifact", name="paddleocr_official_rec_report.json", path=str(report_path), kind="report")
-            return fail(backend, "Official PaddleOCR export failed.", "official_export_failed", {"exitCode": export_exit})
+            return fail(backend, "Official PaddleOCR export failed.", "official_export_failed", {"exitCode": export_exit, "logPath": str(export_log_path)})
         report["checkpointPath"] = str(output_path / "official_model" / "best_accuracy.pdparams")
         report["inferenceModelDir"] = str(output_path / "official_inference")
         emit(backend, "artifact", name="official_model", path=str(output_path / "official_model"), kind="checkpoint_dir")
         emit(backend, "artifact", name="official_inference", path=str(output_path / "official_inference"), kind="model_dir")
+        if run_inference_after_export:
+            prepare_predict_model_dir(output_path / "official_inference", predict_model_dir)
+            predict_exit, predict_lines = run_process(backend, predict_command, repo, env, log_path=predict_log_path)
+            prediction_path = output_path / "official_prediction.json"
+            prediction_payload = {
+                "ok": predict_exit == 0,
+                "exitCode": predict_exit,
+                "imagePath": str(inference_image),
+                "inferenceModelDir": str(output_path / "official_inference"),
+                "predictModelDir": str(predict_model_dir),
+                "dictPath": str(dict_path),
+                "recImageShape": rec_image_shape,
+                "output": predict_lines,
+            }
+            prediction_path.write_text(json.dumps(prediction_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            report["predictExitCode"] = predict_exit
+            report["predictionPath"] = str(prediction_path)
+            emit(backend, "artifact", name="official_prediction.json", path=str(prediction_path), kind="prediction")
+            if predict_exit != 0:
+                report["ok"] = False
+                report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                emit(backend, "artifact", name="paddleocr_official_rec_report.json", path=str(report_path), kind="report")
+                return fail(backend, "Official PaddleOCR prediction failed.", "official_predict_failed", {"exitCode": predict_exit, "logPath": str(predict_log_path)})
 
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     emit(backend, "artifact", name="paddleocr_official_rec_report.json", path=str(report_path), kind="report")
@@ -373,6 +520,7 @@ def run(request: dict[str, Any]) -> int:
         reportPath=str(report_path),
         configPath=str(config_path),
         mode=report["mode"],
+        predictionPath=report.get("predictionPath", ""),
         metrics=report["metrics"],
     )
     return 0

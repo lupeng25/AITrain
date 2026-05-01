@@ -33,6 +33,28 @@ QJsonObject checkObject(const QString& name, const QString& status, const QStrin
     return object;
 }
 
+bool writeJsonFile(const QString& path, const QJsonObject& object, QString* error)
+{
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        if (error) {
+            *error = QStringLiteral("Cannot write JSON report: %1").arg(path);
+        }
+        return false;
+    }
+    file.write(QJsonDocument(object).toJson(QJsonDocument::Indented));
+    return true;
+}
+
+QString defaultTaskOutputPath(const QString& basePath, const QString& taskId)
+{
+    const QString id = taskId.isEmpty()
+        ? QStringLiteral("manual-%1").arg(QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMddHHmmsszzz")))
+        : taskId;
+    return QDir(basePath).filePath(QStringLiteral("runs/%1").arg(id));
+}
+
 QJsonObject nvidiaSmiCheck()
 {
     QProcess process;
@@ -468,11 +490,17 @@ void WorkerSession::runEnvironmentCheck(const QJsonObject& payload)
 
 void WorkerSession::validateDataset(const QJsonObject& payload)
 {
+    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
     const QString datasetPath = payload.value(QStringLiteral("datasetPath")).toString();
     const QString format = payload.value(QStringLiteral("format")).toString();
+    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
     const QJsonObject options = payload.value(QStringLiteral("options")).toObject();
+    if (outputPath.isEmpty()) {
+        outputPath = defaultTaskOutputPath(QFileInfo(datasetPath).absoluteDir().absolutePath(), taskId);
+    }
 
     QJsonObject startProgress;
+    startProgress.insert(QStringLiteral("taskId"), taskId);
     startProgress.insert(QStringLiteral("percent"), 0);
     startProgress.insert(QStringLiteral("message"), QStringLiteral("开始校验数据集。"));
     send(QStringLiteral("progress"), startProgress);
@@ -496,27 +524,51 @@ void WorkerSession::validateDataset(const QJsonObject& payload)
     }
 
     QJsonObject progressPayload;
+    progressPayload.insert(QStringLiteral("taskId"), taskId);
     progressPayload.insert(QStringLiteral("percent"), 100);
     progressPayload.insert(QStringLiteral("message"), QStringLiteral("数据集校验完成。"));
     send(QStringLiteral("progress"), progressPayload);
 
     QJsonObject response = result.toJson();
+    response.insert(QStringLiteral("taskId"), taskId);
     response.insert(QStringLiteral("datasetPath"), datasetPath);
+    response.insert(QStringLiteral("outputPath"), outputPath);
     response.insert(QStringLiteral("format"), format);
     response.insert(QStringLiteral("checkedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    const QString reportPath = QDir(outputPath).filePath(QStringLiteral("dataset_validation_report.json"));
+    response.insert(QStringLiteral("reportPath"), reportPath);
+    QString writeError;
+    if (!writeJsonFile(reportPath, response, &writeError)) {
+        fail(writeError);
+        return;
+    }
+    QJsonObject artifact;
+    artifact.insert(QStringLiteral("taskId"), taskId);
+    artifact.insert(QStringLiteral("kind"), QStringLiteral("dataset_validation_report"));
+    artifact.insert(QStringLiteral("path"), reportPath);
+    artifact.insert(QStringLiteral("message"), QStringLiteral("Dataset validation report"));
+    send(QStringLiteral("artifact"), artifact);
     send(QStringLiteral("datasetValidation"), response);
+    QJsonObject terminal;
+    terminal.insert(QStringLiteral("taskId"), taskId);
+    terminal.insert(QStringLiteral("message"), result.ok
+        ? QStringLiteral("Dataset validation completed")
+        : QStringLiteral("Dataset validation failed"));
+    send(result.ok ? QStringLiteral("completed") : QStringLiteral("failed"), terminal);
     socket_.waitForBytesWritten(1000);
     qApp->quit();
 }
 
 void WorkerSession::splitDataset(const QJsonObject& payload)
 {
+    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
     const QString datasetPath = payload.value(QStringLiteral("datasetPath")).toString();
     const QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
     const QString format = payload.value(QStringLiteral("format")).toString();
     const QJsonObject options = payload.value(QStringLiteral("options")).toObject();
 
     QJsonObject startProgress;
+    startProgress.insert(QStringLiteral("taskId"), taskId);
     startProgress.insert(QStringLiteral("percent"), 0);
     startProgress.insert(QStringLiteral("message"), QStringLiteral("开始划分数据集。"));
     send(QStringLiteral("progress"), startProgress);
@@ -524,22 +576,49 @@ void WorkerSession::splitDataset(const QJsonObject& payload)
     aitrain::DatasetSplitResult result;
     if (format == QStringLiteral("yolo_detection") || format == QStringLiteral("yolo_txt")) {
         result = aitrain::splitYoloDetectionDataset(datasetPath, outputPath, options);
+    } else if (format == QStringLiteral("yolo_segmentation")) {
+        result = aitrain::splitYoloSegmentationDataset(datasetPath, outputPath, options);
+    } else if (format == QStringLiteral("paddleocr_rec")) {
+        result = aitrain::splitPaddleOcrRecDataset(datasetPath, outputPath, options);
     } else {
         result.ok = false;
         result.outputPath = outputPath;
-        result.errors.append(QStringLiteral("当前仅支持 YOLO 检测数据集划分。"));
+        result.errors.append(QStringLiteral("当前仅支持 YOLO 检测、YOLO 分割和 PaddleOCR Rec 数据集划分。"));
     }
 
     QJsonObject progressPayload;
+    progressPayload.insert(QStringLiteral("taskId"), taskId);
     progressPayload.insert(QStringLiteral("percent"), 100);
     progressPayload.insert(QStringLiteral("message"), QStringLiteral("数据集划分完成。"));
     send(QStringLiteral("progress"), progressPayload);
 
     QJsonObject response = result.toJson();
+    response.insert(QStringLiteral("taskId"), taskId);
     response.insert(QStringLiteral("datasetPath"), datasetPath);
     response.insert(QStringLiteral("format"), format);
     response.insert(QStringLiteral("checkedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    const QString reportPath = QDir(outputPath).filePath(QStringLiteral("split_report.json"));
+    response.insert(QStringLiteral("reportPath"), reportPath);
+    if (!QFileInfo::exists(reportPath)) {
+        QString writeError;
+        if (!writeJsonFile(reportPath, response, &writeError)) {
+            fail(writeError);
+            return;
+        }
+    }
+    QJsonObject artifact;
+    artifact.insert(QStringLiteral("taskId"), taskId);
+    artifact.insert(QStringLiteral("kind"), QStringLiteral("dataset_split_report"));
+    artifact.insert(QStringLiteral("path"), reportPath);
+    artifact.insert(QStringLiteral("message"), QStringLiteral("Dataset split report"));
+    send(QStringLiteral("artifact"), artifact);
     send(QStringLiteral("datasetSplit"), response);
+    QJsonObject terminal;
+    terminal.insert(QStringLiteral("taskId"), taskId);
+    terminal.insert(QStringLiteral("message"), result.ok
+        ? QStringLiteral("Dataset split completed")
+        : QStringLiteral("Dataset split failed"));
+    send(result.ok ? QStringLiteral("completed") : QStringLiteral("failed"), terminal);
     socket_.waitForBytesWritten(1000);
     qApp->quit();
 }
@@ -596,6 +675,7 @@ void WorkerSession::exportModel(const QJsonObject& payload)
 
 void WorkerSession::runInference(const QJsonObject& payload)
 {
+    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
     const QString checkpointPath = payload.value(QStringLiteral("checkpointPath")).toString();
     const QString imagePath = payload.value(QStringLiteral("imagePath")).toString();
     QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
@@ -612,6 +692,7 @@ void WorkerSession::runInference(const QJsonObject& payload)
     }
 
     QJsonObject startProgress;
+    startProgress.insert(QStringLiteral("taskId"), taskId);
     startProgress.insert(QStringLiteral("percent"), 0);
     startProgress.insert(QStringLiteral("message"), QStringLiteral("开始推理。"));
     send(QStringLiteral("progress"), startProgress);
@@ -702,6 +783,7 @@ void WorkerSession::runInference(const QJsonObject& payload)
         return;
     }
     QJsonObject predictionsDocument;
+    predictionsDocument.insert(QStringLiteral("taskId"), taskId);
     predictionsDocument.insert(QStringLiteral("checkpointPath"), checkpointPath);
     predictionsDocument.insert(QStringLiteral("imagePath"), imagePath);
     predictionsDocument.insert(QStringLiteral("taskType"), taskType);
@@ -732,17 +814,20 @@ void WorkerSession::runInference(const QJsonObject& payload)
     const int elapsedMs = static_cast<int>(elapsed.elapsed());
 
     QJsonObject progressPayload;
+    progressPayload.insert(QStringLiteral("taskId"), taskId);
     progressPayload.insert(QStringLiteral("percent"), 100);
     progressPayload.insert(QStringLiteral("message"), QStringLiteral("推理完成。"));
     send(QStringLiteral("progress"), progressPayload);
 
     QJsonObject predictionsArtifact;
+    predictionsArtifact.insert(QStringLiteral("taskId"), taskId);
     predictionsArtifact.insert(QStringLiteral("kind"), QStringLiteral("inference_predictions"));
     predictionsArtifact.insert(QStringLiteral("path"), predictionsPath);
     predictionsArtifact.insert(QStringLiteral("message"), QStringLiteral("Inference predictions"));
     send(QStringLiteral("artifact"), predictionsArtifact);
 
     QJsonObject overlayArtifact;
+    overlayArtifact.insert(QStringLiteral("taskId"), taskId);
     overlayArtifact.insert(QStringLiteral("kind"), QStringLiteral("inference_overlay"));
     overlayArtifact.insert(QStringLiteral("path"), overlayPath);
     overlayArtifact.insert(QStringLiteral("message"), QStringLiteral("Inference overlay"));
@@ -750,6 +835,7 @@ void WorkerSession::runInference(const QJsonObject& payload)
 
     QJsonObject response;
     response.insert(QStringLiteral("ok"), true);
+    response.insert(QStringLiteral("taskId"), taskId);
     response.insert(QStringLiteral("checkpointPath"), checkpointPath);
     response.insert(QStringLiteral("imagePath"), imagePath);
     response.insert(QStringLiteral("taskType"), taskType);
@@ -761,6 +847,7 @@ void WorkerSession::runInference(const QJsonObject& payload)
     send(QStringLiteral("inferenceResult"), response);
 
     QJsonObject completed;
+    completed.insert(QStringLiteral("taskId"), taskId);
     completed.insert(QStringLiteral("message"), QStringLiteral("Inference completed"));
     send(QStringLiteral("completed"), completed);
     socket_.waitForBytesWritten(1000);

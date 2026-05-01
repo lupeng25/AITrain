@@ -1,6 +1,15 @@
 build/
 build-*/
 .deps/
+__pycache__/
+*.py[cod]
+*.onnx
+*.pt
+*.pth
+*.pdparams
+*.pdmodel
+*.engine
+*.plan
 .vs/
 *.user
 *.suo

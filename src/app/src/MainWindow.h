@@ -40,6 +40,12 @@ private slots:
     void handleWorkerMessage(const QString& type, const QJsonObject& payload);
     void refreshPlugins();
     void showPage(int pageIndex, const QString& title);
+    void updateSelectedTaskDetails();
+    void updateArtifactPreviewFromSelection();
+    void openSelectedArtifactDirectory();
+    void copySelectedArtifactPath();
+    void useSelectedArtifactForInference();
+    void useSelectedArtifactForExport();
 
 private:
     enum PageIndex {
@@ -73,6 +79,7 @@ private:
     void appendLog(const QString& text);
     void loadPluginCombos();
     void updateRecentTasks();
+    void updateDatasetList();
     void updateTaskTable(QTableWidget* table, const QVector<aitrain::TaskRecord>& tasks);
     void updateHeaderState();
     void updateEnvironmentTable(const QJsonObject& payload);
@@ -81,6 +88,9 @@ private:
     void startQueuedTraining(const QString& taskId, const aitrain::TrainingRequest& request);
     void startNextQueuedTask();
     void configureTable(QTableWidget* table) const;
+    QString createRepositoryTask(aitrain::TaskKind kind, const QString& taskType, const QString& pluginId, const QString& workDir, const QString& message, const QString& requestedTaskId = {});
+    QString selectedArtifactPath() const;
+    void previewArtifactPath(const QString& path);
 
     aitrain::PluginManager pluginManager_;
     aitrain::ProjectRepository repository_;
@@ -115,6 +125,10 @@ private:
     QLabel* dashboardPluginValue_ = nullptr;
     QTableWidget* recentTasksTable_ = nullptr;
     QTableWidget* taskQueueTable_ = nullptr;
+    QTableWidget* taskArtifactTable_ = nullptr;
+    QTableWidget* taskMetricTable_ = nullptr;
+    QTableWidget* taskExportTable_ = nullptr;
+    QTableWidget* datasetListTable_ = nullptr;
     QTableWidget* pluginTable_ = nullptr;
     QTableWidget* environmentTable_ = nullptr;
     QLineEdit* projectNameEdit_ = nullptr;
@@ -129,6 +143,7 @@ private:
     QComboBox* pluginCombo_ = nullptr;
     QComboBox* taskTypeCombo_ = nullptr;
     QLabel* validationSummaryLabel_ = nullptr;
+    QLabel* selectedTaskSummaryLabel_ = nullptr;
     QTableWidget* validationIssuesTable_ = nullptr;
     QTableWidget* datasetPreviewTable_ = nullptr;
     QPlainTextEdit* validationOutput_ = nullptr;
@@ -152,6 +167,8 @@ private:
     QLabel* latestCheckpointLabel_ = nullptr;
     QLabel* latestPreviewPathLabel_ = nullptr;
     QLabel* latestPreviewImageLabel_ = nullptr;
+    QLabel* artifactImagePreviewLabel_ = nullptr;
+    QPlainTextEdit* artifactPreviewText_ = nullptr;
     QTextEdit* logEdit_ = nullptr;
     MetricsWidget* metricsWidget_ = nullptr;
 };

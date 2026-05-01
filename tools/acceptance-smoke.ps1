@@ -5,6 +5,7 @@ param(
     [switch]$TensorRT,
     [switch]$SkipBuild,
     [switch]$SkipOfficialOcr,
+    [switch]$RequirePublicDatasets,
     [switch]$InstallMissingPythonPackages,
     [string]$BuildDir = "build-vscode",
     [string]$WorkDir = ".deps\acceptance-smoke",
@@ -16,6 +17,11 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $script:Root = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $PSScriptRoot) "."))
+$script:AcceptanceStartedAt = [DateTime]::UtcNow
+$script:AcceptanceModes = @()
+$script:AcceptanceStatus = "running"
+$script:AcceptanceFailure = ""
+$script:AcceptanceHardwareBlocked = ""
 
 function Write-Step {
     param([string]$Message)
@@ -28,6 +34,26 @@ function Resolve-AcceptancePath {
         return [System.IO.Path]::GetFullPath($Path)
     }
     return [System.IO.Path]::GetFullPath((Join-Path $script:Root $Path))
+}
+
+function Write-AcceptanceSummary {
+    param(
+        [string]$Status,
+        [string]$Failure = "",
+        [string]$HardwareBlocked = ""
+    )
+    $work = Resolve-AcceptancePath $WorkDir
+    New-Item -ItemType Directory -Force $work | Out-Null
+    $summary = [ordered]@{
+        modes = $script:AcceptanceModes
+        status = $Status
+        workDir = $work
+        startedAt = $script:AcceptanceStartedAt.ToString("o")
+        finishedAt = ([DateTime]::UtcNow).ToString("o")
+        failure = $Failure
+        hardwareBlocked = $HardwareBlocked
+    }
+    $summary | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $work "acceptance_summary.json") -Encoding UTF8
 }
 
 function Assert-PathExists {
@@ -239,71 +265,28 @@ function Materialize-UltralyticsDataset {
     )
     $destinationFull = Resolve-AcceptancePath $Destination
     $resultPath = Join-Path (Split-Path -Parent $destinationFull) ("materialize-{0}.json" -f ($YamlName -replace "[^A-Za-z0-9_.-]", "_"))
-    $code = @'
-import json
-import shutil
-import sys
-from pathlib import Path
-
-def quote(value):
-    return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"') + '"'
-
-def finish(payload):
-    result_path = Path(sys.argv[3]).resolve()
-    result_path.parent.mkdir(parents=True, exist_ok=True)
-    result_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    print(json.dumps(payload, ensure_ascii=False))
-
-try:
-    from ultralytics.utils import SETTINGS
-    from ultralytics.data.utils import check_det_dataset
-    dest = Path(sys.argv[2]).resolve()
-    datasets_dir = dest.parent / "ultralytics_datasets"
-    datasets_dir.mkdir(parents=True, exist_ok=True)
-    SETTINGS["datasets_dir"] = str(datasets_dir)
-    data = check_det_dataset(sys.argv[1], autodownload=True)
-    source = Path(data.get("path") or "").resolve()
-    if dest.exists():
-        shutil.rmtree(dest)
-    dest.mkdir(parents=True, exist_ok=True)
-    for name in ("images", "labels"):
-        src = source / name
-        if not src.exists():
-            raise FileNotFoundError(f"missing {name} directory in {source}")
-        shutil.copytree(src, dest / name)
-    names = data.get("names") or {0: "item"}
-    if isinstance(names, dict):
-        ordered = [str(names[key]) for key in sorted(names, key=lambda value: int(value))]
-    else:
-        ordered = [str(item) for item in names]
-    lines = [
-        "path: " + quote(dest.as_posix()),
-        "train: images/train",
-        "val: images/val",
-        "nc: " + str(len(ordered)),
-        "names:",
-    ]
-    lines.extend(f"  {index}: {quote(name)}" for index, name in enumerate(ordered))
-    (dest / "data.yaml").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    finish({"ok": True, "path": str(dest), "source": str(source)})
-except Exception as exc:
-    finish({"ok": False, "error": str(exc)})
-'@
+    $materializeScript = Join-Path $script:Root "tools\materialize-ultralytics-dataset.py"
+    Assert-PathExists $materializeScript "Ultralytics dataset materializer"
     if (Test-Path $resultPath) {
         Remove-Item -LiteralPath $resultPath -Force
     }
-    $output = & $Python -c $code $YamlName $destinationFull $resultPath 2>&1
+    $downloads = Resolve-AcceptancePath ".deps\datasets\downloads"
+    $materializedRoot = Resolve-AcceptancePath ".deps\datasets\materialized"
+    $output = & $Python $materializeScript --yaml $YamlName --destination $destinationFull --downloads $downloads --materialized-root $materializedRoot --report $resultPath 2>&1
     $last = if (Test-Path $resultPath) { Get-Content -Raw -Encoding UTF8 -LiteralPath $resultPath } else { $output | Select-Object -Last 1 }
     try {
         $json = $last | ConvertFrom-Json
     } catch {
         Write-Host ($output -join [Environment]::NewLine) -ForegroundColor Yellow
+        if ($RequirePublicDatasets) {
+            throw "Could not parse Ultralytics dataset materialization output for $YamlName."
+        }
         Write-Host "  [warn] Could not parse Ultralytics dataset materialization output; using fallback." -ForegroundColor Yellow
         return (Resolve-AcceptancePath $Fallback)
     }
     $hasOk = $null -ne ($json | Get-Member -Name "ok" -MemberType NoteProperty -ErrorAction SilentlyContinue)
     if ($hasOk -and $json.ok) {
-        Write-Host ("  [ok] materialized {0} from {1}" -f $YamlName, $json.source)
+        Write-Host ("  [ok] materialized {0} from {1}" -f $YamlName, $json.downloadUrl)
         return [string]$json.path
     }
     $hasError = $null -ne ($json | Get-Member -Name "error" -MemberType NoteProperty -ErrorAction SilentlyContinue)
@@ -314,6 +297,18 @@ except Exception as exc:
     } else {
         "no JSON materialization result was produced"
     }
+    if ($RequirePublicDatasets) {
+        throw ("{0} public dataset materialization failed: {1}" -f $YamlName, $reason)
+    }
+    $fallbackReport = [ordered]@{
+        ok = $true
+        fallback = $true
+        yamlName = $YamlName
+        reason = $reason
+        path = (Resolve-AcceptancePath $Fallback)
+        materializationReport = $resultPath
+    }
+    $fallbackReport | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path (Split-Path -Parent $destinationFull) ("materialize-{0}-fallback.json" -f ($YamlName -replace "[^A-Za-z0-9_.-]", "_"))) -Encoding UTF8
     Write-Host ("  [warn] {0} unavailable: {1}; using generated fallback." -f $YamlName, $reason) -ForegroundColor Yellow
     return (Resolve-AcceptancePath $Fallback)
 }
@@ -419,7 +414,17 @@ function Invoke-PublicDatasetSmoke {
 
     $ctestFile = Join-Path $script:Root "$BuildDir\CTestTestfile.cmake"
     if (Test-Path $ctestFile) {
-        Invoke-Checked -FilePath "ctest" -Arguments @("--test-dir", (Join-Path $script:Root $BuildDir), "--output-on-failure")
+        $previousAcceptanceSmokeRoot = $env:AITRAIN_ACCEPTANCE_SMOKE_ROOT
+        $env:AITRAIN_ACCEPTANCE_SMOKE_ROOT = $work
+        try {
+            Invoke-Checked -FilePath "ctest" -Arguments @("--test-dir", (Join-Path $script:Root $BuildDir), "--output-on-failure", "--timeout", "240")
+        } finally {
+            if ($null -eq $previousAcceptanceSmokeRoot) {
+                Remove-Item Env:\AITRAIN_ACCEPTANCE_SMOKE_ROOT -ErrorAction SilentlyContinue
+            } else {
+                $env:AITRAIN_ACCEPTANCE_SMOKE_ROOT = $previousAcceptanceSmokeRoot
+            }
+        }
     } else {
         Write-Host "  [warn] CTest build directory not found; skipping C++ ONNX inference regression check." -ForegroundColor Yellow
     }
@@ -501,21 +506,29 @@ try {
     }
 
     if ($LocalBaseline) {
+        $script:AcceptanceModes += "LocalBaseline"
         Invoke-LocalBaseline
     }
     if ($Package) {
+        $script:AcceptanceModes += "Package"
         Invoke-PackageAcceptance
     }
     if ($PublicDatasets) {
+        $script:AcceptanceModes += "PublicDatasets"
         Invoke-PublicDatasetSmoke
     }
     if ($TensorRT) {
+        $script:AcceptanceModes += "TensorRT"
         Invoke-TensorRtAcceptance
     }
 
+    Write-AcceptanceSummary -Status "passed"
     Write-Host "Acceptance smoke completed." -ForegroundColor Green
     exit 0
 } catch {
-    Write-Host ("Acceptance smoke failed: {0}" -f $_.Exception.Message) -ForegroundColor Red
+    $message = $_.Exception.Message
+    $hardwareBlocked = if ($message -like "hardware-blocked:*") { $message } else { "" }
+    Write-AcceptanceSummary -Status "failed" -Failure $message -HardwareBlocked $hardwareBlocked
+    Write-Host ("Acceptance smoke failed: {0}" -f $message) -ForegroundColor Red
     exit 1
 }

@@ -146,17 +146,26 @@ QString phase9RealSmokeRoot()
 QString phase11SegSmokeRoot()
 {
     const QString applicationDir = QCoreApplication::applicationDirPath();
-    const QStringList candidates = {
+    QStringList candidates;
+    const QString acceptanceSmokeRoot = QString::fromLocal8Bit(qgetenv("AITRAIN_ACCEPTANCE_SMOKE_ROOT")).trimmed();
+    if (!acceptanceSmokeRoot.isEmpty()) {
+        candidates.append(QDir::cleanPath(acceptanceSmokeRoot));
+    }
+    candidates.append({
+        QDir::current().absoluteFilePath(QStringLiteral(".deps/acceptance-smoke")),
         QDir::current().absoluteFilePath(QStringLiteral(".deps/phase11-seg-smoke")),
         QDir::current().absoluteFilePath(QStringLiteral(".deps/phase13-examples")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../../.deps/acceptance-smoke")),
         QDir(applicationDir).absoluteFilePath(QStringLiteral("../../.deps/phase11-seg-smoke")),
         QDir(applicationDir).absoluteFilePath(QStringLiteral("../../.deps/phase13-examples")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/acceptance-smoke")),
         QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/phase11-seg-smoke")),
         QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/phase13-examples"))
-    };
+    });
     for (const QString& candidate : candidates) {
         if (QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("out/ultralytics_runs/phase11-seg-smoke/weights/best.onnx")))
-            || QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("runs/yolo_segment/ultralytics_runs/aitrain-yolo-segment/weights/best.onnx")))) {
+            || QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("runs/yolo_segment/ultralytics_runs/aitrain-yolo-segment/weights/best.onnx")))
+            || QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("runs/yolo_segment/ultralytics_runs/acceptance-yolo-segment/weights/best.onnx")))) {
             return QDir::cleanPath(candidate);
         }
     }
@@ -166,14 +175,22 @@ QString phase11SegSmokeRoot()
 QString phase14OcrSmokeRoot()
 {
     const QString applicationDir = QCoreApplication::applicationDirPath();
-    const QStringList candidates = {
+    QStringList candidates;
+    const QString acceptanceSmokeRoot = QString::fromLocal8Bit(qgetenv("AITRAIN_ACCEPTANCE_SMOKE_ROOT")).trimmed();
+    if (!acceptanceSmokeRoot.isEmpty()) {
+        candidates.append(QDir(acceptanceSmokeRoot).filePath(QStringLiteral("generated")));
+    }
+    candidates.append({
+        QDir::current().absoluteFilePath(QStringLiteral(".deps/acceptance-smoke/generated")),
         QDir::current().absoluteFilePath(QStringLiteral(".deps/phase14-ocr-smoke")),
         QDir::current().absoluteFilePath(QStringLiteral(".deps/phase13-examples")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../../.deps/acceptance-smoke/generated")),
         QDir(applicationDir).absoluteFilePath(QStringLiteral("../../.deps/phase14-ocr-smoke")),
         QDir(applicationDir).absoluteFilePath(QStringLiteral("../../.deps/phase13-examples")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/acceptance-smoke/generated")),
         QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/phase14-ocr-smoke")),
         QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/phase13-examples"))
-    };
+    });
     for (const QString& candidate : candidates) {
         if (QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("runs/paddleocr_rec/paddleocr_rec_ctc.onnx")))) {
             return QDir::cleanPath(candidate);
@@ -395,6 +412,17 @@ private slots:
         QVERIFY(exports.first().configJson.contains(QStringLiteral("sourceCheckpoint")));
         QVERIFY(exports.first().inputShapeJson.contains(QStringLiteral("features")));
         QVERIFY(exports.first().outputShapeJson.contains(QStringLiteral("boxes")));
+        const QVector<aitrain::ArtifactRecord> taskArtifacts = repository.artifactsForTask(task.id, &error);
+        QCOMPARE(taskArtifacts.size(), 1);
+        QCOMPARE(taskArtifacts.first().kind, QStringLiteral("checkpoint"));
+        QCOMPARE(taskArtifacts.first().path, artifact.path);
+        const QVector<aitrain::MetricPoint> taskMetrics = repository.metricsForTask(task.id, &error);
+        QCOMPARE(taskMetrics.size(), 1);
+        QCOMPARE(taskMetrics.first().name, QStringLiteral("loss"));
+        QCOMPARE(taskMetrics.first().step, 1);
+        const QVector<aitrain::ExportRecord> taskExports = repository.exportsForTask(task.id, &error);
+        QCOMPARE(taskExports.size(), 1);
+        QCOMPARE(taskExports.first().path, exportRecord.path);
 
         aitrain::DatasetRecord dataset;
         dataset.name = QStringLiteral("demo-dataset");
@@ -411,6 +439,10 @@ private slots:
         QCOMPARE(datasets.first().sampleCount, 2);
         const aitrain::DatasetRecord loadedDataset = repository.datasetByRootPath(dataset.rootPath, &error);
         QCOMPARE(loadedDataset.format, QStringLiteral("yolo_detection"));
+        const QVector<aitrain::DatasetVersionRecord> versions = repository.datasetVersions(loadedDataset.id, &error);
+        QCOMPARE(versions.size(), 1);
+        QCOMPARE(versions.first().rootPath, dataset.rootPath);
+        QVERIFY(versions.first().metadataJson.contains(QStringLiteral("\"ok\":true")));
 
         QVERIFY2(repository.updateTaskState(task.id, aitrain::TaskState::Completed, QStringLiteral("done"), &error), qPrintable(error));
         const QVector<aitrain::TaskRecord> completedTasks = repository.recentTasks(10, &error);
@@ -503,6 +535,39 @@ private slots:
         QCOMPARE(QDir(QDir(output).filePath(QStringLiteral("images/val"))).entryInfoList(QStringList() << QStringLiteral("*.jpg"), QDir::Files).size(), 1);
         QCOMPARE(QDir(QDir(output).filePath(QStringLiteral("images/test"))).entryInfoList(QStringList() << QStringLiteral("*.jpg"), QDir::Files).size(), 1);
         QVERIFY(QFileInfo::exists(QDir(root).filePath(QStringLiteral("images/train/sample_0.jpg"))));
+    }
+
+    void yoloSegmentationAndOcrDatasetSplit()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        const QString segRoot = dir.filePath(QStringLiteral("seg-source"));
+        writeTinySegmentationDataset(segRoot);
+        QJsonObject options;
+        options.insert(QStringLiteral("trainRatio"), 0.5);
+        options.insert(QStringLiteral("valRatio"), 0.5);
+        options.insert(QStringLiteral("testRatio"), 0.0);
+        const QString segOutput = dir.filePath(QStringLiteral("seg-normalized"));
+        const aitrain::DatasetSplitResult segResult = aitrain::splitYoloSegmentationDataset(segRoot, segOutput, options);
+        QVERIFY2(segResult.ok, qPrintable(segResult.errors.join(QStringLiteral("\n"))));
+        QVERIFY(QFileInfo::exists(QDir(segOutput).filePath(QStringLiteral("data.yaml"))));
+        QVERIFY(QFileInfo::exists(QDir(segOutput).filePath(QStringLiteral("labels/train/a.txt")))
+            || QFileInfo::exists(QDir(segOutput).filePath(QStringLiteral("labels/val/a.txt"))));
+        QVERIFY(QFileInfo::exists(QDir(segOutput).filePath(QStringLiteral("split_report.json"))));
+
+        const QString ocrRoot = dir.filePath(QStringLiteral("ocr-source"));
+        writeTinyOcrRecDataset(ocrRoot);
+        const QString ocrOutput = dir.filePath(QStringLiteral("ocr-normalized"));
+        const aitrain::DatasetSplitResult ocrResult = aitrain::splitPaddleOcrRecDataset(ocrRoot, ocrOutput, options);
+        QVERIFY2(ocrResult.ok, qPrintable(ocrResult.errors.join(QStringLiteral("\n"))));
+        QVERIFY(QFileInfo::exists(QDir(ocrOutput).filePath(QStringLiteral("dict.txt"))));
+        QVERIFY(QFileInfo::exists(QDir(ocrOutput).filePath(QStringLiteral("rec_gt.txt"))));
+        QVERIFY(QFileInfo::exists(QDir(ocrOutput).filePath(QStringLiteral("rec_gt_train.txt"))));
+        QVERIFY(QFileInfo::exists(QDir(ocrOutput).filePath(QStringLiteral("rec_gt_val.txt"))));
+        QVERIFY(QFileInfo::exists(QDir(ocrOutput).filePath(QStringLiteral("split_report.json"))));
+        const aitrain::DatasetValidationResult validation = aitrain::validatePaddleOcrRecDataset(ocrOutput);
+        QVERIFY2(validation.ok, qPrintable(validation.errors.join(QStringLiteral("\n"))));
     }
 
     void detectionDatasetLoadsSplit()
@@ -1196,6 +1261,10 @@ private slots:
             onnxPath = QDir(smokeRoot).filePath(QStringLiteral("runs/yolo_segment/ultralytics_runs/aitrain-yolo-segment/weights/best.onnx"));
             imagePath = QDir(smokeRoot).filePath(QStringLiteral("yolo_segment/images/val/b.png"));
         }
+        if (!QFileInfo::exists(onnxPath)) {
+            onnxPath = QDir(smokeRoot).filePath(QStringLiteral("runs/yolo_segment/ultralytics_runs/acceptance-yolo-segment/weights/best.onnx"));
+            imagePath = QDir(smokeRoot).filePath(QStringLiteral("generated/yolo_segment/images/val/b.png"));
+        }
         if (!QFileInfo::exists(onnxPath) || !QFileInfo::exists(imagePath)) {
             QSKIP("YOLO segmentation smoke ONNX artifact is not available.");
         }
@@ -1361,6 +1430,10 @@ private slots:
         if (!QFileInfo::exists(segOnnx)) {
             segOnnx = QDir(segRoot).filePath(QStringLiteral("runs/yolo_segment/ultralytics_runs/aitrain-yolo-segment/weights/best.onnx"));
             segImage = QDir(segRoot).filePath(QStringLiteral("yolo_segment/images/val/b.png"));
+        }
+        if (!QFileInfo::exists(segOnnx)) {
+            segOnnx = QDir(segRoot).filePath(QStringLiteral("runs/yolo_segment/ultralytics_runs/acceptance-yolo-segment/weights/best.onnx"));
+            segImage = QDir(segRoot).filePath(QStringLiteral("generated/yolo_segment/images/val/b.png"));
         }
         const QString ocrOnnx = QDir(ocrRoot).filePath(QStringLiteral("runs/paddleocr_rec/paddleocr_rec_ctc.onnx"));
         const QString ocrImage = QFileInfo::exists(QDir(ocrRoot).filePath(QStringLiteral("paddleocr_rec/images/a.png")))

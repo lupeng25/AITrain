@@ -29,10 +29,14 @@ public:
     bool upsertDatasetValidation(const DatasetRecord& dataset, QString* error = nullptr);
 
     QVector<TaskRecord> recentTasks(int limit, QString* error = nullptr) const;
+    QVector<MetricPoint> metricsForTask(const QString& taskId, QString* error = nullptr) const;
+    QVector<ArtifactRecord> artifactsForTask(const QString& taskId, QString* error = nullptr) const;
+    QVector<ExportRecord> exportsForTask(const QString& taskId, QString* error = nullptr) const;
     QVector<ExportRecord> recentExports(int limit, QString* error = nullptr) const;
     QVector<EnvironmentCheckRecord> recentEnvironmentChecks(int limit, QString* error = nullptr) const;
     QVector<DatasetRecord> recentDatasets(int limit, QString* error = nullptr) const;
     DatasetRecord datasetByRootPath(const QString& rootPath, QString* error = nullptr) const;
+    QVector<DatasetVersionRecord> datasetVersions(int datasetId, QString* error = nullptr) const;
 
 private:
     QString connectionName_;

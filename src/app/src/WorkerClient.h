@@ -16,10 +16,10 @@ public:
 
     bool startTraining(const QString& workerProgram, const aitrain::TrainingRequest& request, QString* error);
     bool requestEnvironmentCheck(const QString& workerProgram, QString* error);
-    bool requestDatasetValidation(const QString& workerProgram, const QString& datasetPath, const QString& format, const QJsonObject& options, QString* error);
-    bool requestDatasetSplit(const QString& workerProgram, const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error);
+    bool requestDatasetValidation(const QString& workerProgram, const QString& datasetPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId = {}, const QString& outputPath = {});
+    bool requestDatasetSplit(const QString& workerProgram, const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId = {});
     bool requestModelExport(const QString& workerProgram, const QString& checkpointPath, const QString& outputPath, const QString& format, QString* error, const QString& taskId = {});
-    bool requestInference(const QString& workerProgram, const QString& checkpointPath, const QString& imagePath, const QString& outputPath, QString* error);
+    bool requestInference(const QString& workerProgram, const QString& checkpointPath, const QString& imagePath, const QString& outputPath, QString* error, const QString& taskId = {});
     void cancel();
     void pause();
     void resume();

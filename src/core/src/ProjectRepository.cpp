@@ -516,6 +516,91 @@ QVector<TaskRecord> ProjectRepository::recentTasks(int limit, QString* error) co
     return tasks;
 }
 
+QVector<MetricPoint> ProjectRepository::metricsForTask(const QString& taskId, QString* error) const
+{
+    QVector<MetricPoint> metrics;
+    QSqlQuery query(db_);
+    query.prepare(QStringLiteral("select id, task_id, name, value, step, epoch, created_at "
+                                 "from metrics where task_id = ? order by step asc, id asc"));
+    query.addBindValue(taskId);
+    if (!query.exec()) {
+        if (error) {
+            *error = sqlError(query);
+        }
+        return metrics;
+    }
+
+    while (query.next()) {
+        MetricPoint point;
+        point.id = query.value(0).toInt();
+        point.taskId = query.value(1).toString();
+        point.name = query.value(2).toString();
+        point.value = query.value(3).toDouble();
+        point.step = query.value(4).toInt();
+        point.epoch = query.value(5).toInt();
+        point.createdAt = dateTimeFromIso(query.value(6).toString());
+        metrics.append(point);
+    }
+    return metrics;
+}
+
+QVector<ArtifactRecord> ProjectRepository::artifactsForTask(const QString& taskId, QString* error) const
+{
+    QVector<ArtifactRecord> artifacts;
+    QSqlQuery query(db_);
+    query.prepare(QStringLiteral("select id, task_id, kind, path, message, created_at "
+                                 "from artifacts where task_id = ? order by created_at asc, id asc"));
+    query.addBindValue(taskId);
+    if (!query.exec()) {
+        if (error) {
+            *error = sqlError(query);
+        }
+        return artifacts;
+    }
+
+    while (query.next()) {
+        ArtifactRecord artifact;
+        artifact.id = query.value(0).toInt();
+        artifact.taskId = query.value(1).toString();
+        artifact.kind = query.value(2).toString();
+        artifact.path = query.value(3).toString();
+        artifact.message = query.value(4).toString();
+        artifact.createdAt = dateTimeFromIso(query.value(5).toString());
+        artifacts.append(artifact);
+    }
+    return artifacts;
+}
+
+QVector<ExportRecord> ProjectRepository::exportsForTask(const QString& taskId, QString* error) const
+{
+    QVector<ExportRecord> exports;
+    QSqlQuery query(db_);
+    query.prepare(QStringLiteral("select id, task_id, source_checkpoint_path, format, path, config_json, input_shape_json, output_shape_json, created_at "
+                                 "from exports where task_id = ? order by created_at asc, id asc"));
+    query.addBindValue(taskId);
+    if (!query.exec()) {
+        if (error) {
+            *error = sqlError(query);
+        }
+        return exports;
+    }
+
+    while (query.next()) {
+        ExportRecord record;
+        record.id = query.value(0).toInt();
+        record.taskId = query.value(1).toString();
+        record.sourceCheckpointPath = query.value(2).toString();
+        record.format = query.value(3).toString();
+        record.path = query.value(4).toString();
+        record.configJson = query.value(5).toString();
+        record.inputShapeJson = query.value(6).toString();
+        record.outputShapeJson = query.value(7).toString();
+        record.createdAt = dateTimeFromIso(query.value(8).toString());
+        exports.append(record);
+    }
+    return exports;
+}
+
 QVector<ExportRecord> ProjectRepository::recentExports(int limit, QString* error) const
 {
     QVector<ExportRecord> exports;
@@ -604,6 +689,33 @@ DatasetRecord ProjectRepository::datasetByRootPath(const QString& rootPath, QStr
     dataset.updatedAt = dateTimeFromIso(query.value(8).toString());
     dataset.lastValidatedAt = dateTimeFromIso(query.value(9).toString());
     return dataset;
+}
+
+QVector<DatasetVersionRecord> ProjectRepository::datasetVersions(int datasetId, QString* error) const
+{
+    QVector<DatasetVersionRecord> versions;
+    QSqlQuery query(db_);
+    query.prepare(QStringLiteral("select id, dataset_id, version, root_path, metadata_json, created_at "
+                                 "from dataset_versions where dataset_id = ? order by created_at desc, id desc"));
+    query.addBindValue(datasetId);
+    if (!query.exec()) {
+        if (error) {
+            *error = sqlError(query);
+        }
+        return versions;
+    }
+
+    while (query.next()) {
+        DatasetVersionRecord version;
+        version.id = query.value(0).toInt();
+        version.datasetId = query.value(1).toInt();
+        version.version = query.value(2).toString();
+        version.rootPath = query.value(3).toString();
+        version.metadataJson = query.value(4).toString();
+        version.createdAt = dateTimeFromIso(query.value(5).toString());
+        versions.append(version);
+    }
+    return versions;
 }
 
 QVector<EnvironmentCheckRecord> ProjectRepository::recentEnvironmentChecks(int limit, QString* error) const

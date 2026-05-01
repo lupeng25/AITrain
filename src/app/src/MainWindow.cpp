@@ -1,11 +1,14 @@
 #include "MainWindow.h"
 
 #include "InfoPanel.h"
+#include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/PluginInterfaces.h"
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
@@ -22,10 +25,12 @@
 #include <QPlainTextEdit>
 #include <QPixmap>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QTime>
 #include <QVBoxLayout>
+#include <QUrl>
 #include <QUuid>
 
 namespace {
@@ -118,6 +123,86 @@ QString confidencePercent(double confidence)
     return QStringLiteral("%1%").arg(QString::number(confidence * 100.0, 'f', 1));
 }
 
+QStringList appImageNameFilters()
+{
+    return {
+        QStringLiteral("*.jpg"),
+        QStringLiteral("*.jpeg"),
+        QStringLiteral("*.png"),
+        QStringLiteral("*.bmp"),
+        QStringLiteral("*.tif"),
+        QStringLiteral("*.tiff")
+    };
+}
+
+QFileInfoList appImageFiles(const QDir& directory)
+{
+    QFileInfoList files;
+    for (const QString& filter : appImageNameFilters()) {
+        files.append(directory.entryInfoList({filter}, QDir::Files, QDir::Name));
+    }
+    return files;
+}
+
+QString detectDatasetFormatFromPath(const QString& path)
+{
+    const QDir root(path);
+    if (QFileInfo::exists(root.filePath(QStringLiteral("rec_gt.txt")))
+        || QFileInfo::exists(root.filePath(QStringLiteral("rec_gt_train.txt")))) {
+        if (QFileInfo::exists(root.filePath(QStringLiteral("dict.txt")))) {
+            return QStringLiteral("paddleocr_rec");
+        }
+    }
+
+    if (!QFileInfo::exists(root.filePath(QStringLiteral("data.yaml")))) {
+        return QString();
+    }
+    for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
+        const QDir imageDir(root.filePath(QStringLiteral("images/%1").arg(split)));
+        const QDir labelDir(root.filePath(QStringLiteral("labels/%1").arg(split)));
+        if (!imageDir.exists() || !labelDir.exists()) {
+            continue;
+        }
+        const QFileInfoList images = appImageFiles(imageDir);
+        for (const QFileInfo& imageInfo : images) {
+            QFile labelFile(labelDir.filePath(imageInfo.completeBaseName() + QStringLiteral(".txt")));
+            if (!labelFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                continue;
+            }
+            while (!labelFile.atEnd()) {
+                const QString line = QString::fromUtf8(labelFile.readLine()).trimmed();
+                if (line.isEmpty()) {
+                    continue;
+                }
+                const QStringList parts = line.split(QRegularExpression(QStringLiteral("\\s+")),
+#if QT_VERSION < QT_VERSION_CHECK(5, 15, 0)
+                    QString::SkipEmptyParts
+#else
+                    Qt::SkipEmptyParts
+#endif
+                );
+                if (parts.size() == 5) {
+                    return QStringLiteral("yolo_detection");
+                }
+                if (parts.size() >= 7 && parts.size() % 2 == 1) {
+                    return QStringLiteral("yolo_segmentation");
+                }
+            }
+        }
+    }
+    return QStringLiteral("yolo_detection");
+}
+
+QString formatJsonTextForPreview(const QByteArray& data)
+{
+    QJsonParseError error;
+    const QJsonDocument document = QJsonDocument::fromJson(data, &error);
+    if (error.error != QJsonParseError::NoError) {
+        return QString::fromUtf8(data);
+    }
+    return QString::fromUtf8(document.toJson(QJsonDocument::Indented));
+}
+
 QString inferenceSummaryFromPredictions(const QString& predictionsPath, const QJsonObject& fallback = {})
 {
     const QString nativePath = QDir::toNativeSeparators(predictionsPath);
@@ -160,7 +245,7 @@ QString inferenceSummaryFromPredictions(const QString& predictionsPath, const QJ
                 .arg(className)
                 .arg(confidencePercent(first.value(QStringLiteral("confidence")).toDouble()));
             if (taskType == QStringLiteral("segmentation")) {
-                detail.append(QStringLiteral("，mask area %1").arg(first.value(QStringLiteral("maskArea")).toInt()));
+                detail.append(QStringLiteral("，mask area %1").arg(confidencePercent(first.value(QStringLiteral("maskArea")).toDouble())));
             }
         }
     } else {
@@ -242,6 +327,7 @@ MainWindow::MainWindow(QWidget* parent)
             repository_.updateTaskState(currentTaskId_, ok ? aitrain::TaskState::Completed : aitrain::TaskState::Failed, message, &error);
             currentTaskId_.clear();
             updateRecentTasks();
+            updateSelectedTaskDetails();
         } else if (kind == QStringLiteral("export") && exportResultLabel_) {
             exportResultLabel_->setText(QStringLiteral("导出完成：%1").arg(QDir::toNativeSeparators(path)));
         } else if (kind == QStringLiteral("inference_overlay") && inferenceOverlayLabel_) {
@@ -482,13 +568,40 @@ QWidget* MainWindow::buildDatasetPage()
     auto* toolsPanel = new InfoPanel(QStringLiteral("标注工具与预览"));
     auto* toolPath = new QLineEdit;
     toolPath->setPlaceholderText(QStringLiteral("LabelMe / AnyLabeling 可执行文件路径"));
+    datasetListTable_ = new QTableWidget(0, 5);
+    datasetListTable_->setHorizontalHeaderLabels(QStringList()
+        << QStringLiteral("数据集")
+        << QStringLiteral("格式")
+        << QStringLiteral("状态")
+        << QStringLiteral("样本")
+        << QStringLiteral("路径"));
+    configureTable(datasetListTable_);
+    connect(datasetListTable_, &QTableWidget::itemSelectionChanged, this, [this]() {
+        if (!datasetListTable_ || datasetListTable_->selectedItems().isEmpty()) {
+            return;
+        }
+        const int row = datasetListTable_->selectedItems().first()->row();
+        const QString path = datasetListTable_->item(row, 4) ? datasetListTable_->item(row, 4)->data(Qt::UserRole).toString() : QString();
+        const QString format = datasetListTable_->item(row, 1) ? datasetListTable_->item(row, 1)->text() : QString();
+        if (!path.isEmpty()) {
+            datasetPathEdit_->setText(QDir::toNativeSeparators(path));
+            const int formatIndex = datasetFormatCombo_->findText(format);
+            if (formatIndex >= 0) {
+                datasetFormatCombo_->setCurrentIndex(formatIndex);
+            }
+            currentDatasetPath_ = path;
+            currentDatasetFormat_ = format;
+        }
+    });
     datasetPreviewTable_ = new QTableWidget(0, 2);
     datasetPreviewTable_->setHorizontalHeaderLabels(QStringList() << QStringLiteral("样本") << QStringLiteral("标签 / 说明"));
     configureTable(datasetPreviewTable_);
     toolsPanel->bodyLayout()->addWidget(toolPath);
     toolsPanel->bodyLayout()->addWidget(new QPushButton(QStringLiteral("启动标注工具")));
+    toolsPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("已登记数据集")));
+    toolsPanel->bodyLayout()->addWidget(datasetListTable_, 1);
     toolsPanel->bodyLayout()->addWidget(datasetPreviewTable_, 1);
-    toolsPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("划分会复制到新目录，不修改原始数据；当前划分先支持 YOLO 检测格式。")));
+    toolsPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("划分会复制到新目录，不修改原始数据；支持 YOLO 检测、YOLO 分割和 PaddleOCR Rec。")));
     toolsPanel->bodyLayout()->addStretch();
 
     splitter->addWidget(resultPanel);
@@ -625,10 +738,87 @@ QWidget* MainWindow::buildTaskQueuePage()
         << QStringLiteral("更新时间")
         << QStringLiteral("消息"));
     configureTable(taskQueueTable_);
+    connect(taskQueueTable_, &QTableWidget::itemSelectionChanged, this, &MainWindow::updateSelectedTaskDetails);
     tablePanel->bodyLayout()->addWidget(taskQueueTable_);
 
+    auto* detailPanel = new InfoPanel(QStringLiteral("任务详情与产物"));
+    selectedTaskSummaryLabel_ = mutedLabel(QStringLiteral("请选择一个任务查看产物、指标和导出记录。"));
+    taskArtifactTable_ = new QTableWidget(0, 4);
+    taskArtifactTable_->setHorizontalHeaderLabels(QStringList()
+        << QStringLiteral("类型")
+        << QStringLiteral("路径")
+        << QStringLiteral("说明")
+        << QStringLiteral("时间"));
+    configureTable(taskArtifactTable_);
+    connect(taskArtifactTable_, &QTableWidget::itemSelectionChanged, this, &MainWindow::updateArtifactPreviewFromSelection);
+
+    taskMetricTable_ = new QTableWidget(0, 4);
+    taskMetricTable_->setHorizontalHeaderLabels(QStringList()
+        << QStringLiteral("指标")
+        << QStringLiteral("值")
+        << QStringLiteral("Step")
+        << QStringLiteral("Epoch"));
+    configureTable(taskMetricTable_);
+
+    taskExportTable_ = new QTableWidget(0, 3);
+    taskExportTable_->setHorizontalHeaderLabels(QStringList()
+        << QStringLiteral("格式")
+        << QStringLiteral("路径")
+        << QStringLiteral("时间"));
+    configureTable(taskExportTable_);
+
+    artifactImagePreviewLabel_ = new QLabel(QStringLiteral("暂无产物预览"));
+    artifactImagePreviewLabel_->setObjectName(QStringLiteral("MutedText"));
+    artifactImagePreviewLabel_->setAlignment(Qt::AlignCenter);
+    artifactImagePreviewLabel_->setMinimumHeight(180);
+    artifactImagePreviewLabel_->setFrameShape(QFrame::StyledPanel);
+    artifactPreviewText_ = new QPlainTextEdit;
+    artifactPreviewText_->setReadOnly(true);
+    artifactPreviewText_->setPlainText(QStringLiteral("选择一个产物后显示摘要。"));
+
+    auto* actionRow = new QHBoxLayout;
+    auto* openDirButton = new QPushButton(QStringLiteral("打开目录"));
+    auto* copyPathButton = new QPushButton(QStringLiteral("复制路径"));
+    auto* useInferButton = new QPushButton(QStringLiteral("用作推理模型"));
+    auto* useExportButton = new QPushButton(QStringLiteral("用作导出输入"));
+    connect(openDirButton, &QPushButton::clicked, this, &MainWindow::openSelectedArtifactDirectory);
+    connect(copyPathButton, &QPushButton::clicked, this, &MainWindow::copySelectedArtifactPath);
+    connect(useInferButton, &QPushButton::clicked, this, &MainWindow::useSelectedArtifactForInference);
+    connect(useExportButton, &QPushButton::clicked, this, &MainWindow::useSelectedArtifactForExport);
+    actionRow->addWidget(openDirButton);
+    actionRow->addWidget(copyPathButton);
+    actionRow->addWidget(useInferButton);
+    actionRow->addWidget(useExportButton);
+    actionRow->addStretch();
+
+    auto* detailSplitter = new QSplitter(Qt::Horizontal);
+    auto* leftDetail = new QWidget;
+    auto* leftLayout = new QVBoxLayout(leftDetail);
+    leftLayout->setContentsMargins(0, 0, 0, 0);
+    leftLayout->addWidget(selectedTaskSummaryLabel_);
+    leftLayout->addWidget(taskArtifactTable_, 2);
+    leftLayout->addWidget(taskMetricTable_, 1);
+    leftLayout->addWidget(taskExportTable_, 1);
+    auto* rightDetail = new QWidget;
+    auto* rightLayout = new QVBoxLayout(rightDetail);
+    rightLayout->setContentsMargins(0, 0, 0, 0);
+    rightLayout->addLayout(actionRow);
+    rightLayout->addWidget(artifactImagePreviewLabel_, 1);
+    rightLayout->addWidget(artifactPreviewText_, 2);
+    detailSplitter->addWidget(leftDetail);
+    detailSplitter->addWidget(rightDetail);
+    detailSplitter->setStretchFactor(0, 2);
+    detailSplitter->setStretchFactor(1, 2);
+    detailPanel->bodyLayout()->addWidget(detailSplitter);
+
+    auto* historySplitter = new QSplitter(Qt::Vertical);
+    historySplitter->addWidget(tablePanel);
+    historySplitter->addWidget(detailPanel);
+    historySplitter->setStretchFactor(0, 2);
+    historySplitter->setStretchFactor(1, 3);
+
     layout->addWidget(toolbar);
-    layout->addWidget(tablePanel, 1);
+    layout->addWidget(historySplitter, 1);
     return page;
 }
 
@@ -876,6 +1066,7 @@ void MainWindow::createProject()
     }
     updateHeaderState();
     updateRecentTasks();
+    updateDatasetList();
     statusBar()->showMessage(QStringLiteral("项目已打开：%1").arg(currentProjectName_), 5000);
 }
 
@@ -884,6 +1075,13 @@ void MainWindow::browseDataset()
     const QString directory = QFileDialog::getExistingDirectory(this, QStringLiteral("选择数据集目录"));
     if (!directory.isEmpty()) {
         datasetPathEdit_->setText(QDir::toNativeSeparators(directory));
+        const QString detectedFormat = detectDatasetFormatFromPath(directory);
+        if (!detectedFormat.isEmpty() && datasetFormatCombo_) {
+            const int index = datasetFormatCombo_->findText(detectedFormat);
+            if (index >= 0) {
+                datasetFormatCombo_->setCurrentIndex(index);
+            }
+        }
         if (splitOutputEdit_ && currentProjectPath_.isEmpty()) {
             splitOutputEdit_->setText(QDir::toNativeSeparators(QDir(directory).absoluteFilePath(QStringLiteral("../normalized"))));
         }
@@ -920,8 +1118,31 @@ void MainWindow::validateDataset()
     options.insert(QStringLiteral("allowEmptyLabels"), false);
     options.insert(QStringLiteral("maxTextLength"), 25);
 
+    QString taskId;
+    QString outputPath;
+    if (repository_.isOpen()) {
+        taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        outputPath = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(taskId));
+        taskId = createRepositoryTask(
+            aitrain::TaskKind::Validate,
+            QStringLiteral("dataset_validation"),
+            QStringLiteral("com.aitrain.plugins.dataset_interop"),
+            outputPath,
+            QStringLiteral("数据集校验中。"),
+            taskId);
+        if (taskId.isEmpty()) {
+            return;
+        }
+    }
+
     QString error;
-    if (!worker_.requestDatasetValidation(workerExecutablePath(), path, format, options, &error)) {
+    if (!worker_.requestDatasetValidation(workerExecutablePath(), path, format, options, &error, taskId, outputPath)) {
+        if (!taskId.isEmpty() && repository_.isOpen()) {
+            QString taskError;
+            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
+            currentTaskId_.clear();
+            updateRecentTasks();
+        }
         validationSummaryLabel_->setText(QStringLiteral("无法启动数据集校验：%1").arg(error));
         QMessageBox::critical(this, QStringLiteral("数据集校验"), error);
         return;
@@ -942,8 +1163,9 @@ void MainWindow::splitDataset()
         QMessageBox::warning(this, QStringLiteral("数据集划分"), QStringLiteral("请先选择数据集目录和格式。"));
         return;
     }
-    if (format != QStringLiteral("yolo_detection") && format != QStringLiteral("yolo_txt")) {
-        QMessageBox::warning(this, QStringLiteral("数据集划分"), QStringLiteral("当前划分先支持 YOLO 检测格式。"));
+    if (format != QStringLiteral("yolo_detection") && format != QStringLiteral("yolo_txt")
+        && format != QStringLiteral("yolo_segmentation") && format != QStringLiteral("paddleocr_rec")) {
+        QMessageBox::warning(this, QStringLiteral("数据集划分"), QStringLiteral("当前划分支持 YOLO 检测、YOLO 分割和 PaddleOCR Rec 格式。"));
         return;
     }
 
@@ -978,8 +1200,27 @@ void MainWindow::splitDataset()
     options.insert(QStringLiteral("maxIssues"), 200);
     options.insert(QStringLiteral("allowEmptyLabels"), false);
 
+    QString taskId;
+    if (repository_.isOpen()) {
+        taskId = createRepositoryTask(
+            aitrain::TaskKind::Validate,
+            QStringLiteral("dataset_split"),
+            QStringLiteral("com.aitrain.plugins.dataset_interop"),
+            outputPath,
+            QStringLiteral("数据集划分中。"));
+        if (taskId.isEmpty()) {
+            return;
+        }
+    }
+
     QString error;
-    if (!worker_.requestDatasetSplit(workerExecutablePath(), path, outputPath, format, options, &error)) {
+    if (!worker_.requestDatasetSplit(workerExecutablePath(), path, outputPath, format, options, &error, taskId)) {
+        if (!taskId.isEmpty() && repository_.isOpen()) {
+            QString taskError;
+            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
+            currentTaskId_.clear();
+            updateRecentTasks();
+        }
         QMessageBox::critical(this, QStringLiteral("数据集划分"), error);
         return;
     }
@@ -1070,8 +1311,27 @@ void MainWindow::startInference()
         outputPath = QFileInfo(checkpointPath).absoluteDir().filePath(QStringLiteral("inference"));
     }
 
+    QString taskId;
+    if (repository_.isOpen()) {
+        taskId = createRepositoryTask(
+            aitrain::TaskKind::Infer,
+            QStringLiteral("inference"),
+            QStringLiteral("com.aitrain.plugins.yolo_native"),
+            outputPath,
+            QStringLiteral("推理中。"));
+        if (taskId.isEmpty()) {
+            return;
+        }
+    }
+
     QString error;
-    if (!worker_.requestInference(workerExecutablePath(), checkpointPath, imagePath, outputPath, &error)) {
+    if (!worker_.requestInference(workerExecutablePath(), checkpointPath, imagePath, outputPath, &error, taskId)) {
+        if (!taskId.isEmpty() && repository_.isOpen()) {
+            QString taskError;
+            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
+            currentTaskId_.clear();
+            updateRecentTasks();
+        }
         QMessageBox::critical(this, QStringLiteral("推理"), error);
         return;
     }
@@ -1479,6 +1739,39 @@ void MainWindow::updateRecentTasks()
     }
 }
 
+void MainWindow::updateDatasetList()
+{
+    if (!datasetListTable_ || !repository_.isOpen()) {
+        return;
+    }
+
+    QString error;
+    const QVector<aitrain::DatasetRecord> datasets = repository_.recentDatasets(50, &error);
+    datasetListTable_->setRowCount(0);
+    if (datasets.isEmpty()) {
+        datasetListTable_->insertRow(0);
+        datasetListTable_->setItem(0, 0, new QTableWidgetItem(QStringLiteral("暂无数据集记录")));
+        for (int column = 1; column < datasetListTable_->columnCount(); ++column) {
+            datasetListTable_->setItem(0, column, new QTableWidgetItem(QString()));
+        }
+        return;
+    }
+
+    for (const aitrain::DatasetRecord& dataset : datasets) {
+        const int row = datasetListTable_->rowCount();
+        datasetListTable_->insertRow(row);
+        auto* nameItem = new QTableWidgetItem(dataset.name);
+        nameItem->setData(Qt::UserRole, dataset.id);
+        datasetListTable_->setItem(row, 0, nameItem);
+        datasetListTable_->setItem(row, 1, new QTableWidgetItem(dataset.format));
+        datasetListTable_->setItem(row, 2, new QTableWidgetItem(dataset.validationStatus == QStringLiteral("valid") ? QStringLiteral("通过") : QStringLiteral("未通过")));
+        datasetListTable_->setItem(row, 3, new QTableWidgetItem(QString::number(dataset.sampleCount)));
+        auto* pathItem = new QTableWidgetItem(QDir::toNativeSeparators(dataset.rootPath));
+        pathItem->setData(Qt::UserRole, dataset.rootPath);
+        datasetListTable_->setItem(row, 4, pathItem);
+    }
+}
+
 void MainWindow::updateTaskTable(QTableWidget* table, const QVector<aitrain::TaskRecord>& tasks)
 {
     if (!table) {
@@ -1515,6 +1808,273 @@ void MainWindow::updateTaskTable(QTableWidget* table, const QVector<aitrain::Tas
             table->setItem(row, 5, new QTableWidgetItem(task.updatedAt.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))));
             table->setItem(row, 6, new QTableWidgetItem(task.message));
         }
+    }
+}
+
+QString MainWindow::createRepositoryTask(aitrain::TaskKind kind,
+    const QString& taskType,
+    const QString& pluginId,
+    const QString& workDir,
+    const QString& message,
+    const QString& requestedTaskId)
+{
+    if (!repository_.isOpen()) {
+        return QString();
+    }
+
+    const QString taskId = requestedTaskId.isEmpty()
+        ? QUuid::createUuid().toString(QUuid::WithoutBraces)
+        : requestedTaskId;
+    aitrain::TaskRecord record;
+    record.id = taskId;
+    record.projectName = currentProjectName_.isEmpty() ? QStringLiteral("manual") : currentProjectName_;
+    record.pluginId = pluginId;
+    record.taskType = taskType;
+    record.kind = kind;
+    record.state = aitrain::TaskState::Queued;
+    record.workDir = workDir;
+    record.message = message;
+    record.createdAt = QDateTime::currentDateTimeUtc();
+    record.updatedAt = record.createdAt;
+
+    QString error;
+    if (!repository_.insertTask(record, &error)) {
+        QMessageBox::critical(this, QStringLiteral("任务"), error);
+        return QString();
+    }
+    if (!repository_.updateTaskState(taskId, aitrain::TaskState::Running, message, &error)) {
+        QMessageBox::critical(this, QStringLiteral("任务"), error);
+        return QString();
+    }
+    currentTaskId_ = taskId;
+    updateRecentTasks();
+    return taskId;
+}
+
+QString MainWindow::selectedArtifactPath() const
+{
+    if (!taskArtifactTable_ || taskArtifactTable_->selectedItems().isEmpty()) {
+        return QString();
+    }
+    const int row = taskArtifactTable_->selectedItems().first()->row();
+    auto* item = taskArtifactTable_->item(row, 1);
+    return item ? item->data(Qt::UserRole).toString() : QString();
+}
+
+void MainWindow::updateSelectedTaskDetails()
+{
+    if (!taskQueueTable_ || !repository_.isOpen()) {
+        return;
+    }
+    if (taskQueueTable_->selectedItems().isEmpty()) {
+        return;
+    }
+    const int row = taskQueueTable_->selectedItems().first()->row();
+    const QString taskId = taskQueueTable_->item(row, 0)
+        ? taskQueueTable_->item(row, 0)->data(Qt::UserRole).toString()
+        : QString();
+    if (taskId.isEmpty()) {
+        return;
+    }
+
+    QString error;
+    const QVector<aitrain::ArtifactRecord> artifacts = repository_.artifactsForTask(taskId, &error);
+    const QVector<aitrain::MetricPoint> metrics = repository_.metricsForTask(taskId, &error);
+    const QVector<aitrain::ExportRecord> exports = repository_.exportsForTask(taskId, &error);
+
+    if (selectedTaskSummaryLabel_) {
+        selectedTaskSummaryLabel_->setText(QStringLiteral("任务 %1：%2 个产物，%3 个指标点，%4 条导出记录")
+            .arg(taskId.left(8))
+            .arg(artifacts.size())
+            .arg(metrics.size())
+            .arg(exports.size()));
+    }
+
+    if (taskArtifactTable_) {
+        taskArtifactTable_->setRowCount(0);
+        if (artifacts.isEmpty()) {
+            taskArtifactTable_->insertRow(0);
+            taskArtifactTable_->setItem(0, 0, new QTableWidgetItem(QStringLiteral("暂无产物")));
+            for (int column = 1; column < taskArtifactTable_->columnCount(); ++column) {
+                taskArtifactTable_->setItem(0, column, new QTableWidgetItem(QString()));
+            }
+        } else {
+            for (const aitrain::ArtifactRecord& artifact : artifacts) {
+                const int artifactRow = taskArtifactTable_->rowCount();
+                taskArtifactTable_->insertRow(artifactRow);
+                taskArtifactTable_->setItem(artifactRow, 0, new QTableWidgetItem(artifact.kind));
+                auto* pathItem = new QTableWidgetItem(QDir::toNativeSeparators(artifact.path));
+                pathItem->setData(Qt::UserRole, artifact.path);
+                taskArtifactTable_->setItem(artifactRow, 1, pathItem);
+                taskArtifactTable_->setItem(artifactRow, 2, new QTableWidgetItem(artifact.message));
+                taskArtifactTable_->setItem(artifactRow, 3, new QTableWidgetItem(artifact.createdAt.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))));
+            }
+        }
+    }
+
+    if (taskMetricTable_) {
+        taskMetricTable_->setRowCount(0);
+        if (metrics.isEmpty()) {
+            taskMetricTable_->insertRow(0);
+            taskMetricTable_->setItem(0, 0, new QTableWidgetItem(QStringLiteral("暂无指标")));
+            for (int column = 1; column < taskMetricTable_->columnCount(); ++column) {
+                taskMetricTable_->setItem(0, column, new QTableWidgetItem(QString()));
+            }
+        } else {
+            for (const aitrain::MetricPoint& metric : metrics) {
+                const int metricRow = taskMetricTable_->rowCount();
+                taskMetricTable_->insertRow(metricRow);
+                taskMetricTable_->setItem(metricRow, 0, new QTableWidgetItem(metric.name));
+                taskMetricTable_->setItem(metricRow, 1, new QTableWidgetItem(QString::number(metric.value, 'f', 6)));
+                taskMetricTable_->setItem(metricRow, 2, new QTableWidgetItem(QString::number(metric.step)));
+                taskMetricTable_->setItem(metricRow, 3, new QTableWidgetItem(QString::number(metric.epoch)));
+            }
+        }
+    }
+
+    if (taskExportTable_) {
+        taskExportTable_->setRowCount(0);
+        if (exports.isEmpty()) {
+            taskExportTable_->insertRow(0);
+            taskExportTable_->setItem(0, 0, new QTableWidgetItem(QStringLiteral("暂无导出")));
+            for (int column = 1; column < taskExportTable_->columnCount(); ++column) {
+                taskExportTable_->setItem(0, column, new QTableWidgetItem(QString()));
+            }
+        } else {
+            for (const aitrain::ExportRecord& exportRecord : exports) {
+                const int exportRow = taskExportTable_->rowCount();
+                taskExportTable_->insertRow(exportRow);
+                taskExportTable_->setItem(exportRow, 0, new QTableWidgetItem(exportRecord.format));
+                auto* pathItem = new QTableWidgetItem(QDir::toNativeSeparators(exportRecord.path));
+                pathItem->setData(Qt::UserRole, exportRecord.path);
+                taskExportTable_->setItem(exportRow, 1, pathItem);
+                taskExportTable_->setItem(exportRow, 2, new QTableWidgetItem(exportRecord.createdAt.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))));
+            }
+        }
+    }
+
+    if (!artifacts.isEmpty()) {
+        taskArtifactTable_->selectRow(0);
+    }
+}
+
+void MainWindow::previewArtifactPath(const QString& path)
+{
+    if (!artifactPreviewText_ || !artifactImagePreviewLabel_) {
+        return;
+    }
+
+    artifactImagePreviewLabel_->clear();
+    artifactImagePreviewLabel_->setText(QStringLiteral("暂无图片预览"));
+    artifactPreviewText_->clear();
+    if (path.isEmpty()) {
+        artifactPreviewText_->setPlainText(QStringLiteral("请选择一个产物。"));
+        return;
+    }
+
+    const QFileInfo info(path);
+    if (!info.exists()) {
+        artifactPreviewText_->setPlainText(QStringLiteral("产物不存在：%1").arg(QDir::toNativeSeparators(path)));
+        return;
+    }
+
+    if (info.isDir()) {
+        artifactPreviewText_->setPlainText(QStringLiteral("目录产物\n路径：%1\n修改时间：%2")
+            .arg(QDir::toNativeSeparators(path), info.lastModified().toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))));
+        return;
+    }
+
+    const QString suffix = info.suffix().toLower();
+    if (QStringList{QStringLiteral("png"), QStringLiteral("jpg"), QStringLiteral("jpeg"), QStringLiteral("bmp")}.contains(suffix)) {
+        QPixmap image(path);
+        if (!image.isNull()) {
+            artifactImagePreviewLabel_->setPixmap(image.scaled(
+                artifactImagePreviewLabel_->size().boundedTo(QSize(520, 360)),
+                Qt::KeepAspectRatio,
+                Qt::SmoothTransformation));
+        }
+        artifactPreviewText_->setPlainText(QStringLiteral("图片产物\n路径：%1\n尺寸：%2 x %3\n大小：%4 bytes")
+            .arg(QDir::toNativeSeparators(path))
+            .arg(image.width())
+            .arg(image.height())
+            .arg(info.size()));
+        return;
+    }
+
+    if (suffix == QStringLiteral("onnx")) {
+        artifactPreviewText_->setPlainText(QStringLiteral("ONNX 模型\n路径：%1\n模型族：%2\n大小：%3 bytes")
+            .arg(QDir::toNativeSeparators(path), aitrain::inferOnnxModelFamily(path))
+            .arg(info.size()));
+        return;
+    }
+    if (suffix == QStringLiteral("engine") || suffix == QStringLiteral("plan") || suffix == QStringLiteral("pdparams") || suffix == QStringLiteral("aitrain")) {
+        artifactPreviewText_->setPlainText(QStringLiteral("模型产物\n路径：%1\n类型：%2\n大小：%3 bytes")
+            .arg(QDir::toNativeSeparators(path), suffix)
+            .arg(info.size()));
+        return;
+    }
+
+    if (QStringList{QStringLiteral("json"), QStringLiteral("yaml"), QStringLiteral("yml"), QStringLiteral("txt"), QStringLiteral("csv"), QStringLiteral("log")}.contains(suffix)) {
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly)) {
+            artifactPreviewText_->setPlainText(QStringLiteral("无法读取文本产物：%1").arg(QDir::toNativeSeparators(path)));
+            return;
+        }
+        const qint64 maxBytes = 256 * 1024;
+        const QByteArray data = file.read(maxBytes);
+        QString text = suffix == QStringLiteral("json") ? formatJsonTextForPreview(data) : QString::fromUtf8(data);
+        if (info.size() > maxBytes) {
+            text.append(QStringLiteral("\n\n[文件超过 256KB，仅显示前部内容]\n路径：%1").arg(QDir::toNativeSeparators(path)));
+        }
+        artifactPreviewText_->setPlainText(text);
+        return;
+    }
+
+    artifactPreviewText_->setPlainText(QStringLiteral("不支持内联预览的产物\n路径：%1\n大小：%2 bytes")
+        .arg(QDir::toNativeSeparators(path))
+        .arg(info.size()));
+}
+
+void MainWindow::updateArtifactPreviewFromSelection()
+{
+    previewArtifactPath(selectedArtifactPath());
+}
+
+void MainWindow::openSelectedArtifactDirectory()
+{
+    const QString path = selectedArtifactPath();
+    if (path.isEmpty()) {
+        return;
+    }
+    const QFileInfo info(path);
+    const QString directory = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
+    QDesktopServices::openUrl(QUrl::fromLocalFile(directory));
+}
+
+void MainWindow::copySelectedArtifactPath()
+{
+    const QString path = selectedArtifactPath();
+    if (!path.isEmpty()) {
+        QApplication::clipboard()->setText(QDir::toNativeSeparators(path));
+        statusBar()->showMessage(QStringLiteral("产物路径已复制"), 3000);
+    }
+}
+
+void MainWindow::useSelectedArtifactForInference()
+{
+    const QString path = selectedArtifactPath();
+    if (!path.isEmpty() && inferenceCheckpointEdit_) {
+        inferenceCheckpointEdit_->setText(QDir::toNativeSeparators(path));
+        showPage(InferencePage, QStringLiteral("推理验证"));
+    }
+}
+
+void MainWindow::useSelectedArtifactForExport()
+{
+    const QString path = selectedArtifactPath();
+    if (!path.isEmpty() && conversionCheckpointEdit_) {
+        conversionCheckpointEdit_->setText(QDir::toNativeSeparators(path));
+        showPage(ConversionPage, QStringLiteral("模型转换"));
     }
 }
 
@@ -1675,6 +2235,7 @@ void MainWindow::updateDatasetValidationResult(const QJsonObject& payload)
         dataset.lastValidatedAt = QDateTime::fromString(payload.value(QStringLiteral("checkedAt")).toString(), Qt::ISODateWithMs);
         QString error;
         repository_.upsertDatasetValidation(dataset, &error);
+        updateDatasetList();
     }
 
     workerPill_->setStatus(QStringLiteral("Worker 空闲"), StatusPill::Tone::Neutral);
@@ -1685,6 +2246,7 @@ void MainWindow::updateDatasetSplitResult(const QJsonObject& payload)
 {
     const bool ok = payload.value(QStringLiteral("ok")).toBool();
     const QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
+    const QString format = payload.value(QStringLiteral("format")).toString(QStringLiteral("yolo_detection"));
     const int trainCount = payload.value(QStringLiteral("trainCount")).toInt();
     const int valCount = payload.value(QStringLiteral("valCount")).toInt();
     const int testCount = payload.value(QStringLiteral("testCount")).toInt();
@@ -1723,7 +2285,7 @@ void MainWindow::updateDatasetSplitResult(const QJsonObject& payload)
     if (ok && repository_.isOpen()) {
         aitrain::DatasetRecord dataset;
         dataset.name = QFileInfo(outputPath).fileName();
-        dataset.format = QStringLiteral("yolo_detection");
+        dataset.format = format;
         dataset.rootPath = outputPath;
         dataset.validationStatus = QStringLiteral("valid");
         dataset.sampleCount = trainCount + valCount + testCount;
@@ -1731,10 +2293,11 @@ void MainWindow::updateDatasetSplitResult(const QJsonObject& payload)
         dataset.lastValidatedAt = QDateTime::fromString(payload.value(QStringLiteral("checkedAt")).toString(), Qt::ISODateWithMs);
         QString error;
         repository_.upsertDatasetValidation(dataset, &error);
+        updateDatasetList();
         datasetPathEdit_->setText(QDir::toNativeSeparators(outputPath));
-        datasetFormatCombo_->setCurrentText(QStringLiteral("yolo_detection"));
+        datasetFormatCombo_->setCurrentText(format);
         currentDatasetPath_ = outputPath;
-        currentDatasetFormat_ = QStringLiteral("yolo_detection");
+        currentDatasetFormat_ = format;
         currentDatasetValid_ = true;
     }
 

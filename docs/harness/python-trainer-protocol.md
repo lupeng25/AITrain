@@ -34,7 +34,7 @@ For the official PaddleOCR PP-OCRv4 Rec adapter, Worker routes `trainingBackend=
 python python_trainers/ocr_rec/paddleocr_official_adapter.py --request <request-json>
 ```
 
-Use `prepareOnly=true` to generate and validate the PP-OCRv4 config, label lists, dictionary copy, report, and reproducible command files without running official training. Use `runOfficial=true` or `prepareOnly=false` with `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` pointing at a PaddleOCR source checkout to execute official `tools/train.py` and `tools/export_model.py`.
+Use `prepareOnly=true` to generate and validate the PP-OCRv4 config, label lists, dictionary copy, report, and reproducible command files without running official training. Use `runOfficial=true` or `prepareOnly=false` with `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` pointing at a PaddleOCR source checkout to execute official `tools/train.py` and `tools/export_model.py`. Set `runInferenceAfterExport=true` with `inferenceImage` to run official `tools/infer/predict_rec.py` after export and write `official_prediction.json`.
 
 The local isolated official smoke is:
 
@@ -87,7 +87,7 @@ Official Python packages are adapted behind this protocol:
 - `ultralytics_yolo_detect`: Ultralytics YOLO detection training. The adapter writes normalized `aitrain_yolo_data.yaml`, calls official `YOLO(...).train()`, exports ONNX, and forwards `best.pt`, `last.pt`, `results.csv`, `args.yaml`, `model.onnx`, and `ultralytics_training_report.json`.
 - `ultralytics_yolo_segment`: Ultralytics YOLO segmentation training. It reuses the detection adapter with segmentation defaults such as `yolov8n-seg.yaml` and forwards mask metrics when the official results expose them.
 - `paddleocr_rec`: PaddlePaddle CTC OCR recognition training for PaddleOCR-style Rec data. It produces `paddleocr_rec_ctc.pdparams`, `dict.txt`, and `paddleocr_rec_training_report.json`. This is not a full PP-OCRv4 official config/export pipeline yet.
-- `paddleocr_rec_official` / `paddleocr_ppocrv4_rec`: PaddleOCR official-recognition adapter. It prepares a PP-OCRv4 config and can run official PaddleOCR training/export from a source checkout. `prepareOnly` artifacts are configuration validation, not trained model artifacts.
+- `paddleocr_rec_official` / `paddleocr_ppocrv4_rec`: PaddleOCR official-recognition adapter. It prepares a PP-OCRv4 config and can run official PaddleOCR training/export/inference from a source checkout. `prepareOnly` artifacts are configuration validation, not trained model artifacts.
   When official training runs, the adapter parses stdout metrics such as `loss`, `ctcLoss`, `nrtrLoss`, `accuracy`, and `normalizedEditDistance` into Worker `metric` events and the final report.
 
 Common Phase 9 detection parameters:
@@ -112,6 +112,19 @@ Common Phase 12 OCR Rec parameters:
 - `imageHeight`: default `32`
 - `maxTextLength`: default `32`
 - `learningRate`: default `0.001`
+
+Common official PaddleOCR Rec parameters:
+
+- `trainLabelFile`: optional explicit training label file.
+- `valLabelFile`: optional explicit validation label file.
+- `dictionaryFile`: optional explicit recognition dictionary.
+- `officialConfig`: optional official config source path.
+- `pretrainedModel`: optional pretrained/export input checkpoint.
+- `resumeCheckpoint`: optional official resume checkpoint.
+- `exportOnly`: skip train and run export from an existing checkpoint.
+- `runInferenceAfterExport`: run official recognition inference after export.
+- `inferenceImage`: sample image for official recognition inference.
+- `recImageShape`: generated recognition image shape, for example `3,48,320`.
 
 Generate minimal smoke datasets and request JSON files with:
 

@@ -21,6 +21,9 @@ AITrain Studio 已具备可运行的平台骨架：Qt Widgets GUI、独立 Worke
 - 阶段 11 已接入 Ultralytics YOLO segmentation 官方训练，并完成本机 CPU 小数据 smoke；C++ ONNX Runtime 已补 YOLOv8-seg mask 后处理和 overlay。
 - 阶段 12 已接入 PaddlePaddle OCR Rec CTC 训练，并完成本机 CPU 小数据 smoke；C++ ONNX Runtime 已补 CTC greedy decode。它兼容 PaddleOCR-style Rec 数据，但还不是完整 PP-OCRv4 官方训练配置和导出链路。
 - 阶段 13 的本机产品化目标是文档、依赖、样例数据生成、硬件兼容矩阵、打包 smoke 和外部 RTX 验收清单。
+- 阶段 17-21 已完成交付验收基线：本机基线冻结、统一验收脚本、TensorRT 外部验收准备、小规模训练/推理/转换 smoke、发布前文档收口。
+- 阶段 22-26 已完成本机后续增强：任务历史与产物索引、GUI 统一 artifact 浏览、三类数据集管理增强、COCO8 / COCO8-seg materialization 稳定化、PaddleOCR 官方 train/export/inference 链路增强。
+- 当前没有 RTX / 第二台主机，因此 TensorRT 真验收继续保持 hardware-blocked，不作为本机阶段完成条件。
 
 ## 2. 实施原则
 
@@ -52,6 +55,9 @@ AITrain Studio 已具备可运行的平台骨架：Qt Widgets GUI、独立 Worke
 | 阶段 11 | 已完成本机 CPU smoke | 官方 YOLO 分割训练接入 | Ultralytics segmentation 训练、ONNX 导出、mask 指标可用 |
 | 阶段 12 | 已完成本机 CPU smoke | PaddlePaddle OCR Rec 训练接入 | PaddlePaddle CTC Rec 训练、checkpoint、ONNX、dict、accuracy、C++ decode 可用 |
 | 阶段 13 | 本机产品化完成，外部验收待补 | 产品化与验收 | 样例数据、文档、兼容矩阵、打包 smoke 已完成；外部 GPU / 干净机器验收待补 |
+| 阶段 14-16 | 已完成本机 CPU smoke | 官方 PaddleOCR Rec 链路 | config、train、export、official inference smoke 可用 |
+| 阶段 17-21 | 已完成本机交付验收基线 | 验收脚本、runbook、公开/生成数据 smoke | `acceptance-smoke.ps1` 和 official OCR smoke 可复验 |
+| 阶段 22-26 | 已完成本机后续增强 | 日常使用、可追踪、可复验 | GUI artifact 浏览、数据集增强、materialization、OCR official report/inference |
 
 ## 4. 已完成阶段复盘
 
@@ -393,7 +399,7 @@ AITrain Studio 已具备可运行的平台骨架：Qt Widgets GUI、独立 Worke
 
 - 新增 `tools/phase16-ocr-official-smoke.ps1`。
 - 脚本会创建或复用 `.deps/python-3.13.13-ocr-amd64` 隔离 Python。
-- 脚本会安装 PaddlePaddle 与官方 PaddleOCR 源码仓库 requirements。
+- 脚本会 checkout 固定 PaddleOCR 源码 ref，并安装固定的 OCR smoke 依赖约束。
 - 脚本会检查官方 `tools/train.py` 可导入。
 - 脚本会生成最小 OCR Rec 数据集，并通过 `paddleocr_rec_official` 后端运行 1 epoch CPU 官方训练。
 - 脚本会调用官方 `tools/export_model.py` 生成 `official_inference`。
@@ -409,6 +415,7 @@ AITrain Studio 已具备可运行的平台骨架：Qt Widgets GUI、独立 Worke
 - `official_model/best_accuracy.pdparams`
 - `official_inference/inference.yml`
 - `paddleocr_official_rec_report.json`
+- report 中记录 `paddleOcrRequestedRef` 和 `paddleOcrResolvedRef`
 
 验收命令：
 
@@ -484,6 +491,7 @@ AITrain Studio 已具备可运行的平台骨架：Qt Widgets GUI、独立 Worke
 
 - `tools\acceptance-smoke.ps1 -PublicDatasets` 会生成最小 detection、segmentation、OCR Rec 数据集。
 - 脚本会尝试通过 Ultralytics 官方包 materialize COCO8 / COCO8-seg；当前本机 materialization 不可用时回退到生成数据集。
+- 脚本运行 CTest 时会设置 `AITRAIN_ACCEPTANCE_SMOKE_ROOT`，确保 C++ ONNX Runtime 测试消费当前 WorkDir 的训练产物，而不是依赖历史 `.deps` 产物。
 - YOLO detection 通过 `ultralytics_yolo_detect` adapter 跑通 1 epoch CPU smoke，产出 `best.pt`、ONNX 和 `ultralytics_training_report.json`。
 - YOLO segmentation 通过 `ultralytics_yolo_segment` adapter 跑通 1 epoch CPU smoke，产出 `best.pt`、ONNX 和 mask 指标 report。
 - OCR Rec 小型 PaddlePaddle CTC backend 跑通 1 epoch CPU smoke，产出 `.pdparams`、ONNX、`dict.txt` 和 report。
@@ -518,3 +526,126 @@ AITrain Studio 已具备可运行的平台骨架：Qt Widgets GUI、独立 Worke
 
 - 在干净 Windows 机器上验证 ZIP 包启动、Worker self-check、plugin smoke 和 Python 环境提示。
 - 在 RTX / SM 75+ 机器上运行真实 TensorRT smoke，并将结果回写 `docs/harness/current-status.md`。
+
+## 19. 阶段 22-26：本机日常使用与可复验增强
+
+目标：在没有 RTX / 第二台主机前，把本机 RC 从“能验收”推进到“可日常使用、可追踪、可复验”。这些阶段不改变 TensorRT 真验收要求；本机 GTX 1060 / SM 61 仍只记录 hardware-blocked。
+
+### 19.1 阶段 22：任务历史与产物索引基础
+
+已完成：
+
+- GUI 发起的推理、数据集校验、数据集划分会创建 SQLite `tasks` 记录。
+- Worker `validateDataset`、`splitDataset`、`infer` 请求支持可选 `taskId`，相关 artifact 事件带回 `taskId`。
+- 数据集校验写出 `runs/<task-id>/dataset_validation_report.json`。
+- 数据集划分继续写出目标数据集目录下的 `split_report.json`，并作为 task artifact 记录。
+- `ProjectRepository` 增加只读查询：
+  - 按 task 查询 artifacts。
+  - 按 task 查询 metrics。
+  - 按 task 查询 exports。
+  - 按 dataset 查询历史 versions。
+- `tools/acceptance-smoke.ps1` 每次运行写出 `acceptance_summary.json`，记录 mode、status、workDir、startedAt、finishedAt、失败原因和 hardware-blocked 原因。
+
+验收：
+
+```powershell
+.\tools\harness-check.ps1
+```
+
+### 19.2 阶段 23：GUI artifact 统一浏览
+
+已完成：
+
+- 任务队列页新增“任务详情与产物”区域。
+- 选择历史任务后展示 artifacts、metrics、exports。
+- JSON / YAML / TXT / CSV / LOG 只读预览，读取大小有限制。
+- PNG / JPG / BMP overlay 可缩放预览。
+- ONNX artifact 显示路径、大小和模型族推断。
+- 目录、checkpoint、engine、pdparams 等模型产物显示路径、类型、大小或修改时间。
+- 操作按钮支持打开所在目录、复制路径、用作推理模型、用作导出输入。
+
+边界：
+
+- GUI 只展示 Worker 和 repository 已记录的产物，不在 `MainWindow` 中实现训练、导出或推理逻辑。
+- UI 手工验收仍需在每次较大界面改动后补跑。
+
+### 19.3 阶段 24：数据集管理增强
+
+已完成：
+
+- 数据集页新增已登记数据集列表。
+- 路径选择后自动识别：
+  - YOLO detection：`data.yaml` + 5 列 label。
+  - YOLO segmentation：`data.yaml` + polygon label。
+  - PaddleOCR Rec：`rec_gt.txt` 或 `rec_gt_train.txt` + `dict.txt`。
+- 数据集划分支持：
+  - YOLO detection。
+  - YOLO segmentation。
+  - PaddleOCR Rec，输出 `images/train|val|test`、`rec_gt_train.txt`、`rec_gt_val.txt`、`rec_gt_test.txt`，并保留兼容当前本地 trainer 的 `rec_gt.txt`。
+- 校验和划分结果通过 Worker 返回并落入 SQLite 任务和 dataset version 记录。
+
+验收：
+
+```powershell
+python examples\create-minimal-datasets.py --output .deps\next-smoke
+.\tools\harness-check.ps1
+```
+
+### 19.4 阶段 25：公开数据集 materialization 稳定化
+
+已完成：
+
+- 新增 `tools/materialize-ultralytics-dataset.py`。
+- `acceptance-smoke.ps1 -PublicDatasets` 调用独立 materializer：
+  - 优先读取已安装 Ultralytics 包内官方 yaml。
+  - 解析 yaml 中的 download URL。
+  - 下载 zip 到 `.deps/datasets/downloads`。
+  - 解压到 `.deps/datasets/materialized/<name>`。
+  - 重写本地绝对路径 `data.yaml`。
+  - 写出 machine-readable report。
+- 默认模式在公开数据下载或解析失败时回退 generated dataset，并记录 fallback 原因。
+- `-RequirePublicDatasets` 会在 COCO8 / COCO8-seg materialization 失败时直接失败，不伪造通过。
+
+验收：
+
+```powershell
+.\tools\acceptance-smoke.ps1 -PublicDatasets -SkipOfficialOcr
+.\tools\acceptance-smoke.ps1 -PublicDatasets -RequirePublicDatasets -SkipOfficialOcr
+```
+
+### 19.5 阶段 26：PaddleOCR 官方链路增强
+
+已完成：
+
+- `paddleocr_rec_official` / `paddleocr_ppocrv4_rec` 支持：
+  - `trainLabelFile`
+  - `valLabelFile`
+  - `dictionaryFile`
+  - `officialConfig`
+  - `pretrainedModel`
+  - `resumeCheckpoint`
+  - `exportOnly`
+  - `runInferenceAfterExport`
+  - `inferenceImage`
+  - `recImageShape`
+- official report 记录：
+  - PaddleOCR requested / resolved ref。
+  - Python / Paddle / PaddleOCR 版本。
+  - train / export / predict 命令。
+  - config、train/val label、dict 路径。
+  - checkpoint、official inference model dir。
+  - metrics、exit code、失败日志路径。
+- `runInferenceAfterExport=true` 时调用官方 `tools/infer/predict_rec.py`，并写出 `official_prediction.json`。
+- `tools/phase16-ocr-official-smoke.ps1` 升级为 train + export + official inference smoke。
+
+验收：
+
+```powershell
+.\tools\phase16-ocr-official-smoke.ps1 -SkipInstall
+.\tools\harness-check.ps1
+```
+
+明确边界：
+
+- 官方 PaddleOCR tiny smoke 证明 train/export/inference wiring 和 artifacts，不代表 OCR 准确率。
+- 当前仍未把 PaddleOCR official inference model 直接接入 C++ Paddle inference runtime；C++ OCR ONNX Runtime 路径仍使用现有 PaddlePaddle CTC ONNX smoke 模型。
