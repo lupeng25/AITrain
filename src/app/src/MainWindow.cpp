@@ -33,6 +33,7 @@
 #include <QSplitter>
 #include <QStatusBar>
 #include <QStandardPaths>
+#include <QTableWidgetItem>
 #include <QTime>
 #include <QVBoxLayout>
 #include <QUrl>
@@ -240,6 +241,92 @@ QString trainingBackendDescription(const QString& backend)
         return QStringLiteral("高级/诊断：Python 协议测试后端，只验证 Worker JSON Lines 协议，不产生真实模型。");
     }
     return QStringLiteral("当前模型能力：通过 Worker 执行，产物、指标和失败原因会写入任务历史。");
+}
+
+QString exportFormatLabel(const QString& format)
+{
+    if (format == QStringLiteral("onnx")) {
+        return QStringLiteral("ONNX 模型");
+    }
+    if (format == QStringLiteral("ncnn")) {
+        return QStringLiteral("NCNN param/bin");
+    }
+    if (format == QStringLiteral("tensorrt")) {
+        return QStringLiteral("TensorRT Engine");
+    }
+    return QStringLiteral("AITrain JSON（诊断）");
+}
+
+QString defaultExportFileName(const QString& format)
+{
+    if (format == QStringLiteral("onnx")) {
+        return QStringLiteral("model.onnx");
+    }
+    if (format == QStringLiteral("ncnn")) {
+        return QStringLiteral("model.param");
+    }
+    if (format == QStringLiteral("tensorrt")) {
+        return QStringLiteral("model.engine");
+    }
+    return QStringLiteral("model.aitrain-export.json");
+}
+
+QString exportFileFilter(const QString& format)
+{
+    if (format == QStringLiteral("onnx")) {
+        return QStringLiteral("ONNX model (*.onnx);;All files (*.*)");
+    }
+    if (format == QStringLiteral("ncnn")) {
+        return QStringLiteral("NCNN param (*.param);;All files (*.*)");
+    }
+    if (format == QStringLiteral("tensorrt")) {
+        return QStringLiteral("TensorRT engine (*.engine *.plan);;All files (*.*)");
+    }
+    return QStringLiteral("AITrain JSON (*.json *.aitrain);;All files (*.*)");
+}
+
+QString exportFormatNote(const QString& format)
+{
+    if (format == QStringLiteral("onnx")) {
+        return QStringLiteral("主交付格式，可继续进入推理验证。");
+    }
+    if (format == QStringLiteral("ncnn")) {
+        return QStringLiteral("需要配置 onnx2ncnn，输出 param/bin。");
+    }
+    if (format == QStringLiteral("tensorrt")) {
+        return QStringLiteral("需要 RTX / SM 75+ 真机外部验收。");
+    }
+    return QStringLiteral("仅用于 tiny detector 诊断，不代表真实 YOLO/OCR。");
+}
+
+QString compactListSummary(const QStringList& values, int maxItems = 3)
+{
+    QStringList unique;
+    for (const QString& value : values) {
+        if (!value.trimmed().isEmpty() && !unique.contains(value)) {
+            unique.append(value);
+        }
+    }
+    unique.sort(Qt::CaseInsensitive);
+    if (unique.isEmpty()) {
+        return QStringLiteral("暂无");
+    }
+    const QString visible = unique.mid(0, maxItems).join(QStringLiteral(", "));
+    const int remaining = unique.size() - qMin(unique.size(), maxItems);
+    return remaining > 0
+        ? QStringLiteral("%1 等 %2 项").arg(visible).arg(unique.size())
+        : visible;
+}
+
+int uniqueStringCount(const QStringList& values)
+{
+    QStringList unique;
+    for (const QString& value : values) {
+        if (!value.trimmed().isEmpty() && !unique.contains(value)) {
+            unique.append(value);
+        }
+    }
+    return unique.size();
 }
 
 bool setComboCurrentData(QComboBox* combo, const QString& data)
@@ -673,14 +760,62 @@ QWidget* MainWindow::buildDashboardPage()
 QWidget* MainWindow::buildProjectPage()
 {
     auto* page = new QWidget;
-    auto* layout = new QHBoxLayout(page);
+    auto* layout = new QVBoxLayout(page);
     layout->setContentsMargins(18, 18, 18, 18);
     layout->setSpacing(16);
 
+    auto* headerOpenButton = primaryButton(QStringLiteral("创建 / 打开项目"));
+
+    auto* headerPanel = new QFrame;
+    headerPanel->setObjectName(QStringLiteral("ExperimentHeader"));
+    auto* headerRoot = new QVBoxLayout(headerPanel);
+    headerRoot->setContentsMargins(14, 12, 14, 12);
+    headerRoot->setSpacing(10);
+    auto* headerTop = new QHBoxLayout;
+    auto* titleBlock = new QWidget;
+    auto* titleLayout = new QVBoxLayout(titleBlock);
+    titleLayout->setContentsMargins(0, 0, 0, 0);
+    titleLayout->setSpacing(2);
+    auto* kicker = new QLabel(QStringLiteral("PROJECT CONSOLE"));
+    kicker->setObjectName(QStringLiteral("ExperimentKicker"));
+    auto* title = new QLabel(QStringLiteral("项目控制台"));
+    title->setObjectName(QStringLiteral("ExperimentTitle"));
+    auto* subtitle = new QLabel(QStringLiteral("统一管理本机训练项目、SQLite 元数据、数据集目录、运行目录和模型产物目录。"));
+    subtitle->setObjectName(QStringLiteral("ExperimentMeta"));
+    subtitle->setWordWrap(true);
+    titleLayout->addWidget(kicker);
+    titleLayout->addWidget(title);
+    titleLayout->addWidget(subtitle);
+    headerTop->addWidget(titleBlock, 1);
+    headerTop->addWidget(headerOpenButton);
+    headerRoot->addLayout(headerTop);
+
+    auto* headerGrid = new QGridLayout;
+    headerGrid->setHorizontalSpacing(12);
+    headerGrid->setVerticalSpacing(8);
+    auto* statusCaption = new QLabel(QStringLiteral("状态"));
+    statusCaption->setObjectName(QStringLiteral("ExperimentMeta"));
+    auto* policyCaption = new QLabel(QStringLiteral("目录"));
+    policyCaption->setObjectName(QStringLiteral("ExperimentMeta"));
+    projectConsoleStatusLabel_ = inlineStatusLabel(QStringLiteral("未打开项目。"));
+    projectConsoleStatusLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
+    auto* policyStatus = inlineStatusLabel(QStringLiteral("项目会生成 datasets、runs、models 和 project.sqlite。"));
+    policyStatus->setObjectName(QStringLiteral("DarkInlineStatus"));
+    headerGrid->addWidget(statusCaption, 0, 0);
+    headerGrid->addWidget(projectConsoleStatusLabel_, 0, 1);
+    headerGrid->addWidget(policyCaption, 1, 0);
+    headerGrid->addWidget(policyStatus, 1, 1);
+    headerRoot->addLayout(headerGrid);
+
+    auto* bodySplitter = new QSplitter(Qt::Horizontal);
+
     auto* formPanel = new InfoPanel(QStringLiteral("项目设置"));
     auto* form = new QFormLayout;
-    form->setLabelAlignment(Qt::AlignRight);
+    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     form->setFormAlignment(Qt::AlignTop);
+    form->setHorizontalSpacing(14);
+    form->setVerticalSpacing(10);
     projectNameEdit_ = new QLineEdit(QStringLiteral("本地训练项目"));
     projectRootEdit_ = new QLineEdit(QDir::toNativeSeparators(QDir::home().filePath(QStringLiteral("AITrainProjects/local_project"))));
     auto* browseButton = new QPushButton(QStringLiteral("选择目录"));
@@ -692,6 +827,7 @@ QWidget* MainWindow::buildProjectPage()
             projectRootEdit_->setText(QDir::toNativeSeparators(directory));
         }
     });
+    connect(headerOpenButton, &QPushButton::clicked, this, &MainWindow::createProject);
     connect(createButton, &QPushButton::clicked, this, &MainWindow::createProject);
 
     auto* pathRow = new QWidget;
@@ -702,18 +838,59 @@ QWidget* MainWindow::buildProjectPage()
     form->addRow(QStringLiteral("项目名称"), projectNameEdit_);
     form->addRow(QStringLiteral("项目目录"), pathRow);
     formPanel->bodyLayout()->addLayout(form);
-    formPanel->bodyLayout()->addWidget(createButton);
+    auto* actionStrip = new QFrame;
+    actionStrip->setObjectName(QStringLiteral("ActionStrip"));
+    auto* actionLayout = new QHBoxLayout(actionStrip);
+    actionLayout->setContentsMargins(10, 8, 10, 8);
+    actionLayout->setSpacing(10);
+    actionLayout->addWidget(mutedLabel(QStringLiteral("打开项目后，数据集、任务、导出记录和环境检查都会写入 project.sqlite。")), 1);
+    actionLayout->addWidget(createButton);
+    formPanel->bodyLayout()->addWidget(actionStrip);
     formPanel->bodyLayout()->addStretch();
 
-    auto* structurePanel = new InfoPanel(QStringLiteral("项目目录结构"));
+    auto* summaryPanel = new InfoPanel(QStringLiteral("项目摘要"));
+    auto* summaryGrid = new QGridLayout;
+    summaryGrid->setHorizontalSpacing(12);
+    summaryGrid->setVerticalSpacing(12);
+    auto* pathCard = createMetricCard(QStringLiteral("项目路径"), QStringLiteral("未打开"), QStringLiteral("当前项目根目录"));
+    projectPathSummaryLabel_ = pathCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
+    if (projectPathSummaryLabel_) {
+        projectPathSummaryLabel_->setWordWrap(true);
+        projectPathSummaryLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    }
+    auto* sqliteCard = createMetricCard(QStringLiteral("SQLite"), QStringLiteral("未连接"), QStringLiteral("项目元数据状态"));
+    projectSqliteSummaryLabel_ = sqliteCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
+    auto* datasetCard = createMetricCard(QStringLiteral("数据集"), QStringLiteral("0"), QStringLiteral("已登记数据集"));
+    projectDatasetSummaryLabel_ = datasetCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
+    auto* taskCard = createMetricCard(QStringLiteral("任务"), QStringLiteral("0"), QStringLiteral("训练、校验、导出、推理"));
+    projectTaskSummaryLabel_ = taskCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
+    auto* exportCard = createMetricCard(QStringLiteral("模型导出"), QStringLiteral("0"), QStringLiteral("已记录导出产物"));
+    projectExportSummaryLabel_ = exportCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
+    summaryGrid->addWidget(pathCard, 0, 0, 1, 2);
+    summaryGrid->addWidget(sqliteCard, 1, 0);
+    summaryGrid->addWidget(datasetCard, 1, 1);
+    summaryGrid->addWidget(taskCard, 2, 0);
+    summaryGrid->addWidget(exportCard, 2, 1);
+    summaryPanel->bodyLayout()->addLayout(summaryGrid);
+
+    auto* structurePanel = new InfoPanel(QStringLiteral("标准目录结构"));
     auto* structure = new QPlainTextEdit;
     structure->setReadOnly(true);
+    structure->setMaximumHeight(170);
     structure->setPlainText(QStringLiteral("datasets/\n  raw/\n  normalized/\nruns/\n  <task-id>/\nmodels/\n  exported/\nproject.sqlite"));
     structurePanel->bodyLayout()->addWidget(structure);
-    structurePanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("创建项目时会自动生成 datasets、runs、models 和 project.sqlite。")));
+    structurePanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("项目页只负责创建和打开工作区；训练、导出和推理仍通过 Worker 执行。")));
+    summaryPanel->bodyLayout()->addWidget(structurePanel);
 
-    layout->addWidget(formPanel, 2);
-    layout->addWidget(structurePanel, 1);
+    bodySplitter->addWidget(formPanel);
+    bodySplitter->addWidget(summaryPanel);
+    bodySplitter->setStretchFactor(0, 3);
+    bodySplitter->setStretchFactor(1, 4);
+    bodySplitter->setSizes(QList<int>() << 460 << 680);
+
+    layout->addWidget(headerPanel);
+    layout->addWidget(bodySplitter, 1);
+    updateProjectSummary();
     return page;
 }
 
@@ -1246,13 +1423,58 @@ QWidget* MainWindow::buildTaskQueuePage()
 QWidget* MainWindow::buildConversionPage()
 {
     auto* page = new QWidget;
-    auto* layout = new QHBoxLayout(page);
+    auto* layout = new QVBoxLayout(page);
     layout->setContentsMargins(18, 18, 18, 18);
     layout->setSpacing(16);
 
-    auto* inputPanel = new InfoPanel(QStringLiteral("输入模型"));
+    auto* headerExportButton = primaryButton(QStringLiteral("开始导出"));
+
+    auto* headerPanel = new QFrame;
+    headerPanel->setObjectName(QStringLiteral("ExperimentHeader"));
+    auto* headerRoot = new QVBoxLayout(headerPanel);
+    headerRoot->setContentsMargins(14, 12, 14, 12);
+    headerRoot->setSpacing(10);
+    auto* headerTop = new QHBoxLayout;
+    auto* titleBlock = new QWidget;
+    auto* titleLayout = new QVBoxLayout(titleBlock);
+    titleLayout->setContentsMargins(0, 0, 0, 0);
+    titleLayout->setSpacing(2);
+    auto* kicker = new QLabel(QStringLiteral("MODEL DELIVERY WORKBENCH"));
+    kicker->setObjectName(QStringLiteral("ExperimentKicker"));
+    auto* title = new QLabel(QStringLiteral("模型导出"));
+    title->setObjectName(QStringLiteral("ExperimentTitle"));
+    auto* subtitle = new QLabel(QStringLiteral("从训练产物生成 ONNX、NCNN、TensorRT 或诊断 JSON，并把报告写入任务与产物。"));
+    subtitle->setObjectName(QStringLiteral("ExperimentMeta"));
+    subtitle->setWordWrap(true);
+    titleLayout->addWidget(kicker);
+    titleLayout->addWidget(title);
+    titleLayout->addWidget(subtitle);
+    headerTop->addWidget(titleBlock, 1);
+    headerTop->addWidget(headerExportButton);
+    headerRoot->addLayout(headerTop);
+
+    auto* headerGrid = new QGridLayout;
+    headerGrid->setHorizontalSpacing(12);
+    headerGrid->setVerticalSpacing(8);
+    auto* sourceLabel = new QLabel(QStringLiteral("输入"));
+    sourceLabel->setObjectName(QStringLiteral("ExperimentMeta"));
+    auto* policyLabel = new QLabel(QStringLiteral("策略"));
+    policyLabel->setObjectName(QStringLiteral("ExperimentMeta"));
+    auto* sourceStatus = inlineStatusLabel(QStringLiteral("优先从“任务与产物”选择 checkpoint、ONNX 或官方训练产物。"));
+    sourceStatus->setObjectName(QStringLiteral("DarkInlineStatus"));
+    auto* policyStatus = inlineStatusLabel(QStringLiteral("导出只通过 Worker 执行；TensorRT 仍需 RTX / SM 75+ 外部验收。"));
+    policyStatus->setObjectName(QStringLiteral("DarkInlineStatus"));
+    headerGrid->addWidget(sourceLabel, 0, 0);
+    headerGrid->addWidget(sourceStatus, 0, 1);
+    headerGrid->addWidget(policyLabel, 1, 0);
+    headerGrid->addWidget(policyStatus, 1, 1);
+    headerRoot->addLayout(headerGrid);
+
+    auto* mainSplitter = new QSplitter(Qt::Horizontal);
+
+    auto* setupPanel = new InfoPanel(QStringLiteral("导出设置"));
     conversionCheckpointEdit_ = new QLineEdit;
-    conversionCheckpointEdit_->setPlaceholderText(QStringLiteral("checkpoint / ONNX / AITrain export path"));
+    conversionCheckpointEdit_->setPlaceholderText(QStringLiteral("从任务产物带入，或选择 checkpoint / ONNX / AITrain export"));
     auto* chooseCheckpointButton = new QPushButton(QStringLiteral("选择模型产物"));
     connect(chooseCheckpointButton, &QPushButton::clicked, this, [this]() {
         const QString file = QFileDialog::getOpenFileName(this, QStringLiteral("选择模型产物"), currentProjectPath_, QStringLiteral("AITrain model (*.aitrain *.json *.onnx *.pt *.pdparams *.engine *.plan);;All files (*.*)"));
@@ -1260,36 +1482,129 @@ QWidget* MainWindow::buildConversionPage()
             conversionCheckpointEdit_->setText(QDir::toNativeSeparators(file));
         }
     });
-    inputPanel->bodyLayout()->addWidget(conversionCheckpointEdit_);
-    inputPanel->bodyLayout()->addWidget(chooseCheckpointButton);
-    inputPanel->bodyLayout()->addStretch();
 
-    auto* exportPanel = new InfoPanel(QStringLiteral("导出配置"));
-    exportPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("模型输入优先从“任务与产物”带入，也可以手动选择。不同后端会在任务日志中写明可导出的真实格式。")));
     conversionFormatCombo_ = new QComboBox;
     conversionFormatCombo_->addItem(QStringLiteral("ONNX 模型"), QStringLiteral("onnx"));
     conversionFormatCombo_->addItem(QStringLiteral("NCNN param/bin（onnx2ncnn）"), QStringLiteral("ncnn"));
     conversionFormatCombo_->addItem(QStringLiteral("AITrain JSON（诊断）"), QStringLiteral("tiny_detector_json"));
     conversionFormatCombo_->addItem(QStringLiteral("TensorRT Engine（RTX / SM 75+ 外部验收）"), QStringLiteral("tensorrt"));
-    conversionOutputEdit_ = new QLineEdit;
-    conversionOutputEdit_->setPlaceholderText(QStringLiteral("输出路径；留空则输出到输入模型同目录"));
-    auto* exportButton = primaryButton(QStringLiteral("导出模型"));
-    connect(exportButton, &QPushButton::clicked, this, &MainWindow::startModelExport);
-    exportPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("NCNN 导出需要 onnx2ncnn，可通过 AITRAIN_NCNN_ONNX2NCNN 或 AITRAIN_NCNN_ROOT 配置；TensorRT 需要 RTX / SM 75+ 真机外部验收。")));
-    exportPanel->bodyLayout()->addWidget(conversionFormatCombo_);
-    exportPanel->bodyLayout()->addWidget(conversionOutputEdit_);
-    exportPanel->bodyLayout()->addWidget(exportButton);
-    exportPanel->bodyLayout()->addStretch();
 
-    auto* resultPanel = new InfoPanel(QStringLiteral("导出结果"));
-    resultPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("导出产物、ONNX shape 校验报告、NCNN param/bin 和后续 TensorRT engine 会显示在这里。")));
-    exportResultLabel_ = mutedLabel(QStringLiteral("暂无导出结果。"));
+    conversionOutputEdit_ = new QLineEdit;
+    conversionOutputEdit_->setPlaceholderText(QStringLiteral("留空则输出到项目 models/exported；未打开项目时使用输入同目录"));
+    auto* chooseOutputButton = new QPushButton(QStringLiteral("选择输出"));
+    connect(chooseOutputButton, &QPushButton::clicked, this, [this]() {
+        const QString format = conversionFormatCombo_
+            ? conversionFormatCombo_->currentData().toString()
+            : QStringLiteral("onnx");
+        const QString inputPath = QDir::fromNativeSeparators(conversionCheckpointEdit_ ? conversionCheckpointEdit_->text().trimmed() : QString());
+        const QString defaultDir = !currentProjectPath_.isEmpty()
+            ? QDir(currentProjectPath_).filePath(QStringLiteral("models/exported"))
+            : QFileInfo(inputPath).absolutePath();
+        const QString selected = QFileDialog::getSaveFileName(
+            this,
+            QStringLiteral("选择导出路径"),
+            QDir(defaultDir).filePath(defaultExportFileName(format)),
+            exportFileFilter(format));
+        if (!selected.isEmpty()) {
+            conversionOutputEdit_->setText(QDir::toNativeSeparators(selected));
+        }
+    });
+    auto* exportButton = primaryButton(QStringLiteral("开始导出"));
+    connect(headerExportButton, &QPushButton::clicked, this, &MainWindow::startModelExport);
+    connect(exportButton, &QPushButton::clicked, this, &MainWindow::startModelExport);
+
+    auto* inputRow = new QWidget;
+    auto* inputLayout = new QHBoxLayout(inputRow);
+    inputLayout->setContentsMargins(0, 0, 0, 0);
+    inputLayout->setSpacing(8);
+    inputLayout->addWidget(conversionCheckpointEdit_, 1);
+    inputLayout->addWidget(chooseCheckpointButton);
+
+    auto* outputRow = new QWidget;
+    auto* outputLayout = new QHBoxLayout(outputRow);
+    outputLayout->setContentsMargins(0, 0, 0, 0);
+    outputLayout->setSpacing(8);
+    outputLayout->addWidget(conversionOutputEdit_, 1);
+    outputLayout->addWidget(chooseOutputButton);
+
+    auto* form = new QFormLayout;
+    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    form->setHorizontalSpacing(14);
+    form->setVerticalSpacing(10);
+    form->addRow(QStringLiteral("模型输入"), inputRow);
+    form->addRow(QStringLiteral("目标格式"), conversionFormatCombo_);
+    form->addRow(QStringLiteral("输出路径"), outputRow);
+    setupPanel->bodyLayout()->addLayout(form);
+
+    auto* sourceHelp = emptyStateLabel(QStringLiteral("从“任务与产物”中选中 best.onnx、checkpoint 或官方导出目录后，可点击“用作导出输入”自动带入这里。"));
+    setupPanel->bodyLayout()->addWidget(sourceHelp);
+
+    auto* actionStrip = new QFrame;
+    actionStrip->setObjectName(QStringLiteral("ActionStrip"));
+    auto* actionLayout = new QHBoxLayout(actionStrip);
+    actionLayout->setContentsMargins(10, 8, 10, 8);
+    actionLayout->setSpacing(10);
+    actionLayout->addWidget(mutedLabel(QStringLiteral("导出任务会记录到任务历史，完成后可直接作为推理输入。")), 1);
+    actionLayout->addWidget(exportButton);
+    setupPanel->bodyLayout()->addWidget(actionStrip);
+    setupPanel->bodyLayout()->addStretch();
+
+    auto* rightStack = new QWidget;
+    auto* rightLayout = new QVBoxLayout(rightStack);
+    rightLayout->setContentsMargins(0, 0, 0, 0);
+    rightLayout->setSpacing(16);
+
+    auto* matrixPanel = new InfoPanel(QStringLiteral("格式矩阵"));
+    auto* matrixTable = new QTableWidget(4, 4);
+    matrixTable->setWordWrap(true);
+    matrixTable->setHorizontalHeaderLabels(QStringList()
+        << QStringLiteral("格式")
+        << QStringLiteral("输入")
+        << QStringLiteral("产物")
+        << QStringLiteral("状态"));
+    configureTable(matrixTable);
+    matrixTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    matrixTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    matrixTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    matrixTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    matrixTable->setMinimumHeight(170);
+    matrixTable->verticalHeader()->setDefaultSectionSize(44);
+    const QStringList formats = {
+        QStringLiteral("onnx"),
+        QStringLiteral("ncnn"),
+        QStringLiteral("tiny_detector_json"),
+        QStringLiteral("tensorrt")
+    };
+    for (int row = 0; row < formats.size(); ++row) {
+        const QString format = formats.at(row);
+        matrixTable->setItem(row, 0, new QTableWidgetItem(exportFormatLabel(format)));
+        matrixTable->setItem(row, 1, new QTableWidgetItem(
+            format == QStringLiteral("tiny_detector_json")
+                ? QStringLiteral("tiny detector checkpoint")
+                : QStringLiteral("checkpoint 或 ONNX")));
+        matrixTable->setItem(row, 2, new QTableWidgetItem(defaultExportFileName(format)));
+        matrixTable->setItem(row, 3, new QTableWidgetItem(exportFormatNote(format)));
+    }
+    matrixPanel->bodyLayout()->addWidget(matrixTable);
+
+    auto* resultPanel = new InfoPanel(QStringLiteral("运行状态"));
+    exportResultLabel_ = inlineStatusLabel(QStringLiteral("暂无导出任务。"));
     resultPanel->bodyLayout()->addWidget(exportResultLabel_);
+    resultPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("ONNX 会写入 AITrain sidecar；NCNN 依赖本机 onnx2ncnn；TensorRT 在当前 GTX 1060 / SM 61 上保持 hardware-blocked。")));
     resultPanel->bodyLayout()->addStretch();
 
-    layout->addWidget(inputPanel);
-    layout->addWidget(exportPanel);
-    layout->addWidget(resultPanel);
+    rightLayout->addWidget(matrixPanel);
+    rightLayout->addWidget(resultPanel, 1);
+
+    mainSplitter->addWidget(setupPanel);
+    mainSplitter->addWidget(rightStack);
+    mainSplitter->setStretchFactor(0, 3);
+    mainSplitter->setStretchFactor(1, 4);
+    mainSplitter->setSizes(QList<int>() << 520 << 680);
+
+    layout->addWidget(headerPanel);
+    layout->addWidget(mainSplitter, 1);
     return page;
 }
 
@@ -1369,25 +1684,95 @@ QWidget* MainWindow::buildPluginsPage()
     layout->setContentsMargins(18, 18, 18, 18);
     layout->setSpacing(16);
 
-    auto* toolbar = new InfoPanel(QStringLiteral("插件管理"));
     auto* refreshButton = primaryButton(QStringLiteral("重新扫描插件"));
     connect(refreshButton, &QPushButton::clicked, this, &MainWindow::refreshPlugins);
-    toolbar->bodyLayout()->addWidget(refreshButton);
+
+    auto* headerPanel = new QFrame;
+    headerPanel->setObjectName(QStringLiteral("ExperimentHeader"));
+    auto* headerRoot = new QVBoxLayout(headerPanel);
+    headerRoot->setContentsMargins(14, 12, 14, 12);
+    headerRoot->setSpacing(10);
+    auto* headerTop = new QHBoxLayout;
+    auto* titleBlock = new QWidget;
+    auto* titleLayout = new QVBoxLayout(titleBlock);
+    titleLayout->setContentsMargins(0, 0, 0, 0);
+    titleLayout->setSpacing(2);
+    auto* kicker = new QLabel(QStringLiteral("PLUGIN CAPABILITY MATRIX"));
+    kicker->setObjectName(QStringLiteral("ExperimentKicker"));
+    auto* title = new QLabel(QStringLiteral("插件能力矩阵"));
+    title->setObjectName(QStringLiteral("ExperimentTitle"));
+    auto* subtitle = new QLabel(QStringLiteral("扫描模型、数据集、导出和推理扩展能力；插件仍只通过公共接口暴露能力。"));
+    subtitle->setObjectName(QStringLiteral("ExperimentMeta"));
+    subtitle->setWordWrap(true);
+    titleLayout->addWidget(kicker);
+    titleLayout->addWidget(title);
+    titleLayout->addWidget(subtitle);
+    headerTop->addWidget(titleBlock, 1);
+    headerTop->addWidget(refreshButton);
+    headerRoot->addLayout(headerTop);
+
+    auto* headerGrid = new QGridLayout;
+    headerGrid->setHorizontalSpacing(12);
+    headerGrid->setVerticalSpacing(8);
+    auto* scanCaption = new QLabel(QStringLiteral("扫描"));
+    scanCaption->setObjectName(QStringLiteral("ExperimentMeta"));
+    auto* pathCaption = new QLabel(QStringLiteral("路径"));
+    pathCaption->setObjectName(QStringLiteral("ExperimentMeta"));
+    pluginConsoleStatusLabel_ = inlineStatusLabel(QStringLiteral("等待插件扫描。"));
+    pluginConsoleStatusLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
+    pluginSearchPathLabel_ = inlineStatusLabel(QStringLiteral("插件搜索路径：未初始化"));
+    pluginSearchPathLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
+    headerGrid->addWidget(scanCaption, 0, 0);
+    headerGrid->addWidget(pluginConsoleStatusLabel_, 0, 1);
+    headerGrid->addWidget(pathCaption, 1, 0);
+    headerGrid->addWidget(pluginSearchPathLabel_, 1, 1);
+    headerRoot->addLayout(headerGrid);
+
+    auto* summaryStrip = new QFrame;
+    summaryStrip->setObjectName(QStringLiteral("ActionStrip"));
+    auto* summaryLayout = new QGridLayout(summaryStrip);
+    summaryLayout->setContentsMargins(12, 12, 12, 12);
+    summaryLayout->setHorizontalSpacing(12);
+    summaryLayout->setVerticalSpacing(12);
+    auto* pluginCountCard = createMetricCard(QStringLiteral("已加载插件"), QStringLiteral("0"), QStringLiteral("manifest 已加载"));
+    pluginCountSummaryLabel_ = pluginCountCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
+    auto* datasetFormatCard = createMetricCard(QStringLiteral("数据集格式"), QStringLiteral("0"), QStringLiteral("可识别 / 校验格式"));
+    pluginDatasetFormatSummaryLabel_ = datasetFormatCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
+    auto* exportFormatCard = createMetricCard(QStringLiteral("导出格式"), QStringLiteral("0"), QStringLiteral("插件声明的导出目标"));
+    pluginExportFormatSummaryLabel_ = exportFormatCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
+    auto* gpuCard = createMetricCard(QStringLiteral("GPU 需求"), QStringLiteral("0"), QStringLiteral("声明需要 GPU 的插件"));
+    pluginGpuSummaryLabel_ = gpuCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
+    summaryLayout->addWidget(pluginCountCard, 0, 0);
+    summaryLayout->addWidget(datasetFormatCard, 0, 1);
+    summaryLayout->addWidget(exportFormatCard, 0, 2);
+    summaryLayout->addWidget(gpuCard, 0, 3);
 
     auto* tablePanel = new InfoPanel(QStringLiteral("已加载插件"));
-    pluginTable_ = new QTableWidget(0, 6);
+    pluginTable_ = new QTableWidget(0, 7);
     pluginTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("ID")
         << QStringLiteral("名称")
         << QStringLiteral("版本")
         << QStringLiteral("任务")
         << QStringLiteral("数据集")
-        << QStringLiteral("导出"));
+        << QStringLiteral("导出")
+        << QStringLiteral("GPU"));
     configureTable(pluginTable_);
+    pluginTable_->setWordWrap(true);
+    pluginTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    pluginTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    pluginTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    pluginTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
+    pluginTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
+    pluginTable_->horizontalHeader()->setSectionResizeMode(5, QHeaderView::Stretch);
+    pluginTable_->horizontalHeader()->setSectionResizeMode(6, QHeaderView::ResizeToContents);
+    pluginTable_->verticalHeader()->setDefaultSectionSize(42);
     tablePanel->bodyLayout()->addWidget(pluginTable_);
 
-    layout->addWidget(toolbar);
+    layout->addWidget(headerPanel);
+    layout->addWidget(summaryStrip);
     layout->addWidget(tablePanel, 1);
+    updatePluginSummary();
     return page;
 }
 
@@ -1398,12 +1783,65 @@ QWidget* MainWindow::buildEnvironmentPage()
     layout->setContentsMargins(18, 18, 18, 18);
     layout->setSpacing(16);
 
-    auto* panel = new InfoPanel(QStringLiteral("环境自检"));
     auto* runButton = primaryButton(QStringLiteral("执行环境自检"));
     connect(runButton, &QPushButton::clicked, this, &MainWindow::runEnvironmentCheck);
+
+    auto* headerPanel = new QFrame;
+    headerPanel->setObjectName(QStringLiteral("ExperimentHeader"));
+    auto* headerRoot = new QVBoxLayout(headerPanel);
+    headerRoot->setContentsMargins(14, 12, 14, 12);
+    headerRoot->setSpacing(10);
+    auto* headerTop = new QHBoxLayout;
+    auto* titleBlock = new QWidget;
+    auto* titleLayout = new QVBoxLayout(titleBlock);
+    titleLayout->setContentsMargins(0, 0, 0, 0);
+    titleLayout->setSpacing(2);
+    auto* kicker = new QLabel(QStringLiteral("RUNTIME HEALTH"));
+    kicker->setObjectName(QStringLiteral("ExperimentKicker"));
+    auto* title = new QLabel(QStringLiteral("运行时健康面板"));
+    title->setObjectName(QStringLiteral("ExperimentTitle"));
+    auto* subtitle = new QLabel(QStringLiteral("检查 NVIDIA 驱动、CUDA、TensorRT、ONNX Runtime、Qt 插件和 Worker 可用性。"));
+    subtitle->setObjectName(QStringLiteral("ExperimentMeta"));
+    subtitle->setWordWrap(true);
+    titleLayout->addWidget(kicker);
+    titleLayout->addWidget(title);
+    titleLayout->addWidget(subtitle);
+    headerTop->addWidget(titleBlock, 1);
+    headerTop->addWidget(runButton);
+    headerRoot->addLayout(headerTop);
+
+    environmentConsoleStatusLabel_ = inlineStatusLabel(QStringLiteral("尚未执行环境自检。"));
+    environmentConsoleStatusLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
+    headerRoot->addWidget(environmentConsoleStatusLabel_);
+
+    auto* summaryStrip = new QFrame;
+    summaryStrip->setObjectName(QStringLiteral("ActionStrip"));
+    auto* summaryLayout = new QGridLayout(summaryStrip);
+    summaryLayout->setContentsMargins(12, 12, 12, 12);
+    summaryLayout->setHorizontalSpacing(12);
+    summaryLayout->setVerticalSpacing(12);
+    auto* okCard = createMetricCard(QStringLiteral("通过"), QStringLiteral("0"), QStringLiteral("可用依赖"));
+    environmentOkSummaryLabel_ = okCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
+    auto* warningCard = createMetricCard(QStringLiteral("警告"), QStringLiteral("0"), QStringLiteral("可继续但需关注"));
+    environmentWarningSummaryLabel_ = warningCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
+    auto* missingCard = createMetricCard(QStringLiteral("缺失"), QStringLiteral("0"), QStringLiteral("会阻塞相关能力"));
+    environmentMissingSummaryLabel_ = missingCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
+    auto* uncheckedCard = createMetricCard(QStringLiteral("未检测"), QStringLiteral("0"), QStringLiteral("等待 Worker 自检"));
+    environmentUncheckedSummaryLabel_ = uncheckedCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
+    summaryLayout->addWidget(okCard, 0, 0);
+    summaryLayout->addWidget(warningCard, 0, 1);
+    summaryLayout->addWidget(missingCard, 0, 2);
+    summaryLayout->addWidget(uncheckedCard, 0, 3);
+
+    auto* panel = new InfoPanel(QStringLiteral("检查明细"));
     environmentTable_ = new QTableWidget(0, 3);
     environmentTable_->setHorizontalHeaderLabels(QStringList() << QStringLiteral("检查项") << QStringLiteral("状态") << QStringLiteral("说明"));
     configureTable(environmentTable_);
+    environmentTable_->setWordWrap(true);
+    environmentTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    environmentTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    environmentTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    environmentTable_->verticalHeader()->setDefaultSectionSize(42);
     const QStringList rows = {
         QStringLiteral("NVIDIA Driver"),
         QStringLiteral("CUDA Runtime"),
@@ -1422,9 +1860,12 @@ QWidget* MainWindow::buildEnvironmentPage()
         environmentTable_->setItem(row, 1, new QTableWidgetItem(QStringLiteral("未检测")));
         environmentTable_->setItem(row, 2, new QTableWidgetItem(QStringLiteral("点击执行环境自检。")));
     }
-    panel->bodyLayout()->addWidget(runButton);
+    panel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("TensorRT 真机验收仍需要 RTX / SM 75+。当前 GTX 1060 / SM 61 只能记录为 hardware-blocked。")));
     panel->bodyLayout()->addWidget(environmentTable_);
+    layout->addWidget(headerPanel);
+    layout->addWidget(summaryStrip);
     layout->addWidget(panel);
+    updateEnvironmentSummary();
     return page;
 }
 
@@ -1675,12 +2116,11 @@ void MainWindow::startModelExport()
         : QStringLiteral("tiny_detector_json");
     QString outputPath = QDir::fromNativeSeparators(conversionOutputEdit_ ? conversionOutputEdit_->text().trimmed() : QString());
     if (outputPath.isEmpty()) {
-        outputPath = QFileInfo(checkpointPath).absoluteDir().filePath(
-            format == QStringLiteral("onnx")
-                ? QStringLiteral("model.onnx")
-                : (format == QStringLiteral("ncnn")
-                    ? QStringLiteral("model.param")
-                    : (format == QStringLiteral("tensorrt") ? QStringLiteral("model.engine") : QStringLiteral("model.aitrain-export.json"))));
+        const QString outputDir = !currentProjectPath_.isEmpty()
+            ? QDir(currentProjectPath_).filePath(QStringLiteral("models/exported"))
+            : QFileInfo(checkpointPath).absoluteDir().absolutePath();
+        QDir().mkpath(outputDir);
+        outputPath = QDir(outputDir).filePath(defaultExportFileName(format));
     }
 
     QString taskId;
@@ -1933,6 +2373,7 @@ void MainWindow::runEnvironmentCheck()
             environmentTable_->setItem(row, 2, new QTableWidgetItem(QStringLiteral("等待 Worker 返回结果。")));
         }
     }
+    updateEnvironmentSummary();
 
     QString error;
     if (!worker_.requestEnvironmentCheck(workerExecutablePath(), &error)) {
@@ -2071,20 +2512,30 @@ void MainWindow::refreshPlugins()
     pluginManager_.scan(pluginSearchPaths());
     if (pluginTable_) {
         pluginTable_->setRowCount(0);
-        for (auto* plugin : pluginManager_.plugins()) {
+        const QVector<aitrain::IModelPlugin*> plugins = pluginManager_.plugins();
+        if (plugins.isEmpty()) {
+            pluginTable_->setRowCount(1);
+            pluginTable_->setItem(0, 0, new QTableWidgetItem(QStringLiteral("暂无插件")));
+            for (int column = 1; column < pluginTable_->columnCount(); ++column) {
+                pluginTable_->setItem(0, column, new QTableWidgetItem(QStringLiteral("重新扫描或检查 plugins/models 目录。")));
+            }
+        }
+        for (auto* plugin : plugins) {
             const aitrain::PluginManifest manifest = plugin->manifest();
             const int row = pluginTable_->rowCount();
             pluginTable_->insertRow(row);
             pluginTable_->setItem(row, 0, new QTableWidgetItem(manifest.id));
             pluginTable_->setItem(row, 1, new QTableWidgetItem(manifest.name));
             pluginTable_->setItem(row, 2, new QTableWidgetItem(manifest.version));
-            pluginTable_->setItem(row, 3, new QTableWidgetItem(manifest.taskTypes.join(QStringLiteral(", "))));
-            pluginTable_->setItem(row, 4, new QTableWidgetItem(manifest.datasetFormats.join(QStringLiteral(", "))));
-            pluginTable_->setItem(row, 5, new QTableWidgetItem(manifest.exportFormats.join(QStringLiteral(", "))));
+            pluginTable_->setItem(row, 3, new QTableWidgetItem(compactListSummary(manifest.taskTypes, 4)));
+            pluginTable_->setItem(row, 4, new QTableWidgetItem(compactListSummary(manifest.datasetFormats, 4)));
+            pluginTable_->setItem(row, 5, new QTableWidgetItem(compactListSummary(manifest.exportFormats, 4)));
+            pluginTable_->setItem(row, 6, new QTableWidgetItem(manifest.requiresGpu ? QStringLiteral("需要") : QStringLiteral("否")));
         }
     }
     loadPluginCombos();
     updateHeaderState();
+    updatePluginSummary();
     updateDashboardSummary();
     refreshTrainingDefaults();
 }
@@ -2635,6 +3086,7 @@ void MainWindow::updateHeaderState()
     if (dashboardPluginValue_) {
         dashboardPluginValue_->setText(QString::number(pluginCount));
     }
+    updatePluginSummary();
 }
 
 void MainWindow::updateEnvironmentTable(const QJsonObject& payload)
@@ -2709,6 +3161,7 @@ void MainWindow::updateEnvironmentTable(const QJsonObject& payload)
     if (dashboardEnvironmentValue_) {
         dashboardEnvironmentValue_->setText(hasMissing ? QStringLiteral("缺失") : (hasWarning ? QStringLiteral("警告") : QStringLiteral("通过")));
     }
+    updateEnvironmentSummary();
     updateDashboardSummary();
     statusBar()->showMessage(QStringLiteral("环境自检完成"), 5000);
 }
@@ -2906,6 +3359,127 @@ void MainWindow::configureTable(QTableWidget* table) const
     table->setShowGrid(false);
 }
 
+void MainWindow::updateProjectSummary()
+{
+    const bool hasProject = !currentProjectPath_.isEmpty() && repository_.isOpen();
+    if (projectConsoleStatusLabel_) {
+        projectConsoleStatusLabel_->setText(hasProject
+            ? QStringLiteral("已打开：%1").arg(currentProjectName_)
+            : QStringLiteral("未打开项目。"));
+    }
+    if (projectPathSummaryLabel_) {
+        projectPathSummaryLabel_->setText(hasProject
+            ? QDir::toNativeSeparators(currentProjectPath_)
+            : QStringLiteral("未打开"));
+    }
+    if (projectSqliteSummaryLabel_) {
+        projectSqliteSummaryLabel_->setText(hasProject ? QStringLiteral("已连接") : QStringLiteral("未连接"));
+    }
+
+    int datasetCount = 0;
+    int taskCount = 0;
+    int exportCount = 0;
+    if (hasProject) {
+        QString error;
+        datasetCount = repository_.recentDatasets(200, &error).size();
+        taskCount = repository_.recentTasks(200, &error).size();
+        exportCount = repository_.recentExports(200, &error).size();
+    }
+    if (projectDatasetSummaryLabel_) {
+        projectDatasetSummaryLabel_->setText(QString::number(datasetCount));
+    }
+    if (projectTaskSummaryLabel_) {
+        projectTaskSummaryLabel_->setText(QString::number(taskCount));
+    }
+    if (projectExportSummaryLabel_) {
+        projectExportSummaryLabel_->setText(QString::number(exportCount));
+    }
+}
+
+void MainWindow::updatePluginSummary()
+{
+    const QVector<aitrain::IModelPlugin*> plugins = pluginManager_.plugins();
+    QStringList datasetFormats;
+    QStringList exportFormats;
+    int gpuPlugins = 0;
+    for (auto* plugin : plugins) {
+        const aitrain::PluginManifest manifest = plugin->manifest();
+        if (manifest.requiresGpu) {
+            ++gpuPlugins;
+        }
+        datasetFormats.append(manifest.datasetFormats);
+        exportFormats.append(manifest.exportFormats);
+    }
+
+    if (pluginConsoleStatusLabel_) {
+        pluginConsoleStatusLabel_->setText(plugins.isEmpty()
+            ? QStringLiteral("未加载插件，请检查插件目录。")
+            : QStringLiteral("已加载 %1 个插件。").arg(plugins.size()));
+    }
+    if (pluginSearchPathLabel_) {
+        pluginSearchPathLabel_->setText(QStringLiteral("插件搜索路径：%1").arg(pluginSearchPaths().join(QStringLiteral(" | "))));
+    }
+    if (pluginCountSummaryLabel_) {
+        pluginCountSummaryLabel_->setText(QString::number(plugins.size()));
+    }
+    if (pluginDatasetFormatSummaryLabel_) {
+        pluginDatasetFormatSummaryLabel_->setText(QString::number(uniqueStringCount(datasetFormats)));
+        pluginDatasetFormatSummaryLabel_->setToolTip(compactListSummary(datasetFormats, 12));
+    }
+    if (pluginExportFormatSummaryLabel_) {
+        pluginExportFormatSummaryLabel_->setText(QString::number(uniqueStringCount(exportFormats)));
+        pluginExportFormatSummaryLabel_->setToolTip(compactListSummary(exportFormats, 12));
+    }
+    if (pluginGpuSummaryLabel_) {
+        pluginGpuSummaryLabel_->setText(QString::number(gpuPlugins));
+    }
+}
+
+void MainWindow::updateEnvironmentSummary()
+{
+    int ok = 0;
+    int warning = 0;
+    int missing = 0;
+    int unchecked = 0;
+    if (environmentTable_) {
+        for (int row = 0; row < environmentTable_->rowCount(); ++row) {
+            const QString state = environmentTable_->item(row, 1) ? environmentTable_->item(row, 1)->text() : QString();
+            if (state == QStringLiteral("通过")) {
+                ++ok;
+            } else if (state == QStringLiteral("警告")) {
+                ++warning;
+            } else if (state == QStringLiteral("缺失")) {
+                ++missing;
+            } else {
+                ++unchecked;
+            }
+        }
+    }
+    if (environmentOkSummaryLabel_) {
+        environmentOkSummaryLabel_->setText(QString::number(ok));
+    }
+    if (environmentWarningSummaryLabel_) {
+        environmentWarningSummaryLabel_->setText(QString::number(warning));
+    }
+    if (environmentMissingSummaryLabel_) {
+        environmentMissingSummaryLabel_->setText(QString::number(missing));
+    }
+    if (environmentUncheckedSummaryLabel_) {
+        environmentUncheckedSummaryLabel_->setText(QString::number(unchecked));
+    }
+    if (environmentConsoleStatusLabel_) {
+        if (missing > 0) {
+            environmentConsoleStatusLabel_->setText(QStringLiteral("发现 %1 项缺失，相关能力会被阻塞。").arg(missing));
+        } else if (warning > 0) {
+            environmentConsoleStatusLabel_->setText(QStringLiteral("发现 %1 项警告，可继续但需要关注。").arg(warning));
+        } else if (unchecked > 0) {
+            environmentConsoleStatusLabel_->setText(QStringLiteral("尚有 %1 项未检测。").arg(unchecked));
+        } else {
+            environmentConsoleStatusLabel_->setText(QStringLiteral("环境自检通过。"));
+        }
+    }
+}
+
 void MainWindow::updateDashboardSummary()
 {
     const bool hasProject = !currentProjectPath_.isEmpty() && repository_.isOpen();
@@ -2969,6 +3543,9 @@ void MainWindow::updateDashboardSummary()
     if (dashboardEnvironmentValue_) {
         dashboardEnvironmentValue_->setText(environmentText);
     }
+    updateProjectSummary();
+    updatePluginSummary();
+    updateEnvironmentSummary();
 
     if (dashboardNextStepLabel_) {
         QString nextStep;

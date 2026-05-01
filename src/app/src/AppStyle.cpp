@@ -116,6 +116,10 @@ void apply(QApplication& app)
             min-height: 24px;
         }
 
+        QLabel#InlineStatus a {
+            color: #2563EB;
+        }
+
         QLabel#DarkInlineStatus {
             color: #F9FAFB;
             background: #1F2937;
@@ -145,7 +149,7 @@ void apply(QApplication& app)
 
         QLabel#MetricValue {
             color: #111827;
-            font-size: 18pt;
+            font-size: 15pt;
             font-weight: 700;
         }
 
@@ -223,6 +227,10 @@ void apply(QApplication& app)
             border-radius: 6px;
         }
 
+        QFrame#ActionStrip QFrame#Panel {
+            border-color: #E5E7EB;
+        }
+
         QGroupBox {
             border: 1px solid #D8DEE6;
             border-radius: 6px;
@@ -275,6 +283,8 @@ void apply(QApplication& app)
             border: 1px solid #D8DEE6;
             border-radius: 5px;
             alternate-background-color: #F9FAFB;
+            selection-background-color: #DBEAFE;
+            selection-color: #111827;
         }
 
         QHeaderView::section {
