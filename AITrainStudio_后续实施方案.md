@@ -707,3 +707,45 @@ python examples\create-minimal-datasets.py --output .deps\next-smoke
 - 训练页能根据数据集类型默认选择官方 YOLO / OCR 后端。
 - scaffold 后端仅在高级 / 诊断区域出现，并有明确占位标注。
 - 跑一次训练 / 导出 / 推理后，任务与产物页能查看 report、ONNX、overlay、prediction JSON。
+
+## 21. 阶段 28-30：标注工作流与本机 RC 收口
+
+目标：在 Phase 27 成熟工作台的基础上，把本机使用链路从“可验收”推进到“可日常操作、可排错、可发布候选包复验”。这些阶段不新增训练算法，也不改变 Worker JSON 协议、SQLite schema 或插件接口。
+
+已完成 / 本阶段实施内容：
+
+- 阶段 28：数据标注工作流产品化。
+  - 数据集页固定使用 X-AnyLabeling 作为外部标注工具，不再暴露 LabelMe / AnyLabeling 二选一。
+  - 自动检测 `AITRAIN_XANYLABELING_EXE`、程序目录、`tools\x-anylabeling`、`.deps\annotation-tools\X-AnyLabeling` 和 PATH。
+  - 提供“启动 X-AnyLabeling”“检测状态”“标注后刷新 / 重新校验”“打开数据目录”动作。
+  - 明确推荐导出格式：检测使用 YOLO bbox，分割使用 YOLO polygon，COCO 先在标注工具内转换；OCR Rec 当前仍以 `rec_gt.txt` / `rec_gt_train.txt` 和 `dict.txt` 为训练入口。
+- 阶段 29：发布候选包验收。
+  - 继续以 `package-smoke.ps1` 和 `acceptance-smoke.ps1 -LocalBaseline -Package` 作为本机 RC gate。
+  - 包体必须保留 docs、examples、requirements、Worker、plugins、Python trainers 和 acceptance scripts。
+  - `.deps`、下载的 X-AnyLabeling、公开数据集、模型权重和训练产物仍不进入源码提交；是否随产品分发 X-AnyLabeling 需单独做第三方许可和体积分发评审。
+- 阶段 30：真实使用体验增强。
+  - 数据集导入后继续自动识别任务类型，并推荐官方训练后端。
+  - 训练页显示更明确的“当前模型能力说明”，把 scaffold / protocol 后端标注为诊断能力。
+  - 任务与产物页支持按类别、状态和搜索文本过滤。
+  - 失败任务详情显示可读失败摘要和下一步排查建议。
+
+边界：
+
+- 标注工具保持为外部进程，不嵌入 `MainWindow`。
+- 不把训练、导出、推理或标注业务逻辑放进 GUI 线程。
+- TensorRT 真验收仍需 RTX / SM 75+，当前 GTX 1060 / SM 61 继续记录为 hardware-blocked。
+
+验收：
+
+```powershell
+.\tools\harness-check.ps1
+.\tools\package-smoke.ps1 -SkipBuild
+.\tools\acceptance-smoke.ps1 -LocalBaseline -Package -SkipBuild
+```
+
+手工 GUI 验收：
+
+- 导入 generated detection / segmentation / OCR Rec 数据集。
+- 在数据集页确认 X-AnyLabeling 状态为已安装，启动标注工具，返回后执行“标注后刷新 / 重新校验”。
+- 校验、划分、训练、导出、推理各跑一次。
+- 在任务与产物页使用类别、状态和搜索过滤；失败任务应显示明确排查建议。

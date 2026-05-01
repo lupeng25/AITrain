@@ -10,6 +10,7 @@ This repository implements the first usable platform layer from the requested pl
 - Qt plugin interfaces for model, dataset, training, validation, export, and inference extensions.
 - Built-in plugin manifests for YOLO-style detection/segmentation, PaddleOCR-style recognition, and dataset interop.
 - Dataset validation and split helpers for YOLO detection, YOLO segmentation, and PaddleOCR recognition label files.
+- External annotation workflow entrypoint for X-AnyLabeling, with local tool detection and a post-labeling refresh/revalidation path.
 - Segmentation admission scaffold with dataset loading, polygon-to-mask conversion, overlay preview, Worker metrics, and scaffold checkpoints.
 - Worker-managed Python trainer adapters for Ultralytics YOLO detection, Ultralytics YOLO segmentation, PaddlePaddle OCR Rec CPU smoke training, and official PaddleOCR PP-OCRv4 Rec train/export/inference orchestration.
 - QtTest coverage for JSONL protocol, project repository behavior, detection workflow, and segmentation admission behavior.
@@ -79,7 +80,7 @@ Print the project context:
 
 ## Acceptance
 
-Phase 17-26 delivery acceptance is documented in `docs/acceptance-runbook.md`.
+Phase 17-30 delivery acceptance is documented in `docs/acceptance-runbook.md`.
 
 Run the local baseline and packaged layout smoke checks with:
 
@@ -125,3 +126,16 @@ Official PaddleOCR Rec train/export/inference smoke can be run in an isolated OC
 ```powershell
 .\tools\phase16-ocr-official-smoke.ps1
 ```
+
+## Annotation Tool
+
+The dataset page uses X-AnyLabeling as the default external annotation tool. The GUI detects it from `AITRAIN_XANYLABELING_EXE`, the app directory, `tools\x-anylabeling`, `.deps\annotation-tools\X-AnyLabeling`, or `PATH`.
+
+Recommended exports:
+
+- YOLO detection: YOLO bbox labels.
+- YOLO segmentation: YOLO polygon labels.
+- COCO: convert inside X-AnyLabeling before importing into the current YOLO/PaddleOCR training flows.
+- OCR Rec: AITrain currently trains from `rec_gt.txt` / `rec_gt_train.txt` plus `dict.txt`.
+
+Downloaded annotation binaries should stay under `.deps\` or another local dependency directory unless a separate redistribution review is completed.

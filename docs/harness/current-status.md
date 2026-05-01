@@ -35,6 +35,9 @@ This file is the source of truth for phase status in new AI coding conversations
 | Phase 25: Public dataset materialization stabilization | Done locally | Added `tools\materialize-ultralytics-dataset.py` and wired `acceptance-smoke.ps1 -PublicDatasets` to materialize COCO8 / COCO8-seg from the installed Ultralytics package yaml and download URL. Reports record source yaml, download URL, Ultralytics version, output `data.yaml`, and fallback state; `-RequirePublicDatasets` fails clearly instead of falling back. |
 | Phase 26: Official PaddleOCR Rec chain enhancement | Done locally | The official PaddleOCR adapter supports explicit train/val label files, dictionary file, official config, pretrained/resume checkpoints, export-only mode, post-export official inference, inference image, and `recImageShape`. Reports now record Python/Paddle/PaddleOCR versions, PaddleOCR source refs, commands, configs, labels, dictionary, checkpoint/model paths, metrics, exit codes, log paths, and `official_prediction.json` when inference is requested. |
 | Phase 27: Mature local workbench UI | Done locally; manual GUI walkthrough still recommended | The Qt Widgets shell has been reorganized into grouped workbench navigation, a project/data/task/model/environment dashboard, dataset library/details workflow, official-backend-first training launch controls, task-history-centered artifact browsing, and less demo-like export/inference copy. This is UI information architecture only; Worker JSON, SQLite schema, plugin interfaces, and training implementation remain unchanged. |
+| Phase 28: Annotation workflow productization | Done locally; manual GUI walkthrough still recommended | The dataset page now uses X-AnyLabeling as the fixed external annotation tool, detects local installation paths, launches it with the selected dataset path, documents recommended export formats, and provides a post-labeling refresh/revalidation action. LabelMe is no longer exposed as a UI choice. |
+| Phase 29: Release-candidate package validation | Done locally; external clean-machine check pending | The release-candidate path remains source/package smoke driven: package layout includes docs, examples, Python trainers, requirements, Worker, plugins, and acceptance scripts while excluding `.deps`, downloaded tools, datasets, model weights, and build artifacts from source control. `package-smoke.ps1`, `acceptance-smoke.ps1 -LocalBaseline -Package -SkipBuild`, and CPack ZIP generation pass locally. X-AnyLabeling remains a local dependency unless separately reviewed for redistribution. |
+| Phase 30: Daily usability enhancements | Done locally; manual GUI walkthrough still recommended | Dataset import already auto-detects YOLO detection, YOLO segmentation, and PaddleOCR Rec formats and recommends official backends. The training page now gives clearer current-backend capability text, task history can be filtered by category/status/search, and failed tasks show a short diagnostic next-step summary. |
 
 ## Local Hardware Note
 
@@ -51,7 +54,7 @@ Recorded on 2026-04-30:
 
 ## Current Next Task
 
-Current local follow-up: perform a manual GUI walkthrough for Phase 27, use the GUI for the daily workflow, and keep external TensorRT blocked until an RTX / SM 75+ machine is available:
+Current local follow-up: perform a manual GUI walkthrough for Phase 27-30, use the GUI for the daily workflow, and keep external TensorRT blocked until an RTX / SM 75+ machine is available:
 
 - keep Phase 7 marked as code complete but hardware-blocked on this GTX 1060 / SM 61 machine
 - Phase 8 is complete as an adapter/protocol layer; `python_mock` remains a scaffold protocol fixture
@@ -74,6 +77,9 @@ Current local follow-up: perform a manual GUI walkthrough for Phase 27, use the 
 - Phase 25 public dataset materialization is split into a standalone script and has required/fallback modes
 - Phase 26 official PaddleOCR Rec smoke now covers train, export, and official inference on one generated sample
 - Phase 27 local automated checks pass; run a manual GUI walkthrough after future layout changes because screenshot/interaction QA is not covered by `harness-check.ps1`
+- Phase 28 X-AnyLabeling integration is local-only by default; downloaded binaries under `.deps\annotation-tools` must not be committed.
+- Phase 29 source/package smoke remains the release-candidate gate; generated ZIP/package artifacts must not be staged unless explicitly requested.
+- Phase 30 improves GUI guidance and filtering only; it does not add new training algorithms.
 - keep training logic inside core/plugin/Worker boundaries, not in `MainWindow`
 - keep C++ tiny detector as a scaffold/demo/test backend until the Python path is stable
 - preserve the external TensorRT acceptance checklist for a future RTX / SM 75+ machine

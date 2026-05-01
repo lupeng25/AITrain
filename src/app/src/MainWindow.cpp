@@ -32,6 +32,7 @@
 #include <QSignalBlocker>
 #include <QSplitter>
 #include <QStatusBar>
+#include <QStandardPaths>
 #include <QTime>
 #include <QVBoxLayout>
 #include <QUrl>
@@ -194,24 +195,24 @@ QString defaultModelForBackend(const QString& backend)
 QString trainingBackendDescription(const QString& backend)
 {
     if (backend == QStringLiteral("ultralytics_yolo_detect")) {
-        return QStringLiteral("官方 Ultralytics YOLO detection 后端，输出 best.pt、ONNX 和训练报告。");
+        return QStringLiteral("当前模型能力：官方 Ultralytics YOLO detection。适合 YOLO bbox 数据，输出 best.pt、ONNX、训练报告，可继续做 ONNX Runtime 推理和 overlay 验证。");
     }
     if (backend == QStringLiteral("ultralytics_yolo_segment")) {
-        return QStringLiteral("官方 Ultralytics YOLO segmentation 后端，输出 mask 指标、best.pt、ONNX 和训练报告。");
+        return QStringLiteral("当前模型能力：官方 Ultralytics YOLO segmentation。适合 YOLO polygon 数据，输出 mask 指标、best.pt、ONNX，并可生成 mask prediction JSON 与 overlay。");
     }
     if (backend == QStringLiteral("paddleocr_rec")) {
-        return QStringLiteral("PaddlePaddle CTC OCR Rec 后端，用于本机 OCR Rec smoke 和 ONNX CTC 推理闭环。");
+        return QStringLiteral("当前模型能力：PaddlePaddle CTC OCR Rec。适合 rec_gt.txt + dict.txt 小规模识别数据，可导出 ONNX 并走 C++ CTC greedy decode。");
     }
     if (backend == QStringLiteral("paddleocr_rec_official") || backend == QStringLiteral("paddleocr_ppocrv4_rec")) {
-        return QStringLiteral("官方 PaddleOCR PP-OCRv4 Rec 适配器；完整训练建议使用隔离 OCR Python 环境。");
+        return QStringLiteral("当前模型能力：官方 PaddleOCR PP-OCRv4 Rec 适配器。适合隔离 OCR Python 环境，记录 train/export/predict 命令、checkpoint、inference model 和官方预测报告。");
     }
     if (backend == QStringLiteral("tiny_linear_detector")) {
-        return QStringLiteral("高级/诊断：C++ tiny detector 占位训练，仅用于平台链路和回归测试。");
+        return QStringLiteral("高级/诊断：C++ tiny detector 占位训练，仅验证平台链路、checkpoint、ONNX 和回归测试，不代表真实 YOLO 能力。");
     }
     if (backend == QStringLiteral("python_mock")) {
-        return QStringLiteral("高级/诊断：Python 协议测试后端，不产生真实模型。");
+        return QStringLiteral("高级/诊断：Python 协议测试后端，只验证 Worker JSON Lines 协议，不产生真实模型。");
     }
-    return QStringLiteral("当前后端会通过 Worker 执行，失败原因会写入任务日志。");
+    return QStringLiteral("当前模型能力：通过 Worker 执行，产物、指标和失败原因会写入任务历史。");
 }
 
 bool setComboCurrentData(QComboBox* combo, const QString& data)
@@ -251,6 +252,60 @@ QFileInfoList appImageFiles(const QDir& directory)
         files.append(directory.entryInfoList({filter}, QDir::Files, QDir::Name));
     }
     return files;
+}
+
+QStringList xAnyLabelingCandidates()
+{
+    const QString envProgram = QString::fromLocal8Bit(qgetenv("AITRAIN_XANYLABELING_EXE")).trimmed();
+    const QString appDir = QApplication::applicationDirPath();
+    return {
+        envProgram,
+        QDir(appDir).filePath(QStringLiteral("X-AnyLabeling.exe")),
+        QDir(appDir).filePath(QStringLiteral("xanylabeling.exe")),
+        QDir(appDir).filePath(QStringLiteral("tools/x-anylabeling/X-AnyLabeling.exe")),
+        QDir(QDir::currentPath()).filePath(QStringLiteral(".deps/annotation-tools/X-AnyLabeling/X-AnyLabeling.exe")),
+        QStringLiteral("xanylabeling"),
+        QStringLiteral("X-AnyLabeling.exe")
+    };
+}
+
+QString resolveExecutableCandidate(const QString& candidate)
+{
+    const QString trimmed = candidate.trimmed();
+    if (trimmed.isEmpty()) {
+        return QString();
+    }
+
+    const QFileInfo info(trimmed);
+    if (info.isAbsolute() || trimmed.contains(QLatin1Char('/')) || trimmed.contains(QLatin1Char('\\'))) {
+        return info.exists() && info.isFile() ? info.absoluteFilePath() : QString();
+    }
+
+    const QString pathExecutable = QStandardPaths::findExecutable(trimmed);
+    if (!pathExecutable.isEmpty()) {
+        return pathExecutable;
+    }
+    return info.exists() && info.isFile() ? info.absoluteFilePath() : QString();
+}
+
+QString resolvedXAnyLabelingProgram()
+{
+    for (const QString& candidate : xAnyLabelingCandidates()) {
+        const QString resolved = resolveExecutableCandidate(candidate);
+        if (!resolved.isEmpty()) {
+            return resolved;
+        }
+    }
+    return QString();
+}
+
+QString xAnyLabelingStatusText()
+{
+    const QString program = resolvedXAnyLabelingProgram();
+    if (program.isEmpty()) {
+        return QStringLiteral("状态：未检测到 X-AnyLabeling。可放到 .deps/annotation-tools/X-AnyLabeling，或设置 AITRAIN_XANYLABELING_EXE。");
+    }
+    return QStringLiteral("状态：已安装 | %1").arg(QDir::toNativeSeparators(program));
 }
 
 QString detectDatasetFormatFromPath(const QString& path)
@@ -744,9 +799,14 @@ QWidget* MainWindow::buildDatasetPage()
     annotationLayout->setContentsMargins(10, 12, 10, 10);
     annotationLayout->setHorizontalSpacing(10);
     annotationLayout->setVerticalSpacing(8);
-    auto* annotationSummary = mutedLabel(QStringLiteral("默认使用 X-AnyLabeling，支持 YOLO 检测/分割、OCR、COCO/YOLO 导入导出和自动标注。"));
+    auto* annotationSummary = mutedLabel(QStringLiteral("默认使用 X-AnyLabeling。推荐导出：检测使用 YOLO bbox，分割使用 YOLO polygon，COCO 可先在标注工具内转换；OCR Rec 当前仍以 rec_gt.txt + dict.txt 为训练入口。"));
+    annotationToolStatusLabel_ = inlineStatusLabel(xAnyLabelingStatusText());
     auto* launchAnnotationToolButton = new QPushButton(QStringLiteral("启动 X-AnyLabeling"));
+    auto* refreshAnnotationStatusButton = new QPushButton(QStringLiteral("检测状态"));
+    auto* refreshDatasetAfterAnnotationButton = new QPushButton(QStringLiteral("标注后刷新 / 重新校验"));
     auto* openDatasetDirButton = new QPushButton(QStringLiteral("打开数据目录"));
+    connect(refreshAnnotationStatusButton, &QPushButton::clicked, this, &MainWindow::updateAnnotationToolStatus);
+    connect(refreshDatasetAfterAnnotationButton, &QPushButton::clicked, this, &MainWindow::refreshAfterAnnotation);
     connect(openDatasetDirButton, &QPushButton::clicked, this, [this]() {
         const QString datasetPath = QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
         if (datasetPath.isEmpty()) {
@@ -761,35 +821,31 @@ QWidget* MainWindow::buildDatasetPage()
             QMessageBox::information(this, QStringLiteral("标注工具"), QStringLiteral("请先选择数据集目录。"));
             return;
         }
-        const QString envProgram = QString::fromLocal8Bit(qgetenv("AITRAIN_XANYLABELING_EXE")).trimmed();
-        const QString appDir = QApplication::applicationDirPath();
-        const QStringList candidates = {
-            envProgram,
-            QDir(appDir).filePath(QStringLiteral("X-AnyLabeling.exe")),
-            QDir(appDir).filePath(QStringLiteral("xanylabeling.exe")),
-            QDir(appDir).filePath(QStringLiteral("tools/x-anylabeling/X-AnyLabeling.exe")),
-            QDir(QDir::currentPath()).filePath(QStringLiteral(".deps/annotation-tools/X-AnyLabeling/X-AnyLabeling.exe")),
-            QStringLiteral("xanylabeling"),
-            QStringLiteral("X-AnyLabeling.exe")
-        };
+        const QString program = resolvedXAnyLabelingProgram();
+        if (program.isEmpty()) {
+            updateAnnotationToolStatus();
+            QMessageBox::warning(this,
+                QStringLiteral("X-AnyLabeling"),
+                QStringLiteral("未找到 X-AnyLabeling。请确保 xanylabeling 在 PATH 中，或将 X-AnyLabeling.exe 放到程序目录 / tools/x-anylabeling / .deps/annotation-tools/X-AnyLabeling。"));
+            return;
+        }
         const QStringList arguments = {QStringLiteral("--filename"), datasetPath, QStringLiteral("--no-auto-update-check")};
-        for (const QString& candidate : candidates) {
-            if (candidate.trimmed().isEmpty()) {
-                continue;
-            }
-            if (QProcess::startDetached(candidate, arguments)) {
-                statusBar()->showMessage(QStringLiteral("已启动 X-AnyLabeling：%1").arg(QDir::toNativeSeparators(datasetPath)), 4000);
-                return;
-            }
+        if (QProcess::startDetached(program, arguments)) {
+            updateAnnotationToolStatus();
+            statusBar()->showMessage(QStringLiteral("已启动 X-AnyLabeling：%1").arg(QDir::toNativeSeparators(datasetPath)), 4000);
+            return;
         }
         QMessageBox::warning(this,
             QStringLiteral("X-AnyLabeling"),
-            QStringLiteral("未找到 X-AnyLabeling。请安装后确保 `xanylabeling` 在 PATH 中，或将 X-AnyLabeling.exe 放到程序目录 / tools/x-anylabeling / .deps/annotation-tools/X-AnyLabeling。"));
+            QStringLiteral("X-AnyLabeling 启动失败：%1").arg(QDir::toNativeSeparators(program)));
     });
     annotationLayout->addWidget(annotationSummary, 0, 0, 1, 4);
-    annotationLayout->addWidget(launchAnnotationToolButton, 1, 0);
-    annotationLayout->addWidget(openDatasetDirButton, 1, 1);
-    annotationLayout->setColumnStretch(2, 1);
+    annotationLayout->addWidget(annotationToolStatusLabel_, 1, 0, 1, 4);
+    annotationLayout->addWidget(launchAnnotationToolButton, 2, 0);
+    annotationLayout->addWidget(refreshAnnotationStatusButton, 2, 1);
+    annotationLayout->addWidget(refreshDatasetAfterAnnotationButton, 2, 2);
+    annotationLayout->addWidget(openDatasetDirButton, 2, 3);
+    annotationLayout->setColumnStretch(4, 1);
     toolsPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("已登记数据集")));
     toolsPanel->bodyLayout()->addWidget(datasetListTable_, 1);
     toolsPanel->bodyLayout()->addWidget(annotationPanel);
@@ -929,6 +985,7 @@ QWidget* MainWindow::buildTrainingPage()
     form->addRow(QStringLiteral("Batch Size"), batchEdit_);
     form->addRow(QStringLiteral("Image Size"), imageSizeEdit_);
     setupPanel->bodyLayout()->addLayout(form);
+    setupPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("当前模型能力说明")));
     setupPanel->bodyLayout()->addWidget(trainingBackendHintLabel_);
 
     auto* advancedGroup = new QGroupBox(QStringLiteral("高级 / 诊断后端"));
@@ -1024,10 +1081,34 @@ QWidget* MainWindow::buildTaskQueuePage()
     auto* row = new QHBoxLayout;
     auto* refreshButton = primaryButton(QStringLiteral("刷新历史"));
     auto* cancelButton = dangerButton(QStringLiteral("取消选中任务"));
+    taskKindFilterCombo_ = new QComboBox;
+    taskKindFilterCombo_->addItem(QStringLiteral("全部类别"), QString());
+    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Train), taskKindLabel(aitrain::TaskKind::Train));
+    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Validate), taskKindLabel(aitrain::TaskKind::Validate));
+    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Export), taskKindLabel(aitrain::TaskKind::Export));
+    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Infer), taskKindLabel(aitrain::TaskKind::Infer));
+    taskStateFilterCombo_ = new QComboBox;
+    taskStateFilterCombo_->addItem(QStringLiteral("全部状态"), QString());
+    taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Queued), taskStateLabel(aitrain::TaskState::Queued));
+    taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Running), taskStateLabel(aitrain::TaskState::Running));
+    taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Completed), taskStateLabel(aitrain::TaskState::Completed));
+    taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Failed), taskStateLabel(aitrain::TaskState::Failed));
+    taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Canceled), taskStateLabel(aitrain::TaskState::Canceled));
+    taskSearchEdit_ = new QLineEdit;
+    taskSearchEdit_->setPlaceholderText(QStringLiteral("搜索任务、后端、消息"));
     connect(refreshButton, &QPushButton::clicked, this, &MainWindow::updateRecentTasks);
     connect(cancelButton, &QPushButton::clicked, this, &MainWindow::cancelSelectedTask);
+    connect(taskKindFilterCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::applyTaskFilters);
+    connect(taskStateFilterCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::applyTaskFilters);
+    connect(taskSearchEdit_, &QLineEdit::textChanged, this, &MainWindow::applyTaskFilters);
     row->addWidget(refreshButton);
     row->addWidget(cancelButton);
+    row->addSpacing(12);
+    row->addWidget(new QLabel(QStringLiteral("类别")));
+    row->addWidget(taskKindFilterCombo_);
+    row->addWidget(new QLabel(QStringLiteral("状态")));
+    row->addWidget(taskStateFilterCombo_);
+    row->addWidget(taskSearchEdit_, 1);
     row->addStretch();
     toolbar->bodyLayout()->addLayout(row);
     toolbar->bodyLayout()->addWidget(mutedLabel(QStringLiteral("这里统一追踪训练、校验、划分、导出和推理任务；运行产物在下方详情区集中查看。")));
@@ -2066,6 +2147,7 @@ void MainWindow::updateRecentTasks()
     }
     if (taskQueueTable_) {
         updateTaskTable(taskQueueTable_, tasks);
+        applyTaskFilters();
     }
     updateDashboardSummary();
 }
@@ -2108,6 +2190,77 @@ void MainWindow::updateDatasetList()
         }
     }
     updateDashboardSummary();
+}
+
+void MainWindow::updateAnnotationToolStatus()
+{
+    if (annotationToolStatusLabel_) {
+        annotationToolStatusLabel_->setText(xAnyLabelingStatusText());
+    }
+}
+
+void MainWindow::refreshAfterAnnotation()
+{
+    const QString datasetPath = QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
+    if (datasetPath.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("标注后刷新"), QStringLiteral("请先选择数据集目录。"));
+        return;
+    }
+
+    const QString detectedFormat = detectDatasetFormatFromPath(datasetPath);
+    if (!detectedFormat.isEmpty() && datasetFormatCombo_) {
+        const int index = datasetFormatCombo_->findText(detectedFormat);
+        if (index >= 0) {
+            datasetFormatCombo_->setCurrentIndex(index);
+        }
+    }
+    currentDatasetPath_ = datasetPath;
+    currentDatasetFormat_ = datasetFormatCombo_ ? datasetFormatCombo_->currentText() : detectedFormat;
+    currentDatasetValid_ = false;
+    updateTrainingSelectionSummary();
+    refreshTrainingDefaults();
+    validateDataset();
+}
+
+void MainWindow::applyTaskFilters()
+{
+    if (!taskQueueTable_ || taskQueueTable_->columnCount() < 7) {
+        return;
+    }
+
+    const QString kind = taskKindFilterCombo_ ? taskKindFilterCombo_->currentData().toString() : QString();
+    const QString state = taskStateFilterCombo_ ? taskStateFilterCombo_->currentData().toString() : QString();
+    const QString query = taskSearchEdit_ ? taskSearchEdit_->text().trimmed() : QString();
+
+    for (int row = 0; row < taskQueueTable_->rowCount(); ++row) {
+        const QString idText = taskQueueTable_->item(row, 0) ? taskQueueTable_->item(row, 0)->text() : QString();
+        if (idText == QStringLiteral("暂无任务记录")) {
+            taskQueueTable_->setRowHidden(row, false);
+            continue;
+        }
+
+        bool visible = true;
+        if (!kind.isEmpty()) {
+            visible = visible && taskQueueTable_->item(row, 1)
+                && taskQueueTable_->item(row, 1)->text() == kind;
+        }
+        if (!state.isEmpty()) {
+            visible = visible && taskQueueTable_->item(row, 4)
+                && taskQueueTable_->item(row, 4)->text() == state;
+        }
+        if (!query.isEmpty()) {
+            bool matched = false;
+            for (int column = 0; column < taskQueueTable_->columnCount(); ++column) {
+                auto* item = taskQueueTable_->item(row, column);
+                if (item && item->text().contains(query, Qt::CaseInsensitive)) {
+                    matched = true;
+                    break;
+                }
+            }
+            visible = visible && matched;
+        }
+        taskQueueTable_->setRowHidden(row, !visible);
+    }
 }
 
 void MainWindow::updateTaskTable(QTableWidget* table, const QVector<aitrain::TaskRecord>& tasks)
@@ -2214,6 +2367,11 @@ void MainWindow::updateSelectedTaskDetails()
     if (taskId.isEmpty()) {
         return;
     }
+    const QString taskKind = taskQueueTable_->item(row, 1) ? taskQueueTable_->item(row, 1)->text() : QString();
+    const QString taskBackend = taskQueueTable_->item(row, 2) ? taskQueueTable_->item(row, 2)->text() : QString();
+    const QString taskType = taskQueueTable_->item(row, 3) ? taskQueueTable_->item(row, 3)->text() : QString();
+    const QString taskState = taskQueueTable_->item(row, 4) ? taskQueueTable_->item(row, 4)->text() : QString();
+    const QString taskMessage = taskQueueTable_->item(row, 6) ? taskQueueTable_->item(row, 6)->text() : QString();
 
     QString error;
     const QVector<aitrain::ArtifactRecord> artifacts = repository_.artifactsForTask(taskId, &error);
@@ -2221,11 +2379,21 @@ void MainWindow::updateSelectedTaskDetails()
     const QVector<aitrain::ExportRecord> exports = repository_.exportsForTask(taskId, &error);
 
     if (selectedTaskSummaryLabel_) {
-        selectedTaskSummaryLabel_->setText(QStringLiteral("任务 %1：%2 个产物，%3 个指标点，%4 条导出记录")
+        QString summary = QStringLiteral("任务 %1：%2 / %3 / %4，%5 个产物，%6 个指标点，%7 条导出记录")
             .arg(taskId.left(8))
+            .arg(taskKind.isEmpty() ? QStringLiteral("任务") : taskKind)
+            .arg(taskType.isEmpty() ? QStringLiteral("未记录类型") : taskType)
+            .arg(taskBackend.isEmpty() ? QStringLiteral("未记录后端") : taskBackend)
             .arg(artifacts.size())
             .arg(metrics.size())
-            .arg(exports.size()));
+            .arg(exports.size());
+        if (taskState == taskStateLabel(aitrain::TaskState::Failed)) {
+            summary.append(QStringLiteral("\n失败摘要：%1\n建议：优先查看 report/log 产物；若提示缺环境或缺 Python 包，进入“环境”页自检；若提示数据错误，回到“数据集”页重新校验。")
+                .arg(taskMessage.isEmpty() ? QStringLiteral("Worker 未返回详细消息。") : taskMessage));
+        } else if (!taskMessage.isEmpty()) {
+            summary.append(QStringLiteral("\n最新消息：%1").arg(taskMessage));
+        }
+        selectedTaskSummaryLabel_->setText(summary);
     }
 
     if (taskArtifactTable_) {

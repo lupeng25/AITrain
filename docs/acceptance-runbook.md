@@ -1,6 +1,6 @@
 # AITrain Studio Acceptance Runbook
 
-This runbook is the Phase 17-26 acceptance path. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, and covers the current local usability additions for task history, artifact browsing, dataset management, public dataset materialization, and official PaddleOCR inference smoke.
+This runbook is the Phase 17-30 acceptance path. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, and covers the current local usability additions for task history, artifact browsing, dataset management, public dataset materialization, official PaddleOCR inference smoke, annotation workflow, and release-candidate usability.
 
 ## Acceptance Modes
 
@@ -112,7 +112,7 @@ Expected artifacts:
 
 If a public dataset requires interactive registration, record it as an external dataset blocker. Do not block the required smoke path as long as the generated minimal dataset path passes.
 
-## Phase 22-26: Local Usability Baseline
+## Phase 22-30: Local Usability Baseline
 
 These phases do not change TensorRT acceptance. They make the local RC easier to use and re-check:
 
@@ -121,6 +121,8 @@ These phases do not change TensorRT acceptance. They make the local RC easier to
 - Dataset management: the GUI auto-detects YOLO detection, YOLO segmentation, and PaddleOCR Rec layouts, and split supports all three.
 - Public datasets: COCO8 / COCO8-seg materialization is a standalone machine-readable script with required and fallback modes.
 - Official OCR: `phase16-ocr-official-smoke.ps1` now covers official train, export, and recognition inference.
+- Annotation: the dataset page launches X-AnyLabeling as the default external annotation tool, detects its local path, and provides a post-labeling refresh/revalidation action.
+- UX closeout: task history can be filtered by category, status, and search text; failed tasks show a short diagnostic next-step summary.
 
 Suggested manual GUI walkthrough:
 
@@ -129,7 +131,9 @@ python examples\create-minimal-datasets.py --output .deps\next-smoke
 .\build-vscode\bin\Release\AITrainStudio.exe
 ```
 
-In the GUI, create or open a project, import the generated detection, segmentation, and OCR Rec datasets, validate and split each dataset, run one training/export/inference path, then confirm the task queue detail view lists report, checkpoint/model, ONNX, overlay, and prediction JSON artifacts.
+In the GUI, create or open a project, import the generated detection, segmentation, and OCR Rec datasets, launch X-AnyLabeling from the dataset page, use "标注后刷新 / 重新校验", validate and split each dataset, run one training/export/inference path, then confirm the task queue detail view lists report, checkpoint/model, ONNX, overlay, and prediction JSON artifacts.
+
+X-AnyLabeling is detected from `AITRAIN_XANYLABELING_EXE`, the app directory, `tools\x-anylabeling`, `.deps\annotation-tools\X-AnyLabeling`, or `PATH`. Keep downloaded binaries in `.deps\` unless a separate redistribution review is completed.
 
 ## Phase 21: Release Closeout
 
