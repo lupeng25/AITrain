@@ -10,6 +10,7 @@ class Sidebar : public QFrame {
 
 public:
     explicit Sidebar(QWidget* parent = nullptr);
+    void addSection(const QString& text);
     void addItem(const QString& text, int pageIndex);
     void setCurrentIndex(int pageIndex);
 
@@ -20,4 +21,3 @@ private:
     QButtonGroup buttons_;
     QVBoxLayout* itemsLayout_ = nullptr;
 };
-

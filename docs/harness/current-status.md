@@ -34,6 +34,7 @@ This file is the source of truth for phase status in new AI coding conversations
 | Phase 24: Dataset management enhancements | Done locally | The dataset page now includes a registered dataset list, format auto-detection for YOLO detection, YOLO segmentation, and PaddleOCR Rec, and Worker-backed split support for all three formats. Split reports are recorded as artifacts and dataset versions remain in SQLite. |
 | Phase 25: Public dataset materialization stabilization | Done locally | Added `tools\materialize-ultralytics-dataset.py` and wired `acceptance-smoke.ps1 -PublicDatasets` to materialize COCO8 / COCO8-seg from the installed Ultralytics package yaml and download URL. Reports record source yaml, download URL, Ultralytics version, output `data.yaml`, and fallback state; `-RequirePublicDatasets` fails clearly instead of falling back. |
 | Phase 26: Official PaddleOCR Rec chain enhancement | Done locally | The official PaddleOCR adapter supports explicit train/val label files, dictionary file, official config, pretrained/resume checkpoints, export-only mode, post-export official inference, inference image, and `recImageShape`. Reports now record Python/Paddle/PaddleOCR versions, PaddleOCR source refs, commands, configs, labels, dictionary, checkpoint/model paths, metrics, exit codes, log paths, and `official_prediction.json` when inference is requested. |
+| Phase 27: Mature local workbench UI | Done locally; manual GUI walkthrough still recommended | The Qt Widgets shell has been reorganized into grouped workbench navigation, a project/data/task/model/environment dashboard, dataset library/details workflow, official-backend-first training launch controls, task-history-centered artifact browsing, and less demo-like export/inference copy. This is UI information architecture only; Worker JSON, SQLite schema, plugin interfaces, and training implementation remain unchanged. |
 
 ## Local Hardware Note
 
@@ -50,7 +51,7 @@ Recorded on 2026-04-30:
 
 ## Current Next Task
 
-Current local follow-up: use the GUI manually for the Phase 22-26 daily workflow and keep external TensorRT blocked until an RTX / SM 75+ machine is available:
+Current local follow-up: perform a manual GUI walkthrough for Phase 27, use the GUI for the daily workflow, and keep external TensorRT blocked until an RTX / SM 75+ machine is available:
 
 - keep Phase 7 marked as code complete but hardware-blocked on this GTX 1060 / SM 61 machine
 - Phase 8 is complete as an adapter/protocol layer; `python_mock` remains a scaffold protocol fixture
@@ -72,6 +73,7 @@ Current local follow-up: use the GUI manually for the Phase 22-26 daily workflow
 - Phase 24 dataset management now supports detection, segmentation, and OCR Rec import/validation/split flows
 - Phase 25 public dataset materialization is split into a standalone script and has required/fallback modes
 - Phase 26 official PaddleOCR Rec smoke now covers train, export, and official inference on one generated sample
+- Phase 27 local automated checks pass; run a manual GUI walkthrough after future layout changes because screenshot/interaction QA is not covered by `harness-check.ps1`
 - keep training logic inside core/plugin/Worker boundaries, not in `MainWindow`
 - keep C++ tiny detector as a scaffold/demo/test backend until the Python path is stable
 - preserve the external TensorRT acceptance checklist for a future RTX / SM 75+ machine
@@ -141,5 +143,6 @@ When an RTX / SM 75+ machine is available, resume Phase 7 acceptance with:
 - Phase 17-21 add acceptance scripts, docs, and smoke coverage only; they do not change public Worker JSON protocol, SQLite schema, plugin interfaces, or GUI architecture.
 - Phase 20 generated-data smoke proves integration and artifacts, not useful model accuracy.
 - Phase 22-26 improve local usability and repeatability; they do not change the TensorRT acceptance requirement.
+- Phase 27 is UI-only: it may reorganize pages, labels, and helper widgets, but must not move training/export/inference work into `MainWindow`.
 - Keep long-running execution in `aitrain_worker`.
 - Keep model-specific behavior behind core/plugin/Worker boundaries, not in `MainWindow`.

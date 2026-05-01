@@ -649,3 +649,61 @@ python examples\create-minimal-datasets.py --output .deps\next-smoke
 
 - 官方 PaddleOCR tiny smoke 证明 train/export/inference wiring 和 artifacts，不代表 OCR 准确率。
 - 当前仍未把 PaddleOCR official inference model 直接接入 C++ Paddle inference runtime；C++ OCR ONNX Runtime 路径仍使用现有 PaddlePaddle CTC ONNX smoke 模型。
+
+## 20. 阶段 27：成熟本地训练工作台界面
+
+目标：把 GUI 从“功能 demo 面板”调整为面向本机视觉训练的成熟工作台。范围限定为 Qt Widgets 信息架构、交互组织、状态表达和文案同步，不改变 Worker JSON 协议、SQLite schema、插件接口或训练实现。
+
+已完成 / 本阶段实施内容：
+
+- 保留左侧 `Sidebar`、顶部状态栏和中央 `QStackedWidget` 架构，并将主导航分组为：
+  - 工作台：总览、项目。
+  - 数据与训练：数据集、训练实验、任务与产物。
+  - 模型交付：模型导出、推理验证。
+  - 系统：插件、环境。
+- 总览页改为项目闭环 dashboard：
+  - 没有项目时显示空状态和创建/打开项目入口，不再展示 `demo_project`。
+  - 打开项目后展示项目、已校验数据集、任务历史、模型导出、插件和环境摘要。
+  - “下一步”区域按当前状态引导数据集、训练、产物、导出和推理流程。
+- 数据集页改为“数据集库 + 所选数据集详情 + 操作”：
+  - 已登记数据集列表优先展示。
+  - 详情区显示格式、校验状态、路径、校验/划分报告和样本预览。
+  - 导入、校验、划分集中为同一工作流动作。
+- 训练页改为“训练实验启动台”：
+  - 第一优先级字段调整为数据集、任务类型、训练后端、模型预设、epoch、batch、image size。
+  - 根据任务类型/数据集格式默认选择官方后端：`ultralytics_yolo_detect`、`ultralytics_yolo_segment`、`paddleocr_rec`。
+  - `tiny_linear_detector`、`python_mock` 等保留在“高级 / 诊断”语境中，并明确为占位或协议测试后端。
+  - 启动训练时把后端写入现有 `parameters.trainingBackend`，Ultralytics 模型预设写入现有 `parameters.model`。
+- “任务与产物”页强化为平台核心历史页：
+  - 默认文案从队列工具转为任务历史和产物浏览。
+  - 继续集中展示 artifacts、metrics、exports，并保留打开目录、复制路径、用作推理模型、用作导出输入。
+- 模型导出和推理验证页去 demo 化：
+  - 模型输入优先从任务产物带入，也可手动选择。
+  - TensorRT 文案明确为 RTX / SM 75+ 外部验收需求，当前 GTX 1060 / SM 61 不伪装为本机可用。
+- 视觉系统轻量成熟化：
+  - 在 `AppStyle` 中补齐侧栏分组、空状态、内联状态、动作区、分组框样式。
+  - 控件间距、状态标签和只读说明统一，不引入 QML 或新 UI 框架。
+
+边界：
+
+- 本阶段不新增训练能力。
+- 不修改 Worker JSON 协议、SQLite schema、插件接口。
+- 不把训练、导出或推理逻辑放入 `MainWindow`。
+- scaffold / tiny 后端继续保留，但必须在 UI 中明确标注为诊断或占位能力。
+
+验收：
+
+```powershell
+.\tools\harness-check.ps1
+.\tools\package-smoke.ps1 -SkipBuild
+.\tools\acceptance-smoke.ps1 -LocalBaseline -Package -SkipBuild
+```
+
+手工 GUI 验收：
+
+- 启动 GUI，无项目时首页显示空状态和下一步入口。
+- 创建/打开项目后，总览页展示项目、数据集、任务、环境摘要。
+- 导入 generated detection / segmentation / OCR Rec 数据集后，可校验、划分、预览。
+- 训练页能根据数据集类型默认选择官方 YOLO / OCR 后端。
+- scaffold 后端仅在高级 / 诊断区域出现，并有明确占位标注。
+- 跑一次训练 / 导出 / 推理后，任务与产物页能查看 report、ONNX、overlay、prediction JSON。

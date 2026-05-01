@@ -49,10 +49,17 @@ void Sidebar::addItem(const QString& text, int pageIndex)
     }
 }
 
+void Sidebar::addSection(const QString& text)
+{
+    auto* label = new QLabel(text);
+    label->setObjectName(QStringLiteral("SidebarSection"));
+    itemsLayout_->addSpacing(10);
+    itemsLayout_->addWidget(label);
+}
+
 void Sidebar::setCurrentIndex(int pageIndex)
 {
     if (auto* button = buttons_.button(pageIndex)) {
         button->setChecked(true);
     }
 }
-

@@ -88,6 +88,9 @@ private:
     void startQueuedTraining(const QString& taskId, const aitrain::TrainingRequest& request);
     void startNextQueuedTask();
     void configureTable(QTableWidget* table) const;
+    void updateDashboardSummary();
+    void updateTrainingSelectionSummary();
+    void refreshTrainingDefaults();
     QString createRepositoryTask(aitrain::TaskKind kind, const QString& taskType, const QString& pluginId, const QString& workDir, const QString& message, const QString& requestedTaskId = {});
     QString selectedArtifactPath() const;
     void previewArtifactPath(const QString& path);
@@ -123,6 +126,10 @@ private:
     QLabel* dashboardProjectValue_ = nullptr;
     QLabel* dashboardTaskValue_ = nullptr;
     QLabel* dashboardPluginValue_ = nullptr;
+    QLabel* dashboardDatasetValue_ = nullptr;
+    QLabel* dashboardModelValue_ = nullptr;
+    QLabel* dashboardEnvironmentValue_ = nullptr;
+    QLabel* dashboardNextStepLabel_ = nullptr;
     QTableWidget* recentTasksTable_ = nullptr;
     QTableWidget* taskQueueTable_ = nullptr;
     QTableWidget* taskArtifactTable_ = nullptr;
@@ -142,8 +149,14 @@ private:
     QComboBox* datasetFormatCombo_ = nullptr;
     QComboBox* pluginCombo_ = nullptr;
     QComboBox* taskTypeCombo_ = nullptr;
+    QComboBox* trainingBackendCombo_ = nullptr;
+    QComboBox* modelPresetCombo_ = nullptr;
     QLabel* validationSummaryLabel_ = nullptr;
     QLabel* selectedTaskSummaryLabel_ = nullptr;
+    QLabel* datasetDetailLabel_ = nullptr;
+    QLabel* trainingDatasetSummaryLabel_ = nullptr;
+    QLabel* trainingBackendHintLabel_ = nullptr;
+    QLabel* trainingRunSummaryLabel_ = nullptr;
     QTableWidget* validationIssuesTable_ = nullptr;
     QTableWidget* datasetPreviewTable_ = nullptr;
     QPlainTextEdit* validationOutput_ = nullptr;

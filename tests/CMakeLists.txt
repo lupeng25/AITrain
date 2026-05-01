@@ -18,7 +18,7 @@ target_link_libraries(aitrain_core_tests
         Qt${QT_VERSION_MAJOR}::Sql
 )
 
-add_test(NAME aitrain_core_tests COMMAND aitrain_core_tests)
+add_test(NAME aitrain_core_tests COMMAND aitrain_core_tests -silent)
 
 aitrain_copy_onnxruntime_runtime(aitrain_core_tests)
 aitrain_copy_tensorrt_runtime(aitrain_core_tests)

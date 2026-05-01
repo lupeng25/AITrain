@@ -43,6 +43,13 @@ void apply(QApplication& app)
             font-size: 8pt;
         }
 
+        QLabel#SidebarSection {
+            color: #6B7280;
+            font-size: 8pt;
+            font-weight: 700;
+            padding: 6px 2px 2px 2px;
+        }
+
         QPushButton#SidebarButton {
             color: #D1D5DB;
             background: transparent;
@@ -92,6 +99,50 @@ void apply(QApplication& app)
             color: #6B7280;
         }
 
+        QLabel#EmptyState {
+            color: #6B7280;
+            background: #F9FAFB;
+            border: 1px dashed #C9D1DB;
+            border-radius: 6px;
+            padding: 12px;
+        }
+
+        QLabel#InlineStatus {
+            color: #374151;
+            background: #F3F5F8;
+            border: 1px solid #D8DEE6;
+            border-radius: 5px;
+            padding: 5px 9px;
+            min-height: 24px;
+        }
+
+        QLabel#DarkInlineStatus {
+            color: #F9FAFB;
+            background: #1F2937;
+            border: 1px solid #374151;
+            border-left: 3px solid #76B900;
+            border-radius: 2px;
+            padding: 6px 10px;
+            min-height: 26px;
+        }
+
+        QLabel#ExperimentKicker {
+            color: #76B900;
+            font-size: 8pt;
+            font-weight: 700;
+        }
+
+        QLabel#ExperimentTitle {
+            color: #FFFFFF;
+            font-size: 13pt;
+            font-weight: 700;
+        }
+
+        QLabel#ExperimentMeta {
+            color: #A7B0BD;
+            font-size: 9pt;
+        }
+
         QLabel#MetricValue {
             color: #111827;
             font-size: 18pt;
@@ -114,8 +165,8 @@ void apply(QApplication& app)
             background: #FFFFFF;
             border: 1px solid #C9D1DB;
             border-radius: 5px;
-            padding: 6px 12px;
-            min-height: 22px;
+            padding: 5px 12px;
+            min-height: 26px;
         }
 
         QPushButton:hover {
@@ -145,7 +196,58 @@ void apply(QApplication& app)
             background: #FFF7F7;
         }
 
-        QLineEdit, QComboBox, QPlainTextEdit, QTextEdit {
+        QPushButton#GreenButton {
+            background: transparent;
+            border: 2px solid #76B900;
+            border-radius: 2px;
+            color: #FFFFFF;
+            font-weight: 700;
+            padding: 5px 13px;
+            min-height: 28px;
+        }
+
+        QPushButton#GreenButton:hover {
+            background: #1F2937;
+            border-color: #BFF230;
+        }
+
+        QFrame#ExperimentHeader {
+            background: #0B1020;
+            border: 1px solid #1F2937;
+            border-radius: 3px;
+        }
+
+        QFrame#ActionStrip {
+            background: #F9FAFB;
+            border: 1px solid #E5E7EB;
+            border-radius: 6px;
+        }
+
+        QGroupBox {
+            border: 1px solid #D8DEE6;
+            border-radius: 6px;
+            margin-top: 12px;
+            padding: 10px;
+            font-weight: 600;
+        }
+
+        QGroupBox::title {
+            subcontrol-origin: margin;
+            left: 10px;
+            padding: 0 4px;
+            color: #374151;
+        }
+
+        QLineEdit, QComboBox {
+            background: #FFFFFF;
+            border: 1px solid #C9D1DB;
+            border-radius: 5px;
+            padding: 2px 8px;
+            min-height: 28px;
+            selection-background-color: #2563EB;
+        }
+
+        QPlainTextEdit, QTextEdit {
             background: #FFFFFF;
             border: 1px solid #C9D1DB;
             border-radius: 5px;
@@ -160,6 +262,11 @@ void apply(QApplication& app)
         QComboBox::drop-down {
             border: none;
             width: 24px;
+        }
+
+        QCheckBox {
+            min-height: 24px;
+            spacing: 6px;
         }
 
         QTableWidget {
@@ -203,4 +310,3 @@ void apply(QApplication& app)
 }
 
 } // namespace AppStyle
-

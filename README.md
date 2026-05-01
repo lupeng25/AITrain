@@ -4,7 +4,7 @@ AITrain Studio is a C++/Qt desktop foundation for managing local computer-vision
 
 This repository implements the first usable platform layer from the requested plan:
 
-- Qt Widgets GUI with project, dataset, training, conversion, inference, and plugin views.
+- Qt Widgets GUI organized as a local training workbench with project dashboard, dataset library, training experiments, task/artifact history, model export, inference validation, plugin, and environment views.
 - Isolated `aitrain_worker` process using JSON Lines over `QLocalSocket`.
 - SQLite-backed project/task/artifact metadata with task detail queries for artifacts, metrics, exports, and dataset versions.
 - Qt plugin interfaces for model, dataset, training, validation, export, and inference extensions.
