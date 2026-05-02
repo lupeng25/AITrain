@@ -27,6 +27,12 @@ private:
     void runEnvironmentCheck(const QJsonObject& payload);
     void validateDataset(const QJsonObject& payload);
     void splitDataset(const QJsonObject& payload);
+    void curateDataset(const QJsonObject& payload);
+    void createDatasetSnapshot(const QJsonObject& payload);
+    void evaluateModel(const QJsonObject& payload);
+    void benchmarkModel(const QJsonObject& payload);
+    void runLocalPipeline(const QJsonObject& payload);
+    void generateDeliveryReport(const QJsonObject& payload);
     void exportModel(const QJsonObject& payload);
     void runInference(const QJsonObject& payload);
     void runDetectionTraining();

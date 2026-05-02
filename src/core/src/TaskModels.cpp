@@ -11,6 +11,12 @@ QString taskKindToString(TaskKind kind)
     case TaskKind::Validate: return QStringLiteral("validate");
     case TaskKind::Export: return QStringLiteral("export");
     case TaskKind::Infer: return QStringLiteral("infer");
+    case TaskKind::Evaluate: return QStringLiteral("evaluate");
+    case TaskKind::Benchmark: return QStringLiteral("benchmark");
+    case TaskKind::Curate: return QStringLiteral("curate");
+    case TaskKind::Snapshot: return QStringLiteral("snapshot");
+    case TaskKind::Pipeline: return QStringLiteral("pipeline");
+    case TaskKind::Report: return QStringLiteral("report");
     }
     return QStringLiteral("train");
 }
@@ -20,6 +26,12 @@ TaskKind taskKindFromString(const QString& value)
     if (value == QStringLiteral("validate")) return TaskKind::Validate;
     if (value == QStringLiteral("export")) return TaskKind::Export;
     if (value == QStringLiteral("infer")) return TaskKind::Infer;
+    if (value == QStringLiteral("evaluate")) return TaskKind::Evaluate;
+    if (value == QStringLiteral("benchmark")) return TaskKind::Benchmark;
+    if (value == QStringLiteral("curate")) return TaskKind::Curate;
+    if (value == QStringLiteral("snapshot")) return TaskKind::Snapshot;
+    if (value == QStringLiteral("pipeline")) return TaskKind::Pipeline;
+    if (value == QStringLiteral("report")) return TaskKind::Report;
     return TaskKind::Train;
 }
 

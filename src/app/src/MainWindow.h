@@ -32,6 +32,8 @@ private slots:
     void browseDataset();
     void validateDataset();
     void splitDataset();
+    void curateDataset();
+    void createDatasetSnapshot();
     void startTraining();
     void startModelExport();
     void startInference();
@@ -46,6 +48,12 @@ private slots:
     void copySelectedArtifactPath();
     void useSelectedArtifactForInference();
     void useSelectedArtifactForExport();
+    void registerSelectedArtifactAsModelVersion();
+    void evaluateSelectedArtifact();
+    void benchmarkSelectedArtifact();
+    void generateDeliveryReportFromSelectedArtifact();
+    void runLocalPipelinePlanFromCurrentDataset();
+    void refreshModelRegistry();
 
 private:
     enum PageIndex {
@@ -54,6 +62,7 @@ private:
         DatasetPage,
         TrainingPage,
         TaskQueuePage,
+        ModelRegistryPage,
         ConversionPage,
         InferencePage,
         PluginsPage,
@@ -66,6 +75,7 @@ private:
     QWidget* buildDatasetPage();
     QWidget* buildTrainingPage();
     QWidget* buildTaskQueuePage();
+    QWidget* buildModelRegistryPage();
     QWidget* buildConversionPage();
     QWidget* buildInferencePage();
     QWidget* buildPluginsPage();
@@ -101,7 +111,9 @@ private:
     void updateAnnotationToolStatus();
     void refreshAfterAnnotation();
     void applyTaskFilters();
+    void updateModelRegistry();
     QString createRepositoryTask(aitrain::TaskKind kind, const QString& taskType, const QString& pluginId, const QString& workDir, const QString& message, const QString& requestedTaskId = {});
+    QString selectedTaskId() const;
     QString selectedArtifactPath() const;
     void previewArtifactPath(const QString& path);
 
@@ -165,6 +177,9 @@ private:
     QTableWidget* taskArtifactTable_ = nullptr;
     QTableWidget* taskMetricTable_ = nullptr;
     QTableWidget* taskExportTable_ = nullptr;
+    QTableWidget* modelVersionTable_ = nullptr;
+    QTableWidget* evaluationReportTable_ = nullptr;
+    QTableWidget* pipelineRunTable_ = nullptr;
     QTableWidget* datasetListTable_ = nullptr;
     QTableWidget* pluginTable_ = nullptr;
     QTableWidget* environmentTable_ = nullptr;
@@ -186,6 +201,7 @@ private:
     QComboBox* modelPresetCombo_ = nullptr;
     QLabel* validationSummaryLabel_ = nullptr;
     QLabel* selectedTaskSummaryLabel_ = nullptr;
+    QLabel* modelRegistrySummaryLabel_ = nullptr;
     QLabel* datasetDetailLabel_ = nullptr;
     QLabel* annotationToolStatusLabel_ = nullptr;
     QLabel* trainingDatasetSummaryLabel_ = nullptr;

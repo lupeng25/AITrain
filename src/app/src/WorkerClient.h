@@ -13,11 +13,18 @@ class WorkerClient : public QObject {
 
 public:
     explicit WorkerClient(QObject* parent = nullptr);
+    ~WorkerClient() override;
 
     bool startTraining(const QString& workerProgram, const aitrain::TrainingRequest& request, QString* error);
     bool requestEnvironmentCheck(const QString& workerProgram, QString* error);
     bool requestDatasetValidation(const QString& workerProgram, const QString& datasetPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId = {}, const QString& outputPath = {});
     bool requestDatasetSplit(const QString& workerProgram, const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId = {});
+    bool requestDatasetCuration(const QString& workerProgram, const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId = {});
+    bool requestDatasetSnapshot(const QString& workerProgram, const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId = {});
+    bool requestModelEvaluation(const QString& workerProgram, const QString& modelPath, const QString& datasetPath, const QString& outputPath, const QString& taskType, const QJsonObject& options, QString* error, const QString& taskId = {});
+    bool requestModelBenchmark(const QString& workerProgram, const QString& modelPath, const QString& outputPath, const QJsonObject& options, QString* error, const QString& taskId = {});
+    bool requestLocalPipeline(const QString& workerProgram, const QString& outputPath, const QString& templateId, const QJsonObject& options, QString* error, const QString& taskId = {});
+    bool requestDeliveryReport(const QString& workerProgram, const QString& outputPath, const QJsonObject& context, QString* error, const QString& taskId = {});
     bool requestModelExport(const QString& workerProgram, const QString& checkpointPath, const QString& outputPath, const QString& format, QString* error, const QString& taskId = {});
     bool requestInference(const QString& workerProgram, const QString& checkpointPath, const QString& imagePath, const QString& outputPath, QString* error, const QString& taskId = {});
     void cancel();
@@ -41,6 +48,7 @@ private slots:
 private:
     bool startWorkerCommand(const QString& workerProgram, const QString& commandType, const QJsonObject& payload, QString* error);
     void send(const QString& type, const QJsonObject& payload);
+    void cleanupSocket();
 
     QLocalServer server_;
     QLocalSocket* socket_ = nullptr;

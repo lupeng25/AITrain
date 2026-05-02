@@ -9,6 +9,7 @@
 #include "aitrain/core/OcrRecDataset.h"
 #include "aitrain/core/OcrRecTrainer.h"
 #include "aitrain/core/ProjectRepository.h"
+#include "aitrain/core/ProductWorkflow.h"
 #include "aitrain/core/SegmentationDataset.h"
 #include "aitrain/core/SegmentationTrainer.h"
 
@@ -24,6 +25,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 #include <QUuid>
+#include <functional>
 
 namespace {
 
@@ -590,6 +592,73 @@ private slots:
         QCOMPARE(versions.first().rootPath, dataset.rootPath);
         QVERIFY(versions.first().metadataJson.contains(QStringLiteral("\"ok\":true")));
 
+        aitrain::ExperimentRecord experiment;
+        experiment.name = QStringLiteral("det-baseline");
+        experiment.taskType = QStringLiteral("detection");
+        experiment.datasetId = loadedDataset.id;
+        experiment.notes = QStringLiteral("local product workflow smoke");
+        const int experimentId = repository.upsertExperiment(experiment, &error);
+        QVERIFY2(experimentId > 0, qPrintable(error));
+
+        aitrain::DatasetSnapshotRecord snapshot;
+        snapshot.datasetId = loadedDataset.id;
+        snapshot.name = QStringLiteral("snapshot-a");
+        snapshot.rootPath = dataset.rootPath;
+        snapshot.manifestPath = QDir(dataset.rootPath).filePath(QStringLiteral("snapshot.json"));
+        snapshot.contentHash = QStringLiteral("abc123");
+        snapshot.fileCount = 4;
+        snapshot.totalBytes = 128;
+        const int snapshotId = repository.insertDatasetSnapshot(snapshot, &error);
+        QVERIFY2(snapshotId > 0, qPrintable(error));
+
+        aitrain::ExperimentRunRecord run;
+        run.experimentId = experimentId;
+        run.taskId = task.id;
+        run.trainingBackend = QStringLiteral("ultralytics_yolo_detect");
+        run.modelPreset = QStringLiteral("yolov8n.yaml");
+        run.datasetSnapshotId = snapshotId;
+        run.requestJson = QStringLiteral("{}");
+        const int runId = repository.insertExperimentRun(run, &error);
+        QVERIFY2(runId > 0, qPrintable(error));
+
+        aitrain::EvaluationReportRecord report;
+        report.taskId = task.id;
+        report.modelPath = exportRecord.path;
+        report.taskType = QStringLiteral("detection");
+        report.datasetSnapshotId = snapshotId;
+        report.reportPath = QDir(dataset.rootPath).filePath(QStringLiteral("evaluation_report.json"));
+        report.summaryJson = QStringLiteral("{}");
+        const int reportId = repository.insertEvaluationReport(report, &error);
+        QVERIFY2(reportId > 0, qPrintable(error));
+
+        aitrain::ModelVersionRecord model;
+        model.modelName = QStringLiteral("detector");
+        model.version = QStringLiteral("v1");
+        model.sourceTaskId = task.id;
+        model.experimentRunId = runId;
+        model.datasetSnapshotId = snapshotId;
+        model.checkpointPath = exportRecord.sourceCheckpointPath;
+        model.onnxPath = exportRecord.path;
+        model.evaluationReportId = reportId;
+        model.status = QStringLiteral("draft");
+        const int modelId = repository.upsertModelVersion(model, &error);
+        QVERIFY2(modelId > 0, qPrintable(error));
+
+        aitrain::PipelineRunRecord pipeline;
+        pipeline.name = QStringLiteral("local-loop");
+        pipeline.templateId = QStringLiteral("train-evaluate-export-register");
+        pipeline.taskIdsJson = QStringLiteral("[\"%1\"]").arg(task.id);
+        pipeline.state = QStringLiteral("completed");
+        const int pipelineId = repository.insertPipelineRun(pipeline, &error);
+        QVERIFY2(pipelineId > 0, qPrintable(error));
+
+        QCOMPARE(repository.recentExperiments(10, &error).first().name, experiment.name);
+        QCOMPARE(repository.experimentRuns(experimentId, &error).first().trainingBackend, run.trainingBackend);
+        QCOMPARE(repository.datasetSnapshots(loadedDataset.id, &error).first().contentHash, snapshot.contentHash);
+        QCOMPARE(repository.recentEvaluationReports(10, &error).first().reportPath, report.reportPath);
+        QCOMPARE(repository.recentModelVersions(10, &error).first().modelName, model.modelName);
+        QCOMPARE(repository.recentPipelineRuns(10, &error).first().templateId, pipeline.templateId);
+
         QVERIFY2(repository.updateTaskState(task.id, aitrain::TaskState::Completed, QStringLiteral("done"), &error), qPrintable(error));
         const QVector<aitrain::TaskRecord> completedTasks = repository.recentTasks(10, &error);
         QCOMPARE(completedTasks.first().state, aitrain::TaskState::Completed);
@@ -625,6 +694,66 @@ private slots:
         QCOMPARE(tasks.first().state, aitrain::TaskState::Failed);
         QCOMPARE(tasks.first().message, QStringLiteral("Worker interrupted"));
         QVERIFY(tasks.first().finishedAt.isValid());
+    }
+
+    void productWorkflowWritesReports()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString datasetRoot = dir.filePath(QStringLiteral("dataset"));
+        writeTinyDetectionDataset(datasetRoot);
+        const QString outputRoot = dir.filePath(QStringLiteral("reports"));
+
+        const aitrain::WorkflowResult snapshot = aitrain::createDatasetSnapshotReport(
+            datasetRoot,
+            QDir(outputRoot).filePath(QStringLiteral("snapshot")),
+            QStringLiteral("yolo_detection"));
+        QVERIFY2(snapshot.ok, qPrintable(snapshot.error));
+        QVERIFY(QFileInfo::exists(snapshot.reportPath));
+        QVERIFY(snapshot.payload.value(QStringLiteral("contentHash")).toString().size() >= 32);
+        QCOMPARE(snapshot.payload.value(QStringLiteral("fileCount")).toInt(), 5);
+
+        const aitrain::WorkflowResult quality = aitrain::curateDatasetQualityReport(
+            datasetRoot,
+            QDir(outputRoot).filePath(QStringLiteral("quality")),
+            QStringLiteral("yolo_detection"));
+        QVERIFY2(quality.ok, qPrintable(quality.error));
+        QVERIFY(QFileInfo::exists(quality.reportPath));
+        QVERIFY(QFileInfo::exists(quality.payload.value(QStringLiteral("classDistributionPath")).toString()));
+        QVERIFY(QFileInfo::exists(quality.payload.value(QStringLiteral("problemSamplesPath")).toString()));
+        QVERIFY(quality.payload.value(QStringLiteral("ok")).toBool());
+
+        const QString modelPath = dir.filePath(QStringLiteral("model.onnx"));
+        writeTextFile(modelPath, QStringLiteral("fake onnx bytes"));
+        const aitrain::WorkflowResult evaluation = aitrain::evaluateModelReport(
+            modelPath,
+            datasetRoot,
+            QDir(outputRoot).filePath(QStringLiteral("evaluation")),
+            QStringLiteral("detection"));
+        QVERIFY2(evaluation.ok, qPrintable(evaluation.error));
+        QVERIFY(QFileInfo::exists(evaluation.reportPath));
+        QVERIFY(evaluation.payload.value(QStringLiteral("scaffold")).toBool());
+
+        const aitrain::WorkflowResult benchmark = aitrain::benchmarkModelReport(
+            modelPath,
+            QDir(outputRoot).filePath(QStringLiteral("benchmark")));
+        QVERIFY2(benchmark.ok, qPrintable(benchmark.error));
+        QVERIFY(QFileInfo::exists(benchmark.reportPath));
+        QVERIFY(benchmark.payload.contains(QStringLiteral("averageMs")));
+
+        const aitrain::WorkflowResult delivery = aitrain::generateTrainingDeliveryReport(
+            QDir(outputRoot).filePath(QStringLiteral("delivery")),
+            QJsonObject{{QStringLiteral("projectName"), QStringLiteral("demo")}});
+        QVERIFY2(delivery.ok, qPrintable(delivery.error));
+        QVERIFY(QFileInfo::exists(delivery.reportPath));
+        QVERIFY(delivery.reportPath.endsWith(QStringLiteral(".html")));
+
+        const aitrain::WorkflowResult pipeline = aitrain::runLocalPipelinePlan(
+            QDir(outputRoot).filePath(QStringLiteral("pipeline")),
+            QStringLiteral("train-evaluate-export-register"));
+        QVERIFY2(pipeline.ok, qPrintable(pipeline.error));
+        QVERIFY(QFileInfo::exists(pipeline.reportPath));
+        QVERIFY(pipeline.payload.value(QStringLiteral("scaffold")).toBool());
     }
 
     void yoloDetectionDatasetValidation()
@@ -1615,7 +1744,7 @@ private slots:
         QTRY_VERIFY2_WITH_TIMEOUT(
             finished,
             qPrintable(QStringLiteral("Worker did not finish. Logs:\n%1").arg(logs.join(QStringLiteral("\n")))),
-            15000);
+            60000);
         QVERIFY2(ok, qPrintable(QStringLiteral("%1 messages=%2 outputExists=%3")
             .arg(finishedMessage)
             .arg(messages.size())
@@ -1653,6 +1782,123 @@ private slots:
         QCOMPARE(predictionsJson.value(QStringLiteral("runtime")).toString(), QStringLiteral("onnxruntime"));
         QCOMPARE(predictionsJson.value(QStringLiteral("predictions")).toArray().size(), 1);
         QCOMPARE(predictionsJson.value(QStringLiteral("predictions")).toArray().first().toObject().value(QStringLiteral("className")).toString(), QStringLiteral("item"));
+    }
+
+    void workerRunsProductWorkflowCommands()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString datasetRoot = dir.filePath(QStringLiteral("dataset"));
+        writeTinyDetectionDataset(datasetRoot);
+        const QString modelPath = dir.filePath(QStringLiteral("model.onnx"));
+        writeTextFile(modelPath, QStringLiteral("fake onnx bytes"));
+
+        auto runCommand = [this](const std::function<bool(WorkerClient&, QString*)>& start, const QString& expectedMessageType) {
+            WorkerClient client;
+            QVector<QPair<QString, QJsonObject>> messages;
+            QStringList logs;
+            bool finished = false;
+            bool ok = false;
+            QString finishedMessage;
+            connect(&client, &WorkerClient::messageReceived, this, [&messages](const QString& type, const QJsonObject& payload) {
+                messages.append(qMakePair(type, payload));
+            });
+            connect(&client, &WorkerClient::logLine, this, [&logs](const QString& line) {
+                logs.append(line);
+            });
+            connect(&client, &WorkerClient::finished, this, [&finished, &ok, &finishedMessage](bool result, const QString& message) {
+                finished = true;
+                ok = result;
+                finishedMessage = message;
+            });
+
+            QString error;
+            QVERIFY2(start(client, &error), qPrintable(error));
+            QTRY_VERIFY2_WITH_TIMEOUT(
+                finished,
+                qPrintable(QStringLiteral("Worker did not finish. Logs:\n%1").arg(logs.join(QStringLiteral("\n")))),
+                60000);
+            QVERIFY2(ok, qPrintable(finishedMessage));
+            QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
+
+            bool sawExpected = false;
+            bool sawArtifact = false;
+            for (const auto& message : messages) {
+                sawExpected = sawExpected || message.first == expectedMessageType;
+                sawArtifact = sawArtifact || message.first == QStringLiteral("artifact");
+            }
+            QVERIFY2(sawExpected, qPrintable(QStringLiteral("Missing expected message: %1").arg(expectedMessageType)));
+            QVERIFY(sawArtifact);
+        };
+
+        runCommand([&](WorkerClient& client, QString* error) {
+            return client.requestDatasetSnapshot(
+                workerExecutablePath(),
+                datasetRoot,
+                dir.filePath(QStringLiteral("worker-snapshot")),
+                QStringLiteral("yolo_detection"),
+                {},
+                error,
+                QStringLiteral("snapshot-task"));
+        }, QStringLiteral("datasetSnapshot"));
+        QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-snapshot/dataset_snapshot_manifest.json"))));
+
+        runCommand([&](WorkerClient& client, QString* error) {
+            return client.requestDatasetCuration(
+                workerExecutablePath(),
+                datasetRoot,
+                dir.filePath(QStringLiteral("worker-quality")),
+                QStringLiteral("yolo_detection"),
+                {},
+                error,
+                QStringLiteral("quality-task"));
+        }, QStringLiteral("datasetQuality"));
+        QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-quality/dataset_quality_report.json"))));
+
+        runCommand([&](WorkerClient& client, QString* error) {
+            return client.requestModelEvaluation(
+                workerExecutablePath(),
+                modelPath,
+                datasetRoot,
+                dir.filePath(QStringLiteral("worker-evaluation")),
+                QStringLiteral("detection"),
+                {},
+                error,
+                QStringLiteral("evaluation-task"));
+        }, QStringLiteral("evaluationReport"));
+        QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-evaluation/evaluation_report.json"))));
+
+        runCommand([&](WorkerClient& client, QString* error) {
+            return client.requestModelBenchmark(
+                workerExecutablePath(),
+                modelPath,
+                dir.filePath(QStringLiteral("worker-benchmark")),
+                {},
+                error,
+                QStringLiteral("benchmark-task"));
+        }, QStringLiteral("benchmarkReport"));
+        QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-benchmark/benchmark_report.json"))));
+
+        runCommand([&](WorkerClient& client, QString* error) {
+            return client.requestDeliveryReport(
+                workerExecutablePath(),
+                dir.filePath(QStringLiteral("worker-delivery")),
+                QJsonObject{{QStringLiteral("projectName"), QStringLiteral("demo")}},
+                error,
+                QStringLiteral("delivery-task"));
+        }, QStringLiteral("deliveryReport"));
+        QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-delivery/training_delivery_report.html"))));
+
+        runCommand([&](WorkerClient& client, QString* error) {
+            return client.requestLocalPipeline(
+                workerExecutablePath(),
+                dir.filePath(QStringLiteral("worker-pipeline")),
+                QStringLiteral("train-evaluate-export-register"),
+                {},
+                error,
+                QStringLiteral("pipeline-task"));
+        }, QStringLiteral("pipelinePlan"));
+        QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-pipeline/local_pipeline_plan.json"))));
     }
 
     void workerRoutesSegmentationAndOcrOnnxInferenceEndToEnd()

@@ -280,6 +280,7 @@ install(FILES
     docs/training-backends.md
     docs/hardware-compatibility.md
     docs/acceptance-runbook.md
+    docs/product-roadmap-local-training-platform.md
     DESTINATION docs
 )
 install(DIRECTORY python_trainers DESTINATION .

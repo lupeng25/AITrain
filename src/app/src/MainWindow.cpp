@@ -20,6 +20,7 @@
 #include <QGroupBox>
 #include <QHeaderView>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -201,6 +202,12 @@ QString taskKindLabel(aitrain::TaskKind kind)
     case aitrain::TaskKind::Validate: return uiText("校验");
     case aitrain::TaskKind::Export: return uiText("导出");
     case aitrain::TaskKind::Infer: return uiText("推理");
+    case aitrain::TaskKind::Evaluate: return uiText("评估");
+    case aitrain::TaskKind::Benchmark: return uiText("基准");
+    case aitrain::TaskKind::Curate: return uiText("质检");
+    case aitrain::TaskKind::Snapshot: return uiText("快照");
+    case aitrain::TaskKind::Pipeline: return uiText("流水线");
+    case aitrain::TaskKind::Report: return uiText("报告");
     }
     return uiText("任务");
 }
@@ -684,6 +691,7 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     sidebar_->addItem(tr("训练实验"), TrainingPage);
     sidebar_->addItem(tr("任务与产物"), TaskQueuePage);
     sidebar_->addSection(tr("模型交付"));
+    sidebar_->addItem(tr("模型库"), ModelRegistryPage);
     sidebar_->addItem(tr("模型导出"), ConversionPage);
     sidebar_->addItem(tr("推理验证"), InferencePage);
     sidebar_->addSection(tr("系统"));
@@ -703,6 +711,7 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     stack_->addWidget(buildDatasetPage());
     stack_->addWidget(buildTrainingPage());
     stack_->addWidget(buildTaskQueuePage());
+    stack_->addWidget(buildModelRegistryPage());
     stack_->addWidget(buildConversionPage());
     stack_->addWidget(buildInferencePage());
     stack_->addWidget(buildPluginsPage());
@@ -734,6 +743,7 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
             currentTaskId_.clear();
             updateRecentTasks();
             updateSelectedTaskDetails();
+            updateModelRegistry();
         } else if (kind == QStringLiteral("export") && exportResultLabel_) {
             exportResultLabel_->setText(tr("导出完成：%1").arg(QDir::toNativeSeparators(path)));
         } else if (kind == QStringLiteral("inference_overlay") && inferenceOverlayLabel_) {
@@ -864,7 +874,7 @@ QWidget* MainWindow::buildDashboardPage()
     auto* taskCard = createMetricCard(QStringLiteral("任务"), QStringLiteral("0"), QStringLiteral("训练、校验、导出、推理记录"));
     dashboardTaskValue_ = taskCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
     grid->addWidget(taskCard, 0, 2);
-    auto* modelCard = createMetricCard(QStringLiteral("模型产物"), QStringLiteral("0"), QStringLiteral("最近导出或可推理模型"));
+    auto* modelCard = createMetricCard(QStringLiteral("模型版本"), QStringLiteral("0"), QStringLiteral("模型库 / 导出产物"));
     dashboardModelValue_ = modelCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
     grid->addWidget(modelCard, 0, 3);
     auto* pluginCard = createMetricCard(QStringLiteral("插件"), QStringLiteral("0"), QStringLiteral("已加载能力插件"));
@@ -888,17 +898,20 @@ QWidget* MainWindow::buildDashboardPage()
     auto* datasetButton = new QPushButton(QStringLiteral("导入 / 校验数据"));
     auto* trainingButton = new QPushButton(QStringLiteral("启动训练实验"));
     auto* artifactButton = new QPushButton(QStringLiteral("查看任务与产物"));
+    auto* modelRegistryButton = new QPushButton(QStringLiteral("模型库"));
     auto* inferenceButton = new QPushButton(QStringLiteral("推理验证"));
     connect(projectButton, &QPushButton::clicked, this, [this]() { showPage(ProjectPage, uiText("项目")); });
     connect(datasetButton, &QPushButton::clicked, this, [this]() { showPage(DatasetPage, uiText("数据集")); });
     connect(trainingButton, &QPushButton::clicked, this, [this]() { showPage(TrainingPage, uiText("训练实验")); });
     connect(artifactButton, &QPushButton::clicked, this, [this]() { showPage(TaskQueuePage, uiText("任务与产物")); });
+    connect(modelRegistryButton, &QPushButton::clicked, this, [this]() { showPage(ModelRegistryPage, uiText("模型库")); });
     connect(inferenceButton, &QPushButton::clicked, this, [this]() { showPage(InferencePage, uiText("推理验证")); });
     actionLayout->addWidget(projectButton, 0, 0);
     actionLayout->addWidget(datasetButton, 0, 1);
     actionLayout->addWidget(trainingButton, 1, 0);
     actionLayout->addWidget(artifactButton, 1, 1);
-    actionLayout->addWidget(inferenceButton, 2, 0, 1, 2);
+    actionLayout->addWidget(modelRegistryButton, 2, 0);
+    actionLayout->addWidget(inferenceButton, 2, 1);
     workflowPanel->bodyLayout()->addWidget(actionStrip);
     workflowPanel->bodyLayout()->addStretch();
 
@@ -1097,6 +1110,10 @@ QWidget* MainWindow::buildDatasetPage()
     splitSeedEdit_ = new QLineEdit(QStringLiteral("42"));
     auto* splitButton = new QPushButton(QStringLiteral("划分数据集"));
     connect(splitButton, &QPushButton::clicked, this, &MainWindow::splitDataset);
+    auto* curateButton = new QPushButton(QStringLiteral("生成质量报告"));
+    connect(curateButton, &QPushButton::clicked, this, &MainWindow::curateDataset);
+    auto* snapshotButton = new QPushButton(QStringLiteral("创建数据快照"));
+    connect(snapshotButton, &QPushButton::clicked, this, &MainWindow::createDatasetSnapshot);
     auto* ratioRow = new QWidget;
     auto* ratioLayout = new QHBoxLayout(ratioRow);
     ratioLayout->setContentsMargins(0, 0, 0, 0);
@@ -1110,6 +1127,8 @@ QWidget* MainWindow::buildDatasetPage()
     auto* datasetActionRow = new QHBoxLayout;
     datasetActionRow->addWidget(validateButton);
     datasetActionRow->addWidget(splitButton);
+    datasetActionRow->addWidget(curateButton);
+    datasetActionRow->addWidget(snapshotButton);
     datasetActionRow->addStretch();
     inputPanel->bodyLayout()->addLayout(datasetActionRow);
 
@@ -1463,6 +1482,12 @@ QWidget* MainWindow::buildTaskQueuePage()
     taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Validate), QStringLiteral("validate"));
     taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Export), QStringLiteral("export"));
     taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Infer), QStringLiteral("infer"));
+    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Evaluate), QStringLiteral("evaluate"));
+    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Benchmark), QStringLiteral("benchmark"));
+    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Curate), QStringLiteral("curate"));
+    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Snapshot), QStringLiteral("snapshot"));
+    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Pipeline), QStringLiteral("pipeline"));
+    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Report), QStringLiteral("report"));
     taskStateFilterCombo_ = new QComboBox;
     taskStateFilterCombo_->addItem(uiText("全部状态"), QString());
     taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Queued), QStringLiteral("queued"));
@@ -1543,14 +1568,26 @@ QWidget* MainWindow::buildTaskQueuePage()
     auto* copyPathButton = new QPushButton(QStringLiteral("复制路径"));
     auto* useInferButton = new QPushButton(QStringLiteral("用作推理模型"));
     auto* useExportButton = new QPushButton(QStringLiteral("用作导出输入"));
+    auto* registerModelButton = new QPushButton(QStringLiteral("注册模型版本"));
+    auto* evaluateButton = new QPushButton(QStringLiteral("评估"));
+    auto* benchmarkButton = new QPushButton(QStringLiteral("基准"));
+    auto* reportButton = new QPushButton(QStringLiteral("交付报告"));
     connect(openDirButton, &QPushButton::clicked, this, &MainWindow::openSelectedArtifactDirectory);
     connect(copyPathButton, &QPushButton::clicked, this, &MainWindow::copySelectedArtifactPath);
     connect(useInferButton, &QPushButton::clicked, this, &MainWindow::useSelectedArtifactForInference);
     connect(useExportButton, &QPushButton::clicked, this, &MainWindow::useSelectedArtifactForExport);
+    connect(registerModelButton, &QPushButton::clicked, this, &MainWindow::registerSelectedArtifactAsModelVersion);
+    connect(evaluateButton, &QPushButton::clicked, this, &MainWindow::evaluateSelectedArtifact);
+    connect(benchmarkButton, &QPushButton::clicked, this, &MainWindow::benchmarkSelectedArtifact);
+    connect(reportButton, &QPushButton::clicked, this, &MainWindow::generateDeliveryReportFromSelectedArtifact);
     actionRow->addWidget(openDirButton);
     actionRow->addWidget(copyPathButton);
     actionRow->addWidget(useInferButton);
     actionRow->addWidget(useExportButton);
+    actionRow->addWidget(registerModelButton);
+    actionRow->addWidget(evaluateButton);
+    actionRow->addWidget(benchmarkButton);
+    actionRow->addWidget(reportButton);
     actionRow->addStretch();
 
     auto* detailSplitter = new QSplitter(Qt::Horizontal);
@@ -1581,6 +1618,121 @@ QWidget* MainWindow::buildTaskQueuePage()
 
     layout->addWidget(toolbar);
     layout->addWidget(historySplitter, 1);
+    return page;
+}
+
+QWidget* MainWindow::buildModelRegistryPage()
+{
+    auto* page = new QWidget;
+    auto* layout = new QVBoxLayout(page);
+    layout->setContentsMargins(18, 18, 18, 18);
+    layout->setSpacing(16);
+
+    auto* toolbar = new InfoPanel(QStringLiteral("模型库"));
+    auto* row = new QHBoxLayout;
+    auto* refreshButton = primaryButton(QStringLiteral("刷新模型库"));
+    auto* inferButton = new QPushButton(QStringLiteral("选中模型用于推理"));
+    auto* exportButton = new QPushButton(QStringLiteral("选中模型用于导出"));
+    auto* pipelineButton = new QPushButton(QStringLiteral("生成本地流水线计划"));
+    connect(refreshButton, &QPushButton::clicked, this, &MainWindow::refreshModelRegistry);
+    connect(inferButton, &QPushButton::clicked, this, [this]() {
+        if (!modelVersionTable_ || modelVersionTable_->selectedItems().isEmpty()) {
+            QMessageBox::information(this, uiText("模型库"), uiText("请先选择一个模型版本。"));
+            return;
+        }
+        const int row = modelVersionTable_->selectedItems().first()->row();
+        QString path = modelVersionTable_->item(row, 4) ? modelVersionTable_->item(row, 4)->data(Qt::UserRole).toString() : QString();
+        if (path.isEmpty()) {
+            path = modelVersionTable_->item(row, 3) ? modelVersionTable_->item(row, 3)->data(Qt::UserRole).toString() : QString();
+        }
+        if (path.isEmpty()) {
+            QMessageBox::information(this, uiText("模型库"), uiText("选中模型版本没有可用 checkpoint 或 ONNX 路径。"));
+            return;
+        }
+        if (inferenceCheckpointEdit_) {
+            inferenceCheckpointEdit_->setText(QDir::toNativeSeparators(path));
+        }
+        showPage(InferencePage, uiText("推理验证"));
+    });
+    connect(exportButton, &QPushButton::clicked, this, [this]() {
+        if (!modelVersionTable_ || modelVersionTable_->selectedItems().isEmpty()) {
+            QMessageBox::information(this, uiText("模型库"), uiText("请先选择一个模型版本。"));
+            return;
+        }
+        const int row = modelVersionTable_->selectedItems().first()->row();
+        QString path = modelVersionTable_->item(row, 3) ? modelVersionTable_->item(row, 3)->data(Qt::UserRole).toString() : QString();
+        if (path.isEmpty()) {
+            path = modelVersionTable_->item(row, 4) ? modelVersionTable_->item(row, 4)->data(Qt::UserRole).toString() : QString();
+        }
+        if (path.isEmpty()) {
+            QMessageBox::information(this, uiText("模型库"), uiText("选中模型版本没有可用 checkpoint 或 ONNX 路径。"));
+            return;
+        }
+        if (conversionCheckpointEdit_) {
+            conversionCheckpointEdit_->setText(QDir::toNativeSeparators(path));
+        }
+        showPage(ConversionPage, uiText("模型导出"));
+    });
+    connect(pipelineButton, &QPushButton::clicked, this, &MainWindow::runLocalPipelinePlanFromCurrentDataset);
+    row->addWidget(refreshButton);
+    row->addWidget(inferButton);
+    row->addWidget(exportButton);
+    row->addWidget(pipelineButton);
+    row->addStretch();
+    modelRegistrySummaryLabel_ = mutedLabel(QStringLiteral("训练产物可从“任务与产物”注册为模型版本；评估、基准和报告仍通过 Worker 执行。"));
+    toolbar->bodyLayout()->addLayout(row);
+    toolbar->bodyLayout()->addWidget(modelRegistrySummaryLabel_);
+
+    auto* splitter = new QSplitter(Qt::Vertical);
+
+    auto* modelPanel = new InfoPanel(QStringLiteral("模型版本"));
+    modelVersionTable_ = new QTableWidget(0, 8);
+    modelVersionTable_->setHorizontalHeaderLabels(QStringList()
+        << QStringLiteral("模型")
+        << QStringLiteral("版本")
+        << QStringLiteral("状态")
+        << QStringLiteral("Checkpoint")
+        << QStringLiteral("ONNX")
+        << QStringLiteral("来源任务")
+        << QStringLiteral("指标")
+        << QStringLiteral("更新时间"));
+    configureTable(modelVersionTable_);
+    modelPanel->bodyLayout()->addWidget(modelVersionTable_);
+
+    auto* lower = new QSplitter(Qt::Horizontal);
+    auto* reportPanel = new InfoPanel(QStringLiteral("最近评估报告"));
+    evaluationReportTable_ = new QTableWidget(0, 5);
+    evaluationReportTable_->setHorizontalHeaderLabels(QStringList()
+        << QStringLiteral("任务")
+        << QStringLiteral("类型")
+        << QStringLiteral("模型")
+        << QStringLiteral("报告")
+        << QStringLiteral("时间"));
+    configureTable(evaluationReportTable_);
+    reportPanel->bodyLayout()->addWidget(evaluationReportTable_);
+
+    auto* pipelinePanel = new InfoPanel(QStringLiteral("流水线记录"));
+    pipelineRunTable_ = new QTableWidget(0, 5);
+    pipelineRunTable_->setHorizontalHeaderLabels(QStringList()
+        << QStringLiteral("名称")
+        << QStringLiteral("模板")
+        << QStringLiteral("状态")
+        << QStringLiteral("摘要")
+        << QStringLiteral("更新时间"));
+    configureTable(pipelineRunTable_);
+    pipelinePanel->bodyLayout()->addWidget(pipelineRunTable_);
+    lower->addWidget(reportPanel);
+    lower->addWidget(pipelinePanel);
+    lower->setStretchFactor(0, 1);
+    lower->setStretchFactor(1, 1);
+
+    splitter->addWidget(modelPanel);
+    splitter->addWidget(lower);
+    splitter->setStretchFactor(0, 3);
+    splitter->setStretchFactor(1, 2);
+
+    layout->addWidget(toolbar);
+    layout->addWidget(splitter, 1);
     return page;
 }
 
@@ -2054,6 +2206,7 @@ QString MainWindow::pageCaption(int pageIndex) const
     case DatasetPage: return tr("管理数据集库，完成导入、校验、划分和样本预览");
     case TrainingPage: return tr("启动官方后端优先的训练实验，并监控指标、日志和产物");
     case TaskQueuePage: return tr("追踪历史任务、指标、导出记录和所有 Worker 产物");
+    case ModelRegistryPage: return tr("管理模型版本、来源 lineage、评估报告和部署基准");
     case ConversionPage: return tr("将训练产物导出为 ONNX 或外部 TensorRT 验收目标");
     case InferencePage: return tr("选择模型与样本图，验证 detection、segmentation 或 OCR 推理结果");
     case PluginsPage: return tr("扫描和诊断模型插件");
@@ -2068,6 +2221,9 @@ void MainWindow::showPage(int pageIndex, const QString& title)
     pageTitle_->setText(title);
     pageCaption_->setText(pageCaption(pageIndex));
     sidebar_->setCurrentIndex(pageIndex);
+    if (pageIndex == ModelRegistryPage) {
+        updateModelRegistry();
+    }
 }
 
 void MainWindow::createProject()
@@ -2095,6 +2251,7 @@ void MainWindow::createProject()
     updateHeaderState();
     updateRecentTasks();
     updateDatasetList();
+    updateModelRegistry();
     updateDashboardSummary();
     refreshTrainingDefaults();
     statusBar()->showMessage(uiText("项目已打开：%1").arg(currentProjectName_), 5000);
@@ -2265,6 +2422,102 @@ void MainWindow::splitDataset()
     statusBar()->showMessage(uiText("正在划分数据集"), 3000);
 }
 
+void MainWindow::curateDataset()
+{
+    if (worker_.isRunning()) {
+        QMessageBox::warning(this, uiText("数据质量报告"), uiText("Worker 正在执行任务，稍后再生成数据质量报告。"));
+        return;
+    }
+    const QString format = currentDatasetFormat();
+    const QString path = QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
+    if (path.isEmpty() || format.isEmpty()) {
+        QMessageBox::warning(this, uiText("数据质量报告"), uiText("请先选择数据集目录和格式。"));
+        return;
+    }
+
+    QString taskId;
+    QString outputPath;
+    if (repository_.isOpen()) {
+        taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        outputPath = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(taskId));
+        taskId = createRepositoryTask(
+            aitrain::TaskKind::Curate,
+            QStringLiteral("dataset_quality"),
+            QStringLiteral("com.aitrain.plugins.dataset_interop"),
+            outputPath,
+            uiText("数据质量报告生成中。"),
+            taskId);
+        if (taskId.isEmpty()) {
+            return;
+        }
+    }
+
+    QJsonObject options;
+    options.insert(QStringLiteral("maxIssues"), 500);
+    options.insert(QStringLiteral("maxProblemSamples"), 500);
+    options.insert(QStringLiteral("maxFiles"), 20000);
+
+    QString error;
+    if (!worker_.requestDatasetCuration(workerExecutablePath(), path, outputPath, format, options, &error, taskId)) {
+        if (!taskId.isEmpty() && repository_.isOpen()) {
+            QString taskError;
+            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
+            currentTaskId_.clear();
+            updateRecentTasks();
+        }
+        QMessageBox::critical(this, uiText("数据质量报告"), error);
+        return;
+    }
+    workerPill_->setStatus(uiText("数据质量报告生成中"), StatusPill::Tone::Info);
+}
+
+void MainWindow::createDatasetSnapshot()
+{
+    if (worker_.isRunning()) {
+        QMessageBox::warning(this, uiText("数据集快照"), uiText("Worker 正在执行任务，稍后再创建数据集快照。"));
+        return;
+    }
+    const QString format = currentDatasetFormat();
+    const QString path = QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
+    if (path.isEmpty() || format.isEmpty()) {
+        QMessageBox::warning(this, uiText("数据集快照"), uiText("请先选择数据集目录和格式。"));
+        return;
+    }
+
+    QString taskId;
+    QString outputPath;
+    if (repository_.isOpen()) {
+        taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        outputPath = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(taskId));
+        taskId = createRepositoryTask(
+            aitrain::TaskKind::Snapshot,
+            QStringLiteral("dataset_snapshot"),
+            QStringLiteral("com.aitrain.plugins.dataset_interop"),
+            outputPath,
+            uiText("数据集快照创建中。"),
+            taskId);
+        if (taskId.isEmpty()) {
+            return;
+        }
+    }
+
+    QJsonObject options;
+    options.insert(QStringLiteral("maxFiles"), 20000);
+
+    QString error;
+    if (!worker_.requestDatasetSnapshot(workerExecutablePath(), path, outputPath, format, options, &error, taskId)) {
+        if (!taskId.isEmpty() && repository_.isOpen()) {
+            QString taskError;
+            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
+            currentTaskId_.clear();
+            updateRecentTasks();
+        }
+        QMessageBox::critical(this, uiText("数据集快照"), error);
+        return;
+    }
+    workerPill_->setStatus(uiText("数据集快照创建中"), StatusPill::Tone::Info);
+}
+
 void MainWindow::startModelExport()
 {
     if (worker_.isRunning()) {
@@ -2290,29 +2543,15 @@ void MainWindow::startModelExport()
 
     QString taskId;
     if (repository_.isOpen()) {
-        taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        aitrain::TaskRecord record;
-        record.id = taskId;
-        record.projectName = currentProjectName_.isEmpty() ? QStringLiteral("manual") : currentProjectName_;
-        record.pluginId = QStringLiteral("com.aitrain.plugins.yolo_native");
-        record.taskType = QStringLiteral("model_export");
-        record.kind = aitrain::TaskKind::Export;
-        record.state = aitrain::TaskState::Queued;
-        record.workDir = QFileInfo(outputPath).absolutePath();
-        record.message = uiText("等待 Worker 导出模型。");
-        record.createdAt = QDateTime::currentDateTimeUtc();
-        record.updatedAt = record.createdAt;
-        QString taskError;
-        if (!repository_.insertTask(record, &taskError)) {
-            QMessageBox::critical(this, uiText("模型导出"), taskError);
+        taskId = createRepositoryTask(
+            aitrain::TaskKind::Export,
+            QStringLiteral("model_export"),
+            QStringLiteral("com.aitrain.plugins.yolo_native"),
+            QFileInfo(outputPath).absolutePath(),
+            uiText("模型导出中。"));
+        if (taskId.isEmpty()) {
             return;
         }
-        if (!repository_.updateTaskState(taskId, aitrain::TaskState::Running, uiText("模型导出中。"), &taskError)) {
-            QMessageBox::critical(this, uiText("模型导出"), taskError);
-            return;
-        }
-        currentTaskId_ = taskId;
-        updateRecentTasks();
     }
 
     QString error;
@@ -2437,6 +2676,18 @@ void MainWindow::startTraining()
         parameters.insert(QStringLiteral("modelPreset"), modelPreset);
         if (backendForRequest.startsWith(QStringLiteral("ultralytics_yolo"))) {
             parameters.insert(QStringLiteral("model"), modelPreset);
+        }
+    }
+    if (repository_.isOpen()) {
+        QString snapshotError;
+        const aitrain::DatasetRecord dataset = repository_.datasetByRootPath(datasetPath, &snapshotError);
+        if (dataset.id > 0) {
+            const QVector<aitrain::DatasetSnapshotRecord> snapshots = repository_.datasetSnapshots(dataset.id, &snapshotError);
+            if (!snapshots.isEmpty()) {
+                parameters.insert(QStringLiteral("datasetSnapshotId"), snapshots.first().id);
+                parameters.insert(QStringLiteral("datasetSnapshotHash"), snapshots.first().contentHash);
+                parameters.insert(QStringLiteral("datasetSnapshotManifest"), snapshots.first().manifestPath);
+            }
         }
     }
 
@@ -2636,12 +2887,103 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
         currentTaskId_.clear();
         updateRecentTasks();
         startNextQueuedTask();
+    } else if (type == QStringLiteral("failed")) {
+        QString error;
+        repository_.updateTaskState(
+            payload.value(QStringLiteral("taskId")).toString(currentTaskId_),
+            aitrain::TaskState::Failed,
+            payload.value(QStringLiteral("message")).toString(),
+            &error);
+        updateRecentTasks();
+        updateModelRegistry();
     } else if (type == QStringLiteral("environmentCheck")) {
         updateEnvironmentTable(payload);
     } else if (type == QStringLiteral("datasetValidation")) {
         updateDatasetValidationResult(payload);
     } else if (type == QStringLiteral("datasetSplit")) {
         updateDatasetSplitResult(payload);
+    } else if (type == QStringLiteral("datasetQuality")) {
+        if (validationSummaryLabel_) {
+            const QJsonObject counts = payload.value(QStringLiteral("issueCounts")).toObject();
+            int issueCount = 0;
+            for (const QString& key : counts.keys()) {
+                issueCount += counts.value(key).toInt();
+            }
+            validationSummaryLabel_->setText(uiText("质量报告完成：发现 %1 个问题样本/标签项。").arg(issueCount));
+        }
+        if (validationOutput_) {
+            validationOutput_->setPlainText(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Indented)));
+        }
+    } else if (type == QStringLiteral("datasetSnapshot")) {
+        if (validationSummaryLabel_) {
+            validationSummaryLabel_->setText(uiText("数据集快照完成：%1 个文件，hash %2。")
+                .arg(payload.value(QStringLiteral("fileCount")).toInt())
+                .arg(payload.value(QStringLiteral("contentHash")).toString().left(12)));
+        }
+        if (validationOutput_) {
+            validationOutput_->setPlainText(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Indented)));
+        }
+        if (repository_.isOpen()) {
+            QString error;
+            const QString datasetPath = payload.value(QStringLiteral("datasetPath")).toString();
+            aitrain::DatasetRecord dataset = repository_.datasetByRootPath(datasetPath, &error);
+            if (dataset.id <= 0 && !datasetPath.isEmpty()) {
+                aitrain::DatasetRecord seed;
+                seed.name = QFileInfo(datasetPath).fileName();
+                seed.format = payload.value(QStringLiteral("format")).toString(currentDatasetFormat_);
+                seed.rootPath = datasetPath;
+                seed.validationStatus = currentDatasetValid_ ? QStringLiteral("valid") : QStringLiteral("snapshot");
+                seed.sampleCount = payload.value(QStringLiteral("fileCount")).toInt();
+                seed.lastReportJson = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
+                seed.lastValidatedAt = QDateTime::currentDateTimeUtc();
+                repository_.upsertDatasetValidation(seed, &error);
+                dataset = repository_.datasetByRootPath(datasetPath, &error);
+            }
+            if (dataset.id > 0) {
+                aitrain::DatasetSnapshotRecord snapshot;
+                snapshot.datasetId = dataset.id;
+                snapshot.name = QFileInfo(datasetPath).fileName();
+                snapshot.rootPath = datasetPath;
+                snapshot.manifestPath = payload.value(QStringLiteral("manifestPath")).toString();
+                snapshot.contentHash = payload.value(QStringLiteral("contentHash")).toString();
+                snapshot.fileCount = payload.value(QStringLiteral("fileCount")).toInt();
+                snapshot.totalBytes = payload.value(QStringLiteral("totalBytes")).toVariant().toLongLong();
+                snapshot.metadataJson = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
+                snapshot.createdAt = QDateTime::currentDateTimeUtc();
+                repository_.insertDatasetSnapshot(snapshot, &error);
+            }
+        }
+    } else if (type == QStringLiteral("evaluationReport")) {
+        if (repository_.isOpen()) {
+            aitrain::EvaluationReportRecord report;
+            report.taskId = payload.value(QStringLiteral("taskId")).toString(currentTaskId_);
+            report.modelPath = payload.value(QStringLiteral("modelPath")).toString();
+            report.taskType = payload.value(QStringLiteral("taskType")).toString();
+            report.reportPath = payload.value(QStringLiteral("reportPath")).toString();
+            report.summaryJson = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
+            report.createdAt = QDateTime::currentDateTimeUtc();
+            QString error;
+            repository_.insertEvaluationReport(report, &error);
+            updateModelRegistry();
+        }
+    } else if (type == QStringLiteral("benchmarkReport")) {
+        updateModelRegistry();
+    } else if (type == QStringLiteral("pipelinePlan")) {
+        if (repository_.isOpen()) {
+            aitrain::PipelineRunRecord pipeline;
+            pipeline.name = uiText("本地闭环流水线");
+            pipeline.templateId = payload.value(QStringLiteral("templateId")).toString();
+            pipeline.taskIdsJson = QString::fromUtf8(QJsonDocument(QJsonObject{{QStringLiteral("taskId"), payload.value(QStringLiteral("taskId")).toString(currentTaskId_)}}).toJson(QJsonDocument::Compact));
+            pipeline.state = payload.value(QStringLiteral("state")).toString(QStringLiteral("planned"));
+            pipeline.summaryJson = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
+            pipeline.createdAt = QDateTime::currentDateTimeUtc();
+            pipeline.updatedAt = pipeline.createdAt;
+            QString error;
+            repository_.insertPipelineRun(pipeline, &error);
+            updateModelRegistry();
+        }
+    } else if (type == QStringLiteral("deliveryReport")) {
+        updateModelRegistry();
     } else if (type == QStringLiteral("modelExport")) {
         if (exportResultLabel_) {
             const QString exportPath = payload.value(QStringLiteral("exportPath")).toString();
@@ -2664,6 +3006,7 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
             QString error;
             repository_.insertExport(exportRecord, &error);
         }
+        updateModelRegistry();
     } else if (type == QStringLiteral("inferenceResult")) {
         if (inferenceResultLabel_) {
             inferenceResultLabel_->setText(inferenceSummaryFromPredictions(
@@ -2990,6 +3333,12 @@ void MainWindow::updateTaskTable(QTableWidget* table, const QVector<aitrain::Tas
             case aitrain::TaskKind::Validate: kindData = QStringLiteral("validate"); break;
             case aitrain::TaskKind::Export: kindData = QStringLiteral("export"); break;
             case aitrain::TaskKind::Infer: kindData = QStringLiteral("infer"); break;
+            case aitrain::TaskKind::Evaluate: kindData = QStringLiteral("evaluate"); break;
+            case aitrain::TaskKind::Benchmark: kindData = QStringLiteral("benchmark"); break;
+            case aitrain::TaskKind::Curate: kindData = QStringLiteral("curate"); break;
+            case aitrain::TaskKind::Snapshot: kindData = QStringLiteral("snapshot"); break;
+            case aitrain::TaskKind::Pipeline: kindData = QStringLiteral("pipeline"); break;
+            case aitrain::TaskKind::Report: kindData = QStringLiteral("report"); break;
             }
             kindItem->setData(Qt::UserRole, kindData);
             table->setItem(row, 1, kindItem);
@@ -3053,6 +3402,126 @@ QString MainWindow::createRepositoryTask(aitrain::TaskKind kind,
     currentTaskId_ = taskId;
     updateRecentTasks();
     return taskId;
+}
+
+void MainWindow::updateModelRegistry()
+{
+    if (!repository_.isOpen()) {
+        if (modelVersionTable_) {
+            modelVersionTable_->setRowCount(0);
+            modelVersionTable_->insertRow(0);
+            modelVersionTable_->setItem(0, 0, new QTableWidgetItem(uiText("请先打开项目")));
+        }
+        if (evaluationReportTable_) {
+            evaluationReportTable_->setRowCount(0);
+        }
+        if (pipelineRunTable_) {
+            pipelineRunTable_->setRowCount(0);
+        }
+        return;
+    }
+
+    QString error;
+    const QVector<aitrain::ModelVersionRecord> models = repository_.recentModelVersions(200, &error);
+    const QVector<aitrain::EvaluationReportRecord> reports = repository_.recentEvaluationReports(100, &error);
+    const QVector<aitrain::PipelineRunRecord> pipelines = repository_.recentPipelineRuns(100, &error);
+
+    if (modelRegistrySummaryLabel_) {
+        modelRegistrySummaryLabel_->setText(uiText("模型版本：%1；评估报告：%2；流水线记录：%3。评估、基准和报告 v1 通过 Worker 生成 artifact，完整质量分析仍按 scaffold 标注。")
+            .arg(models.size())
+            .arg(reports.size())
+            .arg(pipelines.size()));
+    }
+
+    if (modelVersionTable_) {
+        modelVersionTable_->setRowCount(0);
+        if (models.isEmpty()) {
+            modelVersionTable_->insertRow(0);
+            modelVersionTable_->setItem(0, 0, new QTableWidgetItem(uiText("暂无模型版本")));
+            for (int column = 1; column < modelVersionTable_->columnCount(); ++column) {
+                modelVersionTable_->setItem(0, column, new QTableWidgetItem(QString()));
+            }
+        } else {
+            for (const aitrain::ModelVersionRecord& model : models) {
+                const int row = modelVersionTable_->rowCount();
+                modelVersionTable_->insertRow(row);
+                modelVersionTable_->setItem(row, 0, new QTableWidgetItem(model.modelName));
+                modelVersionTable_->setItem(row, 1, new QTableWidgetItem(model.version));
+                modelVersionTable_->setItem(row, 2, new QTableWidgetItem(model.status));
+                auto* checkpointItem = new QTableWidgetItem(QDir::toNativeSeparators(model.checkpointPath));
+                checkpointItem->setData(Qt::UserRole, model.checkpointPath);
+                modelVersionTable_->setItem(row, 3, checkpointItem);
+                auto* onnxItem = new QTableWidgetItem(QDir::toNativeSeparators(model.onnxPath));
+                onnxItem->setData(Qt::UserRole, model.onnxPath);
+                modelVersionTable_->setItem(row, 4, onnxItem);
+                modelVersionTable_->setItem(row, 5, new QTableWidgetItem(model.sourceTaskId.left(8)));
+
+                QString metricsText = model.metricsJson;
+                const QJsonObject metrics = QJsonDocument::fromJson(model.metricsJson.toUtf8()).object();
+                if (!metrics.isEmpty()) {
+                    QStringList pairs;
+                    for (auto it = metrics.constBegin(); it != metrics.constEnd() && pairs.size() < 4; ++it) {
+                        pairs.append(QStringLiteral("%1=%2").arg(it.key()).arg(it.value().toDouble()));
+                    }
+                    metricsText = pairs.join(QStringLiteral(", "));
+                }
+                modelVersionTable_->setItem(row, 6, new QTableWidgetItem(metricsText));
+                modelVersionTable_->setItem(row, 7, new QTableWidgetItem(model.updatedAt.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))));
+            }
+        }
+    }
+
+    if (evaluationReportTable_) {
+        evaluationReportTable_->setRowCount(0);
+        if (reports.isEmpty()) {
+            evaluationReportTable_->insertRow(0);
+            evaluationReportTable_->setItem(0, 0, new QTableWidgetItem(uiText("暂无评估报告")));
+            for (int column = 1; column < evaluationReportTable_->columnCount(); ++column) {
+                evaluationReportTable_->setItem(0, column, new QTableWidgetItem(QString()));
+            }
+        } else {
+            for (const aitrain::EvaluationReportRecord& report : reports) {
+                const int row = evaluationReportTable_->rowCount();
+                evaluationReportTable_->insertRow(row);
+                evaluationReportTable_->setItem(row, 0, new QTableWidgetItem(report.taskId.left(8)));
+                evaluationReportTable_->setItem(row, 1, new QTableWidgetItem(taskTypeLabel(report.taskType)));
+                evaluationReportTable_->setItem(row, 2, new QTableWidgetItem(QDir::toNativeSeparators(report.modelPath)));
+                evaluationReportTable_->setItem(row, 3, new QTableWidgetItem(QDir::toNativeSeparators(report.reportPath)));
+                evaluationReportTable_->setItem(row, 4, new QTableWidgetItem(report.createdAt.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))));
+            }
+        }
+    }
+
+    if (pipelineRunTable_) {
+        pipelineRunTable_->setRowCount(0);
+        if (pipelines.isEmpty()) {
+            pipelineRunTable_->insertRow(0);
+            pipelineRunTable_->setItem(0, 0, new QTableWidgetItem(uiText("暂无流水线记录")));
+            for (int column = 1; column < pipelineRunTable_->columnCount(); ++column) {
+                pipelineRunTable_->setItem(0, column, new QTableWidgetItem(QString()));
+            }
+        } else {
+            for (const aitrain::PipelineRunRecord& pipeline : pipelines) {
+                const int row = pipelineRunTable_->rowCount();
+                pipelineRunTable_->insertRow(row);
+                pipelineRunTable_->setItem(row, 0, new QTableWidgetItem(pipeline.name));
+                pipelineRunTable_->setItem(row, 1, new QTableWidgetItem(pipeline.templateId));
+                pipelineRunTable_->setItem(row, 2, new QTableWidgetItem(pipeline.state));
+                pipelineRunTable_->setItem(row, 3, new QTableWidgetItem(pipeline.summaryJson.left(160)));
+                pipelineRunTable_->setItem(row, 4, new QTableWidgetItem(pipeline.updatedAt.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))));
+            }
+        }
+    }
+}
+
+QString MainWindow::selectedTaskId() const
+{
+    if (!taskQueueTable_ || taskQueueTable_->selectedItems().isEmpty()) {
+        return QString();
+    }
+    const int row = taskQueueTable_->selectedItems().first()->row();
+    auto* item = taskQueueTable_->item(row, 0);
+    return item ? item->data(Qt::UserRole).toString() : QString();
 }
 
 QString MainWindow::selectedArtifactPath() const
@@ -3296,6 +3765,265 @@ void MainWindow::useSelectedArtifactForExport()
         conversionCheckpointEdit_->setText(QDir::toNativeSeparators(path));
         showPage(ConversionPage, tr("模型导出"));
     }
+}
+
+void MainWindow::registerSelectedArtifactAsModelVersion()
+{
+    if (!repository_.isOpen()) {
+        QMessageBox::information(this, uiText("模型注册"), uiText("请先打开项目。"));
+        return;
+    }
+    const QString path = selectedArtifactPath();
+    if (path.isEmpty()) {
+        QMessageBox::information(this, uiText("模型注册"), uiText("请先选择一个 checkpoint、ONNX 或 engine 产物。"));
+        return;
+    }
+
+    const QFileInfo info(path);
+    const QString suffix = info.suffix().toLower();
+    const QString defaultName = currentProjectName_.isEmpty() ? QStringLiteral("model") : currentProjectName_;
+    bool ok = false;
+    const QString modelName = QInputDialog::getText(this, uiText("模型注册"), uiText("模型名称"), QLineEdit::Normal, defaultName, &ok).trimmed();
+    if (!ok || modelName.isEmpty()) {
+        return;
+    }
+
+    const int existingCount = repository_.recentModelVersions(500).size();
+    const QString defaultVersion = QStringLiteral("v%1").arg(existingCount + 1);
+    const QString version = QInputDialog::getText(this, uiText("模型注册"), uiText("版本号"), QLineEdit::Normal, defaultVersion, &ok).trimmed();
+    if (!ok || version.isEmpty()) {
+        return;
+    }
+
+    QJsonObject metricSummary;
+    const QString taskId = selectedTaskId();
+    if (!taskId.isEmpty()) {
+        QString error;
+        const QVector<aitrain::MetricPoint> metrics = repository_.metricsForTask(taskId, &error);
+        for (const aitrain::MetricPoint& metric : metrics) {
+            metricSummary.insert(metric.name, metric.value);
+        }
+    }
+
+    aitrain::ModelVersionRecord record;
+    record.modelName = modelName;
+    record.version = version;
+    record.sourceTaskId = taskId;
+    record.status = suffix == QStringLiteral("onnx") ? QStringLiteral("exported") : QStringLiteral("draft");
+    record.notes = uiText("从任务产物手动注册。");
+    record.metricsJson = QString::fromUtf8(QJsonDocument(metricSummary).toJson(QJsonDocument::Compact));
+    if (suffix == QStringLiteral("onnx")) {
+        record.onnxPath = path;
+    } else if (suffix == QStringLiteral("engine") || suffix == QStringLiteral("plan")) {
+        record.tensorRtEnginePath = path;
+    } else {
+        record.checkpointPath = path;
+    }
+    record.createdAt = QDateTime::currentDateTimeUtc();
+    record.updatedAt = record.createdAt;
+
+    QString error;
+    const int id = repository_.upsertModelVersion(record, &error);
+    if (id <= 0) {
+        QMessageBox::critical(this, uiText("模型注册"), error);
+        return;
+    }
+    updateModelRegistry();
+    updateDashboardSummary();
+    statusBar()->showMessage(uiText("已注册模型版本：%1:%2").arg(modelName, version), 4000);
+    showPage(ModelRegistryPage, uiText("模型库"));
+}
+
+void MainWindow::evaluateSelectedArtifact()
+{
+    if (worker_.isRunning()) {
+        QMessageBox::warning(this, uiText("模型评估"), uiText("Worker 正在执行任务，稍后再评估模型。"));
+        return;
+    }
+    const QString modelPath = selectedArtifactPath();
+    const QString datasetPath = QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
+    if (modelPath.isEmpty() || datasetPath.isEmpty()) {
+        QMessageBox::warning(this, uiText("模型评估"), uiText("请先选择模型产物，并在数据集页选择评估数据集。"));
+        return;
+    }
+
+    const QString taskType = currentTaskType().isEmpty() ? QStringLiteral("detection") : currentTaskType();
+    QString taskId;
+    QString outputPath;
+    if (repository_.isOpen()) {
+        taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        outputPath = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(taskId));
+        taskId = createRepositoryTask(
+            aitrain::TaskKind::Evaluate,
+            taskType,
+            QStringLiteral("com.aitrain.workflow"),
+            outputPath,
+            uiText("模型评估报告生成中。"),
+            taskId);
+        if (taskId.isEmpty()) {
+            return;
+        }
+    }
+
+    QJsonObject options;
+    options.insert(QStringLiteral("scaffoldAcknowledged"), true);
+    QString error;
+    if (!worker_.requestModelEvaluation(workerExecutablePath(), modelPath, datasetPath, outputPath, taskType, options, &error, taskId)) {
+        if (!taskId.isEmpty() && repository_.isOpen()) {
+            QString taskError;
+            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
+            currentTaskId_.clear();
+            updateRecentTasks();
+        }
+        QMessageBox::critical(this, uiText("模型评估"), error);
+        return;
+    }
+    workerPill_->setStatus(uiText("模型评估中"), StatusPill::Tone::Info);
+}
+
+void MainWindow::benchmarkSelectedArtifact()
+{
+    if (worker_.isRunning()) {
+        QMessageBox::warning(this, uiText("部署基准"), uiText("Worker 正在执行任务，稍后再运行部署基准。"));
+        return;
+    }
+    const QString modelPath = selectedArtifactPath();
+    if (modelPath.isEmpty()) {
+        QMessageBox::warning(this, uiText("部署基准"), uiText("请先选择一个模型产物。"));
+        return;
+    }
+
+    QString taskId;
+    QString outputPath;
+    if (repository_.isOpen()) {
+        taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        outputPath = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(taskId));
+        taskId = createRepositoryTask(
+            aitrain::TaskKind::Benchmark,
+            QStringLiteral("model_benchmark"),
+            QStringLiteral("com.aitrain.workflow"),
+            outputPath,
+            uiText("部署基准报告生成中。"),
+            taskId);
+        if (taskId.isEmpty()) {
+            return;
+        }
+    }
+
+    QJsonObject options;
+    options.insert(QStringLiteral("device"), QStringLiteral("cpu"));
+    options.insert(QStringLiteral("batch"), 1);
+    QString error;
+    if (!worker_.requestModelBenchmark(workerExecutablePath(), modelPath, outputPath, options, &error, taskId)) {
+        if (!taskId.isEmpty() && repository_.isOpen()) {
+            QString taskError;
+            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
+            currentTaskId_.clear();
+            updateRecentTasks();
+        }
+        QMessageBox::critical(this, uiText("部署基准"), error);
+        return;
+    }
+    workerPill_->setStatus(uiText("部署基准运行中"), StatusPill::Tone::Info);
+}
+
+void MainWindow::generateDeliveryReportFromSelectedArtifact()
+{
+    if (worker_.isRunning()) {
+        QMessageBox::warning(this, uiText("交付报告"), uiText("Worker 正在执行任务，稍后再生成交付报告。"));
+        return;
+    }
+    const QString modelPath = selectedArtifactPath();
+    if (modelPath.isEmpty()) {
+        QMessageBox::warning(this, uiText("交付报告"), uiText("请先选择一个模型或报告产物。"));
+        return;
+    }
+
+    QString taskId;
+    QString outputPath;
+    if (repository_.isOpen()) {
+        taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        outputPath = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(taskId));
+        taskId = createRepositoryTask(
+            aitrain::TaskKind::Report,
+            QStringLiteral("delivery_report"),
+            QStringLiteral("com.aitrain.workflow"),
+            outputPath,
+            uiText("训练交付报告生成中。"),
+            taskId);
+        if (taskId.isEmpty()) {
+            return;
+        }
+    }
+
+    QJsonObject context;
+    context.insert(QStringLiteral("projectName"), currentProjectName_);
+    context.insert(QStringLiteral("projectPath"), currentProjectPath_);
+    context.insert(QStringLiteral("modelPath"), modelPath);
+    context.insert(QStringLiteral("datasetPath"), currentDatasetPath_);
+    context.insert(QStringLiteral("datasetFormat"), currentDatasetFormat_);
+    context.insert(QStringLiteral("sourceTaskId"), selectedTaskId());
+    QString error;
+    if (!worker_.requestDeliveryReport(workerExecutablePath(), outputPath, context, &error, taskId)) {
+        if (!taskId.isEmpty() && repository_.isOpen()) {
+            QString taskError;
+            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
+            currentTaskId_.clear();
+            updateRecentTasks();
+        }
+        QMessageBox::critical(this, uiText("交付报告"), error);
+        return;
+    }
+    workerPill_->setStatus(uiText("交付报告生成中"), StatusPill::Tone::Info);
+}
+
+void MainWindow::runLocalPipelinePlanFromCurrentDataset()
+{
+    if (worker_.isRunning()) {
+        QMessageBox::warning(this, uiText("本地流水线"), uiText("Worker 正在执行任务，稍后再生成流水线计划。"));
+        return;
+    }
+
+    QString taskId;
+    QString outputPath;
+    if (repository_.isOpen()) {
+        taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        outputPath = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(taskId));
+        taskId = createRepositoryTask(
+            aitrain::TaskKind::Pipeline,
+            QStringLiteral("local_pipeline"),
+            QStringLiteral("com.aitrain.workflow"),
+            outputPath,
+            uiText("本地流水线计划生成中。"),
+            taskId);
+        if (taskId.isEmpty()) {
+            return;
+        }
+    }
+
+    QJsonObject options;
+    options.insert(QStringLiteral("datasetPath"), QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString()));
+    options.insert(QStringLiteral("datasetFormat"), currentDatasetFormat());
+    options.insert(QStringLiteral("taskType"), currentTaskType());
+    options.insert(QStringLiteral("trainingBackend"), trainingBackendCombo_ ? trainingBackendCombo_->currentData().toString() : QString());
+
+    QString error;
+    if (!worker_.requestLocalPipeline(workerExecutablePath(), outputPath, QStringLiteral("train-evaluate-export-register"), options, &error, taskId)) {
+        if (!taskId.isEmpty() && repository_.isOpen()) {
+            QString taskError;
+            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
+            currentTaskId_.clear();
+            updateRecentTasks();
+        }
+        QMessageBox::critical(this, uiText("本地流水线"), error);
+        return;
+    }
+    workerPill_->setStatus(uiText("本地流水线计划生成中"), StatusPill::Tone::Info);
+}
+
+void MainWindow::refreshModelRegistry()
+{
+    updateModelRegistry();
 }
 
 void MainWindow::updateHeaderState()
@@ -3722,6 +4450,7 @@ void MainWindow::updateDashboardSummary()
     int validDatasetCount = 0;
     int taskCount = 0;
     int exportCount = 0;
+    int modelVersionCount = 0;
     if (hasProject) {
         QString error;
         const QVector<aitrain::DatasetRecord> datasets = repository_.recentDatasets(200, &error);
@@ -3733,6 +4462,7 @@ void MainWindow::updateDashboardSummary()
         }
         taskCount = repository_.recentTasks(200, &error).size();
         exportCount = repository_.recentExports(200, &error).size();
+        modelVersionCount = repository_.recentModelVersions(200, &error).size();
     }
 
     if (dashboardDatasetValue_) {
@@ -3744,7 +4474,9 @@ void MainWindow::updateDashboardSummary()
         dashboardTaskValue_->setText(QString::number(taskCount));
     }
     if (dashboardModelValue_) {
-        dashboardModelValue_->setText(QString::number(exportCount));
+        dashboardModelValue_->setText(hasProject
+            ? QStringLiteral("%1 / %2").arg(modelVersionCount).arg(exportCount)
+            : QStringLiteral("0"));
     }
     if (dashboardPluginValue_) {
         dashboardPluginValue_->setText(QString::number(pluginManager_.plugins().size()));
@@ -3782,7 +4514,7 @@ void MainWindow::updateDashboardSummary()
         } else if (taskCount == 0) {
             nextStep = uiText("下一步：进入训练实验，选择已校验数据集。平台会按任务类型优先选择官方 YOLO / OCR 后端。");
         } else if (exportCount == 0) {
-            nextStep = uiText("下一步：在任务与产物中查看 checkpoint / report / ONNX，再进入模型导出或推理验证。");
+            nextStep = uiText("下一步：在任务与产物中查看 checkpoint / report / ONNX，注册到模型库后再做评估、基准、导出或推理验证。");
         } else {
             nextStep = uiText("项目已具备可复验闭环：数据集、任务历史和模型导出均已记录。可继续运行推理验证或追加实验。");
         }

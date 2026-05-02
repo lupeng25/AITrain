@@ -19,6 +19,19 @@ WorkerClient::WorkerClient(QObject* parent)
     });
 }
 
+WorkerClient::~WorkerClient()
+{
+    cleanupSocket();
+    server_.close();
+    if (process_.state() != QProcess::NotRunning) {
+        process_.terminate();
+        if (!process_.waitForFinished(3000)) {
+            process_.kill();
+            process_.waitForFinished(3000);
+        }
+    }
+}
+
 bool WorkerClient::startTraining(const QString& workerProgram, const aitrain::TrainingRequest& request, QString* error)
 {
     return startWorkerCommand(workerProgram, QStringLiteral("startTrain"), request.toJson(), error);
@@ -49,6 +62,69 @@ bool WorkerClient::requestDatasetSplit(const QString& workerProgram, const QStri
     payload.insert(QStringLiteral("format"), format);
     payload.insert(QStringLiteral("options"), options);
     return startWorkerCommand(workerProgram, QStringLiteral("splitDataset"), payload, error);
+}
+
+bool WorkerClient::requestDatasetCuration(const QString& workerProgram, const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId)
+{
+    QJsonObject payload;
+    payload.insert(QStringLiteral("taskId"), taskId);
+    payload.insert(QStringLiteral("datasetPath"), datasetPath);
+    payload.insert(QStringLiteral("outputPath"), outputPath);
+    payload.insert(QStringLiteral("format"), format);
+    payload.insert(QStringLiteral("options"), options);
+    return startWorkerCommand(workerProgram, QStringLiteral("curateDataset"), payload, error);
+}
+
+bool WorkerClient::requestDatasetSnapshot(const QString& workerProgram, const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId)
+{
+    QJsonObject payload;
+    payload.insert(QStringLiteral("taskId"), taskId);
+    payload.insert(QStringLiteral("datasetPath"), datasetPath);
+    payload.insert(QStringLiteral("outputPath"), outputPath);
+    payload.insert(QStringLiteral("format"), format);
+    payload.insert(QStringLiteral("options"), options);
+    return startWorkerCommand(workerProgram, QStringLiteral("createDatasetSnapshot"), payload, error);
+}
+
+bool WorkerClient::requestModelEvaluation(const QString& workerProgram, const QString& modelPath, const QString& datasetPath, const QString& outputPath, const QString& taskType, const QJsonObject& options, QString* error, const QString& taskId)
+{
+    QJsonObject payload;
+    payload.insert(QStringLiteral("taskId"), taskId);
+    payload.insert(QStringLiteral("modelPath"), modelPath);
+    payload.insert(QStringLiteral("datasetPath"), datasetPath);
+    payload.insert(QStringLiteral("outputPath"), outputPath);
+    payload.insert(QStringLiteral("taskType"), taskType);
+    payload.insert(QStringLiteral("options"), options);
+    return startWorkerCommand(workerProgram, QStringLiteral("evaluateModel"), payload, error);
+}
+
+bool WorkerClient::requestModelBenchmark(const QString& workerProgram, const QString& modelPath, const QString& outputPath, const QJsonObject& options, QString* error, const QString& taskId)
+{
+    QJsonObject payload;
+    payload.insert(QStringLiteral("taskId"), taskId);
+    payload.insert(QStringLiteral("modelPath"), modelPath);
+    payload.insert(QStringLiteral("outputPath"), outputPath);
+    payload.insert(QStringLiteral("options"), options);
+    return startWorkerCommand(workerProgram, QStringLiteral("benchmarkModel"), payload, error);
+}
+
+bool WorkerClient::requestLocalPipeline(const QString& workerProgram, const QString& outputPath, const QString& templateId, const QJsonObject& options, QString* error, const QString& taskId)
+{
+    QJsonObject payload;
+    payload.insert(QStringLiteral("taskId"), taskId);
+    payload.insert(QStringLiteral("outputPath"), outputPath);
+    payload.insert(QStringLiteral("templateId"), templateId);
+    payload.insert(QStringLiteral("options"), options);
+    return startWorkerCommand(workerProgram, QStringLiteral("runLocalPipeline"), payload, error);
+}
+
+bool WorkerClient::requestDeliveryReport(const QString& workerProgram, const QString& outputPath, const QJsonObject& context, QString* error, const QString& taskId)
+{
+    QJsonObject payload;
+    payload.insert(QStringLiteral("taskId"), taskId);
+    payload.insert(QStringLiteral("outputPath"), outputPath);
+    payload.insert(QStringLiteral("context"), context);
+    return startWorkerCommand(workerProgram, QStringLiteral("generateDeliveryReport"), payload, error);
 }
 
 bool WorkerClient::requestModelExport(const QString& workerProgram, const QString& checkpointPath, const QString& outputPath, const QString& format, QString* error, const QString& taskId)
@@ -115,6 +191,7 @@ bool WorkerClient::startWorkerCommand(const QString& workerProgram, const QStrin
     if (server_.isListening()) {
         server_.close();
     }
+    cleanupSocket();
 
     const QString serverName = QStringLiteral("aitrain_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
     QLocalServer::removeServer(serverName);
@@ -125,8 +202,9 @@ bool WorkerClient::startWorkerCommand(const QString& workerProgram, const QStrin
         return false;
     }
 
-    socket_ = nullptr;
     buffer_.clear();
+    pendingCommandType_ = commandType;
+    pendingRequest_ = payload;
     process_.setProgram(workerProgram);
     process_.setArguments({QStringLiteral("--server"), serverName});
     process_.setProcessChannelMode(QProcess::MergedChannels);
@@ -135,26 +213,21 @@ bool WorkerClient::startWorkerCommand(const QString& workerProgram, const QStrin
         if (error) {
             *error = process_.errorString();
         }
+        pendingCommandType_.clear();
+        pendingRequest_ = QJsonObject();
         server_.close();
         return false;
     }
 
-    pendingCommandType_ = commandType;
-    pendingRequest_ = payload;
     return true;
 }
 
 void WorkerClient::acceptConnection()
 {
+    cleanupSocket();
     socket_ = server_.nextPendingConnection();
     connect(socket_, &QLocalSocket::readyRead, this, &WorkerClient::readLines);
-    connect(socket_, &QLocalSocket::disconnected, socket_, &QObject::deleteLater);
-    connect(socket_, &QObject::destroyed, this, [this]() { socket_ = nullptr; });
     emit connected();
-
-    if (!pendingCommandType_.isEmpty()) {
-        send(pendingCommandType_, pendingRequest_);
-    }
 }
 
 void WorkerClient::readLines()
@@ -175,7 +248,11 @@ void WorkerClient::readLines()
         QString error;
         if (aitrain::protocol::decodeMessage(line, &type, &payload, &requestId, &error)) {
             emit messageReceived(type, payload);
-            if (type == QStringLiteral("log")) {
+            if (type == QStringLiteral("ready")) {
+                if (!pendingCommandType_.isEmpty()) {
+                    send(pendingCommandType_, pendingRequest_);
+                }
+            } else if (type == QStringLiteral("log")) {
                 emit logLine(payload.value(QStringLiteral("message")).toString());
             } else if (type == QStringLiteral("completed")) {
                 emit finished(true, payload.value(QStringLiteral("message")).toString());
@@ -199,6 +276,7 @@ void WorkerClient::workerFinished(int exitCode, QProcess::ExitStatus status)
     if (status != QProcess::NormalExit || exitCode != 0) {
         emit finished(false, QStringLiteral("Worker exited with code %1").arg(exitCode));
     }
+    cleanupSocket();
     server_.close();
     pendingCommandType_.clear();
     pendingRequest_ = QJsonObject();
@@ -212,4 +290,19 @@ void WorkerClient::send(const QString& type, const QJsonObject& payload)
     }
     socket_->write(aitrain::protocol::encodeMessage(type, payload));
     socket_->flush();
+}
+
+void WorkerClient::cleanupSocket()
+{
+    if (!socket_) {
+        return;
+    }
+    QLocalSocket* socket = socket_;
+    socket_ = nullptr;
+    socket->disconnect(this);
+    if (socket->state() != QLocalSocket::UnconnectedState) {
+        socket->disconnectFromServer();
+        socket->waitForDisconnected(1000);
+    }
+    socket->deleteLater();
 }
