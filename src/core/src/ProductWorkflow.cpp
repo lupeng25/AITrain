@@ -100,14 +100,57 @@ QFileInfoList collectFilesRecursive(const QString& rootPath, int maxFiles)
     while (iterator.hasNext()) {
         iterator.next();
         files.append(iterator.fileInfo());
-        if (maxFiles > 0 && files.size() >= maxFiles) {
-            break;
-        }
     }
     std::sort(files.begin(), files.end(), [](const QFileInfo& left, const QFileInfo& right) {
         return left.absoluteFilePath().compare(right.absoluteFilePath(), Qt::CaseInsensitive) < 0;
     });
+    if (maxFiles > 0 && files.size() > maxFiles) {
+        while (files.size() > maxFiles) {
+            files.removeLast();
+        }
+    }
     return files;
+}
+
+bool isImageFile(const QString& suffix)
+{
+    const QString lower = suffix.toLower();
+    return lower == QStringLiteral("jpg")
+        || lower == QStringLiteral("jpeg")
+        || lower == QStringLiteral("png")
+        || lower == QStringLiteral("bmp")
+        || lower == QStringLiteral("tif")
+        || lower == QStringLiteral("tiff");
+}
+
+QString snapshotFileRole(const QString& relativePath, const QFileInfo& fileInfo)
+{
+    const QString path = QDir::fromNativeSeparators(relativePath).toLower();
+    const QString name = fileInfo.fileName().toLower();
+    const QString suffix = fileInfo.suffix().toLower();
+    if (isImageFile(suffix)) {
+        return QStringLiteral("image");
+    }
+    if (name == QStringLiteral("data.yaml") || name == QStringLiteral("data.yml") || suffix == QStringLiteral("yaml") || suffix == QStringLiteral("yml")) {
+        return QStringLiteral("config");
+    }
+    if (name == QStringLiteral("dict.txt")) {
+        return QStringLiteral("dict");
+    }
+    if (name.startsWith(QStringLiteral("rec_gt")) || name.startsWith(QStringLiteral("det_gt")) || path.contains(QStringLiteral("/rec_gt")) || path.contains(QStringLiteral("/det_gt"))) {
+        return QStringLiteral("ocr_gt");
+    }
+    if ((path.startsWith(QStringLiteral("labels/")) || path.contains(QStringLiteral("/labels/"))) && suffix == QStringLiteral("txt")) {
+        return QStringLiteral("label");
+    }
+    return QStringLiteral("other");
+}
+
+bool isSnapshotKeyRole(const QString& role)
+{
+    return role == QStringLiteral("config")
+        || role == QStringLiteral("dict")
+        || role == QStringLiteral("ocr_gt");
 }
 
 DatasetValidationResult validateByFormat(const QString& datasetPath, const QString& format, const QJsonObject& options)
@@ -269,6 +312,8 @@ WorkflowResult createDatasetSnapshotReport(const QString& datasetPath, const QSt
     const int maxFiles = options.value(QStringLiteral("maxFiles")).toInt(20000);
     const QFileInfoList files = collectFilesRecursive(datasetPath, maxFiles);
     QJsonArray fileArray;
+    QJsonArray keyFileArray;
+    QJsonObject roleCounts;
     QCryptographicHash manifestHash(QCryptographicHash::Sha256);
     qint64 totalBytes = 0;
     QString error;
@@ -280,14 +325,26 @@ WorkflowResult createDatasetSnapshotReport(const QString& datasetPath, const QSt
         }
         totalBytes += fileSize;
         const QString relativePath = cleanRelativePath(root, fileInfo.absoluteFilePath());
+        const QString role = snapshotFileRole(relativePath, fileInfo);
         QJsonObject fileObject;
         fileObject.insert(QStringLiteral("path"), relativePath);
+        fileObject.insert(QStringLiteral("role"), role);
         fileObject.insert(QStringLiteral("size"), QString::number(fileSize));
         fileObject.insert(QStringLiteral("mtime"), fileInfo.lastModified().toUTC().toString(Qt::ISODateWithMs));
         fileObject.insert(QStringLiteral("sha256"), QString::fromLatin1(hash));
         fileArray.append(fileObject);
         manifestHash.addData(relativePath.toUtf8());
+        manifestHash.addData("\0", 1);
         manifestHash.addData(hash);
+        manifestHash.addData("\0", 1);
+        roleCounts.insert(role, roleCounts.value(role).toInt() + 1);
+        if (isSnapshotKeyRole(role)) {
+            QJsonObject keyFile;
+            keyFile.insert(QStringLiteral("path"), relativePath);
+            keyFile.insert(QStringLiteral("role"), role);
+            keyFile.insert(QStringLiteral("sha256"), QString::fromLatin1(hash));
+            keyFileArray.append(keyFile);
+        }
     }
 
     QJsonObject manifest;
@@ -300,6 +357,10 @@ WorkflowResult createDatasetSnapshotReport(const QString& datasetPath, const QSt
     manifest.insert(QStringLiteral("totalBytes"), QString::number(totalBytes));
     manifest.insert(QStringLiteral("contentHash"), QString::fromLatin1(manifestHash.result().toHex()));
     manifest.insert(QStringLiteral("splits"), countImageSplits(datasetPath));
+    manifest.insert(QStringLiteral("roleCounts"), roleCounts);
+    manifest.insert(QStringLiteral("keyFiles"), keyFileArray);
+    manifest.insert(QStringLiteral("imageCount"), roleCounts.value(QStringLiteral("image")).toInt());
+    manifest.insert(QStringLiteral("labelCount"), roleCounts.value(QStringLiteral("label")).toInt());
     manifest.insert(QStringLiteral("files"), fileArray);
 
     const QString reportPath = QDir(outputPath).filePath(QStringLiteral("dataset_snapshot_manifest.json"));

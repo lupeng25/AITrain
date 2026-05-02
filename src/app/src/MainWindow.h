@@ -53,6 +53,7 @@ private slots:
     void benchmarkSelectedArtifact();
     void generateDeliveryReportFromSelectedArtifact();
     void runLocalPipelinePlanFromCurrentDataset();
+    void reproduceSelectedTrainingTask();
     void refreshModelRegistry();
 
 private:
@@ -99,8 +100,16 @@ private:
     void updateEnvironmentTable(const QJsonObject& payload);
     void updateDatasetValidationResult(const QJsonObject& payload);
     void updateDatasetSplitResult(const QJsonObject& payload);
+    struct PendingTrainingTask {
+        QString taskId;
+        aitrain::TrainingRequest request;
+        bool needsSnapshot = false;
+        int datasetId = 0;
+        QString datasetFormat;
+    };
     void startQueuedTraining(const QString& taskId, const aitrain::TrainingRequest& request);
     void startNextQueuedTask();
+    void startSnapshotForQueuedTraining(const PendingTrainingTask& pending);
     void configureTable(QTableWidget* table) const;
     void updateDashboardSummary();
     void updateProjectSummary();
@@ -112,6 +121,9 @@ private:
     void refreshAfterAnnotation();
     void applyTaskFilters();
     void updateModelRegistry();
+    bool attachLatestSnapshotToRequest(aitrain::TrainingRequest& request, int datasetId, QString* error);
+    int recordExperimentRunForRequest(const aitrain::TrainingRequest& request, int datasetId, QString* error);
+    void updateExperimentRunSummary(const QString& taskId);
     QString createRepositoryTask(aitrain::TaskKind kind, const QString& taskType, const QString& pluginId, const QString& workDir, const QString& message, const QString& requestedTaskId = {});
     QString selectedTaskId() const;
     QString selectedArtifactPath() const;
@@ -128,11 +140,9 @@ private:
     QString currentDatasetFormat_;
     bool currentDatasetValid_ = false;
 
-    struct PendingTrainingTask {
-        QString taskId;
-        aitrain::TrainingRequest request;
-    };
     QVector<PendingTrainingTask> pendingTrainingTasks_;
+    PendingTrainingTask activeSnapshotTrainingTask_;
+    bool hasActiveSnapshotTrainingTask_ = false;
 
     Sidebar* sidebar_ = nullptr;
     QStackedWidget* stack_ = nullptr;

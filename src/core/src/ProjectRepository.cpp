@@ -589,6 +589,13 @@ int ProjectRepository::upsertExperiment(const ExperimentRecord& experiment, QStr
 
 int ProjectRepository::insertExperimentRun(const ExperimentRunRecord& run, QString* error)
 {
+    if (!run.taskId.isEmpty()) {
+        const ExperimentRunRecord existing = experimentRunForTask(run.taskId, error);
+        if (existing.id > 0) {
+            return existing.id;
+        }
+    }
+
     QSqlQuery query(db_);
     const QString timestamp = nowIso();
     query.prepare(QStringLiteral("insert into experiment_runs(experiment_id, task_id, training_backend, model_preset, dataset_snapshot_id, request_json, "
@@ -612,6 +619,30 @@ int ProjectRepository::insertExperimentRun(const ExperimentRunRecord& run, QStri
         return 0;
     }
     return query.lastInsertId().toInt();
+}
+
+bool ProjectRepository::updateExperimentRunSummary(const QString& taskId, const QString& bestMetricsJson, const QString& artifactSummaryJson, QString* error)
+{
+    if (taskId.isEmpty()) {
+        if (error) {
+            *error = QStringLiteral("Task id is required to update experiment run summary");
+        }
+        return false;
+    }
+
+    QSqlQuery query(db_);
+    query.prepare(QStringLiteral("update experiment_runs set best_metrics_json = ?, artifact_summary_json = ?, updated_at = ? where task_id = ?"));
+    query.addBindValue(bestMetricsJson);
+    query.addBindValue(artifactSummaryJson);
+    query.addBindValue(nowIso());
+    query.addBindValue(taskId);
+    if (!query.exec()) {
+        if (error) {
+            *error = sqlError(query);
+        }
+        return false;
+    }
+    return true;
 }
 
 int ProjectRepository::insertDatasetSnapshot(const DatasetSnapshotRecord& snapshot, QString* error)
@@ -1048,6 +1079,41 @@ QVector<ExperimentRunRecord> ProjectRepository::experimentRuns(int experimentId,
     return runs;
 }
 
+ExperimentRunRecord ProjectRepository::experimentRunForTask(const QString& taskId, QString* error) const
+{
+    ExperimentRunRecord record;
+    if (taskId.isEmpty()) {
+        return record;
+    }
+
+    QSqlQuery query(db_);
+    query.prepare(QStringLiteral("select id, experiment_id, task_id, training_backend, model_preset, dataset_snapshot_id, request_json, "
+                                 "environment_json, best_metrics_json, artifact_summary_json, created_at, updated_at "
+                                 "from experiment_runs where task_id = ? order by created_at desc, id desc limit 1"));
+    query.addBindValue(taskId);
+    if (!query.exec()) {
+        if (error) {
+            *error = sqlError(query);
+        }
+        return record;
+    }
+    if (query.next()) {
+        record.id = query.value(0).toInt();
+        record.experimentId = query.value(1).toInt();
+        record.taskId = query.value(2).toString();
+        record.trainingBackend = query.value(3).toString();
+        record.modelPreset = query.value(4).toString();
+        record.datasetSnapshotId = query.value(5).toInt();
+        record.requestJson = query.value(6).toString();
+        record.environmentJson = query.value(7).toString();
+        record.bestMetricsJson = query.value(8).toString();
+        record.artifactSummaryJson = query.value(9).toString();
+        record.createdAt = dateTimeFromIso(query.value(10).toString());
+        record.updatedAt = dateTimeFromIso(query.value(11).toString());
+    }
+    return record;
+}
+
 QVector<DatasetSnapshotRecord> ProjectRepository::datasetSnapshots(int datasetId, QString* error) const
 {
     QVector<DatasetSnapshotRecord> snapshots;
@@ -1076,6 +1142,44 @@ QVector<DatasetSnapshotRecord> ProjectRepository::datasetSnapshots(int datasetId
         snapshots.append(record);
     }
     return snapshots;
+}
+
+DatasetSnapshotRecord ProjectRepository::datasetSnapshotById(int snapshotId, QString* error) const
+{
+    DatasetSnapshotRecord record;
+    if (snapshotId <= 0) {
+        return record;
+    }
+
+    QSqlQuery query(db_);
+    query.prepare(QStringLiteral("select id, dataset_id, name, root_path, manifest_path, content_hash, file_count, total_bytes, metadata_json, created_at "
+                                 "from dataset_snapshots where id = ? limit 1"));
+    query.addBindValue(snapshotId);
+    if (!query.exec()) {
+        if (error) {
+            *error = sqlError(query);
+        }
+        return record;
+    }
+    if (query.next()) {
+        record.id = query.value(0).toInt();
+        record.datasetId = query.value(1).toInt();
+        record.name = query.value(2).toString();
+        record.rootPath = query.value(3).toString();
+        record.manifestPath = query.value(4).toString();
+        record.contentHash = query.value(5).toString();
+        record.fileCount = query.value(6).toInt();
+        record.totalBytes = query.value(7).toLongLong();
+        record.metadataJson = query.value(8).toString();
+        record.createdAt = dateTimeFromIso(query.value(9).toString());
+    }
+    return record;
+}
+
+DatasetSnapshotRecord ProjectRepository::latestDatasetSnapshot(int datasetId, QString* error) const
+{
+    const QVector<DatasetSnapshotRecord> snapshots = datasetSnapshots(datasetId, error);
+    return snapshots.isEmpty() ? DatasetSnapshotRecord() : snapshots.first();
 }
 
 QVector<ModelVersionRecord> ProjectRepository::recentModelVersions(int limit, QString* error) const

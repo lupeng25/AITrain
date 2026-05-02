@@ -620,6 +620,12 @@ private slots:
         run.requestJson = QStringLiteral("{}");
         const int runId = repository.insertExperimentRun(run, &error);
         QVERIFY2(runId > 0, qPrintable(error));
+        QCOMPARE(repository.insertExperimentRun(run, &error), runId);
+        QCOMPARE(repository.experimentRunForTask(task.id, &error).id, runId);
+        QCOMPARE(repository.datasetSnapshotById(snapshotId, &error).contentHash, snapshot.contentHash);
+        QCOMPARE(repository.latestDatasetSnapshot(loadedDataset.id, &error).id, snapshotId);
+        QVERIFY2(repository.updateExperimentRunSummary(task.id, QStringLiteral("{\"mAP50\":0.5}"), QStringLiteral("[{\"kind\":\"checkpoint\"}]"), &error), qPrintable(error));
+        QCOMPARE(repository.experimentRunForTask(task.id, &error).bestMetricsJson, QStringLiteral("{\"mAP50\":0.5}"));
 
         aitrain::EvaluationReportRecord report;
         report.taskId = task.id;
@@ -712,6 +718,41 @@ private slots:
         QVERIFY(QFileInfo::exists(snapshot.reportPath));
         QVERIFY(snapshot.payload.value(QStringLiteral("contentHash")).toString().size() >= 32);
         QCOMPARE(snapshot.payload.value(QStringLiteral("fileCount")).toInt(), 5);
+        const QString firstHash = snapshot.payload.value(QStringLiteral("contentHash")).toString();
+        const QJsonArray files = snapshot.payload.value(QStringLiteral("files")).toArray();
+        QCOMPARE(files.size(), 5);
+        QString lastPath;
+        bool sawImage = false;
+        bool sawLabel = false;
+        bool sawConfig = false;
+        for (const QJsonValue& value : files) {
+            const QJsonObject file = value.toObject();
+            const QString path = file.value(QStringLiteral("path")).toString();
+            QVERIFY(lastPath.isEmpty() || lastPath.compare(path, Qt::CaseInsensitive) <= 0);
+            lastPath = path;
+            sawImage = sawImage || file.value(QStringLiteral("role")).toString() == QStringLiteral("image");
+            sawLabel = sawLabel || file.value(QStringLiteral("role")).toString() == QStringLiteral("label");
+            sawConfig = sawConfig || file.value(QStringLiteral("role")).toString() == QStringLiteral("config");
+        }
+        QVERIFY(sawImage);
+        QVERIFY(sawLabel);
+        QVERIFY(sawConfig);
+        QVERIFY(snapshot.payload.value(QStringLiteral("keyFiles")).toArray().size() >= 1);
+        QVERIFY(snapshot.payload.value(QStringLiteral("roleCounts")).toObject().value(QStringLiteral("image")).toInt() >= 1);
+
+        const aitrain::WorkflowResult sameSnapshot = aitrain::createDatasetSnapshotReport(
+            datasetRoot,
+            QDir(outputRoot).filePath(QStringLiteral("snapshot_same")),
+            QStringLiteral("yolo_detection"));
+        QVERIFY2(sameSnapshot.ok, qPrintable(sameSnapshot.error));
+        QCOMPARE(sameSnapshot.payload.value(QStringLiteral("contentHash")).toString(), firstHash);
+        writeTextFile(QDir(datasetRoot).filePath(QStringLiteral("labels/train/a.txt")), QStringLiteral("0 0.5 0.5 0.30 0.30\n"));
+        const aitrain::WorkflowResult changedSnapshot = aitrain::createDatasetSnapshotReport(
+            datasetRoot,
+            QDir(outputRoot).filePath(QStringLiteral("snapshot_changed")),
+            QStringLiteral("yolo_detection"));
+        QVERIFY2(changedSnapshot.ok, qPrintable(changedSnapshot.error));
+        QVERIFY(changedSnapshot.payload.value(QStringLiteral("contentHash")).toString() != firstHash);
 
         const aitrain::WorkflowResult quality = aitrain::curateDatasetQualityReport(
             datasetRoot,

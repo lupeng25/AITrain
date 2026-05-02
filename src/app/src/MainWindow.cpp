@@ -740,6 +740,9 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
         if (!currentTaskId_.isEmpty()) {
             QString error;
             repository_.updateTaskState(currentTaskId_, ok ? aitrain::TaskState::Completed : aitrain::TaskState::Failed, message, &error);
+            if (ok) {
+                updateExperimentRunSummary(currentTaskId_);
+            }
             currentTaskId_.clear();
             updateRecentTasks();
             updateSelectedTaskDetails();
@@ -1476,6 +1479,7 @@ QWidget* MainWindow::buildTaskQueuePage()
     auto* row = new QHBoxLayout;
     auto* refreshButton = primaryButton(QStringLiteral("刷新历史"));
     auto* cancelButton = dangerButton(QStringLiteral("取消选中任务"));
+    auto* reproduceButton = new QPushButton(QStringLiteral("复现实验"));
     taskKindFilterCombo_ = new QComboBox;
     taskKindFilterCombo_->addItem(uiText("全部类别"), QString());
     taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Train), QStringLiteral("train"));
@@ -1499,11 +1503,13 @@ QWidget* MainWindow::buildTaskQueuePage()
     taskSearchEdit_->setPlaceholderText(QStringLiteral("搜索任务、后端、消息"));
     connect(refreshButton, &QPushButton::clicked, this, &MainWindow::updateRecentTasks);
     connect(cancelButton, &QPushButton::clicked, this, &MainWindow::cancelSelectedTask);
+    connect(reproduceButton, &QPushButton::clicked, this, &MainWindow::reproduceSelectedTrainingTask);
     connect(taskKindFilterCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::applyTaskFilters);
     connect(taskStateFilterCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::applyTaskFilters);
     connect(taskSearchEdit_, &QLineEdit::textChanged, this, &MainWindow::applyTaskFilters);
     row->addWidget(refreshButton);
     row->addWidget(cancelButton);
+    row->addWidget(reproduceButton);
     row->addSpacing(12);
     row->addWidget(new QLabel(QStringLiteral("类别")));
     row->addWidget(taskKindFilterCombo_);
@@ -2663,6 +2669,7 @@ void MainWindow::startTraining()
     parameters.insert(QStringLiteral("batchSize"), batchEdit_->text().toInt());
     parameters.insert(QStringLiteral("imageSize"), imageSizeEdit_->text().toInt());
     parameters.insert(QStringLiteral("gridSize"), gridSizeEdit_->text().toInt());
+    parameters.insert(QStringLiteral("seed"), 42);
     parameters.insert(QStringLiteral("resumeCheckpointPath"), QDir::fromNativeSeparators(resumeCheckpointEdit_->text().trimmed()));
     parameters.insert(QStringLiteral("horizontalFlip"), horizontalFlipCheck_ && horizontalFlipCheck_->isChecked());
     parameters.insert(QStringLiteral("colorJitter"), colorJitterCheck_ && colorJitterCheck_->isChecked());
@@ -2678,19 +2685,6 @@ void MainWindow::startTraining()
             parameters.insert(QStringLiteral("model"), modelPreset);
         }
     }
-    if (repository_.isOpen()) {
-        QString snapshotError;
-        const aitrain::DatasetRecord dataset = repository_.datasetByRootPath(datasetPath, &snapshotError);
-        if (dataset.id > 0) {
-            const QVector<aitrain::DatasetSnapshotRecord> snapshots = repository_.datasetSnapshots(dataset.id, &snapshotError);
-            if (!snapshots.isEmpty()) {
-                parameters.insert(QStringLiteral("datasetSnapshotId"), snapshots.first().id);
-                parameters.insert(QStringLiteral("datasetSnapshotHash"), snapshots.first().contentHash);
-                parameters.insert(QStringLiteral("datasetSnapshotManifest"), snapshots.first().manifestPath);
-            }
-        }
-    }
-
     aitrain::TrainingRequest request;
     request.taskId = taskId;
     request.projectPath = currentProjectPath_;
@@ -2700,6 +2694,15 @@ void MainWindow::startTraining()
     request.outputPath = runDir;
     request.parameters = parameters;
 
+    int datasetId = 0;
+    bool needsSnapshot = true;
+    if (repository_.isOpen()) {
+        QString snapshotError;
+        const aitrain::DatasetRecord dataset = repository_.datasetByRootPath(datasetPath, &snapshotError);
+        datasetId = dataset.id;
+        needsSnapshot = !attachLatestSnapshotToRequest(request, datasetId, &snapshotError);
+    }
+
     aitrain::TaskRecord record;
     record.id = taskId;
     record.projectName = currentProjectName_;
@@ -2708,7 +2711,9 @@ void MainWindow::startTraining()
     record.kind = aitrain::TaskKind::Train;
     record.state = aitrain::TaskState::Queued;
     record.workDir = runDir;
-    record.message = worker_.isRunning() ? uiText("等待当前任务完成。") : uiText("等待 Worker 启动。");
+    record.message = needsSnapshot
+        ? uiText("等待自动创建数据快照。")
+        : (worker_.isRunning() ? uiText("等待当前任务完成。") : uiText("等待 Worker 启动。"));
     record.createdAt = QDateTime::currentDateTimeUtc();
     record.updatedAt = record.createdAt;
     QString error;
@@ -2717,11 +2722,17 @@ void MainWindow::startTraining()
         return;
     }
 
-    if (worker_.isRunning()) {
-        pendingTrainingTasks_.append(PendingTrainingTask{taskId, request});
+    if (!needsSnapshot) {
+        recordExperimentRunForRequest(request, datasetId, &error);
+    }
+
+    PendingTrainingTask pending{taskId, request, needsSnapshot, datasetId, datasetFormat};
+    if (worker_.isRunning() || needsSnapshot) {
+        pendingTrainingTasks_.append(pending);
         workerPill_->setStatus(uiText("任务已排队"), StatusPill::Tone::Info);
         appendLog(uiText("任务已加入队列：%1").arg(taskId));
         updateRecentTasks();
+        startNextQueuedTask();
         return;
     }
 
@@ -2774,6 +2785,112 @@ void MainWindow::cancelSelectedTask()
         QMessageBox::information(this, uiText("任务队列"), uiText("只能取消排队任务或当前 Worker 正在运行的任务。"));
         return;
     }
+}
+
+void MainWindow::reproduceSelectedTrainingTask()
+{
+    if (!repository_.isOpen()) {
+        QMessageBox::information(this, uiText("复现实验"), uiText("请先打开项目。"));
+        return;
+    }
+    if (currentProjectPath_.isEmpty()) {
+        QMessageBox::information(this, uiText("复现实验"), uiText("请先打开或创建项目。"));
+        return;
+    }
+
+    const QString sourceTaskId = selectedTaskId();
+    if (sourceTaskId.isEmpty()) {
+        QMessageBox::information(this, uiText("复现实验"), uiText("请先选择一个训练任务。"));
+        return;
+    }
+
+    QString error;
+    aitrain::TaskRecord sourceTask;
+    const QVector<aitrain::TaskRecord> tasks = repository_.recentTasks(500, &error);
+    for (const aitrain::TaskRecord& task : tasks) {
+        if (task.id == sourceTaskId) {
+            sourceTask = task;
+            break;
+        }
+    }
+    if (sourceTask.id.isEmpty() || sourceTask.kind != aitrain::TaskKind::Train) {
+        QMessageBox::warning(this, uiText("复现实验"), uiText("只能复现历史训练任务。"));
+        return;
+    }
+
+    const aitrain::ExperimentRunRecord sourceRun = repository_.experimentRunForTask(sourceTaskId, &error);
+    if (sourceRun.id <= 0 || sourceRun.requestJson.trimmed().isEmpty()) {
+        QMessageBox::warning(this, uiText("复现实验"), uiText("该训练任务没有可复现的 request 记录。"));
+        return;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument requestDoc = QJsonDocument::fromJson(sourceRun.requestJson.toUtf8(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !requestDoc.isObject()) {
+        QMessageBox::warning(this, uiText("复现实验"), uiText("原训练 request JSON 无法解析：%1").arg(parseError.errorString()));
+        return;
+    }
+
+    aitrain::TrainingRequest request = aitrain::TrainingRequest::fromJson(requestDoc.object());
+    const int snapshotId = sourceRun.datasetSnapshotId > 0
+        ? sourceRun.datasetSnapshotId
+        : request.parameters.value(QStringLiteral("datasetSnapshotId")).toInt();
+    const aitrain::DatasetSnapshotRecord snapshot = repository_.datasetSnapshotById(snapshotId, &error);
+    if (snapshot.id <= 0 || snapshot.manifestPath.isEmpty() || !QFileInfo::exists(snapshot.manifestPath)) {
+        QMessageBox::warning(this, uiText("复现实验"), uiText("原实验的数据快照 manifest 缺失，无法按同一快照复现。请重新创建快照或选择其他训练任务。"));
+        return;
+    }
+
+    const QString newTaskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const QString runDir = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(newTaskId));
+    QDir().mkpath(runDir);
+
+    request.taskId = newTaskId;
+    request.projectPath = currentProjectPath_;
+    request.outputPath = runDir;
+    if (request.pluginId.isEmpty()) {
+        request.pluginId = sourceTask.pluginId;
+    }
+    if (request.taskType.isEmpty()) {
+        request.taskType = sourceTask.taskType;
+    }
+    request.parameters.insert(QStringLiteral("datasetSnapshotId"), snapshot.id);
+    request.parameters.insert(QStringLiteral("datasetSnapshotHash"), snapshot.contentHash);
+    request.parameters.insert(QStringLiteral("datasetSnapshotManifest"), snapshot.manifestPath);
+    if (!request.parameters.contains(QStringLiteral("seed"))) {
+        request.parameters.insert(QStringLiteral("seed"), 42);
+    }
+    request.parameters.insert(QStringLiteral("reproducedFromTaskId"), sourceTaskId);
+    request.parameters.insert(QStringLiteral("reproducedFromExperimentRunId"), sourceRun.id);
+    request.parameters.insert(QStringLiteral("reproduceMode"), QStringLiteral("same_snapshot_same_params"));
+
+    aitrain::TaskRecord record;
+    record.id = newTaskId;
+    record.projectName = currentProjectName_;
+    record.pluginId = request.pluginId;
+    record.taskType = request.taskType;
+    record.kind = aitrain::TaskKind::Train;
+    record.state = aitrain::TaskState::Queued;
+    record.workDir = runDir;
+    record.message = worker_.isRunning() ? uiText("复现实验已排队。") : uiText("复现实验等待 Worker 启动。");
+    record.createdAt = QDateTime::currentDateTimeUtc();
+    record.updatedAt = record.createdAt;
+    if (!repository_.insertTask(record, &error)) {
+        QMessageBox::critical(this, uiText("复现实验"), error);
+        return;
+    }
+    recordExperimentRunForRequest(request, snapshot.datasetId, &error);
+
+    PendingTrainingTask pending{newTaskId, request, false, snapshot.datasetId, QString()};
+    if (worker_.isRunning()) {
+        pendingTrainingTasks_.append(pending);
+        workerPill_->setStatus(uiText("复现实验已排队"), StatusPill::Tone::Info);
+        updateRecentTasks();
+        return;
+    }
+
+    updateRecentTasks();
+    startQueuedTraining(newTaskId, request);
 }
 
 void MainWindow::runEnvironmentCheck()
@@ -2881,19 +2998,41 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
         updateRecentTasks();
     } else if (type == QStringLiteral("canceled")) {
         QString error;
-        repository_.updateTaskState(currentTaskId_, aitrain::TaskState::Canceled, payload.value(QStringLiteral("message")).toString(), &error);
+        const QString canceledTaskId = payload.value(QStringLiteral("taskId")).toString(currentTaskId_);
+        const QString canceledMessage = payload.value(QStringLiteral("message")).toString();
+        repository_.updateTaskState(canceledTaskId, aitrain::TaskState::Canceled, canceledMessage, &error);
+        if (hasActiveSnapshotTrainingTask_ && canceledTaskId == currentTaskId_) {
+            repository_.updateTaskState(
+                activeSnapshotTrainingTask_.taskId,
+                aitrain::TaskState::Canceled,
+                uiText("自动数据快照已取消，训练未启动。"),
+                &error);
+            hasActiveSnapshotTrainingTask_ = false;
+            activeSnapshotTrainingTask_ = PendingTrainingTask();
+        }
         workerPill_->setStatus(uiText("任务已取消"), StatusPill::Tone::Warning);
-        appendLog(uiText("任务已取消：%1").arg(payload.value(QStringLiteral("message")).toString()));
+        appendLog(uiText("任务已取消：%1").arg(canceledMessage));
         currentTaskId_.clear();
         updateRecentTasks();
         startNextQueuedTask();
     } else if (type == QStringLiteral("failed")) {
+        const QString failedTaskId = payload.value(QStringLiteral("taskId")).toString(currentTaskId_);
+        const QString failedMessage = payload.value(QStringLiteral("message")).toString();
         QString error;
         repository_.updateTaskState(
-            payload.value(QStringLiteral("taskId")).toString(currentTaskId_),
+            failedTaskId,
             aitrain::TaskState::Failed,
-            payload.value(QStringLiteral("message")).toString(),
+            failedMessage,
             &error);
+        if (hasActiveSnapshotTrainingTask_ && failedTaskId == currentTaskId_) {
+            repository_.updateTaskState(
+                activeSnapshotTrainingTask_.taskId,
+                aitrain::TaskState::Failed,
+                uiText("自动数据快照失败：%1").arg(failedMessage),
+                &error);
+            hasActiveSnapshotTrainingTask_ = false;
+            activeSnapshotTrainingTask_ = PendingTrainingTask();
+        }
         updateRecentTasks();
         updateModelRegistry();
     } else if (type == QStringLiteral("environmentCheck")) {
@@ -2950,9 +3089,24 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
                 snapshot.totalBytes = payload.value(QStringLiteral("totalBytes")).toVariant().toLongLong();
                 snapshot.metadataJson = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
                 snapshot.createdAt = QDateTime::currentDateTimeUtc();
-                repository_.insertDatasetSnapshot(snapshot, &error);
+                const int snapshotId = repository_.insertDatasetSnapshot(snapshot, &error);
+                if (hasActiveSnapshotTrainingTask_
+                    && activeSnapshotTrainingTask_.request.datasetPath == datasetPath
+                    && snapshotId > 0) {
+                    snapshot.id = snapshotId;
+                    activeSnapshotTrainingTask_.request.parameters.insert(QStringLiteral("datasetSnapshotId"), snapshot.id);
+                    activeSnapshotTrainingTask_.request.parameters.insert(QStringLiteral("datasetSnapshotHash"), snapshot.contentHash);
+                    activeSnapshotTrainingTask_.request.parameters.insert(QStringLiteral("datasetSnapshotManifest"), snapshot.manifestPath);
+                    activeSnapshotTrainingTask_.needsSnapshot = false;
+                    recordExperimentRunForRequest(activeSnapshotTrainingTask_.request, activeSnapshotTrainingTask_.datasetId, &error);
+                    pendingTrainingTasks_.prepend(activeSnapshotTrainingTask_);
+                    hasActiveSnapshotTrainingTask_ = false;
+                    activeSnapshotTrainingTask_ = PendingTrainingTask();
+                }
             }
         }
+        updateTrainingSelectionSummary();
+        updateDatasetList();
     } else if (type == QStringLiteral("evaluationReport")) {
         if (repository_.isOpen()) {
             aitrain::EvaluationReportRecord report;
@@ -3404,6 +3558,117 @@ QString MainWindow::createRepositoryTask(aitrain::TaskKind kind,
     return taskId;
 }
 
+bool MainWindow::attachLatestSnapshotToRequest(aitrain::TrainingRequest& request, int datasetId, QString* error)
+{
+    if (!repository_.isOpen() || datasetId <= 0) {
+        return false;
+    }
+
+    const aitrain::DatasetSnapshotRecord snapshot = repository_.latestDatasetSnapshot(datasetId, error);
+    if (snapshot.id <= 0 || snapshot.manifestPath.isEmpty() || !QFileInfo::exists(snapshot.manifestPath)) {
+        return false;
+    }
+
+    request.parameters.insert(QStringLiteral("datasetSnapshotId"), snapshot.id);
+    request.parameters.insert(QStringLiteral("datasetSnapshotHash"), snapshot.contentHash);
+    request.parameters.insert(QStringLiteral("datasetSnapshotManifest"), snapshot.manifestPath);
+    return true;
+}
+
+int MainWindow::recordExperimentRunForRequest(const aitrain::TrainingRequest& request, int datasetId, QString* error)
+{
+    if (!repository_.isOpen() || request.taskId.isEmpty()) {
+        return 0;
+    }
+
+    const int snapshotId = request.parameters.value(QStringLiteral("datasetSnapshotId")).toInt();
+    if (snapshotId <= 0) {
+        return 0;
+    }
+
+    aitrain::ExperimentRecord experiment;
+    const QString datasetName = QFileInfo(request.datasetPath).fileName().isEmpty()
+        ? QStringLiteral("dataset")
+        : QFileInfo(request.datasetPath).fileName();
+    experiment.name = QStringLiteral("%1 / %2").arg(datasetName, taskTypeLabel(request.taskType));
+    experiment.taskType = request.taskType;
+    experiment.datasetId = datasetId;
+    experiment.notes = uiText("Phase 35 自动记录的本地复现实验。");
+    experiment.tagsJson = QString::fromUtf8(QJsonDocument(QJsonArray{
+        QStringLiteral("phase35"),
+        QStringLiteral("local-reproducible")
+    }).toJson(QJsonDocument::Compact));
+    experiment.createdAt = QDateTime::currentDateTimeUtc();
+    experiment.updatedAt = experiment.createdAt;
+    const int experimentId = repository_.upsertExperiment(experiment, error);
+    if (experimentId <= 0) {
+        return 0;
+    }
+
+    aitrain::ExperimentRunRecord run;
+    run.experimentId = experimentId;
+    run.taskId = request.taskId;
+    run.trainingBackend = request.parameters.value(QStringLiteral("trainingBackend")).toString();
+    run.modelPreset = request.parameters.value(QStringLiteral("modelPreset")).toString(
+        request.parameters.value(QStringLiteral("model")).toString());
+    run.datasetSnapshotId = snapshotId;
+    run.requestJson = QString::fromUtf8(QJsonDocument(request.toJson()).toJson(QJsonDocument::Compact));
+    run.environmentJson = QStringLiteral("{}");
+    run.bestMetricsJson = QStringLiteral("{}");
+    run.artifactSummaryJson = QStringLiteral("[]");
+    run.createdAt = QDateTime::currentDateTimeUtc();
+    run.updatedAt = run.createdAt;
+    return repository_.insertExperimentRun(run, error);
+}
+
+void MainWindow::updateExperimentRunSummary(const QString& taskId)
+{
+    if (!repository_.isOpen() || taskId.isEmpty()) {
+        return;
+    }
+
+    QString error;
+    const aitrain::ExperimentRunRecord run = repository_.experimentRunForTask(taskId, &error);
+    if (run.id <= 0) {
+        return;
+    }
+
+    QJsonObject bestMetrics;
+    const QVector<aitrain::MetricPoint> metrics = repository_.metricsForTask(taskId, &error);
+    for (const aitrain::MetricPoint& metric : metrics) {
+        const QString key = metric.name;
+        if (key.isEmpty()) {
+            continue;
+        }
+        const QString lower = key.toLower();
+        const bool minimize = lower.contains(QStringLiteral("loss"))
+            || lower.contains(QStringLiteral("distance"))
+            || lower == QStringLiteral("cer")
+            || lower == QStringLiteral("wer");
+        if (!bestMetrics.contains(key)
+            || (minimize && metric.value < bestMetrics.value(key).toDouble())
+            || (!minimize && metric.value > bestMetrics.value(key).toDouble())) {
+            bestMetrics.insert(key, metric.value);
+        }
+    }
+
+    QJsonArray artifactSummary;
+    const QVector<aitrain::ArtifactRecord> artifacts = repository_.artifactsForTask(taskId, &error);
+    for (const aitrain::ArtifactRecord& artifact : artifacts) {
+        artifactSummary.append(QJsonObject{
+            {QStringLiteral("kind"), artifact.kind},
+            {QStringLiteral("path"), artifact.path},
+            {QStringLiteral("message"), artifact.message}
+        });
+    }
+
+    repository_.updateExperimentRunSummary(
+        taskId,
+        QString::fromUtf8(QJsonDocument(bestMetrics).toJson(QJsonDocument::Compact)),
+        QString::fromUtf8(QJsonDocument(artifactSummary).toJson(QJsonDocument::Compact)),
+        &error);
+}
+
 void MainWindow::updateModelRegistry()
 {
     if (!repository_.isOpen()) {
@@ -3809,6 +4074,14 @@ void MainWindow::registerSelectedArtifactAsModelVersion()
     record.modelName = modelName;
     record.version = version;
     record.sourceTaskId = taskId;
+    if (!taskId.isEmpty()) {
+        QString runError;
+        const aitrain::ExperimentRunRecord run = repository_.experimentRunForTask(taskId, &runError);
+        if (run.id > 0) {
+            record.experimentRunId = run.id;
+            record.datasetSnapshotId = run.datasetSnapshotId;
+        }
+    }
     record.status = suffix == QStringLiteral("onnx") ? QStringLiteral("exported") : QStringLiteral("draft");
     record.notes = uiText("从任务产物手动注册。");
     record.metricsJson = QString::fromUtf8(QJsonDocument(metricSummary).toJson(QJsonDocument::Compact));
@@ -4299,7 +4572,63 @@ void MainWindow::startNextQueuedTask()
     }
 
     const PendingTrainingTask next = pendingTrainingTasks_.takeFirst();
+    if (next.needsSnapshot) {
+        startSnapshotForQueuedTraining(next);
+        return;
+    }
+
+    QString error;
+    recordExperimentRunForRequest(next.request, next.datasetId, &error);
     startQueuedTraining(next.taskId, next.request);
+}
+
+void MainWindow::startSnapshotForQueuedTraining(const PendingTrainingTask& pending)
+{
+    if (!repository_.isOpen()) {
+        return;
+    }
+
+    if (pending.datasetId <= 0 || pending.request.datasetPath.isEmpty()) {
+        QString error;
+        repository_.updateTaskState(pending.taskId, aitrain::TaskState::Failed, uiText("无法为训练创建数据快照：数据集记录缺失。"), &error);
+        updateRecentTasks();
+        return;
+    }
+
+    const QString snapshotTaskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const QString outputPath = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(snapshotTaskId));
+    const QString createdTaskId = createRepositoryTask(
+        aitrain::TaskKind::Snapshot,
+        QStringLiteral("dataset_snapshot"),
+        QStringLiteral("com.aitrain.plugins.dataset_interop"),
+        outputPath,
+        uiText("为训练自动创建数据快照。"),
+        snapshotTaskId);
+    if (createdTaskId.isEmpty()) {
+        return;
+    }
+
+    hasActiveSnapshotTrainingTask_ = true;
+    activeSnapshotTrainingTask_ = pending;
+
+    QJsonObject options;
+    options.insert(QStringLiteral("maxFiles"), 20000);
+
+    QString error;
+    if (!worker_.requestDatasetSnapshot(workerExecutablePath(), pending.request.datasetPath, outputPath, pending.datasetFormat, options, &error, createdTaskId)) {
+        repository_.updateTaskState(createdTaskId, aitrain::TaskState::Failed, error, nullptr);
+        repository_.updateTaskState(pending.taskId, aitrain::TaskState::Failed, uiText("自动数据快照失败：%1").arg(error), nullptr);
+        hasActiveSnapshotTrainingTask_ = false;
+        activeSnapshotTrainingTask_ = PendingTrainingTask();
+        currentTaskId_.clear();
+        updateRecentTasks();
+        QMessageBox::critical(this, uiText("数据快照"), error);
+        return;
+    }
+
+    workerPill_->setStatus(uiText("自动数据快照创建中"), StatusPill::Tone::Info);
+    appendLog(uiText("训练任务 %1 正在等待自动数据快照 %2。").arg(pending.taskId.left(8), createdTaskId.left(8)));
+    updateRecentTasks();
 }
 
 void MainWindow::configureTable(QTableWidget* table) const
@@ -4532,18 +4861,31 @@ void MainWindow::updateTrainingSelectionSummary()
         : currentDatasetFormat();
     const QString state = currentDatasetValid_ ? uiText("已校验") : uiText("待校验");
     const QString pathText = datasetPath.isEmpty() ? uiText("未选择") : QDir::toNativeSeparators(datasetPath);
+    QString snapshotText = uiText("快照：未选择数据集");
+    if (!datasetPath.isEmpty() && repository_.isOpen()) {
+        QString error;
+        const aitrain::DatasetRecord dataset = repository_.datasetByRootPath(datasetPath, &error);
+        const aitrain::DatasetSnapshotRecord snapshot = repository_.latestDatasetSnapshot(dataset.id, &error);
+        snapshotText = snapshot.id > 0
+            ? uiText("快照：#%1 | %2 文件 | hash %3 | %4")
+                .arg(snapshot.id)
+                .arg(snapshot.fileCount)
+                .arg(snapshot.contentHash.left(12))
+                .arg(QDir::toNativeSeparators(snapshot.manifestPath))
+            : uiText("快照：暂无，启动训练时将自动创建。");
+    }
 
     if (trainingDatasetSummaryLabel_) {
         trainingDatasetSummaryLabel_->setText(datasetPath.isEmpty()
             ? uiText("当前数据集：未选择。请先在数据集页导入并通过校验。")
-            : uiText("当前数据集：%1 | %2 | %3")
-                .arg(datasetFormatLabel(datasetFormat), state, pathText));
+            : uiText("当前数据集：%1 | %2 | %3\n%4")
+                .arg(datasetFormatLabel(datasetFormat), state, pathText, snapshotText));
     }
     if (datasetDetailLabel_) {
         datasetDetailLabel_->setText(datasetPath.isEmpty()
             ? uiText("选择或导入数据集后显示格式、样本数、校验状态和最近报告。")
-            : uiText("格式：%1 | 状态：%2 | 路径：%3")
-                .arg(datasetFormatLabel(datasetFormat), state, pathText));
+            : uiText("格式：%1 | 状态：%2 | 路径：%3\n%4")
+                .arg(datasetFormatLabel(datasetFormat), state, pathText, snapshotText));
     }
     if (trainingBackendHintLabel_ && trainingBackendCombo_) {
         trainingBackendHintLabel_->setText(trainingBackendDescription(trainingBackendCombo_->currentData().toString()));

@@ -33,6 +33,7 @@ public:
     int upsertModelVersion(const ModelVersionRecord& modelVersion, QString* error = nullptr);
     int insertEvaluationReport(const EvaluationReportRecord& report, QString* error = nullptr);
     int insertPipelineRun(const PipelineRunRecord& pipelineRun, QString* error = nullptr);
+    bool updateExperimentRunSummary(const QString& taskId, const QString& bestMetricsJson, const QString& artifactSummaryJson, QString* error = nullptr);
 
     QVector<TaskRecord> recentTasks(int limit, QString* error = nullptr) const;
     QVector<MetricPoint> metricsForTask(const QString& taskId, QString* error = nullptr) const;
@@ -45,7 +46,10 @@ public:
     QVector<DatasetVersionRecord> datasetVersions(int datasetId, QString* error = nullptr) const;
     QVector<ExperimentRecord> recentExperiments(int limit, QString* error = nullptr) const;
     QVector<ExperimentRunRecord> experimentRuns(int experimentId, QString* error = nullptr) const;
+    ExperimentRunRecord experimentRunForTask(const QString& taskId, QString* error = nullptr) const;
     QVector<DatasetSnapshotRecord> datasetSnapshots(int datasetId, QString* error = nullptr) const;
+    DatasetSnapshotRecord datasetSnapshotById(int snapshotId, QString* error = nullptr) const;
+    DatasetSnapshotRecord latestDatasetSnapshot(int datasetId, QString* error = nullptr) const;
     QVector<ModelVersionRecord> recentModelVersions(int limit, QString* error = nullptr) const;
     QVector<EvaluationReportRecord> recentEvaluationReports(int limit, QString* error = nullptr) const;
     QVector<PipelineRunRecord> recentPipelineRuns(int limit, QString* error = nullptr) const;
