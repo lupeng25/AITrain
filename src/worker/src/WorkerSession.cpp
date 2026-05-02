@@ -709,7 +709,9 @@ void WorkerSession::curateDataset(const QJsonObject& payload)
              qMakePair(QStringLiteral("image_statistics"), QStringLiteral("imageStatisticsPath")),
              qMakePair(QStringLiteral("split_distribution"), QStringLiteral("splitDistributionPath")),
              qMakePair(QStringLiteral("xanylabeling_fix_list"), QStringLiteral("xAnyLabelingFixListPath")),
-             qMakePair(QStringLiteral("xanylabeling_fix_manifest"), QStringLiteral("xAnyLabelingFixManifestPath"))}) {
+             qMakePair(QStringLiteral("xanylabeling_fix_manifest"), QStringLiteral("xAnyLabelingFixManifestPath")),
+             qMakePair(QStringLiteral("dataset_rework_sample_set"), QStringLiteral("reworkSampleSetPath")),
+             qMakePair(QStringLiteral("prelabel_candidates"), QStringLiteral("prelabelCandidatesPath"))}) {
         const QString path = result.payload.value(item.second).toString();
         if (!path.isEmpty()) {
             QJsonObject extraArtifact;
@@ -898,6 +900,12 @@ void WorkerSession::runLocalPipeline(const QJsonObject& payload)
     const QString templateId = payload.value(QStringLiteral("templateId")).toString();
     const QJsonObject options = payload.value(QStringLiteral("options")).toObject();
 
+    QJsonObject progress;
+    progress.insert(QStringLiteral("taskId"), taskId);
+    progress.insert(QStringLiteral("percent"), 0);
+    progress.insert(QStringLiteral("message"), QStringLiteral("开始执行本地流水线。"));
+    send(QStringLiteral("progress"), progress);
+
     const aitrain::WorkflowResult result = aitrain::runLocalPipelinePlan(outputPath, templateId, options);
     if (!result.ok) {
         fail(result.error);
@@ -905,16 +913,59 @@ void WorkerSession::runLocalPipeline(const QJsonObject& payload)
     }
     QJsonObject artifact;
     artifact.insert(QStringLiteral("taskId"), taskId);
-    artifact.insert(QStringLiteral("kind"), QStringLiteral("local_pipeline_plan"));
+    artifact.insert(QStringLiteral("kind"), QStringLiteral("local_pipeline_execution"));
     artifact.insert(QStringLiteral("path"), result.reportPath);
-    artifact.insert(QStringLiteral("message"), QStringLiteral("Local pipeline plan scaffold"));
+    artifact.insert(QStringLiteral("message"), QStringLiteral("Local pipeline execution report"));
     send(QStringLiteral("artifact"), artifact);
-    send(QStringLiteral("pipelinePlan"), result.payload);
+
+    const QJsonArray artifacts = result.payload.value(QStringLiteral("artifacts")).toArray();
+    for (const QJsonValue& value : artifacts) {
+        const QJsonObject object = value.toObject();
+        const QString path = object.value(QStringLiteral("path")).toString();
+        if (path.isEmpty()) {
+            continue;
+        }
+        QJsonObject extraArtifact;
+        extraArtifact.insert(QStringLiteral("taskId"), taskId);
+        extraArtifact.insert(QStringLiteral("kind"), object.value(QStringLiteral("kind")).toString(QStringLiteral("pipeline_artifact")));
+        extraArtifact.insert(QStringLiteral("path"), path);
+        extraArtifact.insert(QStringLiteral("message"), object.value(QStringLiteral("message")).toString(QStringLiteral("Pipeline artifact")));
+        send(QStringLiteral("artifact"), extraArtifact);
+    }
+
+    QJsonObject pipelinePayload = result.payload;
+    pipelinePayload.insert(QStringLiteral("taskId"), taskId);
+
+    const QString deliveryReportPath = pipelinePayload.value(QStringLiteral("deliveryReportPath")).toString();
+    if (!deliveryReportPath.isEmpty()) {
+        QJsonObject deliveryArtifact;
+        deliveryArtifact.insert(QStringLiteral("taskId"), taskId);
+        deliveryArtifact.insert(QStringLiteral("kind"), QStringLiteral("training_delivery_report"));
+        deliveryArtifact.insert(QStringLiteral("path"), deliveryReportPath);
+        deliveryArtifact.insert(QStringLiteral("message"), QStringLiteral("Pipeline delivery report"));
+        send(QStringLiteral("artifact"), deliveryArtifact);
+    }
+
+    QJsonObject doneProgress;
+    doneProgress.insert(QStringLiteral("taskId"), taskId);
+    doneProgress.insert(QStringLiteral("percent"), 100);
+    const QString pipelineState = pipelinePayload.value(QStringLiteral("state")).toString(QStringLiteral("completed"));
+    doneProgress.insert(QStringLiteral("message"), pipelineState == QStringLiteral("failed")
+        ? QStringLiteral("本地流水线执行失败。")
+        : QStringLiteral("本地流水线执行完成。"));
+    send(QStringLiteral("progress"), doneProgress);
+    send(QStringLiteral("pipelinePlan"), pipelinePayload);
     socket_.waitForBytesWritten(1000);
-    QJsonObject completed;
-    completed.insert(QStringLiteral("taskId"), taskId);
-    completed.insert(QStringLiteral("message"), QStringLiteral("Local pipeline plan generated"));
-    send(QStringLiteral("completed"), completed);
+    QJsonObject terminal;
+    terminal.insert(QStringLiteral("taskId"), taskId);
+    if (pipelineState == QStringLiteral("failed")) {
+        terminal.insert(QStringLiteral("message"),
+            pipelinePayload.value(QStringLiteral("failureReason")).toString(QStringLiteral("Local pipeline execution failed")));
+        send(QStringLiteral("failed"), terminal);
+    } else {
+        terminal.insert(QStringLiteral("message"), QStringLiteral("Local pipeline execution completed"));
+        send(QStringLiteral("completed"), terminal);
+    }
     socket_.waitForBytesWritten(1000);
     qApp->quit();
 }
@@ -948,6 +999,24 @@ void WorkerSession::generateDeliveryReport(const QJsonObject& payload)
         jsonArtifact.insert(QStringLiteral("path"), jsonPath);
         jsonArtifact.insert(QStringLiteral("message"), QStringLiteral("Training delivery report JSON context"));
         send(QStringLiteral("artifact"), jsonArtifact);
+    }
+    const QString modelCardPath = result.payload.value(QStringLiteral("modelCardPath")).toString();
+    if (!modelCardPath.isEmpty()) {
+        QJsonObject modelCardArtifact;
+        modelCardArtifact.insert(QStringLiteral("taskId"), taskId);
+        modelCardArtifact.insert(QStringLiteral("kind"), QStringLiteral("model_card"));
+        modelCardArtifact.insert(QStringLiteral("path"), modelCardPath);
+        modelCardArtifact.insert(QStringLiteral("message"), QStringLiteral("Model card JSON"));
+        send(QStringLiteral("artifact"), modelCardArtifact);
+    }
+    const QString inventoryPath = result.payload.value(QStringLiteral("artifactInventoryPath")).toString();
+    if (!inventoryPath.isEmpty()) {
+        QJsonObject inventoryArtifact;
+        inventoryArtifact.insert(QStringLiteral("taskId"), taskId);
+        inventoryArtifact.insert(QStringLiteral("kind"), QStringLiteral("delivery_artifact_inventory"));
+        inventoryArtifact.insert(QStringLiteral("path"), inventoryPath);
+        inventoryArtifact.insert(QStringLiteral("message"), QStringLiteral("Delivery artifact inventory"));
+        send(QStringLiteral("artifact"), inventoryArtifact);
     }
     send(QStringLiteral("deliveryReport"), result.payload);
     socket_.waitForBytesWritten(1000);

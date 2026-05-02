@@ -782,6 +782,8 @@ private slots:
         QVERIFY(QFileInfo::exists(quality.reportPath));
         QVERIFY(QFileInfo::exists(quality.payload.value(QStringLiteral("classDistributionPath")).toString()));
         QVERIFY(QFileInfo::exists(quality.payload.value(QStringLiteral("problemSamplesPath")).toString()));
+        QVERIFY(QFileInfo::exists(quality.payload.value(QStringLiteral("reworkSampleSetPath")).toString()));
+        QVERIFY(QFileInfo::exists(quality.payload.value(QStringLiteral("prelabelCandidatesPath")).toString()));
         QVERIFY(quality.payload.value(QStringLiteral("ok")).toBool());
 
         aitrain::DetectionTrainingOptions evaluationTrainingOptions;
@@ -827,13 +829,30 @@ private slots:
         QVERIFY2(delivery.ok, qPrintable(delivery.error));
         QVERIFY(QFileInfo::exists(delivery.reportPath));
         QVERIFY(delivery.reportPath.endsWith(QStringLiteral(".html")));
+        QVERIFY(!delivery.payload.value(QStringLiteral("scaffold")).toBool());
+        QVERIFY(QFileInfo::exists(delivery.payload.value(QStringLiteral("modelCardPath")).toString()));
+        QVERIFY(QFileInfo::exists(delivery.payload.value(QStringLiteral("artifactInventoryPath")).toString()));
 
+        QJsonObject pipelineOptions;
+        pipelineOptions.insert(QStringLiteral("datasetPath"), datasetRoot);
+        pipelineOptions.insert(QStringLiteral("datasetFormat"), QStringLiteral("yolo_detection"));
+        pipelineOptions.insert(QStringLiteral("taskType"), QStringLiteral("detection"));
+        pipelineOptions.insert(QStringLiteral("trainingBackend"), QStringLiteral("tiny_linear_detector"));
+        pipelineOptions.insert(QStringLiteral("epochs"), 1);
+        pipelineOptions.insert(QStringLiteral("batchSize"), 1);
+        pipelineOptions.insert(QStringLiteral("imageSize"), 32);
+        pipelineOptions.insert(QStringLiteral("exportFormat"), QStringLiteral("onnx"));
+        pipelineOptions.insert(QStringLiteral("sampleImagePath"), QDir(datasetRoot).filePath(QStringLiteral("images/val/a.png")));
         const aitrain::WorkflowResult pipeline = aitrain::runLocalPipelinePlan(
             QDir(outputRoot).filePath(QStringLiteral("pipeline")),
-            QStringLiteral("train-evaluate-export-register"));
+            QStringLiteral("train-evaluate-export-register"),
+            pipelineOptions);
         QVERIFY2(pipeline.ok, qPrintable(pipeline.error));
         QVERIFY(QFileInfo::exists(pipeline.reportPath));
-        QVERIFY(pipeline.payload.value(QStringLiteral("scaffold")).toBool());
+        QVERIFY(!pipeline.payload.value(QStringLiteral("scaffold")).toBool());
+        QCOMPARE(pipeline.payload.value(QStringLiteral("state")).toString(), QStringLiteral("completed"));
+        QVERIFY(!pipeline.payload.value(QStringLiteral("steps")).toArray().isEmpty());
+        QVERIFY(!pipeline.payload.value(QStringLiteral("taskIds")).toArray().isEmpty());
     }
 
     void datasetQualityCatchesProblemSamples()
@@ -2098,14 +2117,26 @@ private slots:
         QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-delivery/training_delivery_report.html"))));
 
         runCommand([&](WorkerClient& client, QString* error) {
+            QJsonObject pipelineOptions;
+            pipelineOptions.insert(QStringLiteral("datasetPath"), datasetRoot);
+            pipelineOptions.insert(QStringLiteral("datasetFormat"), QStringLiteral("yolo_detection"));
+            pipelineOptions.insert(QStringLiteral("taskType"), QStringLiteral("detection"));
+            pipelineOptions.insert(QStringLiteral("trainingBackend"), QStringLiteral("tiny_linear_detector"));
+            pipelineOptions.insert(QStringLiteral("epochs"), 1);
+            pipelineOptions.insert(QStringLiteral("batchSize"), 1);
+            pipelineOptions.insert(QStringLiteral("imageSize"), 32);
+            pipelineOptions.insert(QStringLiteral("exportFormat"), QStringLiteral("onnx"));
+            pipelineOptions.insert(QStringLiteral("sampleImagePath"), QDir(datasetRoot).filePath(QStringLiteral("images/val/a.png")));
             return client.requestLocalPipeline(
                 workerExecutablePath(),
                 dir.filePath(QStringLiteral("worker-pipeline")),
                 QStringLiteral("train-evaluate-export-register"),
-                {},
+                pipelineOptions,
                 error,
                 QStringLiteral("pipeline-task"));
-        }, QStringLiteral("pipelinePlan"));
+        }, QStringLiteral("pipelinePlan"), QStringList()
+            << QStringLiteral("local_pipeline_execution")
+            << QStringLiteral("delivery_report"));
         QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-pipeline/local_pipeline_plan.json"))));
     }
 

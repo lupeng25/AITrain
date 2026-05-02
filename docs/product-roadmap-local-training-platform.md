@@ -166,7 +166,7 @@ AITrain Studio 已完成 Worker、SQLite、任务记录、artifact 浏览、YOLO
 - Phase 35：数据集快照和复现实验。
 - Phase 36：模型评估与误差分析。
 - Phase 37：数据质量检查和问题样本闭环。
-- Phase 38：本地流水线模板。
+- Phase 38：本地流水线模板（已完成本地执行闭环）。
 - Phase 39：部署 benchmark 和 TensorRT 外部验收增强。
 - Phase 40：图像分类/姿态/OBB 等训练后端扩展。
 - Phase 41：环境 profile 和修复向导。

@@ -18,6 +18,7 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QTextStream>
+#include <QThread>
 
 #include <algorithm>
 namespace aitrain {
@@ -75,6 +76,29 @@ bool writeTextFile(const QString& path, const QString& content, QString* error)
     return true;
 }
 
+bool readJsonFile(const QString& path, QJsonObject* object, QString* error)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (error) {
+            *error = QStringLiteral("Cannot read JSON file: %1").arg(path);
+        }
+        return false;
+    }
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        if (error) {
+            *error = QStringLiteral("Cannot parse JSON file %1: %2").arg(path, parseError.errorString());
+        }
+        return false;
+    }
+    if (object) {
+        *object = document.object();
+    }
+    return true;
+}
+
 QByteArray fileSha256(const QString& path, qint64* size, QString* error)
 {
     QFile file(path);
@@ -125,6 +149,65 @@ bool isImageFile(const QString& suffix)
         || lower == QStringLiteral("bmp")
         || lower == QStringLiteral("tif")
         || lower == QStringLiteral("tiff");
+}
+
+QString firstImageFileUnder(const QString& rootPath)
+{
+    if (rootPath.isEmpty()) {
+        return QString();
+    }
+    const QFileInfo rootInfo(rootPath);
+    if (rootInfo.isFile() && isImageFile(rootInfo.suffix())) {
+        return rootInfo.absoluteFilePath();
+    }
+    if (!rootInfo.exists() || !rootInfo.isDir()) {
+        return QString();
+    }
+
+    QFileInfoList candidates;
+    QDirIterator iterator(rootInfo.absoluteFilePath(), imageNameFilters(), QDir::Files, QDirIterator::Subdirectories);
+    while (iterator.hasNext()) {
+        iterator.next();
+        candidates.append(iterator.fileInfo());
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const QFileInfo& left, const QFileInfo& right) {
+        return left.absoluteFilePath().compare(right.absoluteFilePath(), Qt::CaseInsensitive) < 0;
+    });
+    return candidates.isEmpty() ? QString() : candidates.first().absoluteFilePath();
+}
+
+double percentileMs(QVector<double> values, double percentile)
+{
+    if (values.isEmpty()) {
+        return 0.0;
+    }
+    std::sort(values.begin(), values.end());
+    const double clamped = qBound(0.0, percentile, 100.0);
+    const int index = qBound(0, static_cast<int>((clamped / 100.0) * static_cast<double>(values.size() - 1) + 0.5), values.size() - 1);
+    return values.at(index);
+}
+
+double averageMs(const QVector<double>& values)
+{
+    if (values.isEmpty()) {
+        return 0.0;
+    }
+    double total = 0.0;
+    for (double value : values) {
+        total += value;
+    }
+    return total / static_cast<double>(values.size());
+}
+
+QJsonObject pathArtifact(const QString& kind, const QString& path, const QString& message = QString())
+{
+    QJsonObject artifact;
+    artifact.insert(QStringLiteral("kind"), kind);
+    artifact.insert(QStringLiteral("path"), path);
+    if (!message.isEmpty()) {
+        artifact.insert(QStringLiteral("message"), message);
+    }
+    return artifact;
 }
 
 QString snapshotFileRole(const QString& relativePath, const QFileInfo& fileInfo)
@@ -1708,6 +1791,8 @@ WorkflowResult curateDatasetQualityReport(const QString& datasetPath, const QStr
     const QString splitDistributionPath = QDir(outputPath).filePath(QStringLiteral("split_distribution.csv"));
     const QString xAnyFixListPath = QDir(outputPath).filePath(QStringLiteral("xanylabeling_fix_list.txt"));
     const QString xAnyFixManifestPath = QDir(outputPath).filePath(QStringLiteral("xanylabeling_fix_manifest.json"));
+    const QString reworkSampleSetPath = QDir(outputPath).filePath(QStringLiteral("rework_sample_set.json"));
+    const QString prelabelCandidatesPath = QDir(outputPath).filePath(QStringLiteral("prelabel_candidates.json"));
 
     QJsonObject problems;
     problems.insert(QStringLiteral("schemaVersion"), 2);
@@ -1731,11 +1816,62 @@ WorkflowResult curateDatasetQualityReport(const QString& datasetPath, const QStr
     xAnyManifest.insert(QStringLiteral("fixListPath"), xAnyFixListPath);
     xAnyManifest.insert(QStringLiteral("samples"), context.problemSamples);
 
+    QJsonArray reworkSamples = context.problemSamples;
+    const QString evaluationReportPath = options.value(QStringLiteral("evaluationReportPath")).toString();
+    if (!evaluationReportPath.isEmpty() && QFileInfo::exists(evaluationReportPath)) {
+        QJsonObject evaluationReport;
+        QString readError;
+        if (readJsonFile(evaluationReportPath, &evaluationReport, &readError)) {
+            const QJsonArray evaluationErrors = evaluationReport.value(QStringLiteral("errorSamples")).toArray();
+            for (const QJsonValue& value : evaluationErrors) {
+                QJsonObject sample = value.toObject();
+                sample.insert(QStringLiteral("source"), QStringLiteral("evaluation_error"));
+                sample.insert(QStringLiteral("evaluationReportPath"), evaluationReportPath);
+                reworkSamples.append(sample);
+            }
+        }
+    }
+    QJsonObject reworkSampleSet;
+    reworkSampleSet.insert(QStringLiteral("schemaVersion"), 1);
+    reworkSampleSet.insert(QStringLiteral("kind"), QStringLiteral("dataset_rework_sample_set"));
+    reworkSampleSet.insert(QStringLiteral("createdAt"), nowIso());
+    reworkSampleSet.insert(QStringLiteral("datasetPath"), datasetPath);
+    reworkSampleSet.insert(QStringLiteral("format"), format);
+    reworkSampleSet.insert(QStringLiteral("sourceQualityReport"), reportPath);
+    reworkSampleSet.insert(QStringLiteral("evaluationReportPath"), evaluationReportPath);
+    reworkSampleSet.insert(QStringLiteral("sampleCount"), reworkSamples.size());
+    reworkSampleSet.insert(QStringLiteral("samples"), reworkSamples);
+
+    QJsonArray prelabelCandidates;
+    for (const QJsonValue& value : reworkSamples) {
+        const QJsonObject sample = value.toObject();
+        const QString imagePath = sample.value(QStringLiteral("imagePath")).toString();
+        if (imagePath.isEmpty()) {
+            continue;
+        }
+        prelabelCandidates.append(QJsonObject{
+            {QStringLiteral("imagePath"), imagePath},
+            {QStringLiteral("labelPath"), sample.value(QStringLiteral("labelPath")).toString()},
+            {QStringLiteral("source"), sample.value(QStringLiteral("source")).toString(QStringLiteral("dataset_quality"))},
+            {QStringLiteral("mode"), QStringLiteral("candidate_only")},
+            {QStringLiteral("note"), QStringLiteral("AITrain does not overwrite user labels. Use this as a prelabel/review candidate list.")}
+        });
+    }
+    QJsonObject prelabelManifest;
+    prelabelManifest.insert(QStringLiteral("schemaVersion"), 1);
+    prelabelManifest.insert(QStringLiteral("kind"), QStringLiteral("prelabel_candidates"));
+    prelabelManifest.insert(QStringLiteral("datasetPath"), datasetPath);
+    prelabelManifest.insert(QStringLiteral("format"), format);
+    prelabelManifest.insert(QStringLiteral("candidateCount"), prelabelCandidates.size());
+    prelabelManifest.insert(QStringLiteral("candidates"), prelabelCandidates);
+
     if (!writeTextFile(csvPath, classDistributionCsvV2(context), &error)
         || !writeTextFile(imageStatsPath, imageStatisticsCsv(context), &error)
         || !writeTextFile(splitDistributionPath, splitDistributionCsv(context), &error)
         || !writeTextFile(xAnyFixListPath, context.xAnyFixRows.join(QLatin1Char('\n')) + QLatin1Char('\n'), &error)
-        || !writeJsonFile(xAnyFixManifestPath, xAnyManifest, &error)) {
+        || !writeJsonFile(xAnyFixManifestPath, xAnyManifest, &error)
+        || !writeJsonFile(reworkSampleSetPath, reworkSampleSet, &error)
+        || !writeJsonFile(prelabelCandidatesPath, prelabelManifest, &error)) {
         return failedResult(error);
     }
 
@@ -1746,6 +1882,8 @@ WorkflowResult curateDatasetQualityReport(const QString& datasetPath, const QStr
     report.insert(QStringLiteral("splitDistributionPath"), splitDistributionPath);
     report.insert(QStringLiteral("xAnyLabelingFixListPath"), xAnyFixListPath);
     report.insert(QStringLiteral("xAnyLabelingFixManifestPath"), xAnyFixManifestPath);
+    report.insert(QStringLiteral("reworkSampleSetPath"), reworkSampleSetPath);
+    report.insert(QStringLiteral("prelabelCandidatesPath"), prelabelCandidatesPath);
     if (!writeJsonFile(reportPath, report, &error)) {
         return failedResult(error);
     }
@@ -2122,34 +2260,159 @@ WorkflowResult benchmarkModelReport(const QString& modelPath, const QString& out
         return resultFromReport(reportPath, blocked);
     }
 
-    QElapsedTimer timer;
-    timer.start();
-    QFile file(modelPath);
-    if (!file.open(QIODevice::ReadOnly)) {
-        return failedResult(QStringLiteral("Cannot read model for benchmark: %1").arg(modelPath));
+    const QString datasetPath = options.value(QStringLiteral("datasetPath")).toString();
+    const QString sampleImagePath = options.value(QStringLiteral("sampleImagePath")).toString(
+        options.value(QStringLiteral("imagePath")).toString(firstImageFileUnder(datasetPath)));
+    const int warmupIterations = qMax(0, options.value(QStringLiteral("warmupIterations")).toInt(2));
+    const int iterations = qMax(1, options.value(QStringLiteral("iterations")).toInt(10));
+    const QString provider = runtime == QStringLiteral("onnxruntime")
+        ? QStringLiteral("CPUExecutionProvider")
+        : (runtime == QStringLiteral("tensorrt") ? QStringLiteral("TensorRT") : QStringLiteral("local_file"));
+
+    QVector<double> timings;
+    QString inferenceError;
+    QString modelFamily = suffix == QStringLiteral("onnx") ? inferOnnxModelFamily(modelPath) : QStringLiteral("tiny_detector");
+    int outputCount = 0;
+    bool timedInference = false;
+
+    const auto runTimedInference = [&]() -> bool {
+        if (runtime == QStringLiteral("onnxruntime")) {
+            if (!isOnnxRuntimeInferenceAvailable()) {
+                inferenceError = QStringLiteral("ONNX Runtime is not available in this build.");
+                return false;
+            }
+            if (sampleImagePath.isEmpty() || !QFileInfo::exists(sampleImagePath)) {
+                inferenceError = QStringLiteral("A sample image is required for timed ONNX Runtime benchmark.");
+                return false;
+            }
+            DetectionInferenceOptions inferenceOptions;
+            inferenceOptions.confidenceThreshold = options.value(QStringLiteral("confidenceThreshold")).toDouble(0.25);
+            inferenceOptions.iouThreshold = options.value(QStringLiteral("iouThreshold")).toDouble(0.45);
+            inferenceOptions.maxDetections = options.value(QStringLiteral("maxDetections")).toInt(100);
+            const int totalRuns = warmupIterations + iterations;
+            for (int index = 0; index < totalRuns; ++index) {
+                QElapsedTimer timer;
+                timer.start();
+                if (modelFamily == QStringLiteral("yolo_segmentation")) {
+                    const QVector<SegmentationPrediction> predictions = predictSegmentationOnnxRuntime(modelPath, sampleImagePath, inferenceOptions, &inferenceError);
+                    outputCount = predictions.size();
+                } else if (modelFamily == QStringLiteral("ocr_recognition")) {
+                    const OcrRecPrediction prediction = predictOcrRecOnnxRuntime(modelPath, sampleImagePath, &inferenceError);
+                    outputCount = prediction.text.isEmpty() ? 0 : 1;
+                } else {
+                    const QVector<DetectionPrediction> predictions = predictDetectionOnnxRuntime(modelPath, sampleImagePath, inferenceOptions, &inferenceError);
+                    outputCount = predictions.size();
+                    modelFamily = QStringLiteral("yolo_detection");
+                }
+                if (!inferenceError.isEmpty()) {
+                    return false;
+                }
+                const double elapsedMs = static_cast<double>(timer.nsecsElapsed()) / 1000000.0;
+                if (index >= warmupIterations) {
+                    timings.append(elapsedMs);
+                }
+            }
+            timedInference = true;
+            return true;
+        }
+
+        if (runtime == QStringLiteral("file") && sampleImagePath.isEmpty()) {
+            return false;
+        }
+
+        if (sampleImagePath.isEmpty() || !QFileInfo::exists(sampleImagePath)) {
+            return false;
+        }
+        DetectionBaselineCheckpoint checkpoint;
+        if (!loadDetectionBaselineCheckpoint(modelPath, &checkpoint, &inferenceError)) {
+            return false;
+        }
+        DetectionInferenceOptions inferenceOptions;
+        inferenceOptions.confidenceThreshold = options.value(QStringLiteral("confidenceThreshold")).toDouble(0.25);
+        inferenceOptions.iouThreshold = options.value(QStringLiteral("iouThreshold")).toDouble(0.45);
+        inferenceOptions.maxDetections = options.value(QStringLiteral("maxDetections")).toInt(100);
+        const int totalRuns = warmupIterations + iterations;
+        for (int index = 0; index < totalRuns; ++index) {
+            QElapsedTimer timer;
+            timer.start();
+            const QVector<DetectionPrediction> predictions = predictDetectionBaseline(checkpoint, sampleImagePath, inferenceOptions, &inferenceError);
+            if (!inferenceError.isEmpty()) {
+                return false;
+            }
+            outputCount = predictions.size();
+            const double elapsedMs = static_cast<double>(timer.nsecsElapsed()) / 1000000.0;
+            if (index >= warmupIterations) {
+                timings.append(elapsedMs);
+            }
+        }
+        modelFamily = QStringLiteral("tiny_detector");
+        timedInference = true;
+        return true;
+    };
+
+    runTimedInference();
+
+    qint64 modelBytes = 0;
+    QString hashError;
+    const QByteArray hash = fileSha256(modelPath, &modelBytes, &hashError);
+    if (!hashError.isEmpty()) {
+        return failedResult(hashError);
     }
-    QCryptographicHash hash(QCryptographicHash::Sha256);
-    hash.addData(file.read(1024 * 1024));
-    const qint64 elapsed = qMax<qint64>(1, timer.elapsed());
+
+    if (!timedInference) {
+        QElapsedTimer timer;
+        timer.start();
+        QFile file(modelPath);
+        if (!file.open(QIODevice::ReadOnly)) {
+            return failedResult(QStringLiteral("Cannot read model for benchmark: %1").arg(modelPath));
+        }
+        file.read(1024 * 1024);
+        timings.append(static_cast<double>(qMax<qint64>(1, timer.elapsed())));
+    }
+
+    const double avg = averageMs(timings);
+    const double p50 = percentileMs(timings, 50.0);
+    const double p95 = percentileMs(timings, 95.0);
+    const double p99 = percentileMs(timings, 99.0);
+    const bool runtimeUsable = timedInference && inferenceError.isEmpty();
 
     QJsonObject report;
-    report.insert(QStringLiteral("ok"), true);
+    report.insert(QStringLiteral("ok"), runtimeUsable || runtime == QStringLiteral("file"));
     report.insert(QStringLiteral("kind"), QStringLiteral("benchmark_report"));
     report.insert(QStringLiteral("createdAt"), nowIso());
     report.insert(QStringLiteral("modelPath"), modelPath);
+    report.insert(QStringLiteral("modelFamily"), modelFamily);
     report.insert(QStringLiteral("runtime"), runtime);
     report.insert(QStringLiteral("device"), options.value(QStringLiteral("device")).toString(QStringLiteral("cpu")));
+    report.insert(QStringLiteral("provider"), provider);
     report.insert(QStringLiteral("batch"), options.value(QStringLiteral("batch")).toInt(1));
     report.insert(QStringLiteral("inputShape"), options.value(QStringLiteral("inputShape")).toString(QStringLiteral("auto")));
-    report.insert(QStringLiteral("averageMs"), static_cast<double>(elapsed));
-    report.insert(QStringLiteral("p50Ms"), static_cast<double>(elapsed));
-    report.insert(QStringLiteral("p95Ms"), static_cast<double>(elapsed));
-    report.insert(QStringLiteral("p99Ms"), static_cast<double>(elapsed));
-    report.insert(QStringLiteral("throughput"), 1000.0 / static_cast<double>(elapsed));
-    report.insert(QStringLiteral("modelBytes"), QString::number(modelInfo.size()));
-    report.insert(QStringLiteral("sampleHash"), QString::fromLatin1(hash.result().toHex()));
-    report.insert(QStringLiteral("scaffold"), true);
-    report.insert(QStringLiteral("note"), QStringLiteral("Benchmark v1 measures local model file access and records runtime intent. Full timed inference benchmark is a follow-up phase."));
+    report.insert(QStringLiteral("warmupIterations"), warmupIterations);
+    report.insert(QStringLiteral("iterations"), iterations);
+    report.insert(QStringLiteral("averageMs"), avg);
+    report.insert(QStringLiteral("p50Ms"), p50);
+    report.insert(QStringLiteral("p95Ms"), p95);
+    report.insert(QStringLiteral("p99Ms"), p99);
+    report.insert(QStringLiteral("throughput"), avg > 0.0 ? 1000.0 / avg : 0.0);
+    report.insert(QStringLiteral("outputCount"), outputCount);
+    report.insert(QStringLiteral("sampleImagePath"), sampleImagePath);
+    report.insert(QStringLiteral("modelBytes"), QString::number(modelBytes));
+    report.insert(QStringLiteral("sampleHash"), QString::fromLatin1(hash));
+    report.insert(QStringLiteral("timedInference"), timedInference);
+    report.insert(QStringLiteral("scaffold"), !timedInference);
+    report.insert(QStringLiteral("status"), timedInference ? QStringLiteral("completed") : QStringLiteral("limited"));
+    report.insert(QStringLiteral("deploymentConclusion"), timedInference
+        ? QStringLiteral("local-runtime-available")
+        : QStringLiteral("input-required-or-runtime-limited"));
+    report.insert(QStringLiteral("cpuThreads"), QThread::idealThreadCount());
+    report.insert(QStringLiteral("onnxRuntimeAvailable"), isOnnxRuntimeInferenceAvailable());
+    report.insert(QStringLiteral("tensorRt"), tensorRtBackendStatus().toJson());
+    if (!inferenceError.isEmpty()) {
+        report.insert(QStringLiteral("message"), inferenceError);
+    }
+    report.insert(QStringLiteral("note"), timedInference
+        ? QStringLiteral("Timed local inference benchmark completed with warmup and repeated measurements.")
+        : QStringLiteral("No timed inference was run. Provide an ONNX/tiny detector model and sampleImagePath or datasetPath for full local benchmark."));
 
     QString error;
     const QString reportPath = QDir(outputPath).filePath(QStringLiteral("benchmark_report.json"));
@@ -2165,10 +2428,72 @@ WorkflowResult generateTrainingDeliveryReport(const QString& outputPath, const Q
     QJsonObject reportContext = context;
     reportContext.insert(QStringLiteral("generatedAt"), nowIso());
     reportContext.insert(QStringLiteral("kind"), QStringLiteral("training_delivery_report"));
-    reportContext.insert(QStringLiteral("scaffold"), true);
-    reportContext.insert(QStringLiteral("note"), QStringLiteral("HTML report v1 packages available context and explicit limitations for offline review."));
+    reportContext.insert(QStringLiteral("scaffold"), false);
+    reportContext.insert(QStringLiteral("note"), QStringLiteral("HTML delivery report summarizes lineage, evaluation, benchmark, and export artifacts for local handoff."));
+
+    QJsonArray inventory;
+    const auto addInventoryPath = [&inventory](const QString& kind, const QString& path, const QString& message) {
+        if (path.isEmpty()) {
+            return;
+        }
+        QFileInfo info(path);
+        if (!info.exists()) {
+            return;
+        }
+        QJsonObject item = pathArtifact(kind, path, message);
+        item.insert(QStringLiteral("isDir"), info.isDir());
+        item.insert(QStringLiteral("bytes"), QString::number(info.isDir() ? 0 : info.size()));
+        item.insert(QStringLiteral("updatedAt"), info.lastModified().toUTC().toString(Qt::ISODateWithMs));
+        inventory.append(item);
+    };
+    addInventoryPath(QStringLiteral("model"), reportContext.value(QStringLiteral("modelPath")).toString(), QStringLiteral("Selected model artifact"));
+    addInventoryPath(QStringLiteral("dataset_snapshot"), reportContext.value(QStringLiteral("datasetSnapshotManifest")).toString(), QStringLiteral("Dataset snapshot manifest"));
+    addInventoryPath(QStringLiteral("evaluation_report"), reportContext.value(QStringLiteral("evaluationReportPath")).toString(), QStringLiteral("Evaluation report"));
+    addInventoryPath(QStringLiteral("benchmark_report"), reportContext.value(QStringLiteral("benchmarkReportPath")).toString(), QStringLiteral("Benchmark report"));
+    addInventoryPath(QStringLiteral("export"), reportContext.value(QStringLiteral("exportPath")).toString(), QStringLiteral("Exported model"));
+    addInventoryPath(QStringLiteral("export_report"), reportContext.value(QStringLiteral("exportReportPath")).toString(), QStringLiteral("Export report"));
+    addInventoryPath(QStringLiteral("inference_predictions"), reportContext.value(QStringLiteral("inferencePredictionsPath")).toString(), QStringLiteral("Inference predictions"));
+    addInventoryPath(QStringLiteral("inference_overlay"), reportContext.value(QStringLiteral("inferenceOverlayPath")).toString(), QStringLiteral("Inference overlay"));
+
+    QJsonObject modelCard;
+    modelCard.insert(QStringLiteral("schemaVersion"), 1);
+    modelCard.insert(QStringLiteral("createdAt"), nowIso());
+    modelCard.insert(QStringLiteral("modelPath"), reportContext.value(QStringLiteral("modelPath")).toString());
+    modelCard.insert(QStringLiteral("modelFamily"), reportContext.value(QStringLiteral("modelFamily")).toString());
+    modelCard.insert(QStringLiteral("taskType"), reportContext.value(QStringLiteral("taskType")).toString());
+    modelCard.insert(QStringLiteral("trainingBackend"), reportContext.value(QStringLiteral("trainingBackend")).toString());
+    modelCard.insert(QStringLiteral("modelPreset"), reportContext.value(QStringLiteral("modelPreset")).toString());
+    modelCard.insert(QStringLiteral("datasetPath"), reportContext.value(QStringLiteral("datasetPath")).toString());
+    modelCard.insert(QStringLiteral("datasetFormat"), reportContext.value(QStringLiteral("datasetFormat")).toString());
+    modelCard.insert(QStringLiteral("datasetSnapshotId"), reportContext.value(QStringLiteral("datasetSnapshotId")).toInt());
+    modelCard.insert(QStringLiteral("datasetSnapshotHash"), reportContext.value(QStringLiteral("datasetSnapshotHash")).toString());
+    modelCard.insert(QStringLiteral("datasetSnapshotManifest"), reportContext.value(QStringLiteral("datasetSnapshotManifest")).toString());
+    modelCard.insert(QStringLiteral("sourceTaskId"), reportContext.value(QStringLiteral("sourceTaskId")).toString());
+    modelCard.insert(QStringLiteral("evaluationReportPath"), reportContext.value(QStringLiteral("evaluationReportPath")).toString());
+    modelCard.insert(QStringLiteral("benchmarkReportPath"), reportContext.value(QStringLiteral("benchmarkReportPath")).toString());
+    modelCard.insert(QStringLiteral("exportPath"), reportContext.value(QStringLiteral("exportPath")).toString());
+    modelCard.insert(QStringLiteral("inventory"), inventory);
+    modelCard.insert(QStringLiteral("limitations"), QJsonArray{
+        QStringLiteral("Scaffold backends remain explicitly marked and should not be described as real official training."),
+        QStringLiteral("TensorRT acceptance still requires RTX / SM 75+ hardware when runtime reports hardware-blocked.")
+    });
 
     QString error;
+    const QString modelCardPath = QDir(outputPath).filePath(QStringLiteral("model_card.json"));
+    const QString inventoryPath = QDir(outputPath).filePath(QStringLiteral("delivery_artifact_inventory.json"));
+    if (!writeJsonFile(modelCardPath, modelCard, &error)) {
+        return failedResult(error);
+    }
+    if (!writeJsonFile(inventoryPath, QJsonObject{
+            {QStringLiteral("schemaVersion"), 1},
+            {QStringLiteral("createdAt"), nowIso()},
+            {QStringLiteral("items"), inventory}}, &error)) {
+        return failedResult(error);
+    }
+    reportContext.insert(QStringLiteral("modelCardPath"), modelCardPath);
+    reportContext.insert(QStringLiteral("artifactInventoryPath"), inventoryPath);
+    reportContext.insert(QStringLiteral("artifactCount"), inventory.size());
+
     const QString htmlPath = QDir(outputPath).filePath(QStringLiteral("training_delivery_report.html"));
     if (!writeTextFile(htmlPath, htmlReport(reportContext), &error)) {
         return failedResult(error);
@@ -2184,37 +2509,519 @@ WorkflowResult generateTrainingDeliveryReport(const QString& outputPath, const Q
 
 WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& templateId, const QJsonObject& options)
 {
-    QJsonObject plan;
-    plan.insert(QStringLiteral("kind"), QStringLiteral("local_pipeline_plan"));
-    plan.insert(QStringLiteral("createdAt"), nowIso());
-    plan.insert(QStringLiteral("templateId"), templateId.isEmpty() ? QStringLiteral("train-evaluate-export-register") : templateId);
-    plan.insert(QStringLiteral("state"), QStringLiteral("planned"));
-    plan.insert(QStringLiteral("scaffold"), true);
-    plan.insert(QStringLiteral("note"), QStringLiteral("Pipeline v1 records a deterministic execution plan. Automated multi-step task orchestration is a follow-up phase."));
-    plan.insert(QStringLiteral("options"), options);
-    QJsonArray steps;
-    for (const QString& step : {
-             QStringLiteral("validateDataset"),
-             QStringLiteral("createDatasetSnapshot"),
-             QStringLiteral("startTrain"),
-             QStringLiteral("evaluateModel"),
-             QStringLiteral("exportModel"),
-             QStringLiteral("registerModel"),
-             QStringLiteral("generateTrainingDeliveryReport")}) {
-        QJsonObject object;
-        object.insert(QStringLiteral("command"), step);
-        object.insert(QStringLiteral("state"), QStringLiteral("planned"));
-        steps.append(object);
+    const QString resolvedTemplate = templateId.isEmpty()
+        ? QStringLiteral("train-evaluate-export-register")
+        : templateId.trimmed().toLower();
+    if (resolvedTemplate != QStringLiteral("train-evaluate-export-register")
+        && resolvedTemplate != QStringLiteral("export-infer-benchmark-report")) {
+        return failedResult(QStringLiteral("Unsupported local pipeline template: %1").arg(resolvedTemplate));
     }
-    plan.insert(QStringLiteral("steps"), steps);
+
+    QDir().mkpath(outputPath);
+    QJsonObject pipeline;
+    pipeline.insert(QStringLiteral("kind"), QStringLiteral("local_pipeline_execution"));
+    pipeline.insert(QStringLiteral("createdAt"), nowIso());
+    pipeline.insert(QStringLiteral("templateId"), resolvedTemplate);
+    pipeline.insert(QStringLiteral("state"), QStringLiteral("running"));
+    pipeline.insert(QStringLiteral("scaffold"), false);
+    pipeline.insert(QStringLiteral("options"), options);
+
+    const QString datasetPath = options.value(QStringLiteral("datasetPath")).toString();
+    const QString datasetFormat = options.value(QStringLiteral("datasetFormat")).toString();
+    const QString taskType = options.value(QStringLiteral("taskType")).toString(QStringLiteral("detection"));
+    const QString trainingBackend = options.value(QStringLiteral("trainingBackend")).toString();
+    const QString modelPreset = options.value(QStringLiteral("modelPreset")).toString();
+    const int epochs = qMax(1, options.value(QStringLiteral("epochs")).toInt(1));
+    const QString exportFormat = options.value(QStringLiteral("exportFormat")).toString(QStringLiteral("onnx"));
+    const QString preferredSampleImage = options.value(QStringLiteral("sampleImagePath")).toString(options.value(QStringLiteral("imagePath")).toString());
+
+    QString modelPath = options.value(QStringLiteral("modelPath")).toString(options.value(QStringLiteral("checkpointPath")).toString());
+    QString exportPath;
+    QString exportReportPath;
+    QString inferencePredictionsPath;
+    QString inferenceOverlayPath;
+    QString evaluationReportPath;
+    QString benchmarkReportPath;
+    QString deliveryReportPath;
+    QString datasetSnapshotManifestPath;
+    int datasetSnapshotId = options.value(QStringLiteral("datasetSnapshotId")).toInt();
+    QString datasetSnapshotHash = options.value(QStringLiteral("datasetSnapshotHash")).toString();
+    QString datasetSnapshotManifest = options.value(QStringLiteral("datasetSnapshotManifest")).toString();
+
+    QJsonArray stepArray;
+    QJsonArray stepTaskIds;
+    QJsonArray artifactArray;
+    QString failureReason;
+
+    const auto appendStep = [&](const QString& command, const QString& state, const QString& message, const QString& reportPath, const QJsonArray& artifacts = QJsonArray()) {
+        const QString stepTaskId = QStringLiteral("pipeline_step_%1").arg(stepArray.size() + 1);
+        QJsonObject step;
+        step.insert(QStringLiteral("taskId"), stepTaskId);
+        step.insert(QStringLiteral("command"), command);
+        step.insert(QStringLiteral("state"), state);
+        step.insert(QStringLiteral("message"), message);
+        step.insert(QStringLiteral("finishedAt"), nowIso());
+        if (!reportPath.isEmpty()) {
+            step.insert(QStringLiteral("reportPath"), reportPath);
+        }
+        if (!artifacts.isEmpty()) {
+            step.insert(QStringLiteral("artifacts"), artifacts);
+        }
+        stepArray.append(step);
+        stepTaskIds.append(stepTaskId);
+    };
+
+    const auto appendArtifactsFromPayload = [&](const QJsonObject& payload) {
+        for (const QString& key : payload.keys()) {
+            if (!key.endsWith(QStringLiteral("Path"))) {
+                continue;
+            }
+            const QString path = payload.value(key).toString();
+            if (path.isEmpty()) {
+                continue;
+            }
+            artifactArray.append(pathArtifact(QStringLiteral("workflow_artifact"), path, key));
+        }
+    };
+
+    const auto failPipeline = [&](const QString& stepName, const QString& message) -> WorkflowResult {
+        failureReason = message;
+        appendStep(stepName, QStringLiteral("failed"), message, QString());
+        pipeline.insert(QStringLiteral("state"), QStringLiteral("failed"));
+        pipeline.insert(QStringLiteral("failureReason"), failureReason);
+        pipeline.insert(QStringLiteral("finishedAt"), nowIso());
+        pipeline.insert(QStringLiteral("steps"), stepArray);
+        pipeline.insert(QStringLiteral("taskIds"), stepTaskIds);
+        pipeline.insert(QStringLiteral("artifacts"), artifactArray);
+        QString error;
+        const QString reportPath = QDir(outputPath).filePath(QStringLiteral("local_pipeline_plan.json"));
+        if (!writeJsonFile(reportPath, pipeline, &error)) {
+            return failedResult(error);
+        }
+        pipeline.insert(QStringLiteral("reportPath"), reportPath);
+        return resultFromReport(reportPath, pipeline);
+    };
+
+    auto runValidateStep = [&]() -> bool {
+        if (datasetPath.isEmpty() || datasetFormat.isEmpty()) {
+            failureReason = QStringLiteral("Dataset path and dataset format are required for validation.");
+            return false;
+        }
+        const DatasetValidationResult validation = validateByFormat(datasetPath, datasetFormat, options.value(QStringLiteral("validationOptions")).toObject());
+        const QString reportPath = QDir(outputPath).filePath(QStringLiteral("dataset_validation_report.json"));
+        QString error;
+        QJsonObject payload = validation.toJson();
+        payload.insert(QStringLiteral("createdAt"), nowIso());
+        payload.insert(QStringLiteral("datasetPath"), datasetPath);
+        payload.insert(QStringLiteral("format"), datasetFormat);
+        if (!writeJsonFile(reportPath, payload, &error)) {
+            failureReason = error;
+            return false;
+        }
+        artifactArray.append(pathArtifact(QStringLiteral("dataset_validation_report"), reportPath, QStringLiteral("Validation report")));
+        appendStep(QStringLiteral("validateDataset"),
+            validation.ok ? QStringLiteral("completed") : QStringLiteral("failed"),
+            validation.ok ? QStringLiteral("Dataset validation completed.") : QStringLiteral("Dataset validation failed."),
+            reportPath,
+            QJsonArray{pathArtifact(QStringLiteral("dataset_validation_report"), reportPath)});
+        if (!validation.ok) {
+            failureReason = validation.errors.isEmpty() ? QStringLiteral("Dataset validation failed.") : validation.errors.first();
+            return false;
+        }
+        return true;
+    };
+
+    auto runSnapshotStep = [&]() -> bool {
+        const WorkflowResult snapshot = createDatasetSnapshotReport(
+            datasetPath,
+            QDir(outputPath).filePath(QStringLiteral("dataset_snapshot")),
+            datasetFormat,
+            options.value(QStringLiteral("snapshotOptions")).toObject());
+        if (!snapshot.ok) {
+            failureReason = snapshot.error;
+            return false;
+        }
+        datasetSnapshotManifestPath = snapshot.reportPath;
+        datasetSnapshotHash = snapshot.payload.value(QStringLiteral("contentHash")).toString();
+        datasetSnapshotManifest = snapshot.payload.value(QStringLiteral("manifestPath")).toString(snapshot.reportPath);
+        artifactArray.append(pathArtifact(QStringLiteral("dataset_snapshot_manifest"), snapshot.reportPath, QStringLiteral("Dataset snapshot manifest")));
+        appendArtifactsFromPayload(snapshot.payload);
+        appendStep(QStringLiteral("createDatasetSnapshot"),
+            QStringLiteral("completed"),
+            QStringLiteral("Dataset snapshot created."),
+            snapshot.reportPath,
+            QJsonArray{pathArtifact(QStringLiteral("dataset_snapshot_manifest"), snapshot.reportPath)});
+        return true;
+    };
+
+    auto runTrainStep = [&]() -> bool {
+        const QString backend = trainingBackend.trimmed().toLower();
+        if (taskType == QStringLiteral("detection")
+            && (backend.isEmpty()
+                || backend == QStringLiteral("tiny_linear_detector")
+                || backend == QStringLiteral("tiny_detector")
+                || backend == QStringLiteral("tiny_linear"))) {
+            DetectionTrainingOptions trainOptions;
+            trainOptions.epochs = epochs;
+            trainOptions.batchSize = qMax(1, options.value(QStringLiteral("batchSize")).toInt(1));
+            const int imageSize = qMax(32, options.value(QStringLiteral("imageSize")).toInt(320));
+            trainOptions.imageSize = QSize(imageSize, imageSize);
+            trainOptions.outputPath = QDir(outputPath).filePath(QStringLiteral("training"));
+            trainOptions.trainingBackend = backend.isEmpty() ? QStringLiteral("tiny_linear_detector") : backend;
+            const DetectionTrainingResult trainingResult = trainDetectionBaseline(datasetPath, trainOptions);
+            if (!trainingResult.ok) {
+                failureReason = trainingResult.error;
+                return false;
+            }
+            modelPath = trainingResult.checkpointPath;
+            artifactArray.append(pathArtifact(QStringLiteral("checkpoint"), modelPath, QStringLiteral("Trained checkpoint")));
+            appendStep(QStringLiteral("startTrain"),
+                QStringLiteral("completed"),
+                QStringLiteral("Detection training completed with local tiny backend."),
+                modelPath,
+                QJsonArray{pathArtifact(QStringLiteral("checkpoint"), modelPath)});
+            return true;
+        }
+
+        const QString requestPath = QDir(outputPath).filePath(QStringLiteral("training_request.json"));
+        QJsonObject request;
+        request.insert(QStringLiteral("taskType"), taskType);
+        request.insert(QStringLiteral("datasetPath"), datasetPath);
+        request.insert(QStringLiteral("trainingBackend"), trainingBackend);
+        request.insert(QStringLiteral("modelPreset"), modelPreset);
+        request.insert(QStringLiteral("epochs"), epochs);
+        request.insert(QStringLiteral("note"), QStringLiteral("Pipeline recorded a reproducible training request. Execute through Worker for official backend training."));
+        QString error;
+        if (!writeJsonFile(requestPath, request, &error)) {
+            failureReason = error;
+            return false;
+        }
+        artifactArray.append(pathArtifact(QStringLiteral("training_request"), requestPath, QStringLiteral("External training request")));
+        appendStep(QStringLiteral("startTrain"),
+            QStringLiteral("queued_external"),
+            QStringLiteral("Training backend is external/offical; request recorded for Worker execution."),
+            requestPath,
+            QJsonArray{pathArtifact(QStringLiteral("training_request"), requestPath)});
+        return true;
+    };
+
+    auto runEvaluateStep = [&]() -> bool {
+        if (modelPath.isEmpty() || datasetPath.isEmpty()) {
+            appendStep(QStringLiteral("evaluateModel"),
+                QStringLiteral("skipped"),
+                QStringLiteral("Evaluation skipped because modelPath or datasetPath is missing."),
+                QString());
+            return true;
+        }
+        QJsonObject evalOptions = options.value(QStringLiteral("evaluationOptions")).toObject();
+        if (!datasetSnapshotHash.isEmpty()) {
+            evalOptions.insert(QStringLiteral("datasetSnapshotHash"), datasetSnapshotHash);
+        }
+        if (!datasetSnapshotManifest.isEmpty()) {
+            evalOptions.insert(QStringLiteral("datasetSnapshotManifest"), datasetSnapshotManifest);
+        }
+        if (datasetSnapshotId > 0) {
+            evalOptions.insert(QStringLiteral("datasetSnapshotId"), datasetSnapshotId);
+        }
+        const WorkflowResult evaluation = evaluateModelReport(
+            modelPath,
+            datasetPath,
+            QDir(outputPath).filePath(QStringLiteral("evaluation")),
+            taskType,
+            evalOptions);
+        if (!evaluation.ok) {
+            failureReason = evaluation.error;
+            return false;
+        }
+        evaluationReportPath = evaluation.reportPath;
+        artifactArray.append(pathArtifact(QStringLiteral("evaluation_report"), evaluation.reportPath, QStringLiteral("Evaluation report")));
+        appendArtifactsFromPayload(evaluation.payload);
+        appendStep(QStringLiteral("evaluateModel"),
+            QStringLiteral("completed"),
+            QStringLiteral("Model evaluation completed."),
+            evaluation.reportPath,
+            QJsonArray{pathArtifact(QStringLiteral("evaluation_report"), evaluation.reportPath)});
+        return true;
+    };
+
+    auto runExportStep = [&]() -> bool {
+        if (modelPath.isEmpty()) {
+            failureReason = QStringLiteral("Model export requires modelPath/checkpointPath.");
+            return false;
+        }
+        const QString exportDir = QDir(outputPath).filePath(QStringLiteral("export"));
+        const QString suffix = QFileInfo(modelPath).suffix().toLower();
+        const QString outputModelPath = QDir(exportDir).filePath(
+            exportFormat == QStringLiteral("onnx")
+                ? QStringLiteral("model.onnx")
+                : (exportFormat.startsWith(QStringLiteral("tensorrt")) ? QStringLiteral("model.engine") : QStringLiteral("model.export.json")));
+        const DetectionExportResult exportResult = exportDetectionCheckpoint(
+            modelPath,
+            outputModelPath,
+            exportFormat);
+        if (!exportResult.ok) {
+            failureReason = exportResult.error;
+            return false;
+        }
+        exportPath = exportResult.exportPath;
+        exportReportPath = exportResult.reportPath;
+        artifactArray.append(pathArtifact(QStringLiteral("model_export"), exportPath, QStringLiteral("Model export")));
+        if (!exportReportPath.isEmpty()) {
+            artifactArray.append(pathArtifact(QStringLiteral("model_export_report"), exportReportPath, QStringLiteral("Model export report")));
+        }
+        appendStep(QStringLiteral("exportModel"),
+            QStringLiteral("completed"),
+            QStringLiteral("Model export completed."),
+            exportReportPath.isEmpty() ? exportPath : exportReportPath,
+            QJsonArray{
+                pathArtifact(QStringLiteral("model_export"), exportPath),
+                pathArtifact(QStringLiteral("model_export_report"), exportReportPath)});
+        Q_UNUSED(suffix)
+        return true;
+    };
+
+    auto runInferenceSmokeStep = [&]() -> bool {
+        const QString candidateModel = exportPath.isEmpty() ? modelPath : exportPath;
+        const QString imagePath = !preferredSampleImage.isEmpty()
+            ? preferredSampleImage
+            : firstImageFileUnder(datasetPath);
+        if (candidateModel.isEmpty() || imagePath.isEmpty() || !QFileInfo::exists(imagePath)) {
+            appendStep(QStringLiteral("infer"),
+                QStringLiteral("skipped"),
+                QStringLiteral("Inference smoke skipped because model/image input is missing."),
+                QString());
+            return true;
+        }
+
+        const QString suffix = QFileInfo(candidateModel).suffix().toLower();
+        const QString inferenceDir = QDir(outputPath).filePath(QStringLiteral("inference"));
+        QDir().mkpath(inferenceDir);
+        QJsonArray predictions;
+        QImage overlay;
+        QString error;
+        QString inferenceTaskType = QStringLiteral("detection");
+        if (suffix == QStringLiteral("onnx")) {
+            const QString family = inferOnnxModelFamily(candidateModel);
+            if (family == QStringLiteral("yolo_segmentation")) {
+                inferenceTaskType = QStringLiteral("segmentation");
+                DetectionInferenceOptions inferenceOptions;
+                const QVector<SegmentationPrediction> segPredictions = predictSegmentationOnnxRuntime(candidateModel, imagePath, inferenceOptions, &error);
+                for (const SegmentationPrediction& prediction : segPredictions) {
+                    predictions.append(segmentationPredictionToJson(prediction));
+                }
+                overlay = renderSegmentationPredictions(imagePath, segPredictions, &error);
+            } else if (family == QStringLiteral("ocr_recognition")) {
+                inferenceTaskType = QStringLiteral("ocr_recognition");
+                const OcrRecPrediction prediction = predictOcrRecOnnxRuntime(candidateModel, imagePath, &error);
+                predictions.append(ocrRecPredictionToJson(prediction));
+                overlay = renderOcrRecPrediction(imagePath, prediction, &error);
+            } else {
+                DetectionInferenceOptions inferenceOptions;
+                const QVector<DetectionPrediction> detPredictions = predictDetectionOnnxRuntime(candidateModel, imagePath, inferenceOptions, &error);
+                for (const DetectionPrediction& prediction : detPredictions) {
+                    predictions.append(detectionPredictionToJson(prediction));
+                }
+                overlay = renderDetectionPredictions(imagePath, detPredictions, &error);
+            }
+        } else {
+            DetectionBaselineCheckpoint checkpoint;
+            if (!loadDetectionBaselineCheckpoint(candidateModel, &checkpoint, &error)) {
+                failureReason = error;
+                return false;
+            }
+            DetectionInferenceOptions inferenceOptions;
+            const QVector<DetectionPrediction> detPredictions = predictDetectionBaseline(checkpoint, imagePath, inferenceOptions, &error);
+            for (const DetectionPrediction& prediction : detPredictions) {
+                predictions.append(detectionPredictionToJson(prediction));
+            }
+            overlay = renderDetectionPredictions(imagePath, detPredictions, &error);
+        }
+        if (!error.isEmpty()) {
+            failureReason = error;
+            return false;
+        }
+
+        inferencePredictionsPath = QDir(inferenceDir).filePath(QStringLiteral("inference_predictions.json"));
+        QJsonObject predictionRoot;
+        predictionRoot.insert(QStringLiteral("createdAt"), nowIso());
+        predictionRoot.insert(QStringLiteral("modelPath"), candidateModel);
+        predictionRoot.insert(QStringLiteral("imagePath"), imagePath);
+        predictionRoot.insert(QStringLiteral("taskType"), inferenceTaskType);
+        predictionRoot.insert(QStringLiteral("predictions"), predictions);
+        if (!writeJsonFile(inferencePredictionsPath, predictionRoot, &error)) {
+            failureReason = error;
+            return false;
+        }
+        artifactArray.append(pathArtifact(QStringLiteral("inference_predictions"), inferencePredictionsPath, QStringLiteral("Inference predictions")));
+        if (!overlay.isNull()) {
+            inferenceOverlayPath = QDir(inferenceDir).filePath(QStringLiteral("inference_overlay.png"));
+            overlay.save(inferenceOverlayPath);
+            artifactArray.append(pathArtifact(QStringLiteral("inference_overlay"), inferenceOverlayPath, QStringLiteral("Inference overlay")));
+        }
+        appendStep(QStringLiteral("infer"),
+            QStringLiteral("completed"),
+            QStringLiteral("Inference smoke completed."),
+            inferencePredictionsPath,
+            QJsonArray{
+                pathArtifact(QStringLiteral("inference_predictions"), inferencePredictionsPath),
+                pathArtifact(QStringLiteral("inference_overlay"), inferenceOverlayPath)});
+        return true;
+    };
+
+    auto runBenchmarkStep = [&]() -> bool {
+        const QString benchmarkModelPath = exportPath.isEmpty() ? modelPath : exportPath;
+        if (benchmarkModelPath.isEmpty()) {
+            failureReason = QStringLiteral("Benchmark step requires a model artifact.");
+            return false;
+        }
+        QJsonObject benchmarkOptions = options.value(QStringLiteral("benchmarkOptions")).toObject();
+        benchmarkOptions.insert(QStringLiteral("datasetPath"), datasetPath);
+        if (!preferredSampleImage.isEmpty()) {
+            benchmarkOptions.insert(QStringLiteral("sampleImagePath"), preferredSampleImage);
+        }
+        const WorkflowResult benchmark = benchmarkModelReport(
+            benchmarkModelPath,
+            QDir(outputPath).filePath(QStringLiteral("benchmark")),
+            benchmarkOptions);
+        if (!benchmark.ok) {
+            failureReason = benchmark.error;
+            return false;
+        }
+        benchmarkReportPath = benchmark.reportPath;
+        artifactArray.append(pathArtifact(QStringLiteral("benchmark_report"), benchmark.reportPath, QStringLiteral("Benchmark report")));
+        appendStep(QStringLiteral("benchmarkModel"),
+            QStringLiteral("completed"),
+            QStringLiteral("Benchmark completed."),
+            benchmark.reportPath,
+            QJsonArray{pathArtifact(QStringLiteral("benchmark_report"), benchmark.reportPath)});
+        return true;
+    };
+
+    auto runRegisterStep = [&]() -> bool {
+        const QString registerPath = QDir(outputPath).filePath(QStringLiteral("model_registration_candidate.json"));
+        QJsonObject candidate;
+        candidate.insert(QStringLiteral("createdAt"), nowIso());
+        candidate.insert(QStringLiteral("modelPath"), exportPath.isEmpty() ? modelPath : exportPath);
+        candidate.insert(QStringLiteral("sourceModelPath"), modelPath);
+        candidate.insert(QStringLiteral("evaluationReportPath"), evaluationReportPath);
+        candidate.insert(QStringLiteral("benchmarkReportPath"), benchmarkReportPath);
+        candidate.insert(QStringLiteral("datasetPath"), datasetPath);
+        candidate.insert(QStringLiteral("datasetFormat"), datasetFormat);
+        candidate.insert(QStringLiteral("datasetSnapshotId"), datasetSnapshotId);
+        candidate.insert(QStringLiteral("datasetSnapshotHash"), datasetSnapshotHash);
+        candidate.insert(QStringLiteral("datasetSnapshotManifest"), datasetSnapshotManifest);
+        candidate.insert(QStringLiteral("trainingBackend"), trainingBackend);
+        candidate.insert(QStringLiteral("modelPreset"), modelPreset);
+        candidate.insert(QStringLiteral("taskType"), taskType);
+        candidate.insert(QStringLiteral("state"), QStringLiteral("candidate"));
+        candidate.insert(QStringLiteral("note"), QStringLiteral("Pipeline-generated model registration candidate for GUI/model registry ingestion."));
+        QString error;
+        if (!writeJsonFile(registerPath, candidate, &error)) {
+            failureReason = error;
+            return false;
+        }
+        artifactArray.append(pathArtifact(QStringLiteral("model_registration_candidate"), registerPath, QStringLiteral("Model registration candidate")));
+        appendStep(QStringLiteral("registerModel"),
+            QStringLiteral("completed"),
+            QStringLiteral("Model registration candidate generated."),
+            registerPath,
+            QJsonArray{pathArtifact(QStringLiteral("model_registration_candidate"), registerPath)});
+        return true;
+    };
+
+    auto runDeliveryStep = [&]() -> bool {
+        QJsonObject deliveryContext = options.value(QStringLiteral("deliveryContext")).toObject();
+        deliveryContext.insert(QStringLiteral("templateId"), resolvedTemplate);
+        deliveryContext.insert(QStringLiteral("taskType"), taskType);
+        deliveryContext.insert(QStringLiteral("trainingBackend"), trainingBackend);
+        deliveryContext.insert(QStringLiteral("modelPreset"), modelPreset);
+        deliveryContext.insert(QStringLiteral("modelPath"), exportPath.isEmpty() ? modelPath : exportPath);
+        deliveryContext.insert(QStringLiteral("datasetPath"), datasetPath);
+        deliveryContext.insert(QStringLiteral("datasetFormat"), datasetFormat);
+        deliveryContext.insert(QStringLiteral("datasetSnapshotId"), datasetSnapshotId);
+        deliveryContext.insert(QStringLiteral("datasetSnapshotHash"), datasetSnapshotHash);
+        deliveryContext.insert(QStringLiteral("datasetSnapshotManifest"), datasetSnapshotManifest);
+        deliveryContext.insert(QStringLiteral("evaluationReportPath"), evaluationReportPath);
+        deliveryContext.insert(QStringLiteral("benchmarkReportPath"), benchmarkReportPath);
+        deliveryContext.insert(QStringLiteral("exportPath"), exportPath);
+        deliveryContext.insert(QStringLiteral("exportReportPath"), exportReportPath);
+        deliveryContext.insert(QStringLiteral("inferencePredictionsPath"), inferencePredictionsPath);
+        deliveryContext.insert(QStringLiteral("inferenceOverlayPath"), inferenceOverlayPath);
+        deliveryContext.insert(QStringLiteral("artifacts"), artifactArray);
+        const WorkflowResult delivery = generateTrainingDeliveryReport(
+            QDir(outputPath).filePath(QStringLiteral("delivery")),
+            deliveryContext);
+        if (!delivery.ok) {
+            failureReason = delivery.error;
+            return false;
+        }
+        deliveryReportPath = delivery.reportPath;
+        appendArtifactsFromPayload(delivery.payload);
+        artifactArray.append(pathArtifact(QStringLiteral("delivery_report"), delivery.reportPath, QStringLiteral("Delivery report")));
+        appendStep(QStringLiteral("generateTrainingDeliveryReport"),
+            QStringLiteral("completed"),
+            QStringLiteral("Delivery report generated."),
+            delivery.reportPath,
+            QJsonArray{pathArtifact(QStringLiteral("delivery_report"), delivery.reportPath)});
+        return true;
+    };
+
+    if (resolvedTemplate == QStringLiteral("train-evaluate-export-register")) {
+        if (!runValidateStep()) {
+            return failPipeline(QStringLiteral("validateDataset"), failureReason);
+        }
+        if (!runSnapshotStep()) {
+            return failPipeline(QStringLiteral("createDatasetSnapshot"), failureReason);
+        }
+        if (!runTrainStep()) {
+            return failPipeline(QStringLiteral("startTrain"), failureReason);
+        }
+        if (!runEvaluateStep()) {
+            return failPipeline(QStringLiteral("evaluateModel"), failureReason);
+        }
+        if (!runExportStep()) {
+            return failPipeline(QStringLiteral("exportModel"), failureReason);
+        }
+        if (!runRegisterStep()) {
+            return failPipeline(QStringLiteral("registerModel"), failureReason);
+        }
+        if (!runDeliveryStep()) {
+            return failPipeline(QStringLiteral("generateTrainingDeliveryReport"), failureReason);
+        }
+    } else {
+        if (!runExportStep()) {
+            return failPipeline(QStringLiteral("exportModel"), failureReason);
+        }
+        if (!runInferenceSmokeStep()) {
+            return failPipeline(QStringLiteral("infer"), failureReason);
+        }
+        if (!runBenchmarkStep()) {
+            return failPipeline(QStringLiteral("benchmarkModel"), failureReason);
+        }
+        if (!runDeliveryStep()) {
+            return failPipeline(QStringLiteral("generateTrainingDeliveryReport"), failureReason);
+        }
+    }
+
+    pipeline.insert(QStringLiteral("state"), QStringLiteral("completed"));
+    pipeline.insert(QStringLiteral("steps"), stepArray);
+    pipeline.insert(QStringLiteral("taskIds"), stepTaskIds);
+    pipeline.insert(QStringLiteral("artifacts"), artifactArray);
+    pipeline.insert(QStringLiteral("modelPath"), modelPath);
+    pipeline.insert(QStringLiteral("exportPath"), exportPath);
+    pipeline.insert(QStringLiteral("evaluationReportPath"), evaluationReportPath);
+    pipeline.insert(QStringLiteral("benchmarkReportPath"), benchmarkReportPath);
+    pipeline.insert(QStringLiteral("deliveryReportPath"), deliveryReportPath);
+    pipeline.insert(QStringLiteral("datasetSnapshotManifestPath"), datasetSnapshotManifestPath);
+    pipeline.insert(QStringLiteral("finishedAt"), nowIso());
 
     QString error;
     const QString reportPath = QDir(outputPath).filePath(QStringLiteral("local_pipeline_plan.json"));
-    if (!writeJsonFile(reportPath, plan, &error)) {
+    if (!writeJsonFile(reportPath, pipeline, &error)) {
         return failedResult(error);
     }
-    plan.insert(QStringLiteral("reportPath"), reportPath);
-    return resultFromReport(reportPath, plan);
+    pipeline.insert(QStringLiteral("reportPath"), reportPath);
+    return resultFromReport(reportPath, pipeline);
 }
 
 } // namespace aitrain

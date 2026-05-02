@@ -45,6 +45,7 @@ This file is the source of truth for phase status in new AI coding conversations
 | Phase 35: Dataset snapshots and reproducible training | Done locally | Dataset snapshot manifests are now stable and include file roles, key files, role counts, split counts, image/label summaries, and content hashes based on relative paths plus file hashes. Training requests now carry seed, backend, model preset, and dataset snapshot lineage; if no usable snapshot exists, the GUI queues an automatic snapshot task before starting training. Experiment runs are persisted from training requests and completed runs summarize metrics/artifacts. The task page adds a reproduce action for training tasks that reuses the original request, snapshot, seed, backend, model preset, and records reproduction lineage. |
 | Phase 36: Detection evaluation and error analysis | Done locally for detection AP50 | `evaluateModel` now performs real YOLO detection evaluation for tiny detector, detection ONNX Runtime, and available TensorRT detection models. It selects val/test/train splits, computes IoU=0.5 TP/FP/FN, precision, recall, per-class AP50, and mAP50, and writes `evaluation_report.json`, `per_class_metrics.csv`, `error_samples.json`, `confusion_matrix.csv`, and overlay artifacts. Segmentation and OCR evaluation remain explicitly scaffold reports for later phases. |
 | Phase 37: Dataset quality checks and fix loop | Done locally | `curateDataset` now performs real dataset quality analysis for YOLO detection/segmentation and PaddleOCR Det/Rec, including unreadable images, zero-byte files, missing/orphan labels, bbox and polygon validation, OCR label checks, duplicate samples, split and class distribution warnings, and X-AnyLabeling repair manifests. The GUI shows report summaries, problem samples, and repair-list actions without moving long work into `MainWindow`. |
+| Phase 38: Local pipeline templates execution | Done locally | `runLocalPipeline` now executes two templates instead of only generating a scaffold plan: `train-evaluate-export-register` and `export-infer-benchmark-report`. The workflow writes step/task lineage, emits pipeline artifacts, produces delivery reports, and records completed/failed pipeline states through Worker messages. GUI entry text now uses “execute local pipeline”, supports template selection, and persists pipeline task ids as arrays. Local `harness-check.ps1` passes with updated core/worker/app/tests coverage. |
 
 ## Local Hardware Note
 
@@ -61,7 +62,7 @@ Recorded on 2026-04-30:
 
 ## Current Next Task
 
-Current local follow-up: perform a manual GUI walkthrough for Phase 37 UI changes, use the GUI for the daily workflow, and keep external TensorRT blocked until an RTX / SM 75+ machine is available:
+Current local follow-up: continue Phase 39/42 productization follow-up (deployment benchmark hardening and richer delivery report packaging), while keeping external TensorRT blocked until an RTX / SM 75+ machine is available:
 
 - keep Phase 7 marked as code complete but hardware-blocked on this GTX 1060 / SM 61 machine
 - Phase 8 is complete as an adapter/protocol layer; `python_mock` remains a scaffold protocol fixture
@@ -94,6 +95,7 @@ Current local follow-up: perform a manual GUI walkthrough for Phase 37 UI change
 - Phase 35 makes dataset snapshots part of the training lineage and adds same-snapshot reproducible training from task history. It still does not implement full experiment comparison UI or real evaluation; those remain Phase 36+ follow-ups.
 - Phase 36 upgrades detection `evaluateModel` to real AP50 evaluation and error artifacts. It does not implement COCO mAP50-95, segmentation mask evaluation, OCR CER/WER, or official Ultralytics/PaddleOCR val delegation.
 - Phase 37 upgrades dataset curation into a real quality-analysis loop with repair manifests. It does not auto-fix user data, embed X-AnyLabeling, or perform automatic rebalancing/deletion of samples.
+- Phase 38 upgrades local pipeline templates from scaffold planning to executable workflows with step artifacts, progress/failure reporting, benchmark/delivery chaining, and GUI template selection. It still does not orchestrate full official Python backend training as independent nested Worker tasks inside one pipeline run.
 - keep training logic inside core/plugin/Worker boundaries, not in `MainWindow`
 - keep C++ tiny detector as a scaffold/demo/test backend until the Python path is stable
 - preserve the external TensorRT acceptance checklist for a future RTX / SM 75+ machine

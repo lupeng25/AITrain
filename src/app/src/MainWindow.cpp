@@ -1645,7 +1645,7 @@ QWidget* MainWindow::buildModelRegistryPage()
     auto* refreshButton = primaryButton(QStringLiteral("刷新模型库"));
     auto* inferButton = new QPushButton(QStringLiteral("选中模型用于推理"));
     auto* exportButton = new QPushButton(QStringLiteral("选中模型用于导出"));
-    auto* pipelineButton = new QPushButton(QStringLiteral("生成本地流水线计划"));
+    auto* pipelineButton = new QPushButton(QStringLiteral("执行本地流水线"));
     connect(refreshButton, &QPushButton::clicked, this, &MainWindow::refreshModelRegistry);
     connect(inferButton, &QPushButton::clicked, this, [this]() {
         if (!modelVersionTable_ || modelVersionTable_->selectedItems().isEmpty()) {
@@ -1691,7 +1691,7 @@ QWidget* MainWindow::buildModelRegistryPage()
     row->addWidget(exportButton);
     row->addWidget(pipelineButton);
     row->addStretch();
-    modelRegistrySummaryLabel_ = mutedLabel(QStringLiteral("训练产物可从“任务与产物”注册为模型版本；评估、基准和报告仍通过 Worker 执行。"));
+    modelRegistrySummaryLabel_ = mutedLabel(QStringLiteral("训练产物可从“任务与产物”注册为模型版本；评估、基准、流水线与交付报告均通过 Worker 执行。"));
     toolbar->bodyLayout()->addLayout(row);
     toolbar->bodyLayout()->addWidget(modelRegistrySummaryLabel_);
 
@@ -3233,7 +3233,14 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
             aitrain::PipelineRunRecord pipeline;
             pipeline.name = uiText("本地闭环流水线");
             pipeline.templateId = payload.value(QStringLiteral("templateId")).toString();
-            pipeline.taskIdsJson = QString::fromUtf8(QJsonDocument(QJsonObject{{QStringLiteral("taskId"), payload.value(QStringLiteral("taskId")).toString(currentTaskId_)}}).toJson(QJsonDocument::Compact));
+            QJsonArray taskIds = payload.value(QStringLiteral("taskIds")).toArray();
+            if (taskIds.isEmpty()) {
+                const QString fallbackTaskId = payload.value(QStringLiteral("taskId")).toString(currentTaskId_);
+                if (!fallbackTaskId.isEmpty()) {
+                    taskIds.append(fallbackTaskId);
+                }
+            }
+            pipeline.taskIdsJson = QString::fromUtf8(QJsonDocument(taskIds).toJson(QJsonDocument::Compact));
             pipeline.state = payload.value(QStringLiteral("state")).toString(QStringLiteral("planned"));
             pipeline.summaryJson = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
             pipeline.createdAt = QDateTime::currentDateTimeUtc();
@@ -4430,9 +4437,29 @@ void MainWindow::generateDeliveryReportFromSelectedArtifact()
 void MainWindow::runLocalPipelinePlanFromCurrentDataset()
 {
     if (worker_.isRunning()) {
-        QMessageBox::warning(this, uiText("本地流水线"), uiText("Worker 正在执行任务，稍后再生成流水线计划。"));
+        QMessageBox::warning(this, uiText("本地流水线"), uiText("Worker 正在执行任务，稍后再执行流水线。"));
         return;
     }
+
+    const QStringList templateLabels = {
+        uiText("训练->评估->导出->注册->报告"),
+        uiText("导出->推理->基准->报告")
+    };
+    bool ok = false;
+    const QString selectedTemplate = QInputDialog::getItem(
+        this,
+        uiText("本地流水线"),
+        uiText("选择流水线模板"),
+        templateLabels,
+        0,
+        false,
+        &ok);
+    if (!ok || selectedTemplate.isEmpty()) {
+        return;
+    }
+    const QString templateId = selectedTemplate == templateLabels.at(1)
+        ? QStringLiteral("export-infer-benchmark-report")
+        : QStringLiteral("train-evaluate-export-register");
 
     QString taskId;
     QString outputPath;
@@ -4444,21 +4471,39 @@ void MainWindow::runLocalPipelinePlanFromCurrentDataset()
             QStringLiteral("local_pipeline"),
             QStringLiteral("com.aitrain.workflow"),
             outputPath,
-            uiText("本地流水线计划生成中。"),
+            uiText("本地流水线执行中。"),
             taskId);
         if (taskId.isEmpty()) {
             return;
         }
     }
 
+    int datasetId = 0;
+    if (repository_.isOpen()) {
+        QString repositoryError;
+        const QString datasetPath = QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
+        const aitrain::DatasetRecord dataset = repository_.datasetByRootPath(datasetPath, &repositoryError);
+        datasetId = dataset.id;
+    }
+
     QJsonObject options;
-    options.insert(QStringLiteral("datasetPath"), QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString()));
+    const QString datasetPath = QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
+    options.insert(QStringLiteral("datasetId"), datasetId);
+    options.insert(QStringLiteral("datasetPath"), datasetPath);
     options.insert(QStringLiteral("datasetFormat"), currentDatasetFormat());
     options.insert(QStringLiteral("taskType"), currentTaskType());
     options.insert(QStringLiteral("trainingBackend"), trainingBackendCombo_ ? trainingBackendCombo_->currentData().toString() : QString());
+    options.insert(QStringLiteral("modelPreset"), modelPresetCombo_ ? modelPresetCombo_->currentText().trimmed() : QString());
+    options.insert(QStringLiteral("epochs"), epochsEdit_ ? epochsEdit_->text().toInt() : 1);
+    options.insert(QStringLiteral("batchSize"), batchEdit_ ? batchEdit_->text().toInt() : 1);
+    options.insert(QStringLiteral("imageSize"), imageSizeEdit_ ? imageSizeEdit_->text().toInt() : 640);
+    options.insert(QStringLiteral("exportFormat"), QStringLiteral("onnx"));
+    options.insert(QStringLiteral("sourceTaskId"), selectedTaskId());
+    options.insert(QStringLiteral("modelPath"), selectedArtifactPath());
+    options.insert(QStringLiteral("sampleImagePath"), inferenceImageEdit_ ? QDir::fromNativeSeparators(inferenceImageEdit_->text().trimmed()) : QString());
 
     QString error;
-    if (!worker_.requestLocalPipeline(workerExecutablePath(), outputPath, QStringLiteral("train-evaluate-export-register"), options, &error, taskId)) {
+    if (!worker_.requestLocalPipeline(workerExecutablePath(), outputPath, templateId, options, &error, taskId)) {
         if (!taskId.isEmpty() && repository_.isOpen()) {
             QString taskError;
             repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
@@ -4468,7 +4513,7 @@ void MainWindow::runLocalPipelinePlanFromCurrentDataset()
         QMessageBox::critical(this, uiText("本地流水线"), error);
         return;
     }
-    workerPill_->setStatus(uiText("本地流水线计划生成中"), StatusPill::Tone::Info);
+    workerPill_->setStatus(uiText("本地流水线执行中"), StatusPill::Tone::Info);
 }
 
 void MainWindow::refreshModelRegistry()
