@@ -21,6 +21,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QProcess>
+#include <QSet>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
@@ -35,6 +36,25 @@ void writeTextFile(const QString& path, const QString& content)
     QFile file(path);
     QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text));
     file.write(content.toUtf8());
+}
+
+QJsonObject readJsonObject(const QString& path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return {};
+    }
+    return QJsonDocument::fromJson(file.readAll()).object();
+}
+
+bool jsonArrayContainsCode(const QJsonArray& array, const QString& code)
+{
+    for (const QJsonValue& value : array) {
+        if (value.toObject().value(QStringLiteral("code")).toString() == code) {
+            return true;
+        }
+    }
+    return false;
 }
 
 class ScopedEnvVar {
@@ -814,6 +834,106 @@ private slots:
         QVERIFY2(pipeline.ok, qPrintable(pipeline.error));
         QVERIFY(QFileInfo::exists(pipeline.reportPath));
         QVERIFY(pipeline.payload.value(QStringLiteral("scaffold")).toBool());
+    }
+
+    void datasetQualityCatchesProblemSamples()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.path();
+        writeTextFile(QDir(root).filePath(QStringLiteral("data.yaml")), QStringLiteral("nc: 2\nnames: [cat, dog]\n"));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("images/train/good.png")));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("images/train/no_label.png")));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("images/train/bad_bbox.png")));
+        writeTextFile(QDir(root).filePath(QStringLiteral("labels/train/good.txt")), QStringLiteral("0 0.5 0.5 0.25 0.25\n0 0.5 0.5 0.25 0.25\n"));
+        writeTextFile(QDir(root).filePath(QStringLiteral("labels/train/bad_bbox.txt")), QStringLiteral("2 1.5 0.5 0.2 0.2\n"));
+        writeTextFile(QDir(root).filePath(QStringLiteral("labels/train/orphan.txt")), QStringLiteral("0 0.5 0.5 0.25 0.25\n"));
+        writeTextFile(QDir(root).filePath(QStringLiteral("labels/val/missing_label.txt")), QStringLiteral(""));
+        writeTextFile(QDir(root).filePath(QStringLiteral("labels/train/zero.txt")), QStringLiteral("0 0.5 0.5 0.25 0.25\n"));
+        QFile zeroImage(QDir(root).filePath(QStringLiteral("images/train/zero.png")));
+        QVERIFY(zeroImage.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        zeroImage.close();
+        writeTinyPng(QDir(root).filePath(QStringLiteral("images/train/duplicate.png")));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("images/train/duplicate_copy.png")));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("images/val/bad.png")));
+        writeTextFile(QDir(root).filePath(QStringLiteral("labels/val/bad.txt")), QStringLiteral("9 0.5 0.5 0.2 0.2\n"));
+
+        const QString outputRoot = dir.filePath(QStringLiteral("quality"));
+        const aitrain::WorkflowResult quality = aitrain::curateDatasetQualityReport(
+            root,
+            outputRoot,
+            QStringLiteral("yolo_detection"),
+            QJsonObject{{QStringLiteral("maxFiles"), 100}, {QStringLiteral("maxIssues"), 1000}, {QStringLiteral("maxProblemSamples"), 1000}});
+        QVERIFY2(quality.ok, qPrintable(quality.error));
+        QVERIFY(!quality.payload.value(QStringLiteral("ok")).toBool());
+        QVERIFY(QFileInfo::exists(quality.payload.value(QStringLiteral("reportPath")).toString()));
+        QVERIFY(QFileInfo::exists(quality.payload.value(QStringLiteral("classDistributionPath")).toString()));
+        QVERIFY(QFileInfo::exists(quality.payload.value(QStringLiteral("problemSamplesPath")).toString()));
+        QVERIFY(QFileInfo::exists(quality.payload.value(QStringLiteral("imageStatisticsPath")).toString()));
+        QVERIFY(QFileInfo::exists(quality.payload.value(QStringLiteral("splitDistributionPath")).toString()));
+        QVERIFY(QFileInfo::exists(quality.payload.value(QStringLiteral("xAnyLabelingFixListPath")).toString()));
+        QVERIFY(QFileInfo::exists(quality.payload.value(QStringLiteral("xAnyLabelingFixManifestPath")).toString()));
+
+        const QJsonObject report = readJsonObject(quality.payload.value(QStringLiteral("reportPath")).toString());
+        QCOMPARE(report.value(QStringLiteral("schemaVersion")).toInt(), 2);
+        QVERIFY(report.value(QStringLiteral("severityCounts")).toObject().value(QStringLiteral("error")).toInt() > 0);
+        QVERIFY(jsonArrayContainsCode(report.value(QStringLiteral("issues")).toArray(), QStringLiteral("bbox_out_of_bounds")));
+        QVERIFY(jsonArrayContainsCode(report.value(QStringLiteral("issues")).toArray(), QStringLiteral("class_id_out_of_range")));
+        QVERIFY(jsonArrayContainsCode(report.value(QStringLiteral("issues")).toArray(), QStringLiteral("duplicate_label_row")));
+        QVERIFY(jsonArrayContainsCode(report.value(QStringLiteral("issues")).toArray(), QStringLiteral("orphan_label")));
+        QVERIFY(jsonArrayContainsCode(report.value(QStringLiteral("issues")).toArray(), QStringLiteral("zero_byte_image")));
+        QVERIFY(jsonArrayContainsCode(report.value(QStringLiteral("issues")).toArray(), QStringLiteral("duplicate_image_hash")));
+        QVERIFY(jsonArrayContainsCode(report.value(QStringLiteral("problemSamples")).toArray(), QStringLiteral("missing_label")));
+        QVERIFY(jsonArrayContainsCode(report.value(QStringLiteral("problemSamples")).toArray(), QStringLiteral("bbox_out_of_bounds")));
+
+        const QJsonObject problems = readJsonObject(quality.payload.value(QStringLiteral("problemSamplesPath")).toString());
+        QVERIFY(jsonArrayContainsCode(problems.value(QStringLiteral("samples")).toArray(), QStringLiteral("missing_label")));
+        QVERIFY(jsonArrayContainsCode(problems.value(QStringLiteral("samples")).toArray(), QStringLiteral("duplicate_image_hash")));
+
+        const QString segRoot = dir.filePath(QStringLiteral("segmentation"));
+        writeTinySegmentationDataset(segRoot);
+        writeTextFile(QDir(segRoot).filePath(QStringLiteral("labels/train/a.txt")), QStringLiteral("0 0.1 0.1 0.2 0.2\n"));
+        const aitrain::WorkflowResult segQuality = aitrain::curateDatasetQualityReport(
+            segRoot,
+            dir.filePath(QStringLiteral("seg-quality")),
+            QStringLiteral("yolo_segmentation"));
+        QVERIFY2(segQuality.ok, qPrintable(segQuality.error));
+        QVERIFY(jsonArrayContainsCode(segQuality.payload.value(QStringLiteral("problemSamples")).toArray(), QStringLiteral("polygon_points_too_few")));
+
+        const QString recRoot = dir.filePath(QStringLiteral("ocr-rec"));
+        writeTextFile(QDir(recRoot).filePath(QStringLiteral("dict.txt")), QStringLiteral("a\n"));
+        writeTinyPng(QDir(recRoot).filePath(QStringLiteral("images/a.png")));
+        writeTextFile(QDir(recRoot).filePath(QStringLiteral("rec_gt.txt")),
+            QStringLiteral("images/a.png\tab\nimages/a.png\ta\nimages/missing.png\ta\n"));
+        const aitrain::WorkflowResult recQuality = aitrain::curateDatasetQualityReport(
+            recRoot,
+            dir.filePath(QStringLiteral("rec-quality")),
+            QStringLiteral("paddleocr_rec"));
+        QVERIFY2(recQuality.ok, qPrintable(recQuality.error));
+        const QJsonArray recProblems = recQuality.payload.value(QStringLiteral("problemSamples")).toArray();
+        QVERIFY(jsonArrayContainsCode(recProblems, QStringLiteral("char_not_in_dictionary")));
+        QVERIFY(jsonArrayContainsCode(recProblems, QStringLiteral("duplicate_ocr_sample")));
+        QVERIFY(jsonArrayContainsCode(recProblems, QStringLiteral("missing_image")));
+
+        const QString detRoot = dir.filePath(QStringLiteral("ocr-det"));
+        writeTinyPng(QDir(detRoot).filePath(QStringLiteral("images/a.png")));
+        writeTinyPng(QDir(detRoot).filePath(QStringLiteral("images/b.png")));
+        writeTinyPng(QDir(detRoot).filePath(QStringLiteral("images/c.png")));
+        writeTextFile(QDir(detRoot).filePath(QStringLiteral("det_gt.txt")),
+            QStringLiteral("images/a.png\tbad-json\n"
+                           "images/a.png\t[{\"points\":[[1,1],[2,2],[3,3],[4,4]]}]\n"
+                           "images/b.png\t[{\"transcription\":\"x\",\"points\":[[1,1],[2,2]]}]\n"
+                           "images/c.png\t[{\"transcription\":\"x\",\"points\":[[1,1],[100,1],[100,100],[1,100]]}]\n"));
+        const aitrain::WorkflowResult detQuality = aitrain::curateDatasetQualityReport(
+            detRoot,
+            dir.filePath(QStringLiteral("det-quality")),
+            QStringLiteral("paddleocr_det"));
+        QVERIFY2(detQuality.ok, qPrintable(detQuality.error));
+        const QJsonArray detProblems = detQuality.payload.value(QStringLiteral("problemSamples")).toArray();
+        QVERIFY(jsonArrayContainsCode(detProblems, QStringLiteral("invalid_det_json")));
+        QVERIFY(jsonArrayContainsCode(detProblems, QStringLiteral("missing_transcription")));
+        QVERIFY(jsonArrayContainsCode(detProblems, QStringLiteral("det_points_too_few")));
+        QVERIFY(jsonArrayContainsCode(detProblems, QStringLiteral("det_point_out_of_bounds")));
     }
 
     void yoloDetectionDatasetValidation()
@@ -1859,7 +1979,7 @@ private slots:
         QVERIFY2(evaluationTraining.ok, qPrintable(evaluationTraining.error));
         const QString modelPath = evaluationTraining.checkpointPath;
 
-        auto runCommand = [this](const std::function<bool(WorkerClient&, QString*)>& start, const QString& expectedMessageType) {
+        auto runCommand = [this](const std::function<bool(WorkerClient&, QString*)>& start, const QString& expectedMessageType, const QStringList& expectedArtifactKinds = {}) {
             WorkerClient client;
             QVector<QPair<QString, QJsonObject>> messages;
             QStringList logs;
@@ -1881,20 +2001,32 @@ private slots:
             QString error;
             QVERIFY2(start(client, &error), qPrintable(error));
             QTRY_VERIFY2_WITH_TIMEOUT(
-                finished,
+                finished || !client.isRunning(),
                 qPrintable(QStringLiteral("Worker did not finish. Logs:\n%1").arg(logs.join(QStringLiteral("\n")))),
                 60000);
-            QVERIFY2(ok, qPrintable(finishedMessage));
-            QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
+            if (finished) {
+                QVERIFY2(ok, qPrintable(finishedMessage));
+            }
+            if (client.isRunning()) {
+                QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
+            }
 
             bool sawExpected = false;
-            bool sawArtifact = false;
+            QSet<QString> artifactKinds;
+            QStringList observedTypes;
             for (const auto& message : messages) {
+                observedTypes.append(message.first);
                 sawExpected = sawExpected || message.first == expectedMessageType;
-                sawArtifact = sawArtifact || message.first == QStringLiteral("artifact");
+                if (message.first == QStringLiteral("artifact")) {
+                    artifactKinds.insert(message.second.value(QStringLiteral("kind")).toString());
+                }
             }
-            QVERIFY2(sawExpected, qPrintable(QStringLiteral("Missing expected message: %1").arg(expectedMessageType)));
-            QVERIFY(sawArtifact);
+            QVERIFY2(sawExpected, qPrintable(QStringLiteral("Missing expected message: %1. Observed: %2")
+                .arg(expectedMessageType, observedTypes.join(QStringLiteral(", ")))));
+            QVERIFY(!artifactKinds.isEmpty());
+            for (const QString& kind : expectedArtifactKinds) {
+                QVERIFY2(artifactKinds.contains(kind), qPrintable(QStringLiteral("Missing artifact kind: %1").arg(kind)));
+            }
         };
 
         runCommand([&](WorkerClient& client, QString* error) {
@@ -1918,8 +2050,18 @@ private slots:
                 {},
                 error,
                 QStringLiteral("quality-task"));
-        }, QStringLiteral("datasetQuality"));
+        }, QStringLiteral("datasetQuality"), QStringList()
+            << QStringLiteral("dataset_quality_report")
+            << QStringLiteral("class_distribution")
+            << QStringLiteral("problem_samples")
+            << QStringLiteral("image_statistics")
+            << QStringLiteral("split_distribution")
+            << QStringLiteral("xanylabeling_fix_list")
+            << QStringLiteral("xanylabeling_fix_manifest"));
         QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-quality/dataset_quality_report.json"))));
+        QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-quality/image_statistics.csv"))));
+        QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-quality/split_distribution.csv"))));
+        QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-quality/xanylabeling_fix_list.txt"))));
 
         runCommand([&](WorkerClient& client, QString* error) {
             return client.requestModelEvaluation(

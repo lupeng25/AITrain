@@ -3,6 +3,7 @@
 #include "aitrain/core/JsonProtocol.h"
 
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QUuid>
 
@@ -205,6 +206,7 @@ bool WorkerClient::startWorkerCommand(const QString& workerProgram, const QStrin
     buffer_.clear();
     pendingCommandType_ = commandType;
     pendingRequest_ = payload;
+    finishedEmitted_ = false;
     process_.setProgram(workerProgram);
     process_.setArguments({QStringLiteral("--server"), serverName});
     process_.setProcessChannelMode(QProcess::MergedChannels);
@@ -255,8 +257,10 @@ void WorkerClient::readLines()
             } else if (type == QStringLiteral("log")) {
                 emit logLine(payload.value(QStringLiteral("message")).toString());
             } else if (type == QStringLiteral("completed")) {
+                finishedEmitted_ = true;
                 emit finished(true, payload.value(QStringLiteral("message")).toString());
             } else if (type == QStringLiteral("failed")) {
+                finishedEmitted_ = true;
                 emit finished(false, payload.value(QStringLiteral("message")).toString());
             } else if (type == QStringLiteral("paused")
                 || type == QStringLiteral("resumed")
@@ -273,8 +277,24 @@ void WorkerClient::readLines()
 
 void WorkerClient::workerFinished(int exitCode, QProcess::ExitStatus status)
 {
+    if (socket_) {
+        QElapsedTimer drainTimer;
+        drainTimer.start();
+        while (socket_ && drainTimer.elapsed() < 3000) {
+            if (socket_->bytesAvailable() > 0) {
+                readLines();
+                continue;
+            }
+            if (!socket_->waitForReadyRead(25) && socket_->state() == QLocalSocket::UnconnectedState) {
+                break;
+            }
+        }
+    }
     if (status != QProcess::NormalExit || exitCode != 0) {
-        emit finished(false, QStringLiteral("Worker exited with code %1").arg(exitCode));
+        if (!finishedEmitted_) {
+            finishedEmitted_ = true;
+            emit finished(false, QStringLiteral("Worker exited with code %1").arg(exitCode));
+        }
     }
     cleanupSocket();
     server_.close();

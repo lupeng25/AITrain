@@ -56,4 +56,5 @@ private:
     QByteArray buffer_;
     QString pendingCommandType_;
     QJsonObject pendingRequest_;
+    bool finishedEmitted_ = false;
 };

@@ -34,6 +34,8 @@ private slots:
     void splitDataset();
     void curateDataset();
     void createDatasetSnapshot();
+    void openDatasetQualityFixList();
+    void launchXAnyLabelingForQualityFix();
     void startTraining();
     void startModelExport();
     void startInference();
@@ -138,6 +140,7 @@ private:
     QString currentTaskId_;
     QString currentDatasetPath_;
     QString currentDatasetFormat_;
+    QString latestQualityFixListPath_;
     bool currentDatasetValid_ = false;
 
     QVector<PendingTrainingTask> pendingTrainingTasks_;

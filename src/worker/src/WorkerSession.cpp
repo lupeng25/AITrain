@@ -676,7 +676,7 @@ void WorkerSession::curateDataset(const QJsonObject& payload)
 
     const aitrain::WorkflowResult result = aitrain::curateDatasetQualityReport(datasetPath, outputPath, format, options);
     if (!result.ok) {
-        fail(result.error);
+        fail(QStringLiteral("Dataset quality report failed for %1 (%2): %3").arg(datasetPath, format, result.error));
         return;
     }
 
@@ -705,6 +705,21 @@ void WorkerSession::curateDataset(const QJsonObject& payload)
         problemArtifact.insert(QStringLiteral("message"), QStringLiteral("Problem sample list"));
         send(QStringLiteral("artifact"), problemArtifact);
     }
+    for (const auto& item : {
+             qMakePair(QStringLiteral("image_statistics"), QStringLiteral("imageStatisticsPath")),
+             qMakePair(QStringLiteral("split_distribution"), QStringLiteral("splitDistributionPath")),
+             qMakePair(QStringLiteral("xanylabeling_fix_list"), QStringLiteral("xAnyLabelingFixListPath")),
+             qMakePair(QStringLiteral("xanylabeling_fix_manifest"), QStringLiteral("xAnyLabelingFixManifestPath"))}) {
+        const QString path = result.payload.value(item.second).toString();
+        if (!path.isEmpty()) {
+            QJsonObject extraArtifact;
+            extraArtifact.insert(QStringLiteral("taskId"), taskId);
+            extraArtifact.insert(QStringLiteral("kind"), item.first);
+            extraArtifact.insert(QStringLiteral("path"), path);
+            extraArtifact.insert(QStringLiteral("message"), QStringLiteral("Dataset quality artifact"));
+            send(QStringLiteral("artifact"), extraArtifact);
+        }
+    }
 
     QJsonObject doneProgress;
     doneProgress.insert(QStringLiteral("taskId"), taskId);
@@ -712,6 +727,7 @@ void WorkerSession::curateDataset(const QJsonObject& payload)
     doneProgress.insert(QStringLiteral("message"), QStringLiteral("数据质量报告完成。"));
     send(QStringLiteral("progress"), doneProgress);
     send(QStringLiteral("datasetQuality"), result.payload);
+    socket_.waitForBytesWritten(1000);
 
     QJsonObject completed;
     completed.insert(QStringLiteral("taskId"), taskId);
@@ -757,6 +773,7 @@ void WorkerSession::createDatasetSnapshot(const QJsonObject& payload)
     doneProgress.insert(QStringLiteral("message"), QStringLiteral("数据集快照完成。"));
     send(QStringLiteral("progress"), doneProgress);
     send(QStringLiteral("datasetSnapshot"), result.payload);
+    socket_.waitForBytesWritten(1000);
 
     QJsonObject completed;
     completed.insert(QStringLiteral("taskId"), taskId);
@@ -817,6 +834,7 @@ void WorkerSession::evaluateModel(const QJsonObject& payload)
     progressDone.insert(QStringLiteral("message"), QStringLiteral("模型评估完成。"));
     send(QStringLiteral("progress"), progressDone);
     send(QStringLiteral("evaluationReport"), result.payload);
+    socket_.waitForBytesWritten(1000);
 
     QJsonObject completed;
     completed.insert(QStringLiteral("taskId"), taskId);
@@ -860,6 +878,7 @@ void WorkerSession::benchmarkModel(const QJsonObject& payload)
     progressDone.insert(QStringLiteral("message"), QStringLiteral("部署基准测试完成。"));
     send(QStringLiteral("progress"), progressDone);
     send(QStringLiteral("benchmarkReport"), result.payload);
+    socket_.waitForBytesWritten(1000);
 
     QJsonObject completed;
     completed.insert(QStringLiteral("taskId"), taskId);
@@ -891,6 +910,7 @@ void WorkerSession::runLocalPipeline(const QJsonObject& payload)
     artifact.insert(QStringLiteral("message"), QStringLiteral("Local pipeline plan scaffold"));
     send(QStringLiteral("artifact"), artifact);
     send(QStringLiteral("pipelinePlan"), result.payload);
+    socket_.waitForBytesWritten(1000);
     QJsonObject completed;
     completed.insert(QStringLiteral("taskId"), taskId);
     completed.insert(QStringLiteral("message"), QStringLiteral("Local pipeline plan generated"));
@@ -930,6 +950,7 @@ void WorkerSession::generateDeliveryReport(const QJsonObject& payload)
         send(QStringLiteral("artifact"), jsonArtifact);
     }
     send(QStringLiteral("deliveryReport"), result.payload);
+    socket_.waitForBytesWritten(1000);
     QJsonObject completed;
     completed.insert(QStringLiteral("taskId"), taskId);
     completed.insert(QStringLiteral("message"), QStringLiteral("Training delivery report generated"));

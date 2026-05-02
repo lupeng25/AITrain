@@ -1,6 +1,6 @@
 # Current Project Status
 
-Last updated: 2026-05-01
+Last updated: 2026-05-02
 
 This file is the source of truth for phase status in new AI coding conversations. Read it before using `AITrainStudio_后续实施方案.md`, because that document is the long-range roadmap and may contain historical phase descriptions.
 
@@ -44,6 +44,7 @@ This file is the source of truth for phase status in new AI coding conversations
 | Phase 34: Local product loop metadata | Done locally as v1/scaffold where noted | Added the local roadmap doc, SQLite metadata for experiments, dataset snapshots, model versions, evaluation reports, and pipeline runs; added Worker commands for dataset curation, dataset snapshot, model evaluation, benchmark, local pipeline plan, and delivery report generation; added GUI entry points for quality reports, snapshots, model registration, model library, evaluation, benchmark, pipeline plan, and delivery reports. Evaluation, benchmark, pipeline, and delivery report are v1/scaffold artifacts that record lineage and limitations; full per-sample quality analysis and timed inference benchmark remain follow-up work. |
 | Phase 35: Dataset snapshots and reproducible training | Done locally | Dataset snapshot manifests are now stable and include file roles, key files, role counts, split counts, image/label summaries, and content hashes based on relative paths plus file hashes. Training requests now carry seed, backend, model preset, and dataset snapshot lineage; if no usable snapshot exists, the GUI queues an automatic snapshot task before starting training. Experiment runs are persisted from training requests and completed runs summarize metrics/artifacts. The task page adds a reproduce action for training tasks that reuses the original request, snapshot, seed, backend, model preset, and records reproduction lineage. |
 | Phase 36: Detection evaluation and error analysis | Done locally for detection AP50 | `evaluateModel` now performs real YOLO detection evaluation for tiny detector, detection ONNX Runtime, and available TensorRT detection models. It selects val/test/train splits, computes IoU=0.5 TP/FP/FN, precision, recall, per-class AP50, and mAP50, and writes `evaluation_report.json`, `per_class_metrics.csv`, `error_samples.json`, `confusion_matrix.csv`, and overlay artifacts. Segmentation and OCR evaluation remain explicitly scaffold reports for later phases. |
+| Phase 37: Dataset quality checks and fix loop | Done locally | `curateDataset` now performs real dataset quality analysis for YOLO detection/segmentation and PaddleOCR Det/Rec, including unreadable images, zero-byte files, missing/orphan labels, bbox and polygon validation, OCR label checks, duplicate samples, split and class distribution warnings, and X-AnyLabeling repair manifests. The GUI shows report summaries, problem samples, and repair-list actions without moving long work into `MainWindow`. |
 
 ## Local Hardware Note
 
@@ -60,7 +61,7 @@ Recorded on 2026-04-30:
 
 ## Current Next Task
 
-Current local follow-up: perform a manual GUI walkthrough for Phase 27-30, use the GUI for the daily workflow, and keep external TensorRT blocked until an RTX / SM 75+ machine is available:
+Current local follow-up: perform a manual GUI walkthrough for Phase 37 UI changes, use the GUI for the daily workflow, and keep external TensorRT blocked until an RTX / SM 75+ machine is available:
 
 - keep Phase 7 marked as code complete but hardware-blocked on this GTX 1060 / SM 61 machine
 - Phase 8 is complete as an adapter/protocol layer; `python_mock` remains a scaffold protocol fixture
@@ -92,6 +93,7 @@ Current local follow-up: perform a manual GUI walkthrough for Phase 27-30, use t
 - Phase 34 adds product-loop metadata and Worker/GUI orchestration entry points only. `evaluateModel`, `benchmarkModel`, `runLocalPipeline`, and `generateDeliveryReport` intentionally produce v1/scaffold reports until full per-sample analysis, timed runtime benchmark, and multi-step pipeline execution are implemented.
 - Phase 35 makes dataset snapshots part of the training lineage and adds same-snapshot reproducible training from task history. It still does not implement full experiment comparison UI or real evaluation; those remain Phase 36+ follow-ups.
 - Phase 36 upgrades detection `evaluateModel` to real AP50 evaluation and error artifacts. It does not implement COCO mAP50-95, segmentation mask evaluation, OCR CER/WER, or official Ultralytics/PaddleOCR val delegation.
+- Phase 37 upgrades dataset curation into a real quality-analysis loop with repair manifests. It does not auto-fix user data, embed X-AnyLabeling, or perform automatic rebalancing/deletion of samples.
 - keep training logic inside core/plugin/Worker boundaries, not in `MainWindow`
 - keep C++ tiny detector as a scaffold/demo/test backend until the Python path is stable
 - preserve the external TensorRT acceptance checklist for a future RTX / SM 75+ machine

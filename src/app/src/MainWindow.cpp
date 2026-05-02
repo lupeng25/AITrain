@@ -1117,6 +1117,10 @@ QWidget* MainWindow::buildDatasetPage()
     connect(curateButton, &QPushButton::clicked, this, &MainWindow::curateDataset);
     auto* snapshotButton = new QPushButton(QStringLiteral("创建数据快照"));
     connect(snapshotButton, &QPushButton::clicked, this, &MainWindow::createDatasetSnapshot);
+    auto* openFixListButton = new QPushButton(QStringLiteral("打开问题清单"));
+    connect(openFixListButton, &QPushButton::clicked, this, &MainWindow::openDatasetQualityFixList);
+    auto* fixWithXAnyButton = new QPushButton(QStringLiteral("X-AnyLabeling 修复"));
+    connect(fixWithXAnyButton, &QPushButton::clicked, this, &MainWindow::launchXAnyLabelingForQualityFix);
     auto* ratioRow = new QWidget;
     auto* ratioLayout = new QHBoxLayout(ratioRow);
     ratioLayout->setContentsMargins(0, 0, 0, 0);
@@ -1132,6 +1136,8 @@ QWidget* MainWindow::buildDatasetPage()
     datasetActionRow->addWidget(splitButton);
     datasetActionRow->addWidget(curateButton);
     datasetActionRow->addWidget(snapshotButton);
+    datasetActionRow->addWidget(openFixListButton);
+    datasetActionRow->addWidget(fixWithXAnyButton);
     datasetActionRow->addStretch();
     inputPanel->bodyLayout()->addLayout(datasetActionRow);
 
@@ -2462,6 +2468,9 @@ void MainWindow::curateDataset()
     options.insert(QStringLiteral("maxIssues"), 500);
     options.insert(QStringLiteral("maxProblemSamples"), 500);
     options.insert(QStringLiteral("maxFiles"), 20000);
+    options.insert(QStringLiteral("duplicateHashLimit"), 20000);
+    options.insert(QStringLiteral("distributionWarningThreshold"), 0.25);
+    options.insert(QStringLiteral("exportXAnyLabelingFixList"), true);
 
     QString error;
     if (!worker_.requestDatasetCuration(workerExecutablePath(), path, outputPath, format, options, &error, taskId)) {
@@ -2475,6 +2484,43 @@ void MainWindow::curateDataset()
         return;
     }
     workerPill_->setStatus(uiText("数据质量报告生成中"), StatusPill::Tone::Info);
+}
+
+void MainWindow::openDatasetQualityFixList()
+{
+    if (latestQualityFixListPath_.isEmpty() || !QFileInfo::exists(latestQualityFixListPath_)) {
+        QMessageBox::information(this, uiText("问题清单"), uiText("请先生成数据质量报告。"));
+        return;
+    }
+    QDesktopServices::openUrl(QUrl::fromLocalFile(latestQualityFixListPath_));
+}
+
+void MainWindow::launchXAnyLabelingForQualityFix()
+{
+    const QString datasetPath = QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
+    if (datasetPath.isEmpty()) {
+        QMessageBox::information(this, uiText("X-AnyLabeling 修复"), uiText("请先选择数据集目录。"));
+        return;
+    }
+    if (!latestQualityFixListPath_.isEmpty()) {
+        statusBar()->showMessage(uiText("问题清单：%1").arg(QDir::toNativeSeparators(latestQualityFixListPath_)), 6000);
+    }
+    const QString program = resolvedXAnyLabelingProgram();
+    if (program.isEmpty()) {
+        updateAnnotationToolStatus();
+        QMessageBox::warning(this,
+            QStringLiteral("X-AnyLabeling"),
+            uiText("未找到 X-AnyLabeling。请确保 xanylabeling 在 PATH 中，或将 X-AnyLabeling.exe 放到程序目录 / tools/x-anylabeling / .deps/annotation-tools/X-AnyLabeling。"));
+        return;
+    }
+    QDesktopServices::openUrl(QUrl::fromLocalFile(datasetPath));
+    if (QProcess::startDetached(program, QStringList() << datasetPath)) {
+        statusBar()->showMessage(uiText("已启动 X-AnyLabeling，请按问题清单修复样本。"), 5000);
+    } else {
+        QMessageBox::warning(this,
+            QStringLiteral("X-AnyLabeling"),
+            uiText("X-AnyLabeling 启动失败：%1").arg(QDir::toNativeSeparators(program)));
+    }
 }
 
 void MainWindow::createDatasetSnapshot()
@@ -3042,16 +3088,75 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
     } else if (type == QStringLiteral("datasetSplit")) {
         updateDatasetSplitResult(payload);
     } else if (type == QStringLiteral("datasetQuality")) {
+        latestQualityFixListPath_ = payload.value(QStringLiteral("xAnyLabelingFixListPath")).toString();
         if (validationSummaryLabel_) {
-            const QJsonObject counts = payload.value(QStringLiteral("issueCounts")).toObject();
-            int issueCount = 0;
-            for (const QString& key : counts.keys()) {
-                issueCount += counts.value(key).toInt();
-            }
-            validationSummaryLabel_->setText(uiText("质量报告完成：发现 %1 个问题样本/标签项。").arg(issueCount));
+            const QJsonObject severityCounts = payload.value(QStringLiteral("severityCounts")).toObject();
+            const QJsonObject summary = payload.value(QStringLiteral("summary")).toObject();
+            validationSummaryLabel_->setText(uiText("质量报告完成：error %1 / warning %2 / info %3，问题样本 %4，重复图片 %5。")
+                .arg(severityCounts.value(QStringLiteral("error")).toInt())
+                .arg(severityCounts.value(QStringLiteral("warning")).toInt())
+                .arg(severityCounts.value(QStringLiteral("info")).toInt())
+                .arg(summary.value(QStringLiteral("problemSampleCount")).toInt())
+                .arg(summary.value(QStringLiteral("duplicateImageCount")).toInt()));
         }
         if (validationOutput_) {
             validationOutput_->setPlainText(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Indented)));
+        }
+        if (validationIssuesTable_) {
+            validationIssuesTable_->setRowCount(0);
+            const QJsonArray samples = !payload.value(QStringLiteral("problemSamples")).toArray().isEmpty()
+                ? payload.value(QStringLiteral("problemSamples")).toArray()
+                : payload.value(QStringLiteral("issues")).toArray();
+            if (samples.isEmpty()) {
+                validationIssuesTable_->insertRow(0);
+                validationIssuesTable_->setItem(0, 0, new QTableWidgetItem(uiText("通过")));
+                validationIssuesTable_->setItem(0, 1, new QTableWidgetItem(QStringLiteral("ok")));
+                validationIssuesTable_->setItem(0, 2, new QTableWidgetItem(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString()));
+                validationIssuesTable_->setItem(0, 3, new QTableWidgetItem(QString()));
+                validationIssuesTable_->setItem(0, 4, new QTableWidgetItem(uiText("未发现需要修复的问题样本。")));
+            } else {
+                for (const QJsonValue& value : samples) {
+                    const QJsonObject issue = value.toObject();
+                    const int row = validationIssuesTable_->rowCount();
+                    validationIssuesTable_->insertRow(row);
+                    validationIssuesTable_->setItem(row, 0, new QTableWidgetItem(issueSeverityLabel(issue.value(QStringLiteral("severity")).toString())));
+                    validationIssuesTable_->setItem(row, 1, new QTableWidgetItem(issue.value(QStringLiteral("code")).toString()));
+                    const QString issuePath = !issue.value(QStringLiteral("imagePath")).toString().isEmpty()
+                        ? issue.value(QStringLiteral("imagePath")).toString()
+                        : (!issue.value(QStringLiteral("labelPath")).toString().isEmpty()
+                            ? issue.value(QStringLiteral("labelPath")).toString()
+                            : issue.value(QStringLiteral("filePath")).toString());
+                    validationIssuesTable_->setItem(row, 2, new QTableWidgetItem(issuePath));
+                    const int line = issue.value(QStringLiteral("line")).toInt();
+                    validationIssuesTable_->setItem(row, 3, new QTableWidgetItem(line > 0 ? QString::number(line) : QString()));
+                    validationIssuesTable_->setItem(row, 4, new QTableWidgetItem(issue.value(QStringLiteral("message")).toString()));
+                }
+            }
+        }
+        if (datasetDetailLabel_) {
+            datasetDetailLabel_->setText(uiText("修复清单：%1")
+                .arg(latestQualityFixListPath_.isEmpty() ? uiText("暂无") : QDir::toNativeSeparators(latestQualityFixListPath_)));
+        }
+        const QString datasetPath = payload.value(QStringLiteral("datasetPath")).toString();
+        const QString format = payload.value(QStringLiteral("format")).toString();
+        if (!datasetPath.isEmpty()) {
+            currentDatasetPath_ = datasetPath;
+            currentDatasetFormat_ = format;
+            currentDatasetValid_ = payload.value(QStringLiteral("ok")).toBool();
+        }
+        if (repository_.isOpen() && !datasetPath.isEmpty()) {
+            const QJsonObject summary = payload.value(QStringLiteral("summary")).toObject();
+            aitrain::DatasetRecord dataset;
+            dataset.name = QFileInfo(datasetPath).fileName();
+            dataset.format = format;
+            dataset.rootPath = datasetPath;
+            dataset.validationStatus = payload.value(QStringLiteral("ok")).toBool() ? QStringLiteral("valid") : QStringLiteral("invalid");
+            dataset.sampleCount = summary.value(QStringLiteral("sampleCount")).toInt();
+            dataset.lastReportJson = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
+            dataset.lastValidatedAt = QDateTime::fromString(payload.value(QStringLiteral("checkedAt")).toString(), Qt::ISODateWithMs);
+            QString error;
+            repository_.upsertDatasetValidation(dataset, &error);
+            updateDatasetList();
         }
     } else if (type == QStringLiteral("datasetSnapshot")) {
         if (validationSummaryLabel_) {
@@ -3994,6 +4099,47 @@ void MainWindow::previewArtifactPath(const QString& path)
                 lines << uiText("错误样本：%1；低置信样本：%2")
                     .arg(report.value(QStringLiteral("errorSamples")).toArray().size())
                     .arg(report.value(QStringLiteral("lowConfidenceSamples")).toArray().size());
+                lines << QString();
+                text = lines.join(QLatin1Char('\n')) + text;
+            }
+        } else if (suffix == QStringLiteral("json") && info.fileName() == QStringLiteral("dataset_quality_report.json")) {
+            QJsonParseError parseError;
+            const QJsonObject report = QJsonDocument::fromJson(data, &parseError).object();
+            if (parseError.error == QJsonParseError::NoError && !report.isEmpty()) {
+                const QJsonObject severity = report.value(QStringLiteral("severityCounts")).toObject();
+                const QJsonObject summary = report.value(QStringLiteral("summary")).toObject();
+                QStringList lines;
+                lines << uiText("数据质量报告摘要");
+                lines << uiText("格式：%1；真实分析：%2")
+                    .arg(report.value(QStringLiteral("format")).toString())
+                    .arg(report.value(QStringLiteral("scaffold")).toBool() ? uiText("否，scaffold") : uiText("是"));
+                lines << uiText("error=%1 warning=%2 info=%3 问题样本=%4 重复图片=%5")
+                    .arg(severity.value(QStringLiteral("error")).toInt())
+                    .arg(severity.value(QStringLiteral("warning")).toInt())
+                    .arg(severity.value(QStringLiteral("info")).toInt())
+                    .arg(summary.value(QStringLiteral("problemSampleCount")).toInt())
+                    .arg(summary.value(QStringLiteral("duplicateImageCount")).toInt());
+                lines << uiText("修复清单：%1").arg(QDir::toNativeSeparators(report.value(QStringLiteral("xAnyLabelingFixListPath")).toString()));
+                lines << QString();
+                text = lines.join(QLatin1Char('\n')) + text;
+            }
+        } else if (suffix == QStringLiteral("json") && info.fileName() == QStringLiteral("problem_samples.json")) {
+            QJsonParseError parseError;
+            const QJsonObject report = QJsonDocument::fromJson(data, &parseError).object();
+            if (parseError.error == QJsonParseError::NoError && !report.isEmpty()) {
+                const QJsonArray samples = report.value(QStringLiteral("samples")).toArray();
+                QStringList lines;
+                lines << uiText("问题样本摘要");
+                lines << uiText("问题样本数：%1").arg(samples.size());
+                const int previewCount = qMin(5, samples.size());
+                for (int index = 0; index < previewCount; ++index) {
+                    const QJsonObject sample = samples.at(index).toObject();
+                    lines << QStringLiteral("%1. %2 %3 %4")
+                        .arg(index + 1)
+                        .arg(sample.value(QStringLiteral("severity")).toString())
+                        .arg(sample.value(QStringLiteral("code")).toString())
+                        .arg(QDir::toNativeSeparators(sample.value(QStringLiteral("imagePath")).toString()));
+                }
                 lines << QString();
                 text = lines.join(QLatin1Char('\n')) + text;
             }
