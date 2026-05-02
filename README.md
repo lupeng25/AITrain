@@ -97,7 +97,7 @@ Print the project context:
 
 ## Acceptance
 
-Phase 17-30 delivery acceptance is documented in `docs/acceptance-runbook.md`.
+Phase 17-33 delivery acceptance is documented in `docs/acceptance-runbook.md`.
 
 Run the local baseline and packaged layout smoke checks with:
 
@@ -110,6 +110,12 @@ Small generated-data training smoke can be run with:
 
 ```powershell
 .\tools\acceptance-smoke.ps1 -PublicDatasets
+```
+
+For a longer local CPU smoke on deterministic small/medium generated data:
+
+```powershell
+.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr
 ```
 
 To require real Ultralytics COCO8 / COCO8-seg materialization instead of generated fallback:
@@ -132,6 +138,12 @@ Minimal sample datasets can be generated with:
 
 ```powershell
 python examples\create-minimal-datasets.py --output .deps\examples-smoke
+```
+
+The local CPU smoke profile generates larger deterministic detection, segmentation, and OCR Rec samples:
+
+```powershell
+python examples\create-minimal-datasets.py --output .deps\cpu-smoke-data --profile cpu-smoke
 ```
 
 The generated requests can be passed directly to the Python trainers for smoke validation. These datasets are intentionally tiny and are only meant to verify trainer wiring and artifact creation. The GUI can import, validate, split, and preview the generated detection, segmentation, and OCR Rec layouts.

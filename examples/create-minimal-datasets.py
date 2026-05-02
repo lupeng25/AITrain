@@ -83,7 +83,117 @@ def make_ocr_det(root: Path) -> None:
     )
 
 
-def make_requests(root: Path) -> None:
+def yolo_box_label(class_id: int, rect: tuple[int, int, int, int], width: int, height: int) -> str:
+    x0, y0, x1, y1 = rect
+    x_center = ((x0 + x1) / 2.0) / width
+    y_center = ((y0 + y1) / 2.0) / height
+    box_width = (x1 - x0) / width
+    box_height = (y1 - y0) / height
+    return f"{class_id} {x_center:.6f} {y_center:.6f} {box_width:.6f} {box_height:.6f}\n"
+
+
+def make_yolo_detection_cpu_smoke(root: Path) -> None:
+    width = 128
+    height = 128
+    class_colors = [(36, 145, 255), (220, 80, 80)]
+    for split, count, offset in (("train", 32, 0), ("val", 8, 100)):
+        for index in range(count):
+            class_id = index % 2
+            box_width = 24 + ((index + offset) % 4) * 6
+            box_height = 22 + ((index * 3 + offset) % 5) * 5
+            x0 = 8 + ((index * 11 + offset) % (width - box_width - 16))
+            y0 = 10 + ((index * 7 + offset) % (height - box_height - 18))
+            rect = (x0, y0, x0 + box_width, y0 + box_height)
+            stem = f"{split}_{index:02d}"
+            write_png(root / f"images/{split}/{stem}.png", width, height, rect, class_colors[class_id])
+            write_text(root / f"labels/{split}/{stem}.txt", yolo_box_label(class_id, rect, width, height))
+    write_text(
+        root / "data.yaml",
+        "path: .\ntrain: images/train\nval: images/val\nnc: 2\nnames: [item, marker]\n",
+    )
+
+
+def make_yolo_segmentation_cpu_smoke(root: Path) -> None:
+    width = 128
+    height = 128
+    class_colors = [(15, 174, 102), (180, 92, 220)]
+    for split, count, offset in (("train", 24, 0), ("val", 8, 80)):
+        for index in range(count):
+            class_id = index % 2
+            box_width = 28 + ((index + offset) % 5) * 5
+            box_height = 26 + ((index * 2 + offset) % 4) * 7
+            x0 = 9 + ((index * 13 + offset) % (width - box_width - 18))
+            y0 = 11 + ((index * 9 + offset) % (height - box_height - 20))
+            rect = (x0, y0, x0 + box_width, y0 + box_height)
+            stem = f"{split}_{index:02d}"
+            write_png(root / f"images/{split}/{stem}.png", width, height, rect, class_colors[class_id])
+            x1, y1 = x0 + box_width, y0 + box_height
+            polygon = (
+                f"{class_id} "
+                f"{x0 / width:.6f} {y0 / height:.6f} "
+                f"{x1 / width:.6f} {y0 / height:.6f} "
+                f"{x1 / width:.6f} {y1 / height:.6f} "
+                f"{x0 / width:.6f} {y1 / height:.6f}\n"
+            )
+            write_text(root / f"labels/{split}/{stem}.txt", polygon)
+    write_text(
+        root / "data.yaml",
+        "path: .\ntrain: images/train\nval: images/val\nnc: 2\nnames: [part, scratch]\n",
+    )
+
+
+def make_ocr_rec_cpu_smoke(root: Path) -> None:
+    chars = "ab12cd34"
+    labels = []
+    for index in range(96):
+        x0 = 6 + (index * 5) % 52
+        x1 = min(122, x0 + 22 + (index % 6) * 7)
+        y0 = 5 + (index * 3) % 12
+        y1 = min(30, y0 + 13 + (index % 3) * 3)
+        stem = f"ocr_{index:03d}"
+        text_length = 2 + (index % 5)
+        text = "".join(chars[(index + step * 3) % len(chars)] for step in range(text_length))
+        write_png(root / f"images/{stem}.png", 128, 32, (x0, y0, x1, y1), (35 + (index % 3) * 35, 35, 35))
+        labels.append(f"images/{stem}.png\t{text}")
+    write_text(root / "dict.txt", "\n".join(chars) + "\n")
+    write_text(root / "rec_gt.txt", "\n".join(labels) + "\n")
+
+
+def make_requests(root: Path, profile: str = "minimal") -> None:
+    if profile == "cpu-smoke":
+        detect_parameters = {
+            "model": "yolov8n.yaml",
+            "epochs": 3,
+            "batchSize": 2,
+            "imageSize": 128,
+            "device": "cpu",
+            "workers": 0,
+            "runName": "cpu-yolo-detect",
+            "compactEvents": True,
+        }
+        segment_parameters = {
+            "model": "yolov8n-seg.yaml",
+            "epochs": 3,
+            "batchSize": 2,
+            "imageSize": 128,
+            "device": "cpu",
+            "workers": 0,
+            "runName": "cpu-yolo-segment",
+            "compactEvents": True,
+        }
+        ocr_parameters = {
+            "epochs": 8,
+            "batchSize": 8,
+            "imageWidth": 128,
+            "imageHeight": 32,
+            "maxTextLength": 10,
+            "learningRate": 0.01,
+        }
+    else:
+        detect_parameters = {"model": "yolov8n.yaml", "epochs": 1, "batchSize": 1, "imageSize": 64, "device": "cpu", "workers": 0}
+        segment_parameters = {"model": "yolov8n-seg.yaml", "epochs": 1, "batchSize": 1, "imageSize": 64, "device": "cpu", "workers": 0}
+        ocr_parameters = {"epochs": 1, "batchSize": 2, "imageWidth": 96, "imageHeight": 32, "maxTextLength": 8, "learningRate": 0.01}
+
     requests = {
         "yolo_detect_request.json": {
             "protocolVersion": 1,
@@ -92,7 +202,7 @@ def make_requests(root: Path) -> None:
             "datasetPath": str(root / "yolo_detect"),
             "outputPath": str(root / "runs/yolo_detect"),
             "backend": "ultralytics_yolo_detect",
-            "parameters": {"model": "yolov8n.yaml", "epochs": 1, "batchSize": 1, "imageSize": 64, "device": "cpu", "workers": 0},
+            "parameters": detect_parameters,
         },
         "yolo_segment_request.json": {
             "protocolVersion": 1,
@@ -101,7 +211,7 @@ def make_requests(root: Path) -> None:
             "datasetPath": str(root / "yolo_segment"),
             "outputPath": str(root / "runs/yolo_segment"),
             "backend": "ultralytics_yolo_segment",
-            "parameters": {"model": "yolov8n-seg.yaml", "epochs": 1, "batchSize": 1, "imageSize": 64, "device": "cpu", "workers": 0},
+            "parameters": segment_parameters,
         },
         "paddleocr_rec_request.json": {
             "protocolVersion": 1,
@@ -110,7 +220,7 @@ def make_requests(root: Path) -> None:
             "datasetPath": str(root / "paddleocr_rec"),
             "outputPath": str(root / "runs/paddleocr_rec"),
             "backend": "paddleocr_rec",
-            "parameters": {"epochs": 1, "batchSize": 2, "imageWidth": 96, "imageHeight": 32, "maxTextLength": 8, "learningRate": 0.01},
+            "parameters": ocr_parameters,
         },
         "paddleocr_det_official_request.json": {
             "protocolVersion": 1,
@@ -146,14 +256,20 @@ def make_requests(root: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default="minimal-datasets", help="Output directory")
+    parser.add_argument("--profile", choices=("minimal", "cpu-smoke"), default="minimal", help="Dataset size/profile")
     args = parser.parse_args()
     root = Path(args.output).resolve()
     root.mkdir(parents=True, exist_ok=True)
-    make_yolo_detection(root / "yolo_detect")
-    make_yolo_segmentation(root / "yolo_segment")
+    if args.profile == "cpu-smoke":
+        make_yolo_detection_cpu_smoke(root / "yolo_detect")
+        make_yolo_segmentation_cpu_smoke(root / "yolo_segment")
+        make_ocr_rec_cpu_smoke(root / "paddleocr_rec")
+    else:
+        make_yolo_detection(root / "yolo_detect")
+        make_yolo_segmentation(root / "yolo_segment")
+        make_ocr_rec(root / "paddleocr_rec")
     make_ocr_det(root / "paddleocr_det")
-    make_ocr_rec(root / "paddleocr_rec")
-    make_requests(root)
+    make_requests(root, args.profile)
     print(root)
     return 0
 

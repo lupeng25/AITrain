@@ -2,6 +2,7 @@ param(
     [switch]$LocalBaseline,
     [switch]$Package,
     [switch]$PublicDatasets,
+    [switch]$CpuTrainingSmoke,
     [switch]$TensorRT,
     [switch]$SkipBuild,
     [switch]$SkipOfficialOcr,
@@ -345,6 +346,123 @@ function Assert-TrainingReport {
     }
 }
 
+function Get-TrainingReportSummary {
+    param([string]$ReportPath)
+    $report = Get-Content -Raw -Encoding UTF8 -LiteralPath $ReportPath | ConvertFrom-Json
+    $summary = [ordered]@{
+        reportPath = [System.IO.Path]::GetFullPath($ReportPath)
+        checkpointPath = if ($report.PSObject.Properties.Name -contains "checkpointPath") { [string]$report.checkpointPath } else { "" }
+        onnxPath = if ($report.PSObject.Properties.Name -contains "onnxPath") { [string]$report.onnxPath } else { "" }
+        dictPath = if ($report.PSObject.Properties.Name -contains "dictPath") { [string]$report.dictPath } else { "" }
+        metrics = if ($report.PSObject.Properties.Name -contains "metrics") { $report.metrics } else { [ordered]@{} }
+    }
+    return $summary
+}
+
+function Count-Files {
+    param(
+        [string]$Path,
+        [string]$Filter = "*"
+    )
+    if (!(Test-Path $Path)) {
+        return 0
+    }
+    return @((Get-ChildItem -LiteralPath $Path -Filter $Filter -File -ErrorAction SilentlyContinue)).Count
+}
+
+function Invoke-CtestForAcceptanceWorkDir {
+    param(
+        [string]$WorkRoot,
+        [int]$TimeoutSeconds = 240
+    )
+    $ctestFile = Join-Path $script:Root "$BuildDir\CTestTestfile.cmake"
+    if (Test-Path $ctestFile) {
+        $previousAcceptanceSmokeRoot = $env:AITRAIN_ACCEPTANCE_SMOKE_ROOT
+        $env:AITRAIN_ACCEPTANCE_SMOKE_ROOT = $WorkRoot
+        try {
+            Invoke-Checked -FilePath "ctest" -Arguments @("--test-dir", (Join-Path $script:Root $BuildDir), "--output-on-failure", "--timeout", "$TimeoutSeconds")
+        } finally {
+            if ($null -eq $previousAcceptanceSmokeRoot) {
+                Remove-Item Env:\AITRAIN_ACCEPTANCE_SMOKE_ROOT -ErrorAction SilentlyContinue
+            } else {
+                $env:AITRAIN_ACCEPTANCE_SMOKE_ROOT = $previousAcceptanceSmokeRoot
+            }
+        }
+    } else {
+        Write-Host "  [warn] CTest build directory not found; skipping C++ ONNX inference regression check." -ForegroundColor Yellow
+    }
+}
+
+function Invoke-CpuTrainingSmoke {
+    $python = Resolve-PythonExe
+    Ensure-PythonModules -Python $python -Modules @("ultralytics") -RequirementsFile "python_trainers\requirements-yolo.txt" -CapabilityName "Ultralytics YOLO"
+    Ensure-PythonModules -Python $python -Modules @("paddle", "onnx", "PIL", "numpy") -RequirementsFile "python_trainers\requirements-ocr.txt" -CapabilityName "PaddlePaddle OCR Rec"
+
+    $baseWork = Resolve-AcceptancePath $WorkDir
+    $work = Join-Path $baseWork "cpu-training-smoke"
+    New-Item -ItemType Directory -Force $work | Out-Null
+
+    $startedAt = [DateTime]::UtcNow
+    $generator = Join-Path $script:Root "examples\create-minimal-datasets.py"
+    Assert-PathExists $generator "minimal dataset generator"
+    Invoke-Checked -FilePath $python -Arguments @($generator, "--output", (Join-Path $work "generated"), "--profile", "cpu-smoke")
+
+    $generated = Join-Path $work "generated"
+    $datasetSummary = [ordered]@{
+        yoloDetectTrain = Count-Files -Path (Join-Path $generated "yolo_detect\images\train") -Filter "*.png"
+        yoloDetectVal = Count-Files -Path (Join-Path $generated "yolo_detect\images\val") -Filter "*.png"
+        yoloSegmentTrain = Count-Files -Path (Join-Path $generated "yolo_segment\images\train") -Filter "*.png"
+        yoloSegmentVal = Count-Files -Path (Join-Path $generated "yolo_segment\images\val") -Filter "*.png"
+        ocrRecSamples = if (Test-Path (Join-Path $generated "paddleocr_rec\rec_gt.txt")) {
+            @((Get-Content -Encoding UTF8 -LiteralPath (Join-Path $generated "paddleocr_rec\rec_gt.txt") | Where-Object { $_.Trim() })).Count
+        } else {
+            0
+        }
+    }
+
+    $detectRequestPath = Join-Path $generated "yolo_detect_request.json"
+    $segmentRequestPath = Join-Path $generated "yolo_segment_request.json"
+    $ocrRequestPath = Join-Path $generated "paddleocr_rec_request.json"
+
+    Invoke-Checked -FilePath $python -Arguments @((Join-Path $script:Root "python_trainers\detection\ultralytics_trainer.py"), "--request", $detectRequestPath)
+    $detectReportPath = Join-Path $generated "runs\yolo_detect\ultralytics_training_report.json"
+    Assert-TrainingReport -ReportPath $detectReportPath -ArtifactProperties @("checkpointPath", "onnxPath")
+
+    Invoke-Checked -FilePath $python -Arguments @((Join-Path $script:Root "python_trainers\segmentation\ultralytics_trainer.py"), "--request", $segmentRequestPath)
+    $segmentReportPath = Join-Path $generated "runs\yolo_segment\ultralytics_training_report.json"
+    Assert-TrainingReport -ReportPath $segmentReportPath -ArtifactProperties @("checkpointPath", "onnxPath")
+
+    Invoke-Checked -FilePath $python -Arguments @((Join-Path $script:Root "python_trainers\ocr_rec\paddleocr_trainer.py"), "--request", $ocrRequestPath)
+    $ocrReportPath = Join-Path $generated "runs\paddleocr_rec\paddleocr_rec_training_report.json"
+    Assert-TrainingReport -ReportPath $ocrReportPath -ArtifactProperties @("checkpointPath", "onnxPath", "dictPath")
+
+    Invoke-CtestForAcceptanceWorkDir -WorkRoot $work -TimeoutSeconds 360
+
+    $finishedAt = [DateTime]::UtcNow
+    $summary = [ordered]@{
+        ok = $true
+        mode = "CpuTrainingSmoke"
+        workDir = $work
+        startedAt = $startedAt.ToString("o")
+        finishedAt = $finishedAt.ToString("o")
+        elapsedSeconds = [Math]::Round(($finishedAt - $startedAt).TotalSeconds, 3)
+        note = "CPU smoke validates training/export/inference wiring on generated small/medium data; it is not an accuracy benchmark."
+        datasets = $datasetSummary
+        parameters = [ordered]@{
+            yolo = [ordered]@{ epochs = 3; batchSize = 2; imageSize = 128; device = "cpu"; workers = 0 }
+            ocrRec = [ordered]@{ epochs = 8; batchSize = 8; imageWidth = 128; imageHeight = 32; maxTextLength = 10 }
+        }
+        reports = [ordered]@{
+            detection = Get-TrainingReportSummary -ReportPath $detectReportPath
+            segmentation = Get-TrainingReportSummary -ReportPath $segmentReportPath
+            ocrRecognition = Get-TrainingReportSummary -ReportPath $ocrReportPath
+        }
+    }
+    $summaryPath = Join-Path $work "cpu_training_smoke_summary.json"
+    $summary | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $summaryPath -Encoding UTF8
+    Write-Host ("  [ok] CPU training smoke summary={0}" -f $summaryPath)
+}
+
 function Invoke-PublicDatasetSmoke {
     $python = Resolve-PythonExe
     Ensure-PythonModules -Python $python -Modules @("ultralytics") -RequirementsFile "python_trainers\requirements-yolo.txt" -CapabilityName "Ultralytics YOLO"
@@ -412,22 +530,7 @@ function Invoke-PublicDatasetSmoke {
     Invoke-Checked -FilePath $python -Arguments @((Join-Path $script:Root "python_trainers\ocr_rec\paddleocr_trainer.py"), "--request", $ocrRequestPath)
     Assert-TrainingReport -ReportPath (Join-Path $work "generated\runs\paddleocr_rec\paddleocr_rec_training_report.json") -ArtifactProperties @("checkpointPath", "onnxPath", "dictPath")
 
-    $ctestFile = Join-Path $script:Root "$BuildDir\CTestTestfile.cmake"
-    if (Test-Path $ctestFile) {
-        $previousAcceptanceSmokeRoot = $env:AITRAIN_ACCEPTANCE_SMOKE_ROOT
-        $env:AITRAIN_ACCEPTANCE_SMOKE_ROOT = $work
-        try {
-            Invoke-Checked -FilePath "ctest" -Arguments @("--test-dir", (Join-Path $script:Root $BuildDir), "--output-on-failure", "--timeout", "240")
-        } finally {
-            if ($null -eq $previousAcceptanceSmokeRoot) {
-                Remove-Item Env:\AITRAIN_ACCEPTANCE_SMOKE_ROOT -ErrorAction SilentlyContinue
-            } else {
-                $env:AITRAIN_ACCEPTANCE_SMOKE_ROOT = $previousAcceptanceSmokeRoot
-            }
-        }
-    } else {
-        Write-Host "  [warn] CTest build directory not found; skipping C++ ONNX inference regression check." -ForegroundColor Yellow
-    }
+    Invoke-CtestForAcceptanceWorkDir -WorkRoot $work -TimeoutSeconds 240
 
     if (!$SkipOfficialOcr) {
         $phase16 = Join-Path $script:Root "tools\phase16-ocr-official-smoke.ps1"
@@ -501,8 +604,8 @@ function Invoke-TensorRtAcceptance {
 }
 
 try {
-    if (-not ($LocalBaseline -or $Package -or $PublicDatasets -or $TensorRT)) {
-        throw "Select at least one mode: -LocalBaseline, -Package, -PublicDatasets, or -TensorRT."
+    if (-not ($LocalBaseline -or $Package -or $PublicDatasets -or $CpuTrainingSmoke -or $TensorRT)) {
+        throw "Select at least one mode: -LocalBaseline, -Package, -PublicDatasets, -CpuTrainingSmoke, or -TensorRT."
     }
 
     if ($LocalBaseline) {
@@ -516,6 +619,10 @@ try {
     if ($PublicDatasets) {
         $script:AcceptanceModes += "PublicDatasets"
         Invoke-PublicDatasetSmoke
+    }
+    if ($CpuTrainingSmoke) {
+        $script:AcceptanceModes += "CpuTrainingSmoke"
+        Invoke-CpuTrainingSmoke
     }
     if ($TensorRT) {
         $script:AcceptanceModes += "TensorRT"

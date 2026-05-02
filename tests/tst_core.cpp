@@ -191,14 +191,35 @@ QString mockPythonTrainerScriptPath()
 QString phase9RealSmokeRoot()
 {
     const QString applicationDir = QCoreApplication::applicationDirPath();
-    const QStringList candidates = {
+    QStringList candidates;
+    const QString acceptanceSmokeRoot = QString::fromLocal8Bit(qgetenv("AITRAIN_ACCEPTANCE_SMOKE_ROOT")).trimmed();
+    if (!acceptanceSmokeRoot.isEmpty()) {
+        candidates.append(QDir::cleanPath(acceptanceSmokeRoot));
+        candidates.append(QDir(acceptanceSmokeRoot).filePath(QStringLiteral("generated")));
+    }
+    candidates.append({
         QDir::current().absoluteFilePath(QStringLiteral(".deps/phase9-real-smoke")),
+        QDir::current().absoluteFilePath(QStringLiteral(".deps/acceptance-smoke")),
+        QDir::current().absoluteFilePath(QStringLiteral(".deps/acceptance-smoke/generated")),
+        QDir::current().absoluteFilePath(QStringLiteral(".deps/acceptance-smoke/cpu-training-smoke")),
+        QDir::current().absoluteFilePath(QStringLiteral(".deps/acceptance-smoke/cpu-training-smoke/generated")),
         QDir(applicationDir).absoluteFilePath(QStringLiteral("../../.deps/phase9-real-smoke")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../../.deps/acceptance-smoke")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../../.deps/acceptance-smoke/generated")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../../.deps/acceptance-smoke/cpu-training-smoke")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../../.deps/acceptance-smoke/cpu-training-smoke/generated")),
         QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/phase9-real-smoke")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/acceptance-smoke")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/acceptance-smoke/generated")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/acceptance-smoke/cpu-training-smoke")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/acceptance-smoke/cpu-training-smoke/generated")),
         QDir(applicationDir).absoluteFilePath(QStringLiteral(".deps/phase9-real-smoke"))
-    };
+    });
     for (const QString& candidate : candidates) {
-        if (QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("request.json")))) {
+        if (QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("request.json")))
+            || QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("out/ultralytics_runs/phase9-real-smoke/weights/best.onnx")))
+            || QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("runs/yolo_detect/ultralytics_runs/acceptance-yolo-detect/weights/best.onnx")))
+            || QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("runs/yolo_detect/ultralytics_runs/cpu-yolo-detect/weights/best.onnx")))) {
             return QDir::cleanPath(candidate);
         }
     }
@@ -215,19 +236,29 @@ QString phase11SegSmokeRoot()
     }
     candidates.append({
         QDir::current().absoluteFilePath(QStringLiteral(".deps/acceptance-smoke")),
+        QDir::current().absoluteFilePath(QStringLiteral(".deps/acceptance-smoke/generated")),
+        QDir::current().absoluteFilePath(QStringLiteral(".deps/acceptance-smoke/cpu-training-smoke")),
+        QDir::current().absoluteFilePath(QStringLiteral(".deps/acceptance-smoke/cpu-training-smoke/generated")),
         QDir::current().absoluteFilePath(QStringLiteral(".deps/phase11-seg-smoke")),
         QDir::current().absoluteFilePath(QStringLiteral(".deps/phase13-examples")),
         QDir(applicationDir).absoluteFilePath(QStringLiteral("../../.deps/acceptance-smoke")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../../.deps/acceptance-smoke/generated")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../../.deps/acceptance-smoke/cpu-training-smoke")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../../.deps/acceptance-smoke/cpu-training-smoke/generated")),
         QDir(applicationDir).absoluteFilePath(QStringLiteral("../../.deps/phase11-seg-smoke")),
         QDir(applicationDir).absoluteFilePath(QStringLiteral("../../.deps/phase13-examples")),
         QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/acceptance-smoke")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/acceptance-smoke/generated")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/acceptance-smoke/cpu-training-smoke")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/acceptance-smoke/cpu-training-smoke/generated")),
         QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/phase11-seg-smoke")),
         QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/phase13-examples"))
     });
     for (const QString& candidate : candidates) {
         if (QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("out/ultralytics_runs/phase11-seg-smoke/weights/best.onnx")))
             || QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("runs/yolo_segment/ultralytics_runs/aitrain-yolo-segment/weights/best.onnx")))
-            || QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("runs/yolo_segment/ultralytics_runs/acceptance-yolo-segment/weights/best.onnx")))) {
+            || QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("runs/yolo_segment/ultralytics_runs/acceptance-yolo-segment/weights/best.onnx")))
+            || QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("runs/yolo_segment/ultralytics_runs/cpu-yolo-segment/weights/best.onnx")))) {
             return QDir::cleanPath(candidate);
         }
     }
@@ -1388,8 +1419,16 @@ private slots:
         if (smokeRoot.isEmpty()) {
             QSKIP("Phase 9 real Ultralytics smoke artifacts are not available.");
         }
-        const QString onnxPath = QDir(smokeRoot).filePath(QStringLiteral("out/ultralytics_runs/phase9-real-smoke/weights/best.onnx"));
-        const QString imagePath = QDir(smokeRoot).filePath(QStringLiteral("dataset/images/val/a.png"));
+        QString onnxPath = QDir(smokeRoot).filePath(QStringLiteral("out/ultralytics_runs/phase9-real-smoke/weights/best.onnx"));
+        QString imagePath = QDir(smokeRoot).filePath(QStringLiteral("dataset/images/val/a.png"));
+        if (!QFileInfo::exists(onnxPath)) {
+            onnxPath = QDir(smokeRoot).filePath(QStringLiteral("runs/yolo_detect/ultralytics_runs/acceptance-yolo-detect/weights/best.onnx"));
+            imagePath = QDir(smokeRoot).filePath(QStringLiteral("generated/yolo_detect/images/val/b.png"));
+        }
+        if (!QFileInfo::exists(onnxPath)) {
+            onnxPath = QDir(smokeRoot).filePath(QStringLiteral("runs/yolo_detect/ultralytics_runs/cpu-yolo-detect/weights/best.onnx"));
+            imagePath = QDir(smokeRoot).filePath(QStringLiteral("yolo_detect/images/val/val_00.png"));
+        }
         if (!QFileInfo::exists(onnxPath) || !QFileInfo::exists(imagePath)) {
             QSKIP("Phase 9 real Ultralytics smoke artifacts are not available.");
         }
@@ -1463,6 +1502,10 @@ private slots:
         if (!QFileInfo::exists(onnxPath)) {
             onnxPath = QDir(smokeRoot).filePath(QStringLiteral("runs/yolo_segment/ultralytics_runs/acceptance-yolo-segment/weights/best.onnx"));
             imagePath = QDir(smokeRoot).filePath(QStringLiteral("generated/yolo_segment/images/val/b.png"));
+        }
+        if (!QFileInfo::exists(onnxPath)) {
+            onnxPath = QDir(smokeRoot).filePath(QStringLiteral("runs/yolo_segment/ultralytics_runs/cpu-yolo-segment/weights/best.onnx"));
+            imagePath = QDir(smokeRoot).filePath(QStringLiteral("yolo_segment/images/val/val_00.png"));
         }
         if (!QFileInfo::exists(onnxPath) || !QFileInfo::exists(imagePath)) {
             QSKIP("YOLO segmentation smoke ONNX artifact is not available.");
@@ -1633,6 +1676,10 @@ private slots:
         if (!QFileInfo::exists(segOnnx)) {
             segOnnx = QDir(segRoot).filePath(QStringLiteral("runs/yolo_segment/ultralytics_runs/acceptance-yolo-segment/weights/best.onnx"));
             segImage = QDir(segRoot).filePath(QStringLiteral("generated/yolo_segment/images/val/b.png"));
+        }
+        if (!QFileInfo::exists(segOnnx)) {
+            segOnnx = QDir(segRoot).filePath(QStringLiteral("runs/yolo_segment/ultralytics_runs/cpu-yolo-segment/weights/best.onnx"));
+            segImage = QDir(segRoot).filePath(QStringLiteral("yolo_segment/images/val/val_00.png"));
         }
         const QString ocrOnnx = QDir(ocrRoot).filePath(QStringLiteral("runs/paddleocr_rec/paddleocr_rec_ctc.onnx"));
         const QString ocrImage = QFileInfo::exists(QDir(ocrRoot).filePath(QStringLiteral("paddleocr_rec/images/a.png")))

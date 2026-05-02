@@ -40,6 +40,7 @@ This file is the source of truth for phase status in new AI coding conversations
 | Phase 30: Daily usability enhancements | Done locally; manual GUI walkthrough still recommended | Dataset import already auto-detects YOLO detection, YOLO segmentation, and PaddleOCR Rec formats and recommends official backends. The training page now gives clearer current-backend capability text, task history can be filtered by category/status/search, and failed tasks show a short diagnostic next-step summary. |
 | Phase 31: Official PaddleOCR full toolchain | Done on local CPU smoke | Added PaddleOCR Det dataset validation/split, official Det adapter, official System `predict_system.py` adapter, GUI/backend defaults, example requests, package checks, and `tools\phase31-paddleocr-full-official-smoke.ps1`. The full local smoke passed with pinned PaddleOCR ref `f8b41a62bba991d35e578ffa712107a042b0c3b0`, official Det 1-epoch CPU train/export, official Rec 1-epoch CPU train/export, and official `predict_system.py` system inference. This is an official PaddleOCR toolchain path for Det+Rec+System artifacts; C++ DB detection ONNX postprocess is still not implemented. |
 | Phase 32: Localization and offline licensing | Done locally; manual GUI walkthrough still recommended | Added Qt-based Chinese/English GUI switching with `QSettings` persistence and restart-to-apply behavior, expanded translation coverage for main-window controls, combo items, read-only text views, table headers/body cells, status text, and the registration dialog. Added offline signed, machine-bound license validation before the main window opens, plus `AITrainLicenseGenerator.exe` as a separate Qt tool for private-key license issuance. No Worker JSON protocol, SQLite schema, plugin interface, training, export, or inference logic changes were made for this phase. |
+| Phase 33: Local CPU small/medium training smoke | Done locally | Added `tools\acceptance-smoke.ps1 -CpuTrainingSmoke` and `examples\create-minimal-datasets.py --profile cpu-smoke`. The local run generated 32/8 YOLO detection, 24/8 YOLO segmentation, and 96 OCR Rec samples, trained YOLO detection/segmentation for 3 CPU epochs, trained the PaddlePaddle OCR Rec CTC backend for 8 CPU epochs, exported ONNX artifacts, wrote `cpu_training_smoke_summary.json`, and passed CTest against the generated WorkDir. This is a wiring/artifact smoke, not an accuracy benchmark, and it does not change TensorRT external acceptance requirements. |
 
 ## Local Hardware Note
 
@@ -84,6 +85,7 @@ Current local follow-up: perform a manual GUI walkthrough for Phase 27-30, use t
 - Phase 30 improves GUI guidance and filtering only; it does not add new training algorithms.
 - Phase 31 adds official PaddleOCR Det and System toolchain wiring. Treat `paddleocr_system_official` as official-tool inference, not C++ ONNX DB postprocess. `tools\phase31-paddleocr-full-official-smoke.ps1 -WorkDir .deps\phase31-paddleocr-full-official-smoke-final -SkipInstall` passed locally with the isolated OCR environment.
 - Phase 32 adds product-shell localization and offline licensing only. Language choice and accepted license data are stored in `QSettings`; license tokens are bound to the machine code; generator private keys must remain local and must not be included in customer packages. Current translation scope covers the Qt GUI shell and registration dialog, while core/Worker/Python trainer logs and plugin-provided manifest text may remain untranslated.
+- Phase 33 adds a longer CPU-only smoke using deterministic small/medium generated data. `tools\acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr -WorkDir .deps\acceptance-smoke-cpu-check` passed locally and produced `cpu_training_smoke_summary.json`; it validates wiring and artifacts, not model quality.
 - keep training logic inside core/plugin/Worker boundaries, not in `MainWindow`
 - keep C++ tiny detector as a scaffold/demo/test backend until the Python path is stable
 - preserve the external TensorRT acceptance checklist for a future RTX / SM 75+ machine
@@ -104,6 +106,12 @@ For small public/generated-data training smoke, run:
 
 ```powershell
 .\tools\acceptance-smoke.ps1 -PublicDatasets
+```
+
+For the local CPU small/medium training smoke, run:
+
+```powershell
+.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr
 ```
 
 To require successful public COCO8 / COCO8-seg materialization instead of fallback, run:
@@ -128,6 +136,12 @@ Minimal example datasets can be generated with:
 
 ```powershell
 python examples\create-minimal-datasets.py --output .deps\examples-smoke
+```
+
+Small/medium deterministic CPU smoke datasets can be generated with:
+
+```powershell
+python examples\create-minimal-datasets.py --output .deps\cpu-smoke-data --profile cpu-smoke
 ```
 
 When an RTX / SM 75+ machine is available, resume Phase 7 acceptance with:
@@ -155,5 +169,6 @@ When an RTX / SM 75+ machine is available, resume Phase 7 acceptance with:
 - Phase 22-26 improve local usability and repeatability; they do not change the TensorRT acceptance requirement.
 - Phase 27 is UI-only: it may reorganize pages, labels, and helper widgets, but must not move training/export/inference work into `MainWindow`.
 - Phase 32 is product-shell only: it must not change Worker JSON protocol, SQLite schema, plugin interfaces, training/export/inference behavior, or the machine-bound offline licensing trust model without an explicit follow-up plan.
+- Phase 33 local CPU small/medium smoke validates training/export/inference wiring only; it is not a production accuracy benchmark and does not change TensorRT external acceptance status.
 - Keep long-running execution in `aitrain_worker`.
 - Keep model-specific behavior behind core/plugin/Worker boundaries, not in `MainWindow`.

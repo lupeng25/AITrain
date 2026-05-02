@@ -10,6 +10,7 @@ Run the unified smoke script from the repository root:
 .\tools\acceptance-smoke.ps1 -LocalBaseline
 .\tools\acceptance-smoke.ps1 -Package -SkipBuild
 .\tools\acceptance-smoke.ps1 -PublicDatasets
+.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr
 .\tools\acceptance-smoke.ps1 -TensorRT
 ```
 
@@ -120,6 +121,24 @@ Expected artifacts:
 - Official PaddleOCR full chain: Det `official_model\best_accuracy.pdparams`, Det `official_inference\inference.yml`, Rec `official_inference\inference.yml`, `official_system_prediction.json`, `system_results.txt`, visualization images, `paddleocr_official_det_report.json`, `paddleocr_official_rec_report.json`, and `paddleocr_official_system_report.json` when `phase31-paddleocr-full-official-smoke.ps1` is run.
 
 If a public dataset requires interactive registration, record it as an external dataset blocker. Do not block the required smoke path as long as the generated minimal dataset path passes.
+
+## Phase 33: Local CPU Small/Medium Training Smoke
+
+Run:
+
+```powershell
+.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr
+```
+
+This mode does not download public datasets and does not run TensorRT. It generates deterministic `--profile cpu-smoke` data under `<WorkDir>\cpu-training-smoke\generated`, trains YOLO detection and YOLO segmentation for 3 CPU epochs at image size 128, trains the small PaddlePaddle OCR Rec CTC backend for 8 CPU epochs, exports ONNX artifacts, and runs CTest against those artifacts.
+
+Expected artifacts:
+
+- `cpu_training_smoke_summary.json` with dataset counts, parameters, report paths, artifact paths, metrics, and elapsed time.
+- YOLO detection and segmentation: `best.pt`, `best.onnx`, and `ultralytics_training_report.json`.
+- OCR Rec small CTC: `paddleocr_rec_ctc.pdparams`, `paddleocr_rec_ctc.onnx`, `dict.txt`, and `paddleocr_rec_training_report.json`.
+
+This is a stronger local integration smoke than `-PublicDatasets`, but it is still not a model accuracy benchmark.
 
 ## Phase 22-30: Local Usability Baseline
 

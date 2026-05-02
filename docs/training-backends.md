@@ -137,6 +137,14 @@ Public dataset materialization is handled by `tools\materialize-ultralytics-data
 
 Every `acceptance-smoke.ps1` run writes `acceptance_summary.json` into its work directory with modes, status, timing, failure reason, and hardware-blocked reason when applicable.
 
+For a longer local-only CPU exercise that avoids public downloads and TensorRT, run:
+
+```powershell
+.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr
+```
+
+This mode generates deterministic small/medium datasets with `examples\create-minimal-datasets.py --profile cpu-smoke`, trains YOLO detection and segmentation for 3 epochs at image size 128 on CPU, trains the small PaddlePaddle OCR Rec CTC backend for 8 epochs, exports ONNX artifacts, runs CTest with `AITRAIN_ACCEPTANCE_SMOKE_ROOT` pointed at the new artifacts, and writes `cpu_training_smoke_summary.json`. It validates wiring, artifacts, and C++ ONNX Runtime compatibility; it is not an accuracy benchmark.
+
 ## Official PaddleOCR Adapter Parameters
 
 The official Rec adapter accepts these extra parameters in addition to the common Python trainer request fields:
