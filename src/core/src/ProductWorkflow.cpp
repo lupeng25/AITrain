@@ -15,7 +15,6 @@
 #include <QTextStream>
 
 #include <algorithm>
-
 namespace aitrain {
 namespace {
 
@@ -245,6 +244,15 @@ QString classDistributionCsv(const QJsonObject& counts)
     return csv;
 }
 
+QString csvEscape(QString value)
+{
+    if (value.contains(QLatin1Char('"')) || value.contains(QLatin1Char(',')) || value.contains(QLatin1Char('\n'))) {
+        value.replace(QLatin1Char('"'), QStringLiteral("\"\""));
+        return QStringLiteral("\"%1\"").arg(value);
+    }
+    return value;
+}
+
 QJsonArray issueArray(const DatasetValidationResult& validation, int maxItems)
 {
     QJsonArray issues;
@@ -282,6 +290,189 @@ QString htmlReport(const QJsonObject& context)
         .arg(htmlEscape(QString::fromUtf8(QJsonDocument(context).toJson(QJsonDocument::Indented))));
     html += QStringLiteral("</body></html>");
     return html;
+}
+
+double boxArea(const DetectionBox& box)
+{
+    return qMax(0.0, box.width) * qMax(0.0, box.height);
+}
+
+double boxIou(const DetectionBox& left, const DetectionBox& right)
+{
+    const double leftX1 = left.xCenter - left.width / 2.0;
+    const double leftY1 = left.yCenter - left.height / 2.0;
+    const double leftX2 = left.xCenter + left.width / 2.0;
+    const double leftY2 = left.yCenter + left.height / 2.0;
+    const double rightX1 = right.xCenter - right.width / 2.0;
+    const double rightY1 = right.yCenter - right.height / 2.0;
+    const double rightX2 = right.xCenter + right.width / 2.0;
+    const double rightY2 = right.yCenter + right.height / 2.0;
+    const double intersectionWidth = qMax(0.0, qMin(leftX2, rightX2) - qMax(leftX1, rightX1));
+    const double intersectionHeight = qMax(0.0, qMin(leftY2, rightY2) - qMax(leftY1, rightY1));
+    const double intersection = intersectionWidth * intersectionHeight;
+    const double areaSum = boxArea(left) + boxArea(right) - intersection;
+    return areaSum > 0.0 ? intersection / areaSum : 0.0;
+}
+
+QJsonObject detectionBoxToJson(const DetectionBox& box)
+{
+    return QJsonObject{
+        {QStringLiteral("classId"), box.classId},
+        {QStringLiteral("xCenter"), box.xCenter},
+        {QStringLiteral("yCenter"), box.yCenter},
+        {QStringLiteral("width"), box.width},
+        {QStringLiteral("height"), box.height}
+    };
+}
+
+bool detectionSplitExists(const QString& datasetPath, const QString& split)
+{
+    const QDir root(datasetPath);
+    return QDir(root.filePath(QStringLiteral("images/%1").arg(split))).exists()
+        && QDir(root.filePath(QStringLiteral("labels/%1").arg(split))).exists();
+}
+
+QString selectDetectionSplit(const QString& datasetPath)
+{
+    for (const QString& split : {QStringLiteral("val"), QStringLiteral("test"), QStringLiteral("train")}) {
+        if (detectionSplitExists(datasetPath, split)) {
+            return split;
+        }
+    }
+    return QString();
+}
+
+QVector<DetectionPrediction> runDetectionPredictions(
+    const QString& modelPath,
+    const QString& imagePath,
+    const DetectionInferenceOptions& options,
+    QString* runtime,
+    QString* error)
+{
+    const QString suffix = QFileInfo(modelPath).suffix().toLower();
+    if (suffix == QStringLiteral("onnx")) {
+        if (runtime) {
+            *runtime = QStringLiteral("onnxruntime");
+        }
+        return predictDetectionOnnxRuntime(modelPath, imagePath, options, error);
+    }
+    if (suffix == QStringLiteral("engine") || suffix == QStringLiteral("plan")) {
+        if (runtime) {
+            *runtime = QStringLiteral("tensorrt");
+        }
+        if (!isTensorRtInferenceAvailable()) {
+            if (error) {
+                *error = QStringLiteral("hardware-blocked: TensorRT evaluation requires a compatible RTX / SM 75+ acceptance machine and runtime.");
+            }
+            return {};
+        }
+        return predictDetectionTensorRt(modelPath, imagePath, options, error);
+    }
+
+    DetectionBaselineCheckpoint checkpoint;
+    if (!loadDetectionBaselineCheckpoint(modelPath, &checkpoint, error)) {
+        return {};
+    }
+    if (runtime) {
+        *runtime = QStringLiteral("tiny_detector");
+    }
+    return predictDetectionBaseline(checkpoint, imagePath, options, error);
+}
+
+struct DetectionEvaluationItem {
+    int classId = 0;
+    double confidence = 0.0;
+    bool truePositive = false;
+};
+
+struct DetectionClassStats {
+    int gt = 0;
+    int tp = 0;
+    int fp = 0;
+    int fn = 0;
+    double precision = 0.0;
+    double recall = 0.0;
+    double ap50 = 0.0;
+    QVector<DetectionEvaluationItem> items;
+};
+
+double ap50FromItems(QVector<DetectionEvaluationItem> items, int gtCount)
+{
+    if (gtCount <= 0) {
+        return 0.0;
+    }
+    std::sort(items.begin(), items.end(), [](const DetectionEvaluationItem& left, const DetectionEvaluationItem& right) {
+        return left.confidence > right.confidence;
+    });
+
+    QVector<double> recalls;
+    QVector<double> precisions;
+    int tp = 0;
+    int fp = 0;
+    for (const DetectionEvaluationItem& item : items) {
+        if (item.truePositive) {
+            ++tp;
+        } else {
+            ++fp;
+        }
+        recalls.append(static_cast<double>(tp) / static_cast<double>(gtCount));
+        precisions.append(static_cast<double>(tp) / static_cast<double>(qMax(1, tp + fp)));
+    }
+
+    double ap = 0.0;
+    for (int threshold = 0; threshold <= 100; ++threshold) {
+        const double recallThreshold = static_cast<double>(threshold) / 100.0;
+        double precisionAtRecall = 0.0;
+        for (int index = 0; index < recalls.size(); ++index) {
+            if (recalls.at(index) >= recallThreshold) {
+                precisionAtRecall = qMax(precisionAtRecall, precisions.at(index));
+            }
+        }
+        ap += precisionAtRecall;
+    }
+    return ap / 101.0;
+}
+
+QString perClassMetricsCsv(const QStringList& classNames, const QVector<DetectionClassStats>& stats)
+{
+    QString csv = QStringLiteral("classId,className,gt,tp,fp,fn,precision,recall,ap50\n");
+    for (int classId = 0; classId < stats.size(); ++classId) {
+        const DetectionClassStats& item = stats.at(classId);
+        const QString className = classId < classNames.size() && !classNames.at(classId).isEmpty()
+            ? classNames.at(classId)
+            : QStringLiteral("class_%1").arg(classId);
+        csv += QStringLiteral("%1,%2,%3,%4,%5,%6,%7,%8,%9\n")
+            .arg(classId)
+            .arg(csvEscape(className))
+            .arg(item.gt)
+            .arg(item.tp)
+            .arg(item.fp)
+            .arg(item.fn)
+            .arg(item.precision, 0, 'f', 6)
+            .arg(item.recall, 0, 'f', 6)
+            .arg(item.ap50, 0, 'f', 6);
+    }
+    return csv;
+}
+
+QString confusionMatrixCsv(const QStringList& classNames, const QVector<QVector<int>>& matrix)
+{
+    QString csv = QStringLiteral("actual\\predicted");
+    for (int classId = 0; classId < classNames.size(); ++classId) {
+        csv += QStringLiteral(",%1").arg(csvEscape(classNames.at(classId)));
+    }
+    csv += QStringLiteral(",background\n");
+    for (int row = 0; row < matrix.size(); ++row) {
+        const QString rowName = row < classNames.size()
+            ? classNames.at(row)
+            : QStringLiteral("background");
+        csv += csvEscape(rowName);
+        for (int column = 0; column < matrix.at(row).size(); ++column) {
+            csv += QStringLiteral(",%1").arg(matrix.at(row).at(column));
+        }
+        csv += QLatin1Char('\n');
+    }
+    return csv;
 }
 
 WorkflowResult resultFromReport(const QString& reportPath, const QJsonObject& payload)
@@ -414,10 +605,303 @@ WorkflowResult curateDatasetQualityReport(const QString& datasetPath, const QStr
 
 WorkflowResult evaluateModelReport(const QString& modelPath, const QString& datasetPath, const QString& outputPath, const QString& taskType, const QJsonObject& options)
 {
-    Q_UNUSED(options)
     const QFileInfo modelInfo(modelPath);
     if (!modelInfo.exists()) {
         return failedResult(QStringLiteral("Model file does not exist: %1").arg(modelPath));
+    }
+    const QDir datasetRoot(datasetPath);
+    if (!datasetRoot.exists()) {
+        return failedResult(QStringLiteral("Dataset directory does not exist: %1").arg(datasetPath));
+    }
+
+    if (taskType == QStringLiteral("detection") || taskType == QStringLiteral("yolo_detection")) {
+        const QString split = options.value(QStringLiteral("split")).toString(selectDetectionSplit(datasetPath));
+        if (split.isEmpty()) {
+            return failedResult(QStringLiteral("No detection split found. Expected images/val, images/test, or images/train with matching labels."));
+        }
+
+        DetectionDataset dataset;
+        QString error;
+        if (!dataset.load(datasetPath, split, &error)) {
+            return failedResult(error);
+        }
+
+        DetectionInferenceOptions inferenceOptions;
+        inferenceOptions.iouThreshold = options.value(QStringLiteral("nmsIouThreshold")).toDouble(0.45);
+        inferenceOptions.confidenceThreshold = options.value(QStringLiteral("confidenceThreshold")).toDouble(0.001);
+        inferenceOptions.maxDetections = options.value(QStringLiteral("maxDetections")).toInt(100);
+        const double matchIouThreshold = options.value(QStringLiteral("iouThreshold")).toDouble(0.5);
+        const double lowConfidenceThreshold = options.value(QStringLiteral("lowConfidenceThreshold")).toDouble(0.25);
+        const int maxErrorSamples = options.value(QStringLiteral("maxErrorSamples")).toInt(200);
+        const int maxOverlaySamples = options.value(QStringLiteral("maxOverlaySamples")).toInt(50);
+
+        QStringList classNames = dataset.info().classNames;
+        const int classCount = qMax(dataset.info().classCount, classNames.size());
+        while (classNames.size() < classCount) {
+            classNames.append(QStringLiteral("class_%1").arg(classNames.size()));
+        }
+        QVector<DetectionClassStats> classStats(classCount);
+        QVector<QVector<int>> confusion(classCount + 1, QVector<int>(classCount + 1, 0));
+        QJsonArray sampleSummaries;
+        QJsonArray errorSamples;
+        QJsonArray lowConfidenceSamples;
+        QString runtime = QStringLiteral("unknown");
+        int totalGt = 0;
+        int totalPredictions = 0;
+        int totalTp = 0;
+        int totalFp = 0;
+        int totalFn = 0;
+        int overlayCount = 0;
+        const QDir outputDir(outputPath);
+        QDir().mkpath(outputDir.filePath(QStringLiteral("overlays")));
+
+        for (const DetectionSample& sample : dataset.samples()) {
+            QString predictionError;
+            const QVector<DetectionPrediction> predictions = runDetectionPredictions(modelPath, sample.imagePath, inferenceOptions, &runtime, &predictionError);
+            if (!predictionError.isEmpty()) {
+                if (predictionError.startsWith(QStringLiteral("hardware-blocked"))) {
+                    QJsonObject blocked;
+                    blocked.insert(QStringLiteral("ok"), false);
+                    blocked.insert(QStringLiteral("status"), QStringLiteral("hardware-blocked"));
+                    blocked.insert(QStringLiteral("kind"), QStringLiteral("evaluation_report"));
+                    blocked.insert(QStringLiteral("createdAt"), nowIso());
+                    blocked.insert(QStringLiteral("modelPath"), modelPath);
+                    blocked.insert(QStringLiteral("datasetPath"), datasetPath);
+                    blocked.insert(QStringLiteral("taskType"), taskType);
+                    blocked.insert(QStringLiteral("runtime"), runtime);
+                    blocked.insert(QStringLiteral("scaffold"), false);
+                    blocked.insert(QStringLiteral("message"), predictionError);
+                    const QString reportPath = outputDir.filePath(QStringLiteral("evaluation_report.json"));
+                    if (!writeJsonFile(reportPath, blocked, &error)) {
+                        return failedResult(error);
+                    }
+                    blocked.insert(QStringLiteral("reportPath"), reportPath);
+                    return resultFromReport(reportPath, blocked);
+                }
+                return failedResult(predictionError);
+            }
+
+            totalGt += sample.boxes.size();
+            totalPredictions += predictions.size();
+            for (const DetectionBox& gt : sample.boxes) {
+                if (gt.classId >= 0 && gt.classId < classStats.size()) {
+                    classStats[gt.classId].gt += 1;
+                }
+            }
+
+            QVector<bool> gtMatched(sample.boxes.size(), false);
+            QVector<DetectionPrediction> sortedPredictions = predictions;
+            std::sort(sortedPredictions.begin(), sortedPredictions.end(), [](const DetectionPrediction& left, const DetectionPrediction& right) {
+                return left.confidence > right.confidence;
+            });
+
+            QJsonArray samplePredictions;
+            bool sampleHasError = false;
+            for (const DetectionPrediction& prediction : sortedPredictions) {
+                int bestMatch = -1;
+                double bestIou = 0.0;
+                int bestAny = -1;
+                double bestAnyIou = 0.0;
+                for (int index = 0; index < sample.boxes.size(); ++index) {
+                    if (gtMatched.at(index)) {
+                        continue;
+                    }
+                    const double iou = boxIou(prediction.box, sample.boxes.at(index));
+                    if (iou > bestAnyIou) {
+                        bestAnyIou = iou;
+                        bestAny = index;
+                    }
+                    if (prediction.box.classId == sample.boxes.at(index).classId && iou > bestIou) {
+                        bestIou = iou;
+                        bestMatch = index;
+                    }
+                }
+
+                const bool matched = bestMatch >= 0 && bestIou >= matchIouThreshold;
+                const int predClass = prediction.box.classId >= 0 && prediction.box.classId < classStats.size()
+                    ? prediction.box.classId
+                    : classStats.size() - 1;
+                if (matched) {
+                    gtMatched[bestMatch] = true;
+                    classStats[predClass].tp += 1;
+                    classStats[predClass].items.append(DetectionEvaluationItem{predClass, prediction.confidence, true});
+                    confusion[predClass][predClass] += 1;
+                    ++totalTp;
+                } else {
+                    if (predClass >= 0 && predClass < classStats.size()) {
+                        classStats[predClass].fp += 1;
+                        classStats[predClass].items.append(DetectionEvaluationItem{predClass, prediction.confidence, false});
+                    }
+                    if (bestAny >= 0 && bestAnyIou >= matchIouThreshold) {
+                        const int gtClass = sample.boxes.at(bestAny).classId;
+                        if (gtClass >= 0 && gtClass < classCount && predClass >= 0 && predClass < classCount) {
+                            confusion[gtClass][predClass] += 1;
+                        }
+                    } else if (predClass >= 0 && predClass < classCount) {
+                        confusion[classCount][predClass] += 1;
+                    }
+                    ++totalFp;
+                    sampleHasError = true;
+                    if (errorSamples.size() < maxErrorSamples) {
+                        errorSamples.append(QJsonObject{
+                            {QStringLiteral("reason"), QStringLiteral("false_positive")},
+                            {QStringLiteral("imagePath"), sample.imagePath},
+                            {QStringLiteral("labelPath"), sample.labelPath},
+                            {QStringLiteral("matchedIou"), bestAnyIou},
+                            {QStringLiteral("prediction"), detectionPredictionToJson(prediction)}
+                        });
+                    }
+                }
+                if (prediction.confidence < lowConfidenceThreshold && lowConfidenceSamples.size() < maxErrorSamples) {
+                    lowConfidenceSamples.append(QJsonObject{
+                        {QStringLiteral("imagePath"), sample.imagePath},
+                        {QStringLiteral("labelPath"), sample.labelPath},
+                        {QStringLiteral("prediction"), detectionPredictionToJson(prediction)}
+                    });
+                }
+                samplePredictions.append(detectionPredictionToJson(prediction));
+            }
+
+            for (int index = 0; index < sample.boxes.size(); ++index) {
+                if (!gtMatched.at(index)) {
+                    const DetectionBox& gt = sample.boxes.at(index);
+                    if (gt.classId >= 0 && gt.classId < classStats.size()) {
+                        classStats[gt.classId].fn += 1;
+                        confusion[gt.classId][classCount] += 1;
+                    }
+                    ++totalFn;
+                    sampleHasError = true;
+                    if (errorSamples.size() < maxErrorSamples) {
+                        errorSamples.append(QJsonObject{
+                            {QStringLiteral("reason"), QStringLiteral("false_negative")},
+                            {QStringLiteral("imagePath"), sample.imagePath},
+                            {QStringLiteral("labelPath"), sample.labelPath},
+                            {QStringLiteral("groundTruth"), detectionBoxToJson(gt)}
+                        });
+                    }
+                }
+            }
+
+            QString overlayPath;
+            if (sampleHasError && overlayCount < maxOverlaySamples) {
+                QString overlayError;
+                QImage overlay = renderDetectionPredictions(sample.imagePath, predictions, &overlayError);
+                if (!overlay.isNull()) {
+                    overlayPath = outputDir.filePath(QStringLiteral("overlays/%1_%2.png")
+                        .arg(overlayCount, 4, 10, QLatin1Char('0'))
+                        .arg(QFileInfo(sample.imagePath).completeBaseName()));
+                    if (overlay.save(overlayPath)) {
+                        ++overlayCount;
+                    } else {
+                        overlayPath.clear();
+                    }
+                }
+            }
+
+            QJsonObject sampleSummary;
+            sampleSummary.insert(QStringLiteral("imagePath"), sample.imagePath);
+            sampleSummary.insert(QStringLiteral("labelPath"), sample.labelPath);
+            sampleSummary.insert(QStringLiteral("groundTruthCount"), sample.boxes.size());
+            sampleSummary.insert(QStringLiteral("predictionCount"), predictions.size());
+            sampleSummary.insert(QStringLiteral("hasError"), sampleHasError);
+            if (!overlayPath.isEmpty()) {
+                sampleSummary.insert(QStringLiteral("overlayPath"), overlayPath);
+            }
+            sampleSummary.insert(QStringLiteral("predictions"), samplePredictions);
+            sampleSummaries.append(sampleSummary);
+        }
+
+        QJsonArray perClassArray;
+        double map50 = 0.0;
+        int apClassCount = 0;
+        for (int classId = 0; classId < classStats.size(); ++classId) {
+            DetectionClassStats& stats = classStats[classId];
+            stats.precision = stats.tp + stats.fp > 0 ? static_cast<double>(stats.tp) / static_cast<double>(stats.tp + stats.fp) : 0.0;
+            stats.recall = stats.gt > 0 ? static_cast<double>(stats.tp) / static_cast<double>(stats.gt) : 0.0;
+            stats.ap50 = ap50FromItems(stats.items, stats.gt);
+            if (stats.gt > 0) {
+                map50 += stats.ap50;
+                ++apClassCount;
+            }
+            const QString className = classId < classNames.size() && !classNames.at(classId).isEmpty()
+                ? classNames.at(classId)
+                : QStringLiteral("class_%1").arg(classId);
+            perClassArray.append(QJsonObject{
+                {QStringLiteral("classId"), classId},
+                {QStringLiteral("className"), className},
+                {QStringLiteral("gt"), stats.gt},
+                {QStringLiteral("tp"), stats.tp},
+                {QStringLiteral("fp"), stats.fp},
+                {QStringLiteral("fn"), stats.fn},
+                {QStringLiteral("precision"), stats.precision},
+                {QStringLiteral("recall"), stats.recall},
+                {QStringLiteral("ap50"), stats.ap50}
+            });
+        }
+        map50 = apClassCount > 0 ? map50 / static_cast<double>(apClassCount) : 0.0;
+        const double precision = totalTp + totalFp > 0 ? static_cast<double>(totalTp) / static_cast<double>(totalTp + totalFp) : 0.0;
+        const double recall = totalGt > 0 ? static_cast<double>(totalTp) / static_cast<double>(totalGt) : 0.0;
+
+        QJsonObject metrics;
+        metrics.insert(QStringLiteral("precision"), precision);
+        metrics.insert(QStringLiteral("recall"), recall);
+        metrics.insert(QStringLiteral("mAP50"), map50);
+        metrics.insert(QStringLiteral("tp"), totalTp);
+        metrics.insert(QStringLiteral("fp"), totalFp);
+        metrics.insert(QStringLiteral("fn"), totalFn);
+        metrics.insert(QStringLiteral("gt"), totalGt);
+        metrics.insert(QStringLiteral("predictions"), totalPredictions);
+
+        QJsonObject report;
+        report.insert(QStringLiteral("ok"), true);
+        report.insert(QStringLiteral("kind"), QStringLiteral("evaluation_report"));
+        report.insert(QStringLiteral("createdAt"), nowIso());
+        report.insert(QStringLiteral("modelPath"), modelPath);
+        report.insert(QStringLiteral("datasetPath"), datasetPath);
+        report.insert(QStringLiteral("taskType"), QStringLiteral("detection"));
+        report.insert(QStringLiteral("split"), split);
+        report.insert(QStringLiteral("runtime"), runtime);
+        report.insert(QStringLiteral("datasetSnapshotId"), options.value(QStringLiteral("datasetSnapshotId")).toInt());
+        report.insert(QStringLiteral("datasetSnapshotHash"), options.value(QStringLiteral("datasetSnapshotHash")).toString());
+        report.insert(QStringLiteral("datasetSnapshotManifest"), options.value(QStringLiteral("datasetSnapshotManifest")).toString());
+        report.insert(QStringLiteral("scaffold"), false);
+        report.insert(QStringLiteral("metrics"), metrics);
+        report.insert(QStringLiteral("perClass"), perClassArray);
+        report.insert(QStringLiteral("samples"), sampleSummaries);
+        report.insert(QStringLiteral("errorSamples"), errorSamples);
+        report.insert(QStringLiteral("lowConfidenceSamples"), lowConfidenceSamples);
+        report.insert(QStringLiteral("sampleCount"), dataset.size());
+        report.insert(QStringLiteral("parameters"), QJsonObject{
+            {QStringLiteral("iouThreshold"), matchIouThreshold},
+            {QStringLiteral("confidenceThreshold"), inferenceOptions.confidenceThreshold},
+            {QStringLiteral("nmsIouThreshold"), inferenceOptions.iouThreshold},
+            {QStringLiteral("maxDetections"), inferenceOptions.maxDetections},
+            {QStringLiteral("lowConfidenceThreshold"), lowConfidenceThreshold}
+        });
+        report.insert(QStringLiteral("limitations"), QStringLiteral("Phase 36 computes detection AP50 only. COCO mAP50-95, segmentation mask evaluation, and OCR CER/WER remain follow-up work."));
+
+        const QString reportPath = outputDir.filePath(QStringLiteral("evaluation_report.json"));
+        const QString perClassPath = outputDir.filePath(QStringLiteral("per_class_metrics.csv"));
+        const QString errorPath = outputDir.filePath(QStringLiteral("error_samples.json"));
+        const QString confusionPath = outputDir.filePath(QStringLiteral("confusion_matrix.csv"));
+        if (!writeTextFile(perClassPath, perClassMetricsCsv(classNames, classStats), &error)) {
+            return failedResult(error);
+        }
+        if (!writeJsonFile(errorPath, QJsonObject{{QStringLiteral("samples"), errorSamples}, {QStringLiteral("lowConfidenceSamples"), lowConfidenceSamples}}, &error)) {
+            return failedResult(error);
+        }
+        if (!writeTextFile(confusionPath, confusionMatrixCsv(classNames, confusion), &error)) {
+            return failedResult(error);
+        }
+        report.insert(QStringLiteral("reportPath"), reportPath);
+        report.insert(QStringLiteral("perClassMetricsPath"), perClassPath);
+        report.insert(QStringLiteral("errorSamplesPath"), errorPath);
+        report.insert(QStringLiteral("confusionMatrixPath"), confusionPath);
+        report.insert(QStringLiteral("overlayDir"), outputDir.filePath(QStringLiteral("overlays")));
+        if (!writeJsonFile(reportPath, report, &error)) {
+            return failedResult(error);
+        }
+        return resultFromReport(reportPath, report);
     }
 
     QJsonObject summary;
@@ -426,8 +910,11 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
     summary.insert(QStringLiteral("modelPath"), modelPath);
     summary.insert(QStringLiteral("datasetPath"), datasetPath);
     summary.insert(QStringLiteral("taskType"), taskType);
+    summary.insert(QStringLiteral("datasetSnapshotId"), options.value(QStringLiteral("datasetSnapshotId")).toInt());
+    summary.insert(QStringLiteral("datasetSnapshotHash"), options.value(QStringLiteral("datasetSnapshotHash")).toString());
+    summary.insert(QStringLiteral("datasetSnapshotManifest"), options.value(QStringLiteral("datasetSnapshotManifest")).toString());
     summary.insert(QStringLiteral("scaffold"), true);
-    summary.insert(QStringLiteral("note"), QStringLiteral("Evaluation report v1 records model/data lineage and placeholder quality sections. Full per-sample mAP/CER analysis is a follow-up phase."));
+    summary.insert(QStringLiteral("note"), QStringLiteral("Phase 36 implements real evaluation for detection only. Segmentation mask metrics and OCR CER/WER remain scaffold reports."));
 
     QJsonObject metrics;
     if (taskType == QStringLiteral("ocr_recognition") || taskType == QStringLiteral("ocr")) {

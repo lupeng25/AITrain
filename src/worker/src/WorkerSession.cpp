@@ -796,6 +796,21 @@ void WorkerSession::evaluateModel(const QJsonObject& payload)
     artifact.insert(QStringLiteral("path"), result.reportPath);
     artifact.insert(QStringLiteral("message"), QStringLiteral("Model evaluation report"));
     send(QStringLiteral("artifact"), artifact);
+    for (const auto& item : {
+             qMakePair(QStringLiteral("per_class_metrics"), QStringLiteral("perClassMetricsPath")),
+             qMakePair(QStringLiteral("error_samples"), QStringLiteral("errorSamplesPath")),
+             qMakePair(QStringLiteral("confusion_matrix"), QStringLiteral("confusionMatrixPath")),
+             qMakePair(QStringLiteral("evaluation_overlays"), QStringLiteral("overlayDir"))}) {
+        const QString path = result.payload.value(item.second).toString();
+        if (!path.isEmpty()) {
+            QJsonObject extraArtifact;
+            extraArtifact.insert(QStringLiteral("taskId"), taskId);
+            extraArtifact.insert(QStringLiteral("kind"), item.first);
+            extraArtifact.insert(QStringLiteral("path"), path);
+            extraArtifact.insert(QStringLiteral("message"), QStringLiteral("Model evaluation artifact"));
+            send(QStringLiteral("artifact"), extraArtifact);
+        }
+    }
     QJsonObject progressDone;
     progressDone.insert(QStringLiteral("taskId"), taskId);
     progressDone.insert(QStringLiteral("percent"), 100);

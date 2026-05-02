@@ -764,8 +764,14 @@ private slots:
         QVERIFY(QFileInfo::exists(quality.payload.value(QStringLiteral("problemSamplesPath")).toString()));
         QVERIFY(quality.payload.value(QStringLiteral("ok")).toBool());
 
-        const QString modelPath = dir.filePath(QStringLiteral("model.onnx"));
-        writeTextFile(modelPath, QStringLiteral("fake onnx bytes"));
+        aitrain::DetectionTrainingOptions evaluationTrainingOptions;
+        evaluationTrainingOptions.epochs = 1;
+        evaluationTrainingOptions.batchSize = 1;
+        evaluationTrainingOptions.imageSize = QSize(32, 32);
+        evaluationTrainingOptions.outputPath = QDir(outputRoot).filePath(QStringLiteral("evaluation-model"));
+        const aitrain::DetectionTrainingResult evaluationTraining = aitrain::trainDetectionBaseline(datasetRoot, evaluationTrainingOptions);
+        QVERIFY2(evaluationTraining.ok, qPrintable(evaluationTraining.error));
+        const QString modelPath = evaluationTraining.checkpointPath;
         const aitrain::WorkflowResult evaluation = aitrain::evaluateModelReport(
             modelPath,
             datasetRoot,
@@ -773,7 +779,20 @@ private slots:
             QStringLiteral("detection"));
         QVERIFY2(evaluation.ok, qPrintable(evaluation.error));
         QVERIFY(QFileInfo::exists(evaluation.reportPath));
-        QVERIFY(evaluation.payload.value(QStringLiteral("scaffold")).toBool());
+        QVERIFY(!evaluation.payload.value(QStringLiteral("scaffold")).toBool());
+        QVERIFY(QFileInfo::exists(evaluation.payload.value(QStringLiteral("perClassMetricsPath")).toString()));
+        QVERIFY(QFileInfo::exists(evaluation.payload.value(QStringLiteral("errorSamplesPath")).toString()));
+        QVERIFY(QFileInfo::exists(evaluation.payload.value(QStringLiteral("confusionMatrixPath")).toString()));
+        QVERIFY(QFileInfo(evaluation.payload.value(QStringLiteral("overlayDir")).toString()).exists());
+        QVERIFY(evaluation.payload.value(QStringLiteral("metrics")).toObject().contains(QStringLiteral("mAP50")));
+
+        const aitrain::WorkflowResult segmentationEvaluation = aitrain::evaluateModelReport(
+            modelPath,
+            datasetRoot,
+            QDir(outputRoot).filePath(QStringLiteral("segmentation-evaluation")),
+            QStringLiteral("segmentation"));
+        QVERIFY2(segmentationEvaluation.ok, qPrintable(segmentationEvaluation.error));
+        QVERIFY(segmentationEvaluation.payload.value(QStringLiteral("scaffold")).toBool());
 
         const aitrain::WorkflowResult benchmark = aitrain::benchmarkModelReport(
             modelPath,
@@ -1831,8 +1850,14 @@ private slots:
         QVERIFY(dir.isValid());
         const QString datasetRoot = dir.filePath(QStringLiteral("dataset"));
         writeTinyDetectionDataset(datasetRoot);
-        const QString modelPath = dir.filePath(QStringLiteral("model.onnx"));
-        writeTextFile(modelPath, QStringLiteral("fake onnx bytes"));
+        aitrain::DetectionTrainingOptions evaluationTrainingOptions;
+        evaluationTrainingOptions.epochs = 1;
+        evaluationTrainingOptions.batchSize = 1;
+        evaluationTrainingOptions.imageSize = QSize(32, 32);
+        evaluationTrainingOptions.outputPath = dir.filePath(QStringLiteral("evaluation-model"));
+        const aitrain::DetectionTrainingResult evaluationTraining = aitrain::trainDetectionBaseline(datasetRoot, evaluationTrainingOptions);
+        QVERIFY2(evaluationTraining.ok, qPrintable(evaluationTraining.error));
+        const QString modelPath = evaluationTraining.checkpointPath;
 
         auto runCommand = [this](const std::function<bool(WorkerClient&, QString*)>& start, const QString& expectedMessageType) {
             WorkerClient client;

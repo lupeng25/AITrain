@@ -3113,6 +3113,7 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
             report.taskId = payload.value(QStringLiteral("taskId")).toString(currentTaskId_);
             report.modelPath = payload.value(QStringLiteral("modelPath")).toString();
             report.taskType = payload.value(QStringLiteral("taskType")).toString();
+            report.datasetSnapshotId = payload.value(QStringLiteral("datasetSnapshotId")).toInt();
             report.reportPath = payload.value(QStringLiteral("reportPath")).toString();
             report.summaryJson = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
             report.createdAt = QDateTime::currentDateTimeUtc();
@@ -3977,6 +3978,26 @@ void MainWindow::previewArtifactPath(const QString& path)
         const qint64 maxBytes = 256 * 1024;
         const QByteArray data = file.read(maxBytes);
         QString text = suffix == QStringLiteral("json") ? formatJsonTextForPreview(data) : QString::fromUtf8(data);
+        if (suffix == QStringLiteral("json") && info.fileName() == QStringLiteral("evaluation_report.json")) {
+            QJsonParseError parseError;
+            const QJsonObject report = QJsonDocument::fromJson(data, &parseError).object();
+            if (parseError.error == QJsonParseError::NoError && !report.isEmpty()) {
+                const QJsonObject metrics = report.value(QStringLiteral("metrics")).toObject();
+                QStringList lines;
+                lines << uiText("评估报告摘要");
+                lines << uiText("任务类型：%1").arg(report.value(QStringLiteral("taskType")).toString());
+                lines << uiText("真实评估：%1").arg(report.value(QStringLiteral("scaffold")).toBool() ? uiText("否，scaffold") : uiText("是"));
+                lines << uiText("precision=%1 recall=%2 mAP50=%3")
+                    .arg(metrics.value(QStringLiteral("precision")).toDouble(), 0, 'f', 4)
+                    .arg(metrics.value(QStringLiteral("recall")).toDouble(), 0, 'f', 4)
+                    .arg(metrics.value(QStringLiteral("mAP50")).toDouble(), 0, 'f', 4);
+                lines << uiText("错误样本：%1；低置信样本：%2")
+                    .arg(report.value(QStringLiteral("errorSamples")).toArray().size())
+                    .arg(report.value(QStringLiteral("lowConfidenceSamples")).toArray().size());
+                lines << QString();
+                text = lines.join(QLatin1Char('\n')) + text;
+            }
+        }
         if (info.size() > maxBytes) {
             text.append(uiText("\n\n[文件超过 256KB，仅显示前部内容]\n路径：%1").arg(QDir::toNativeSeparators(path)));
         }
@@ -4140,6 +4161,16 @@ void MainWindow::evaluateSelectedArtifact()
 
     QJsonObject options;
     options.insert(QStringLiteral("scaffoldAcknowledged"), true);
+    if (repository_.isOpen()) {
+        QString snapshotError;
+        const aitrain::DatasetRecord dataset = repository_.datasetByRootPath(datasetPath, &snapshotError);
+        const aitrain::DatasetSnapshotRecord snapshot = repository_.latestDatasetSnapshot(dataset.id, &snapshotError);
+        if (snapshot.id > 0) {
+            options.insert(QStringLiteral("datasetSnapshotId"), snapshot.id);
+            options.insert(QStringLiteral("datasetSnapshotHash"), snapshot.contentHash);
+            options.insert(QStringLiteral("datasetSnapshotManifest"), snapshot.manifestPath);
+        }
+    }
     QString error;
     if (!worker_.requestModelEvaluation(workerExecutablePath(), modelPath, datasetPath, outputPath, taskType, options, &error, taskId)) {
         if (!taskId.isEmpty() && repository_.isOpen()) {
