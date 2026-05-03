@@ -559,6 +559,450 @@
         <source>未检测</source>
         <translation>Unchecked</translation>
     </message>
+    <message>
+        <source>评估</source>
+        <translation>Evaluation</translation>
+    </message>
+    <message>
+        <source>基准</source>
+        <translation>Benchmark</translation>
+    </message>
+    <message>
+        <source>质检</source>
+        <translation>Quality Check</translation>
+    </message>
+    <message>
+        <source>快照</source>
+        <translation>Snapshot</translation>
+    </message>
+    <message>
+        <source>流水线</source>
+        <translation>Pipeline</translation>
+    </message>
+    <message>
+        <source>模型库</source>
+        <translation>Model Library</translation>
+    </message>
+    <message>
+        <source>模型版本</source>
+        <translation>Model Versions</translation>
+    </message>
+    <message>
+        <source>模型库 / 导出产物</source>
+        <translation>Model library / exported artifacts</translation>
+    </message>
+    <message>
+        <source>生成质量报告</source>
+        <translation>Generate Quality Report</translation>
+    </message>
+    <message>
+        <source>创建数据快照</source>
+        <translation>Create Dataset Snapshot</translation>
+    </message>
+    <message>
+        <source>打开问题清单</source>
+        <translation>Open Issue List</translation>
+    </message>
+    <message>
+        <source>X-AnyLabeling 修复</source>
+        <translation>X-AnyLabeling Fix</translation>
+    </message>
+    <message>
+        <source>复现实验</source>
+        <translation>Reproduce Run</translation>
+    </message>
+    <message>
+        <source>注册模型版本</source>
+        <translation>Register Model Version</translation>
+    </message>
+    <message>
+        <source>交付报告</source>
+        <translation>Delivery Report</translation>
+    </message>
+    <message>
+        <source>刷新模型库</source>
+        <translation>Refresh Model Library</translation>
+    </message>
+    <message>
+        <source>选中模型用于推理</source>
+        <translation>Use Selected Model for Inference</translation>
+    </message>
+    <message>
+        <source>选中模型用于导出</source>
+        <translation>Use Selected Model for Export</translation>
+    </message>
+    <message>
+        <source>执行本地流水线</source>
+        <translation>Run Local Pipeline</translation>
+    </message>
+    <message>
+        <source>请先选择一个模型版本。</source>
+        <translation>Select a model version first.</translation>
+    </message>
+    <message>
+        <source>选中模型版本没有可用 checkpoint 或 ONNX 路径。</source>
+        <translation>The selected model version has no available checkpoint or ONNX path.</translation>
+    </message>
+    <message>
+        <source>训练产物可从“任务与产物”注册为模型版本；评估、基准、流水线与交付报告均通过 Worker 执行。</source>
+        <translation>Training artifacts can be registered as model versions from Tasks and Artifacts; evaluation, benchmarking, pipelines, and delivery reports all run through the Worker.</translation>
+    </message>
+    <message>
+        <source>来源任务</source>
+        <translation>Source Task</translation>
+    </message>
+    <message>
+        <source>最近评估报告</source>
+        <translation>Recent Evaluation Reports</translation>
+    </message>
+    <message>
+        <source>流水线记录</source>
+        <translation>Pipeline Records</translation>
+    </message>
+    <message>
+        <source>模板</source>
+        <translation>Template</translation>
+    </message>
+    <message>
+        <source>管理模型版本、来源 lineage、评估报告和部署基准</source>
+        <translation>Manage model versions, source lineage, evaluation reports, and deployment benchmarks</translation>
+    </message>
+    <message>
+        <source>数据质量报告</source>
+        <translation>Dataset Quality Report</translation>
+    </message>
+    <message>
+        <source>Worker 正在执行任务，稍后再生成数据质量报告。</source>
+        <translation>Worker is running a task. Generate the dataset quality report later.</translation>
+    </message>
+    <message>
+        <source>数据质量报告生成中。</source>
+        <translation>Generating dataset quality report.</translation>
+    </message>
+    <message>
+        <source>数据质量报告生成中</source>
+        <translation>Generating quality report</translation>
+    </message>
+    <message>
+        <source>问题清单</source>
+        <translation>Issue List</translation>
+    </message>
+    <message>
+        <source>请先生成数据质量报告。</source>
+        <translation>Generate the dataset quality report first.</translation>
+    </message>
+    <message>
+        <source>问题清单：%1</source>
+        <translation>Issue list: %1</translation>
+    </message>
+    <message>
+        <source>已启动 X-AnyLabeling，请按问题清单修复样本。</source>
+        <translation>X-AnyLabeling started. Fix samples according to the issue list.</translation>
+    </message>
+    <message>
+        <source>数据集快照</source>
+        <translation>Dataset Snapshot</translation>
+    </message>
+    <message>
+        <source>Worker 正在执行任务，稍后再创建数据集快照。</source>
+        <translation>Worker is running a task. Create the dataset snapshot later.</translation>
+    </message>
+    <message>
+        <source>数据集快照创建中。</source>
+        <translation>Creating dataset snapshot.</translation>
+    </message>
+    <message>
+        <source>数据集快照创建中</source>
+        <translation>Creating dataset snapshot</translation>
+    </message>
+    <message>
+        <source>等待自动创建数据快照。</source>
+        <translation>Waiting for an automatic dataset snapshot.</translation>
+    </message>
+    <message>
+        <source>请先打开项目。</source>
+        <translation>Open a project first.</translation>
+    </message>
+    <message>
+        <source>请先打开或创建项目。</source>
+        <translation>Open or create a project first.</translation>
+    </message>
+    <message>
+        <source>请先选择一个训练任务。</source>
+        <translation>Select a training task first.</translation>
+    </message>
+    <message>
+        <source>只能复现历史训练任务。</source>
+        <translation>Only historical training tasks can be reproduced.</translation>
+    </message>
+    <message>
+        <source>该训练任务没有可复现的 request 记录。</source>
+        <translation>This training task has no reproducible request record.</translation>
+    </message>
+    <message>
+        <source>原训练 request JSON 无法解析：%1</source>
+        <translation>The original training request JSON could not be parsed: %1</translation>
+    </message>
+    <message>
+        <source>原实验的数据快照 manifest 缺失，无法按同一快照复现。请重新创建快照或选择其他训练任务。</source>
+        <translation>The original run's dataset snapshot manifest is missing, so it cannot be reproduced from the same snapshot. Create a new snapshot or choose another training task.</translation>
+    </message>
+    <message>
+        <source>复现实验已排队。</source>
+        <translation>Reproduction run queued.</translation>
+    </message>
+    <message>
+        <source>复现实验等待 Worker 启动。</source>
+        <translation>Reproduction run is waiting for Worker to start.</translation>
+    </message>
+    <message>
+        <source>复现实验已排队</source>
+        <translation>Reproduction queued</translation>
+    </message>
+    <message>
+        <source>自动数据快照已取消，训练未启动。</source>
+        <translation>Automatic dataset snapshot was canceled. Training did not start.</translation>
+    </message>
+    <message>
+        <source>自动数据快照失败：%1</source>
+        <translation>Automatic dataset snapshot failed: %1</translation>
+    </message>
+    <message>
+        <source>质量报告完成：error %1 / warning %2 / info %3，问题样本 %4，重复图片 %5。</source>
+        <translation>Quality report complete: error %1 / warning %2 / info %3, problem samples %4, duplicate images %5.</translation>
+    </message>
+    <message>
+        <source>未发现需要修复的问题样本。</source>
+        <translation>No problem samples requiring fixes were found.</translation>
+    </message>
+    <message>
+        <source>修复清单：%1</source>
+        <translation>Fix list: %1</translation>
+    </message>
+    <message>
+        <source>数据集快照完成：%1 个文件，hash %2。</source>
+        <translation>Dataset snapshot complete: %1 files, hash %2.</translation>
+    </message>
+    <message>
+        <source>本地闭环流水线</source>
+        <translation>Local End-to-End Pipeline</translation>
+    </message>
+    <message>
+        <source>Phase 35 自动记录的本地复现实验。</source>
+        <translation>Local reproduction run recorded automatically in Phase 35.</translation>
+    </message>
+    <message>
+        <source>模型版本：%1；评估报告：%2；流水线记录：%3。评估、基准和报告 v1 通过 Worker 生成 artifact，完整质量分析仍按 scaffold 标注。</source>
+        <translation>Model versions: %1; evaluation reports: %2; pipeline records: %3. Evaluation, benchmarking, and report v1 artifacts are generated through the Worker; full quality analysis remains explicitly marked as scaffold.</translation>
+    </message>
+    <message>
+        <source>暂无模型版本</source>
+        <translation>No model versions</translation>
+    </message>
+    <message>
+        <source>暂无评估报告</source>
+        <translation>No evaluation reports</translation>
+    </message>
+    <message>
+        <source>暂无流水线记录</source>
+        <translation>No pipeline records</translation>
+    </message>
+    <message>
+        <source>评估报告摘要</source>
+        <translation>Evaluation Report Summary</translation>
+    </message>
+    <message>
+        <source>任务类型：%1</source>
+        <translation>Task type: %1</translation>
+    </message>
+    <message>
+        <source>真实评估：%1</source>
+        <translation>Real evaluation: %1</translation>
+    </message>
+    <message>
+        <source>否，scaffold</source>
+        <translation>No, scaffold</translation>
+    </message>
+    <message>
+        <source>是</source>
+        <translation>Yes</translation>
+    </message>
+    <message>
+        <source>错误样本：%1；低置信样本：%2</source>
+        <translation>Error samples: %1; low-confidence samples: %2</translation>
+    </message>
+    <message>
+        <source>数据质量报告摘要</source>
+        <translation>Dataset Quality Report Summary</translation>
+    </message>
+    <message>
+        <source>格式：%1；真实分析：%2</source>
+        <translation>Format: %1; real analysis: %2</translation>
+    </message>
+    <message>
+        <source>error=%1 warning=%2 info=%3 问题样本=%4 重复图片=%5</source>
+        <translation>error=%1 warning=%2 info=%3 problem samples=%4 duplicate images=%5</translation>
+    </message>
+    <message>
+        <source>问题样本摘要</source>
+        <translation>Problem Sample Summary</translation>
+    </message>
+    <message>
+        <source>问题样本数：%1</source>
+        <translation>Problem sample count: %1</translation>
+    </message>
+    <message>
+        <source>模型注册</source>
+        <translation>Model Registration</translation>
+    </message>
+    <message>
+        <source>请先选择一个 checkpoint、ONNX 或 engine 产物。</source>
+        <translation>Select a checkpoint, ONNX, or engine artifact first.</translation>
+    </message>
+    <message>
+        <source>模型名称</source>
+        <translation>Model Name</translation>
+    </message>
+    <message>
+        <source>版本号</source>
+        <translation>Version</translation>
+    </message>
+    <message>
+        <source>从任务产物手动注册。</source>
+        <translation>Registered manually from a task artifact.</translation>
+    </message>
+    <message>
+        <source>已注册模型版本：%1:%2</source>
+        <translation>Registered model version: %1:%2</translation>
+    </message>
+    <message>
+        <source>模型评估</source>
+        <translation>Model Evaluation</translation>
+    </message>
+    <message>
+        <source>Worker 正在执行任务，稍后再评估模型。</source>
+        <translation>Worker is running a task. Evaluate the model later.</translation>
+    </message>
+    <message>
+        <source>请先选择模型产物，并在数据集页选择评估数据集。</source>
+        <translation>Select a model artifact first, then choose an evaluation dataset on the Datasets page.</translation>
+    </message>
+    <message>
+        <source>模型评估报告生成中。</source>
+        <translation>Generating model evaluation report.</translation>
+    </message>
+    <message>
+        <source>模型评估中</source>
+        <translation>Evaluating model</translation>
+    </message>
+    <message>
+        <source>部署基准</source>
+        <translation>Deployment Benchmark</translation>
+    </message>
+    <message>
+        <source>Worker 正在执行任务，稍后再运行部署基准。</source>
+        <translation>Worker is running a task. Run the deployment benchmark later.</translation>
+    </message>
+    <message>
+        <source>请先选择一个模型产物。</source>
+        <translation>Select a model artifact first.</translation>
+    </message>
+    <message>
+        <source>部署基准报告生成中。</source>
+        <translation>Generating deployment benchmark report.</translation>
+    </message>
+    <message>
+        <source>部署基准运行中</source>
+        <translation>Running deployment benchmark</translation>
+    </message>
+    <message>
+        <source>Worker 正在执行任务，稍后再生成交付报告。</source>
+        <translation>Worker is running a task. Generate the delivery report later.</translation>
+    </message>
+    <message>
+        <source>请先选择一个模型或报告产物。</source>
+        <translation>Select a model or report artifact first.</translation>
+    </message>
+    <message>
+        <source>训练交付报告生成中。</source>
+        <translation>Generating training delivery report.</translation>
+    </message>
+    <message>
+        <source>交付报告生成中</source>
+        <translation>Generating delivery report</translation>
+    </message>
+    <message>
+        <source>本地流水线</source>
+        <translation>Local Pipeline</translation>
+    </message>
+    <message>
+        <source>Worker 正在执行任务，稍后再执行流水线。</source>
+        <translation>Worker is running a task. Run the pipeline later.</translation>
+    </message>
+    <message>
+        <source>训练-&gt;评估-&gt;导出-&gt;注册-&gt;报告</source>
+        <translation>Train -&gt; Evaluate -&gt; Export -&gt; Register -&gt; Report</translation>
+    </message>
+    <message>
+        <source>导出-&gt;推理-&gt;基准-&gt;报告</source>
+        <translation>Export -&gt; Inference -&gt; Benchmark -&gt; Report</translation>
+    </message>
+    <message>
+        <source>选择流水线模板</source>
+        <translation>Choose Pipeline Template</translation>
+    </message>
+    <message>
+        <source>本地流水线执行中。</source>
+        <translation>Running local pipeline.</translation>
+    </message>
+    <message>
+        <source>本地流水线执行中</source>
+        <translation>Running local pipeline</translation>
+    </message>
+    <message>
+        <source>无法为训练创建数据快照：数据集记录缺失。</source>
+        <translation>Cannot create a dataset snapshot for training: dataset record is missing.</translation>
+    </message>
+    <message>
+        <source>为训练自动创建数据快照。</source>
+        <translation>Creating a dataset snapshot automatically for training.</translation>
+    </message>
+    <message>
+        <source>数据快照</source>
+        <translation>Data Snapshot</translation>
+    </message>
+    <message>
+        <source>自动数据快照创建中</source>
+        <translation>Automatic dataset snapshot in progress</translation>
+    </message>
+    <message>
+        <source>训练任务 %1 正在等待自动数据快照 %2。</source>
+        <translation>Training task %1 is waiting for automatic dataset snapshot %2.</translation>
+    </message>
+    <message>
+        <source>下一步：在任务与产物中查看 checkpoint / report / ONNX，注册到模型库后再做评估、基准、导出或推理验证。</source>
+        <translation>Next: inspect checkpoint / report / ONNX under Tasks and Artifacts, register it in the model library, then continue with evaluation, benchmarking, export, or inference validation.</translation>
+    </message>
+    <message>
+        <source>快照：未选择数据集</source>
+        <translation>Snapshot: no dataset selected</translation>
+    </message>
+    <message>
+        <source>快照：#%1 | %2 文件 | hash %3 | %4</source>
+        <translation>Snapshot: #%1 | %2 files | hash %3 | %4</translation>
+    </message>
+    <message>
+        <source>快照：暂无，启动训练时将自动创建。</source>
+        <translation>Snapshot: none yet; one will be created automatically when training starts.</translation>
+    </message>
+    <message>
+        <source>当前数据集：%1 | %2 | %3\n%4</source>
+        <translation>Current dataset: %1 | %2 | %3\n%4</translation>
+    </message>
+    <message>
+        <source>格式：%1 | 状态：%2 | 路径：%3\n%4</source>
+        <translation>Format: %1 | Status: %2 | Path: %3\n%4</translation>
+    </message>
 </context>
 <context>
     <name>RegistrationDialog</name>
