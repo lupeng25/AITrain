@@ -33,6 +33,7 @@
 #include <QScrollArea>
 #include <QSettings>
 #include <QSignalBlocker>
+#include <QSizePolicy>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QStandardPaths>
@@ -169,13 +170,27 @@ InfoPanel* createCompactSummaryCard(const QString& label, const QString& value, 
 {
     auto* panel = new InfoPanel(label);
     panel->setObjectName(QStringLiteral("CompactMetricPanel"));
+    panel->setMinimumWidth(0);
+    panel->setMinimumHeight(78);
+    panel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+    if (auto* panelLayout = qobject_cast<QVBoxLayout*>(panel->layout())) {
+        panelLayout->setContentsMargins(12, 10, 12, 10);
+        panelLayout->setSpacing(5);
+    }
+    panel->bodyLayout()->setSpacing(2);
     auto* valueLabel = new QLabel(value);
     valueLabel->setObjectName(QStringLiteral("CompactMetricValue"));
     valueLabel->setWordWrap(true);
+    valueLabel->setMinimumWidth(0);
+    valueLabel->setMinimumHeight(22);
+    valueLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     valueLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     auto* captionLabel = new QLabel(caption);
     captionLabel->setObjectName(QStringLiteral("CompactMetricCaption"));
     captionLabel->setWordWrap(true);
+    captionLabel->setMinimumWidth(0);
+    captionLabel->setMinimumHeight(16);
+    captionLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     panel->bodyLayout()->addWidget(valueLabel);
     panel->bodyLayout()->addWidget(captionLabel);
     panel->bodyLayout()->addStretch();
@@ -943,8 +958,12 @@ QWidget* MainWindow::buildDashboardPage()
 
 QWidget* MainWindow::buildProjectPage()
 {
-    auto* page = new QWidget;
-    auto* layout = new QVBoxLayout(page);
+    auto* page = new QScrollArea;
+    page->setWidgetResizable(true);
+    page->setFrameShape(QFrame::NoFrame);
+
+    auto* content = new QWidget;
+    auto* layout = new QVBoxLayout(content);
     layout->setContentsMargins(18, 18, 18, 18);
     layout->setSpacing(16);
 
@@ -991,8 +1010,6 @@ QWidget* MainWindow::buildProjectPage()
     headerGrid->addWidget(policyStatus, 1, 1);
     headerRoot->addLayout(headerGrid);
 
-    auto* bodySplitter = new QSplitter(Qt::Horizontal);
-
     auto* formPanel = new InfoPanel(QStringLiteral("项目设置"));
     auto* form = new QFormLayout;
     form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
@@ -1033,9 +1050,8 @@ QWidget* MainWindow::buildProjectPage()
     formPanel->bodyLayout()->addStretch();
 
     auto* summaryPanel = new InfoPanel(QStringLiteral("项目摘要"));
-    auto* summaryGrid = new QGridLayout;
-    summaryGrid->setHorizontalSpacing(12);
-    summaryGrid->setVerticalSpacing(12);
+    auto* summaryList = new QVBoxLayout;
+    summaryList->setSpacing(10);
     auto* pathCard = createCompactSummaryCard(QStringLiteral("项目路径"), QStringLiteral("未打开"), QStringLiteral("当前项目根目录"));
     projectPathSummaryLabel_ = pathCard->findChild<QLabel*>(QStringLiteral("CompactMetricValue"));
     auto* sqliteCard = createCompactSummaryCard(QStringLiteral("SQLite"), QStringLiteral("未连接"), QStringLiteral("项目元数据状态"));
@@ -1046,12 +1062,12 @@ QWidget* MainWindow::buildProjectPage()
     projectTaskSummaryLabel_ = taskCard->findChild<QLabel*>(QStringLiteral("CompactMetricValue"));
     auto* exportCard = createCompactSummaryCard(QStringLiteral("模型导出"), QStringLiteral("0"), QStringLiteral("已记录导出产物"));
     projectExportSummaryLabel_ = exportCard->findChild<QLabel*>(QStringLiteral("CompactMetricValue"));
-    summaryGrid->addWidget(pathCard, 0, 0, 1, 2);
-    summaryGrid->addWidget(sqliteCard, 1, 0);
-    summaryGrid->addWidget(datasetCard, 1, 1);
-    summaryGrid->addWidget(taskCard, 2, 0);
-    summaryGrid->addWidget(exportCard, 2, 1);
-    summaryPanel->bodyLayout()->addLayout(summaryGrid);
+    summaryList->addWidget(pathCard);
+    summaryList->addWidget(sqliteCard);
+    summaryList->addWidget(datasetCard);
+    summaryList->addWidget(taskCard);
+    summaryList->addWidget(exportCard);
+    summaryPanel->bodyLayout()->addLayout(summaryList);
 
     auto* structurePanel = new InfoPanel(QStringLiteral("标准目录结构"));
     auto* structure = new QPlainTextEdit;
@@ -1062,14 +1078,11 @@ QWidget* MainWindow::buildProjectPage()
     structurePanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("项目页只负责创建和打开工作区；训练、导出和推理仍通过 Worker 执行。")));
     summaryPanel->bodyLayout()->addWidget(structurePanel);
 
-    bodySplitter->addWidget(formPanel);
-    bodySplitter->addWidget(summaryPanel);
-    bodySplitter->setStretchFactor(0, 3);
-    bodySplitter->setStretchFactor(1, 4);
-    bodySplitter->setSizes(QList<int>() << 460 << 680);
-
     layout->addWidget(headerPanel);
-    layout->addWidget(bodySplitter, 1);
+    layout->addWidget(formPanel);
+    layout->addWidget(summaryPanel);
+    layout->addStretch();
+    page->setWidget(content);
     updateProjectSummary();
     return page;
 }
@@ -1418,7 +1431,6 @@ QWidget* MainWindow::buildTrainingPage()
     setupScroll->setFrameShape(QFrame::NoFrame);
     setupScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setupScroll->setMinimumWidth(390);
-    setupScroll->setMaximumWidth(520);
 
     auto* monitorPanel = new InfoPanel(QStringLiteral("训练监控"));
     progressBar_ = new QProgressBar;
@@ -1465,9 +1477,9 @@ QWidget* MainWindow::buildTrainingPage()
     auto* bodySplitter = new QSplitter(Qt::Horizontal);
     bodySplitter->addWidget(setupScroll);
     bodySplitter->addWidget(rightSplitter);
-    bodySplitter->setStretchFactor(0, 0);
-    bodySplitter->setStretchFactor(1, 1);
-    bodySplitter->setSizes(QList<int>() << 430 << 780);
+    bodySplitter->setStretchFactor(0, 5);
+    bodySplitter->setStretchFactor(1, 6);
+    bodySplitter->setSizes(QList<int>() << 520 << 620);
 
     layout->addWidget(headerPanel);
     layout->addWidget(bodySplitter, 1);
