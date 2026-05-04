@@ -201,6 +201,34 @@ double averageMs(const QVector<double>& values)
     return total / static_cast<double>(values.size());
 }
 
+QJsonObject fileDigestObject(const QString& path, QString* error)
+{
+    QJsonObject digest;
+    if (path.isEmpty()) {
+        return digest;
+    }
+    const QFileInfo info(path);
+    digest.insert(QStringLiteral("path"), path);
+    digest.insert(QStringLiteral("exists"), info.exists());
+    if (!info.exists() || info.isDir()) {
+        return digest;
+    }
+
+    qint64 size = 0;
+    QString hashError;
+    const QByteArray hash = fileSha256(path, &size, &hashError);
+    if (!hashError.isEmpty()) {
+        if (error) {
+            *error = hashError;
+        }
+        return digest;
+    }
+    digest.insert(QStringLiteral("bytes"), QString::number(size));
+    digest.insert(QStringLiteral("sha256"), QString::fromLatin1(hash));
+    digest.insert(QStringLiteral("updatedAt"), info.lastModified().toUTC().toString(Qt::ISODateWithMs));
+    return digest;
+}
+
 QJsonObject pathArtifact(const QString& kind, const QString& path, const QString& message = QString())
 {
     QJsonObject artifact;
@@ -210,6 +238,83 @@ QJsonObject pathArtifact(const QString& kind, const QString& path, const QString
         artifact.insert(QStringLiteral("message"), message);
     }
     return artifact;
+}
+
+QJsonObject readJsonObjectIfExists(const QString& path)
+{
+    QJsonObject object;
+    QString error;
+    if (path.isEmpty() || !QFileInfo::exists(path) || !readJsonFile(path, &object, &error)) {
+        return {};
+    }
+    return object;
+}
+
+QJsonObject evaluationDeliverySummary(const QString& reportPath)
+{
+    const QJsonObject report = readJsonObjectIfExists(reportPath);
+    if (report.isEmpty()) {
+        return {};
+    }
+    QJsonObject summary;
+    summary.insert(QStringLiteral("reportPath"), reportPath);
+    summary.insert(QStringLiteral("taskType"), report.value(QStringLiteral("taskType")).toString());
+    summary.insert(QStringLiteral("status"), report.value(QStringLiteral("status")).toString(QStringLiteral("completed")));
+    summary.insert(QStringLiteral("scaffold"), report.value(QStringLiteral("scaffold")).toBool());
+    summary.insert(QStringLiteral("metrics"), report.value(QStringLiteral("metrics")).toObject());
+    summary.insert(QStringLiteral("perClassMetricsPath"), report.value(QStringLiteral("perClassMetricsPath")).toString());
+    summary.insert(QStringLiteral("errorSamplesPath"), report.value(QStringLiteral("errorSamplesPath")).toString());
+    summary.insert(QStringLiteral("confusionMatrixPath"), report.value(QStringLiteral("confusionMatrixPath")).toString());
+    summary.insert(QStringLiteral("limitations"), report.value(QStringLiteral("limitations")).toArray());
+    return summary;
+}
+
+QJsonObject benchmarkDeliverySummary(const QString& reportPath)
+{
+    const QJsonObject report = readJsonObjectIfExists(reportPath);
+    if (report.isEmpty()) {
+        return {};
+    }
+    QJsonObject summary;
+    summary.insert(QStringLiteral("reportPath"), reportPath);
+    summary.insert(QStringLiteral("runtime"), report.value(QStringLiteral("runtime")).toString());
+    summary.insert(QStringLiteral("modelFamily"), report.value(QStringLiteral("modelFamily")).toString());
+    summary.insert(QStringLiteral("runtimeStatus"), report.value(QStringLiteral("runtimeStatus")).toString(report.value(QStringLiteral("status")).toString()));
+    summary.insert(QStringLiteral("deploymentConclusion"), report.value(QStringLiteral("deploymentConclusion")).toString());
+    summary.insert(QStringLiteral("timedInference"), report.value(QStringLiteral("timedInference")).toBool());
+    summary.insert(QStringLiteral("latency"), report.value(QStringLiteral("latency")).toObject());
+    summary.insert(QStringLiteral("averageMs"), report.value(QStringLiteral("averageMs")).toDouble());
+    summary.insert(QStringLiteral("p95Ms"), report.value(QStringLiteral("p95Ms")).toDouble());
+    summary.insert(QStringLiteral("throughput"), report.value(QStringLiteral("throughput")).toDouble());
+    summary.insert(QStringLiteral("failureCategory"), report.value(QStringLiteral("failureCategory")).toString());
+    return summary;
+}
+
+QJsonArray deliveryLimitations(const QJsonObject& context, const QJsonObject& evaluationSummary, const QJsonObject& benchmarkSummary)
+{
+    QJsonArray limitations;
+    const QString backend = context.value(QStringLiteral("trainingBackend")).toString();
+    if (backend == QStringLiteral("tiny_linear_detector")
+        || backend == QStringLiteral("python_mock")
+        || context.value(QStringLiteral("scaffold")).toBool()) {
+        limitations.append(QStringLiteral("Scaffold or diagnostic backends are not production YOLO/OCR training capabilities."));
+    }
+    if (evaluationSummary.value(QStringLiteral("scaffold")).toBool()) {
+        limitations.append(QStringLiteral("Evaluation summary includes scaffold or limited metrics; inspect the evaluation report before delivery."));
+    }
+    const QString benchmarkConclusion = benchmarkSummary.value(QStringLiteral("deploymentConclusion")).toString();
+    const QString benchmarkFailure = benchmarkSummary.value(QStringLiteral("failureCategory")).toString();
+    if (benchmarkConclusion == QStringLiteral("hardware-blocked") || benchmarkFailure == QStringLiteral("hardware-blocked")) {
+        limitations.append(QStringLiteral("TensorRT remains hardware-blocked on this machine; RTX / SM 75+ acceptance is required."));
+    }
+    if (context.value(QStringLiteral("taskType")).toString().contains(QStringLiteral("ocr"), Qt::CaseInsensitive)
+        && backend.contains(QStringLiteral("official"), Qt::CaseInsensitive)) {
+        limitations.append(QStringLiteral("PaddleOCR official system path is tool-chain orchestration, not C++ DB ONNX postprocess."));
+    }
+    if (limitations.isEmpty()) {
+        limitations.append(QStringLiteral("No additional delivery limitation was inferred beyond source artifact notes."));
+    }
+    return limitations;
 }
 
 QString snapshotFileRole(const QString& relativePath, const QFileInfo& fileInfo)
@@ -1430,16 +1535,69 @@ QString htmlEscape(QString value)
 
 QString htmlReport(const QJsonObject& context)
 {
+    const QJsonObject evaluation = context.value(QStringLiteral("evaluationSummary")).toObject();
+    const QJsonObject benchmark = context.value(QStringLiteral("benchmarkSummary")).toObject();
+    const QJsonArray inventory = context.value(QStringLiteral("inventory")).toArray();
+    const QJsonArray limitations = context.value(QStringLiteral("limitations")).toArray();
+    const QJsonObject evaluationMetrics = evaluation.value(QStringLiteral("metrics")).toObject();
+    const QJsonObject latency = benchmark.value(QStringLiteral("latency")).toObject();
+
+    QString inventoryRows;
+    for (const QJsonValue& value : inventory) {
+        const QJsonObject item = value.toObject();
+        inventoryRows += QStringLiteral("<tr><td>%1</td><td>%2</td><td>%3</td><td>%4</td></tr>")
+            .arg(htmlEscape(item.value(QStringLiteral("kind")).toString()))
+            .arg(htmlEscape(QDir::toNativeSeparators(item.value(QStringLiteral("path")).toString())))
+            .arg(htmlEscape(item.value(QStringLiteral("bytes")).toString()))
+            .arg(htmlEscape(item.value(QStringLiteral("sha256")).toString().left(12)));
+    }
+    if (inventoryRows.isEmpty()) {
+        inventoryRows = QStringLiteral("<tr><td colspan=\"4\">No delivery artifacts were attached.</td></tr>");
+    }
+
+    QString limitationItems;
+    for (const QJsonValue& value : limitations) {
+        limitationItems += QStringLiteral("<li>%1</li>").arg(htmlEscape(value.toString()));
+    }
+
     QString html;
     html += QStringLiteral("<!doctype html><html><head><meta charset=\"utf-8\"><title>AITrain Delivery Report</title>");
     html += QStringLiteral("<style>body{font-family:Segoe UI,Arial,sans-serif;margin:32px;color:#111827;background:#f4f6f8}"
                            "section{background:white;border:1px solid #d8dee6;border-radius:8px;padding:18px;margin:14px 0}"
+                           "table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid #d8dee6;padding:8px;text-align:left}"
+                           "th{background:#f4f6f8}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}"
+                           ".metric{background:#f9fafb;border:1px solid #d8dee6;border-radius:6px;padding:10px}"
                            "pre{white-space:pre-wrap;background:#111827;color:#f9fafb;padding:14px;border-radius:6px}"
                            "h1,h2{margin:0 0 12px}</style></head><body>");
     html += QStringLiteral("<h1>AITrain Studio Training Delivery Report</h1>");
-    html += QStringLiteral("<section><h2>Summary</h2><p>Generated at %1.</p><p>This report is an offline local delivery artifact. Scaffold or diagnostic backends remain explicitly marked in source artifacts.</p></section>")
-        .arg(htmlEscape(nowIso()));
-    html += QStringLiteral("<section><h2>Context</h2><pre>%1</pre></section>")
+    html += QStringLiteral("<section><h2>Summary</h2><div class=\"grid\">"
+                           "<div class=\"metric\"><b>Project</b><br>%1</div>"
+                           "<div class=\"metric\"><b>Task type</b><br>%2</div>"
+                           "<div class=\"metric\"><b>Backend</b><br>%3</div>"
+                           "<div class=\"metric\"><b>Model</b><br>%4</div>"
+                           "</div><p>Generated at %5. This is an offline local delivery artifact.</p></section>")
+        .arg(htmlEscape(context.value(QStringLiteral("projectName")).toString(QStringLiteral("AITrain Studio"))))
+        .arg(htmlEscape(context.value(QStringLiteral("taskType")).toString()))
+        .arg(htmlEscape(context.value(QStringLiteral("trainingBackend")).toString()))
+        .arg(htmlEscape(QDir::toNativeSeparators(context.value(QStringLiteral("modelPath")).toString())))
+        .arg(htmlEscape(context.value(QStringLiteral("generatedAt")).toString(nowIso())));
+    html += QStringLiteral("<section><h2>Evaluation</h2><pre>%1</pre></section>")
+        .arg(htmlEscape(QString::fromUtf8(QJsonDocument(evaluationMetrics).toJson(QJsonDocument::Indented))));
+    html += QStringLiteral("<section><h2>Benchmark</h2><div class=\"grid\">"
+                           "<div class=\"metric\"><b>Runtime</b><br>%1</div>"
+                           "<div class=\"metric\"><b>Status</b><br>%2</div>"
+                           "<div class=\"metric\"><b>P95</b><br>%3 ms</div>"
+                           "<div class=\"metric\"><b>Throughput</b><br>%4 /s</div>"
+                           "</div></section>")
+        .arg(htmlEscape(benchmark.value(QStringLiteral("runtime")).toString()))
+        .arg(htmlEscape(benchmark.value(QStringLiteral("runtimeStatus")).toString()))
+        .arg(latency.value(QStringLiteral("p95Ms")).toDouble(), 0, 'f', 2)
+        .arg(latency.value(QStringLiteral("throughput")).toDouble(), 0, 'f', 2);
+    html += QStringLiteral("<section><h2>Artifact Inventory</h2><table><thead><tr><th>Kind</th><th>Path</th><th>Bytes</th><th>SHA256</th></tr></thead><tbody>%1</tbody></table></section>")
+        .arg(inventoryRows);
+    html += QStringLiteral("<section><h2>Limitations</h2><ul>%1</ul></section>")
+        .arg(limitationItems);
+    html += QStringLiteral("<section><h2>Machine-readable Context</h2><pre>%1</pre></section>")
         .arg(htmlEscape(QString::fromUtf8(QJsonDocument(context).toJson(QJsonDocument::Indented))));
     html += QStringLiteral("</body></html>");
     return html;
@@ -2859,12 +3017,22 @@ WorkflowResult benchmarkModelReport(const QString& modelPath, const QString& out
         suffix == QStringLiteral("onnx") ? QStringLiteral("onnxruntime") :
         (suffix == QStringLiteral("engine") || suffix == QStringLiteral("plan") ? QStringLiteral("tensorrt") : QStringLiteral("file")));
     if (runtime == QStringLiteral("tensorrt") && !isTensorRtInferenceAvailable()) {
+        QString digestError;
+        const QJsonObject modelDigest = fileDigestObject(modelPath, &digestError);
         QJsonObject blocked;
         blocked.insert(QStringLiteral("ok"), false);
         blocked.insert(QStringLiteral("status"), QStringLiteral("hardware-blocked"));
+        blocked.insert(QStringLiteral("failureCategory"), QStringLiteral("hardware-blocked"));
         blocked.insert(QStringLiteral("modelPath"), modelPath);
+        blocked.insert(QStringLiteral("modelDigest"), modelDigest);
         blocked.insert(QStringLiteral("runtime"), runtime);
+        blocked.insert(QStringLiteral("runtimeUsable"), false);
+        blocked.insert(QStringLiteral("timedInference"), false);
+        blocked.insert(QStringLiteral("deploymentConclusion"), QStringLiteral("hardware-blocked"));
         blocked.insert(QStringLiteral("message"), QStringLiteral("TensorRT benchmark requires a compatible RTX / SM 75+ acceptance machine and runtime."));
+        if (!digestError.isEmpty()) {
+            blocked.insert(QStringLiteral("digestError"), digestError);
+        }
         QString error;
         const QString reportPath = QDir(outputPath).filePath(QStringLiteral("benchmark_report.json"));
         if (!writeJsonFile(reportPath, blocked, &error)) {
@@ -2888,15 +3056,18 @@ WorkflowResult benchmarkModelReport(const QString& modelPath, const QString& out
     QString modelFamily = suffix == QStringLiteral("onnx") ? inferOnnxModelFamily(modelPath) : QStringLiteral("tiny_detector");
     int outputCount = 0;
     bool timedInference = false;
+    QString failureCategory;
 
     const auto runTimedInference = [&]() -> bool {
         if (runtime == QStringLiteral("onnxruntime")) {
             if (!isOnnxRuntimeInferenceAvailable()) {
                 inferenceError = QStringLiteral("ONNX Runtime is not available in this build.");
+                failureCategory = QStringLiteral("runtime-missing");
                 return false;
             }
             if (sampleImagePath.isEmpty() || !QFileInfo::exists(sampleImagePath)) {
                 inferenceError = QStringLiteral("A sample image is required for timed ONNX Runtime benchmark.");
+                failureCategory = QStringLiteral("sample-required");
                 return false;
             }
             DetectionInferenceOptions inferenceOptions;
@@ -2919,6 +3090,7 @@ WorkflowResult benchmarkModelReport(const QString& modelPath, const QString& out
                     modelFamily = QStringLiteral("yolo_detection");
                 }
                 if (!inferenceError.isEmpty()) {
+                    failureCategory = QStringLiteral("unsupported-model");
                     return false;
                 }
                 const double elapsedMs = static_cast<double>(timer.nsecsElapsed()) / 1000000.0;
@@ -2931,14 +3103,17 @@ WorkflowResult benchmarkModelReport(const QString& modelPath, const QString& out
         }
 
         if (runtime == QStringLiteral("file") && sampleImagePath.isEmpty()) {
+            failureCategory = QStringLiteral("sample-required");
             return false;
         }
 
         if (sampleImagePath.isEmpty() || !QFileInfo::exists(sampleImagePath)) {
+            failureCategory = QStringLiteral("sample-required");
             return false;
         }
         DetectionBaselineCheckpoint checkpoint;
         if (!loadDetectionBaselineCheckpoint(modelPath, &checkpoint, &inferenceError)) {
+            failureCategory = QStringLiteral("unsupported-model");
             return false;
         }
         DetectionInferenceOptions inferenceOptions;
@@ -2951,6 +3126,7 @@ WorkflowResult benchmarkModelReport(const QString& modelPath, const QString& out
             timer.start();
             const QVector<DetectionPrediction> predictions = predictDetectionBaseline(checkpoint, sampleImagePath, inferenceOptions, &inferenceError);
             if (!inferenceError.isEmpty()) {
+                failureCategory = QStringLiteral("unsupported-model");
                 return false;
             }
             outputCount = predictions.size();
@@ -2966,11 +3142,15 @@ WorkflowResult benchmarkModelReport(const QString& modelPath, const QString& out
 
     runTimedInference();
 
-    qint64 modelBytes = 0;
-    QString hashError;
-    const QByteArray hash = fileSha256(modelPath, &modelBytes, &hashError);
-    if (!hashError.isEmpty()) {
-        return failedResult(hashError);
+    QString modelDigestError;
+    const QJsonObject modelDigest = fileDigestObject(modelPath, &modelDigestError);
+    if (!modelDigestError.isEmpty()) {
+        return failedResult(modelDigestError);
+    }
+    QString sampleDigestError;
+    const QJsonObject sampleDigest = fileDigestObject(sampleImagePath, &sampleDigestError);
+    if (!sampleDigestError.isEmpty()) {
+        return failedResult(sampleDigestError);
     }
 
     if (!timedInference) {
@@ -2989,6 +3169,26 @@ WorkflowResult benchmarkModelReport(const QString& modelPath, const QString& out
     const double p95 = percentileMs(timings, 95.0);
     const double p99 = percentileMs(timings, 99.0);
     const bool runtimeUsable = timedInference && inferenceError.isEmpty();
+    if (failureCategory.isEmpty() && !runtimeUsable) {
+        failureCategory = runtime == QStringLiteral("file")
+            ? QStringLiteral("metadata-only")
+            : QStringLiteral("unsupported-model");
+    }
+
+    QJsonObject latency;
+    latency.insert(QStringLiteral("averageMs"), avg);
+    latency.insert(QStringLiteral("p50Ms"), p50);
+    latency.insert(QStringLiteral("p95Ms"), p95);
+    latency.insert(QStringLiteral("p99Ms"), p99);
+    latency.insert(QStringLiteral("throughput"), avg > 0.0 ? 1000.0 / avg : 0.0);
+
+    QJsonObject runtimeObject;
+    runtimeObject.insert(QStringLiteral("name"), runtime);
+    runtimeObject.insert(QStringLiteral("provider"), provider);
+    runtimeObject.insert(QStringLiteral("device"), options.value(QStringLiteral("device")).toString(QStringLiteral("cpu")));
+    runtimeObject.insert(QStringLiteral("usable"), runtimeUsable);
+    runtimeObject.insert(QStringLiteral("onnxRuntimeAvailable"), isOnnxRuntimeInferenceAvailable());
+    runtimeObject.insert(QStringLiteral("tensorRt"), tensorRtBackendStatus().toJson());
 
     QJsonObject report;
     report.insert(QStringLiteral("ok"), runtimeUsable || runtime == QStringLiteral("file"));
@@ -3001,6 +3201,9 @@ WorkflowResult benchmarkModelReport(const QString& modelPath, const QString& out
     report.insert(QStringLiteral("provider"), provider);
     report.insert(QStringLiteral("batch"), options.value(QStringLiteral("batch")).toInt(1));
     report.insert(QStringLiteral("inputShape"), options.value(QStringLiteral("inputShape")).toString(QStringLiteral("auto")));
+    report.insert(QStringLiteral("runtimeUsable"), runtimeUsable);
+    report.insert(QStringLiteral("runtimeStatus"), runtimeUsable ? QStringLiteral("available") : failureCategory);
+    report.insert(QStringLiteral("failureCategory"), runtimeUsable ? QStringLiteral("") : failureCategory);
     report.insert(QStringLiteral("warmupIterations"), warmupIterations);
     report.insert(QStringLiteral("iterations"), iterations);
     report.insert(QStringLiteral("averageMs"), avg);
@@ -3008,16 +3211,21 @@ WorkflowResult benchmarkModelReport(const QString& modelPath, const QString& out
     report.insert(QStringLiteral("p95Ms"), p95);
     report.insert(QStringLiteral("p99Ms"), p99);
     report.insert(QStringLiteral("throughput"), avg > 0.0 ? 1000.0 / avg : 0.0);
+    report.insert(QStringLiteral("latency"), latency);
     report.insert(QStringLiteral("outputCount"), outputCount);
     report.insert(QStringLiteral("sampleImagePath"), sampleImagePath);
-    report.insert(QStringLiteral("modelBytes"), QString::number(modelBytes));
-    report.insert(QStringLiteral("sampleHash"), QString::fromLatin1(hash));
+    report.insert(QStringLiteral("modelDigest"), modelDigest);
+    report.insert(QStringLiteral("sampleDigest"), sampleDigest);
+    report.insert(QStringLiteral("modelBytes"), modelDigest.value(QStringLiteral("bytes")).toString());
+    report.insert(QStringLiteral("modelSha256"), modelDigest.value(QStringLiteral("sha256")).toString());
+    report.insert(QStringLiteral("sampleSha256"), sampleDigest.value(QStringLiteral("sha256")).toString());
     report.insert(QStringLiteral("timedInference"), timedInference);
     report.insert(QStringLiteral("scaffold"), !timedInference);
     report.insert(QStringLiteral("status"), timedInference ? QStringLiteral("completed") : QStringLiteral("limited"));
     report.insert(QStringLiteral("deploymentConclusion"), timedInference
         ? QStringLiteral("local-runtime-available")
         : QStringLiteral("input-required-or-runtime-limited"));
+    report.insert(QStringLiteral("runtimeDetails"), runtimeObject);
     report.insert(QStringLiteral("cpuThreads"), QThread::idealThreadCount());
     report.insert(QStringLiteral("onnxRuntimeAvailable"), isOnnxRuntimeInferenceAvailable());
     report.insert(QStringLiteral("tensorRt"), tensorRtBackendStatus().toJson());
@@ -3058,6 +3266,14 @@ WorkflowResult generateTrainingDeliveryReport(const QString& outputPath, const Q
         item.insert(QStringLiteral("isDir"), info.isDir());
         item.insert(QStringLiteral("bytes"), QString::number(info.isDir() ? 0 : info.size()));
         item.insert(QStringLiteral("updatedAt"), info.lastModified().toUTC().toString(Qt::ISODateWithMs));
+        if (!info.isDir()) {
+            QString digestError;
+            const QJsonObject digest = fileDigestObject(path, &digestError);
+            item.insert(QStringLiteral("sha256"), digest.value(QStringLiteral("sha256")).toString());
+            if (!digestError.isEmpty()) {
+                item.insert(QStringLiteral("digestError"), digestError);
+            }
+        }
         inventory.append(item);
     };
     addInventoryPath(QStringLiteral("model"), reportContext.value(QStringLiteral("modelPath")).toString(), QStringLiteral("Selected model artifact"));
@@ -3068,6 +3284,14 @@ WorkflowResult generateTrainingDeliveryReport(const QString& outputPath, const Q
     addInventoryPath(QStringLiteral("export_report"), reportContext.value(QStringLiteral("exportReportPath")).toString(), QStringLiteral("Export report"));
     addInventoryPath(QStringLiteral("inference_predictions"), reportContext.value(QStringLiteral("inferencePredictionsPath")).toString(), QStringLiteral("Inference predictions"));
     addInventoryPath(QStringLiteral("inference_overlay"), reportContext.value(QStringLiteral("inferenceOverlayPath")).toString(), QStringLiteral("Inference overlay"));
+
+    const QJsonObject evaluationSummary = evaluationDeliverySummary(reportContext.value(QStringLiteral("evaluationReportPath")).toString());
+    const QJsonObject benchmarkSummary = benchmarkDeliverySummary(reportContext.value(QStringLiteral("benchmarkReportPath")).toString());
+    const QJsonArray limitations = deliveryLimitations(reportContext, evaluationSummary, benchmarkSummary);
+    reportContext.insert(QStringLiteral("evaluationSummary"), evaluationSummary);
+    reportContext.insert(QStringLiteral("benchmarkSummary"), benchmarkSummary);
+    reportContext.insert(QStringLiteral("limitations"), limitations);
+    reportContext.insert(QStringLiteral("inventory"), inventory);
 
     QJsonObject modelCard;
     modelCard.insert(QStringLiteral("schemaVersion"), 1);
@@ -3086,11 +3310,10 @@ WorkflowResult generateTrainingDeliveryReport(const QString& outputPath, const Q
     modelCard.insert(QStringLiteral("evaluationReportPath"), reportContext.value(QStringLiteral("evaluationReportPath")).toString());
     modelCard.insert(QStringLiteral("benchmarkReportPath"), reportContext.value(QStringLiteral("benchmarkReportPath")).toString());
     modelCard.insert(QStringLiteral("exportPath"), reportContext.value(QStringLiteral("exportPath")).toString());
+    modelCard.insert(QStringLiteral("evaluationSummary"), evaluationSummary);
+    modelCard.insert(QStringLiteral("benchmarkSummary"), benchmarkSummary);
     modelCard.insert(QStringLiteral("inventory"), inventory);
-    modelCard.insert(QStringLiteral("limitations"), QJsonArray{
-        QStringLiteral("Scaffold backends remain explicitly marked and should not be described as real official training."),
-        QStringLiteral("TensorRT acceptance still requires RTX / SM 75+ hardware when runtime reports hardware-blocked.")
-    });
+    modelCard.insert(QStringLiteral("limitations"), limitations);
 
     QString error;
     const QString modelCardPath = QDir(outputPath).filePath(QStringLiteral("model_card.json"));
@@ -3101,6 +3324,7 @@ WorkflowResult generateTrainingDeliveryReport(const QString& outputPath, const Q
     if (!writeJsonFile(inventoryPath, QJsonObject{
             {QStringLiteral("schemaVersion"), 1},
             {QStringLiteral("createdAt"), nowIso()},
+            {QStringLiteral("artifactCount"), inventory.size()},
             {QStringLiteral("items"), inventory}}, &error)) {
         return failedResult(error);
     }

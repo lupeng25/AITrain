@@ -380,7 +380,13 @@ function Invoke-CtestForAcceptanceWorkDir {
         $previousAcceptanceSmokeRoot = $env:AITRAIN_ACCEPTANCE_SMOKE_ROOT
         $env:AITRAIN_ACCEPTANCE_SMOKE_ROOT = $WorkRoot
         try {
-            Invoke-Checked -FilePath "ctest" -Arguments @("--test-dir", (Join-Path $script:Root $BuildDir), "--output-on-failure", "--timeout", "$TimeoutSeconds")
+            try {
+                Invoke-Checked -FilePath "ctest" -Arguments @("--test-dir", (Join-Path $script:Root $BuildDir), "--output-on-failure", "--timeout", "$TimeoutSeconds")
+            } catch {
+                Write-Host "  [warn] CTest failed immediately after smoke training; retrying once after cleanup delay." -ForegroundColor Yellow
+                Start-Sleep -Seconds 5
+                Invoke-Checked -FilePath "ctest" -Arguments @("--test-dir", (Join-Path $script:Root $BuildDir), "--output-on-failure", "--timeout", "$TimeoutSeconds")
+            }
         } finally {
             if ($null -eq $previousAcceptanceSmokeRoot) {
                 Remove-Item Env:\AITRAIN_ACCEPTANCE_SMOKE_ROOT -ErrorAction SilentlyContinue

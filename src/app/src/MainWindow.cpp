@@ -149,6 +149,116 @@ QString backendLabel(const QString& backend)
     return backend;
 }
 
+QJsonObject readJsonObjectFile(const QString& path)
+{
+    if (path.isEmpty()) {
+        return {};
+    }
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return {};
+    }
+    QJsonParseError error;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject()) {
+        return {};
+    }
+    return document.object();
+}
+
+QJsonObject compactEvaluationSummary(const QString& reportPath)
+{
+    const QJsonObject report = readJsonObjectFile(reportPath);
+    if (report.isEmpty()) {
+        return {};
+    }
+    QJsonObject summary;
+    summary.insert(QStringLiteral("reportPath"), reportPath);
+    summary.insert(QStringLiteral("taskType"), report.value(QStringLiteral("taskType")).toString());
+    summary.insert(QStringLiteral("status"), report.value(QStringLiteral("status")).toString(QStringLiteral("completed")));
+    summary.insert(QStringLiteral("scaffold"), report.value(QStringLiteral("scaffold")).toBool());
+    summary.insert(QStringLiteral("metrics"), report.value(QStringLiteral("metrics")).toObject());
+    summary.insert(QStringLiteral("limitations"), report.value(QStringLiteral("limitations")).toArray());
+    return summary;
+}
+
+QJsonObject compactBenchmarkSummary(const QString& reportPath)
+{
+    const QJsonObject report = readJsonObjectFile(reportPath);
+    if (report.isEmpty()) {
+        return {};
+    }
+    QJsonObject summary;
+    summary.insert(QStringLiteral("reportPath"), reportPath);
+    summary.insert(QStringLiteral("runtime"), report.value(QStringLiteral("runtime")).toString());
+    summary.insert(QStringLiteral("modelFamily"), report.value(QStringLiteral("modelFamily")).toString());
+    summary.insert(QStringLiteral("runtimeStatus"), report.value(QStringLiteral("runtimeStatus")).toString(report.value(QStringLiteral("status")).toString()));
+    summary.insert(QStringLiteral("deploymentConclusion"), report.value(QStringLiteral("deploymentConclusion")).toString());
+    summary.insert(QStringLiteral("timedInference"), report.value(QStringLiteral("timedInference")).toBool());
+    summary.insert(QStringLiteral("averageMs"), report.value(QStringLiteral("averageMs")).toDouble());
+    summary.insert(QStringLiteral("p95Ms"), report.value(QStringLiteral("p95Ms")).toDouble());
+    summary.insert(QStringLiteral("throughput"), report.value(QStringLiteral("throughput")).toDouble());
+    summary.insert(QStringLiteral("failureCategory"), report.value(QStringLiteral("failureCategory")).toString());
+    return summary;
+}
+
+QString metricValueText(const QJsonObject& metrics, const QStringList& keys)
+{
+    for (const QString& key : keys) {
+        if (metrics.contains(key)) {
+            return QStringLiteral("%1=%2").arg(key).arg(metrics.value(key).toDouble(), 0, 'f', 4);
+        }
+    }
+    return {};
+}
+
+QString modelSummaryText(const QJsonObject& summary)
+{
+    QStringList parts;
+    const QJsonObject evaluation = summary.value(QStringLiteral("evaluation")).toObject();
+    const QJsonObject metrics = evaluation.value(QStringLiteral("metrics")).toObject();
+    const QString metricText = metricValueText(metrics, {
+        QStringLiteral("mAP50"),
+        QStringLiteral("maskIoU"),
+        QStringLiteral("accuracy"),
+        QStringLiteral("cer")
+    });
+    if (!metricText.isEmpty()) {
+        parts.append(metricText);
+    }
+
+    const QJsonObject benchmark = summary.value(QStringLiteral("benchmark")).toObject();
+    if (!benchmark.isEmpty()) {
+        const QString runtime = benchmark.value(QStringLiteral("runtime")).toString();
+        const double p95 = benchmark.value(QStringLiteral("p95Ms")).toDouble();
+        const double throughput = benchmark.value(QStringLiteral("throughput")).toDouble();
+        if (benchmark.value(QStringLiteral("timedInference")).toBool()) {
+            parts.append(QStringLiteral("%1 p95=%2 ms").arg(runtime.isEmpty() ? QStringLiteral("runtime") : runtime).arg(p95, 0, 'f', 2));
+            parts.append(QStringLiteral("throughput=%1/s").arg(throughput, 0, 'f', 2));
+        } else {
+            const QString status = benchmark.value(QStringLiteral("runtimeStatus")).toString(QStringLiteral("limited"));
+            parts.append(QStringLiteral("%1 %2").arg(runtime.isEmpty() ? QStringLiteral("runtime") : runtime, status));
+        }
+    }
+
+    const QJsonArray limitations = summary.value(QStringLiteral("limitations")).toArray();
+    if (!limitations.isEmpty()) {
+        parts.append(uiText("限制 %1 项").arg(limitations.size()));
+    }
+
+    if (!parts.isEmpty()) {
+        return parts.join(QStringLiteral(" | "));
+    }
+
+    QStringList fallback;
+    for (auto it = summary.constBegin(); it != summary.constEnd() && fallback.size() < 4; ++it) {
+        if (it.value().isDouble()) {
+            fallback.append(QStringLiteral("%1=%2").arg(it.key()).arg(it.value().toDouble(), 0, 'f', 4));
+        }
+    }
+    return fallback.isEmpty() ? QString::fromUtf8(QJsonDocument(summary).toJson(QJsonDocument::Compact)) : fallback.join(QStringLiteral(", "));
+}
+
 QString exportComboLabel(const QString& format)
 {
     if (format == QStringLiteral("onnx")) {
@@ -231,6 +341,9 @@ QString environmentStatusLabel(const QString& status)
 {
     if (status == QStringLiteral("ok")) {
         return uiText("通过");
+    }
+    if (status == QStringLiteral("hardware-blocked")) {
+        return uiText("硬件受限");
     }
     if (status == QStringLiteral("warning")) {
         return uiText("警告");
@@ -1718,7 +1831,7 @@ QWidget* MainWindow::buildModelRegistryPage()
         << QStringLiteral("Checkpoint")
         << QStringLiteral("ONNX")
         << QStringLiteral("来源任务")
-        << QStringLiteral("指标")
+        << QStringLiteral("交付摘要")
         << QStringLiteral("更新时间"));
     configureTable(modelVersionTable_);
     modelPanel->bodyLayout()->addWidget(modelVersionTable_);
@@ -3819,12 +3932,42 @@ void MainWindow::registerPipelineModelVersion(const QJsonObject& payload)
 
     QJsonObject metricSummary;
     const QString evaluationReportPath = payload.value(QStringLiteral("evaluationReportPath")).toString();
-    if (!evaluationReportPath.isEmpty()) {
-        QFile reportFile(evaluationReportPath);
-        if (reportFile.open(QIODevice::ReadOnly)) {
-            const QJsonObject report = QJsonDocument::fromJson(reportFile.readAll()).object();
-            metricSummary = report.value(QStringLiteral("metrics")).toObject();
-        }
+    const QString benchmarkReportPath = payload.value(QStringLiteral("benchmarkReportPath")).toString();
+    const QString deliveryReportPath = payload.value(QStringLiteral("deliveryReportPath")).toString();
+    const QJsonObject evaluationSummary = compactEvaluationSummary(evaluationReportPath);
+    const QJsonObject benchmarkSummary = compactBenchmarkSummary(benchmarkReportPath);
+    if (!evaluationSummary.isEmpty()) {
+        metricSummary.insert(QStringLiteral("evaluation"), evaluationSummary);
+    }
+    if (!benchmarkSummary.isEmpty()) {
+        metricSummary.insert(QStringLiteral("benchmark"), benchmarkSummary);
+    }
+    metricSummary.insert(QStringLiteral("lineage"), QJsonObject{
+        {QStringLiteral("sourceTaskId"), sourceTaskId},
+        {QStringLiteral("datasetSnapshotId"), payload.value(QStringLiteral("datasetSnapshotId")).toInt()},
+        {QStringLiteral("trainingBackend"), options.value(QStringLiteral("trainingBackend")).toString()},
+        {QStringLiteral("modelPreset"), options.value(QStringLiteral("model")).toString()}
+    });
+    metricSummary.insert(QStringLiteral("artifacts"), QJsonObject{
+        {QStringLiteral("modelPath"), modelPath},
+        {QStringLiteral("checkpointPath"), payload.value(QStringLiteral("modelPath")).toString()},
+        {QStringLiteral("exportPath"), exportPath},
+        {QStringLiteral("evaluationReportPath"), evaluationReportPath},
+        {QStringLiteral("benchmarkReportPath"), benchmarkReportPath},
+        {QStringLiteral("deliveryReportPath"), deliveryReportPath}
+    });
+    QJsonArray limitations;
+    const QString backendForLimit = options.value(QStringLiteral("trainingBackend")).toString();
+    if (backendForLimit == QStringLiteral("tiny_linear_detector")
+        || backendForLimit == QStringLiteral("python_mock")) {
+        limitations.append(QStringLiteral("scaffold-or-diagnostic-backend"));
+    }
+    if (benchmarkSummary.value(QStringLiteral("failureCategory")).toString() == QStringLiteral("hardware-blocked")
+        || benchmarkSummary.value(QStringLiteral("deploymentConclusion")).toString() == QStringLiteral("hardware-blocked")) {
+        limitations.append(QStringLiteral("tensorrt-hardware-blocked"));
+    }
+    if (!limitations.isEmpty()) {
+        metricSummary.insert(QStringLiteral("limitations"), limitations);
     }
 
     const QString backend = options.value(QStringLiteral("trainingBackend")).toString();
@@ -3912,15 +4055,10 @@ void MainWindow::updateModelRegistry()
                 modelVersionTable_->setItem(row, 4, onnxItem);
                 modelVersionTable_->setItem(row, 5, new QTableWidgetItem(model.sourceTaskId.left(8)));
 
-                QString metricsText = model.metricsJson;
                 const QJsonObject metrics = QJsonDocument::fromJson(model.metricsJson.toUtf8()).object();
-                if (!metrics.isEmpty()) {
-                    QStringList pairs;
-                    for (auto it = metrics.constBegin(); it != metrics.constEnd() && pairs.size() < 4; ++it) {
-                        pairs.append(QStringLiteral("%1=%2").arg(it.key()).arg(it.value().toDouble()));
-                    }
-                    metricsText = pairs.join(QStringLiteral(", "));
-                }
+                const QString metricsText = metrics.isEmpty()
+                    ? model.metricsJson
+                    : modelSummaryText(metrics);
                 modelVersionTable_->setItem(row, 6, new QTableWidgetItem(metricsText));
                 modelVersionTable_->setItem(row, 7, new QTableWidgetItem(model.updatedAt.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))));
             }
@@ -4621,18 +4759,15 @@ void MainWindow::updateEnvironmentTable(const QJsonObject& payload)
 
     bool hasMissing = false;
     bool hasWarning = false;
-    environmentTable_->setRowCount(0);
-    for (const QJsonValue& value : checks) {
-        const QJsonObject check = value.toObject();
-        const QString name = check.value(QStringLiteral("name")).toString();
-        const QString status = check.value(QStringLiteral("status")).toString();
-        const QString message = check.value(QStringLiteral("message")).toString();
+    const auto markStatus = [&hasMissing, &hasWarning](const QString& status) {
         if (status == QStringLiteral("missing")) {
             hasMissing = true;
-        } else if (status == QStringLiteral("warning")) {
+        } else if (status == QStringLiteral("warning") || status == QStringLiteral("hardware-blocked")) {
             hasWarning = true;
         }
-
+    };
+    const auto appendRow = [this, &payload, &markStatus](const QString& name, const QString& status, const QString& message, const QJsonObject& details = {}) {
+        markStatus(status);
         const int row = environmentTable_->rowCount();
         environmentTable_->insertRow(row);
         environmentTable_->setItem(row, 0, new QTableWidgetItem(name));
@@ -4646,10 +4781,54 @@ void MainWindow::updateEnvironmentTable(const QJsonObject& payload)
             record.name = name;
             record.status = status;
             record.message = message;
-            record.detailsJson = QString::fromUtf8(QJsonDocument(check.value(QStringLiteral("details")).toObject()).toJson(QJsonDocument::Compact));
+            if (!details.isEmpty()) {
+                record.detailsJson = QString::fromUtf8(QJsonDocument(details).toJson(QJsonDocument::Compact));
+            }
             record.checkedAt = QDateTime::fromString(payload.value(QStringLiteral("checkedAt")).toString(), Qt::ISODateWithMs);
             QString error;
             repository_.insertEnvironmentCheck(record, &error);
+        }
+    };
+
+    environmentTable_->setRowCount(0);
+    for (const QJsonValue& value : checks) {
+        const QJsonObject check = value.toObject();
+        const QString name = check.value(QStringLiteral("name")).toString();
+        const QString status = check.value(QStringLiteral("status")).toString();
+        const QString message = check.value(QStringLiteral("message")).toString();
+        appendRow(name, status, message, check.value(QStringLiteral("details")).toObject());
+    }
+
+    const QJsonObject profiles = payload.value(QStringLiteral("profiles")).toObject();
+    for (auto it = profiles.constBegin(); it != profiles.constEnd(); ++it) {
+        const QJsonObject profile = it.value().toObject();
+        const QString title = profile.value(QStringLiteral("title")).toString(it.key());
+        const QString status = profile.value(QStringLiteral("status")).toString(QStringLiteral("warning"));
+        const QJsonArray repairHints = profile.value(QStringLiteral("repairHints")).toArray();
+        QStringList hintText;
+        for (const QJsonValue& value : repairHints) {
+            const QString text = value.toString().trimmed();
+            if (!text.isEmpty()) {
+                hintText.append(text);
+            }
+        }
+        if (hintText.isEmpty()) {
+            hintText.append(uiText("暂无修复建议。"));
+        }
+        appendRow(
+            QStringLiteral("Profile / %1").arg(title),
+            status,
+            hintText.join(QStringLiteral(" | ")),
+            profile);
+
+        const QJsonArray profileChecks = profile.value(QStringLiteral("checks")).toArray();
+        for (const QJsonValue& checkValue : profileChecks) {
+            const QJsonObject check = checkValue.toObject();
+            appendRow(
+                QStringLiteral("%1 / %2").arg(title, check.value(QStringLiteral("name")).toString()),
+                check.value(QStringLiteral("status")).toString(QStringLiteral("warning")),
+                check.value(QStringLiteral("message")).toString(),
+                check.value(QStringLiteral("details")).toObject());
         }
     }
 
@@ -4659,25 +4838,7 @@ void MainWindow::updateEnvironmentTable(const QJsonObject& payload)
         const QString message = pluginCount > 0
             ? uiText("已加载 %1 个 AITrain 插件。").arg(pluginCount)
             : uiText("未加载 AITrain 插件，请检查 plugins/models 目录。");
-        if (status == QStringLiteral("warning")) {
-            hasWarning = true;
-        }
-        const int row = environmentTable_->rowCount();
-        environmentTable_->insertRow(row);
-        environmentTable_->setItem(row, 0, new QTableWidgetItem(uiText("AITrain Plugins")));
-        auto* statusItem = new QTableWidgetItem(environmentStatusLabel(status));
-        statusItem->setData(Qt::UserRole, status);
-        environmentTable_->setItem(row, 1, statusItem);
-        environmentTable_->setItem(row, 2, new QTableWidgetItem(message));
-        if (repository_.isOpen()) {
-            aitrain::EnvironmentCheckRecord record;
-            record.name = uiText("AITrain Plugins");
-            record.status = status;
-            record.message = message;
-            record.checkedAt = QDateTime::fromString(payload.value(QStringLiteral("checkedAt")).toString(), Qt::ISODateWithMs);
-            QString error;
-            repository_.insertEnvironmentCheck(record, &error);
-        }
+        appendRow(uiText("AITrain Plugins"), status, message);
     }
 
     const StatusPill::Tone tone = hasMissing ? StatusPill::Tone::Error : (hasWarning ? StatusPill::Tone::Warning : StatusPill::Tone::Success);
@@ -5023,12 +5184,16 @@ void MainWindow::updateEnvironmentSummary()
     int ok = 0;
     int warning = 0;
     int missing = 0;
+    int blocked = 0;
     int unchecked = 0;
     if (environmentTable_) {
         for (int row = 0; row < environmentTable_->rowCount(); ++row) {
             const QString state = environmentTable_->item(row, 1) ? environmentTable_->item(row, 1)->data(Qt::UserRole).toString() : QString();
             if (state == QStringLiteral("ok")) {
                 ++ok;
+            } else if (state == QStringLiteral("hardware-blocked")) {
+                ++warning;
+                ++blocked;
             } else if (state == QStringLiteral("warning")) {
                 ++warning;
             } else if (state == QStringLiteral("missing")) {
@@ -5054,7 +5219,10 @@ void MainWindow::updateEnvironmentSummary()
         if (missing > 0) {
             environmentConsoleStatusLabel_->setText(uiText("发现 %1 项缺失，相关能力会被阻塞。").arg(missing));
         } else if (warning > 0) {
-            environmentConsoleStatusLabel_->setText(uiText("发现 %1 项警告，可继续但需要关注。").arg(warning));
+            environmentConsoleStatusLabel_->setText(
+                blocked > 0
+                    ? uiText("发现 %1 项警告（其中 %2 项硬件受限），可继续但需要关注。").arg(warning).arg(blocked)
+                    : uiText("发现 %1 项警告，可继续但需要关注。").arg(warning));
         } else if (unchecked > 0) {
             environmentConsoleStatusLabel_->setText(uiText("尚有 %1 项未检测。").arg(unchecked));
         } else {
@@ -5120,7 +5288,7 @@ void MainWindow::updateDashboardSummary()
             const QString state = environmentTable_->item(row, 1) ? environmentTable_->item(row, 1)->data(Qt::UserRole).toString() : QString();
             hasChecked = hasChecked || !state.isEmpty();
             hasMissing = hasMissing || state == QStringLiteral("missing");
-            hasWarning = hasWarning || state == QStringLiteral("warning");
+            hasWarning = hasWarning || state == QStringLiteral("warning") || state == QStringLiteral("hardware-blocked");
         }
         if (hasChecked) {
             environmentText = hasMissing ? uiText("缺失")

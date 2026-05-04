@@ -817,20 +817,60 @@ private slots:
 
         const aitrain::WorkflowResult benchmark = aitrain::benchmarkModelReport(
             modelPath,
-            QDir(outputRoot).filePath(QStringLiteral("benchmark")));
+            QDir(outputRoot).filePath(QStringLiteral("benchmark")),
+            QJsonObject{
+                {QStringLiteral("datasetPath"), datasetRoot},
+                {QStringLiteral("warmupIterations"), 0},
+                {QStringLiteral("iterations"), 2}
+            });
         QVERIFY2(benchmark.ok, qPrintable(benchmark.error));
         QVERIFY(QFileInfo::exists(benchmark.reportPath));
         QVERIFY(benchmark.payload.contains(QStringLiteral("averageMs")));
+        QVERIFY(benchmark.payload.value(QStringLiteral("timedInference")).toBool());
+        QVERIFY(benchmark.payload.value(QStringLiteral("runtimeUsable")).toBool());
+        QVERIFY(!benchmark.payload.value(QStringLiteral("modelSha256")).toString().isEmpty());
+        QVERIFY(benchmark.payload.value(QStringLiteral("modelDigest")).toObject().contains(QStringLiteral("sha256")));
+        QVERIFY(benchmark.payload.value(QStringLiteral("sampleDigest")).toObject().contains(QStringLiteral("sha256")));
+        QVERIFY(benchmark.payload.value(QStringLiteral("latency")).toObject().contains(QStringLiteral("p95Ms")));
+        QCOMPARE(benchmark.payload.value(QStringLiteral("deploymentConclusion")).toString(), QStringLiteral("local-runtime-available"));
 
         const aitrain::WorkflowResult delivery = aitrain::generateTrainingDeliveryReport(
             QDir(outputRoot).filePath(QStringLiteral("delivery")),
-            QJsonObject{{QStringLiteral("projectName"), QStringLiteral("demo")}});
+            QJsonObject{
+                {QStringLiteral("projectName"), QStringLiteral("demo")},
+                {QStringLiteral("modelPath"), modelPath},
+                {QStringLiteral("taskType"), QStringLiteral("detection")},
+                {QStringLiteral("trainingBackend"), QStringLiteral("tiny_linear_detector")},
+                {QStringLiteral("evaluationReportPath"), evaluation.reportPath},
+                {QStringLiteral("benchmarkReportPath"), benchmark.reportPath}
+            });
         QVERIFY2(delivery.ok, qPrintable(delivery.error));
         QVERIFY(QFileInfo::exists(delivery.reportPath));
         QVERIFY(delivery.reportPath.endsWith(QStringLiteral(".html")));
         QVERIFY(!delivery.payload.value(QStringLiteral("scaffold")).toBool());
-        QVERIFY(QFileInfo::exists(delivery.payload.value(QStringLiteral("modelCardPath")).toString()));
-        QVERIFY(QFileInfo::exists(delivery.payload.value(QStringLiteral("artifactInventoryPath")).toString()));
+        const QString modelCardPath = delivery.payload.value(QStringLiteral("modelCardPath")).toString();
+        const QString inventoryPath = delivery.payload.value(QStringLiteral("artifactInventoryPath")).toString();
+        QVERIFY(QFileInfo::exists(modelCardPath));
+        QVERIFY(QFileInfo::exists(inventoryPath));
+        QVERIFY(delivery.payload.value(QStringLiteral("evaluationSummary")).toObject().contains(QStringLiteral("metrics")));
+        QVERIFY(delivery.payload.value(QStringLiteral("benchmarkSummary")).toObject().contains(QStringLiteral("latency")));
+        QVERIFY(!delivery.payload.value(QStringLiteral("limitations")).toArray().isEmpty());
+        QFile modelCardFile(modelCardPath);
+        QVERIFY(modelCardFile.open(QIODevice::ReadOnly));
+        const QJsonObject modelCard = QJsonDocument::fromJson(modelCardFile.readAll()).object();
+        QVERIFY(modelCard.value(QStringLiteral("evaluationSummary")).toObject().contains(QStringLiteral("metrics")));
+        QVERIFY(modelCard.value(QStringLiteral("benchmarkSummary")).toObject().contains(QStringLiteral("latency")));
+        QFile inventoryFile(inventoryPath);
+        QVERIFY(inventoryFile.open(QIODevice::ReadOnly));
+        const QJsonArray inventory = QJsonDocument::fromJson(inventoryFile.readAll()).object().value(QStringLiteral("items")).toArray();
+        QVERIFY(!inventory.isEmpty());
+        bool sawModelHash = false;
+        for (const QJsonValue& value : inventory) {
+            const QJsonObject item = value.toObject();
+            sawModelHash = sawModelHash || (item.value(QStringLiteral("kind")).toString() == QStringLiteral("model")
+                && !item.value(QStringLiteral("sha256")).toString().isEmpty());
+        }
+        QVERIFY(sawModelHash);
 
         QJsonObject pipelineOptions;
         pipelineOptions.insert(QStringLiteral("datasetPath"), datasetRoot);
@@ -3233,7 +3273,17 @@ private slots:
         bool sawUltralytics = false;
         bool sawPaddleOcr = false;
         bool sawPaddle = false;
+        bool sawProfiles = false;
+        bool sawYoloProfile = false;
+        bool sawOcrProfile = false;
+        bool sawTensorRtProfile = false;
+        bool sawProfileArtifact = false;
         for (const auto& message : messages) {
+            if (message.first == QStringLiteral("artifact")
+                && message.second.value(QStringLiteral("kind")).toString() == QStringLiteral("environment_profiles_report")) {
+                sawProfileArtifact = true;
+                QVERIFY(!message.second.value(QStringLiteral("path")).toString().isEmpty());
+            }
             if (message.first != QStringLiteral("environmentCheck")) {
                 continue;
             }
@@ -3246,11 +3296,39 @@ private slots:
                 sawPaddleOcr = sawPaddleOcr || name == QStringLiteral("PaddleOCR");
                 sawPaddle = sawPaddle || name == QStringLiteral("PaddlePaddle");
             }
+
+            const QJsonObject profiles = message.second.value(QStringLiteral("profiles")).toObject();
+            sawProfiles = !profiles.isEmpty();
+            const auto validateProfile = [](const QJsonObject& profile) {
+                QVERIFY(!profile.value(QStringLiteral("status")).toString().isEmpty());
+                QVERIFY(profile.value(QStringLiteral("checks")).isArray());
+                QVERIFY(profile.value(QStringLiteral("repairHints")).isArray());
+            };
+            const QJsonObject yolo = profiles.value(QStringLiteral("yolo")).toObject();
+            const QJsonObject ocr = profiles.value(QStringLiteral("ocr")).toObject();
+            const QJsonObject tensorrt = profiles.value(QStringLiteral("tensorrt")).toObject();
+            if (!yolo.isEmpty()) {
+                sawYoloProfile = true;
+                validateProfile(yolo);
+            }
+            if (!ocr.isEmpty()) {
+                sawOcrProfile = true;
+                validateProfile(ocr);
+            }
+            if (!tensorrt.isEmpty()) {
+                sawTensorRtProfile = true;
+                validateProfile(tensorrt);
+            }
         }
         QVERIFY(sawPython);
         QVERIFY(sawUltralytics);
         QVERIFY(sawPaddleOcr);
         QVERIFY(sawPaddle);
+        QVERIFY(sawProfiles);
+        QVERIFY(sawYoloProfile);
+        QVERIFY(sawOcrProfile);
+        QVERIFY(sawTensorRtProfile);
+        QVERIFY(sawProfileArtifact);
     }
 
     void paddleOcrDatasetValidation()

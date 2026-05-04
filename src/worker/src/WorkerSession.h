@@ -47,6 +47,7 @@ private:
     bool forwardPythonTrainerLine(const QByteArray& line, bool* terminalMessageSeen);
     void emitDetectionPreviewArtifacts(const QString& checkpointPath);
     void send(const QString& type, const QJsonObject& payload);
+    void finishSession();
     void fail(const QString& message);
     void complete();
 

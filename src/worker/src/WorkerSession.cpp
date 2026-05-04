@@ -244,6 +244,250 @@ QJsonObject pythonModuleCheck(const QString& executable, const QString& displayN
         missingMessage);
 }
 
+QJsonObject profileCheck(const QString& name, const QString& status, const QString& message, const QJsonObject& details = {})
+{
+    QJsonObject object;
+    object.insert(QStringLiteral("name"), name);
+    object.insert(QStringLiteral("status"), status);
+    object.insert(QStringLiteral("message"), message);
+    object.insert(QStringLiteral("details"), details);
+    return object;
+}
+
+QJsonObject makeProfile(const QString& id, const QString& title, const QJsonArray& checks, const QJsonArray& repairHints)
+{
+    bool hasMissing = false;
+    bool hasWarning = false;
+    bool hasBlocked = false;
+    for (const QJsonValue& value : checks) {
+        const QString status = value.toObject().value(QStringLiteral("status")).toString();
+        hasMissing = hasMissing || status == QStringLiteral("missing");
+        hasWarning = hasWarning || status == QStringLiteral("warning");
+        hasBlocked = hasBlocked || status == QStringLiteral("hardware-blocked");
+    }
+
+    QString status = QStringLiteral("ok");
+    if (hasBlocked) {
+        status = QStringLiteral("hardware-blocked");
+    } else if (hasMissing) {
+        status = QStringLiteral("missing");
+    } else if (hasWarning) {
+        status = QStringLiteral("warning");
+    }
+
+    QJsonObject profile;
+    profile.insert(QStringLiteral("id"), id);
+    profile.insert(QStringLiteral("title"), title);
+    profile.insert(QStringLiteral("status"), status);
+    profile.insert(QStringLiteral("checks"), checks);
+    profile.insert(QStringLiteral("repairHints"), repairHints);
+    return profile;
+}
+
+QJsonObject runModuleProbe(const QString& pythonExecutable, const QString& checkName, const QString& moduleName, const QString& hint)
+{
+    if (pythonExecutable.isEmpty()) {
+        return profileCheck(checkName, QStringLiteral("missing"), QStringLiteral("Python executable is unavailable."));
+    }
+
+    QProcess process;
+    process.start(pythonExecutable, QStringList()
+        << QStringLiteral("-c")
+        << QStringLiteral("import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('%1') else 3)").arg(moduleName));
+    if (!process.waitForStarted(2000) || !process.waitForFinished(5000)) {
+        return profileCheck(checkName, QStringLiteral("warning"), QStringLiteral("Unable to probe module availability quickly."));
+    }
+    if (process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0) {
+        return profileCheck(checkName, QStringLiteral("ok"), QStringLiteral("Available."));
+    }
+    return profileCheck(checkName, QStringLiteral("missing"), hint);
+}
+
+QJsonObject yoloEnvironmentProfile(const QString& pythonExecutable)
+{
+    QJsonArray checks;
+    QJsonArray repairHints;
+
+    if (pythonExecutable.isEmpty()) {
+        checks.append(profileCheck(
+            QStringLiteral("pythonExecutable"),
+            QStringLiteral("missing"),
+            QStringLiteral("No usable Python executable was found for YOLO official backends.")));
+        repairHints.append(QStringLiteral("Set training parameter `pythonExecutable` or environment variable `AITRAIN_PYTHON_EXECUTABLE` to a valid Python path."));
+        repairHints.append(QStringLiteral("Use local embed Python under `.deps/python-3.13.13-embed-amd64/python.exe` when available."));
+    } else {
+        checks.append(profileCheck(
+            QStringLiteral("pythonExecutable"),
+            QStringLiteral("ok"),
+            QStringLiteral("Python executable is available."),
+            QJsonObject{{QStringLiteral("path"), pythonExecutable}}));
+    }
+
+    checks.append(runModuleProbe(
+        pythonExecutable,
+        QStringLiteral("ultralytics"),
+        QStringLiteral("ultralytics"),
+        QStringLiteral("Ultralytics is missing; official YOLO detection/segmentation training will be unavailable.")));
+    checks.append(runModuleProbe(
+        pythonExecutable,
+        QStringLiteral("torch"),
+        QStringLiteral("torch"),
+        QStringLiteral("PyTorch is missing; official Ultralytics YOLO training requires torch.")));
+    checks.append(runModuleProbe(
+        pythonExecutable,
+        QStringLiteral("onnx"),
+        QStringLiteral("onnx"),
+        QStringLiteral("onnx package is missing; ONNX export validation may fail.")));
+    checks.append(runModuleProbe(
+        pythonExecutable,
+        QStringLiteral("onnxruntime"),
+        QStringLiteral("onnxruntime"),
+        QStringLiteral("onnxruntime package is missing; Python-side ONNX runtime checks may fail.")));
+
+    repairHints.append(QStringLiteral("Install YOLO profile packages in selected Python: `pip install ultralytics onnx onnxruntime`."));
+    repairHints.append(QStringLiteral("Keep official YOLO training in Worker-managed Python subprocesses; avoid GUI-embedded Python."));
+
+    return makeProfile(QStringLiteral("yolo"), QStringLiteral("YOLO Profile"), checks, repairHints);
+}
+
+QJsonObject ocrEnvironmentProfile(const QString& pythonExecutable)
+{
+    QJsonArray checks;
+    QJsonArray repairHints;
+
+    const QString isolatedOcrPython = QString::fromLocal8Bit(qgetenv("AITRAIN_OCR_PYTHON_EXECUTABLE")).trimmed();
+    if (isolatedOcrPython.isEmpty()) {
+        checks.append(profileCheck(
+            QStringLiteral("isolatedOcrPython"),
+            QStringLiteral("warning"),
+            QStringLiteral("No isolated OCR Python is configured via AITRAIN_OCR_PYTHON_EXECUTABLE.")));
+        repairHints.append(QStringLiteral("Set `AITRAIN_OCR_PYTHON_EXECUTABLE` to isolated OCR Python for PaddleOCR official workflows."));
+    } else {
+        checks.append(profileCheck(
+            QStringLiteral("isolatedOcrPython"),
+            QStringLiteral("ok"),
+            QStringLiteral("Isolated OCR Python is configured."),
+            QJsonObject{{QStringLiteral("path"), isolatedOcrPython}}));
+    }
+
+    const QString activePython = !isolatedOcrPython.isEmpty() ? isolatedOcrPython : pythonExecutable;
+    if (activePython.isEmpty()) {
+        checks.append(profileCheck(
+            QStringLiteral("pythonExecutable"),
+            QStringLiteral("missing"),
+            QStringLiteral("No usable Python executable is available for OCR checks.")));
+    } else {
+        checks.append(profileCheck(
+            QStringLiteral("pythonExecutable"),
+            QStringLiteral("ok"),
+            QStringLiteral("Python executable is available for OCR profile checks."),
+            QJsonObject{{QStringLiteral("path"), activePython}}));
+    }
+
+    checks.append(runModuleProbe(
+        activePython,
+        QStringLiteral("paddle"),
+        QStringLiteral("paddle"),
+        QStringLiteral("PaddlePaddle is missing; official OCR adapters will be unavailable.")));
+    checks.append(runModuleProbe(
+        activePython,
+        QStringLiteral("paddleocr"),
+        QStringLiteral("paddleocr"),
+        QStringLiteral("PaddleOCR is missing; official OCR adapters will be unavailable.")));
+
+    const QString sourceRoot = QString::fromLocal8Bit(qgetenv("AITRAIN_PADDLEOCR_SOURCE_ROOT")).trimmed();
+    if (sourceRoot.isEmpty()) {
+        checks.append(profileCheck(
+            QStringLiteral("paddleOcrSourceCheckout"),
+            QStringLiteral("warning"),
+            QStringLiteral("PaddleOCR source checkout path is not configured (AITRAIN_PADDLEOCR_SOURCE_ROOT).")));
+    } else {
+        const bool trainScriptExists = QFileInfo::exists(QDir(sourceRoot).filePath(QStringLiteral("tools/train.py")));
+        checks.append(profileCheck(
+            QStringLiteral("paddleOcrSourceCheckout"),
+            trainScriptExists ? QStringLiteral("ok") : QStringLiteral("warning"),
+            trainScriptExists
+                ? QStringLiteral("PaddleOCR source checkout is ready.")
+                : QStringLiteral("PaddleOCR source checkout is configured but tools/train.py was not found."),
+            QJsonObject{{QStringLiteral("path"), sourceRoot}}));
+    }
+
+    const bool smokeScriptReady = QFileInfo::exists(QDir::current().filePath(QStringLiteral("tools/phase16-ocr-official-smoke.ps1")));
+    checks.append(profileCheck(
+        QStringLiteral("officialSmokeScript"),
+        smokeScriptReady ? QStringLiteral("ok") : QStringLiteral("missing"),
+        smokeScriptReady
+            ? QStringLiteral("Official OCR smoke script is available.")
+            : QStringLiteral("Official OCR smoke script is missing.")));
+
+    checks.append(profileCheck(
+        QStringLiteral("torchPaddleConflictRisk"),
+        QStringLiteral("warning"),
+        QStringLiteral("Mixed Torch/Paddle environments may have DLL conflicts. Prefer isolated OCR Python for official OCR workflows.")));
+
+    repairHints.append(QStringLiteral("Use isolated OCR Python and run `tools/phase16-ocr-official-smoke.ps1` to verify official OCR chain."));
+    repairHints.append(QStringLiteral("If Torch/Paddle DLL conflicts appear, separate YOLO and OCR environments."));
+
+    return makeProfile(QStringLiteral("ocr"), QStringLiteral("OCR Profile"), checks, repairHints);
+}
+
+QJsonObject tensorRtEnvironmentProfile(const QJsonArray& baseChecks)
+{
+    QJsonArray checks;
+    QJsonArray repairHints;
+
+    const auto findBaseCheck = [&baseChecks](const QString& name) {
+        for (const QJsonValue& value : baseChecks) {
+            const QJsonObject check = value.toObject();
+            if (check.value(QStringLiteral("name")).toString() == name) {
+                return check;
+            }
+        }
+        return QJsonObject{};
+    };
+
+    const QJsonObject nvidia = findBaseCheck(QStringLiteral("NVIDIA Driver"));
+    const QJsonObject cudaRuntime = findBaseCheck(QStringLiteral("CUDA Runtime"));
+    const QJsonObject cudnn = findBaseCheck(QStringLiteral("cuDNN"));
+    const QJsonObject tensorRt = findBaseCheck(QStringLiteral("TensorRT"));
+    checks.append(profileCheck(
+        QStringLiteral("nvidiaDriver"),
+        nvidia.value(QStringLiteral("status")).toString(QStringLiteral("warning")),
+        nvidia.value(QStringLiteral("message")).toString()));
+    checks.append(profileCheck(
+        QStringLiteral("cudaRuntime"),
+        cudaRuntime.value(QStringLiteral("status")).toString(QStringLiteral("warning")),
+        cudaRuntime.value(QStringLiteral("message")).toString()));
+    checks.append(profileCheck(
+        QStringLiteral("cuDnn"),
+        cudnn.value(QStringLiteral("status")).toString(QStringLiteral("warning")),
+        cudnn.value(QStringLiteral("message")).toString()));
+    checks.append(profileCheck(
+        QStringLiteral("tensorRtDll"),
+        tensorRt.value(QStringLiteral("status")).toString(QStringLiteral("warning")),
+        tensorRt.value(QStringLiteral("message")).toString()));
+
+    const aitrain::TensorRtBackendStatus backend = aitrain::tensorRtBackendStatus();
+    QJsonObject backendDetails = backend.toJson();
+    QString hardwareStatus = backend.inferenceAvailable ? QStringLiteral("ok") : QStringLiteral("warning");
+    QString hardwareMessage = backend.message;
+    if (hardwareMessage.contains(QStringLiteral("SM 61"), Qt::CaseInsensitive)
+        || hardwareMessage.contains(QStringLiteral("not supported"), Qt::CaseInsensitive)) {
+        hardwareStatus = QStringLiteral("hardware-blocked");
+        hardwareMessage = QStringLiteral("TensorRT is hardware-blocked on the current GPU. Use RTX / SM 75+ for acceptance.");
+    }
+    checks.append(profileCheck(
+        QStringLiteral("sm75Acceptance"),
+        hardwareStatus,
+        hardwareMessage,
+        backendDetails));
+
+    repairHints.append(QStringLiteral("Keep TensorRT DLLs under runtimes/tensorrt or PATH and rerun environment check."));
+    repairHints.append(QStringLiteral("Use RTX / SM 75+ machine for TensorRT acceptance; GTX 1060 / SM 61 should remain hardware-blocked."));
+
+    return makeProfile(QStringLiteral("tensorrt"), QStringLiteral("TensorRT Profile"), checks, repairHints);
+}
+
 } // namespace
 
 WorkerSession::WorkerSession(QObject* parent)
@@ -510,12 +754,34 @@ void WorkerSession::runEnvironmentCheck(const QJsonObject& payload)
         QStringLiteral("PaddlePaddle is not installed. Official PaddleOCR Det/Rec/System workflows will be unavailable.")));
     checks.append(checkObject(QStringLiteral("Worker"), QStringLiteral("ok"), QStringLiteral("Worker 环境自检命令可用。")));
 
+    QJsonObject profiles;
+    profiles.insert(QStringLiteral("yolo"), yoloEnvironmentProfile(pythonExecutable));
+    profiles.insert(QStringLiteral("ocr"), ocrEnvironmentProfile(pythonExecutable));
+    profiles.insert(QStringLiteral("tensorrt"), tensorRtEnvironmentProfile(checks));
+
     QJsonObject result;
     result.insert(QStringLiteral("checkedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     result.insert(QStringLiteral("checks"), checks);
+    result.insert(QStringLiteral("profiles"), profiles);
+
+    const QString reportPath = QDir::current().filePath(QStringLiteral("environment_profiles_report.json"));
+    QString reportError;
+    if (writeJsonFile(reportPath, result, &reportError)) {
+        QJsonObject artifact;
+        artifact.insert(QStringLiteral("taskId"), QStringLiteral("environment-check"));
+        artifact.insert(QStringLiteral("kind"), QStringLiteral("environment_profiles_report"));
+        artifact.insert(QStringLiteral("path"), reportPath);
+        artifact.insert(QStringLiteral("message"), QStringLiteral("Environment profile report"));
+        send(QStringLiteral("artifact"), artifact);
+        result.insert(QStringLiteral("reportPath"), reportPath);
+    } else {
+        QJsonObject logPayload;
+        logPayload.insert(QStringLiteral("message"), QStringLiteral("Failed to write environment profile report: %1").arg(reportError));
+        send(QStringLiteral("log"), logPayload);
+    }
+
     send(QStringLiteral("environmentCheck"), result);
-    socket_.waitForBytesWritten(1000);
-    qApp->quit();
+    finishSession();
 }
 
 void WorkerSession::validateDataset(const QJsonObject& payload)
@@ -1327,8 +1593,7 @@ void WorkerSession::runInference(const QJsonObject& payload)
     completed.insert(QStringLiteral("taskId"), taskId);
     completed.insert(QStringLiteral("message"), QStringLiteral("Inference completed"));
     send(QStringLiteral("completed"), completed);
-    socket_.waitForBytesWritten(1000);
-    qApp->quit();
+    finishSession();
 }
 
 bool WorkerSession::shouldUsePythonTrainer() const
@@ -2275,6 +2540,17 @@ void WorkerSession::send(const QString& type, const QJsonObject& payload)
     socket_.flush();
 }
 
+void WorkerSession::finishSession()
+{
+    socket_.flush();
+    socket_.waitForBytesWritten(1000);
+    if (socket_.state() == QLocalSocket::ConnectedState) {
+        socket_.disconnectFromServer();
+        socket_.waitForDisconnected(1000);
+    }
+    qApp->quit();
+}
+
 void WorkerSession::fail(const QString& message)
 {
     running_ = false;
@@ -2283,8 +2559,7 @@ void WorkerSession::fail(const QString& message)
     QJsonObject payload;
     payload.insert(QStringLiteral("message"), message);
     send(QStringLiteral("failed"), payload);
-    socket_.waitForBytesWritten(1000);
-    qApp->quit();
+    finishSession();
 }
 
 void WorkerSession::complete()
@@ -2314,5 +2589,5 @@ void WorkerSession::complete()
     QJsonObject payload;
     payload.insert(QStringLiteral("message"), QStringLiteral("Training workflow completed"));
     send(QStringLiteral("completed"), payload);
-    qApp->quit();
+    finishSession();
 }

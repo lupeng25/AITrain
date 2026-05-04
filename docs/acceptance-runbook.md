@@ -7,6 +7,7 @@ This runbook is the Phase 17-31 acceptance path. It freezes the local baseline, 
 Run the unified smoke script from the repository root:
 
 ```powershell
+.\tools\local-rc-closeout.ps1
 .\tools\acceptance-smoke.ps1 -LocalBaseline
 .\tools\acceptance-smoke.ps1 -Package -SkipBuild
 .\tools\acceptance-smoke.ps1 -PublicDatasets
@@ -24,6 +25,8 @@ The same script is also installed into packaged builds under `tools\acceptance-s
 All generated datasets, official downloads, trainer outputs, and smoke artifacts must stay under `.deps\` or another explicitly supplied work directory. Do not add them to source control.
 
 Every `acceptance-smoke.ps1` run writes `acceptance_summary.json` to its work directory. The summary records requested modes, status, work directory, start/end timestamps, failure reason, and hardware-blocked reason when applicable.
+
+For the current local release-candidate closeout path, use `docs\local-rc-closeout.md`. It is the Phase 42 Lite entry point for source build, package smoke, optional local baseline, optional CPU training smoke, Phase 41 environment profile GUI walkthrough, and boundary wording checks.
 
 ## Phase 17: Local Baseline Freeze
 

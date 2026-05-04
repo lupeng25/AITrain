@@ -48,6 +48,11 @@ This file is the source of truth for phase status in new AI coding conversations
 | Phase 38: Local pipeline templates execution | Done locally | `runLocalPipeline` now executes two templates instead of only generating a scaffold plan: `train-evaluate-export-register` and `export-infer-benchmark-report`. The workflow writes step/task lineage, emits pipeline artifacts, produces delivery reports, and records completed/failed pipeline states through Worker messages. GUI entry text now uses “execute local pipeline”, supports template selection, and persists pipeline task ids as arrays. Local `harness-check.ps1` passes with updated core/worker/app/tests coverage. |
 | Phase 39A: Real segmentation and OCR Rec evaluation | Done locally (ONNX evaluation path) | `evaluateModel` now includes real segmentation and OCR recognition evaluation when ONNX runtime artifacts are available. Segmentation reports include `maskIoU`, `maskMap50`, per-class metrics, confusion matrix, error samples, and overlays. OCR reports include `accuracy`, `editDistance`, `CER`, `WER`, error samples, and overlays. Detection behavior is unchanged. Current limitation: segmentation COCO-style `mAP50-95` and broader non-ONNX parity remain follow-up work. |
 
+| Phase 39B: Official backend local pipeline execution | Done locally | `runLocalPipeline` now executes Worker-managed Python trainer steps for official/backend pipeline training instead of treating `training_request.json` as completion. Pipeline training artifacts, metrics, checkpoint/ONNX/report paths, evaluation/export/register/delivery outputs, and top-level terminal Worker messages are preserved without leaking nested trainer terminal messages. |
+| Phase 39C: Benchmark, model registry, and delivery report hardening | Done locally | `benchmarkModel` now emits structured runtime status, latency percentiles, throughput, model/sample digests, failure categories, and TensorRT hardware-blocked status. Pipeline model registration stores evaluation/benchmark/artifact/lineage/limitation summaries for the model registry. Delivery reports now include readable HTML sections, model card summaries, artifact inventory hashes, and explicit scaffold / official / hardware-blocked limitations. |
+| Phase 41 Lite: Environment profiles and repair guidance | Done locally | Worker `environmentCheck` now includes structured `profiles` for YOLO/OCR/TensorRT with per-check status and repair hints, writes `environment_profiles_report.json`, and emits `environment_profiles_report` artifacts. GUI environment table now renders profile summary/check rows and treats TensorRT SM 61 as `hardware-blocked` warning semantics instead of pass/fail confusion. |
+| Phase 42 Lite: Local RC closeout | Done locally with CPU smoke | Added `docs/local-rc-closeout.md` and `tools/local-rc-closeout.ps1` as the local release-candidate closeout entry point. Package layout checks now assert the closeout doc/script are installed. The local RC fast path passed, `acceptance-smoke.ps1 -LocalBaseline -Package -SkipBuild` passed, and `acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr` passed with 32/8 YOLO detection, 24/8 YOLO segmentation, and 96 OCR Rec generated samples. CPU smoke produced YOLO detection/segmentation `best.pt` + `best.onnx`, OCR Rec `.pdparams` + ONNX + dict, and `cpu_training_smoke_summary.json`. This remains a wiring/artifact smoke, not an accuracy benchmark. |
+
 ## Local Hardware Note
 
 Recorded on 2026-04-30:
@@ -63,14 +68,13 @@ Recorded on 2026-04-30:
 
 ## Current Next Task
 
-Current local follow-up: start Phase 39B from `docs/product-roadmap-local-training-platform.md`. The next direction is product-loop hardening for the existing detection / segmentation / OCR capabilities, not adding new training backends.
+Current local follow-up: local RC closeout and CPU training smoke are complete locally; rerun external acceptance for clean Windows packaging and TensorRT hardware when available.
 
 Recommended implementation order:
 
-1. Phase 39B: make local pipeline templates truly execute official Worker/Python backend steps instead of only recording request files.
-2. Phase 39C: harden `benchmarkModel`, model registry summaries, and delivery report packaging.
-3. Phase 41 Lite: add YOLO / OCR isolated / TensorRT environment profiles and repair guidance.
-4. Phase 40 backlog remains deferred until 39B/39C/41 Lite are substantially complete.
+1. External acceptance: rerun package / local baseline smoke on clean Windows and TensorRT on RTX / SM 75+ hardware when available.
+2. Keep `tools\local-rc-closeout.ps1` as the repeatable local RC gate before future release-candidate handoff.
+3. Keep Phase 40 backlog deferred unless a new priority is explicitly approved.
 
 Current constraints to preserve:
 
@@ -80,10 +84,10 @@ Current constraints to preserve:
 - Phase 12 PaddlePaddle OCR Rec CTC and C++ ONNX CTC greedy decode are available for local smoke models; full PP-OCRv4 official runtime integration is still separate.
 - Phase 31 `paddleocr_system_official` is official-tool inference through PaddleOCR `predict_system.py`; it is not C++ DB detection ONNX postprocess.
 - Phase 39A real segmentation/OCR evaluation is complete through the ONNX evaluation path; keep limitations explicit and avoid overstating non-ONNX parity.
-- Phase 38 local pipeline templates execute workflow steps, but official Python backend training still needs true nested Worker orchestration before it can be treated as a complete product loop.
+- Phase 39B/39C local product loop hardening is complete locally for Worker-managed official pipeline training, benchmark summaries, model registry summaries, and delivery report packaging.
 - Keep training, evaluation, export, inference, benchmark, and report logic inside core/plugin/Worker boundaries, not in `MainWindow`.
 - Keep C++ tiny detector, segmentation baseline, and OCR baseline as scaffold/demo/test backends only.
-- Do not prioritize Phase 40 classification / pose / OBB / anomaly backends until Phase 39B/39C and Phase 41 Lite are substantially complete.
+- Do not prioritize Phase 40 classification / pose / OBB / anomaly backends until external acceptance and release priorities are explicitly reset.
 
 Primary direction document:
 
