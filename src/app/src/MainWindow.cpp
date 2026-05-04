@@ -3259,6 +3259,7 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
             pipeline.updatedAt = pipeline.createdAt;
             QString error;
             repository_.insertPipelineRun(pipeline, &error);
+            registerPipelineModelVersion(payload);
             updateModelRegistry();
         }
     } else if (type == QStringLiteral("deliveryReport")) {
@@ -3792,6 +3793,71 @@ void MainWindow::updateExperimentRunSummary(const QString& taskId)
         QString::fromUtf8(QJsonDocument(bestMetrics).toJson(QJsonDocument::Compact)),
         QString::fromUtf8(QJsonDocument(artifactSummary).toJson(QJsonDocument::Compact)),
         &error);
+}
+
+void MainWindow::registerPipelineModelVersion(const QJsonObject& payload)
+{
+    if (!repository_.isOpen()) {
+        return;
+    }
+    if (payload.value(QStringLiteral("state")).toString() != QStringLiteral("completed")) {
+        return;
+    }
+
+    const QString sourceTaskId = payload.value(QStringLiteral("taskId")).toString(currentTaskId_);
+    const QString exportPath = payload.value(QStringLiteral("exportPath")).toString();
+    const QString modelPath = exportPath.isEmpty()
+        ? payload.value(QStringLiteral("modelPath")).toString()
+        : exportPath;
+    if (modelPath.isEmpty() || !QFileInfo::exists(modelPath)) {
+        return;
+    }
+
+    const QJsonObject options = payload.value(QStringLiteral("options")).toObject();
+    QString error;
+    const aitrain::ExperimentRunRecord run = repository_.experimentRunForTask(sourceTaskId, &error);
+
+    QJsonObject metricSummary;
+    const QString evaluationReportPath = payload.value(QStringLiteral("evaluationReportPath")).toString();
+    if (!evaluationReportPath.isEmpty()) {
+        QFile reportFile(evaluationReportPath);
+        if (reportFile.open(QIODevice::ReadOnly)) {
+            const QJsonObject report = QJsonDocument::fromJson(reportFile.readAll()).object();
+            metricSummary = report.value(QStringLiteral("metrics")).toObject();
+        }
+    }
+
+    const QString backend = options.value(QStringLiteral("trainingBackend")).toString();
+    const QString datasetName = QFileInfo(options.value(QStringLiteral("datasetPath")).toString()).fileName();
+    const QString modelName = QStringLiteral("%1_%2_%3")
+        .arg(currentProjectName_.isEmpty() ? QStringLiteral("pipeline_model") : currentProjectName_)
+        .arg(datasetName.isEmpty() ? QStringLiteral("dataset") : datasetName)
+        .arg(backend.isEmpty() ? QStringLiteral("pipeline") : backend);
+    const QString version = QStringLiteral("pipeline_%1")
+        .arg(QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMddHHmmss")));
+
+    aitrain::ModelVersionRecord record;
+    record.modelName = modelName;
+    record.version = version;
+    record.sourceTaskId = sourceTaskId;
+    record.experimentRunId = run.id;
+    record.datasetSnapshotId = run.datasetSnapshotId > 0
+        ? run.datasetSnapshotId
+        : payload.value(QStringLiteral("datasetSnapshotId")).toInt();
+    record.status = QFileInfo(modelPath).suffix().compare(QStringLiteral("onnx"), Qt::CaseInsensitive) == 0
+        ? QStringLiteral("exported")
+        : QStringLiteral("validated");
+    record.notes = uiText("由本地流水线自动注册。");
+    record.metricsJson = QString::fromUtf8(QJsonDocument(metricSummary).toJson(QJsonDocument::Compact));
+    if (QFileInfo(modelPath).suffix().compare(QStringLiteral("onnx"), Qt::CaseInsensitive) == 0) {
+        record.onnxPath = modelPath;
+        record.checkpointPath = payload.value(QStringLiteral("modelPath")).toString();
+    } else {
+        record.checkpointPath = modelPath;
+    }
+    record.createdAt = QDateTime::currentDateTimeUtc();
+    record.updatedAt = record.createdAt;
+    repository_.upsertModelVersion(record, &error);
 }
 
 void MainWindow::updateModelRegistry()

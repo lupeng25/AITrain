@@ -4,6 +4,8 @@
 项目目录：`C:\Users\73200\Desktop\code\AITrain`
 权威状态入口：`docs/harness/current-status.md`
 
+> 当前 Phase 39+ 的下一步方向以 `docs/product-roadmap-local-training-platform.md` 和 `docs/harness/current-status.md` 为准。本文保留中长期历史路线、阶段复盘和背景材料，不作为当前下一步优先级的唯一来源。
+
 本文用于规划 AITrain Studio 在阶段 7 之后的中长期路线。阶段状态以 `docs/harness/current-status.md` 为准；本文提供目标、交付、验收标准和风险控制。
 
 ## 1. 当前结论

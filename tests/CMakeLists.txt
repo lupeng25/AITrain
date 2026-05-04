@@ -18,7 +18,10 @@ target_link_libraries(aitrain_core_tests
         Qt${QT_VERSION_MAJOR}::Sql
 )
 
-add_test(NAME aitrain_core_tests COMMAND aitrain_core_tests -silent)
+add_test(NAME aitrain_core_tests COMMAND aitrain_core_tests)
+set_tests_properties(aitrain_core_tests PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
 
 aitrain_copy_onnxruntime_runtime(aitrain_core_tests)
 aitrain_copy_tensorrt_runtime(aitrain_core_tests)

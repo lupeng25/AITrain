@@ -2,9 +2,11 @@
 
 #include "aitrain/core/TaskModels.h"
 
+#include <QJsonArray>
 #include <QLocalSocket>
 #include <QObject>
 #include <QProcess>
+#include <QVector>
 #include <QTimer>
 
 class WorkerSession : public QObject {
@@ -48,6 +50,26 @@ private:
     void fail(const QString& message);
     void complete();
 
+    struct PipelineTrainResult {
+        bool ok = false;
+        QString error;
+        QString checkpointPath;
+        QString onnxPath;
+        QString reportPath;
+        QJsonObject completedPayload;
+        QJsonArray artifacts;
+        QJsonArray metrics;
+        QJsonArray logs;
+    };
+
+    PipelineTrainResult runPipelineTrainingStep(
+        const QString& parentTaskId,
+        const QString& outputPath,
+        const QJsonObject& options,
+        const QString& datasetPath,
+        const QString& taskType);
+    bool forwardPipelinePythonTrainerLine(const QByteArray& line, PipelineTrainResult* result, bool* terminalMessageSeen);
+
     QLocalSocket socket_;
     QByteArray buffer_;
     QTimer timer_;
@@ -58,4 +80,5 @@ private:
     bool paused_ = false;
     bool canceled_ = false;
     QProcess pythonTrainerProcess_;
+    bool interceptPythonTrainerMessages_ = false;
 };

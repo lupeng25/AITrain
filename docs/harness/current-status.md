@@ -1,6 +1,6 @@
 # Current Project Status
 
-Last updated: 2026-05-02
+Last updated: 2026-05-04
 
 This file is the source of truth for phase status in new AI coding conversations. Read it before using `AITrainStudio_后续实施方案.md`, because that document is the long-range roadmap and may contain historical phase descriptions.
 
@@ -43,9 +43,10 @@ This file is the source of truth for phase status in new AI coding conversations
 | Phase 33: Local CPU small/medium training smoke | Done locally | Added `tools\acceptance-smoke.ps1 -CpuTrainingSmoke` and `examples\create-minimal-datasets.py --profile cpu-smoke`. The local run generated 32/8 YOLO detection, 24/8 YOLO segmentation, and 96 OCR Rec samples, trained YOLO detection/segmentation for 3 CPU epochs, trained the PaddlePaddle OCR Rec CTC backend for 8 CPU epochs, exported ONNX artifacts, wrote `cpu_training_smoke_summary.json`, and passed CTest against the generated WorkDir. This is a wiring/artifact smoke, not an accuracy benchmark, and it does not change TensorRT external acceptance requirements. |
 | Phase 34: Local product loop metadata | Done locally as v1/scaffold where noted | Added the local roadmap doc, SQLite metadata for experiments, dataset snapshots, model versions, evaluation reports, and pipeline runs; added Worker commands for dataset curation, dataset snapshot, model evaluation, benchmark, local pipeline plan, and delivery report generation; added GUI entry points for quality reports, snapshots, model registration, model library, evaluation, benchmark, pipeline plan, and delivery reports. Evaluation, benchmark, pipeline, and delivery report are v1/scaffold artifacts that record lineage and limitations; full per-sample quality analysis and timed inference benchmark remain follow-up work. |
 | Phase 35: Dataset snapshots and reproducible training | Done locally | Dataset snapshot manifests are now stable and include file roles, key files, role counts, split counts, image/label summaries, and content hashes based on relative paths plus file hashes. Training requests now carry seed, backend, model preset, and dataset snapshot lineage; if no usable snapshot exists, the GUI queues an automatic snapshot task before starting training. Experiment runs are persisted from training requests and completed runs summarize metrics/artifacts. The task page adds a reproduce action for training tasks that reuses the original request, snapshot, seed, backend, model preset, and records reproduction lineage. |
-| Phase 36: Detection evaluation and error analysis | Done locally for detection AP50 | `evaluateModel` now performs real YOLO detection evaluation for tiny detector, detection ONNX Runtime, and available TensorRT detection models. It selects val/test/train splits, computes IoU=0.5 TP/FP/FN, precision, recall, per-class AP50, and mAP50, and writes `evaluation_report.json`, `per_class_metrics.csv`, `error_samples.json`, `confusion_matrix.csv`, and overlay artifacts. Segmentation and OCR evaluation remain explicitly scaffold reports for later phases. |
+| Phase 36: Detection evaluation and error analysis | Done locally for detection AP50 | `evaluateModel` now performs real YOLO detection evaluation for tiny detector, detection ONNX Runtime, and available TensorRT detection models. It selects val/test/train splits, computes IoU=0.5 TP/FP/FN, precision, recall, per-class AP50, and mAP50, and writes `evaluation_report.json`, `per_class_metrics.csv`, `error_samples.json`, `confusion_matrix.csv`, and overlay artifacts. |
 | Phase 37: Dataset quality checks and fix loop | Done locally | `curateDataset` now performs real dataset quality analysis for YOLO detection/segmentation and PaddleOCR Det/Rec, including unreadable images, zero-byte files, missing/orphan labels, bbox and polygon validation, OCR label checks, duplicate samples, split and class distribution warnings, and X-AnyLabeling repair manifests. The GUI shows report summaries, problem samples, and repair-list actions without moving long work into `MainWindow`. |
 | Phase 38: Local pipeline templates execution | Done locally | `runLocalPipeline` now executes two templates instead of only generating a scaffold plan: `train-evaluate-export-register` and `export-infer-benchmark-report`. The workflow writes step/task lineage, emits pipeline artifacts, produces delivery reports, and records completed/failed pipeline states through Worker messages. GUI entry text now uses “execute local pipeline”, supports template selection, and persists pipeline task ids as arrays. Local `harness-check.ps1` passes with updated core/worker/app/tests coverage. |
+| Phase 39A: Real segmentation and OCR Rec evaluation | Done locally (ONNX evaluation path) | `evaluateModel` now includes real segmentation and OCR recognition evaluation when ONNX runtime artifacts are available. Segmentation reports include `maskIoU`, `maskMap50`, per-class metrics, confusion matrix, error samples, and overlays. OCR reports include `accuracy`, `editDistance`, `CER`, `WER`, error samples, and overlays. Detection behavior is unchanged. Current limitation: segmentation COCO-style `mAP50-95` and broader non-ONNX parity remain follow-up work. |
 
 ## Local Hardware Note
 
@@ -62,43 +63,46 @@ Recorded on 2026-04-30:
 
 ## Current Next Task
 
-Current local follow-up: continue Phase 39/42 productization follow-up (deployment benchmark hardening and richer delivery report packaging), while keeping external TensorRT blocked until an RTX / SM 75+ machine is available:
+Current local follow-up: start Phase 39B from `docs/product-roadmap-local-training-platform.md`. The next direction is product-loop hardening for the existing detection / segmentation / OCR capabilities, not adding new training backends.
 
-- keep Phase 7 marked as code complete but hardware-blocked on this GTX 1060 / SM 61 machine
-- Phase 8 is complete as an adapter/protocol layer; `python_mock` remains a scaffold protocol fixture
-- Phase 9 is complete on this machine for a CPU smoke using the installed official Ultralytics package; keep license constraints visible before redistribution
-- Phase 10 ONNX Runtime inference is complete for real YOLO detection ONNX; TensorRT engine acceptance still needs RTX / SM 75+
-- Phase 11 official YOLO segmentation training is complete on local CPU smoke
-- Phase 12 PaddlePaddle OCR Rec training and C++ ONNX CTC greedy decode are complete on local CPU smoke; full PP-OCRv4 config/export is still future work
-- Phase 13 local productization is complete: docs, generated sample datasets, Python dependency files, hardware compatibility notes, package smoke verification
-- Phase 14 official PaddleOCR Rec adapter/config generation is complete; full official training should use an isolated OCR Python environment or a clean machine to avoid PaddlePaddle/PyTorch DLL conflicts in the shared `.deps` Python
-- Phase 15 GUI inference summaries are complete for detection, segmentation, and OCR recognition prediction JSON
-- Phase 16 official PaddleOCR Rec train/export smoke is complete in an isolated OCR Python environment with a pinned PaddleOCR source ref
-- Phase 17 local baseline freeze is complete; the checked worktree remains a local delivery baseline with TensorRT still external pending
-- Phase 18 acceptance runbook and `tools\acceptance-smoke.ps1` are complete and installed into the package layout
-- Phase 19 TensorRT preparation is complete; local `-TensorRT` correctly reports `hardware-blocked` on SM 61
-- Phase 20 training / inference / conversion acceptance is complete locally; CTest consumes the current acceptance WorkDir, and public Ultralytics COCO8 / COCO8-seg materialization now succeeds when network and package metadata are available
-- Phase 21 release closeout documentation is complete locally; clean Windows and RTX TensorRT remain external acceptance tasks
-- Phase 22 task history and artifact indexing is complete locally; repository query tests cover artifacts, metrics, exports, and dataset versions
-- Phase 23 GUI artifact browsing is implemented; it still needs normal manual GUI walkthrough whenever UI layout changes are made
-- Phase 24 dataset management now supports detection, segmentation, and OCR Rec import/validation/split flows
-- Phase 25 public dataset materialization is split into a standalone script and has required/fallback modes
-- Phase 26 official PaddleOCR Rec smoke now covers train, export, and official inference on one generated sample
-- Phase 27 local automated checks pass; run a manual GUI walkthrough after future layout changes because screenshot/interaction QA is not covered by `harness-check.ps1`
-- Phase 28 X-AnyLabeling integration is local-only by default; downloaded binaries under `.deps\annotation-tools` must not be committed.
-- Phase 29 source/package smoke remains the release-candidate gate; generated ZIP/package artifacts must not be staged unless explicitly requested.
-- Phase 30 improves GUI guidance and filtering only; it does not add new training algorithms.
-- Phase 31 adds official PaddleOCR Det and System toolchain wiring. Treat `paddleocr_system_official` as official-tool inference, not C++ ONNX DB postprocess. `tools\phase31-paddleocr-full-official-smoke.ps1 -WorkDir .deps\phase31-paddleocr-full-official-smoke-final -SkipInstall` passed locally with the isolated OCR environment.
-- Phase 32 adds product-shell localization and offline licensing only. Language choice and accepted license data are stored in `QSettings`; license tokens are bound to the machine code; generator private keys must remain local and must not be included in customer packages. Current translation scope covers the Qt GUI shell and registration dialog, while core/Worker/Python trainer logs and plugin-provided manifest text may remain untranslated.
-- Phase 33 adds a longer CPU-only smoke using deterministic small/medium generated data. `tools\acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr -WorkDir .deps\acceptance-smoke-cpu-check` passed locally and produced `cpu_training_smoke_summary.json`; it validates wiring and artifacts, not model quality.
-- Phase 34 adds product-loop metadata and Worker/GUI orchestration entry points only. `evaluateModel`, `benchmarkModel`, `runLocalPipeline`, and `generateDeliveryReport` intentionally produce v1/scaffold reports until full per-sample analysis, timed runtime benchmark, and multi-step pipeline execution are implemented.
-- Phase 35 makes dataset snapshots part of the training lineage and adds same-snapshot reproducible training from task history. It still does not implement full experiment comparison UI or real evaluation; those remain Phase 36+ follow-ups.
-- Phase 36 upgrades detection `evaluateModel` to real AP50 evaluation and error artifacts. It does not implement COCO mAP50-95, segmentation mask evaluation, OCR CER/WER, or official Ultralytics/PaddleOCR val delegation.
-- Phase 37 upgrades dataset curation into a real quality-analysis loop with repair manifests. It does not auto-fix user data, embed X-AnyLabeling, or perform automatic rebalancing/deletion of samples.
-- Phase 38 upgrades local pipeline templates from scaffold planning to executable workflows with step artifacts, progress/failure reporting, benchmark/delivery chaining, and GUI template selection. It still does not orchestrate full official Python backend training as independent nested Worker tasks inside one pipeline run.
-- keep training logic inside core/plugin/Worker boundaries, not in `MainWindow`
-- keep C++ tiny detector as a scaffold/demo/test backend until the Python path is stable
-- preserve the external TensorRT acceptance checklist for a future RTX / SM 75+ machine
+Recommended implementation order:
+
+1. Phase 39B: make local pipeline templates truly execute official Worker/Python backend steps instead of only recording request files.
+2. Phase 39C: harden `benchmarkModel`, model registry summaries, and delivery report packaging.
+3. Phase 41 Lite: add YOLO / OCR isolated / TensorRT environment profiles and repair guidance.
+4. Phase 40 backlog remains deferred until 39B/39C/41 Lite are substantially complete.
+
+Current constraints to preserve:
+
+- Phase 7 / Phase 10 TensorRT remains external RTX / SM 75+ acceptance; this GTX 1060 / SM 61 machine must continue to report `hardware-blocked`.
+- Phase 8 Python trainer adapter is complete as a protocol layer; `python_mock` remains a scaffold fixture only.
+- Phase 9 / Phase 11 official Ultralytics detection and segmentation training are available through Worker-managed Python trainers; keep license constraints visible before redistribution.
+- Phase 12 PaddlePaddle OCR Rec CTC and C++ ONNX CTC greedy decode are available for local smoke models; full PP-OCRv4 official runtime integration is still separate.
+- Phase 31 `paddleocr_system_official` is official-tool inference through PaddleOCR `predict_system.py`; it is not C++ DB detection ONNX postprocess.
+- Phase 39A real segmentation/OCR evaluation is complete through the ONNX evaluation path; keep limitations explicit and avoid overstating non-ONNX parity.
+- Phase 38 local pipeline templates execute workflow steps, but official Python backend training still needs true nested Worker orchestration before it can be treated as a complete product loop.
+- Keep training, evaluation, export, inference, benchmark, and report logic inside core/plugin/Worker boundaries, not in `MainWindow`.
+- Keep C++ tiny detector, segmentation baseline, and OCR baseline as scaffold/demo/test backends only.
+- Do not prioritize Phase 40 classification / pose / OBB / anomaly backends until Phase 39B/39C and Phase 41 Lite are substantially complete.
+
+Primary direction document:
+
+```text
+docs/product-roadmap-local-training-platform.md
+```
+
+For document-only changes, run:
+
+```powershell
+git diff --check
+.\tools\harness-context.ps1
+```
+
+For code changes, run:
+
+```powershell
+.\tools\harness-check.ps1
+```
 
 For local baseline acceptance, run:
 
@@ -112,49 +116,13 @@ For packaging smoke checks, run:
 .\tools\acceptance-smoke.ps1 -Package -SkipBuild
 ```
 
-For small public/generated-data training smoke, run:
-
-```powershell
-.\tools\acceptance-smoke.ps1 -PublicDatasets
-```
-
 For the local CPU small/medium training smoke, run:
 
 ```powershell
 .\tools\acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr
 ```
 
-To require successful public COCO8 / COCO8-seg materialization instead of fallback, run:
-
-```powershell
-.\tools\acceptance-smoke.ps1 -PublicDatasets -RequirePublicDatasets -SkipOfficialOcr
-```
-
-For official PaddleOCR Rec train/export/inference smoke in an isolated OCR environment, run:
-
-```powershell
-.\tools\phase16-ocr-official-smoke.ps1
-```
-
-For ZIP package generation, run:
-
-```powershell
-cmake --build build-vscode --target package
-```
-
-Minimal example datasets can be generated with:
-
-```powershell
-python examples\create-minimal-datasets.py --output .deps\examples-smoke
-```
-
-Small/medium deterministic CPU smoke datasets can be generated with:
-
-```powershell
-python examples\create-minimal-datasets.py --output .deps\cpu-smoke-data --profile cpu-smoke
-```
-
-When an RTX / SM 75+ machine is available, resume Phase 7 acceptance with:
+When an RTX / SM 75+ machine is available, resume TensorRT acceptance with:
 
 ```powershell
 .\tools\acceptance-smoke.ps1 -TensorRT -WorkDir .deps\acceptance-tensorrt

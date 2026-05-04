@@ -813,8 +813,7 @@ private slots:
             datasetRoot,
             QDir(outputRoot).filePath(QStringLiteral("segmentation-evaluation")),
             QStringLiteral("segmentation"));
-        QVERIFY2(segmentationEvaluation.ok, qPrintable(segmentationEvaluation.error));
-        QVERIFY(segmentationEvaluation.payload.value(QStringLiteral("scaffold")).toBool());
+        QVERIFY(!segmentationEvaluation.ok);
 
         const aitrain::WorkflowResult benchmark = aitrain::benchmarkModelReport(
             modelPath,
@@ -1887,6 +1886,80 @@ private slots:
         QVERIFY(prediction.confidence >= 0.0);
         const QImage overlay = aitrain::renderOcrRecPrediction(imagePath, prediction, &error);
         QVERIFY2(!overlay.isNull(), qPrintable(error));
+    }
+
+    void evaluateModelReportRunsRealSegmentationAndOcrOnnxSmoke()
+    {
+        if (!aitrain::isOnnxRuntimeInferenceAvailable()) {
+            QSKIP("ONNX Runtime SDK is not enabled in this build.");
+        }
+
+        const QString segRoot = phase11SegSmokeRoot();
+        const QString ocrRoot = phase14OcrSmokeRoot();
+        if (segRoot.isEmpty() || ocrRoot.isEmpty()) {
+            QSKIP("Segmentation/OCR ONNX smoke artifacts are not available.");
+        }
+
+        QString segOnnx = QDir(segRoot).filePath(QStringLiteral("out/ultralytics_runs/phase11-seg-smoke/weights/best.onnx"));
+        QString segDataset = QDir(segRoot).filePath(QStringLiteral("dataset"));
+        if (!QFileInfo::exists(segOnnx)) {
+            segOnnx = QDir(segRoot).filePath(QStringLiteral("runs/yolo_segment/ultralytics_runs/aitrain-yolo-segment/weights/best.onnx"));
+            segDataset = QDir(segRoot).filePath(QStringLiteral("yolo_segment"));
+        }
+        if (!QFileInfo::exists(segOnnx)) {
+            segOnnx = QDir(segRoot).filePath(QStringLiteral("runs/yolo_segment/ultralytics_runs/acceptance-yolo-segment/weights/best.onnx"));
+            segDataset = QDir(segRoot).filePath(QStringLiteral("generated/yolo_segment"));
+        }
+        if (!QFileInfo::exists(segOnnx)) {
+            segOnnx = QDir(segRoot).filePath(QStringLiteral("runs/yolo_segment/ultralytics_runs/cpu-yolo-segment/weights/best.onnx"));
+            segDataset = QDir(segRoot).filePath(QStringLiteral("yolo_segment"));
+        }
+
+        const QString ocrOnnx = QDir(ocrRoot).filePath(QStringLiteral("runs/paddleocr_rec/paddleocr_rec_ctc.onnx"));
+        QString ocrDataset = QDir(ocrRoot).filePath(QStringLiteral("dataset"));
+        if (!QFileInfo::exists(QDir(ocrDataset).filePath(QStringLiteral("rec_gt.txt")))) {
+            ocrDataset = QDir(ocrRoot).filePath(QStringLiteral("paddleocr_rec"));
+        }
+        if (!QFileInfo::exists(segOnnx) || !QFileInfo::exists(ocrOnnx)
+            || !QFileInfo::exists(QDir(segDataset).filePath(QStringLiteral("data.yaml")))
+            || !QFileInfo::exists(QDir(ocrDataset).filePath(QStringLiteral("rec_gt.txt")))) {
+            QSKIP("Segmentation/OCR ONNX smoke artifacts are not available.");
+        }
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        const aitrain::WorkflowResult segEvaluation = aitrain::evaluateModelReport(
+            segOnnx,
+            segDataset,
+            dir.filePath(QStringLiteral("segmentation-evaluation")),
+            QStringLiteral("segmentation"));
+        QVERIFY2(segEvaluation.ok, qPrintable(segEvaluation.error));
+        QVERIFY(!segEvaluation.payload.value(QStringLiteral("scaffold")).toBool(true));
+        QVERIFY(QFileInfo::exists(segEvaluation.reportPath));
+        QVERIFY(QFileInfo::exists(segEvaluation.payload.value(QStringLiteral("perClassMetricsPath")).toString()));
+        QVERIFY(QFileInfo::exists(segEvaluation.payload.value(QStringLiteral("errorSamplesPath")).toString()));
+        QVERIFY(QFileInfo::exists(segEvaluation.payload.value(QStringLiteral("confusionMatrixPath")).toString()));
+        QVERIFY(QFileInfo(segEvaluation.payload.value(QStringLiteral("overlayDir")).toString()).exists());
+        const QJsonObject segMetrics = segEvaluation.payload.value(QStringLiteral("metrics")).toObject();
+        QVERIFY(segMetrics.contains(QStringLiteral("maskIoU")));
+        QVERIFY(segMetrics.contains(QStringLiteral("maskMap50")));
+
+        const aitrain::WorkflowResult ocrEvaluation = aitrain::evaluateModelReport(
+            ocrOnnx,
+            ocrDataset,
+            dir.filePath(QStringLiteral("ocr-evaluation")),
+            QStringLiteral("ocr_recognition"));
+        QVERIFY2(ocrEvaluation.ok, qPrintable(ocrEvaluation.error));
+        QVERIFY(!ocrEvaluation.payload.value(QStringLiteral("scaffold")).toBool(true));
+        QVERIFY(QFileInfo::exists(ocrEvaluation.reportPath));
+        QVERIFY(QFileInfo::exists(ocrEvaluation.payload.value(QStringLiteral("errorSamplesPath")).toString()));
+        QVERIFY(QFileInfo(ocrEvaluation.payload.value(QStringLiteral("overlayDir")).toString()).exists());
+        const QJsonObject ocrMetrics = ocrEvaluation.payload.value(QStringLiteral("metrics")).toObject();
+        QVERIFY(ocrMetrics.contains(QStringLiteral("accuracy")));
+        QVERIFY(ocrMetrics.contains(QStringLiteral("editDistance")));
+        QVERIFY(ocrMetrics.contains(QStringLiteral("cer")));
+        QVERIFY(ocrMetrics.contains(QStringLiteral("wer")));
     }
 
     void workerRunsOnnxInferenceEndToEnd()
@@ -3035,6 +3108,109 @@ private slots:
         QVERIFY(sawPrepareOnly);
         QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("run_official_system_predict.ps1"))));
         QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("paddleocr_official_system_report.json"))));
+    }
+
+    void workerRunsLocalPipelineWithOfficialPythonTraining()
+    {
+        const QString python = pythonExecutablePath();
+        if (python.isEmpty()) {
+            QSKIP("Python executable is not available.");
+        }
+        const QString trainerScript = mockPythonTrainerScriptPath();
+        QVERIFY2(!trainerScript.isEmpty(), "Mock Python trainer script is not available.");
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString datasetRoot = dir.filePath(QStringLiteral("dataset"));
+        writeTinyDetectionDataset(datasetRoot);
+        const QString outputPath = dir.filePath(QStringLiteral("worker-pipeline-official"));
+
+        WorkerClient client;
+        QVector<QPair<QString, QJsonObject>> messages;
+        QStringList logs;
+        bool finished = false;
+        bool ok = false;
+        QString finishedMessage;
+        connect(&client, &WorkerClient::messageReceived, this, [&messages](const QString& type, const QJsonObject& payload) {
+            messages.append(qMakePair(type, payload));
+        });
+        connect(&client, &WorkerClient::logLine, this, [&logs](const QString& line) {
+            logs.append(line);
+        });
+        connect(&client, &WorkerClient::finished, this, [&finished, &ok, &finishedMessage](bool result, const QString& message) {
+            finished = true;
+            ok = result;
+            finishedMessage = message;
+        });
+
+        QJsonObject pipelineOptions;
+        pipelineOptions.insert(QStringLiteral("datasetPath"), datasetRoot);
+        pipelineOptions.insert(QStringLiteral("datasetFormat"), QStringLiteral("yolo_detection"));
+        pipelineOptions.insert(QStringLiteral("taskType"), QStringLiteral("detection"));
+        pipelineOptions.insert(QStringLiteral("trainingBackend"), QStringLiteral("python_mock"));
+        pipelineOptions.insert(QStringLiteral("pythonExecutable"), python);
+        pipelineOptions.insert(QStringLiteral("pythonTrainerScript"), trainerScript);
+        pipelineOptions.insert(QStringLiteral("epochs"), 1);
+        pipelineOptions.insert(QStringLiteral("mockStepsPerEpoch"), 2);
+        pipelineOptions.insert(QStringLiteral("mockSleepMs"), 0);
+        pipelineOptions.insert(QStringLiteral("mockCheckpointMode"), QStringLiteral("tiny_linear_detector"));
+        pipelineOptions.insert(QStringLiteral("exportFormat"), QStringLiteral("onnx"));
+        pipelineOptions.insert(QStringLiteral("sampleImagePath"), QDir(datasetRoot).filePath(QStringLiteral("images/val/a.png")));
+
+        QString error;
+        QVERIFY2(client.requestLocalPipeline(
+            workerExecutablePath(),
+            outputPath,
+            QStringLiteral("train-evaluate-export-register"),
+            pipelineOptions,
+            &error,
+            QStringLiteral("pipeline-official-task")), qPrintable(error));
+        QTRY_VERIFY2_WITH_TIMEOUT(
+            finished,
+            qPrintable(QStringLiteral("Worker did not finish. Logs:\n%1").arg(logs.join(QStringLiteral("\n")))),
+            20000);
+        QVERIFY2(ok, qPrintable(QStringList({finishedMessage, logs.join(QStringLiteral("\n"))}).join(QStringLiteral("\n"))));
+        QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
+
+        bool sawPipelinePlan = false;
+        QString pipelineReportPath;
+        for (const auto& message : messages) {
+            if (message.first == QStringLiteral("pipelinePlan")) {
+                sawPipelinePlan = true;
+                QCOMPARE(message.second.value(QStringLiteral("state")).toString(), QStringLiteral("completed"));
+                pipelineReportPath = message.second.value(QStringLiteral("reportPath")).toString();
+                QVERIFY(!message.second.value(QStringLiteral("modelPath")).toString().isEmpty());
+                break;
+            }
+        }
+        QVERIFY(sawPipelinePlan);
+        QVERIFY(QFileInfo::exists(pipelineReportPath));
+
+        const QString pipelineJsonPath = QDir(outputPath).filePath(QStringLiteral("local_pipeline_plan.json"));
+        QVERIFY(QFileInfo::exists(pipelineJsonPath));
+        QFile file(pipelineJsonPath);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QJsonObject pipeline = QJsonDocument::fromJson(file.readAll()).object();
+        QCOMPARE(pipeline.value(QStringLiteral("state")).toString(), QStringLiteral("completed"));
+        QVERIFY(!pipeline.value(QStringLiteral("modelPath")).toString().isEmpty());
+        QVERIFY(QFileInfo::exists(pipeline.value(QStringLiteral("modelPath")).toString()));
+        QVERIFY(QFileInfo::exists(pipeline.value(QStringLiteral("evaluationReportPath")).toString()));
+        QVERIFY(QFileInfo::exists(pipeline.value(QStringLiteral("deliveryReportPath")).toString()));
+
+        const QJsonArray steps = pipeline.value(QStringLiteral("steps")).toArray();
+        bool sawCompletedTrainingStep = false;
+        for (const QJsonValue& value : steps) {
+            const QJsonObject step = value.toObject();
+            if (step.value(QStringLiteral("command")).toString() == QStringLiteral("startTrain")) {
+                QCOMPARE(step.value(QStringLiteral("state")).toString(), QStringLiteral("completed"));
+                sawCompletedTrainingStep = true;
+            }
+        }
+        QVERIFY(sawCompletedTrainingStep);
+        QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("training/python_trainer_request.json"))));
+        QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("training/python_trainer_request.json"))));
+        QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("training/python_mock_training_report.json"))));
+        QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("training/python_mock_detection_checkpoint.aitrain"))));
     }
 
     void workerEnvironmentCheckReportsPythonTrainerBackends()

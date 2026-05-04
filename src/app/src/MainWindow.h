@@ -126,6 +126,7 @@ private:
     bool attachLatestSnapshotToRequest(aitrain::TrainingRequest& request, int datasetId, QString* error);
     int recordExperimentRunForRequest(const aitrain::TrainingRequest& request, int datasetId, QString* error);
     void updateExperimentRunSummary(const QString& taskId);
+    void registerPipelineModelVersion(const QJsonObject& payload);
     QString createRepositoryTask(aitrain::TaskKind kind, const QString& taskType, const QString& pluginId, const QString& workDir, const QString& message, const QString& requestedTaskId = {});
     QString selectedTaskId() const;
     QString selectedArtifactPath() const;
