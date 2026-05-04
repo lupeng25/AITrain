@@ -1,6 +1,6 @@
 # AITrain Studio Acceptance Runbook
 
-This runbook is the Phase 17-46 acceptance path. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, records a traceable release-freeze package identity, validates newer YOLO detection/segmentation model-family candidates, and adds C++ PaddleOCR Det DB-style ONNX postprocess coverage before clean Windows and RTX / SM 75+ TensorRT validation.
+This runbook is the Phase 17-47 acceptance path. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, records a traceable release-freeze package identity, validates newer YOLO detection/segmentation model-family candidates, adds C++ PaddleOCR Det DB-style ONNX postprocess coverage, and prepares real exported PaddleOCR Det ONNX wiring evidence collection before clean Windows and RTX / SM 75+ TensorRT validation.
 
 ## Acceptance Modes
 
@@ -180,6 +180,28 @@ The CTest suite covers the deterministic postprocess path with a synthetic proba
 
 This phase validates C++ postprocess wiring only. It does not mark PP-OCRv5 official training/export accuracy as accepted, and the full official PaddleOCR Det+Rec+System path remains `tools\phase31-paddleocr-full-official-smoke.ps1` / official `predict_system.py`.
 
+## Phase 47: Real PaddleOCR Det ONNX Wiring Smoke
+
+Phase 47 attempts to convert the official PaddleOCR Det inference model from Phase 31 into ONNX through the official PaddleX `--paddle2onnx` path, writes an AITrain sidecar with `modelFamily=ocr_detection`, then runs the C++ ONNX Runtime DB-style postprocess through `aitrain_worker --ocr-det-onnx-smoke`.
+
+```powershell
+.\tools\phase47-paddleocr-det-onnx-smoke.ps1
+```
+
+Expected passing artifacts under `.deps\phase47-paddleocr-det-onnx-smoke`:
+
+- `paddleocr_det_official.onnx`
+- `paddleocr_det_official.onnx.aitrain-export.json`
+- `cpp_onnx_smoke\ocr_det_onnx_predictions.json`
+- `cpp_onnx_smoke\ocr_det_onnx_overlay.png`
+- `paddleocr_det_onnx_smoke_summary.json`
+
+The script reuses existing Phase 31 Det artifacts when available. If the official Det inference model is missing or failed, it runs `tools\phase31-paddleocr-full-official-smoke.ps1` first. Conversion uses a separate Python 3.12 embeddable environment because the local Python 3.13 OCR environment only sees old `paddle2onnx` wheels that are not compatible with PaddlePaddle 3.x PIR inference exports. By default the conversion environment uses Paddle's Windows nightly CPU package source, which matches the official Windows guidance for Paddle2ONNX conversion; `-UseStablePaddleForConversion` can be used to reproduce the stable-wheel path.
+
+If conversion is blocked, the script writes `paddleocr_det_onnx_smoke_summary.json` with `status=conversion-blocked`, including Python/Paddle/PaddleX/Paddle2ONNX versions, pip index evidence, the Phase 31 Det inference artifact paths, and the PaddleX conversion output. The current local machine reaches this blocked state even with Python 3.12.10, PaddlePaddle `3.4.0.dev20260407`, PaddleX 3.5.1, and Paddle2ONNX 2.1.0 because `paddle2onnx_cpp2py_export` fails to load. Paddle2ONNX 1.3.1 can import on this machine, but it cannot parse PaddlePaddle 3 PIR `inference.json`, so it is not a valid fallback for current Phase 31 Det exports.
+
+A passing Phase 47 run is real exported Det ONNX wiring evidence for the C++ postprocess path on a tiny CPU smoke model. It is still not PP-OCRv5 official accuracy parity or a production OCR benchmark.
+
 ## Phase 20: Small Training Smoke
 
 Run:
@@ -271,4 +293,4 @@ Then check:
 - Phase 7 / Phase 10 TensorRT status stays external pending unless RTX / SM 75+ smoke passed.
 - Third-party backend license notes remain visible, especially Ultralytics AGPL / Enterprise constraints.
 - C++ tiny detector, segmentation baseline, and OCR baseline are still marked as scaffold/demo/test backends.
-- C++ PaddleOCR Det DB-style ONNX postprocess has a Phase 46 v1 path for probability-map outputs, but full OCR system acceptance remains official `predict_system.py` until real exported Det ONNX evidence is recorded.
+- C++ PaddleOCR Det DB-style ONNX postprocess has a Phase 46 v1 path for probability-map outputs. Phase 47 prepares real exported Det ONNX wiring evidence collection, but the current local PaddleX/Paddle2ONNX conversion chain is blocked; full OCR system acceptance remains official `predict_system.py` until production-quality Det+Rec/System accuracy acceptance is recorded.

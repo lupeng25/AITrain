@@ -56,6 +56,7 @@ This file is the source of truth for phase status in new AI coding conversations
 | Phase 44 Lite: Release freeze package identity | Prepared locally | Added `docs/release-freeze-handoff.md` and `tools/release-freeze-handoff.ps1` to run local RC closeout, generate the CPack ZIP, compute SHA256 hashes, and write `release_handoff_manifest.json` / `release_handoff_summary.md` under `build-vscode\release-freeze-handoff`. Package install and package smoke checks now assert the release-freeze doc/script are present. This does not mark clean Windows or TensorRT external acceptance as passed. |
 | Phase 45: YOLO new-version productization | Done locally for YOLO11 detection/segmentation smoke | Added `docs\yolo-model-support-matrix.md` and `tools\phase45-yolo-model-matrix-smoke.ps1` for newer Ultralytics detection/segmentation model-family acceptance. The local required matrix passed with Ultralytics 8.4.45 for `yolo11n.yaml` and `yolo11n-seg.yaml`, producing `best.pt`, `best.onnx`, `ultralytics_training_report.json`, and `yolo_model_matrix_summary.json`; CTest also passed with `AITRAIN_ACCEPTANCE_SMOKE_ROOT` pointed at the Phase 45 work directory. YOLO12 nano detection/segmentation remain optional candidates via `-IncludeYolo12`; classification, pose, OBB, anomaly, YOLO-World, YOLOE, and TensorRT remain out of this phase. |
 | Phase 46: PaddleOCR Det C++ ONNX postprocess | Done locally as DB-style v1 postprocess | Added C++ `ocr_detection` model-family handling for PaddleOCR Det DB-style ONNX probability maps: single-output `[1,1,H,W]` / `[1,H,W]` / `[H,W]` maps can be thresholded into connected text regions, converted to four-point polygons, serialized as `ocr_detection` prediction JSON, rendered as overlays, and routed through Worker/ProductWorkflow inference paths. Local deterministic CTest covers the postprocess with a synthetic map. This is not PP-OCRv5 official accuracy parity; full Det+Rec/System acceptance remains the official PaddleOCR toolchain until real exported Det ONNX evidence is recorded. |
+| Phase 47: Real PaddleOCR Det ONNX wiring smoke | Prepared; local PaddleX/Paddle2ONNX conversion blocked | Added `tools\phase47-paddleocr-det-onnx-smoke.ps1` and `aitrain_worker --ocr-det-onnx-smoke`. The script reuses or regenerates Phase 31 official Det artifacts, provisions a dedicated Python 3.12 conversion environment, defaults to Paddle's Windows nightly CPU source for conversion, installs PaddleX 3.5.1 / Paddle2ONNX 2.1.0, attempts official `paddlex --paddle2onnx`, writes a machine-readable `paddleocr_det_onnx_smoke_summary.json`, and runs the C++ ONNX Runtime DB-style smoke only after conversion succeeds. Current local result is `status=conversion-blocked`: even with PaddlePaddle `3.4.0.dev20260407`, Paddle2ONNX 2.1.0 fails to load `paddle2onnx_cpp2py_export`, while Paddle2ONNX 1.3.1 can import but cannot parse PaddlePaddle 3 PIR `inference.json`. No real exported Det ONNX pass is recorded yet. Phase 46 C++ postprocess remains covered by deterministic CTest, and Phase 31 official `predict_system.py` remains the full OCR system acceptance path. |
 
 ## Local Hardware Note
 
@@ -72,7 +73,7 @@ Recorded on 2026-04-30:
 
 ## Current Next Task
 
-Current local follow-up: local RC closeout, CPU training smoke, external acceptance handoff package, release-freeze package identity tooling, Phase 45 YOLO11 detection/segmentation model-family smoke, and Phase 46 PaddleOCR Det DB-style C++ ONNX postprocess are complete locally; generate a frozen handoff package and collect external acceptance results for clean Windows packaging and TensorRT hardware when available.
+Current local follow-up: local RC closeout, CPU training smoke, external acceptance handoff package, release-freeze package identity tooling, Phase 45 YOLO11 detection/segmentation model-family smoke, and Phase 46 PaddleOCR Det DB-style C++ ONNX postprocess are complete locally. Phase 47 is prepared but the local PaddleX/Paddle2ONNX conversion chain is blocked before real Det ONNX evidence is produced. Generate a frozen handoff package, collect external acceptance results for clean Windows packaging and TensorRT hardware when available, and resume Phase 47 on an environment where Paddle2ONNX 2.1.0 native plugin loads successfully or where Linux/WSL conversion can produce the Det ONNX artifact.
 
 Recommended implementation order:
 
@@ -81,8 +82,9 @@ Recommended implementation order:
 3. Record returned filled templates, `acceptance_summary.json`, console output, Worker self-check JSON, package layout, and GPU/driver evidence before updating status.
 4. Keep `tools\local-rc-closeout.ps1` as the repeatable local RC gate before future release-candidate handoff.
 5. Optionally run `tools\phase45-yolo-model-matrix-smoke.ps1 -IncludeYolo12` if YOLO12 detection/segmentation candidate evidence is needed.
-6. Collect a real exported PaddleOCR Det ONNX artifact if PP-OCRv5 / official Det ONNX parity acceptance is needed beyond the Phase 46 synthetic-map postprocess coverage.
-7. Keep Phase 40 backlog deferred unless a new priority is explicitly approved.
+6. Resume Phase 47 conversion on a clean Python 3.12 environment, alternate Windows machine, or Linux/WSL environment where PaddleX can load Paddle2ONNX 2.1.0 and parse PaddlePaddle 3 PIR inference exports, then record real Det ONNX predictions/overlay evidence.
+7. For production OCR readiness, collect non-tiny PaddleOCR Det/Rec/System datasets and record accuracy-oriented acceptance beyond tiny wiring smoke.
+8. Keep Phase 40 backlog deferred unless a new priority is explicitly approved.
 
 Current constraints to preserve:
 
@@ -94,7 +96,7 @@ Current constraints to preserve:
 - Phase 39A real segmentation/OCR evaluation is complete through the ONNX evaluation path; keep limitations explicit and avoid overstating non-ONNX parity.
 - Phase 39B/39C local product loop hardening is complete locally for Worker-managed official pipeline training, benchmark summaries, model registry summaries, and delivery report packaging.
 - Phase 45 validates newer YOLO detection/segmentation model names only; do not imply product support for classification, pose, OBB, anomaly, YOLO-World, or YOLOE.
-- Phase 46 adds C++ OCR Det DB-style postprocess for probability maps only; do not claim PP-OCRv5 official accuracy parity without a real exported Det ONNX smoke.
+- Phase 46 adds C++ OCR Det DB-style postprocess for probability maps. Phase 47 is prepared but currently blocked in PaddleX/Paddle2ONNX conversion; do not claim real exported Det ONNX wiring or PP-OCRv5 official accuracy parity until a passing ONNX smoke is recorded.
 - Keep training, evaluation, export, inference, benchmark, and report logic inside core/plugin/Worker boundaries, not in `MainWindow`.
 - Keep C++ tiny detector, segmentation baseline, and OCR baseline as scaffold/demo/test backends only.
 - Do not prioritize Phase 40 classification / pose / OBB / anomaly backends until external acceptance and release priorities are explicitly reset.
@@ -170,5 +172,6 @@ When an RTX / SM 75+ machine is available, resume TensorRT acceptance with:
 - Phase 33 local CPU small/medium smoke validates training/export/inference wiring only; it is not a production accuracy benchmark and does not change TensorRT external acceptance status.
 - Phase 45 YOLO11 matrix validates productized detection/segmentation wiring and artifacts only; it is not an accuracy benchmark and does not expand scope to other YOLO tasks.
 - Phase 46 PaddleOCR Det C++ ONNX postprocess is v1 probability-map postprocess coverage; full official OCR system acceptance still uses PaddleOCR `predict_system.py`.
+- Phase 47 PaddleOCR Det ONNX smoke is prepared but locally blocked by PaddleX/Paddle2ONNX native plugin availability; when it passes, it validates conversion and C++ postprocess wiring on a tiny model only, not a production OCR benchmark.
 - Keep long-running execution in `aitrain_worker`.
 - Keep model-specific behavior behind core/plugin/Worker boundaries, not in `MainWindow`.

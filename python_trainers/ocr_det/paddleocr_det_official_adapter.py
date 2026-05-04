@@ -149,7 +149,12 @@ def select_checkpoint_base(output_path: Path, explicit_base: Any) -> Path:
         candidate = model_dir / name
         if checkpoint_base_exists(candidate):
             return candidate
-    for candidate in sorted(model_dir.glob("iter_epoch_*.pdparams"), reverse=True):
+    epoch_candidates = []
+    for candidate in model_dir.glob("iter_epoch_*.pdparams"):
+        match = re.search(r"iter_epoch_(\d+)\.pdparams$", candidate.name)
+        epoch = int(match.group(1)) if match else -1
+        epoch_candidates.append((epoch, candidate))
+    for _, candidate in sorted(epoch_candidates, key=lambda item: item[0], reverse=True):
         return candidate.with_suffix("")
     return model_dir / "best_accuracy"
 

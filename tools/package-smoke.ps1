@@ -108,6 +108,7 @@ Assert-PathExists "tools\local-rc-closeout.ps1" "local RC closeout script"
 Assert-PathExists "tools\release-freeze-handoff.ps1" "release freeze handoff script"
 Assert-PathExists "tools\materialize-ultralytics-dataset.py" "Ultralytics dataset materializer"
 Assert-PathExists "tools\phase31-paddleocr-full-official-smoke.ps1" "Phase 31 PaddleOCR full smoke script"
+Assert-PathExists "tools\phase47-paddleocr-det-onnx-smoke.ps1" "Phase 47 PaddleOCR Det ONNX smoke script"
 
 $onnxRuntimeRootDll = Join-Path $prefixFull "onnxruntime.dll"
 $onnxRuntimeFolderDll = Join-Path $prefixFull "runtimes\onnxruntime\onnxruntime.dll"

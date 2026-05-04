@@ -200,7 +200,11 @@ The final `paddleocr_official_system_report.json` records Python/Paddle/PaddleOC
 
 Phase 46 adds a C++ ONNX Runtime path for PaddleOCR Det DB-style detection maps. AITrain can identify `ocr_detection` ONNX sidecars/reports, run a single-output DB probability map shaped `[1,1,H,W]`, `[1,H,W]`, or `[H,W]`, threshold connected components, emit four-point text-box polygons, write `ocr_detection` prediction JSON, and render an overlay through the existing inference artifact path.
 
-This is a v1 DB-style postprocess and smoke-validated C++ wiring. It is not a replacement for the full official PaddleOCR System acceptance path, and it does not claim PP-OCRv5 accuracy parity. Use official `predict_system.py` for complete Det+Rec system validation until a real exported Det ONNX artifact is separately accepted.
+Phase 47 adds `tools\phase47-paddleocr-det-onnx-smoke.ps1`, which attempts to convert the official PaddleOCR Det inference model into ONNX through PaddleX `--paddle2onnx`, writes an AITrain sidecar when conversion succeeds, and calls `aitrain_worker --ocr-det-onnx-smoke` to produce C++ predictions and overlay artifacts.
+
+The current local conversion environment is prepared but blocked: Python 3.12.10 can install Paddle's Windows nightly CPU wheel (`paddlepaddle 3.4.0.dev20260407`), PaddleX 3.5.1, and Paddle2ONNX 2.1.0, but `paddle2onnx_cpp2py_export` fails to load and PaddleX reports `Paddle2ONNX is not available` at conversion time. Paddle2ONNX 1.3.1 can import on this machine, but it cannot parse PaddlePaddle 3 PIR `inference.json`. The script records this as `status=conversion-blocked` in `paddleocr_det_onnx_smoke_summary.json` instead of treating it as a pass.
+
+This is a v1 DB-style postprocess plus prepared real exported ONNX wiring smoke path. It is not a replacement for the full official PaddleOCR System acceptance path, and it does not claim PP-OCRv5 accuracy parity. Use official `predict_system.py` for complete Det+Rec system validation until production-quality OCR accuracy acceptance is separately recorded.
 
 If public dataset materialization fails or requires external interaction, the generated minimal datasets remain the required smoke baseline. The failure reason should be recorded as an external data acquisition blocker, not hidden as a successful public dataset run.
 
@@ -210,7 +214,7 @@ If public dataset materialization fails or requires external interaction, the ge
 - Phase 45 covers newer YOLO detection/segmentation model names only; it does not productize YOLO classification, pose, OBB, anomaly, YOLO-World, or YOLOE.
 - GTX 1060 / SM 61 can run CPU training smoke and ONNX Runtime checks, but it cannot validate TensorRT 10 engine building.
 - C++ segmentation mask ONNX postprocess and OCR ONNX CTC greedy decode are available for the current smoke models.
-- C++ OCR Det ONNX Runtime DB-style postprocess is available as a Phase 46 v1 path for single-output probability maps. End-to-end PaddleOCR validation still uses official `predict_system.py` unless a real exported Det ONNX artifact is separately accepted.
+- C++ OCR Det ONNX Runtime DB-style postprocess is available as a Phase 46 v1 path for single-output probability maps, with Phase 47 prepared for real exported Det ONNX wiring smoke once the local PaddleX/Paddle2ONNX conversion chain is unblocked. End-to-end PaddleOCR validation still uses official `predict_system.py` unless production-quality OCR system acceptance is separately recorded.
 - Official third-party backend licensing must be reviewed before commercial redistribution.
 - The official PaddleOCR adapter should be run in an isolated OCR Python environment. Mixing PaddlePaddle and PyTorch in one Windows Python process can trigger DLL conflicts through newer `albumentations` builds.
 - The official PP-OCRv4 smoke uses a tiny generated dataset; it validates train/export/inference wiring and artifacts, not useful OCR accuracy.
