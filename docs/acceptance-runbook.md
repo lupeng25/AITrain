@@ -1,6 +1,6 @@
 # AITrain Studio Acceptance Runbook
 
-This runbook is the Phase 17-45 acceptance path. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, records a traceable release-freeze package identity, and validates newer YOLO detection/segmentation model-family candidates before clean Windows and RTX / SM 75+ TensorRT validation.
+This runbook is the Phase 17-46 acceptance path. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, records a traceable release-freeze package identity, validates newer YOLO detection/segmentation model-family candidates, and adds C++ PaddleOCR Det DB-style ONNX postprocess coverage before clean Windows and RTX / SM 75+ TensorRT validation.
 
 ## Acceptance Modes
 
@@ -163,6 +163,23 @@ Expected artifacts:
 
 Required Phase 45 models are `yolo11n.yaml` and `yolo11n-seg.yaml`. `yolo12n.yaml` and `yolo12n-seg.yaml` are optional candidates until explicitly recorded as passed. This is a wiring/artifact/productization smoke, not an accuracy benchmark.
 
+## Phase 46: PaddleOCR Det C++ ONNX Postprocess
+
+Phase 46 adds C++ DB-style postprocess for PaddleOCR Det ONNX probability maps. The required local acceptance is the normal harness check:
+
+```powershell
+.\tools\harness-check.ps1
+```
+
+The CTest suite covers the deterministic postprocess path with a synthetic probability map. Expected behavior:
+
+- single connected text region becomes one `ocr_detection` prediction;
+- small noise regions are filtered by `minArea`;
+- predictions include four-point polygons, normalized boxes, confidence, and pixel area;
+- overlay rendering returns a valid image.
+
+This phase validates C++ postprocess wiring only. It does not mark PP-OCRv5 official training/export accuracy as accepted, and the full official PaddleOCR Det+Rec+System path remains `tools\phase31-paddleocr-full-official-smoke.ps1` / official `predict_system.py`.
+
 ## Phase 20: Small Training Smoke
 
 Run:
@@ -254,4 +271,4 @@ Then check:
 - Phase 7 / Phase 10 TensorRT status stays external pending unless RTX / SM 75+ smoke passed.
 - Third-party backend license notes remain visible, especially Ultralytics AGPL / Enterprise constraints.
 - C++ tiny detector, segmentation baseline, and OCR baseline are still marked as scaffold/demo/test backends.
-- C++ PaddleOCR Det DB ONNX postprocess remains out of scope; the full OCR acceptance path is official `predict_system.py`.
+- C++ PaddleOCR Det DB-style ONNX postprocess has a Phase 46 v1 path for probability-map outputs, but full OCR system acceptance remains official `predict_system.py` until real exported Det ONNX evidence is recorded.

@@ -14,6 +14,7 @@
 #include <QLibrary>
 #include <QMap>
 #include <QPainter>
+#include <QQueue>
 #include <QProcess>
 #include <QRegularExpression>
 #include <QStandardPaths>
@@ -1103,6 +1104,31 @@ QJsonObject loadOcrRecReport(const QString& onnxPath)
     return {};
 }
 
+QJsonObject loadOcrDetReport(const QString& onnxPath)
+{
+    const QFileInfo onnxInfo(onnxPath);
+    const QStringList candidates = {
+        onnxInfo.absoluteDir().filePath(QStringLiteral("paddleocr_official_det_report.json")),
+        onnxExportReportPath(onnxPath),
+        QStringLiteral("%1.aitrain-export.json").arg(onnxPath)
+    };
+    for (const QString& candidate : candidates) {
+        QFile file(candidate);
+        if (!file.open(QIODevice::ReadOnly)) {
+            continue;
+        }
+        const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+        if (document.isObject()) {
+            const QJsonObject object = document.object();
+            if (object.value(QStringLiteral("backend")).toString() == QStringLiteral("paddleocr_det_official")
+                || object.value(QStringLiteral("modelFamily")).toString() == QStringLiteral("ocr_detection")) {
+                return object;
+            }
+        }
+    }
+    return {};
+}
+
 QVector<float> ocrImageTensor(const QImage& image, int width, int height)
 {
     const QImage gray = image.convertToFormat(QImage::Format_Grayscale8).scaled(width, height, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
@@ -1112,6 +1138,24 @@ QVector<float> ocrImageTensor(const QImage& image, int width, int height)
         const uchar* scanline = gray.constScanLine(y);
         for (int x = 0; x < width; ++x) {
             tensor[y * width + x] = static_cast<float>(scanline[x]) / 255.0f;
+        }
+    }
+    return tensor;
+}
+
+QVector<float> ocrDetImageTensor(const QImage& image, int width, int height)
+{
+    const QImage rgb = image.convertToFormat(QImage::Format_RGB888).scaled(width, height, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    QVector<float> tensor;
+    tensor.resize(3 * width * height);
+    const int planeSize = width * height;
+    for (int y = 0; y < height; ++y) {
+        const uchar* scanline = rgb.constScanLine(y);
+        for (int x = 0; x < width; ++x) {
+            const int pixelIndex = y * width + x;
+            tensor[pixelIndex] = static_cast<float>(scanline[x * 3]) / 255.0f;
+            tensor[planeSize + pixelIndex] = static_cast<float>(scanline[x * 3 + 1]) / 255.0f;
+            tensor[planeSize * 2 + pixelIndex] = static_cast<float>(scanline[x * 3 + 2]) / 255.0f;
         }
     }
     return tensor;
@@ -1171,6 +1215,48 @@ OcrRecPrediction ocrPredictionFromLogits(
     }
     prediction.confidence = timesteps > 0 ? confidenceSum / static_cast<double>(timesteps) : 0.0;
     return prediction;
+}
+
+QVector<float> ocrDetProbabilityMapFromOutput(
+    const float* output,
+    const std::vector<int64_t>& shape,
+    QSize* mapSize,
+    QString* error)
+{
+    if (!output) {
+        if (error) {
+            *error = QStringLiteral("OCR Det ONNX output tensor is null");
+        }
+        return {};
+    }
+
+    int height = 0;
+    int width = 0;
+    if (shape.size() == 4 && shape.at(0) == 1 && shape.at(1) == 1 && shape.at(2) > 0 && shape.at(3) > 0) {
+        height = static_cast<int>(shape.at(2));
+        width = static_cast<int>(shape.at(3));
+    } else if (shape.size() == 3 && shape.at(0) == 1 && shape.at(1) > 0 && shape.at(2) > 0) {
+        height = static_cast<int>(shape.at(1));
+        width = static_cast<int>(shape.at(2));
+    } else if (shape.size() == 2 && shape.at(0) > 0 && shape.at(1) > 0) {
+        height = static_cast<int>(shape.at(0));
+        width = static_cast<int>(shape.at(1));
+    } else {
+        if (error) {
+            *error = QStringLiteral("OCR Det DB ONNX output must be [1,1,H,W], [1,H,W], or [H,W]");
+        }
+        return {};
+    }
+
+    QVector<float> probabilities;
+    probabilities.resize(width * height);
+    for (int index = 0; index < probabilities.size(); ++index) {
+        probabilities[index] = qBound(0.0f, output[index], 1.0f);
+    }
+    if (mapSize) {
+        *mapSize = QSize(width, height);
+    }
+    return probabilities;
 }
 
 void appendProtoVarint(QByteArray* output, quint64 value)
@@ -2461,11 +2547,19 @@ QString inferOnnxModelFamily(const QString& onnxPath)
         || configuredBackend == QStringLiteral("paddleocr_rec")) {
         return QStringLiteral("ocr_recognition");
     }
+    if (configuredFamily == QStringLiteral("ocr_detection")
+        || configuredBackend == QStringLiteral("paddleocr_det_official")) {
+        return QStringLiteral("ocr_detection");
+    }
     if (configuredFamily == QStringLiteral("yolo_detection")
         || configuredBackend == QStringLiteral("ultralytics_yolo_detect")) {
         return QStringLiteral("yolo_detection");
     }
 
+    const QJsonObject detReport = loadOcrDetReport(onnxPath);
+    if (!detReport.isEmpty()) {
+        return QStringLiteral("ocr_detection");
+    }
     const QJsonObject ocrReport = loadOcrRecReport(onnxPath);
     if (!ocrReport.isEmpty()) {
         return QStringLiteral("ocr_recognition");
@@ -2494,6 +2588,14 @@ QString inferOnnxModelFamily(const QString& onnxPath)
             const std::vector<int64_t> inputShape = session.GetInputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape();
             if (inputShape.size() == 4 && inputShape.at(1) == 1) {
                 return QStringLiteral("ocr_recognition");
+            }
+            if (inputShape.size() == 4 && inputShape.at(1) == 3 && session.GetOutputCount() == 1) {
+                const std::vector<int64_t> outputShape = session.GetOutputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape();
+                if ((outputShape.size() == 4 && outputShape.at(1) == 1)
+                    || (outputShape.size() == 3 && outputShape.at(0) == 1)
+                    || outputShape.size() == 2) {
+                    return QStringLiteral("ocr_detection");
+                }
             }
             if (session.GetOutputCount() >= 2) {
                 for (size_t index = 0; index < session.GetOutputCount(); ++index) {
@@ -3052,6 +3154,116 @@ OcrRecPrediction predictOcrRecOnnxRuntime(
 #endif
 }
 
+QVector<OcrDetPrediction> predictOcrDetOnnxRuntime(
+    const QString& onnxPath,
+    const QString& imagePath,
+    const OcrDetPostprocessOptions& options,
+    QString* error)
+{
+#ifndef AITRAIN_WITH_ONNXRUNTIME
+    Q_UNUSED(onnxPath)
+    Q_UNUSED(imagePath)
+    Q_UNUSED(options)
+    if (error) {
+        *error = QStringLiteral("ONNX Runtime inference is not enabled. Configure AITRAIN_ONNXRUNTIME_ROOT with an ONNX Runtime SDK to enable .onnx inference.");
+    }
+    return {};
+#else
+    if (!QFileInfo::exists(onnxPath)) {
+        if (error) {
+            *error = QStringLiteral("OCR Det ONNX model does not exist: %1").arg(onnxPath);
+        }
+        return {};
+    }
+    QImage image(imagePath);
+    if (image.isNull()) {
+        if (error) {
+            *error = QStringLiteral("Cannot read image for OCR Det ONNX prediction: %1").arg(imagePath);
+        }
+        return {};
+    }
+
+    try {
+        Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "aitrain");
+        Ort::SessionOptions sessionOptions;
+        sessionOptions.SetIntraOpNumThreads(1);
+        sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
+#ifdef Q_OS_WIN
+        const std::wstring modelPath = QDir::toNativeSeparators(onnxPath).toStdWString();
+        Ort::Session session(env, modelPath.c_str(), sessionOptions);
+#else
+        const QByteArray modelPath = QFile::encodeName(onnxPath);
+        Ort::Session session(env, modelPath.constData(), sessionOptions);
+#endif
+        Ort::AllocatorWithDefaultOptions allocator;
+        if (session.GetInputCount() != 1 || session.GetOutputCount() < 1) {
+            if (error) {
+                *error = QStringLiteral("OCR Det DB ONNX expects one input and at least one output");
+            }
+            return {};
+        }
+        const std::vector<int64_t> inputShape = session.GetInputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape();
+        if (inputShape.size() != 4 || inputShape.at(1) != 3) {
+            if (error) {
+                *error = QStringLiteral("OCR Det DB ONNX input shape must be [1, 3, height, width]");
+            }
+            return {};
+        }
+        const int inputHeight = inputShape.at(2) > 0 ? static_cast<int>(inputShape.at(2)) : image.height();
+        const int inputWidth = inputShape.at(3) > 0 ? static_cast<int>(inputShape.at(3)) : image.width();
+        if (inputHeight <= 0 || inputWidth <= 0) {
+            if (error) {
+                *error = QStringLiteral("OCR Det DB ONNX input dimensions are invalid");
+            }
+            return {};
+        }
+
+        QVector<float> input = ocrDetImageTensor(image, inputWidth, inputHeight);
+        std::vector<int64_t> tensorShape = {1, 3, inputHeight, inputWidth};
+        Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+        Ort::Value inputTensor = Ort::Value::CreateTensor<float>(
+            memoryInfo,
+            input.data(),
+            static_cast<size_t>(input.size()),
+            tensorShape.data(),
+            tensorShape.size());
+
+        auto inputName = session.GetInputNameAllocated(0, allocator);
+        auto outputName = session.GetOutputNameAllocated(0, allocator);
+        const char* inputNames[] = { inputName.get() };
+        const char* outputNames[] = { outputName.get() };
+        std::vector<Ort::Value> outputs = session.Run(
+            Ort::RunOptions{nullptr},
+            inputNames,
+            &inputTensor,
+            1,
+            outputNames,
+            1);
+
+        QSize mapSize;
+        const QVector<float> probabilityMap = ocrDetProbabilityMapFromOutput(
+            outputs.front().GetTensorData<float>(),
+            outputs.front().GetTensorTypeAndShapeInfo().GetShape(),
+            &mapSize,
+            error);
+        if (probabilityMap.isEmpty()) {
+            return {};
+        }
+        return postProcessPaddleOcrDetDbMap(probabilityMap, mapSize, image.size(), options, error);
+    } catch (const Ort::Exception& exception) {
+        if (error) {
+            *error = QStringLiteral("ONNX Runtime OCR Det inference failed: %1").arg(QString::fromUtf8(exception.what()));
+        }
+        return {};
+    } catch (const std::exception& exception) {
+        if (error) {
+            *error = QStringLiteral("ONNX OCR Det inference failed: %1").arg(QString::fromUtf8(exception.what()));
+        }
+        return {};
+    }
+#endif
+}
+
 QVector<DetectionPrediction> postProcessDetectionPredictions(
     const QVector<DetectionPrediction>& predictions,
     const DetectionInferenceOptions& options)
@@ -3091,6 +3303,124 @@ QVector<DetectionPrediction> postProcessDetectionPredictions(
         }
     }
     return selected;
+}
+
+QVector<OcrDetPrediction> postProcessPaddleOcrDetDbMap(
+    const QVector<float>& probabilityMap,
+    const QSize& mapSize,
+    const QSize& sourceSize,
+    const OcrDetPostprocessOptions& options,
+    QString* error)
+{
+    if (mapSize.isEmpty() || sourceSize.isEmpty() || probabilityMap.size() != mapSize.width() * mapSize.height()) {
+        if (error) {
+            *error = QStringLiteral("OCR Det DB probability map size is invalid");
+        }
+        return {};
+    }
+
+    const double binaryThreshold = qBound(0.0, options.binaryThreshold, 1.0);
+    const double boxThreshold = qBound(0.0, options.boxThreshold, 1.0);
+    const int minArea = qMax(1, options.minArea);
+    const int maxDetections = qMax(0, options.maxDetections);
+    if (maxDetections == 0) {
+        return {};
+    }
+
+    const int width = mapSize.width();
+    const int height = mapSize.height();
+    QVector<uchar> visited(width * height, 0);
+    QVector<OcrDetPrediction> detections;
+
+    auto indexOf = [width](int x, int y) {
+        return y * width + x;
+    };
+
+    for (int startY = 0; startY < height; ++startY) {
+        for (int startX = 0; startX < width; ++startX) {
+            const int startIndex = indexOf(startX, startY);
+            if (visited.at(startIndex) || probabilityMap.at(startIndex) < binaryThreshold) {
+                continue;
+            }
+
+            QQueue<QPoint> queue;
+            queue.enqueue(QPoint(startX, startY));
+            visited[startIndex] = 1;
+            int minX = startX;
+            int maxX = startX;
+            int minY = startY;
+            int maxY = startY;
+            int area = 0;
+            double confidenceSum = 0.0;
+
+            while (!queue.isEmpty()) {
+                const QPoint point = queue.dequeue();
+                const int pointIndex = indexOf(point.x(), point.y());
+                ++area;
+                confidenceSum += static_cast<double>(probabilityMap.at(pointIndex));
+                minX = qMin(minX, point.x());
+                maxX = qMax(maxX, point.x());
+                minY = qMin(minY, point.y());
+                maxY = qMax(maxY, point.y());
+
+                const QPoint neighbors[] = {
+                    QPoint(point.x() + 1, point.y()),
+                    QPoint(point.x() - 1, point.y()),
+                    QPoint(point.x(), point.y() + 1),
+                    QPoint(point.x(), point.y() - 1)
+                };
+                for (const QPoint& neighbor : neighbors) {
+                    if (neighbor.x() < 0 || neighbor.x() >= width || neighbor.y() < 0 || neighbor.y() >= height) {
+                        continue;
+                    }
+                    const int neighborIndex = indexOf(neighbor.x(), neighbor.y());
+                    if (visited.at(neighborIndex) || probabilityMap.at(neighborIndex) < binaryThreshold) {
+                        continue;
+                    }
+                    visited[neighborIndex] = 1;
+                    queue.enqueue(neighbor);
+                }
+            }
+
+            const double confidence = area > 0 ? confidenceSum / static_cast<double>(area) : 0.0;
+            if (area < minArea || confidence < boxThreshold) {
+                continue;
+            }
+
+            const double sx = static_cast<double>(sourceSize.width()) / static_cast<double>(qMax(1, width));
+            const double sy = static_cast<double>(sourceSize.height()) / static_cast<double>(qMax(1, height));
+            const double left = qBound(0.0, static_cast<double>(minX) * sx, static_cast<double>(sourceSize.width()));
+            const double top = qBound(0.0, static_cast<double>(minY) * sy, static_cast<double>(sourceSize.height()));
+            const double right = qBound(0.0, static_cast<double>(maxX + 1) * sx, static_cast<double>(sourceSize.width()));
+            const double bottom = qBound(0.0, static_cast<double>(maxY + 1) * sy, static_cast<double>(sourceSize.height()));
+
+            OcrDetPrediction prediction;
+            prediction.confidence = confidence;
+            prediction.pixelArea = area;
+            prediction.polygon = {
+                QPointF(left, top),
+                QPointF(right, top),
+                QPointF(right, bottom),
+                QPointF(left, bottom)
+            };
+            const double sourceWidth = qMax(1, sourceSize.width());
+            const double sourceHeight = qMax(1, sourceSize.height());
+            prediction.box.classId = 0;
+            prediction.box.xCenter = clamp01((left + right) / 2.0 / sourceWidth);
+            prediction.box.yCenter = clamp01((top + bottom) / 2.0 / sourceHeight);
+            prediction.box.width = qBound(1.0e-6, (right - left) / sourceWidth, 1.0);
+            prediction.box.height = qBound(1.0e-6, (bottom - top) / sourceHeight, 1.0);
+            detections.append(prediction);
+        }
+    }
+
+    std::sort(detections.begin(), detections.end(), [](const OcrDetPrediction& left, const OcrDetPrediction& right) {
+        return left.confidence > right.confidence;
+    });
+    if (detections.size() > maxDetections) {
+        detections.resize(maxDetections);
+    }
+    return detections;
 }
 
 QJsonObject detectionPredictionToJson(const DetectionPrediction& prediction)
@@ -3134,6 +3464,25 @@ QJsonObject ocrRecPredictionToJson(const OcrRecPrediction& prediction)
         {QStringLiteral("blankIndex"), prediction.blankIndex},
         {QStringLiteral("tokens"), tokens}
     };
+}
+
+QJsonObject ocrDetPredictionToJson(const OcrDetPrediction& prediction)
+{
+    QJsonArray points;
+    for (const QPointF& point : prediction.polygon) {
+        QJsonArray item;
+        item.append(point.x());
+        item.append(point.y());
+        points.append(item);
+    }
+
+    QJsonObject object;
+    object.insert(QStringLiteral("taskType"), QStringLiteral("ocr_detection"));
+    object.insert(QStringLiteral("confidence"), prediction.confidence);
+    object.insert(QStringLiteral("pixelArea"), prediction.pixelArea);
+    object.insert(QStringLiteral("points"), points);
+    object.insert(QStringLiteral("box"), boxObject(prediction.box));
+    return object;
 }
 
 QImage renderDetectionPredictions(
@@ -3334,6 +3683,38 @@ QImage renderOcrRecPrediction(
     painter.end();
     const QString text = prediction.text.isEmpty() ? QStringLiteral("empty") : prediction.text;
     drawPixelText(&output, QPoint(8, image.height() + 8), text, Qt::white, 3);
+    return output;
+}
+
+QImage renderOcrDetPredictions(
+    const QString& imagePath,
+    const QVector<OcrDetPrediction>& predictions,
+    QString* error)
+{
+    QImage image(imagePath);
+    if (image.isNull()) {
+        if (error) {
+            *error = QStringLiteral("Cannot render OCR Det prediction image: %1").arg(imagePath);
+        }
+        return {};
+    }
+
+    QImage output = image.convertToFormat(QImage::Format_ARGB32);
+    QPainter painter(&output);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QPen(QColor(245, 158, 11), qMax(2, output.width() / 240)));
+    painter.setBrush(QColor(245, 158, 11, 45));
+    for (const OcrDetPrediction& prediction : predictions) {
+        if (prediction.polygon.size() < 4) {
+            continue;
+        }
+        QPolygonF polygon;
+        for (const QPointF& point : prediction.polygon) {
+            polygon << point;
+        }
+        painter.drawPolygon(polygon);
+    }
+    painter.end();
     return output;
 }
 

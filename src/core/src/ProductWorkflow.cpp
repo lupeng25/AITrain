@@ -3084,6 +3084,11 @@ WorkflowResult benchmarkModelReport(const QString& modelPath, const QString& out
                 } else if (modelFamily == QStringLiteral("ocr_recognition")) {
                     const OcrRecPrediction prediction = predictOcrRecOnnxRuntime(modelPath, sampleImagePath, &inferenceError);
                     outputCount = prediction.text.isEmpty() ? 0 : 1;
+                } else if (modelFamily == QStringLiteral("ocr_detection")) {
+                    OcrDetPostprocessOptions detOptions;
+                    detOptions.maxDetections = inferenceOptions.maxDetections;
+                    const QVector<OcrDetPrediction> predictions = predictOcrDetOnnxRuntime(modelPath, sampleImagePath, detOptions, &inferenceError);
+                    outputCount = predictions.size();
                 } else {
                     const QVector<DetectionPrediction> predictions = predictDetectionOnnxRuntime(modelPath, sampleImagePath, inferenceOptions, &inferenceError);
                     outputCount = predictions.size();
@@ -3707,6 +3712,14 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
                 const OcrRecPrediction prediction = predictOcrRecOnnxRuntime(candidateModel, imagePath, &error);
                 predictions.append(ocrRecPredictionToJson(prediction));
                 overlay = renderOcrRecPrediction(imagePath, prediction, &error);
+            } else if (family == QStringLiteral("ocr_detection")) {
+                inferenceTaskType = QStringLiteral("ocr_detection");
+                OcrDetPostprocessOptions detOptions;
+                const QVector<OcrDetPrediction> detPredictions = predictOcrDetOnnxRuntime(candidateModel, imagePath, detOptions, &error);
+                for (const OcrDetPrediction& prediction : detPredictions) {
+                    predictions.append(ocrDetPredictionToJson(prediction));
+                }
+                overlay = renderOcrDetPredictions(imagePath, detPredictions, &error);
             } else {
                 DetectionInferenceOptions inferenceOptions;
                 const QVector<DetectionPrediction> detPredictions = predictDetectionOnnxRuntime(candidateModel, imagePath, inferenceOptions, &error);

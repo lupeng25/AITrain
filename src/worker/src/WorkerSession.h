@@ -69,6 +69,8 @@ private:
         const QJsonObject& options,
         const QString& datasetPath,
         const QString& taskType);
+    void drainPipelinePythonTrainerOutput(QByteArray* buffer, PipelineTrainResult* result, bool* terminalMessageSeen);
+    void drainPipelinePythonTrainerErrors(QByteArray* buffer, PipelineTrainResult* result);
     bool forwardPipelinePythonTrainerLine(const QByteArray& line, PipelineTrainResult* result, bool* terminalMessageSeen);
 
     QLocalSocket socket_;

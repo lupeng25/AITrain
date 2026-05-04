@@ -1474,6 +1474,23 @@ void WorkerSession::runInference(const QJsonObject& payload)
             predictionArray.append(aitrain::ocrRecPredictionToJson(prediction));
             overlay = aitrain::renderOcrRecPrediction(imagePath, prediction, &error);
             predictionCount = 1;
+        } else if (modelFamily == QStringLiteral("ocr_detection")) {
+            taskType = QStringLiteral("ocr_detection");
+            aitrain::OcrDetPostprocessOptions detOptions;
+            detOptions.binaryThreshold = payload.value(QStringLiteral("binaryThreshold")).toDouble(detOptions.binaryThreshold);
+            detOptions.boxThreshold = payload.value(QStringLiteral("boxThreshold")).toDouble(detOptions.boxThreshold);
+            detOptions.minArea = payload.value(QStringLiteral("minArea")).toInt(detOptions.minArea);
+            detOptions.maxDetections = payload.value(QStringLiteral("maxDetections")).toInt(detOptions.maxDetections);
+            const QVector<aitrain::OcrDetPrediction> predictions = aitrain::predictOcrDetOnnxRuntime(checkpointPath, imagePath, detOptions, &error);
+            if (!error.isEmpty()) {
+                fail(error);
+                return;
+            }
+            for (const aitrain::OcrDetPrediction& prediction : predictions) {
+                predictionArray.append(aitrain::ocrDetPredictionToJson(prediction));
+            }
+            overlay = aitrain::renderOcrDetPredictions(imagePath, predictions, &error);
+            predictionCount = predictions.size();
         } else {
             const QVector<aitrain::DetectionPrediction> predictions = aitrain::predictDetectionOnnxRuntime(checkpointPath, imagePath, options, &error);
             if (!error.isEmpty()) {
@@ -1777,32 +1794,8 @@ WorkerSession::PipelineTrainResult WorkerSession::runPipelineTrainingStep(
     interceptPythonTrainerMessages_ = true;
     while (pythonTrainerProcess_.state() != QProcess::NotRunning) {
         pythonTrainerProcess_.waitForReadyRead(50);
-        stdoutBuffer.append(pythonTrainerProcess_.readAllStandardOutput());
-        int newline = stdoutBuffer.indexOf('\n');
-        while (newline >= 0) {
-            const QByteArray line = stdoutBuffer.left(newline).trimmed();
-            stdoutBuffer.remove(0, newline + 1);
-            if (!line.isEmpty()) {
-                forwardPipelinePythonTrainerLine(line, &result, &terminalMessageSeen);
-            }
-            newline = stdoutBuffer.indexOf('\n');
-        }
-
-        stderrBuffer.append(pythonTrainerProcess_.readAllStandardError());
-        newline = stderrBuffer.indexOf('\n');
-        while (newline >= 0) {
-            const QByteArray line = stderrBuffer.left(newline).trimmed();
-            stderrBuffer.remove(0, newline + 1);
-            if (!line.isEmpty()) {
-                QJsonObject logObject;
-                logObject.insert(QStringLiteral("taskId"), request_.taskId);
-                logObject.insert(QStringLiteral("backend"), backend);
-                logObject.insert(QStringLiteral("message"), QString::fromUtf8(line));
-                result.logs.append(logObject);
-                send(QStringLiteral("log"), logObject);
-            }
-            newline = stderrBuffer.indexOf('\n');
-        }
+        drainPipelinePythonTrainerOutput(&stdoutBuffer, &result, &terminalMessageSeen);
+        drainPipelinePythonTrainerErrors(&stderrBuffer, &result);
 
         QCoreApplication::processEvents();
         if (canceled_) {
@@ -1814,6 +1807,9 @@ WorkerSession::PipelineTrainResult WorkerSession::runPipelineTrainingStep(
             pythonTrainerProcess_.waitForFinished(1);
         }
     }
+    pythonTrainerProcess_.waitForFinished(1000);
+    drainPipelinePythonTrainerOutput(&stdoutBuffer, &result, &terminalMessageSeen);
+    drainPipelinePythonTrainerErrors(&stderrBuffer, &result);
     interceptPythonTrainerMessages_ = false;
 
     if (!stdoutBuffer.trimmed().isEmpty()) {
@@ -1838,6 +1834,39 @@ WorkerSession::PipelineTrainResult WorkerSession::runPipelineTrainingStep(
     }
 
     return result;
+}
+
+void WorkerSession::drainPipelinePythonTrainerOutput(QByteArray* buffer, PipelineTrainResult* result, bool* terminalMessageSeen)
+{
+    buffer->append(pythonTrainerProcess_.readAllStandardOutput());
+    int newline = buffer->indexOf('\n');
+    while (newline >= 0) {
+        const QByteArray line = buffer->left(newline).trimmed();
+        buffer->remove(0, newline + 1);
+        if (!line.isEmpty()) {
+            forwardPipelinePythonTrainerLine(line, result, terminalMessageSeen);
+        }
+        newline = buffer->indexOf('\n');
+    }
+}
+
+void WorkerSession::drainPipelinePythonTrainerErrors(QByteArray* buffer, PipelineTrainResult* result)
+{
+    buffer->append(pythonTrainerProcess_.readAllStandardError());
+    int newline = buffer->indexOf('\n');
+    while (newline >= 0) {
+        const QByteArray line = buffer->left(newline).trimmed();
+        buffer->remove(0, newline + 1);
+        if (!line.isEmpty()) {
+            QJsonObject logObject;
+            logObject.insert(QStringLiteral("taskId"), request_.taskId);
+            logObject.insert(QStringLiteral("backend"), requestedTrainingBackend(request_));
+            logObject.insert(QStringLiteral("message"), QString::fromUtf8(line));
+            result->logs.append(logObject);
+            send(QStringLiteral("log"), logObject);
+        }
+        newline = buffer->indexOf('\n');
+    }
 }
 
 bool WorkerSession::forwardPipelinePythonTrainerLine(const QByteArray& line, PipelineTrainResult* result, bool* terminalMessageSeen)

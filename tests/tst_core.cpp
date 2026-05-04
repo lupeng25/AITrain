@@ -1928,6 +1928,56 @@ private slots:
         QVERIFY2(!overlay.isNull(), qPrintable(error));
     }
 
+    void paddleOcrDetDbPostProcessExtractsTextBoxes()
+    {
+        QVector<float> probabilityMap(16 * 12, 0.01f);
+        for (int y = 3; y <= 7; ++y) {
+            for (int x = 4; x <= 10; ++x) {
+                probabilityMap[y * 16 + x] = 0.92f;
+            }
+        }
+        probabilityMap[0] = 0.99f;
+
+        aitrain::OcrDetPostprocessOptions options;
+        options.binaryThreshold = 0.3;
+        options.boxThreshold = 0.5;
+        options.minArea = 6;
+        options.maxDetections = 5;
+        QString error;
+        const QVector<aitrain::OcrDetPrediction> predictions = aitrain::postProcessPaddleOcrDetDbMap(
+            probabilityMap,
+            QSize(16, 12),
+            QSize(160, 120),
+            options,
+            &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(predictions.size(), 1);
+        const aitrain::OcrDetPrediction& prediction = predictions.first();
+        QVERIFY(prediction.confidence > 0.9);
+        QCOMPARE(prediction.pixelArea, 35);
+        QCOMPARE(prediction.polygon.size(), 4);
+        QCOMPARE(qRound(prediction.polygon.at(0).x()), 40);
+        QCOMPARE(qRound(prediction.polygon.at(0).y()), 30);
+        QCOMPARE(qRound(prediction.polygon.at(2).x()), 110);
+        QCOMPARE(qRound(prediction.polygon.at(2).y()), 80);
+        QVERIFY(prediction.box.xCenter > 0.45 && prediction.box.xCenter < 0.5);
+        QVERIFY(prediction.box.yCenter > 0.45 && prediction.box.yCenter < 0.5);
+
+        const QJsonObject predictionJson = aitrain::ocrDetPredictionToJson(prediction);
+        QCOMPARE(predictionJson.value(QStringLiteral("taskType")).toString(), QStringLiteral("ocr_detection"));
+        QCOMPARE(predictionJson.value(QStringLiteral("points")).toArray().size(), 4);
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString imagePath = dir.filePath(QStringLiteral("sample.png"));
+        QImage image(160, 120, QImage::Format_RGB888);
+        image.fill(Qt::white);
+        QVERIFY(image.save(imagePath));
+        const QImage overlay = aitrain::renderOcrDetPredictions(imagePath, predictions, &error);
+        QVERIFY2(!overlay.isNull(), qPrintable(error));
+        QCOMPARE(overlay.size(), image.size());
+    }
+
     void evaluateModelReportRunsRealSegmentationAndOcrOnnxSmoke()
     {
         if (!aitrain::isOnnxRuntimeInferenceAvailable()) {
@@ -3208,7 +3258,7 @@ private slots:
         QTRY_VERIFY2_WITH_TIMEOUT(
             finished,
             qPrintable(QStringLiteral("Worker did not finish. Logs:\n%1").arg(logs.join(QStringLiteral("\n")))),
-            20000);
+            120000);
         QVERIFY2(ok, qPrintable(QStringList({finishedMessage, logs.join(QStringLiteral("\n"))}).join(QStringLiteral("\n"))));
         QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
 

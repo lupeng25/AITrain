@@ -12,7 +12,7 @@ AITrain Studio keeps training out of the GUI process. Real training is launched 
 | `paddleocr_rec` | OCR recognition | Real PaddlePaddle CTC smoke backend | Trains a small PaddlePaddle CTC recognizer on PaddleOCR-style Rec data, exports ONNX, and supports C++ ONNX Runtime CTC greedy decode. Not a full PP-OCRv4 official config/export pipeline yet. |
 | `paddleocr_rec_official` / `paddleocr_ppocrv4_rec` | OCR recognition | Official PaddleOCR adapter | Generates a PP-OCRv4 recognition config from AITrain PaddleOCR-style Rec data and can run official PaddleOCR `tools/train.py`, `tools/export_model.py`, and optional `tools/infer/predict_rec.py` when `runOfficial=true` and `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` points to a checkout. `prepareOnly=true` validates config generation only. |
 | `paddleocr_det_official` | OCR detection | Official PaddleOCR adapter | Generates a PP-OCRv4 detection config from PaddleOCR Det data and can run official PaddleOCR `tools/train.py` and `tools/export_model.py`. Artifacts include `aitrain_ppocrv4_det.yml`, `official_model/best_accuracy.pdparams`, `official_inference/inference.yml`, and `paddleocr_official_det_report.json`. |
-| `paddleocr_system_official` | OCR system inference | Official PaddleOCR adapter | Runs official `tools/infer/predict_system.py` from a PaddleOCR source checkout using exported Det and Rec inference model directories. This is the current end-to-end PaddleOCR validation path; it is not C++ OCR Det ONNX postprocess. |
+| `paddleocr_system_official` | OCR system inference | Official PaddleOCR adapter | Runs official `tools/infer/predict_system.py` from a PaddleOCR source checkout using exported Det and Rec inference model directories. This remains the full official end-to-end OCR validation path. |
 | `python_mock` | Any | Protocol fixture | Used only to verify Worker subprocess handling. Not real training. |
 
 ## Environment Setup
@@ -196,6 +196,12 @@ The official System adapter accepts these parameters:
 
 The final `paddleocr_official_system_report.json` records Python/Paddle/PaddleOCR versions, source checkout ref, command, exit code, log path, model directories, dictionary path, `official_system_prediction.json`, `system_results.txt`, and the visualization directory.
 
+## C++ PaddleOCR Det ONNX Postprocess
+
+Phase 46 adds a C++ ONNX Runtime path for PaddleOCR Det DB-style detection maps. AITrain can identify `ocr_detection` ONNX sidecars/reports, run a single-output DB probability map shaped `[1,1,H,W]`, `[1,H,W]`, or `[H,W]`, threshold connected components, emit four-point text-box polygons, write `ocr_detection` prediction JSON, and render an overlay through the existing inference artifact path.
+
+This is a v1 DB-style postprocess and smoke-validated C++ wiring. It is not a replacement for the full official PaddleOCR System acceptance path, and it does not claim PP-OCRv5 accuracy parity. Use official `predict_system.py` for complete Det+Rec system validation until a real exported Det ONNX artifact is separately accepted.
+
 If public dataset materialization fails or requires external interaction, the generated minimal datasets remain the required smoke baseline. The failure reason should be recorded as an external data acquisition blocker, not hidden as a successful public dataset run.
 
 ## Known Boundaries
@@ -204,7 +210,7 @@ If public dataset materialization fails or requires external interaction, the ge
 - Phase 45 covers newer YOLO detection/segmentation model names only; it does not productize YOLO classification, pose, OBB, anomaly, YOLO-World, or YOLOE.
 - GTX 1060 / SM 61 can run CPU training smoke and ONNX Runtime checks, but it cannot validate TensorRT 10 engine building.
 - C++ segmentation mask ONNX postprocess and OCR ONNX CTC greedy decode are available for the current smoke models.
-- C++ OCR Det ONNX Runtime DB postprocess is not implemented. End-to-end PaddleOCR validation currently uses official `predict_system.py`.
+- C++ OCR Det ONNX Runtime DB-style postprocess is available as a Phase 46 v1 path for single-output probability maps. End-to-end PaddleOCR validation still uses official `predict_system.py` unless a real exported Det ONNX artifact is separately accepted.
 - Official third-party backend licensing must be reviewed before commercial redistribution.
 - The official PaddleOCR adapter should be run in an isolated OCR Python environment. Mixing PaddlePaddle and PyTorch in one Windows Python process can trigger DLL conflicts through newer `albumentations` builds.
 - The official PP-OCRv4 smoke uses a tiny generated dataset; it validates train/export/inference wiring and artifacts, not useful OCR accuracy.
