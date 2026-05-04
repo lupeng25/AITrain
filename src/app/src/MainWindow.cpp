@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 
+#include "EvaluationReportView.h"
 #include "InfoPanel.h"
 #include "LanguageSupport.h"
 #include "aitrain/core/DetectionTrainer.h"
@@ -820,6 +821,7 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     sidebar_->addItem(tr("任务与产物"), TaskQueuePage);
     sidebar_->addSection(tr("模型交付"));
     sidebar_->addItem(tr("模型库"), ModelRegistryPage);
+    sidebar_->addItem(tr("评估报告"), EvaluationReportsPage);
     sidebar_->addItem(tr("模型导出"), ConversionPage);
     sidebar_->addItem(tr("推理验证"), InferencePage);
     sidebar_->addSection(tr("系统"));
@@ -840,6 +842,7 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     stack_->addWidget(buildTrainingPage());
     stack_->addWidget(buildTaskQueuePage());
     stack_->addWidget(buildModelRegistryPage());
+    stack_->addWidget(buildEvaluationReportsPage());
     stack_->addWidget(buildConversionPage());
     stack_->addWidget(buildInferencePage());
     stack_->addWidget(buildPluginsPage());
@@ -1699,6 +1702,22 @@ QWidget* MainWindow::buildTaskQueuePage()
     artifactPreviewText_ = new QPlainTextEdit;
     artifactPreviewText_->setReadOnly(true);
     artifactPreviewText_->setPlainText(QStringLiteral("选择一个产物后显示摘要。"));
+    auto* artifactDefaultPreview = new QWidget;
+    auto* artifactDefaultLayout = new QVBoxLayout(artifactDefaultPreview);
+    artifactDefaultLayout->setContentsMargins(0, 0, 0, 0);
+    artifactDefaultLayout->setSpacing(8);
+    artifactDefaultLayout->addWidget(artifactImagePreviewLabel_, 1);
+    artifactDefaultLayout->addWidget(artifactPreviewText_, 2);
+    artifactPreviewStack_ = new QStackedWidget;
+    artifactPreviewStack_->addWidget(artifactDefaultPreview);
+    artifactEvaluationReportView_ = new EvaluationReportView;
+    auto* artifactEvaluationScroll = new QScrollArea;
+    artifactEvaluationScroll->setWidget(artifactEvaluationReportView_);
+    artifactEvaluationScroll->setWidgetResizable(true);
+    artifactEvaluationScroll->setFrameShape(QFrame::NoFrame);
+    artifactEvaluationScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    artifactEvaluationScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    artifactPreviewStack_->addWidget(artifactEvaluationScroll);
 
     auto* actionRow = new QHBoxLayout;
     auto* openDirButton = new QPushButton(QStringLiteral("打开目录"));
@@ -1739,8 +1758,7 @@ QWidget* MainWindow::buildTaskQueuePage()
     auto* rightLayout = new QVBoxLayout(rightDetail);
     rightLayout->setContentsMargins(0, 0, 0, 0);
     rightLayout->addLayout(actionRow);
-    rightLayout->addWidget(artifactImagePreviewLabel_, 1);
-    rightLayout->addWidget(artifactPreviewText_, 2);
+    rightLayout->addWidget(artifactPreviewStack_, 1);
     detailSplitter->addWidget(leftDetail);
     detailSplitter->addWidget(rightDetail);
     detailSplitter->setStretchFactor(0, 2);
@@ -1771,6 +1789,7 @@ QWidget* MainWindow::buildModelRegistryPage()
     auto* inferButton = new QPushButton(QStringLiteral("选中模型用于推理"));
     auto* exportButton = new QPushButton(QStringLiteral("选中模型用于导出"));
     auto* pipelineButton = new QPushButton(QStringLiteral("执行本地流水线"));
+    auto* reportsButton = new QPushButton(QStringLiteral("查看评估报告"));
     connect(refreshButton, &QPushButton::clicked, this, &MainWindow::refreshModelRegistry);
     connect(inferButton, &QPushButton::clicked, this, [this]() {
         if (!modelVersionTable_ || modelVersionTable_->selectedItems().isEmpty()) {
@@ -1811,12 +1830,14 @@ QWidget* MainWindow::buildModelRegistryPage()
         showPage(ConversionPage, uiText("模型导出"));
     });
     connect(pipelineButton, &QPushButton::clicked, this, &MainWindow::runLocalPipelinePlanFromCurrentDataset);
+    connect(reportsButton, &QPushButton::clicked, this, &MainWindow::openEvaluationReportsPage);
     row->addWidget(refreshButton);
     row->addWidget(inferButton);
     row->addWidget(exportButton);
     row->addWidget(pipelineButton);
+    row->addWidget(reportsButton);
     row->addStretch();
-    modelRegistrySummaryLabel_ = mutedLabel(QStringLiteral("训练产物可从“任务与产物”注册为模型版本；评估、基准、流水线与交付报告均通过 Worker 执行。"));
+    modelRegistrySummaryLabel_ = mutedLabel(QStringLiteral("训练产物可从“任务与产物”注册为模型版本；评估报告已拆分到独立页面，模型库聚焦版本管理、导出和推理入口。"));
     toolbar->bodyLayout()->addLayout(row);
     toolbar->bodyLayout()->addWidget(modelRegistrySummaryLabel_);
 
@@ -1836,18 +1857,6 @@ QWidget* MainWindow::buildModelRegistryPage()
     configureTable(modelVersionTable_);
     modelPanel->bodyLayout()->addWidget(modelVersionTable_);
 
-    auto* lower = new QSplitter(Qt::Horizontal);
-    auto* reportPanel = new InfoPanel(QStringLiteral("最近评估报告"));
-    evaluationReportTable_ = new QTableWidget(0, 5);
-    evaluationReportTable_->setHorizontalHeaderLabels(QStringList()
-        << QStringLiteral("任务")
-        << QStringLiteral("类型")
-        << QStringLiteral("模型")
-        << QStringLiteral("报告")
-        << QStringLiteral("时间"));
-    configureTable(evaluationReportTable_);
-    reportPanel->bodyLayout()->addWidget(evaluationReportTable_);
-
     auto* pipelinePanel = new InfoPanel(QStringLiteral("流水线记录"));
     pipelineRunTable_ = new QTableWidget(0, 5);
     pipelineRunTable_->setHorizontalHeaderLabels(QStringList()
@@ -1858,15 +1867,65 @@ QWidget* MainWindow::buildModelRegistryPage()
         << QStringLiteral("更新时间"));
     configureTable(pipelineRunTable_);
     pipelinePanel->bodyLayout()->addWidget(pipelineRunTable_);
-    lower->addWidget(reportPanel);
-    lower->addWidget(pipelinePanel);
-    lower->setStretchFactor(0, 1);
-    lower->setStretchFactor(1, 1);
-
     splitter->addWidget(modelPanel);
-    splitter->addWidget(lower);
-    splitter->setStretchFactor(0, 3);
+    splitter->addWidget(pipelinePanel);
+    splitter->setStretchFactor(0, 4);
     splitter->setStretchFactor(1, 2);
+
+    layout->addWidget(toolbar);
+    layout->addWidget(splitter, 1);
+    return page;
+}
+
+QWidget* MainWindow::buildEvaluationReportsPage()
+{
+    auto* page = new QWidget;
+    auto* layout = new QVBoxLayout(page);
+    layout->setContentsMargins(18, 18, 18, 18);
+    layout->setSpacing(16);
+
+    auto* toolbar = new InfoPanel(QStringLiteral("评估报告"));
+    auto* row = new QHBoxLayout;
+    auto* refreshButton = primaryButton(QStringLiteral("刷新评估报告"));
+    auto* backToModelsButton = new QPushButton(QStringLiteral("查看模型库"));
+    connect(refreshButton, &QPushButton::clicked, this, &MainWindow::refreshModelRegistry);
+    connect(backToModelsButton, &QPushButton::clicked, this, [this]() {
+        showPage(ModelRegistryPage, uiText("模型库"));
+    });
+    row->addWidget(refreshButton);
+    row->addWidget(backToModelsButton);
+    row->addStretch();
+    toolbar->bodyLayout()->addLayout(row);
+    toolbar->bodyLayout()->addWidget(mutedLabel(QStringLiteral("集中查看最近评估报告、任务类型、报告路径和详细可视化结果；模型版本管理保留在“模型库”。")));
+
+    auto* splitter = new QSplitter(Qt::Vertical);
+
+    auto* reportPanel = new InfoPanel(QStringLiteral("最近评估报告"));
+    evaluationReportTable_ = new QTableWidget(0, 5);
+    evaluationReportTable_->setHorizontalHeaderLabels(QStringList()
+        << QStringLiteral("任务")
+        << QStringLiteral("类型")
+        << QStringLiteral("模型")
+        << QStringLiteral("报告")
+        << QStringLiteral("时间"));
+    configureTable(evaluationReportTable_);
+    connect(evaluationReportTable_, &QTableWidget::itemSelectionChanged, this, &MainWindow::updateSelectedEvaluationReportDetails);
+    reportPanel->bodyLayout()->addWidget(evaluationReportTable_);
+
+    auto* reportDetailPanel = new InfoPanel(QStringLiteral("评估报告详情"));
+    evaluationReportView_ = new EvaluationReportView;
+    auto* evaluationReportScroll = new QScrollArea;
+    evaluationReportScroll->setWidget(evaluationReportView_);
+    evaluationReportScroll->setWidgetResizable(true);
+    evaluationReportScroll->setFrameShape(QFrame::NoFrame);
+    evaluationReportScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    evaluationReportScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    reportDetailPanel->bodyLayout()->addWidget(evaluationReportScroll);
+
+    splitter->addWidget(reportPanel);
+    splitter->addWidget(reportDetailPanel);
+    splitter->setStretchFactor(0, 1);
+    splitter->setStretchFactor(1, 3);
 
     layout->addWidget(toolbar);
     layout->addWidget(splitter, 1);
@@ -2343,7 +2402,8 @@ QString MainWindow::pageCaption(int pageIndex) const
     case DatasetPage: return tr("管理数据集库，完成导入、校验、划分和样本预览");
     case TrainingPage: return tr("启动官方后端优先的训练实验，并监控指标、日志和产物");
     case TaskQueuePage: return tr("追踪历史任务、指标、导出记录和所有 Worker 产物");
-    case ModelRegistryPage: return tr("管理模型版本、来源 lineage、评估报告和部署基准");
+    case ModelRegistryPage: return tr("管理模型版本、来源 lineage，以及导出、推理和流水线入口");
+    case EvaluationReportsPage: return tr("集中查看最近评估报告、任务类型、报告路径和详细可视化结果");
     case ConversionPage: return tr("将训练产物导出为 ONNX 或外部 TensorRT 验收目标");
     case InferencePage: return tr("选择模型与样本图，验证 detection、segmentation 或 OCR 推理结果");
     case PluginsPage: return tr("扫描和诊断模型插件");
@@ -2361,6 +2421,14 @@ void MainWindow::showPage(int pageIndex, const QString& title)
     if (pageIndex == ModelRegistryPage) {
         updateModelRegistry();
     }
+    if (pageIndex == EvaluationReportsPage) {
+        updateModelRegistry();
+    }
+}
+
+void MainWindow::openEvaluationReportsPage()
+{
+    showPage(EvaluationReportsPage, uiText("评估报告"));
 }
 
 void MainWindow::createProject()
@@ -4080,11 +4148,14 @@ void MainWindow::updateModelRegistry()
                 evaluationReportTable_->setItem(row, 0, new QTableWidgetItem(report.taskId.left(8)));
                 evaluationReportTable_->setItem(row, 1, new QTableWidgetItem(taskTypeLabel(report.taskType)));
                 evaluationReportTable_->setItem(row, 2, new QTableWidgetItem(QDir::toNativeSeparators(report.modelPath)));
-                evaluationReportTable_->setItem(row, 3, new QTableWidgetItem(QDir::toNativeSeparators(report.reportPath)));
+                auto* pathItem = new QTableWidgetItem(QDir::toNativeSeparators(report.reportPath));
+                pathItem->setData(Qt::UserRole, report.reportPath);
+                evaluationReportTable_->setItem(row, 3, pathItem);
                 evaluationReportTable_->setItem(row, 4, new QTableWidgetItem(report.createdAt.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))));
             }
         }
     }
+    updateSelectedEvaluationReportDetails();
 
     if (pipelineRunTable_) {
         pipelineRunTable_->setRowCount(0);
@@ -4125,6 +4196,16 @@ QString MainWindow::selectedArtifactPath() const
     }
     const int row = taskArtifactTable_->selectedItems().first()->row();
     auto* item = taskArtifactTable_->item(row, 1);
+    return item ? item->data(Qt::UserRole).toString() : QString();
+}
+
+QString MainWindow::selectedEvaluationReportPath() const
+{
+    if (!evaluationReportTable_ || evaluationReportTable_->selectedItems().isEmpty()) {
+        return QString();
+    }
+    const int row = evaluationReportTable_->selectedItems().first()->row();
+    auto* item = evaluationReportTable_->item(row, 3);
     return item ? item->data(Qt::UserRole).toString() : QString();
 }
 
@@ -4242,10 +4323,14 @@ void MainWindow::updateSelectedTaskDetails()
 
 void MainWindow::previewArtifactPath(const QString& path)
 {
-    if (!artifactPreviewText_ || !artifactImagePreviewLabel_) {
+    if (!artifactPreviewText_ || !artifactImagePreviewLabel_ || !artifactPreviewStack_) {
         return;
     }
 
+    artifactPreviewStack_->setCurrentIndex(0);
+    if (artifactEvaluationReportView_) {
+        artifactEvaluationReportView_->clear();
+    }
     artifactImagePreviewLabel_->clear();
     artifactImagePreviewLabel_->setText(uiText("暂无图片预览"));
     artifactPreviewText_->clear();
@@ -4298,6 +4383,11 @@ void MainWindow::previewArtifactPath(const QString& path)
     }
 
     if (QStringList{QStringLiteral("json"), QStringLiteral("yaml"), QStringLiteral("yml"), QStringLiteral("txt"), QStringLiteral("csv"), QStringLiteral("log")}.contains(suffix)) {
+        if (suffix == QStringLiteral("json") && info.fileName() == QStringLiteral("evaluation_report.json") && artifactEvaluationReportView_) {
+            artifactEvaluationReportView_->loadReport(path);
+            artifactPreviewStack_->setCurrentIndex(1);
+            return;
+        }
         QFile file(path);
         if (!file.open(QIODevice::ReadOnly)) {
             artifactPreviewText_->setPlainText(uiText("无法读取文本产物：%1").arg(QDir::toNativeSeparators(path)));
@@ -4377,6 +4467,19 @@ void MainWindow::previewArtifactPath(const QString& path)
     artifactPreviewText_->setPlainText(uiText("不支持内联预览的产物\n路径：%1\n大小：%2 bytes")
         .arg(QDir::toNativeSeparators(path))
         .arg(info.size()));
+}
+
+void MainWindow::updateSelectedEvaluationReportDetails()
+{
+    if (!evaluationReportView_) {
+        return;
+    }
+    const QString reportPath = selectedEvaluationReportPath();
+    if (reportPath.isEmpty()) {
+        evaluationReportView_->clear();
+        return;
+    }
+    evaluationReportView_->loadReport(reportPath);
 }
 
 void MainWindow::updateArtifactPreviewFromSelection()

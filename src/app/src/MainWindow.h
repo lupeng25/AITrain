@@ -20,6 +20,7 @@
 #include <QVector>
 
 class InfoPanel;
+class EvaluationReportView;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -57,6 +58,8 @@ private slots:
     void runLocalPipelinePlanFromCurrentDataset();
     void reproduceSelectedTrainingTask();
     void refreshModelRegistry();
+    void updateSelectedEvaluationReportDetails();
+    void openEvaluationReportsPage();
 
 private:
     enum PageIndex {
@@ -66,6 +69,7 @@ private:
         TrainingPage,
         TaskQueuePage,
         ModelRegistryPage,
+        EvaluationReportsPage,
         ConversionPage,
         InferencePage,
         PluginsPage,
@@ -79,6 +83,7 @@ private:
     QWidget* buildTrainingPage();
     QWidget* buildTaskQueuePage();
     QWidget* buildModelRegistryPage();
+    QWidget* buildEvaluationReportsPage();
     QWidget* buildConversionPage();
     QWidget* buildInferencePage();
     QWidget* buildPluginsPage();
@@ -131,6 +136,7 @@ private:
     QString selectedTaskId() const;
     QString selectedArtifactPath() const;
     void previewArtifactPath(const QString& path);
+    QString selectedEvaluationReportPath() const;
 
     aitrain::PluginManager pluginManager_;
     aitrain::ProjectRepository repository_;
@@ -246,6 +252,9 @@ private:
     QLabel* latestPreviewImageLabel_ = nullptr;
     QLabel* artifactImagePreviewLabel_ = nullptr;
     QPlainTextEdit* artifactPreviewText_ = nullptr;
+    QStackedWidget* artifactPreviewStack_ = nullptr;
+    EvaluationReportView* artifactEvaluationReportView_ = nullptr;
     QTextEdit* logEdit_ = nullptr;
     MetricsWidget* metricsWidget_ = nullptr;
+    EvaluationReportView* evaluationReportView_ = nullptr;
 };

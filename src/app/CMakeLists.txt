@@ -3,6 +3,8 @@ add_executable(AITrainStudio WIN32
     src/AiTrainAppConfig.h.in
     src/AppStyle.h
     src/AppStyle.cpp
+    src/EvaluationReportView.h
+    src/EvaluationReportView.cpp
     src/InfoPanel.h
     src/InfoPanel.cpp
     src/LanguageSupport.h
