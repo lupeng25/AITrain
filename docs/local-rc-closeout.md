@@ -2,6 +2,8 @@
 
 This checklist is the local, non-external release-candidate closeout path after Phase 39B, Phase 39C, and Phase 41 Lite. It does not add new model backends. It exists to make the current detection, segmentation, OCR, pipeline, benchmark, model registry, delivery report, and environment profile loop repeatable on the development machine.
 
+After this local gate passes, use `docs\external-acceptance-handoff.md` and `docs\acceptance-templates\` for the clean Windows package and RTX / SM 75+ TensorRT external acceptance handoff.
+
 ## Scope
 
 Local closeout covers:
@@ -93,3 +95,5 @@ After closeout passes locally, update `docs/harness/current-status.md` with:
 - Commands run and whether CPU training smoke was included.
 - Any skipped heavy smoke and why.
 - External clean Windows and RTX TensorRT acceptance remaining pending.
+
+The next handoff step is to send the package plus `docs\external-acceptance-handoff.md` and collect filled templates from the external clean Windows and TensorRT machines.

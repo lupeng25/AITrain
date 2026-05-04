@@ -1,6 +1,6 @@
 # AITrain Studio Acceptance Runbook
 
-This runbook is the Phase 17-31 acceptance path. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, and covers the current local usability additions for task history, artifact browsing, dataset management, public dataset materialization, official PaddleOCR inference smoke, annotation workflow, release-candidate usability, and the official PaddleOCR Det + Rec + System chain.
+This runbook is the Phase 17-44 acceptance path. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, and records a traceable release-freeze package identity before clean Windows and RTX / SM 75+ TensorRT validation.
 
 ## Acceptance Modes
 
@@ -27,6 +27,10 @@ All generated datasets, official downloads, trainer outputs, and smoke artifacts
 Every `acceptance-smoke.ps1` run writes `acceptance_summary.json` to its work directory. The summary records requested modes, status, work directory, start/end timestamps, failure reason, and hardware-blocked reason when applicable.
 
 For the current local release-candidate closeout path, use `docs\local-rc-closeout.md`. It is the Phase 42 Lite entry point for source build, package smoke, optional local baseline, optional CPU training smoke, Phase 41 environment profile GUI walkthrough, and boundary wording checks.
+
+For external handoff, use `docs\external-acceptance-handoff.md` and the result templates under `docs\acceptance-templates`. These files define the package-root commands, TensorRT commands, required returned evidence, and the clean separation between local RC closeout and external acceptance.
+
+For release-freeze package identity, use `docs\release-freeze-handoff.md` and `tools\release-freeze-handoff.ps1`. This generates the CPack ZIP, SHA256 hashes, and a handoff manifest without marking external acceptance as passed.
 
 ## Phase 17: Local Baseline Freeze
 
@@ -94,6 +98,45 @@ Acceptance requires:
 - Worker self-check resolves CUDA, cuDNN, TensorRT, TensorRT Plugin, TensorRT ONNX Parser, and ONNX Runtime.
 - `aitrain_worker.exe --tensorrt-smoke <work-dir>` builds an engine and runs inference.
 - The result is recorded back in `docs\harness\current-status.md` only after a real RTX / SM 75+ pass.
+
+## Phase 43 Lite: External Acceptance Handoff
+
+Before sending a package to an external tester, read:
+
+```text
+docs\external-acceptance-handoff.md
+docs\acceptance-templates\clean-windows-acceptance-result.md
+docs\acceptance-templates\tensorrt-acceptance-result.md
+```
+
+Clean Windows package acceptance from the unpacked package root:
+
+```powershell
+.\tools\acceptance-smoke.ps1 -Package
+```
+
+RTX / SM 75+ TensorRT acceptance from a package root or source tree:
+
+```powershell
+.\tools\acceptance-smoke.ps1 -TensorRT -WorkDir .deps\acceptance-tensorrt
+```
+
+Return the filled template, `acceptance_summary.json`, full console output, Worker self-check JSON, package layout summary, GPU/driver evidence for TensorRT, and the exact TensorRT smoke pass/fail/hardware-blocked output. Do not update TensorRT status as passed until a real supported GPU run succeeds.
+
+## Phase 44 Lite: Release Freeze Handoff
+
+From the source tree, generate a traceable package handoff:
+
+```powershell
+.\tools\release-freeze-handoff.ps1
+```
+
+This runs the local RC closeout by default, generates the CPack ZIP, computes SHA256 hashes, and writes:
+
+- `build-vscode\release-freeze-handoff\release_handoff_manifest.json`
+- `build-vscode\release-freeze-handoff\release_handoff_summary.md`
+
+Send those files with the ZIP package and the Phase 43 external acceptance templates. This is still a local handoff preparation step; clean Windows and TensorRT acceptance remain external until evidence is returned.
 
 ## Phase 20: Small Training Smoke
 

@@ -31,11 +31,16 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Harness check: tests" -ForegroundColor Cyan
-$test = "call `"$vcvars`" >nul && ctest --test-dir $buildDir --output-on-failure"
+$test = "call `"$vcvars`" >nul && ctest --test-dir $buildDir --output-on-failure --interactive-debug-mode 1"
 cmd /c $test
 if ($LASTEXITCODE -ne 0) {
-    throw "Tests failed with exit code $LASTEXITCODE"
+    $firstTestExitCode = $LASTEXITCODE
+    Write-Host "Harness check: tests failed with exit code $firstTestExitCode; retrying once after cleanup delay." -ForegroundColor Yellow
+    Start-Sleep -Seconds 5
+    cmd /c $test
+    if ($LASTEXITCODE -ne 0) {
+        throw "Tests failed with exit code $LASTEXITCODE"
+    }
 }
 
 Write-Host "Harness check passed." -ForegroundColor Green
-

@@ -52,6 +52,8 @@ This file is the source of truth for phase status in new AI coding conversations
 | Phase 39C: Benchmark, model registry, and delivery report hardening | Done locally | `benchmarkModel` now emits structured runtime status, latency percentiles, throughput, model/sample digests, failure categories, and TensorRT hardware-blocked status. Pipeline model registration stores evaluation/benchmark/artifact/lineage/limitation summaries for the model registry. Delivery reports now include readable HTML sections, model card summaries, artifact inventory hashes, and explicit scaffold / official / hardware-blocked limitations. |
 | Phase 41 Lite: Environment profiles and repair guidance | Done locally | Worker `environmentCheck` now includes structured `profiles` for YOLO/OCR/TensorRT with per-check status and repair hints, writes `environment_profiles_report.json`, and emits `environment_profiles_report` artifacts. GUI environment table now renders profile summary/check rows and treats TensorRT SM 61 as `hardware-blocked` warning semantics instead of pass/fail confusion. |
 | Phase 42 Lite: Local RC closeout | Done locally with CPU smoke | Added `docs/local-rc-closeout.md` and `tools/local-rc-closeout.ps1` as the local release-candidate closeout entry point. Package layout checks now assert the closeout doc/script are installed. The local RC fast path passed, `acceptance-smoke.ps1 -LocalBaseline -Package -SkipBuild` passed, and `acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr` passed with 32/8 YOLO detection, 24/8 YOLO segmentation, and 96 OCR Rec generated samples. CPU smoke produced YOLO detection/segmentation `best.pt` + `best.onnx`, OCR Rec `.pdparams` + ONNX + dict, and `cpu_training_smoke_summary.json`. This remains a wiring/artifact smoke, not an accuracy benchmark. |
+| Phase 43 Lite: External acceptance handoff package | Prepared locally | Added `docs/external-acceptance-handoff.md` and result templates under `docs/acceptance-templates` for clean Windows package acceptance and RTX / SM 75+ TensorRT acceptance. Package install and package smoke checks now assert the handoff doc and templates are present. This phase prepares external evidence collection only; clean Windows package acceptance and TensorRT pass must still be recorded from external machines. |
+| Phase 44 Lite: Release freeze package identity | Prepared locally | Added `docs/release-freeze-handoff.md` and `tools/release-freeze-handoff.ps1` to run local RC closeout, generate the CPack ZIP, compute SHA256 hashes, and write `release_handoff_manifest.json` / `release_handoff_summary.md` under `build-vscode\release-freeze-handoff`. Package install and package smoke checks now assert the release-freeze doc/script are present. This does not mark clean Windows or TensorRT external acceptance as passed. |
 
 ## Local Hardware Note
 
@@ -68,13 +70,15 @@ Recorded on 2026-04-30:
 
 ## Current Next Task
 
-Current local follow-up: local RC closeout and CPU training smoke are complete locally; rerun external acceptance for clean Windows packaging and TensorRT hardware when available.
+Current local follow-up: local RC closeout, CPU training smoke, external acceptance handoff package, and release-freeze package identity tooling are complete locally; generate a frozen handoff package and collect external acceptance results for clean Windows packaging and TensorRT hardware when available.
 
 Recommended implementation order:
 
-1. External acceptance: rerun package / local baseline smoke on clean Windows and TensorRT on RTX / SM 75+ hardware when available.
-2. Keep `tools\local-rc-closeout.ps1` as the repeatable local RC gate before future release-candidate handoff.
-3. Keep Phase 40 backlog deferred unless a new priority is explicitly approved.
+1. Generate the frozen handoff package with `tools\release-freeze-handoff.ps1`, then send the ZIP, manifest, summary, `docs\external-acceptance-handoff.md`, and `docs\acceptance-templates\` to external testers.
+2. External acceptance: run package smoke on clean Windows and TensorRT smoke on RTX / SM 75+ hardware.
+3. Record returned filled templates, `acceptance_summary.json`, console output, Worker self-check JSON, package layout, and GPU/driver evidence before updating status.
+4. Keep `tools\local-rc-closeout.ps1` as the repeatable local RC gate before future release-candidate handoff.
+5. Keep Phase 40 backlog deferred unless a new priority is explicitly approved.
 
 Current constraints to preserve:
 

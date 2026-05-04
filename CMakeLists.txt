@@ -275,12 +275,15 @@ install(DIRECTORY DESTINATION runtimes/onnxruntime)
 install(DIRECTORY DESTINATION runtimes/tensorrt)
 install(DIRECTORY DESTINATION docs)
 install(DIRECTORY docs/harness DESTINATION docs)
+install(DIRECTORY docs/acceptance-templates DESTINATION docs)
 install(DIRECTORY examples DESTINATION .)
 install(FILES
     docs/training-backends.md
     docs/hardware-compatibility.md
     docs/acceptance-runbook.md
     docs/local-rc-closeout.md
+    docs/external-acceptance-handoff.md
+    docs/release-freeze-handoff.md
     docs/product-roadmap-local-training-platform.md
     DESTINATION docs
 )
@@ -291,6 +294,7 @@ install(DIRECTORY python_trainers DESTINATION .
 install(FILES
     tools/acceptance-smoke.ps1
     tools/local-rc-closeout.ps1
+    tools/release-freeze-handoff.ps1
     tools/materialize-ultralytics-dataset.py
     tools/phase16-ocr-official-smoke.ps1
     tools/phase31-paddleocr-full-official-smoke.ps1
