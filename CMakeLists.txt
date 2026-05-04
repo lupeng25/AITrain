@@ -293,7 +293,12 @@ install(DIRECTORY python_trainers DESTINATION .
     PATTERN "*.pyc" EXCLUDE
 )
 install(FILES
+    installer/AITrainStudio.iss
+    DESTINATION installer
+)
+install(FILES
     tools/acceptance-smoke.ps1
+    tools/build-inno-installer.ps1
     tools/phase45-yolo-model-matrix-smoke.ps1
     tools/local-rc-closeout.ps1
     tools/release-freeze-handoff.ps1
@@ -301,6 +306,7 @@ install(FILES
     tools/phase16-ocr-official-smoke.ps1
     tools/phase31-paddleocr-full-official-smoke.ps1
     tools/phase47-paddleocr-det-onnx-smoke.ps1
+    tools/production-ocr-acceptance.ps1
     DESTINATION tools
 )
 

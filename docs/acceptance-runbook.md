@@ -202,6 +202,29 @@ If conversion is blocked, the script writes `paddleocr_det_onnx_smoke_summary.js
 
 A passing Phase 47 run is real exported Det ONNX wiring evidence for the C++ postprocess path on a tiny CPU smoke model. It is still not PP-OCRv5 official accuracy parity or a production OCR benchmark.
 
+## Production OCR Acceptance
+
+Use this gate only with representative, non-tiny OCR data and returned official reports:
+
+```powershell
+.\tools\production-ocr-acceptance.ps1 `
+  -DetDataset <paddleocr-det-dataset> `
+  -RecDataset <paddleocr-rec-dataset> `
+  -SystemImages <end-to-end-image-folder> `
+  -OfficialDetReport <paddleocr_official_det_report.json> `
+  -OfficialRecReport <paddleocr_official_rec_report.json> `
+  -OfficialSystemReport <paddleocr_official_system_report.json> `
+  -OcrDetOnnxSummary <paddleocr_det_onnx_smoke_summary.json> `
+  -RequireDetOnnxEvidence
+```
+
+The script writes:
+
+- `production_ocr_acceptance_report.json`
+- `production_ocr_acceptance_summary.md`
+
+Default thresholds are intentionally higher than tiny smoke data: at least 100 Det images, 1000 Rec samples, 100 System images, Rec accuracy >= 0.90, and CER <= 0.10. If evidence is missing, the script exits blocked and records the missing checks instead of marking production OCR as accepted.
+
 ## Phase 20: Small Training Smoke
 
 Run:

@@ -46,6 +46,32 @@ The manifest records:
 - External acceptance docs/templates to send with the package.
 - Required external result artifacts to return.
 
+## Inno Setup Installer
+
+The repo also includes an Inno Setup 6 script for producing a Windows installer from the same verified package layout used by package smoke:
+
+```powershell
+.\tools\build-inno-installer.ps1
+```
+
+The command refreshes `build-vscode\package-smoke`, verifies the layout, locates `ISCC.exe`, and writes:
+
+- `build-vscode\inno\AITrainStudio-0.1.0-Setup.exe`
+
+For a faster compile after `package-smoke` has already passed:
+
+```powershell
+.\tools\build-inno-installer.ps1 -SkipPackageSmoke
+```
+
+For a smaller CPU/ONNX installer that leaves TensorRT redistribution to the ZIP package or a separate GPU bundle:
+
+```powershell
+.\tools\build-inno-installer.ps1 -SkipPackageSmoke -ExcludeTensorRt
+```
+
+The installer wraps the package-smoke directory only. It does not add `.deps`, generated datasets, downloaded tools, model weights, ONNX smoke outputs, TensorRT engines, or external acceptance evidence.
+
 ## External Follow-Up
 
 Send the generated ZIP package plus:
