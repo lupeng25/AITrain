@@ -54,6 +54,7 @@ This file is the source of truth for phase status in new AI coding conversations
 | Phase 42 Lite: Local RC closeout | Done locally with CPU smoke | Added `docs/local-rc-closeout.md` and `tools/local-rc-closeout.ps1` as the local release-candidate closeout entry point. Package layout checks now assert the closeout doc/script are installed. The local RC fast path passed, `acceptance-smoke.ps1 -LocalBaseline -Package -SkipBuild` passed, and `acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr` passed with 32/8 YOLO detection, 24/8 YOLO segmentation, and 96 OCR Rec generated samples. CPU smoke produced YOLO detection/segmentation `best.pt` + `best.onnx`, OCR Rec `.pdparams` + ONNX + dict, and `cpu_training_smoke_summary.json`. This remains a wiring/artifact smoke, not an accuracy benchmark. |
 | Phase 43 Lite: External acceptance handoff package | Prepared locally | Added `docs/external-acceptance-handoff.md` and result templates under `docs/acceptance-templates` for clean Windows package acceptance and RTX / SM 75+ TensorRT acceptance. Package install and package smoke checks now assert the handoff doc and templates are present. This phase prepares external evidence collection only; clean Windows package acceptance and TensorRT pass must still be recorded from external machines. |
 | Phase 44 Lite: Release freeze package identity | Prepared locally | Added `docs/release-freeze-handoff.md` and `tools/release-freeze-handoff.ps1` to run local RC closeout, generate the CPack ZIP, compute SHA256 hashes, and write `release_handoff_manifest.json` / `release_handoff_summary.md` under `build-vscode\release-freeze-handoff`. Package install and package smoke checks now assert the release-freeze doc/script are present. This does not mark clean Windows or TensorRT external acceptance as passed. |
+| Phase 45: YOLO new-version productization | Done locally for YOLO11 detection/segmentation smoke | Added `docs\yolo-model-support-matrix.md` and `tools\phase45-yolo-model-matrix-smoke.ps1` for newer Ultralytics detection/segmentation model-family acceptance. The local required matrix passed with Ultralytics 8.4.45 for `yolo11n.yaml` and `yolo11n-seg.yaml`, producing `best.pt`, `best.onnx`, `ultralytics_training_report.json`, and `yolo_model_matrix_summary.json`; CTest also passed with `AITRAIN_ACCEPTANCE_SMOKE_ROOT` pointed at the Phase 45 work directory. YOLO12 nano detection/segmentation remain optional candidates via `-IncludeYolo12`; classification, pose, OBB, anomaly, YOLO-World, YOLOE, and TensorRT remain out of this phase. |
 
 ## Local Hardware Note
 
@@ -70,7 +71,7 @@ Recorded on 2026-04-30:
 
 ## Current Next Task
 
-Current local follow-up: local RC closeout, CPU training smoke, external acceptance handoff package, and release-freeze package identity tooling are complete locally; generate a frozen handoff package and collect external acceptance results for clean Windows packaging and TensorRT hardware when available.
+Current local follow-up: local RC closeout, CPU training smoke, external acceptance handoff package, release-freeze package identity tooling, and Phase 45 YOLO11 detection/segmentation model-family smoke are complete locally; generate a frozen handoff package and collect external acceptance results for clean Windows packaging and TensorRT hardware when available.
 
 Recommended implementation order:
 
@@ -78,7 +79,8 @@ Recommended implementation order:
 2. External acceptance: run package smoke on clean Windows and TensorRT smoke on RTX / SM 75+ hardware.
 3. Record returned filled templates, `acceptance_summary.json`, console output, Worker self-check JSON, package layout, and GPU/driver evidence before updating status.
 4. Keep `tools\local-rc-closeout.ps1` as the repeatable local RC gate before future release-candidate handoff.
-5. Keep Phase 40 backlog deferred unless a new priority is explicitly approved.
+5. Optionally run `tools\phase45-yolo-model-matrix-smoke.ps1 -IncludeYolo12` if YOLO12 detection/segmentation candidate evidence is needed.
+6. Keep Phase 40 backlog deferred unless a new priority is explicitly approved.
 
 Current constraints to preserve:
 
@@ -89,6 +91,7 @@ Current constraints to preserve:
 - Phase 31 `paddleocr_system_official` is official-tool inference through PaddleOCR `predict_system.py`; it is not C++ DB detection ONNX postprocess.
 - Phase 39A real segmentation/OCR evaluation is complete through the ONNX evaluation path; keep limitations explicit and avoid overstating non-ONNX parity.
 - Phase 39B/39C local product loop hardening is complete locally for Worker-managed official pipeline training, benchmark summaries, model registry summaries, and delivery report packaging.
+- Phase 45 validates newer YOLO detection/segmentation model names only; do not imply product support for classification, pose, OBB, anomaly, YOLO-World, or YOLOE.
 - Keep training, evaluation, export, inference, benchmark, and report logic inside core/plugin/Worker boundaries, not in `MainWindow`.
 - Keep C++ tiny detector, segmentation baseline, and OCR baseline as scaffold/demo/test backends only.
 - Do not prioritize Phase 40 classification / pose / OBB / anomaly backends until external acceptance and release priorities are explicitly reset.
@@ -130,6 +133,12 @@ For the local CPU small/medium training smoke, run:
 .\tools\acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr
 ```
 
+For the Phase 45 YOLO model-family smoke, run:
+
+```powershell
+.\tools\phase45-yolo-model-matrix-smoke.ps1
+```
+
 When an RTX / SM 75+ machine is available, resume TensorRT acceptance with:
 
 ```powershell
@@ -156,5 +165,6 @@ When an RTX / SM 75+ machine is available, resume TensorRT acceptance with:
 - Phase 27 is UI-only: it may reorganize pages, labels, and helper widgets, but must not move training/export/inference work into `MainWindow`.
 - Phase 32 is product-shell only: it must not change Worker JSON protocol, SQLite schema, plugin interfaces, training/export/inference behavior, or the machine-bound offline licensing trust model without an explicit follow-up plan.
 - Phase 33 local CPU small/medium smoke validates training/export/inference wiring only; it is not a production accuracy benchmark and does not change TensorRT external acceptance status.
+- Phase 45 YOLO11 matrix validates productized detection/segmentation wiring and artifacts only; it is not an accuracy benchmark and does not expand scope to other YOLO tasks.
 - Keep long-running execution in `aitrain_worker`.
 - Keep model-specific behavior behind core/plugin/Worker boundaries, not in `MainWindow`.

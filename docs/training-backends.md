@@ -26,6 +26,15 @@ python -m venv .venv-yolo
 .\.venv-yolo\Scripts\python.exe -m pip install -r python_trainers\requirements-yolo.txt
 ```
 
+YOLO model-family status is tracked in `docs\yolo-model-support-matrix.md`. The product defaults remain `yolov8n.yaml` for detection and `yolov8n-seg.yaml` for segmentation. Phase 45 adds a repeatable acceptance matrix for newer detection/segmentation families:
+
+```powershell
+.\tools\phase45-yolo-model-matrix-smoke.ps1
+.\tools\phase45-yolo-model-matrix-smoke.ps1 -IncludeYolo12
+```
+
+The required Phase 45 targets are `yolo11n.yaml` and `yolo11n-seg.yaml`. YOLO12 nano detection/segmentation are optional candidates until a local pass is recorded. Classification, pose, OBB, anomaly, YOLO-World, and YOLOE remain out of the current productized training path.
+
 OCR recognition:
 
 ```powershell
@@ -145,6 +154,14 @@ For a longer local-only CPU exercise that avoids public downloads and TensorRT, 
 
 This mode generates deterministic small/medium datasets with `examples\create-minimal-datasets.py --profile cpu-smoke`, trains YOLO detection and segmentation for 3 epochs at image size 128 on CPU, trains the small PaddlePaddle OCR Rec CTC backend for 8 epochs, exports ONNX artifacts, runs CTest with `AITRAIN_ACCEPTANCE_SMOKE_ROOT` pointed at the new artifacts, and writes `cpu_training_smoke_summary.json`. It validates wiring, artifacts, and C++ ONNX Runtime compatibility; it is not an accuracy benchmark.
 
+For the Phase 45 newer-YOLO-family matrix, run:
+
+```powershell
+.\tools\phase45-yolo-model-matrix-smoke.ps1
+```
+
+This validates the required YOLO11 detection/segmentation candidates through the same official Ultralytics adapters, checks report/checkpoint/ONNX artifacts, and runs CTest against the generated work directory when a build tree is available. Use `-IncludeYolo12` to include optional YOLO12 nano candidates.
+
 ## Official PaddleOCR Adapter Parameters
 
 The official Rec adapter accepts these extra parameters in addition to the common Python trainer request fields:
@@ -184,6 +201,7 @@ If public dataset materialization fails or requires external interaction, the ge
 ## Known Boundaries
 
 - TensorRT engine building is still pending external RTX / SM 75+ acceptance.
+- Phase 45 covers newer YOLO detection/segmentation model names only; it does not productize YOLO classification, pose, OBB, anomaly, YOLO-World, or YOLOE.
 - GTX 1060 / SM 61 can run CPU training smoke and ONNX Runtime checks, but it cannot validate TensorRT 10 engine building.
 - C++ segmentation mask ONNX postprocess and OCR ONNX CTC greedy decode are available for the current smoke models.
 - C++ OCR Det ONNX Runtime DB postprocess is not implemented. End-to-end PaddleOCR validation currently uses official `predict_system.py`.

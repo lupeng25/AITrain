@@ -281,6 +281,7 @@ install(FILES
     docs/training-backends.md
     docs/hardware-compatibility.md
     docs/acceptance-runbook.md
+    docs/yolo-model-support-matrix.md
     docs/local-rc-closeout.md
     docs/external-acceptance-handoff.md
     docs/release-freeze-handoff.md
@@ -293,6 +294,7 @@ install(DIRECTORY python_trainers DESTINATION .
 )
 install(FILES
     tools/acceptance-smoke.ps1
+    tools/phase45-yolo-model-matrix-smoke.ps1
     tools/local-rc-closeout.ps1
     tools/release-freeze-handoff.ps1
     tools/materialize-ultralytics-dataset.py

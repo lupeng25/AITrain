@@ -1,6 +1,6 @@
 # AITrain Studio Acceptance Runbook
 
-This runbook is the Phase 17-44 acceptance path. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, and records a traceable release-freeze package identity before clean Windows and RTX / SM 75+ TensorRT validation.
+This runbook is the Phase 17-45 acceptance path. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, records a traceable release-freeze package identity, and validates newer YOLO detection/segmentation model-family candidates before clean Windows and RTX / SM 75+ TensorRT validation.
 
 ## Acceptance Modes
 
@@ -12,6 +12,7 @@ Run the unified smoke script from the repository root:
 .\tools\acceptance-smoke.ps1 -Package -SkipBuild
 .\tools\acceptance-smoke.ps1 -PublicDatasets
 .\tools\acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr
+.\tools\phase45-yolo-model-matrix-smoke.ps1
 .\tools\acceptance-smoke.ps1 -TensorRT
 ```
 
@@ -31,6 +32,8 @@ For the current local release-candidate closeout path, use `docs\local-rc-closeo
 For external handoff, use `docs\external-acceptance-handoff.md` and the result templates under `docs\acceptance-templates`. These files define the package-root commands, TensorRT commands, required returned evidence, and the clean separation between local RC closeout and external acceptance.
 
 For release-freeze package identity, use `docs\release-freeze-handoff.md` and `tools\release-freeze-handoff.ps1`. This generates the CPack ZIP, SHA256 hashes, and a handoff manifest without marking external acceptance as passed.
+
+For YOLO model-family productization, use `docs\yolo-model-support-matrix.md` and `tools\phase45-yolo-model-matrix-smoke.ps1`. Phase 45 validates newer Ultralytics detection/segmentation model names only; it does not expand the productized scope to classification, pose, OBB, anomaly, YOLO-World, YOLOE, or TensorRT.
 
 ## Phase 17: Local Baseline Freeze
 
@@ -138,6 +141,28 @@ This runs the local RC closeout by default, generates the CPack ZIP, computes SH
 
 Send those files with the ZIP package and the Phase 43 external acceptance templates. This is still a local handoff preparation step; clean Windows and TensorRT acceptance remain external until evidence is returned.
 
+## Phase 45: YOLO New-Version Productization
+
+Run the required YOLO11 detection/segmentation model matrix:
+
+```powershell
+.\tools\phase45-yolo-model-matrix-smoke.ps1
+```
+
+Optional YOLO12 candidate coverage:
+
+```powershell
+.\tools\phase45-yolo-model-matrix-smoke.ps1 -IncludeYolo12
+```
+
+Expected artifacts:
+
+- `yolo_model_matrix_summary.json` under `.deps\phase45-yolo-model-matrix` by default.
+- For each required model: `ultralytics_training_report.json`, `best.pt`, and exported ONNX.
+- If CTest is available, the script runs C++ ONNX Runtime regression checks with `AITRAIN_ACCEPTANCE_SMOKE_ROOT` pointed at the Phase 45 work directory.
+
+Required Phase 45 models are `yolo11n.yaml` and `yolo11n-seg.yaml`. `yolo12n.yaml` and `yolo12n-seg.yaml` are optional candidates until explicitly recorded as passed. This is a wiring/artifact/productization smoke, not an accuracy benchmark.
+
 ## Phase 20: Small Training Smoke
 
 Run:
@@ -225,6 +250,7 @@ Before marking a release baseline:
 Then check:
 
 - `docs\harness\current-status.md` remains the source of truth.
+- `docs\yolo-model-support-matrix.md` remains the source of truth for productized YOLO model-family status.
 - Phase 7 / Phase 10 TensorRT status stays external pending unless RTX / SM 75+ smoke passed.
 - Third-party backend license notes remain visible, especially Ultralytics AGPL / Enterprise constraints.
 - C++ tiny detector, segmentation baseline, and OCR baseline are still marked as scaffold/demo/test backends.
