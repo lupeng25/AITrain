@@ -4153,6 +4153,9 @@ void MainWindow::updateModelRegistry()
                 evaluationReportTable_->setItem(row, 3, pathItem);
                 evaluationReportTable_->setItem(row, 4, new QTableWidgetItem(report.createdAt.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))));
             }
+            if (evaluationReportTable_->rowCount() > 0) {
+                evaluationReportTable_->selectRow(0);
+            }
         }
     }
     updateSelectedEvaluationReportDetails();
@@ -4316,8 +4319,16 @@ void MainWindow::updateSelectedTaskDetails()
         }
     }
 
-    if (!artifacts.isEmpty()) {
-        taskArtifactTable_->selectRow(0);
+    if (!artifacts.isEmpty() && taskArtifactTable_) {
+        int preferredRow = 0;
+        for (int artifactRow = 0; artifactRow < taskArtifactTable_->rowCount(); ++artifactRow) {
+            auto* kindItem = taskArtifactTable_->item(artifactRow, 0);
+            if (kindItem && kindItem->text() == QStringLiteral("evaluation_report")) {
+                preferredRow = artifactRow;
+                break;
+            }
+        }
+        taskArtifactTable_->selectRow(preferredRow);
     }
 }
 
