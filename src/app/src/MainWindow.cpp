@@ -308,6 +308,91 @@ InfoPanel* createCompactSummaryCard(const QString& label, const QString& value, 
     return panel;
 }
 
+QLabel* inferenceBadge(const QString& text)
+{
+    auto* label = new QLabel(text);
+    label->setObjectName(QStringLiteral("InferenceBadge"));
+    label->setAlignment(Qt::AlignCenter);
+    return label;
+}
+
+QFrame* createInferenceStep(const QString& index, const QString& title, const QString& caption)
+{
+    auto* frame = new QFrame;
+    frame->setObjectName(QStringLiteral("InferenceStep"));
+    frame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+    auto* layout = new QHBoxLayout(frame);
+    layout->setContentsMargins(10, 8, 10, 8);
+    layout->setSpacing(9);
+
+    auto* indexLabel = new QLabel(index);
+    indexLabel->setObjectName(QStringLiteral("InferenceStepIndex"));
+    indexLabel->setAlignment(Qt::AlignCenter);
+    indexLabel->setFixedSize(24, 24);
+
+    auto* textBlock = new QWidget;
+    auto* textLayout = new QVBoxLayout(textBlock);
+    textLayout->setContentsMargins(0, 0, 0, 0);
+    textLayout->setSpacing(1);
+    auto* titleLabel = new QLabel(title);
+    titleLabel->setObjectName(QStringLiteral("InferenceStepTitle"));
+    auto* captionLabel = new QLabel(caption);
+    captionLabel->setObjectName(QStringLiteral("InferenceStepCaption"));
+    captionLabel->setWordWrap(true);
+    textLayout->addWidget(titleLabel);
+    textLayout->addWidget(captionLabel);
+
+    layout->addWidget(indexLabel);
+    layout->addWidget(textBlock, 1);
+    return frame;
+}
+
+QFrame* createInferenceCapability(const QString& title, const QString& caption)
+{
+    auto* frame = new QFrame;
+    frame->setObjectName(QStringLiteral("InferenceCapability"));
+    auto* layout = new QVBoxLayout(frame);
+    layout->setContentsMargins(10, 8, 10, 8);
+    layout->setSpacing(3);
+    auto* titleLabel = new QLabel(title);
+    titleLabel->setObjectName(QStringLiteral("InferenceCapabilityTitle"));
+    auto* captionLabel = new QLabel(caption);
+    captionLabel->setObjectName(QStringLiteral("InferenceCapabilityCaption"));
+    captionLabel->setWordWrap(true);
+    layout->addWidget(titleLabel);
+    layout->addWidget(captionLabel);
+    return frame;
+}
+
+void setInferenceOverlayText(QLabel* label, const QString& text)
+{
+    if (!label) {
+        return;
+    }
+    label->clear();
+    label->setText(text);
+}
+
+void loadInferenceOverlay(QLabel* label, const QString& path)
+{
+    if (!label) {
+        return;
+    }
+    QPixmap overlay(path);
+    if (overlay.isNull()) {
+        setInferenceOverlayText(label, uiText("推理 overlay 加载失败"));
+        return;
+    }
+    QSize targetSize = label->size().boundedTo(QSize(900, 560));
+    if (targetSize.width() < 160 || targetSize.height() < 120) {
+        targetSize = QSize(720, 420);
+    }
+    label->setPixmap(overlay.scaled(
+        targetSize,
+        Qt::KeepAspectRatio,
+        Qt::SmoothTransformation));
+}
+
 QString taskStateLabel(aitrain::TaskState state)
 {
     switch (state) {
@@ -881,15 +966,7 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
         } else if (kind == QStringLiteral("export") && exportResultLabel_) {
             exportResultLabel_->setText(tr("导出完成：%1").arg(QDir::toNativeSeparators(path)));
         } else if (kind == QStringLiteral("inference_overlay") && inferenceOverlayLabel_) {
-            QPixmap overlay(path);
-            if (!overlay.isNull()) {
-                inferenceOverlayLabel_->setPixmap(overlay.scaled(
-                    inferenceOverlayLabel_->size().boundedTo(QSize(520, 360)),
-                    Qt::KeepAspectRatio,
-                    Qt::SmoothTransformation));
-            } else {
-                inferenceOverlayLabel_->setText(tr("推理 overlay 加载失败"));
-            }
+            loadInferenceOverlay(inferenceOverlayLabel_, path);
         } else if (kind == QStringLiteral("inference_predictions") && inferenceResultLabel_) {
             inferenceResultLabel_->setText(inferenceSummaryFromPredictions(path));
         }
@@ -2129,7 +2206,70 @@ QWidget* MainWindow::buildInferencePage()
     layout->setContentsMargins(18, 18, 18, 18);
     layout->setSpacing(16);
 
-    auto* toolbar = new InfoPanel(QStringLiteral("推理输入"));
+    auto* headerInferButton = primaryButton(QStringLiteral("开始推理"));
+
+    auto* headerPanel = new QFrame;
+    headerPanel->setObjectName(QStringLiteral("InferenceHeader"));
+    auto* headerRoot = new QVBoxLayout(headerPanel);
+    headerRoot->setContentsMargins(16, 14, 16, 14);
+    headerRoot->setSpacing(11);
+
+    auto* headerTop = new QHBoxLayout;
+    headerTop->setSpacing(14);
+    auto* titleBlock = new QWidget;
+    auto* titleLayout = new QVBoxLayout(titleBlock);
+    titleLayout->setContentsMargins(0, 0, 0, 0);
+    titleLayout->setSpacing(4);
+    auto* kicker = new QLabel(QStringLiteral("INFERENCE VALIDATION"));
+    kicker->setObjectName(QStringLiteral("InferenceKicker"));
+    auto* title = new QLabel(QStringLiteral("推理验证工作台"));
+    title->setObjectName(QStringLiteral("InferenceTitle"));
+    auto* subtitle = new QLabel(QStringLiteral("选择模型和图片，运行 Worker 推理并查看 prediction JSON 与 overlay。这里不直接承载模型后处理逻辑。"));
+    subtitle->setObjectName(QStringLiteral("InferenceMeta"));
+    subtitle->setWordWrap(true);
+    auto* badgeRow = new QWidget;
+    auto* badgeLayout = new QHBoxLayout(badgeRow);
+    badgeLayout->setContentsMargins(0, 4, 0, 0);
+    badgeLayout->setSpacing(7);
+    badgeLayout->addWidget(inferenceBadge(QStringLiteral("ONNX Runtime")));
+    badgeLayout->addWidget(inferenceBadge(QStringLiteral("Worker")));
+    badgeLayout->addWidget(inferenceBadge(QStringLiteral("Prediction JSON")));
+    badgeLayout->addWidget(inferenceBadge(QStringLiteral("Overlay")));
+    badgeLayout->addStretch();
+    titleLayout->addWidget(kicker);
+    titleLayout->addWidget(title);
+    titleLayout->addWidget(subtitle);
+    titleLayout->addWidget(badgeRow);
+    headerTop->addWidget(titleBlock, 1);
+    headerTop->addWidget(headerInferButton, 0, Qt::AlignTop);
+    headerRoot->addLayout(headerTop);
+
+    auto* headerGrid = new QGridLayout;
+    headerGrid->setHorizontalSpacing(12);
+    headerGrid->setVerticalSpacing(8);
+    auto* executionLabel = new QLabel(QStringLiteral("执行"));
+    executionLabel->setObjectName(QStringLiteral("InferenceMeta"));
+    auto* boundaryLabel = new QLabel(QStringLiteral("边界"));
+    boundaryLabel->setObjectName(QStringLiteral("InferenceMeta"));
+    auto* executionStatus = inlineStatusLabel(QStringLiteral("Worker 隔离执行推理；任务、产物和失败原因写入任务历史。"));
+    executionStatus->setObjectName(QStringLiteral("DarkInlineStatus"));
+    auto* boundaryStatus = inlineStatusLabel(QStringLiteral("C++ ONNX 支持 detection / segmentation / OCR Rec；PaddleOCR System 仍查看官方工具链产物。"));
+    boundaryStatus->setObjectName(QStringLiteral("DarkInlineStatus"));
+    headerGrid->addWidget(executionLabel, 0, 0);
+    headerGrid->addWidget(executionStatus, 0, 1);
+    headerGrid->addWidget(boundaryLabel, 1, 0);
+    headerGrid->addWidget(boundaryStatus, 1, 1);
+    headerGrid->setColumnStretch(1, 1);
+    headerRoot->addLayout(headerGrid);
+
+    auto* mainSplitter = new QSplitter(Qt::Horizontal);
+
+    auto* leftStack = new QWidget;
+    auto* leftLayout = new QVBoxLayout(leftStack);
+    leftLayout->setContentsMargins(0, 0, 0, 0);
+    leftLayout->setSpacing(16);
+
+    auto* toolbar = new InfoPanel(QStringLiteral("验证输入"));
     auto* inferForm = new QFormLayout;
     inferenceCheckpointEdit_ = new QLineEdit;
     inferenceImageEdit_ = new QLineEdit;
@@ -2139,6 +2279,7 @@ QWidget* MainWindow::buildInferencePage()
     inferenceOutputEdit_->setPlaceholderText(QStringLiteral("输出目录；留空则输出到模型同目录 inference"));
     auto* chooseModelButton = new QPushButton(QStringLiteral("选择模型文件"));
     auto* chooseImageButton = new QPushButton(QStringLiteral("选择图片"));
+    auto* chooseOutputButton = new QPushButton(QStringLiteral("选择输出目录"));
     auto* inferButton = primaryButton(QStringLiteral("开始推理"));
     connect(chooseModelButton, &QPushButton::clicked, this, [this]() {
         const QString file = QFileDialog::getOpenFileName(this, uiText("选择模型文件"), currentProjectPath_, QStringLiteral("AITrain model (*.aitrain *.json *.onnx *.engine *.plan);;All files (*.*)"));
@@ -2152,6 +2293,19 @@ QWidget* MainWindow::buildInferencePage()
             inferenceImageEdit_->setText(QDir::toNativeSeparators(file));
         }
     });
+    connect(chooseOutputButton, &QPushButton::clicked, this, [this]() {
+        const QString modelPath = QDir::fromNativeSeparators(inferenceCheckpointEdit_ ? inferenceCheckpointEdit_->text().trimmed() : QString());
+        const QString currentOutput = QDir::fromNativeSeparators(inferenceOutputEdit_ ? inferenceOutputEdit_->text().trimmed() : QString());
+        const QString defaultDir = !currentOutput.isEmpty()
+            ? currentOutput
+            : (!currentProjectPath_.isEmpty()
+                ? QDir(currentProjectPath_).filePath(QStringLiteral("inference"))
+                : QFileInfo(modelPath).absoluteDir().filePath(QStringLiteral("inference")));
+        const QString dir = QFileDialog::getExistingDirectory(this, uiText("选择推理输出目录"), defaultDir);
+        if (!dir.isEmpty() && inferenceOutputEdit_) {
+            inferenceOutputEdit_->setText(QDir::toNativeSeparators(dir));
+        }
+    });
     connect(inferButton, &QPushButton::clicked, this, &MainWindow::startInference);
     auto* modelRow = new QWidget;
     auto* modelLayout = new QHBoxLayout(modelRow);
@@ -2161,33 +2315,107 @@ QWidget* MainWindow::buildInferencePage()
     auto* imageRow = new QWidget;
     auto* imageLayout = new QHBoxLayout(imageRow);
     imageLayout->setContentsMargins(0, 0, 0, 0);
+    imageLayout->setSpacing(8);
     imageLayout->addWidget(inferenceImageEdit_);
     imageLayout->addWidget(chooseImageButton);
-    inferForm->addRow(QStringLiteral("模型"), modelRow);
-    inferForm->addRow(QStringLiteral("图片"), imageRow);
-    inferForm->addRow(QStringLiteral("输出"), inferenceOutputEdit_);
+    modelLayout->setSpacing(8);
+    auto* outputRow = new QWidget;
+    auto* outputLayout = new QHBoxLayout(outputRow);
+    outputLayout->setContentsMargins(0, 0, 0, 0);
+    outputLayout->setSpacing(8);
+    outputLayout->addWidget(inferenceOutputEdit_);
+    outputLayout->addWidget(chooseOutputButton);
+    inferForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    inferForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    inferForm->setHorizontalSpacing(14);
+    inferForm->setVerticalSpacing(10);
+    inferForm->addRow(QStringLiteral("模型路径"), modelRow);
+    inferForm->addRow(QStringLiteral("图片路径"), imageRow);
+    inferForm->addRow(QStringLiteral("推理输出"), outputRow);
     toolbar->bodyLayout()->addLayout(inferForm);
-    toolbar->bodyLayout()->addWidget(mutedLabel(QStringLiteral("推理验证会根据 ONNX 模型族或 AITrain 导出信息选择 detection、segmentation 或 OCR Rec 后处理；完整 PaddleOCR System 推理通过官方工具链任务产物查看。")));
-    toolbar->bodyLayout()->addWidget(inferButton);
+    auto* sourceHelp = emptyStateLabel(QStringLiteral("从“任务与产物”选中 ONNX、AITrain export 或 engine 后，可点击“用作推理模型”自动带入这里。输出目录留空会写到模型同目录 inference。"));
+    toolbar->bodyLayout()->addWidget(sourceHelp);
+    auto* actionStrip = new QFrame;
+    actionStrip->setObjectName(QStringLiteral("ActionStrip"));
+    auto* actionLayout = new QHBoxLayout(actionStrip);
+    actionLayout->setContentsMargins(10, 8, 10, 8);
+    actionLayout->setSpacing(10);
+    actionLayout->addWidget(mutedLabel(QStringLiteral("推理任务会记录到任务历史，完成后可在产物详情中复查 JSON、overlay 和耗时。")), 1);
+    actionLayout->addWidget(inferButton);
+    toolbar->bodyLayout()->addWidget(actionStrip);
+    toolbar->bodyLayout()->addStretch();
+
+    auto* capabilityPanel = new InfoPanel(QStringLiteral("可解析结果"));
+    capabilityPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("推理验证会根据 ONNX 模型族或 AITrain 导出信息选择后处理；scaffold / 官方工具链边界保持显式。")));
+    auto* capabilityGrid = new QGridLayout;
+    capabilityGrid->setHorizontalSpacing(10);
+    capabilityGrid->setVerticalSpacing(10);
+    capabilityGrid->addWidget(createInferenceCapability(QStringLiteral("YOLO 检测"), QStringLiteral("box、类别、置信度、NMS 与 overlay。")), 0, 0);
+    capabilityGrid->addWidget(createInferenceCapability(QStringLiteral("YOLO 分割"), QStringLiteral("box、mask、mask area 与半透明 overlay。")), 0, 1);
+    capabilityGrid->addWidget(createInferenceCapability(QStringLiteral("OCR Rec"), QStringLiteral("CTC greedy decode、文本与置信度摘要。")), 1, 0);
+    capabilityGrid->addWidget(createInferenceCapability(QStringLiteral("PaddleOCR System"), QStringLiteral("端到端结果仍通过官方工具链任务产物查看。")), 1, 1);
+    capabilityGrid->setColumnStretch(0, 1);
+    capabilityGrid->setColumnStretch(1, 1);
+    capabilityPanel->bodyLayout()->addLayout(capabilityGrid);
+    capabilityPanel->bodyLayout()->addStretch();
+
+    leftLayout->addWidget(toolbar, 3);
+    leftLayout->addWidget(capabilityPanel, 2);
+
+    auto* rightStack = new QWidget;
+    auto* rightLayout = new QVBoxLayout(rightStack);
+    rightLayout->setContentsMargins(0, 0, 0, 0);
+    rightLayout->setSpacing(16);
+
+    auto* flowPanel = new InfoPanel(QStringLiteral("验证链路"));
+    auto* flowGrid = new QGridLayout;
+    flowGrid->setHorizontalSpacing(10);
+    flowGrid->setVerticalSpacing(10);
+    flowGrid->addWidget(createInferenceStep(QStringLiteral("1"), QStringLiteral("模型产物"), QStringLiteral("ONNX / AITrain export / TensorRT engine")), 0, 0);
+    flowGrid->addWidget(createInferenceStep(QStringLiteral("2"), QStringLiteral("样本图片"), QStringLiteral("单张验证图进入预处理")), 0, 1);
+    flowGrid->addWidget(createInferenceStep(QStringLiteral("3"), QStringLiteral("Worker 推理"), QStringLiteral("隔离执行，不阻塞 GUI")), 1, 0);
+    flowGrid->addWidget(createInferenceStep(QStringLiteral("4"), QStringLiteral("结果归档"), QStringLiteral("prediction JSON + overlay")), 1, 1);
+    flowGrid->setColumnStretch(0, 1);
+    flowGrid->setColumnStretch(1, 1);
+    flowPanel->bodyLayout()->addLayout(flowGrid);
 
     auto* preview = new QSplitter(Qt::Horizontal);
-    auto* sourcePanel = new InfoPanel(QStringLiteral("输入预览"));
-    sourcePanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("原图、视频帧或 OCR 输入图像。")));
-    auto* resultPanel = new InfoPanel(QStringLiteral("结果预览"));
-    resultPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("检测框、分割 mask、OCR 文本和耗时会显示在这里。")));
-    inferenceResultLabel_ = mutedLabel(QStringLiteral("暂无推理结果。"));
-    sourcePanel->bodyLayout()->addWidget(inferenceResultLabel_);
-    inferenceOverlayLabel_ = new QLabel(QStringLiteral("暂无 overlay"));
-    inferenceOverlayLabel_->setObjectName(QStringLiteral("MutedText"));
-    inferenceOverlayLabel_->setAlignment(Qt::AlignCenter);
-    inferenceOverlayLabel_->setMinimumHeight(240);
-    inferenceOverlayLabel_->setFrameShape(QFrame::StyledPanel);
-    resultPanel->bodyLayout()->addWidget(inferenceOverlayLabel_);
-    preview->addWidget(sourcePanel);
-    preview->addWidget(resultPanel);
+    auto* summaryPanel = new InfoPanel(QStringLiteral("结果摘要"));
+    summaryPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("Worker 返回的 prediction JSON 会压缩显示任务类型、结果数量、首个类别 / 文本、耗时和结果文件路径。")));
+    inferenceResultLabel_ = inlineStatusLabel(QStringLiteral("尚未推理。"));
+    inferenceResultLabel_->setObjectName(QStringLiteral("InferenceResultSummary"));
+    summaryPanel->bodyLayout()->addWidget(inferenceResultLabel_);
+    summaryPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("完整原始 JSON 可在“任务与产物”的产物详情中查看。")));
+    summaryPanel->bodyLayout()->addStretch();
 
-    layout->addWidget(toolbar);
-    layout->addWidget(preview, 1);
+    auto* resultPanel = new InfoPanel(QStringLiteral("Overlay 预览"));
+    resultPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("完成后显示检测框、分割 mask 或 OCR 可视化图；失败时保留明确状态文本。")));
+    inferenceOverlayLabel_ = new QLabel(QStringLiteral("暂无 overlay\n运行推理后显示可视化产物。"));
+    inferenceOverlayLabel_->setObjectName(QStringLiteral("InferenceOverlayCanvas"));
+    inferenceOverlayLabel_->setAlignment(Qt::AlignCenter);
+    inferenceOverlayLabel_->setMinimumHeight(300);
+    inferenceOverlayLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    inferenceOverlayLabel_->setFrameShape(QFrame::NoFrame);
+    resultPanel->bodyLayout()->addWidget(inferenceOverlayLabel_);
+    preview->addWidget(summaryPanel);
+    preview->addWidget(resultPanel);
+    preview->setStretchFactor(0, 1);
+    preview->setStretchFactor(1, 2);
+    preview->setSizes(QList<int>() << 300 << 620);
+
+    rightLayout->addWidget(flowPanel);
+    rightLayout->addWidget(preview, 1);
+
+    mainSplitter->addWidget(leftStack);
+    mainSplitter->addWidget(rightStack);
+    mainSplitter->setStretchFactor(0, 3);
+    mainSplitter->setStretchFactor(1, 5);
+    mainSplitter->setSizes(QList<int>() << 460 << 760);
+
+    connect(headerInferButton, &QPushButton::clicked, this, &MainWindow::startInference);
+
+    layout->addWidget(headerPanel);
+    layout->addWidget(mainSplitter, 1);
     return page;
 }
 
@@ -2865,6 +3093,7 @@ void MainWindow::startInference()
     if (inferenceResultLabel_) {
         inferenceResultLabel_->setText(uiText("正在推理：%1").arg(QDir::toNativeSeparators(imagePath)));
     }
+    setInferenceOverlayText(inferenceOverlayLabel_, uiText("推理运行中\n等待 Worker 写入 overlay 产物。"));
     workerPill_->setStatus(uiText("推理中"), StatusPill::Tone::Info);
 }
 
@@ -3208,15 +3437,7 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
         if (kind == QStringLiteral("export") && exportResultLabel_) {
             exportResultLabel_->setText(uiText("导出完成：%1").arg(QDir::toNativeSeparators(path)));
         } else if (kind == QStringLiteral("inference_overlay") && inferenceOverlayLabel_) {
-            QPixmap overlay(path);
-            if (!overlay.isNull()) {
-                inferenceOverlayLabel_->setPixmap(overlay.scaled(
-                    inferenceOverlayLabel_->size().boundedTo(QSize(520, 360)),
-                    Qt::KeepAspectRatio,
-                    Qt::SmoothTransformation));
-            } else {
-                inferenceOverlayLabel_->setText(uiText("推理 overlay 加载失败"));
-            }
+            loadInferenceOverlay(inferenceOverlayLabel_, path);
         } else if (kind == QStringLiteral("inference_predictions") && inferenceResultLabel_) {
             inferenceResultLabel_->setText(inferenceSummaryFromPredictions(path));
         }
@@ -3479,6 +3700,7 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
                 payload.value(QStringLiteral("predictionsPath")).toString(),
                 payload));
         }
+        loadInferenceOverlay(inferenceOverlayLabel_, payload.value(QStringLiteral("overlayPath")).toString());
     }
 }
 

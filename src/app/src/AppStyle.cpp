@@ -278,6 +278,113 @@ void apply(QApplication& app)
             border-color: #E5E7EB;
         }
 
+        QFrame#InferenceHeader {
+            background: #0B1020;
+            border: 1px solid #1F2937;
+            border-radius: 4px;
+        }
+
+        QFrame#InferenceHeader QPushButton#PrimaryButton {
+            background: #76B900;
+            border-color: #76B900;
+            color: #0B1020;
+            font-weight: 700;
+        }
+
+        QFrame#InferenceHeader QPushButton#PrimaryButton:hover {
+            background: #8DCE12;
+            border-color: #8DCE12;
+        }
+
+        QLabel#InferenceKicker {
+            color: #76B900;
+            font-size: 8pt;
+            font-weight: 700;
+        }
+
+        QLabel#InferenceTitle {
+            color: #FFFFFF;
+            font-size: 15pt;
+            font-weight: 700;
+        }
+
+        QLabel#InferenceMeta {
+            color: #A7B0BD;
+            font-size: 9pt;
+        }
+
+        QLabel#InferenceBadge {
+            color: #D8F99C;
+            background: #111827;
+            border: 1px solid #2F3B4C;
+            border-radius: 11px;
+            padding: 3px 9px;
+            font-size: 8pt;
+            font-weight: 700;
+            min-height: 18px;
+        }
+
+        QFrame#InferenceStep {
+            background: #F9FAFB;
+            border: 1px solid #E5E7EB;
+            border-radius: 6px;
+        }
+
+        QLabel#InferenceStepIndex {
+            color: #0B1020;
+            background: #D8F99C;
+            border: 1px solid #76B900;
+            border-radius: 12px;
+            font-weight: 700;
+        }
+
+        QLabel#InferenceStepTitle {
+            color: #111827;
+            font-weight: 700;
+        }
+
+        QLabel#InferenceStepCaption {
+            color: #6B7280;
+            font-size: 8pt;
+        }
+
+        QFrame#InferenceCapability {
+            background: #F9FAFB;
+            border: 1px solid #E5E7EB;
+            border-left: 3px solid #76B900;
+            border-radius: 5px;
+        }
+
+        QLabel#InferenceCapabilityTitle {
+            color: #111827;
+            font-weight: 700;
+        }
+
+        QLabel#InferenceCapabilityCaption {
+            color: #6B7280;
+            font-size: 8pt;
+        }
+
+        QLabel#InferenceResultSummary {
+            color: #D1D5DB;
+            background: #0B1020;
+            border: 1px solid #1F2937;
+            border-left: 3px solid #76B900;
+            border-radius: 4px;
+            padding: 10px 12px;
+            min-height: 54px;
+            font-family: "Consolas";
+            font-size: 9pt;
+        }
+
+        QLabel#InferenceOverlayCanvas {
+            color: #6B7280;
+            background: #F9FAFB;
+            border: 1px dashed #C9D1DB;
+            border-radius: 8px;
+            padding: 16px;
+        }
+
         QGroupBox {
             border: 1px solid #D8DEE6;
             border-radius: 6px;
