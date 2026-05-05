@@ -1665,6 +1665,7 @@ QWidget* MainWindow::buildTaskQueuePage()
         << QStringLiteral("更新时间")
         << QStringLiteral("消息"));
     configureTable(taskQueueTable_);
+    taskQueueTable_->setMinimumHeight(220);
     connect(taskQueueTable_, &QTableWidget::itemSelectionChanged, this, &MainWindow::updateSelectedTaskDetails);
     tablePanel->bodyLayout()->addWidget(taskQueueTable_);
 
@@ -1770,6 +1771,7 @@ QWidget* MainWindow::buildTaskQueuePage()
     historySplitter->addWidget(detailPanel);
     historySplitter->setStretchFactor(0, 2);
     historySplitter->setStretchFactor(1, 3);
+    historySplitter->setSizes(QList<int>() << 260 << 520);
 
     layout->addWidget(toolbar);
     layout->addWidget(historySplitter, 1);
@@ -2418,6 +2420,9 @@ void MainWindow::showPage(int pageIndex, const QString& title)
     pageTitle_->setText(title);
     pageCaption_->setText(pageCaption(pageIndex));
     sidebar_->setCurrentIndex(pageIndex);
+    if (pageIndex == TaskQueuePage) {
+        updateRecentTasks();
+    }
     if (pageIndex == ModelRegistryPage) {
         updateModelRegistry();
     }
@@ -3751,6 +3756,94 @@ void MainWindow::applyTaskFilters()
         }
         taskQueueTable_->setRowHidden(row, !visible);
     }
+
+    ensureVisibleTaskSelection();
+}
+
+void MainWindow::ensureVisibleTaskSelection()
+{
+    if (!taskQueueTable_) {
+        return;
+    }
+
+    auto isSelectableRow = [this](int row) {
+        if (row < 0 || row >= taskQueueTable_->rowCount() || taskQueueTable_->isRowHidden(row)) {
+            return false;
+        }
+        auto* idItem = taskQueueTable_->item(row, 0);
+        if (!idItem) {
+            return false;
+        }
+        if (idItem->data(Qt::UserRole + 1).toString() == QStringLiteral("empty")) {
+            return false;
+        }
+        return !idItem->data(Qt::UserRole).toString().isEmpty();
+    };
+
+    int selectedRow = -1;
+    if (!taskQueueTable_->selectedItems().isEmpty()) {
+        selectedRow = taskQueueTable_->selectedItems().first()->row();
+    }
+    if (isSelectableRow(selectedRow)) {
+        return;
+    }
+
+    int preferredRow = -1;
+    int fallbackRow = -1;
+    for (int row = 0; row < taskQueueTable_->rowCount(); ++row) {
+        if (!isSelectableRow(row)) {
+            continue;
+        }
+        if (fallbackRow < 0) {
+            fallbackRow = row;
+        }
+        auto* kindItem = taskQueueTable_->item(row, 1);
+        if (kindItem && kindItem->data(Qt::UserRole).toString() == QStringLiteral("evaluate")) {
+            preferredRow = row;
+            break;
+        }
+    }
+
+    const int rowToSelect = preferredRow >= 0 ? preferredRow : fallbackRow;
+    if (rowToSelect >= 0) {
+        const QSignalBlocker blocker(taskQueueTable_);
+        taskQueueTable_->clearSelection();
+        taskQueueTable_->selectRow(rowToSelect);
+        taskQueueTable_->setCurrentCell(rowToSelect, 0);
+        updateSelectedTaskDetails();
+        return;
+    }
+
+    {
+        const QSignalBlocker blocker(taskQueueTable_);
+        taskQueueTable_->clearSelection();
+    }
+    clearSelectedTaskDetails();
+}
+
+void MainWindow::clearSelectedTaskDetails()
+{
+    if (selectedTaskSummaryLabel_) {
+        selectedTaskSummaryLabel_->setText(uiText("请选择一个任务查看产物、指标和导出记录。"));
+    }
+
+    auto clearTableWithPlaceholder = [](QTableWidget* table, const QString& placeholder) {
+        if (!table) {
+            return;
+        }
+        table->clearSelection();
+        table->setRowCount(0);
+        table->insertRow(0);
+        table->setItem(0, 0, new QTableWidgetItem(placeholder));
+        for (int column = 1; column < table->columnCount(); ++column) {
+            table->setItem(0, column, new QTableWidgetItem(QString()));
+        }
+    };
+
+    clearTableWithPlaceholder(taskArtifactTable_, uiText("暂无产物"));
+    clearTableWithPlaceholder(taskMetricTable_, uiText("暂无指标"));
+    clearTableWithPlaceholder(taskExportTable_, uiText("暂无导出"));
+    previewArtifactPath(QString());
 }
 
 void MainWindow::updateTaskTable(QTableWidget* table, const QVector<aitrain::TaskRecord>& tasks)
@@ -4218,6 +4311,7 @@ void MainWindow::updateSelectedTaskDetails()
         return;
     }
     if (taskQueueTable_->selectedItems().isEmpty()) {
+        clearSelectedTaskDetails();
         return;
     }
     const int row = taskQueueTable_->selectedItems().first()->row();
@@ -4225,6 +4319,7 @@ void MainWindow::updateSelectedTaskDetails()
         ? taskQueueTable_->item(row, 0)->data(Qt::UserRole).toString()
         : QString();
     if (taskId.isEmpty()) {
+        clearSelectedTaskDetails();
         return;
     }
     const QString taskKind = taskQueueTable_->item(row, 1) ? taskQueueTable_->item(row, 1)->text() : QString();

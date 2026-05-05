@@ -127,6 +127,8 @@ private:
     void updateAnnotationToolStatus();
     void refreshAfterAnnotation();
     void applyTaskFilters();
+    void ensureVisibleTaskSelection();
+    void clearSelectedTaskDetails();
     void updateModelRegistry();
     bool attachLatestSnapshotToRequest(aitrain::TrainingRequest& request, int datasetId, QString* error);
     int recordExperimentRunForRequest(const aitrain::TrainingRequest& request, int datasetId, QString* error);
