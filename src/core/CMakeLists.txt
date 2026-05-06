@@ -11,6 +11,7 @@ add_library(aitrain_core STATIC
     include/aitrain/core/JsonProtocol.h
     include/aitrain/core/LicenseManager.h
     include/aitrain/core/PluginManager.h
+    include/aitrain/core/PluginMarketplace.h
     include/aitrain/core/ProjectRepository.h
     include/aitrain/core/ProductWorkflow.h
     include/aitrain/core/TaskModels.h
@@ -25,6 +26,7 @@ add_library(aitrain_core STATIC
     src/SegmentationDataset.cpp
     src/SegmentationTrainer.cpp
     src/PluginManager.cpp
+    src/PluginMarketplace.cpp
     src/ProjectRepository.cpp
     src/ProductWorkflow.cpp
     src/TaskModels.cpp

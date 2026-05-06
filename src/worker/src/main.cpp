@@ -3,6 +3,7 @@
 #include "aitrain/core/Deployment.h"
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/PluginManager.h"
+#include "aitrain/core/PluginMarketplace.h"
 
 #include <QCoreApplication>
 #include <QCommandLineParser>
@@ -84,6 +85,19 @@ int runPluginSmoke(const QString& pluginDirectory)
     result.insert(QStringLiteral("plugins"), pluginArray);
     result.insert(QStringLiteral("errors"), QJsonArray::fromStringList(manager.errors()));
     result.insert(QStringLiteral("missingRequiredPlugins"), QJsonArray::fromStringList(missingIds));
+
+    const QString marketplaceRoot = QDir(QFileInfo(pluginDirectory).absolutePath()).filePath(QStringLiteral("marketplace"));
+    aitrain::PluginMarketplace marketplace(marketplaceRoot, QFileInfo(pluginDirectory).absoluteFilePath());
+    aitrain::PluginMarketplaceReport marketplaceReport;
+    const QVector<aitrain::InstalledPluginRecord> installed = marketplace.installedPlugins(&marketplaceReport);
+    QJsonArray installedArray;
+    for (const aitrain::InstalledPluginRecord& record : installed) {
+        installedArray.append(record.toJson());
+    }
+    result.insert(QStringLiteral("marketplaceRoot"), QFileInfo(marketplaceRoot).absoluteFilePath());
+    result.insert(QStringLiteral("marketplaceStatePath"), marketplace.statePath());
+    result.insert(QStringLiteral("marketplaceInstalledPlugins"), installedArray);
+    result.insert(QStringLiteral("marketplaceState"), marketplaceReport.toJson());
     writeJsonLine(result);
     return missingIds.isEmpty() ? 0 : 4;
 }

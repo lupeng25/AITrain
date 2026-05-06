@@ -21,6 +21,7 @@
 
 class InfoPanel;
 class EvaluationReportView;
+class PluginMarketplaceWidget;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -189,6 +190,7 @@ private:
     QLabel* pluginDatasetFormatSummaryLabel_ = nullptr;
     QLabel* pluginExportFormatSummaryLabel_ = nullptr;
     QLabel* pluginGpuSummaryLabel_ = nullptr;
+    QLabel* pluginMarketplaceStatusLabel_ = nullptr;
     QLabel* environmentConsoleStatusLabel_ = nullptr;
     QLabel* environmentOkSummaryLabel_ = nullptr;
     QLabel* environmentWarningSummaryLabel_ = nullptr;
@@ -204,6 +206,7 @@ private:
     QTableWidget* pipelineRunTable_ = nullptr;
     QTableWidget* datasetListTable_ = nullptr;
     QTableWidget* pluginTable_ = nullptr;
+    PluginMarketplaceWidget* pluginMarketplaceWidget_ = nullptr;
     QTableWidget* environmentTable_ = nullptr;
     QComboBox* taskKindFilterCombo_ = nullptr;
     QComboBox* taskStateFilterCombo_ = nullptr;

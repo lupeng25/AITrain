@@ -3,6 +3,7 @@
 #include "EvaluationReportView.h"
 #include "InfoPanel.h"
 #include "LanguageSupport.h"
+#include "PluginMarketplaceWidget.h"
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/PluginInterfaces.h"
 
@@ -38,6 +39,7 @@
 #include <QSplitter>
 #include <QStatusBar>
 #include <QStandardPaths>
+#include <QTabWidget>
 #include <QTableWidgetItem>
 #include <QTime>
 #include <QToolButton>
@@ -2464,10 +2466,14 @@ QWidget* MainWindow::buildPluginsPage()
     pluginConsoleStatusLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
     pluginSearchPathLabel_ = inlineStatusLabel(QStringLiteral("插件搜索路径：未初始化"));
     pluginSearchPathLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
+    pluginMarketplaceStatusLabel_ = inlineStatusLabel(QStringLiteral("插件市场：等待加载本地索引。"));
+    pluginMarketplaceStatusLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
     headerGrid->addWidget(scanCaption, 0, 0);
     headerGrid->addWidget(pluginConsoleStatusLabel_, 0, 1);
     headerGrid->addWidget(pathCaption, 1, 0);
     headerGrid->addWidget(pluginSearchPathLabel_, 1, 1);
+    headerGrid->addWidget(new QLabel(QStringLiteral("市场")), 2, 0);
+    headerGrid->addWidget(pluginMarketplaceStatusLabel_, 2, 1);
     headerRoot->addLayout(headerGrid);
 
     auto* summaryStrip = new QFrame;
@@ -2489,7 +2495,7 @@ QWidget* MainWindow::buildPluginsPage()
     summaryLayout->addWidget(exportFormatCard, 0, 2);
     summaryLayout->addWidget(gpuCard, 0, 3);
 
-    auto* tablePanel = new InfoPanel(QStringLiteral("已加载插件"));
+    auto* tablePanel = new InfoPanel(QStringLiteral("插件扩展"));
     pluginTable_ = new QTableWidget(0, 7);
     pluginTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("ID")
@@ -2509,7 +2515,31 @@ QWidget* MainWindow::buildPluginsPage()
     pluginTable_->horizontalHeader()->setSectionResizeMode(5, QHeaderView::Stretch);
     pluginTable_->horizontalHeader()->setSectionResizeMode(6, QHeaderView::ResizeToContents);
     pluginTable_->verticalHeader()->setDefaultSectionSize(42);
-    tablePanel->bodyLayout()->addWidget(pluginTable_);
+
+    const QString appDir = QApplication::applicationDirPath();
+    pluginMarketplaceWidget_ = new PluginMarketplaceWidget(
+        QDir(appDir).filePath(QStringLiteral("plugins/marketplace")),
+        QDir(appDir).filePath(QStringLiteral("plugins/models")));
+    connect(pluginMarketplaceWidget_, &PluginMarketplaceWidget::releasePluginLoadersRequested, this, [this]() {
+        pluginManager_.scan(QStringList());
+    });
+    connect(pluginMarketplaceWidget_, &PluginMarketplaceWidget::pluginsChanged, this, &MainWindow::refreshPlugins);
+    connect(pluginMarketplaceWidget_, &PluginMarketplaceWidget::statusChanged, this, [this](const QString& status) {
+        if (pluginMarketplaceStatusLabel_) {
+            pluginMarketplaceStatusLabel_->setText(status);
+        }
+    });
+    pluginMarketplaceWidget_->refreshInstalledPlugins();
+
+    auto* tabs = new QTabWidget;
+    auto* loadedTab = new QWidget;
+    auto* loadedLayout = new QVBoxLayout(loadedTab);
+    loadedLayout->setContentsMargins(0, 0, 0, 0);
+    loadedLayout->addWidget(pluginTable_);
+
+    tabs->addTab(loadedTab, QStringLiteral("已加载"));
+    tabs->addTab(pluginMarketplaceWidget_, QStringLiteral("插件市场"));
+    tablePanel->bodyLayout()->addWidget(tabs);
 
     layout->addWidget(headerPanel);
     layout->addWidget(summaryStrip);

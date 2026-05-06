@@ -271,6 +271,7 @@ add_dependencies(AITrainStudio aitrain_python_trainers_copy)
 add_dependencies(aitrain_worker aitrain_python_trainers_copy)
 
 install(DIRECTORY DESTINATION plugins/models)
+install(DIRECTORY DESTINATION plugins/marketplace)
 install(DIRECTORY DESTINATION runtimes/onnxruntime)
 install(DIRECTORY DESTINATION runtimes/tensorrt)
 install(DIRECTORY DESTINATION docs)
@@ -286,8 +287,11 @@ install(FILES
     docs/external-acceptance-handoff.md
     docs/release-freeze-handoff.md
     docs/product-roadmap-local-training-platform.md
+    docs/plugin-marketplace.md
+    docs/plugin-package-format.md
     DESTINATION docs
 )
+install(DIRECTORY examples/plugin-package-template DESTINATION examples)
 install(DIRECTORY python_trainers DESTINATION .
     PATTERN "__pycache__" EXCLUDE
     PATTERN "*.pyc" EXCLUDE
@@ -302,6 +306,8 @@ install(FILES
     tools/phase45-yolo-model-matrix-smoke.ps1
     tools/local-rc-closeout.ps1
     tools/release-freeze-handoff.ps1
+    tools/create-plugin-package.ps1
+    tools/create-plugin-marketplace-demo.ps1
     tools/materialize-ultralytics-dataset.py
     tools/phase16-ocr-official-smoke.ps1
     tools/phase31-paddleocr-full-official-smoke.ps1

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "com.example.aitrain.plugin",
+  "name": "Example AITrain Plugin",
+  "version": "0.1.0",
+  "description": "Minimal plugin marketplace package manifest template.",
+  "publisher": "Example Publisher",
+  "license": "Proprietary",
+  "category": "dataset_interop",
+  "capabilities": [
+    "dataset_interop"
+  ],
+  "entrypoints": {
+    "qtModelPlugin": "payload/plugins/models/YourPlugin.dll"
+  },
+  "compatibility": {
+    "minAitrainVersion": "0.1.0",
+    "qtAbi": "Qt5.12",
+    "msvcRuntime": "msvc1950",
+    "requiresGpu": false
+  },
+  "files": [
+    "payload/plugins/models/YourPlugin.dll"
+  ],
+  "hashes": {
+    "payload/plugins/models/YourPlugin.dll": "replace-with-sha256"
+  }
+}

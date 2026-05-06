@@ -8,12 +8,15 @@
 #include "aitrain/core/LicenseManager.h"
 #include "aitrain/core/OcrRecDataset.h"
 #include "aitrain/core/OcrRecTrainer.h"
+#include "aitrain/core/PluginManager.h"
+#include "aitrain/core/PluginMarketplace.h"
 #include "aitrain/core/ProjectRepository.h"
 #include "aitrain/core/ProductWorkflow.h"
 #include "aitrain/core/SegmentationDataset.h"
 #include "aitrain/core/SegmentationTrainer.h"
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -165,6 +168,129 @@ QString tokenWithCustomer(const QString& token, const QString& customer)
     payload.insert(QStringLiteral("customer"), customer);
     parts[1] = testBase64UrlEncode(QJsonDocument(payload).toJson(QJsonDocument::Compact));
     return QString::fromLatin1(parts.at(0) + QByteArrayLiteral(".") + parts.at(1) + QByteArrayLiteral(".") + parts.at(2));
+}
+
+QString builtPluginPath(const QString& fileName)
+{
+    const QString applicationDir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../plugins/models/%1").arg(fileName)),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("plugins/models/%1").arg(fileName)),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../../build-vscode/plugins/models/%1").arg(fileName)),
+        QDir::current().absoluteFilePath(QStringLiteral("build-vscode/plugins/models/%1").arg(fileName))
+    };
+    for (const QString& candidate : candidates) {
+        if (QFileInfo::exists(candidate)) {
+            return QFileInfo(candidate).absoluteFilePath();
+        }
+    }
+    return {};
+}
+
+QString sha256FileForTest(const QString& path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return {};
+    }
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    while (!file.atEnd()) {
+        hash.addData(file.read(1024 * 1024));
+    }
+    return QString::fromLatin1(hash.result().toHex());
+}
+
+QString powershellExecutablePath()
+{
+    const QStringList candidates = {
+        QStandardPaths::findExecutable(QStringLiteral("powershell")),
+        QStandardPaths::findExecutable(QStringLiteral("powershell.exe")),
+        QStringLiteral("powershell")
+    };
+    for (const QString& candidate : candidates) {
+        if (!candidate.isEmpty()) {
+            return candidate;
+        }
+    }
+    return {};
+}
+
+bool zipDirectoryForTest(const QString& sourceDir, const QString& zipPath, QString* error)
+{
+    const QString powershell = powershellExecutablePath();
+    if (powershell.isEmpty()) {
+        if (error) {
+            *error = QStringLiteral("PowerShell is not available.");
+        }
+        return false;
+    }
+    QDir().mkpath(QFileInfo(zipPath).absolutePath());
+    QFile::remove(zipPath);
+
+    QProcess process;
+    process.start(powershell,
+        QStringList()
+            << QStringLiteral("-NoProfile")
+            << QStringLiteral("-ExecutionPolicy")
+            << QStringLiteral("Bypass")
+            << QStringLiteral("-Command")
+            << QStringLiteral("$source=$args[0]; $zip=$args[1]; Compress-Archive -Path (Join-Path $source '*') -DestinationPath $zip -Force")
+            << QFileInfo(sourceDir).absoluteFilePath()
+            << QFileInfo(zipPath).absoluteFilePath());
+    if (!process.waitForStarted(5000) || !process.waitForFinished(30000)
+        || process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+        if (error) {
+            const QString stderrText = QString::fromLocal8Bit(process.readAllStandardError()).trimmed();
+            *error = stderrText.isEmpty()
+                ? QStringLiteral("Compress-Archive failed.")
+                : stderrText;
+        }
+        return false;
+    }
+    return QFileInfo::exists(zipPath);
+}
+
+QString writeMarketplacePackageFixture(const QString& root, const QString& pluginDllPath, const QString& pluginId, const QString& version)
+{
+    const QString packageRoot = QDir(root).filePath(QStringLiteral("package"));
+    const QString payloadPlugin = QDir(packageRoot).filePath(QStringLiteral("payload/plugins/models/%1").arg(QFileInfo(pluginDllPath).fileName()));
+    if (!QDir().mkpath(QFileInfo(payloadPlugin).absolutePath())) {
+        return {};
+    }
+    QFile::remove(payloadPlugin);
+    if (!QFile::copy(pluginDllPath, payloadPlugin)) {
+        return {};
+    }
+    writeTextFile(QDir(packageRoot).filePath(QStringLiteral("LICENSE")), QStringLiteral("Test license\n"));
+    const QString relativeDll = QStringLiteral("payload/plugins/models/%1").arg(QFileInfo(pluginDllPath).fileName());
+    const QString digest = sha256FileForTest(payloadPlugin);
+    if (digest.isEmpty()) {
+        return {};
+    }
+    QJsonObject manifest;
+    manifest.insert(QStringLiteral("schemaVersion"), 1);
+    manifest.insert(QStringLiteral("id"), pluginId);
+    manifest.insert(QStringLiteral("name"), QStringLiteral("Marketplace Fixture"));
+    manifest.insert(QStringLiteral("version"), version);
+    manifest.insert(QStringLiteral("description"), QStringLiteral("Fixture plugin package."));
+    manifest.insert(QStringLiteral("publisher"), QStringLiteral("AITrain Tests"));
+    manifest.insert(QStringLiteral("license"), QStringLiteral("Test"));
+    manifest.insert(QStringLiteral("category"), QStringLiteral("dataset_interop"));
+    manifest.insert(QStringLiteral("capabilities"), QJsonArray{QStringLiteral("dataset_interop")});
+    manifest.insert(QStringLiteral("entrypoints"), QJsonObject{{QStringLiteral("qtModelPlugin"), relativeDll}});
+    manifest.insert(QStringLiteral("compatibility"), QJsonObject{
+        {QStringLiteral("minAitrainVersion"), QStringLiteral("0.1.0")},
+        {QStringLiteral("qtAbi"), aitrain::PluginMarketplace::currentQtAbi()},
+        {QStringLiteral("requiresGpu"), false}
+    });
+    manifest.insert(QStringLiteral("files"), QJsonArray{relativeDll});
+    manifest.insert(QStringLiteral("hashes"), QJsonObject{{relativeDll, digest}});
+    QFile manifestFile(QDir(packageRoot).filePath(QStringLiteral("plugin.json")));
+    if (!manifestFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        return {};
+    }
+    manifestFile.write(QJsonDocument(manifest).toJson(QJsonDocument::Indented));
+    return packageRoot;
 }
 
 QString pythonExecutablePath()
@@ -385,6 +511,164 @@ private slots:
         QCOMPARE(decodedPayload.value(QStringLiteral("taskId")).toString(), QStringLiteral("abc"));
         QCOMPARE(decodedPayload.value(QStringLiteral("value")).toInt(), 42);
         QVERIFY(error.isEmpty());
+    }
+
+    void pluginMarketplaceParsesIndexAndInstallsExpandedPackage()
+    {
+        const QString pluginDll = builtPluginPath(QStringLiteral("DatasetInteropPlugin.dll"));
+        if (pluginDll.isEmpty()) {
+            QSKIP("Built DatasetInteropPlugin.dll is not available for marketplace fixture.");
+        }
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString packageRoot = writeMarketplacePackageFixture(
+            dir.path(),
+            pluginDll,
+            QStringLiteral("com.aitrain.plugins.dataset_interop"),
+            QStringLiteral("0.1.1"));
+        QVERIFY(!packageRoot.isEmpty());
+
+        const QString indexPath = dir.filePath(QStringLiteral("marketplace.json"));
+        QJsonObject index;
+        index.insert(QStringLiteral("schemaVersion"), 1);
+        index.insert(QStringLiteral("plugins"), QJsonArray{
+            QJsonObject{
+                {QStringLiteral("id"), QStringLiteral("com.aitrain.plugins.dataset_interop")},
+                {QStringLiteral("name"), QStringLiteral("Dataset Interop")},
+                {QStringLiteral("version"), QStringLiteral("0.1.1")},
+                {QStringLiteral("description"), QStringLiteral("Dataset marketplace fixture")},
+                {QStringLiteral("publisher"), QStringLiteral("AITrain Tests")},
+                {QStringLiteral("license"), QStringLiteral("Test")},
+                {QStringLiteral("category"), QStringLiteral("dataset_interop")},
+                {QStringLiteral("capabilities"), QJsonArray{QStringLiteral("dataset_interop")}},
+                {QStringLiteral("minAitrainVersion"), QStringLiteral("0.1.0")},
+                {QStringLiteral("qtAbi"), aitrain::PluginMarketplace::currentQtAbi()},
+                {QStringLiteral("downloadUrl"), packageRoot}
+            }
+        });
+        QFile indexFile(indexPath);
+        QVERIFY(indexFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        indexFile.write(QJsonDocument(index).toJson(QJsonDocument::Indented));
+        indexFile.close();
+
+        aitrain::PluginMarketplace marketplace(
+            dir.filePath(QStringLiteral("marketplace")),
+            dir.filePath(QStringLiteral("plugins/models")),
+            dir.filePath(QStringLiteral("plugin_marketplace_state.json")));
+
+        aitrain::PluginMarketplaceReport indexReport;
+        const QVector<aitrain::MarketplacePluginEntry> entries = marketplace.loadIndex(indexPath, &indexReport);
+        QVERIFY2(indexReport.ok, qPrintable(indexReport.message));
+        QCOMPARE(entries.size(), 1);
+        QCOMPARE(entries.first().installedState, QStringLiteral("available"));
+
+        aitrain::PluginPackageManifest manifest;
+        const aitrain::PluginMarketplaceReport inspectReport = marketplace.inspectPackage(packageRoot, &manifest);
+        QVERIFY2(inspectReport.ok, qPrintable(inspectReport.errors.join(QStringLiteral("\n"))));
+        QCOMPARE(manifest.id, QStringLiteral("com.aitrain.plugins.dataset_interop"));
+
+        const aitrain::PluginMarketplaceReport installReport = marketplace.installPackage(packageRoot, true);
+        QVERIFY2(installReport.ok, qPrintable(installReport.errors.join(QStringLiteral("\n"))));
+        QCOMPARE(installReport.status, QStringLiteral("enabled"));
+
+        const QVector<aitrain::InstalledPluginRecord> installed = marketplace.installedPlugins();
+        QCOMPARE(installed.size(), 1);
+        QVERIFY(installed.first().enabled);
+        QVERIFY(QFileInfo::exists(QDir(marketplace.activePluginDirectory()).filePath(QStringLiteral("DatasetInteropPlugin.dll"))));
+
+        QProcess smoke;
+        smoke.start(workerExecutablePath(), QStringList() << QStringLiteral("--plugin-smoke") << marketplace.activePluginDirectory());
+        QVERIFY(smoke.waitForStarted(5000));
+        QVERIFY(smoke.waitForFinished(15000));
+        QCOMPARE(smoke.exitCode(), 4);
+        const QJsonObject smokeJson = QJsonDocument::fromJson(smoke.readAllStandardOutput().trimmed()).object();
+        QCOMPARE(smokeJson.value(QStringLiteral("pluginCount")).toInt(), 1);
+
+        const aitrain::PluginMarketplaceReport disableReport = marketplace.disablePlugin(QStringLiteral("com.aitrain.plugins.dataset_interop"));
+        QVERIFY2(disableReport.ok, qPrintable(disableReport.message));
+        QVERIFY(!QFileInfo::exists(QDir(marketplace.activePluginDirectory()).filePath(QStringLiteral("DatasetInteropPlugin.dll"))));
+
+        const aitrain::PluginMarketplaceReport uninstallReport = marketplace.uninstallPlugin(QStringLiteral("com.aitrain.plugins.dataset_interop"), QStringLiteral("0.1.1"));
+        QVERIFY2(uninstallReport.ok, qPrintable(uninstallReport.message));
+        QVERIFY(marketplace.installedPlugins().isEmpty());
+    }
+
+    void pluginMarketplaceRejectsHashMismatch()
+    {
+        const QString pluginDll = builtPluginPath(QStringLiteral("DatasetInteropPlugin.dll"));
+        if (pluginDll.isEmpty()) {
+            QSKIP("Built DatasetInteropPlugin.dll is not available for marketplace fixture.");
+        }
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString packageRoot = writeMarketplacePackageFixture(
+            dir.path(),
+            pluginDll,
+            QStringLiteral("com.aitrain.plugins.dataset_interop"),
+            QStringLiteral("0.1.2"));
+        QVERIFY(!packageRoot.isEmpty());
+
+        QJsonObject manifest = readJsonObject(QDir(packageRoot).filePath(QStringLiteral("plugin.json")));
+        const QString relativeDll = manifest.value(QStringLiteral("entrypoints")).toObject().value(QStringLiteral("qtModelPlugin")).toString();
+        manifest.insert(QStringLiteral("hashes"), QJsonObject{{relativeDll, QStringLiteral("0000")}});
+        QFile manifestFile(QDir(packageRoot).filePath(QStringLiteral("plugin.json")));
+        QVERIFY(manifestFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        manifestFile.write(QJsonDocument(manifest).toJson(QJsonDocument::Indented));
+        manifestFile.close();
+
+        aitrain::PluginMarketplace marketplace(
+            dir.filePath(QStringLiteral("marketplace")),
+            dir.filePath(QStringLiteral("plugins/models")),
+            dir.filePath(QStringLiteral("plugin_marketplace_state.json")));
+        const aitrain::PluginMarketplaceReport report = marketplace.inspectPackage(packageRoot);
+        QVERIFY(!report.ok);
+        QCOMPARE(report.status, QStringLiteral("hash-mismatch"));
+    }
+
+    void pluginMarketplaceInstallsZipPackage()
+    {
+        const QString pluginDll = builtPluginPath(QStringLiteral("DatasetInteropPlugin.dll"));
+        if (pluginDll.isEmpty()) {
+            QSKIP("Built DatasetInteropPlugin.dll is not available for marketplace fixture.");
+        }
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString packageRoot = writeMarketplacePackageFixture(
+            dir.path(),
+            pluginDll,
+            QStringLiteral("com.aitrain.plugins.dataset_interop"),
+            QStringLiteral("0.1.3"));
+        QVERIFY(!packageRoot.isEmpty());
+
+        const QString zipPath = dir.filePath(QStringLiteral("DatasetInterop.aitrain-plugin.zip"));
+        QString zipError;
+        if (!zipDirectoryForTest(packageRoot, zipPath, &zipError)) {
+            QSKIP(qPrintable(QStringLiteral("Cannot create zip package fixture: %1").arg(zipError)));
+        }
+
+        aitrain::PluginMarketplace marketplace(
+            dir.filePath(QStringLiteral("marketplace")),
+            dir.filePath(QStringLiteral("plugins/models")),
+            dir.filePath(QStringLiteral("plugin_marketplace_state.json")));
+
+        aitrain::PluginPackageManifest manifest;
+        const aitrain::PluginMarketplaceReport inspectReport = marketplace.inspectPackage(zipPath, &manifest);
+        QVERIFY2(inspectReport.ok, qPrintable(inspectReport.errors.join(QStringLiteral("\n"))));
+        QCOMPARE(manifest.id, QStringLiteral("com.aitrain.plugins.dataset_interop"));
+        QVERIFY(!inspectReport.details.value(QStringLiteral("temporaryRoot")).toString().isEmpty());
+
+        const aitrain::PluginMarketplaceReport installReport = marketplace.installPackage(zipPath, true);
+        QVERIFY2(installReport.ok, qPrintable(installReport.errors.join(QStringLiteral("\n"))));
+        QCOMPARE(installReport.status, QStringLiteral("enabled"));
+        QVERIFY(QFileInfo::exists(QDir(marketplace.activePluginDirectory()).filePath(QStringLiteral("DatasetInteropPlugin.dll"))));
+
+        const QVector<aitrain::InstalledPluginRecord> installed = marketplace.installedPlugins();
+        QCOMPARE(installed.size(), 1);
+        QCOMPARE(installed.first().sourcePath, QFileInfo(zipPath).absoluteFilePath());
+        QVERIFY(installed.first().enabled);
     }
 
     void offlineLicenseTokensValidate()
