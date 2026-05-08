@@ -143,13 +143,13 @@ Send those files with the ZIP package and the Phase 43 external acceptance templ
 
 ## Phase 45: YOLO New-Version Productization
 
-Run the required YOLO11 detection/segmentation model matrix:
+Run the required YOLO11 and YOLO12 detection/segmentation model matrix:
 
 ```powershell
 .\tools\phase45-yolo-model-matrix-smoke.ps1
 ```
 
-Optional YOLO12 candidate coverage:
+The legacy YOLO12 command remains accepted, but it is no longer needed because YOLO12 is part of the default matrix:
 
 ```powershell
 .\tools\phase45-yolo-model-matrix-smoke.ps1 -IncludeYolo12
@@ -161,7 +161,7 @@ Expected artifacts:
 - For each required model: `ultralytics_training_report.json`, `best.pt`, and exported ONNX.
 - If CTest is available, the script runs C++ ONNX Runtime regression checks with `AITRAIN_ACCEPTANCE_SMOKE_ROOT` pointed at the Phase 45 work directory.
 
-Required Phase 45 models are `yolo11n.yaml` and `yolo11n-seg.yaml`. `yolo12n.yaml` and `yolo12n-seg.yaml` are optional candidates until explicitly recorded as passed. This is a wiring/artifact/productization smoke, not an accuracy benchmark.
+Required Phase 45 models are `yolo11n.yaml`, `yolo11n-seg.yaml`, `yolo12n.yaml`, and `yolo12n-seg.yaml`. This is a wiring/artifact/productization smoke, not an accuracy benchmark.
 
 ## Phase 46: PaddleOCR Det C++ ONNX Postprocess
 

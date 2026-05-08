@@ -33,7 +33,7 @@ YOLO model-family status is tracked in `docs\yolo-model-support-matrix.md`. The 
 .\tools\phase45-yolo-model-matrix-smoke.ps1 -IncludeYolo12
 ```
 
-The required Phase 45 targets are `yolo11n.yaml` and `yolo11n-seg.yaml`. YOLO12 nano detection/segmentation are optional candidates until a local pass is recorded. Classification, pose, OBB, anomaly, YOLO-World, and YOLOE remain out of the current productized training path.
+The required Phase 45 targets are `yolo11n.yaml`, `yolo11n-seg.yaml`, `yolo12n.yaml`, and `yolo12n-seg.yaml`. Classification, pose, OBB, anomaly, YOLO-World, and YOLOE remain out of the current productized training path.
 
 OCR recognition:
 
@@ -160,7 +160,7 @@ For the Phase 45 newer-YOLO-family matrix, run:
 .\tools\phase45-yolo-model-matrix-smoke.ps1
 ```
 
-This validates the required YOLO11 detection/segmentation candidates through the same official Ultralytics adapters, checks report/checkpoint/ONNX artifacts, and runs CTest against the generated work directory when a build tree is available. Use `-IncludeYolo12` to include optional YOLO12 nano candidates.
+This validates the required YOLO11 and YOLO12 detection/segmentation candidates through the same official Ultralytics adapters, checks report/checkpoint/ONNX artifacts, and runs CTest against the generated work directory when a build tree is available. The legacy `-IncludeYolo12` switch is still accepted, but YOLO12 is now included by default.
 
 ## Official PaddleOCR Adapter Parameters
 

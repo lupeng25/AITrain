@@ -298,14 +298,10 @@ Invoke-Checked -FilePath $python -Arguments @($generator, "--output", $generated
 
 $cases = @(
     [pscustomobject]@{ name = "yolo11n-detect"; task = "detection"; backend = "ultralytics_yolo_detect"; model = "yolo11n.yaml"; required = $true },
-    [pscustomobject]@{ name = "yolo11n-segment"; task = "segmentation"; backend = "ultralytics_yolo_segment"; model = "yolo11n-seg.yaml"; required = $true }
+    [pscustomobject]@{ name = "yolo11n-segment"; task = "segmentation"; backend = "ultralytics_yolo_segment"; model = "yolo11n-seg.yaml"; required = $true },
+    [pscustomobject]@{ name = "yolo12n-detect"; task = "detection"; backend = "ultralytics_yolo_detect"; model = "yolo12n.yaml"; required = $true },
+    [pscustomobject]@{ name = "yolo12n-segment"; task = "segmentation"; backend = "ultralytics_yolo_segment"; model = "yolo12n-seg.yaml"; required = $true }
 )
-if ($IncludeYolo12) {
-    $cases += @(
-        [pscustomobject]@{ name = "yolo12n-detect"; task = "detection"; backend = "ultralytics_yolo_detect"; model = "yolo12n.yaml"; required = $true },
-        [pscustomobject]@{ name = "yolo12n-segment"; task = "segmentation"; backend = "ultralytics_yolo_segment"; model = "yolo12n-seg.yaml"; required = $true }
-    )
-}
 
 $results = @()
 foreach ($case in $cases) {
@@ -356,7 +352,7 @@ $summary = [ordered]@{
         batchSize = $Batch
         imageSize = $ImageSize
         device = "cpu"
-        includeYolo12 = [bool]$IncludeYolo12
+        includeYolo12 = $true
     }
     ctestStatus = $ctestStatus
     results = $results

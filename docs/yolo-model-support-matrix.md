@@ -21,20 +21,20 @@ AITrain Studio currently owns the orchestration layer: Worker request routing, d
 | `yolov8n-seg.yaml` | Segmentation | `ultralytics_yolo_segment` | Product default | Earlier local CPU smoke produced `best.pt`, `best.onnx`, report metrics, and C++ ONNX Runtime segmentation smoke coverage. |
 | `yolo11n.yaml` | Detection | `ultralytics_yolo_detect` | Phase 45 validated after smoke pass | Required Phase 45 model-matrix target. |
 | `yolo11n-seg.yaml` | Segmentation | `ultralytics_yolo_segment` | Phase 45 validated after smoke pass | Required Phase 45 model-matrix target. |
-| `yolo12n.yaml` | Detection | `ultralytics_yolo_detect` | Candidate | Optional Phase 45 target via `-IncludeYolo12`; do not call product default until a pass is recorded. |
-| `yolo12n-seg.yaml` | Segmentation | `ultralytics_yolo_segment` | Candidate | Optional Phase 45 target via `-IncludeYolo12`; do not call product default until a pass is recorded. |
+| `yolo12n.yaml` | Detection | `ultralytics_yolo_detect` | Phase 45 validated after smoke pass | Required Phase 45 model-matrix target. |
+| `yolo12n-seg.yaml` | Segmentation | `ultralytics_yolo_segment` | Phase 45 validated after smoke pass | Required Phase 45 model-matrix target. |
 
 The local development baseline used for Phase 45 investigation has `ultralytics` 8.4.45 installed, and that package resolves the YOLO11 and YOLO12 nano detection/segmentation YAML names above.
 
 ## Acceptance Command
 
-Run the required YOLO11 matrix:
+Run the required YOLO11 + YOLO12 matrix:
 
 ```powershell
 .\tools\phase45-yolo-model-matrix-smoke.ps1
 ```
 
-Optionally include YOLO12 candidates:
+The legacy `-IncludeYolo12` switch is still accepted for older command lines, but YOLO12 is now included by default:
 
 ```powershell
 .\tools\phase45-yolo-model-matrix-smoke.ps1 -IncludeYolo12
