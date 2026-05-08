@@ -399,6 +399,59 @@ QFrame* createInferenceCapability(const QString& title, const QString& caption)
     return frame;
 }
 
+QFrame* createWorkbenchHeader(
+    const QString& kickerText,
+    const QString& titleText,
+    const QString& subtitleText,
+    QPushButton* actionButton,
+    const QStringList& badges)
+{
+    auto* headerPanel = new QFrame;
+    headerPanel->setObjectName(QStringLiteral("InferenceHeader"));
+    auto* headerRoot = new QVBoxLayout(headerPanel);
+    headerRoot->setContentsMargins(16, 14, 16, 14);
+    headerRoot->setSpacing(11);
+
+    auto* headerTop = new QHBoxLayout;
+    headerTop->setSpacing(14);
+    auto* titleBlock = new QWidget;
+    auto* titleLayout = new QVBoxLayout(titleBlock);
+    titleLayout->setContentsMargins(0, 0, 0, 0);
+    titleLayout->setSpacing(4);
+
+    auto* kicker = new QLabel(kickerText);
+    kicker->setObjectName(QStringLiteral("InferenceKicker"));
+    auto* title = new QLabel(titleText);
+    title->setObjectName(QStringLiteral("InferenceTitle"));
+    auto* subtitle = new QLabel(subtitleText);
+    subtitle->setObjectName(QStringLiteral("InferenceMeta"));
+    subtitle->setWordWrap(true);
+    allowLabelToShrink(subtitle);
+
+    titleLayout->addWidget(kicker);
+    titleLayout->addWidget(title);
+    titleLayout->addWidget(subtitle);
+
+    if (!badges.isEmpty()) {
+        auto* badgeRow = new QWidget;
+        auto* badgeLayout = new QHBoxLayout(badgeRow);
+        badgeLayout->setContentsMargins(0, 4, 0, 0);
+        badgeLayout->setSpacing(7);
+        for (const QString& badge : badges) {
+            badgeLayout->addWidget(inferenceBadge(badge));
+        }
+        badgeLayout->addStretch();
+        titleLayout->addWidget(badgeRow);
+    }
+
+    headerTop->addWidget(titleBlock, 1);
+    if (actionButton) {
+        headerTop->addWidget(actionButton, 0, Qt::AlignTop);
+    }
+    headerRoot->addLayout(headerTop);
+    return headerPanel;
+}
+
 void setInferenceOverlayText(QLabel* label, const QString& text)
 {
     if (!label) {
@@ -1318,10 +1371,18 @@ QWidget* MainWindow::buildProjectPage()
 
 QWidget* MainWindow::buildDatasetPage()
 {
-    auto* page = new QWidget;
-    auto* layout = new QVBoxLayout(page);
+    auto* page = new QScrollArea;
+    page->setWidgetResizable(true);
+    page->setFrameShape(QFrame::NoFrame);
+    page->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+    auto* content = new QWidget;
+    auto* layout = new QVBoxLayout(content);
     layout->setContentsMargins(18, 18, 18, 18);
     layout->setSpacing(16);
+
+    auto* headerValidateButton = primaryButton(QStringLiteral("校验数据集"));
+    connect(headerValidateButton, &QPushButton::clicked, this, &MainWindow::validateDataset);
 
     auto* inputPanel = new InfoPanel(QStringLiteral("数据集操作"));
     auto* form = new QFormLayout;
@@ -1561,8 +1622,19 @@ QWidget* MainWindow::buildDatasetPage()
     splitter->setStretchFactor(1, 3);
     splitter->setSizes(QList<int>() << 480 << 620);
 
+    layout->addWidget(createWorkbenchHeader(
+        QStringLiteral("DATASET VALIDATION"),
+        QStringLiteral("数据集工作台"),
+        QStringLiteral("导入、校验、划分、快照和标注工具入口统一在这里；训练前必须先完成当前格式校验。"),
+        headerValidateButton,
+        QStringList()
+            << QStringLiteral("YOLO BBox")
+            << QStringLiteral("YOLO Polygon")
+            << QStringLiteral("PaddleOCR Det")
+            << QStringLiteral("PaddleOCR Rec")));
     layout->addWidget(inputPanel);
     layout->addWidget(splitter, 1);
+    page->setWidget(content);
     return page;
 }
 
@@ -1813,6 +1885,9 @@ QWidget* MainWindow::buildTaskQueuePage()
     auto* layout = new QVBoxLayout(page);
     layout->setContentsMargins(18, 18, 18, 18);
     layout->setSpacing(16);
+
+    auto* headerRefreshButton = primaryButton(QStringLiteral("刷新历史"));
+    connect(headerRefreshButton, &QPushButton::clicked, this, &MainWindow::updateRecentTasks);
 
     auto* refreshButton = primaryButton(QStringLiteral("刷新历史"));
     auto* cancelButton = dangerButton(QStringLiteral("取消选中任务"));
@@ -2065,6 +2140,16 @@ QWidget* MainWindow::buildTaskQueuePage()
     bodySplitter->setStretchFactor(1, 3);
     bodySplitter->setSizes(QList<int>() << 520 << 840);
 
+    layout->addWidget(createWorkbenchHeader(
+        QStringLiteral("TASK ARTIFACT CENTER"),
+        QStringLiteral("任务与产物工作台"),
+        QStringLiteral("按任务追踪 Worker 产物、指标、导出和评估报告；选中产物后进入推理、导出、注册、评估或交付报告。"),
+        headerRefreshButton,
+        QStringList()
+            << QStringLiteral("Task History")
+            << QStringLiteral("Artifacts")
+            << QStringLiteral("Metrics")
+            << QStringLiteral("Reports")));
     layout->addWidget(toolbar);
     layout->addWidget(bodySplitter, 1);
     return page;
@@ -2076,6 +2161,9 @@ QWidget* MainWindow::buildModelRegistryPage()
     auto* layout = new QVBoxLayout(page);
     layout->setContentsMargins(18, 18, 18, 18);
     layout->setSpacing(16);
+
+    auto* headerRefreshButton = primaryButton(QStringLiteral("刷新模型库"));
+    connect(headerRefreshButton, &QPushButton::clicked, this, &MainWindow::refreshModelRegistry);
 
     auto* toolbar = new InfoPanel(QStringLiteral("模型库"));
     auto* actionStrip = new QFrame;
@@ -2196,6 +2284,16 @@ QWidget* MainWindow::buildModelRegistryPage()
     splitter->setStretchFactor(1, 2);
     splitter->setSizes(QList<int>() << 520 << 260);
 
+    layout->addWidget(createWorkbenchHeader(
+        QStringLiteral("MODEL REGISTRY"),
+        QStringLiteral("模型库工作台"),
+        QStringLiteral("管理训练产物注册后的模型版本、来源 lineage、交付摘要和本地流水线入口。"),
+        headerRefreshButton,
+        QStringList()
+            << QStringLiteral("Versioned Models")
+            << QStringLiteral("Lineage")
+            << QStringLiteral("Export")
+            << QStringLiteral("Inference")));
     layout->addWidget(toolbar);
     layout->addWidget(splitter, 1);
     return page;
@@ -2208,8 +2306,15 @@ QWidget* MainWindow::buildEvaluationReportsPage()
     layout->setContentsMargins(18, 18, 18, 18);
     layout->setSpacing(16);
 
+    auto* headerRefreshButton = primaryButton(QStringLiteral("刷新评估报告"));
+    connect(headerRefreshButton, &QPushButton::clicked, this, &MainWindow::refreshModelRegistry);
+
     auto* toolbar = new InfoPanel(QStringLiteral("评估报告"));
-    auto* row = new QHBoxLayout;
+    auto* actionStrip = new QFrame;
+    actionStrip->setObjectName(QStringLiteral("ActionStrip"));
+    auto* row = new QHBoxLayout(actionStrip);
+    row->setContentsMargins(10, 8, 10, 8);
+    row->setSpacing(10);
     auto* refreshButton = primaryButton(QStringLiteral("刷新评估报告"));
     auto* backToModelsButton = new QPushButton(QStringLiteral("查看模型库"));
     connect(refreshButton, &QPushButton::clicked, this, &MainWindow::refreshModelRegistry);
@@ -2219,7 +2324,7 @@ QWidget* MainWindow::buildEvaluationReportsPage()
     row->addWidget(refreshButton);
     row->addWidget(backToModelsButton);
     row->addStretch();
-    toolbar->bodyLayout()->addLayout(row);
+    toolbar->bodyLayout()->addWidget(actionStrip);
     auto* reportHint = mutedLabel(QStringLiteral("集中查看最近评估报告、任务类型、报告路径和详细可视化结果；模型版本管理保留在“模型库”。"));
     allowLabelToShrink(reportHint);
     toolbar->bodyLayout()->addWidget(reportHint);
@@ -2262,6 +2367,16 @@ QWidget* MainWindow::buildEvaluationReportsPage()
     splitter->setStretchFactor(1, 3);
     splitter->setSizes(QList<int>() << 260 << 560);
 
+    layout->addWidget(createWorkbenchHeader(
+        QStringLiteral("EVALUATION REPORTS"),
+        QStringLiteral("评估报告工作台"),
+        QStringLiteral("集中查看模型评估摘要、关键指标、分类别表现、混淆矩阵、错误样本和 overlay 详情。"),
+        headerRefreshButton,
+        QStringList()
+            << QStringLiteral("Metrics")
+            << QStringLiteral("Per-class")
+            << QStringLiteral("Confusion Matrix")
+            << QStringLiteral("Error Overlay")));
     layout->addWidget(toolbar);
     layout->addWidget(splitter, 1);
     return page;
