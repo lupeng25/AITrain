@@ -1773,13 +1773,16 @@ QWidget* MainWindow::buildTaskQueuePage()
     taskQueueTable_->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     taskQueueTable_->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
     taskQueueTable_->verticalHeader()->setDefaultSectionSize(42);
+    taskQueueTable_->horizontalHeader()->setStretchLastSection(false);
     taskQueueTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     taskQueueTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     taskQueueTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    taskQueueTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    taskQueueTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
     taskQueueTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
     taskQueueTable_->horizontalHeader()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
-    taskQueueTable_->horizontalHeader()->setSectionResizeMode(6, QHeaderView::Stretch);
+    taskQueueTable_->horizontalHeader()->setSectionResizeMode(6, QHeaderView::ResizeToContents);
+    taskQueueTable_->setColumnHidden(2, true);
+    taskQueueTable_->setColumnHidden(6, true);
     connect(taskQueueTable_, &QTableWidget::itemSelectionChanged, this, &MainWindow::updateSelectedTaskDetails);
     tablePanel->bodyLayout()->addWidget(taskQueueTable_);
 
@@ -4167,12 +4170,12 @@ QString MainWindow::currentTaskType() const
 
 QString MainWindow::currentTaskKindFilter() const
 {
-    return comboCurrentDataOrText(taskKindFilterCombo_);
+    return taskKindFilterCombo_ ? taskKindFilterCombo_->currentData().toString() : QString();
 }
 
 QString MainWindow::currentTaskStateFilter() const
 {
-    return comboCurrentDataOrText(taskStateFilterCombo_);
+    return taskStateFilterCombo_ ? taskStateFilterCombo_->currentData().toString() : QString();
 }
 
 void MainWindow::updateRecentTasks()
