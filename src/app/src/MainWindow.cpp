@@ -1688,12 +1688,11 @@ QWidget* MainWindow::buildTaskQueuePage()
     layout->setContentsMargins(18, 18, 18, 18);
     layout->setSpacing(16);
 
-    auto* toolbar = new InfoPanel(QStringLiteral("历史操作"));
-    auto* row = new QHBoxLayout;
     auto* refreshButton = primaryButton(QStringLiteral("刷新历史"));
     auto* cancelButton = dangerButton(QStringLiteral("取消选中任务"));
     auto* reproduceButton = new QPushButton(QStringLiteral("复现实验"));
     taskKindFilterCombo_ = new QComboBox;
+    taskKindFilterCombo_->setMinimumWidth(140);
     taskKindFilterCombo_->addItem(uiText("全部类别"), QString());
     taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Train), QStringLiteral("train"));
     taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Validate), QStringLiteral("validate"));
@@ -1706,6 +1705,7 @@ QWidget* MainWindow::buildTaskQueuePage()
     taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Pipeline), QStringLiteral("pipeline"));
     taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Report), QStringLiteral("report"));
     taskStateFilterCombo_ = new QComboBox;
+    taskStateFilterCombo_->setMinimumWidth(140);
     taskStateFilterCombo_->addItem(uiText("全部状态"), QString());
     taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Queued), QStringLiteral("queued"));
     taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Running), QStringLiteral("running"));
@@ -1713,6 +1713,7 @@ QWidget* MainWindow::buildTaskQueuePage()
     taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Failed), QStringLiteral("failed"));
     taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Canceled), QStringLiteral("canceled"));
     taskSearchEdit_ = new QLineEdit;
+    taskSearchEdit_->setMinimumWidth(260);
     taskSearchEdit_->setPlaceholderText(QStringLiteral("搜索任务、后端、消息"));
     connect(refreshButton, &QPushButton::clicked, this, &MainWindow::updateRecentTasks);
     connect(cancelButton, &QPushButton::clicked, this, &MainWindow::cancelSelectedTask);
@@ -1720,17 +1721,38 @@ QWidget* MainWindow::buildTaskQueuePage()
     connect(taskKindFilterCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::applyTaskFilters);
     connect(taskStateFilterCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::applyTaskFilters);
     connect(taskSearchEdit_, &QLineEdit::textChanged, this, &MainWindow::applyTaskFilters);
-    row->addWidget(refreshButton);
-    row->addWidget(cancelButton);
-    row->addWidget(reproduceButton);
-    row->addSpacing(12);
-    row->addWidget(new QLabel(QStringLiteral("类别")));
-    row->addWidget(taskKindFilterCombo_);
-    row->addWidget(new QLabel(QStringLiteral("状态")));
-    row->addWidget(taskStateFilterCombo_);
-    row->addWidget(taskSearchEdit_, 1);
-    row->addStretch();
-    toolbar->bodyLayout()->addLayout(row);
+
+    auto* toolbar = new InfoPanel(QStringLiteral("历史操作"));
+    toolbar->bodyLayout()->setSpacing(6);
+
+    auto* controlStrip = new QFrame;
+    controlStrip->setObjectName(QStringLiteral("TaskControlStrip"));
+    auto* actionLayout = new QGridLayout(controlStrip);
+    actionLayout->setContentsMargins(12, 8, 12, 8);
+    actionLayout->setHorizontalSpacing(10);
+    actionLayout->setVerticalSpacing(6);
+    auto* actionCaption = new QLabel(uiText("操作"));
+    actionCaption->setObjectName(QStringLiteral("TaskFilterLabel"));
+    actionLayout->addWidget(actionCaption, 0, 0);
+    actionLayout->addWidget(refreshButton, 0, 1);
+    actionLayout->addWidget(cancelButton, 0, 2);
+    actionLayout->addWidget(reproduceButton, 0, 3);
+
+    auto* categoryLabel = new QLabel(QStringLiteral("类别"));
+    categoryLabel->setObjectName(QStringLiteral("TaskFilterLabel"));
+    auto* stateLabel = new QLabel(QStringLiteral("状态"));
+    stateLabel->setObjectName(QStringLiteral("TaskFilterLabel"));
+    auto* searchLabel = new QLabel(uiText("搜索"));
+    searchLabel->setObjectName(QStringLiteral("TaskFilterLabel"));
+    actionLayout->addWidget(categoryLabel, 1, 0);
+    actionLayout->addWidget(taskKindFilterCombo_, 1, 1);
+    actionLayout->addWidget(stateLabel, 1, 2);
+    actionLayout->addWidget(taskStateFilterCombo_, 1, 3);
+    actionLayout->addWidget(searchLabel, 1, 4);
+    actionLayout->addWidget(taskSearchEdit_, 1, 5);
+    actionLayout->setColumnStretch(5, 1);
+
+    toolbar->bodyLayout()->addWidget(controlStrip);
     toolbar->bodyLayout()->addWidget(mutedLabel(QStringLiteral("这里统一追踪训练、校验、划分、导出和推理任务；运行产物在下方详情区集中查看。")));
 
     auto* tablePanel = new InfoPanel(QStringLiteral("任务历史"));
@@ -1744,12 +1766,22 @@ QWidget* MainWindow::buildTaskQueuePage()
         << QStringLiteral("更新时间")
         << QStringLiteral("消息"));
     configureTable(taskQueueTable_);
-    taskQueueTable_->setMinimumHeight(220);
+    taskQueueTable_->setWordWrap(true);
+    taskQueueTable_->setMinimumHeight(180);
+    taskQueueTable_->verticalHeader()->setDefaultSectionSize(42);
+    taskQueueTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    taskQueueTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    taskQueueTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    taskQueueTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    taskQueueTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+    taskQueueTable_->horizontalHeader()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
+    taskQueueTable_->horizontalHeader()->setSectionResizeMode(6, QHeaderView::Stretch);
     connect(taskQueueTable_, &QTableWidget::itemSelectionChanged, this, &MainWindow::updateSelectedTaskDetails);
     tablePanel->bodyLayout()->addWidget(taskQueueTable_);
 
     auto* detailPanel = new InfoPanel(QStringLiteral("任务详情与产物"));
-    selectedTaskSummaryLabel_ = mutedLabel(QStringLiteral("请选择一个任务查看产物、指标和导出记录。"));
+    selectedTaskSummaryLabel_ = inlineStatusLabel(QStringLiteral("请选择一个任务查看产物、指标和导出记录。"));
+    selectedTaskSummaryLabel_->setMinimumHeight(46);
     taskArtifactTable_ = new QTableWidget(0, 4);
     taskArtifactTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("类型")
@@ -1757,6 +1789,13 @@ QWidget* MainWindow::buildTaskQueuePage()
         << QStringLiteral("说明")
         << QStringLiteral("时间"));
     configureTable(taskArtifactTable_);
+    taskArtifactTable_->setWordWrap(true);
+    taskArtifactTable_->setMinimumHeight(220);
+    taskArtifactTable_->verticalHeader()->setDefaultSectionSize(42);
+    taskArtifactTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    taskArtifactTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    taskArtifactTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    taskArtifactTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
     connect(taskArtifactTable_, &QTableWidget::itemSelectionChanged, this, &MainWindow::updateArtifactPreviewFromSelection);
 
     taskMetricTable_ = new QTableWidget(0, 4);
@@ -1766,6 +1805,12 @@ QWidget* MainWindow::buildTaskQueuePage()
         << QStringLiteral("Step")
         << QStringLiteral("Epoch"));
     configureTable(taskMetricTable_);
+    taskMetricTable_->setMinimumHeight(210);
+    taskMetricTable_->verticalHeader()->setDefaultSectionSize(38);
+    taskMetricTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    taskMetricTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    taskMetricTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    taskMetricTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
 
     taskExportTable_ = new QTableWidget(0, 3);
     taskExportTable_->setHorizontalHeaderLabels(QStringList()
@@ -1773,22 +1818,29 @@ QWidget* MainWindow::buildTaskQueuePage()
         << QStringLiteral("路径")
         << QStringLiteral("时间"));
     configureTable(taskExportTable_);
+    taskExportTable_->setWordWrap(true);
+    taskExportTable_->setMinimumHeight(210);
+    taskExportTable_->verticalHeader()->setDefaultSectionSize(42);
+    taskExportTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    taskExportTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    taskExportTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
 
     artifactImagePreviewLabel_ = new QLabel(QStringLiteral("暂无产物预览"));
-    artifactImagePreviewLabel_->setObjectName(QStringLiteral("MutedText"));
+    artifactImagePreviewLabel_->setObjectName(QStringLiteral("ArtifactPreviewCanvas"));
     artifactImagePreviewLabel_->setAlignment(Qt::AlignCenter);
     artifactImagePreviewLabel_->setMinimumHeight(180);
-    artifactImagePreviewLabel_->setFrameShape(QFrame::StyledPanel);
     artifactPreviewText_ = new QPlainTextEdit;
+    artifactPreviewText_->setObjectName(QStringLiteral("ArtifactPreviewText"));
     artifactPreviewText_->setReadOnly(true);
     artifactPreviewText_->setPlainText(QStringLiteral("选择一个产物后显示摘要。"));
     auto* artifactDefaultPreview = new QWidget;
     auto* artifactDefaultLayout = new QVBoxLayout(artifactDefaultPreview);
     artifactDefaultLayout->setContentsMargins(0, 0, 0, 0);
-    artifactDefaultLayout->setSpacing(8);
+    artifactDefaultLayout->setSpacing(10);
     artifactDefaultLayout->addWidget(artifactImagePreviewLabel_, 1);
     artifactDefaultLayout->addWidget(artifactPreviewText_, 2);
     artifactPreviewStack_ = new QStackedWidget;
+    artifactPreviewStack_->setMinimumHeight(240);
     artifactPreviewStack_->addWidget(artifactDefaultPreview);
     artifactEvaluationReportView_ = new EvaluationReportView;
     auto* artifactEvaluationScroll = new QScrollArea;
@@ -1799,7 +1851,12 @@ QWidget* MainWindow::buildTaskQueuePage()
     artifactEvaluationScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     artifactPreviewStack_->addWidget(artifactEvaluationScroll);
 
-    auto* actionRow = new QHBoxLayout;
+    auto* actionGridFrame = new QFrame;
+    actionGridFrame->setObjectName(QStringLiteral("ArtifactActionGrid"));
+    auto* actionGrid = new QGridLayout(actionGridFrame);
+    actionGrid->setContentsMargins(8, 8, 8, 8);
+    actionGrid->setHorizontalSpacing(8);
+    actionGrid->setVerticalSpacing(6);
     auto* openDirButton = new QPushButton(QStringLiteral("打开目录"));
     auto* copyPathButton = new QPushButton(QStringLiteral("复制路径"));
     auto* useInferButton = new QPushButton(QStringLiteral("用作推理模型"));
@@ -1816,41 +1873,57 @@ QWidget* MainWindow::buildTaskQueuePage()
     connect(evaluateButton, &QPushButton::clicked, this, &MainWindow::evaluateSelectedArtifact);
     connect(benchmarkButton, &QPushButton::clicked, this, &MainWindow::benchmarkSelectedArtifact);
     connect(reportButton, &QPushButton::clicked, this, &MainWindow::generateDeliveryReportFromSelectedArtifact);
-    actionRow->addWidget(openDirButton);
-    actionRow->addWidget(copyPathButton);
-    actionRow->addWidget(useInferButton);
-    actionRow->addWidget(useExportButton);
-    actionRow->addWidget(registerModelButton);
-    actionRow->addWidget(evaluateButton);
-    actionRow->addWidget(benchmarkButton);
-    actionRow->addWidget(reportButton);
-    actionRow->addStretch();
+    actionGrid->addWidget(openDirButton, 0, 0);
+    actionGrid->addWidget(copyPathButton, 0, 1);
+    actionGrid->addWidget(useInferButton, 0, 2);
+    actionGrid->addWidget(useExportButton, 0, 3);
+    actionGrid->addWidget(registerModelButton, 1, 0);
+    actionGrid->addWidget(evaluateButton, 1, 1);
+    actionGrid->addWidget(benchmarkButton, 1, 2);
+    actionGrid->addWidget(reportButton, 1, 3);
+    for (int column = 0; column < 4; ++column) {
+        actionGrid->setColumnStretch(column, 1);
+    }
 
+    auto* artifactTab = new QWidget;
+    auto* artifactTabLayout = new QVBoxLayout(artifactTab);
+    artifactTabLayout->setContentsMargins(0, 0, 0, 0);
+    artifactTabLayout->addWidget(taskArtifactTable_);
+    auto* metricTab = new QWidget;
+    auto* metricTabLayout = new QVBoxLayout(metricTab);
+    metricTabLayout->setContentsMargins(0, 0, 0, 0);
+    metricTabLayout->addWidget(taskMetricTable_);
+    auto* exportTab = new QWidget;
+    auto* exportTabLayout = new QVBoxLayout(exportTab);
+    exportTabLayout->setContentsMargins(0, 0, 0, 0);
+    exportTabLayout->addWidget(taskExportTable_);
+
+    auto* detailTabs = new QTabWidget;
+    detailTabs->setObjectName(QStringLiteral("TaskDetailTabs"));
+    detailTabs->addTab(artifactTab, uiText("产物"));
+    detailTabs->addTab(metricTab, uiText("指标"));
+    detailTabs->addTab(exportTab, uiText("导出"));
+
+    detailTabs->setMinimumWidth(560);
     auto* detailSplitter = new QSplitter(Qt::Horizontal);
-    auto* leftDetail = new QWidget;
-    auto* leftLayout = new QVBoxLayout(leftDetail);
-    leftLayout->setContentsMargins(0, 0, 0, 0);
-    leftLayout->addWidget(selectedTaskSummaryLabel_);
-    leftLayout->addWidget(taskArtifactTable_, 2);
-    leftLayout->addWidget(taskMetricTable_, 1);
-    leftLayout->addWidget(taskExportTable_, 1);
-    auto* rightDetail = new QWidget;
-    auto* rightLayout = new QVBoxLayout(rightDetail);
-    rightLayout->setContentsMargins(0, 0, 0, 0);
-    rightLayout->addLayout(actionRow);
-    rightLayout->addWidget(artifactPreviewStack_, 1);
-    detailSplitter->addWidget(leftDetail);
-    detailSplitter->addWidget(rightDetail);
-    detailSplitter->setStretchFactor(0, 2);
+    detailSplitter->addWidget(detailTabs);
+    detailSplitter->addWidget(artifactPreviewStack_);
+    detailSplitter->setChildrenCollapsible(false);
+    detailSplitter->setStretchFactor(0, 3);
     detailSplitter->setStretchFactor(1, 2);
-    detailPanel->bodyLayout()->addWidget(detailSplitter);
+    detailSplitter->setSizes(QList<int>() << 700 << 500);
+    detailPanel->bodyLayout()->setSpacing(10);
+    detailPanel->bodyLayout()->addWidget(selectedTaskSummaryLabel_);
+    detailPanel->bodyLayout()->addWidget(detailSplitter, 1);
+    detailPanel->bodyLayout()->addWidget(actionGridFrame);
 
     auto* historySplitter = new QSplitter(Qt::Vertical);
     historySplitter->addWidget(tablePanel);
     historySplitter->addWidget(detailPanel);
-    historySplitter->setStretchFactor(0, 2);
-    historySplitter->setStretchFactor(1, 3);
-    historySplitter->setSizes(QList<int>() << 260 << 520);
+    historySplitter->setChildrenCollapsible(false);
+    historySplitter->setStretchFactor(0, 1);
+    historySplitter->setStretchFactor(1, 4);
+    historySplitter->setSizes(QList<int>() << 230 << 680);
 
     layout->addWidget(toolbar);
     layout->addWidget(historySplitter, 1);

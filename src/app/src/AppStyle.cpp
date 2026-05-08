@@ -278,6 +278,68 @@ void apply(QApplication& app)
             border-color: #E5E7EB;
         }
 
+        QFrame#TaskControlStrip,
+        QFrame#ArtifactActionGrid {
+            background: #F9FAFB;
+            border: 1px solid #E5E7EB;
+            border-radius: 6px;
+        }
+
+        QFrame#TaskControlStrip QPushButton,
+        QFrame#ArtifactActionGrid QPushButton {
+            min-height: 24px;
+            padding: 4px 10px;
+        }
+
+        QLabel#TaskFilterLabel {
+            color: #374151;
+            font-size: 8pt;
+            font-weight: 700;
+            padding: 0 4px;
+        }
+
+        QTabWidget#TaskDetailTabs::pane {
+            border: 1px solid #D8DEE6;
+            border-radius: 6px;
+            background: #FFFFFF;
+            top: -1px;
+        }
+
+        QTabWidget#TaskDetailTabs QTabBar::tab {
+            background: #F3F5F8;
+            color: #6B7280;
+            border: 1px solid #D8DEE6;
+            border-bottom: none;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+            padding: 7px 14px;
+            margin-right: 3px;
+            min-width: 58px;
+        }
+
+        QTabWidget#TaskDetailTabs QTabBar::tab:selected {
+            background: #FFFFFF;
+            color: #111827;
+            font-weight: 700;
+        }
+
+        QLabel#ArtifactPreviewCanvas {
+            color: #6B7280;
+            background: #F9FAFB;
+            border: 1px dashed #C9D1DB;
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        QPlainTextEdit#ArtifactPreviewText {
+            background: #0B1020;
+            color: #D1D5DB;
+            border: 1px solid #1F2937;
+            border-radius: 6px;
+            font-family: "Consolas";
+            font-size: 9pt;
+        }
+
         QFrame#InferenceHeader {
             background: #0B1020;
             border: 1px solid #1F2937;
