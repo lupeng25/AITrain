@@ -126,6 +126,15 @@ void apply(QApplication& app)
             color: #2563EB;
         }
 
+        QLabel#TaskDetailSummary {
+            color: #374151;
+            background: #F9FAFB;
+            border: 1px solid #D8DEE6;
+            border-radius: 5px;
+            padding: 8px 10px;
+            min-height: 28px;
+        }
+
         QLabel#DarkInlineStatus {
             color: #F9FAFB;
             background: #1F2937;
@@ -287,8 +296,8 @@ void apply(QApplication& app)
 
         QFrame#TaskControlStrip QPushButton,
         QFrame#ArtifactActionGrid QPushButton {
-            min-height: 24px;
-            padding: 4px 10px;
+            min-height: 30px;
+            padding: 6px 12px;
         }
 
         QLabel#TaskFilterLabel {

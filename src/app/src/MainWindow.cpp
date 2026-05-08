@@ -1756,6 +1756,8 @@ QWidget* MainWindow::buildTaskQueuePage()
     toolbar->bodyLayout()->addWidget(mutedLabel(QStringLiteral("这里统一追踪训练、校验、划分、导出和推理任务；运行产物在下方详情区集中查看。")));
 
     auto* tablePanel = new InfoPanel(QStringLiteral("任务历史"));
+    tablePanel->setMinimumWidth(420);
+    tablePanel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     taskQueueTable_ = new QTableWidget(0, 7);
     taskQueueTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("任务")
@@ -1768,6 +1770,8 @@ QWidget* MainWindow::buildTaskQueuePage()
     configureTable(taskQueueTable_);
     taskQueueTable_->setWordWrap(true);
     taskQueueTable_->setMinimumHeight(180);
+    taskQueueTable_->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    taskQueueTable_->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
     taskQueueTable_->verticalHeader()->setDefaultSectionSize(42);
     taskQueueTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     taskQueueTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
@@ -1780,8 +1784,12 @@ QWidget* MainWindow::buildTaskQueuePage()
     tablePanel->bodyLayout()->addWidget(taskQueueTable_);
 
     auto* detailPanel = new InfoPanel(QStringLiteral("任务详情与产物"));
+    detailPanel->setMinimumWidth(640);
+    detailPanel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     selectedTaskSummaryLabel_ = inlineStatusLabel(QStringLiteral("请选择一个任务查看产物、指标和导出记录。"));
-    selectedTaskSummaryLabel_->setMinimumHeight(46);
+    selectedTaskSummaryLabel_->setObjectName(QStringLiteral("TaskDetailSummary"));
+    selectedTaskSummaryLabel_->setMinimumHeight(40);
+    selectedTaskSummaryLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
     taskArtifactTable_ = new QTableWidget(0, 4);
     taskArtifactTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("类型")
@@ -1828,10 +1836,12 @@ QWidget* MainWindow::buildTaskQueuePage()
     artifactImagePreviewLabel_ = new QLabel(QStringLiteral("暂无产物预览"));
     artifactImagePreviewLabel_->setObjectName(QStringLiteral("ArtifactPreviewCanvas"));
     artifactImagePreviewLabel_->setAlignment(Qt::AlignCenter);
-    artifactImagePreviewLabel_->setMinimumHeight(180);
+    artifactImagePreviewLabel_->setMinimumHeight(220);
+    artifactImagePreviewLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     artifactPreviewText_ = new QPlainTextEdit;
     artifactPreviewText_->setObjectName(QStringLiteral("ArtifactPreviewText"));
     artifactPreviewText_->setReadOnly(true);
+    artifactPreviewText_->setMinimumHeight(160);
     artifactPreviewText_->setPlainText(QStringLiteral("选择一个产物后显示摘要。"));
     auto* artifactDefaultPreview = new QWidget;
     auto* artifactDefaultLayout = new QVBoxLayout(artifactDefaultPreview);
@@ -1840,7 +1850,7 @@ QWidget* MainWindow::buildTaskQueuePage()
     artifactDefaultLayout->addWidget(artifactImagePreviewLabel_, 1);
     artifactDefaultLayout->addWidget(artifactPreviewText_, 2);
     artifactPreviewStack_ = new QStackedWidget;
-    artifactPreviewStack_->setMinimumHeight(240);
+    artifactPreviewStack_->setMinimumHeight(220);
     artifactPreviewStack_->addWidget(artifactDefaultPreview);
     artifactEvaluationReportView_ = new EvaluationReportView;
     auto* artifactEvaluationScroll = new QScrollArea;
@@ -1853,10 +1863,11 @@ QWidget* MainWindow::buildTaskQueuePage()
 
     auto* actionGridFrame = new QFrame;
     actionGridFrame->setObjectName(QStringLiteral("ArtifactActionGrid"));
+    actionGridFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
     auto* actionGrid = new QGridLayout(actionGridFrame);
-    actionGrid->setContentsMargins(8, 8, 8, 8);
-    actionGrid->setHorizontalSpacing(8);
-    actionGrid->setVerticalSpacing(6);
+    actionGrid->setContentsMargins(12, 10, 12, 10);
+    actionGrid->setHorizontalSpacing(12);
+    actionGrid->setVerticalSpacing(8);
     auto* openDirButton = new QPushButton(QStringLiteral("打开目录"));
     auto* copyPathButton = new QPushButton(QStringLiteral("复制路径"));
     auto* useInferButton = new QPushButton(QStringLiteral("用作推理模型"));
@@ -1897,36 +1908,36 @@ QWidget* MainWindow::buildTaskQueuePage()
     auto* exportTabLayout = new QVBoxLayout(exportTab);
     exportTabLayout->setContentsMargins(0, 0, 0, 0);
     exportTabLayout->addWidget(taskExportTable_);
+    auto* previewTab = new QWidget;
+    auto* previewTabLayout = new QVBoxLayout(previewTab);
+    previewTabLayout->setContentsMargins(0, 0, 0, 0);
+    previewTabLayout->addWidget(artifactPreviewStack_);
 
     auto* detailTabs = new QTabWidget;
     detailTabs->setObjectName(QStringLiteral("TaskDetailTabs"));
     detailTabs->addTab(artifactTab, uiText("产物"));
     detailTabs->addTab(metricTab, uiText("指标"));
     detailTabs->addTab(exportTab, uiText("导出"));
+    detailTabs->addTab(previewTab, uiText("预览"));
 
-    detailTabs->setMinimumWidth(560);
-    auto* detailSplitter = new QSplitter(Qt::Horizontal);
-    detailSplitter->addWidget(detailTabs);
-    detailSplitter->addWidget(artifactPreviewStack_);
-    detailSplitter->setChildrenCollapsible(false);
-    detailSplitter->setStretchFactor(0, 3);
-    detailSplitter->setStretchFactor(1, 2);
-    detailSplitter->setSizes(QList<int>() << 700 << 500);
-    detailPanel->bodyLayout()->setSpacing(10);
+    detailTabs->setMinimumHeight(420);
+    detailTabs->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    artifactPreviewStack_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    detailPanel->bodyLayout()->setSpacing(12);
     detailPanel->bodyLayout()->addWidget(selectedTaskSummaryLabel_);
-    detailPanel->bodyLayout()->addWidget(detailSplitter, 1);
+    detailPanel->bodyLayout()->addWidget(detailTabs, 1);
     detailPanel->bodyLayout()->addWidget(actionGridFrame);
 
-    auto* historySplitter = new QSplitter(Qt::Vertical);
-    historySplitter->addWidget(tablePanel);
-    historySplitter->addWidget(detailPanel);
-    historySplitter->setChildrenCollapsible(false);
-    historySplitter->setStretchFactor(0, 1);
-    historySplitter->setStretchFactor(1, 4);
-    historySplitter->setSizes(QList<int>() << 230 << 680);
+    auto* bodySplitter = new QSplitter(Qt::Horizontal);
+    bodySplitter->addWidget(tablePanel);
+    bodySplitter->addWidget(detailPanel);
+    bodySplitter->setChildrenCollapsible(false);
+    bodySplitter->setStretchFactor(0, 2);
+    bodySplitter->setStretchFactor(1, 3);
+    bodySplitter->setSizes(QList<int>() << 520 << 840);
 
     layout->addWidget(toolbar);
-    layout->addWidget(historySplitter, 1);
+    layout->addWidget(bodySplitter, 1);
     return page;
 }
 
@@ -4983,10 +4994,13 @@ void MainWindow::previewArtifactPath(const QString& path)
         artifactEvaluationReportView_->clear();
     }
     artifactImagePreviewLabel_->clear();
-    artifactImagePreviewLabel_->setText(uiText("暂无图片预览"));
+    artifactImagePreviewLabel_->setVisible(false);
+    artifactImagePreviewLabel_->setText(uiText("暂无产物预览"));
+    artifactPreviewText_->setVisible(true);
     artifactPreviewText_->clear();
     if (path.isEmpty()) {
-        artifactPreviewText_->setPlainText(uiText("请选择一个产物。"));
+        artifactImagePreviewLabel_->setVisible(true);
+        artifactPreviewText_->setVisible(false);
         return;
     }
 
@@ -5006,6 +5020,7 @@ void MainWindow::previewArtifactPath(const QString& path)
     if (QStringList{QStringLiteral("png"), QStringLiteral("jpg"), QStringLiteral("jpeg"), QStringLiteral("bmp")}.contains(suffix)) {
         QPixmap image(path);
         if (!image.isNull()) {
+            artifactImagePreviewLabel_->setVisible(true);
             artifactImagePreviewLabel_->setPixmap(image.scaled(
                 artifactImagePreviewLabel_->size().boundedTo(QSize(520, 360)),
                 Qt::KeepAspectRatio,
