@@ -95,6 +95,11 @@ QString uiText(const char* source)
     return aitrain_app::translateText("MainWindow", QString::fromUtf8(source));
 }
 
+QString defaultProjectPathSettingsKey()
+{
+    return QStringLiteral("settings/defaultProjectPath");
+}
+
 QString taskTypeLabel(const QString& taskType)
 {
     if (taskType == QStringLiteral("detection")) {
@@ -914,6 +919,7 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     sidebar_->addSection(tr("系统"));
     sidebar_->addItem(tr("插件"), PluginsPage);
     sidebar_->addItem(tr("环境"), EnvironmentPage);
+    sidebar_->addItem(uiText("设置"), SettingsPage);
     rootLayout->addWidget(sidebar_);
 
     auto* content = new QWidget;
@@ -934,6 +940,7 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     stack_->addWidget(buildInferencePage());
     stack_->addWidget(buildPluginsPage());
     stack_->addWidget(buildEnvironmentPage());
+    stack_->addWidget(buildSettingsPage());
     contentLayout->addWidget(stack_, 1);
 
     rootLayout->addWidget(content, 1);
@@ -1023,37 +1030,26 @@ QWidget* MainWindow::buildTopBar()
     auto* languageLayout = new QHBoxLayout(languageSwitch);
     languageLayout->setContentsMargins(2, 2, 2, 2);
     languageLayout->setSpacing(0);
-    auto* zhButton = new QToolButton;
-    zhButton->setObjectName(QStringLiteral("LanguageSwitchButton"));
-    zhButton->setText(QStringLiteral("中"));
-    zhButton->setCheckable(true);
-    zhButton->setCursor(Qt::PointingHandCursor);
-    zhButton->setToolTip(tr("切换到中文，重启后生效"));
-    auto* enButton = new QToolButton;
-    enButton->setObjectName(QStringLiteral("LanguageSwitchButton"));
-    enButton->setText(QStringLiteral("EN"));
-    enButton->setCheckable(true);
-    enButton->setCursor(Qt::PointingHandCursor);
-    enButton->setToolTip(tr("Switch to English after restart"));
-    const QString configuredLanguage = aitrain_app::configuredLanguageCode();
-    zhButton->setChecked(configuredLanguage == QStringLiteral("zh_CN"));
-    enButton->setChecked(configuredLanguage == QStringLiteral("en_US"));
-    languageLayout->addWidget(zhButton);
-    languageLayout->addWidget(enButton);
-    const auto storeLanguage = [this, zhButton, enButton](const QString& selected) {
-        const QString previous = aitrain_app::configuredLanguageCode();
-        aitrain_app::storeLanguageCode(selected);
-        zhButton->setChecked(selected == QStringLiteral("zh_CN"));
-        enButton->setChecked(selected == QStringLiteral("en_US"));
-        if (previous != selected) {
-            QMessageBox::information(this, tr("界面语言"), tr("语言设置已保存，重启 AITrain Studio 后生效。"));
-        }
-    };
-    connect(zhButton, &QToolButton::clicked, this, [storeLanguage]() {
-        storeLanguage(QStringLiteral("zh_CN"));
+    topBarZhLanguageButton_ = new QToolButton;
+    topBarZhLanguageButton_->setObjectName(QStringLiteral("LanguageSwitchButton"));
+    topBarZhLanguageButton_->setText(QStringLiteral("中"));
+    topBarZhLanguageButton_->setCheckable(true);
+    topBarZhLanguageButton_->setCursor(Qt::PointingHandCursor);
+    topBarZhLanguageButton_->setToolTip(uiText("切换到中文，重启后生效"));
+    topBarEnLanguageButton_ = new QToolButton;
+    topBarEnLanguageButton_->setObjectName(QStringLiteral("LanguageSwitchButton"));
+    topBarEnLanguageButton_->setText(QStringLiteral("EN"));
+    topBarEnLanguageButton_->setCheckable(true);
+    topBarEnLanguageButton_->setCursor(Qt::PointingHandCursor);
+    topBarEnLanguageButton_->setToolTip(uiText("切换到英文，重启后生效"));
+    updateLanguageButtonState();
+    languageLayout->addWidget(topBarZhLanguageButton_);
+    languageLayout->addWidget(topBarEnLanguageButton_);
+    connect(topBarZhLanguageButton_, &QToolButton::clicked, this, [this]() {
+        storeLanguagePreference(QStringLiteral("zh_CN"));
     });
-    connect(enButton, &QToolButton::clicked, this, [storeLanguage]() {
-        storeLanguage(QStringLiteral("en_US"));
+    connect(topBarEnLanguageButton_, &QToolButton::clicked, this, [this]() {
+        storeLanguagePreference(QStringLiteral("en_US"));
     });
 
     layout->addWidget(titleBlock, 1);
@@ -1213,7 +1209,7 @@ QWidget* MainWindow::buildProjectPage()
     form->setHorizontalSpacing(14);
     form->setVerticalSpacing(10);
     projectNameEdit_ = new QLineEdit(uiText("本地训练项目"));
-    projectRootEdit_ = new QLineEdit(QDir::toNativeSeparators(QDir::home().filePath(QStringLiteral("AITrainProjects/local_project"))));
+    projectRootEdit_ = new QLineEdit(QDir::toNativeSeparators(configuredDefaultProjectPath()));
     auto* browseButton = new QPushButton(QStringLiteral("选择目录"));
     auto* createButton = primaryButton(QStringLiteral("创建 / 打开项目"));
 
@@ -2645,6 +2641,206 @@ QWidget* MainWindow::buildEnvironmentPage()
     return page;
 }
 
+QWidget* MainWindow::buildSettingsPage()
+{
+    auto* page = new QScrollArea;
+    page->setWidgetResizable(true);
+    page->setFrameShape(QFrame::NoFrame);
+
+    auto* content = new QWidget;
+    auto* layout = new QVBoxLayout(content);
+    layout->setContentsMargins(18, 18, 18, 18);
+    layout->setSpacing(16);
+
+    auto* headerPanel = new QFrame;
+    headerPanel->setObjectName(QStringLiteral("ExperimentHeader"));
+    auto* headerRoot = new QVBoxLayout(headerPanel);
+    headerRoot->setContentsMargins(14, 12, 14, 12);
+    headerRoot->setSpacing(10);
+    auto* headerTop = new QHBoxLayout;
+    auto* titleBlock = new QWidget;
+    auto* titleLayout = new QVBoxLayout(titleBlock);
+    titleLayout->setContentsMargins(0, 0, 0, 0);
+    titleLayout->setSpacing(2);
+    auto* kicker = new QLabel(QStringLiteral("APPLICATION SETTINGS"));
+    kicker->setObjectName(QStringLiteral("ExperimentKicker"));
+    auto* title = new QLabel(uiText("系统设置"));
+    title->setObjectName(QStringLiteral("ExperimentTitle"));
+    auto* subtitle = new QLabel(uiText("集中管理轻量级应用偏好、授权状态和本地系统入口；训练、导出和推理仍由各自页面和 Worker 执行。"));
+    subtitle->setObjectName(QStringLiteral("ExperimentMeta"));
+    subtitle->setWordWrap(true);
+    titleLayout->addWidget(kicker);
+    titleLayout->addWidget(title);
+    titleLayout->addWidget(subtitle);
+    headerTop->addWidget(titleBlock, 1);
+    headerRoot->addLayout(headerTop);
+
+    auto* languagePanel = new InfoPanel(uiText("界面语言"));
+    auto* languageRow = new QFrame;
+    languageRow->setObjectName(QStringLiteral("ActionStrip"));
+    auto* languageLayout = new QHBoxLayout(languageRow);
+    languageLayout->setContentsMargins(10, 8, 10, 8);
+    languageLayout->setSpacing(10);
+    languageLayout->addWidget(mutedLabel(uiText("保存后需要重启 AITrain Studio 才会完全切换界面语言。")), 1);
+    auto* languageSwitch = new QFrame;
+    languageSwitch->setObjectName(QStringLiteral("LanguageSwitch"));
+    auto* switchLayout = new QHBoxLayout(languageSwitch);
+    switchLayout->setContentsMargins(2, 2, 2, 2);
+    switchLayout->setSpacing(0);
+    settingsZhLanguageButton_ = new QToolButton;
+    settingsZhLanguageButton_->setObjectName(QStringLiteral("LanguageSwitchButton"));
+    settingsZhLanguageButton_->setText(QStringLiteral("中"));
+    settingsZhLanguageButton_->setCheckable(true);
+    settingsZhLanguageButton_->setCursor(Qt::PointingHandCursor);
+    settingsZhLanguageButton_->setToolTip(uiText("切换到中文，重启后生效"));
+    settingsEnLanguageButton_ = new QToolButton;
+    settingsEnLanguageButton_->setObjectName(QStringLiteral("LanguageSwitchButton"));
+    settingsEnLanguageButton_->setText(QStringLiteral("EN"));
+    settingsEnLanguageButton_->setCheckable(true);
+    settingsEnLanguageButton_->setCursor(Qt::PointingHandCursor);
+    settingsEnLanguageButton_->setToolTip(uiText("切换到英文，重启后生效"));
+    switchLayout->addWidget(settingsZhLanguageButton_);
+    switchLayout->addWidget(settingsEnLanguageButton_);
+    languageLayout->addWidget(languageSwitch);
+    connect(settingsZhLanguageButton_, &QToolButton::clicked, this, [this]() {
+        storeLanguagePreference(QStringLiteral("zh_CN"));
+    });
+    connect(settingsEnLanguageButton_, &QToolButton::clicked, this, [this]() {
+        storeLanguagePreference(QStringLiteral("en_US"));
+    });
+    languagePanel->bodyLayout()->addWidget(languageRow);
+
+    auto* projectPathPanel = new InfoPanel(uiText("默认项目目录"));
+    auto* projectPathForm = new QFormLayout;
+    projectPathForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    projectPathForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    projectPathForm->setHorizontalSpacing(14);
+    projectPathForm->setVerticalSpacing(10);
+    settingsDefaultProjectPathEdit_ = new QLineEdit(QDir::toNativeSeparators(configuredDefaultProjectPath()));
+    settingsDefaultProjectPathEdit_->setPlaceholderText(QDir::toNativeSeparators(defaultProjectPath()));
+    auto* browseDefaultProjectButton = new QPushButton(uiText("选择目录"));
+    auto* defaultPathRow = new QWidget;
+    auto* defaultPathLayout = new QHBoxLayout(defaultPathRow);
+    defaultPathLayout->setContentsMargins(0, 0, 0, 0);
+    defaultPathLayout->setSpacing(8);
+    defaultPathLayout->addWidget(settingsDefaultProjectPathEdit_, 1);
+    defaultPathLayout->addWidget(browseDefaultProjectButton);
+    projectPathForm->addRow(uiText("默认项目目录"), defaultPathRow);
+    projectPathPanel->bodyLayout()->addLayout(projectPathForm);
+    auto* defaultPathActions = new QFrame;
+    defaultPathActions->setObjectName(QStringLiteral("ActionStrip"));
+    auto* defaultPathActionLayout = new QHBoxLayout(defaultPathActions);
+    defaultPathActionLayout->setContentsMargins(10, 8, 10, 8);
+    defaultPathActionLayout->setSpacing(10);
+    settingsDefaultProjectPathStatusLabel_ = mutedLabel(uiText("默认项目目录会作为项目页的初始路径；不会自动打开或迁移现有项目。"));
+    auto* saveDefaultPathButton = primaryButton(uiText("保存默认目录"));
+    auto* resetDefaultPathButton = new QPushButton(uiText("恢复默认"));
+    defaultPathActionLayout->addWidget(settingsDefaultProjectPathStatusLabel_, 1);
+    defaultPathActionLayout->addWidget(resetDefaultPathButton);
+    defaultPathActionLayout->addWidget(saveDefaultPathButton);
+    projectPathPanel->bodyLayout()->addWidget(defaultPathActions);
+    connect(browseDefaultProjectButton, &QPushButton::clicked, this, [this]() {
+        const QString directory = QFileDialog::getExistingDirectory(
+            this,
+            uiText("请选择默认项目目录"),
+            QDir::fromNativeSeparators(settingsDefaultProjectPathEdit_->text().trimmed()));
+        if (!directory.isEmpty()) {
+            settingsDefaultProjectPathEdit_->setText(QDir::toNativeSeparators(directory));
+        }
+    });
+    connect(saveDefaultPathButton, &QPushButton::clicked, this, [this]() {
+        storeDefaultProjectPathPreference(settingsDefaultProjectPathEdit_->text());
+    });
+    connect(resetDefaultPathButton, &QPushButton::clicked, this, [this]() {
+        settingsDefaultProjectPathEdit_->setText(QDir::toNativeSeparators(defaultProjectPath()));
+        storeDefaultProjectPathPreference(defaultProjectPath());
+        if (settingsDefaultProjectPathStatusLabel_) {
+            settingsDefaultProjectPathStatusLabel_->setText(uiText("默认项目目录已恢复。"));
+        }
+    });
+
+    auto* licensePanel = new InfoPanel(uiText("授权状态"));
+    auto* licenseForm = new QFormLayout;
+    licenseForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    licenseForm->setHorizontalSpacing(14);
+    licenseForm->setVerticalSpacing(8);
+    licenseForm->addRow(uiText("授权用户"), new QLabel(licenseOwner_.isEmpty() ? uiText("已注册") : licenseOwner_));
+    licenseForm->addRow(uiText("有效期"), new QLabel(licenseExpiry_.isEmpty() ? uiText("未记录") : licenseExpiry_));
+    licensePanel->bodyLayout()->addLayout(licenseForm);
+    licensePanel->bodyLayout()->addWidget(mutedLabel(uiText("离线授权已在启动时校验；这里只展示当前授权信息，不提供换绑或激活入口。")));
+
+    auto* entryPanel = new InfoPanel(uiText("系统入口"));
+    auto* entryActions = new QFrame;
+    entryActions->setObjectName(QStringLiteral("ActionStrip"));
+    auto* entryLayout = new QGridLayout(entryActions);
+    entryLayout->setContentsMargins(10, 8, 10, 8);
+    entryLayout->setHorizontalSpacing(10);
+    entryLayout->setVerticalSpacing(10);
+    auto* openProjectButton = primaryButton(uiText("打开项目页"));
+    auto* openPluginsButton = new QPushButton(uiText("打开插件页"));
+    auto* openEnvironmentButton = new QPushButton(uiText("打开环境页"));
+    auto* runEnvironmentButton = new QPushButton(uiText("执行环境自检"));
+    connect(openProjectButton, &QPushButton::clicked, this, [this]() { showPage(ProjectPage, uiText("项目")); });
+    connect(openPluginsButton, &QPushButton::clicked, this, [this]() { showPage(PluginsPage, uiText("插件")); });
+    connect(openEnvironmentButton, &QPushButton::clicked, this, [this]() { showPage(EnvironmentPage, uiText("环境")); });
+    connect(runEnvironmentButton, &QPushButton::clicked, this, [this]() {
+        showPage(EnvironmentPage, uiText("环境"));
+        runEnvironmentCheck();
+    });
+    entryLayout->addWidget(openProjectButton, 0, 0);
+    entryLayout->addWidget(openPluginsButton, 0, 1);
+    entryLayout->addWidget(openEnvironmentButton, 1, 0);
+    entryLayout->addWidget(runEnvironmentButton, 1, 1);
+    entryPanel->bodyLayout()->addWidget(entryActions);
+    entryPanel->bodyLayout()->addWidget(mutedLabel(uiText("环境自检仍通过 Worker 执行，当前有任务运行时会沿用现有 busy guard。")));
+
+    auto* pathsPanel = new InfoPanel(uiText("本地路径"));
+    auto* pathsGrid = new QGridLayout;
+    pathsGrid->setHorizontalSpacing(10);
+    pathsGrid->setVerticalSpacing(8);
+    const QString appDir = QApplication::applicationDirPath();
+    const auto addStaticPathRow = [this, pathsGrid](int row, const QString& labelText, const QString& path) {
+        auto* label = new QLabel(labelText);
+        auto* edit = new QLineEdit(QDir::toNativeSeparators(path));
+        edit->setReadOnly(true);
+        auto* openButton = new QPushButton(uiText("打开目录"));
+        auto* copyButton = new QPushButton(uiText("复制路径"));
+        connect(openButton, &QPushButton::clicked, this, [this, path]() { openLocalDirectory(path); });
+        connect(copyButton, &QPushButton::clicked, this, [this, path, labelText]() { copyLocalPath(path, labelText); });
+        pathsGrid->addWidget(label, row, 0);
+        pathsGrid->addWidget(edit, row, 1);
+        pathsGrid->addWidget(openButton, row, 2);
+        pathsGrid->addWidget(copyButton, row, 3);
+    };
+    addStaticPathRow(0, uiText("插件目录"), QDir(appDir).filePath(QStringLiteral("plugins/models")));
+    addStaticPathRow(1, uiText("插件市场目录"), QDir(appDir).filePath(QStringLiteral("plugins/marketplace")));
+    auto* currentProjectLabel = new QLabel(uiText("当前项目目录"));
+    settingsCurrentProjectPathLabel_ = inlineStatusLabel(uiText("未打开项目"));
+    auto* openCurrentProjectButton = new QPushButton(uiText("打开目录"));
+    auto* copyCurrentProjectButton = new QPushButton(uiText("复制路径"));
+    connect(openCurrentProjectButton, &QPushButton::clicked, this, [this]() { openLocalDirectory(currentProjectPath_); });
+    connect(copyCurrentProjectButton, &QPushButton::clicked, this, [this]() { copyLocalPath(currentProjectPath_, uiText("当前项目目录")); });
+    pathsGrid->addWidget(currentProjectLabel, 2, 0);
+    pathsGrid->addWidget(settingsCurrentProjectPathLabel_, 2, 1);
+    pathsGrid->addWidget(openCurrentProjectButton, 2, 2);
+    pathsGrid->addWidget(copyCurrentProjectButton, 2, 3);
+    pathsGrid->setColumnStretch(1, 1);
+    pathsPanel->bodyLayout()->addLayout(pathsGrid);
+
+    layout->addWidget(headerPanel);
+    layout->addWidget(languagePanel);
+    layout->addWidget(projectPathPanel);
+    layout->addWidget(licensePanel);
+    layout->addWidget(entryPanel);
+    layout->addWidget(pathsPanel);
+    layout->addStretch();
+
+    page->setWidget(content);
+    updateLanguageButtonState();
+    updateSettingsSummary();
+    return page;
+}
+
 InfoPanel* MainWindow::createMetricCard(const QString& label, const QString& value, const QString& caption)
 {
     auto* panel = new InfoPanel(label);
@@ -2672,6 +2868,7 @@ QString MainWindow::pageCaption(int pageIndex) const
     case InferencePage: return tr("选择模型与样本图，验证 detection、segmentation 或 OCR 推理结果");
     case PluginsPage: return tr("扫描和诊断模型插件");
     case EnvironmentPage: return tr("检查 GPU、CUDA、TensorRT 和运行时依赖");
+    case SettingsPage: return uiText("集中管理界面语言、默认项目目录、授权状态和常用系统入口");
     default: return {};
     }
 }
@@ -2690,6 +2887,9 @@ void MainWindow::showPage(int pageIndex, const QString& title)
     }
     if (pageIndex == EvaluationReportsPage) {
         updateModelRegistry();
+    }
+    if (pageIndex == SettingsPage) {
+        updateSettingsSummary();
     }
 }
 
@@ -2725,6 +2925,7 @@ void MainWindow::createProject()
     updateDatasetList();
     updateModelRegistry();
     updateDashboardSummary();
+    updateSettingsSummary();
     refreshTrainingDefaults();
     statusBar()->showMessage(uiText("项目已打开：%1").arg(currentProjectName_), 5000);
 }
@@ -3801,6 +4002,21 @@ QStringList MainWindow::pluginSearchPaths() const
         QDir(appDir).filePath(QStringLiteral("../plugins/models")),
         QDir(appDir).filePath(QStringLiteral("../../plugins/models"))
     };
+}
+
+QString MainWindow::defaultProjectPath() const
+{
+    return QDir::home().filePath(QStringLiteral("AITrainProjects/local_project"));
+}
+
+QString MainWindow::configuredDefaultProjectPath() const
+{
+    QSettings settings;
+    const QString configured = settings.value(defaultProjectPathSettingsKey(), defaultProjectPath()).toString().trimmed();
+    if (configured.isEmpty()) {
+        return defaultProjectPath();
+    }
+    return QDir::cleanPath(QDir::fromNativeSeparators(configured));
 }
 
 void MainWindow::ensureProjectSubdirs(const QString& rootPath)
@@ -5694,6 +5910,97 @@ void MainWindow::updateEnvironmentSummary()
             environmentConsoleStatusLabel_->setText(uiText("环境自检通过。"));
         }
     }
+}
+
+void MainWindow::updateSettingsSummary()
+{
+    if (settingsDefaultProjectPathEdit_) {
+        settingsDefaultProjectPathEdit_->setText(QDir::toNativeSeparators(configuredDefaultProjectPath()));
+    }
+    if (settingsCurrentProjectPathLabel_) {
+        settingsCurrentProjectPathLabel_->setText(currentProjectPath_.isEmpty()
+            ? uiText("未打开项目")
+            : QDir::toNativeSeparators(currentProjectPath_));
+    }
+    updateLanguageButtonState();
+}
+
+void MainWindow::storeLanguagePreference(const QString& languageCode)
+{
+    const QString previous = aitrain_app::configuredLanguageCode();
+    aitrain_app::storeLanguageCode(languageCode);
+    updateLanguageButtonState();
+    if (previous != aitrain_app::configuredLanguageCode()) {
+        QMessageBox::information(this, uiText("界面语言"), uiText("语言设置已保存，重启 AITrain Studio 后生效。"));
+    }
+}
+
+void MainWindow::updateLanguageButtonState()
+{
+    const QString language = aitrain_app::configuredLanguageCode();
+    const auto setChecked = [&language](QToolButton* button, const QString& buttonLanguage) {
+        if (!button) {
+            return;
+        }
+        const QSignalBlocker blocker(button);
+        button->setChecked(language == buttonLanguage);
+    };
+    setChecked(topBarZhLanguageButton_, QStringLiteral("zh_CN"));
+    setChecked(topBarEnLanguageButton_, QStringLiteral("en_US"));
+    setChecked(settingsZhLanguageButton_, QStringLiteral("zh_CN"));
+    setChecked(settingsEnLanguageButton_, QStringLiteral("en_US"));
+}
+
+void MainWindow::storeDefaultProjectPathPreference(const QString& path)
+{
+    const QString normalized = QDir::cleanPath(QDir::fromNativeSeparators(path.trimmed()));
+    if (normalized.isEmpty() || normalized == QStringLiteral(".")) {
+        QMessageBox::warning(this, uiText("默认项目目录"), uiText("目录不能为空。"));
+        return;
+    }
+
+    QSettings settings;
+    settings.setValue(defaultProjectPathSettingsKey(), normalized);
+    const QString native = QDir::toNativeSeparators(normalized);
+    if (settingsDefaultProjectPathEdit_) {
+        settingsDefaultProjectPathEdit_->setText(native);
+    }
+    if (projectRootEdit_ && currentProjectPath_.isEmpty()) {
+        projectRootEdit_->setText(native);
+    }
+    if (settingsDefaultProjectPathStatusLabel_) {
+        settingsDefaultProjectPathStatusLabel_->setText(uiText("默认项目目录已保存。"));
+    }
+    statusBar()->showMessage(uiText("默认项目目录已保存。"), 3000);
+}
+
+void MainWindow::openLocalDirectory(const QString& path)
+{
+    const QString normalized = QDir::cleanPath(QDir::fromNativeSeparators(path.trimmed()));
+    if (normalized.isEmpty() || normalized == QStringLiteral(".")) {
+        statusBar()->showMessage(uiText("当前未打开项目。"), 3000);
+        return;
+    }
+
+    const QFileInfo info(normalized);
+    const QString directory = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
+    if (!QDir(directory).exists()) {
+        statusBar()->showMessage(uiText("目录不存在：%1").arg(QDir::toNativeSeparators(directory)), 5000);
+        return;
+    }
+    QDesktopServices::openUrl(QUrl::fromLocalFile(directory));
+}
+
+void MainWindow::copyLocalPath(const QString& path, const QString& label)
+{
+    const QString normalized = QDir::cleanPath(QDir::fromNativeSeparators(path.trimmed()));
+    if (normalized.isEmpty() || normalized == QStringLiteral(".")) {
+        statusBar()->showMessage(uiText("当前未打开项目。"), 3000);
+        return;
+    }
+
+    QApplication::clipboard()->setText(QDir::toNativeSeparators(normalized));
+    statusBar()->showMessage(uiText("路径已复制：%1").arg(label), 3000);
 }
 
 void MainWindow::updateDashboardSummary()

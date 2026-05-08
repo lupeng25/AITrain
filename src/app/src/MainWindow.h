@@ -22,6 +22,7 @@
 class InfoPanel;
 class EvaluationReportView;
 class PluginMarketplaceWidget;
+class QToolButton;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -74,7 +75,8 @@ private:
         ConversionPage,
         InferencePage,
         PluginsPage,
-        EnvironmentPage
+        EnvironmentPage,
+        SettingsPage
     };
 
     QWidget* buildTopBar();
@@ -89,11 +91,14 @@ private:
     QWidget* buildInferencePage();
     QWidget* buildPluginsPage();
     QWidget* buildEnvironmentPage();
+    QWidget* buildSettingsPage();
 
     InfoPanel* createMetricCard(const QString& label, const QString& value, const QString& caption);
     QString pageCaption(int pageIndex) const;
     QString workerExecutablePath() const;
     QStringList pluginSearchPaths() const;
+    QString defaultProjectPath() const;
+    QString configuredDefaultProjectPath() const;
     void ensureProjectSubdirs(const QString& rootPath);
     void appendLog(const QString& text);
     void loadPluginCombos();
@@ -123,8 +128,14 @@ private:
     void updateProjectSummary();
     void updatePluginSummary();
     void updateEnvironmentSummary();
+    void updateSettingsSummary();
     void updateTrainingSelectionSummary();
     void refreshTrainingDefaults();
+    void storeLanguagePreference(const QString& languageCode);
+    void updateLanguageButtonState();
+    void storeDefaultProjectPathPreference(const QString& path);
+    void openLocalDirectory(const QString& path);
+    void copyLocalPath(const QString& path, const QString& label);
     void updateAnnotationToolStatus();
     void refreshAfterAnnotation();
     void applyTaskFilters();
@@ -166,6 +177,10 @@ private:
     StatusPill* pluginPill_ = nullptr;
     StatusPill* gpuPill_ = nullptr;
     StatusPill* licensePill_ = nullptr;
+    QToolButton* topBarZhLanguageButton_ = nullptr;
+    QToolButton* topBarEnLanguageButton_ = nullptr;
+    QToolButton* settingsZhLanguageButton_ = nullptr;
+    QToolButton* settingsEnLanguageButton_ = nullptr;
     QString licenseOwner_;
     QString licenseExpiry_;
 
@@ -196,6 +211,9 @@ private:
     QLabel* environmentWarningSummaryLabel_ = nullptr;
     QLabel* environmentMissingSummaryLabel_ = nullptr;
     QLabel* environmentUncheckedSummaryLabel_ = nullptr;
+    QLabel* settingsDefaultProjectPathStatusLabel_ = nullptr;
+    QLabel* settingsCurrentProjectPathLabel_ = nullptr;
+    QLineEdit* settingsDefaultProjectPathEdit_ = nullptr;
     QTableWidget* recentTasksTable_ = nullptr;
     QTableWidget* taskQueueTable_ = nullptr;
     QTableWidget* taskArtifactTable_ = nullptr;
