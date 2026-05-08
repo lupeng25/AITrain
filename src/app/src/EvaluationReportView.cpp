@@ -127,6 +127,8 @@ EvaluationReportView::EvaluationReportView(QWidget* parent)
     metricsTable_ = new QTableWidget(0, 2);
     metricsTable_->setHorizontalHeaderLabels(QStringList() << uiText("指标") << uiText("值"));
     configureTable(metricsTable_);
+    metricsTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    metricsTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     metricsTable_->setMinimumHeight(180);
     metricsTable_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     metricsPanel->bodyLayout()->addWidget(metricsTable_);
@@ -144,6 +146,13 @@ EvaluationReportView::EvaluationReportView(QWidget* parent)
         << uiText("Recall")
         << uiText("质量"));
     configureTable(perClassTable_);
+    perClassTable_->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    perClassTable_->horizontalHeader()->setStretchLastSection(false);
+    perClassTable_->horizontalHeader()->setMinimumSectionSize(52);
+    perClassTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    for (int column = 1; column < perClassTable_->columnCount(); ++column) {
+        perClassTable_->horizontalHeader()->setSectionResizeMode(column, QHeaderView::ResizeToContents);
+    }
     perClassTable_->setMinimumHeight(180);
     perClassTable_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     perClassPanel->bodyLayout()->addWidget(perClassTable_);
@@ -173,6 +182,13 @@ EvaluationReportView::EvaluationReportView(QWidget* parent)
         << uiText("预测")
         << uiText("补充信息"));
     configureTable(errorTable_);
+    errorTable_->setWordWrap(true);
+    errorTable_->verticalHeader()->setDefaultSectionSize(40);
+    errorTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    errorTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    errorTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    errorTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    errorTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
     errorTable_->setMinimumHeight(180);
     errorTable_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     connect(errorTable_, &QTableWidget::itemSelectionChanged, this, &EvaluationReportView::updateErrorPreview);
@@ -315,7 +331,7 @@ void EvaluationReportView::populateMetrics(const QJsonObject& report)
         metricsTable_->setItem(row, 0, new QTableWidgetItem(it.key()));
         metricsTable_->setItem(row, 1, new QTableWidgetItem(jsonValueSummary(it.value())));
     }
-    metricsTable_->resizeColumnsToContents();
+    metricsTable_->resizeColumnToContents(1);
 }
 
 void EvaluationReportView::populatePerClass(const QJsonObject& report)
@@ -351,7 +367,13 @@ void EvaluationReportView::populatePerClass(const QJsonObject& report)
         }
         perClassTable_->setItem(row, 7, new QTableWidgetItem(quality));
     }
-    perClassTable_->resizeColumnsToContents();
+    perClassTable_->resizeColumnToContents(1);
+    perClassTable_->resizeColumnToContents(2);
+    perClassTable_->resizeColumnToContents(3);
+    perClassTable_->resizeColumnToContents(4);
+    perClassTable_->resizeColumnToContents(5);
+    perClassTable_->resizeColumnToContents(6);
+    perClassTable_->resizeColumnToContents(7);
 }
 
 void EvaluationReportView::populateConfusion(const QJsonObject& report)
@@ -468,7 +490,9 @@ void EvaluationReportView::populateErrors(const QJsonObject& report)
         return;
     }
 
-    errorTable_->resizeColumnsToContents();
+    errorTable_->resizeColumnToContents(0);
+    errorTable_->resizeColumnToContents(2);
+    errorTable_->resizeColumnToContents(3);
     errorTable_->selectRow(0);
 }
 

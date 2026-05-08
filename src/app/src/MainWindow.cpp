@@ -92,6 +92,16 @@ QString compactPathForStatus(const QString& path, int maxChars = 72)
     return QStringLiteral("...") + nativePath.right(qMax(0, maxChars - 3));
 }
 
+QString compactTextForStatus(const QString& text, int maxChars = 96)
+{
+    if (text.size() <= maxChars) {
+        return text;
+    }
+    const int head = qMax(12, maxChars / 2 - 3);
+    const int tail = qMax(12, maxChars - head - 5);
+    return text.left(head) + QStringLiteral(" ... ") + text.right(tail);
+}
+
 QPushButton* primaryButton(const QString& text)
 {
     auto* button = new QPushButton(text);
@@ -762,9 +772,9 @@ QString xAnyLabelingStatusText()
 {
     const QString program = resolvedXAnyLabelingProgram();
     if (program.isEmpty()) {
-        return uiText("状态：未检测到 X-AnyLabeling。可放到 .deps/annotation-tools/X-AnyLabeling，或设置 AITRAIN_XANYLABELING_EXE。");
+        return uiText("状态：未检测到 X-AnyLabeling。请检查 PATH、环境变量或 .deps/annotation-tools。");
     }
-    return uiText("状态：已安装 | %1").arg(QDir::toNativeSeparators(program));
+    return uiText("状态：已安装 | %1").arg(compactPathForStatus(program, 72));
 }
 
 QString detectDatasetFormatFromPath(const QString& path)
@@ -1089,6 +1099,8 @@ QWidget* MainWindow::buildDashboardPage()
 
     projectLabel_ = inlineStatusLabel(QStringLiteral("未打开项目。先创建或打开本地项目，后续数据集、任务和模型产物都会写入项目目录。"));
     gpuLabel_ = inlineStatusLabel(QStringLiteral("GPU / 运行时：未执行环境自检"));
+    allowLabelToShrink(projectLabel_);
+    allowLabelToShrink(gpuLabel_);
 
     auto* grid = new QGridLayout;
     grid->setSpacing(12);
@@ -1115,6 +1127,7 @@ QWidget* MainWindow::buildDashboardPage()
 
     auto* workflowPanel = new InfoPanel(QStringLiteral("下一步"));
     dashboardNextStepLabel_ = emptyStateLabel(QStringLiteral("打开项目后，按 数据集 -> 训练实验 -> 任务与产物 -> 模型导出 -> 推理验证 的顺序完成本机训练闭环。"));
+    allowLabelToShrink(dashboardNextStepLabel_);
     workflowPanel->bodyLayout()->addWidget(dashboardNextStepLabel_);
     auto* actionStrip = new QFrame;
     actionStrip->setObjectName(QStringLiteral("ActionStrip"));
@@ -1195,6 +1208,7 @@ QWidget* MainWindow::buildProjectPage()
     auto* subtitle = new QLabel(QStringLiteral("统一管理本机训练项目、SQLite 元数据、数据集目录、运行目录和模型产物目录。"));
     subtitle->setObjectName(QStringLiteral("ExperimentMeta"));
     subtitle->setWordWrap(true);
+    allowLabelToShrink(subtitle);
     titleLayout->addWidget(kicker);
     titleLayout->addWidget(title);
     titleLayout->addWidget(subtitle);
@@ -1213,6 +1227,8 @@ QWidget* MainWindow::buildProjectPage()
     projectConsoleStatusLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
     auto* policyStatus = inlineStatusLabel(QStringLiteral("项目会生成 datasets、runs、models 和 project.sqlite。"));
     policyStatus->setObjectName(QStringLiteral("DarkInlineStatus"));
+    allowLabelToShrink(projectConsoleStatusLabel_);
+    allowLabelToShrink(policyStatus);
     headerGrid->addWidget(statusCaption, 0, 0);
     headerGrid->addWidget(projectConsoleStatusLabel_, 0, 1);
     headerGrid->addWidget(policyCaption, 1, 0);
@@ -1250,11 +1266,15 @@ QWidget* MainWindow::buildProjectPage()
     formPanel->bodyLayout()->addLayout(form);
     auto* actionStrip = new QFrame;
     actionStrip->setObjectName(QStringLiteral("ActionStrip"));
-    auto* actionLayout = new QHBoxLayout(actionStrip);
+    auto* actionLayout = new QGridLayout(actionStrip);
     actionLayout->setContentsMargins(10, 8, 10, 8);
-    actionLayout->setSpacing(10);
-    actionLayout->addWidget(mutedLabel(QStringLiteral("打开项目后，数据集、任务、导出记录和环境检查都会写入 project.sqlite。")), 1);
-    actionLayout->addWidget(createButton);
+    actionLayout->setHorizontalSpacing(10);
+    actionLayout->setVerticalSpacing(8);
+    auto* projectActionHint = mutedLabel(QStringLiteral("打开项目后，数据集、任务、导出记录和环境检查都会写入 project.sqlite。"));
+    allowLabelToShrink(projectActionHint);
+    actionLayout->addWidget(projectActionHint, 0, 0);
+    actionLayout->addWidget(createButton, 1, 0, Qt::AlignRight);
+    actionLayout->setColumnStretch(0, 1);
     formPanel->bodyLayout()->addWidget(actionStrip);
     formPanel->bodyLayout()->addStretch();
 
@@ -1353,20 +1373,29 @@ QWidget* MainWindow::buildDatasetPage()
     form->addRow(QStringLiteral("输出目录"), splitOutputEdit_);
     form->addRow(QStringLiteral("train / val / test / seed"), ratioRow);
     inputPanel->bodyLayout()->addLayout(form);
-    auto* datasetActionRow = new QHBoxLayout;
-    datasetActionRow->addWidget(validateButton);
-    datasetActionRow->addWidget(splitButton);
-    datasetActionRow->addWidget(curateButton);
-    datasetActionRow->addWidget(snapshotButton);
-    datasetActionRow->addWidget(openFixListButton);
-    datasetActionRow->addWidget(fixWithXAnyButton);
-    datasetActionRow->addStretch();
-    inputPanel->bodyLayout()->addLayout(datasetActionRow);
+    auto* datasetActionStrip = new QFrame;
+    datasetActionStrip->setObjectName(QStringLiteral("ActionStrip"));
+    auto* datasetActionGrid = new QGridLayout(datasetActionStrip);
+    datasetActionGrid->setContentsMargins(10, 8, 10, 8);
+    datasetActionGrid->setHorizontalSpacing(10);
+    datasetActionGrid->setVerticalSpacing(8);
+    datasetActionGrid->addWidget(validateButton, 0, 0);
+    datasetActionGrid->addWidget(splitButton, 0, 1);
+    datasetActionGrid->addWidget(snapshotButton, 0, 2);
+    datasetActionGrid->addWidget(curateButton, 1, 0);
+    datasetActionGrid->addWidget(openFixListButton, 1, 1);
+    datasetActionGrid->addWidget(fixWithXAnyButton, 1, 2);
+    for (int column = 0; column < 3; ++column) {
+        datasetActionGrid->setColumnStretch(column, 1);
+    }
+    inputPanel->bodyLayout()->addWidget(datasetActionStrip);
 
     auto* splitter = new QSplitter(Qt::Horizontal);
     auto* resultPanel = new InfoPanel(QStringLiteral("所选数据集详情"));
     datasetDetailLabel_ = inlineStatusLabel(QStringLiteral("选择或导入数据集后显示格式、样本数、校验状态和最近报告。"));
     validationSummaryLabel_ = mutedLabel(QStringLiteral("请选择数据集目录和格式，然后执行校验。"));
+    allowLabelToShrink(datasetDetailLabel_);
+    allowLabelToShrink(validationSummaryLabel_);
     validationIssuesTable_ = new QTableWidget(0, 5);
     validationIssuesTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("级别")
@@ -1375,8 +1404,15 @@ QWidget* MainWindow::buildDatasetPage()
         << QStringLiteral("行号")
         << QStringLiteral("说明"));
     configureTable(validationIssuesTable_);
+    validationIssuesTable_->verticalHeader()->setDefaultSectionSize(38);
+    validationIssuesTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    validationIssuesTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    validationIssuesTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    validationIssuesTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    validationIssuesTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
     validationOutput_ = new QPlainTextEdit;
     validationOutput_->setReadOnly(true);
+    validationOutput_->setMinimumHeight(130);
     validationOutput_->setPlainText(QStringLiteral("校验报告 JSON 会显示在这里。"));
     resultPanel->bodyLayout()->addWidget(datasetDetailLabel_);
     resultPanel->bodyLayout()->addWidget(validationSummaryLabel_);
@@ -1392,6 +1428,13 @@ QWidget* MainWindow::buildDatasetPage()
         << QStringLiteral("样本")
         << QStringLiteral("路径"));
     configureTable(datasetListTable_);
+    datasetListTable_->setWordWrap(true);
+    datasetListTable_->verticalHeader()->setDefaultSectionSize(40);
+    datasetListTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    datasetListTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    datasetListTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    datasetListTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    datasetListTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
     connect(datasetListTable_, &QTableWidget::itemSelectionChanged, this, [this]() {
         if (!datasetListTable_ || datasetListTable_->selectedItems().isEmpty()) {
             return;
@@ -1416,13 +1459,23 @@ QWidget* MainWindow::buildDatasetPage()
     datasetPreviewTable_ = new QTableWidget(0, 2);
     datasetPreviewTable_->setHorizontalHeaderLabels(QStringList() << QStringLiteral("样本") << QStringLiteral("标签 / 说明"));
     configureTable(datasetPreviewTable_);
+    datasetPreviewTable_->setWordWrap(true);
+    datasetPreviewTable_->verticalHeader()->setDefaultSectionSize(40);
+    datasetPreviewTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    datasetPreviewTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     auto* annotationPanel = new QGroupBox(QStringLiteral("外部标注工具"));
-    auto* annotationLayout = new QGridLayout(annotationPanel);
-    annotationLayout->setContentsMargins(10, 12, 10, 10);
-    annotationLayout->setHorizontalSpacing(10);
-    annotationLayout->setVerticalSpacing(8);
-    auto* annotationSummary = mutedLabel(QStringLiteral("默认使用 X-AnyLabeling。推荐导出：检测使用 YOLO bbox，分割使用 YOLO polygon；PaddleOCR Det 使用 det_gt.txt，PaddleOCR Rec 使用 rec_gt.txt + dict.txt。"));
+    annotationPanel->setMinimumHeight(136);
+    annotationPanel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+    auto* annotationLayout = new QVBoxLayout(annotationPanel);
+    annotationLayout->setContentsMargins(10, 12, 10, 8);
+    annotationLayout->setSpacing(6);
+    auto* annotationSummary = mutedLabel(QStringLiteral("X-AnyLabeling：检测导出 YOLO bbox，分割导出 YOLO polygon；PaddleOCR 使用 det_gt / rec_gt + dict。"));
     annotationToolStatusLabel_ = inlineStatusLabel(xAnyLabelingStatusText());
+    allowLabelToShrink(annotationSummary);
+    allowLabelToShrink(annotationToolStatusLabel_);
+    annotationSummary->setMinimumHeight(28);
+    annotationToolStatusLabel_->setMinimumHeight(28);
+    annotationToolStatusLabel_->setToolTip(QDir::toNativeSeparators(resolvedXAnyLabelingProgram()));
     auto* launchAnnotationToolButton = new QPushButton(QStringLiteral("启动 X-AnyLabeling"));
     auto* refreshAnnotationStatusButton = new QPushButton(QStringLiteral("检测状态"));
     auto* refreshDatasetAfterAnnotationButton = new QPushButton(QStringLiteral("标注后刷新 / 重新校验"));
@@ -1461,25 +1514,52 @@ QWidget* MainWindow::buildDatasetPage()
             QStringLiteral("X-AnyLabeling"),
             uiText("X-AnyLabeling 启动失败：%1").arg(QDir::toNativeSeparators(program)));
     });
-    annotationLayout->addWidget(annotationSummary, 0, 0, 1, 4);
-    annotationLayout->addWidget(annotationToolStatusLabel_, 1, 0, 1, 4);
-    annotationLayout->addWidget(launchAnnotationToolButton, 2, 0);
-    annotationLayout->addWidget(refreshAnnotationStatusButton, 2, 1);
-    annotationLayout->addWidget(refreshDatasetAfterAnnotationButton, 2, 2);
-    annotationLayout->addWidget(openDatasetDirButton, 2, 3);
-    annotationLayout->setColumnStretch(4, 1);
-    toolsPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("已登记数据集")));
-    toolsPanel->bodyLayout()->addWidget(datasetListTable_, 1);
-    toolsPanel->bodyLayout()->addWidget(annotationPanel);
-    toolsPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("样本预览")));
-    toolsPanel->bodyLayout()->addWidget(datasetPreviewTable_, 1);
-    toolsPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("划分会复制到新目录，不修改原始数据；支持 YOLO 检测、YOLO 分割、PaddleOCR Det 和 PaddleOCR Rec。")));
-    toolsPanel->bodyLayout()->addStretch();
+    auto* annotationActionRow = new QWidget;
+    auto* annotationActionGrid = new QGridLayout(annotationActionRow);
+    annotationActionGrid->setContentsMargins(0, 0, 0, 0);
+    annotationActionGrid->setHorizontalSpacing(10);
+    annotationActionGrid->setVerticalSpacing(0);
+    annotationActionGrid->addWidget(launchAnnotationToolButton, 0, 0);
+    annotationActionGrid->addWidget(refreshAnnotationStatusButton, 0, 1);
+    annotationActionGrid->addWidget(refreshDatasetAfterAnnotationButton, 0, 2);
+    annotationActionGrid->addWidget(openDatasetDirButton, 0, 3);
+    for (int column = 0; column < 4; ++column) {
+        annotationActionGrid->setColumnStretch(column, 1);
+    }
+    annotationLayout->addWidget(annotationSummary);
+    annotationLayout->addWidget(annotationToolStatusLabel_);
+    annotationLayout->addWidget(annotationActionRow);
+    auto* datasetLibraryTab = new QWidget;
+    auto* datasetLibraryLayout = new QVBoxLayout(datasetLibraryTab);
+    datasetLibraryLayout->setContentsMargins(0, 0, 0, 0);
+    datasetLibraryLayout->setSpacing(10);
+    auto* datasetLibraryCaption = mutedLabel(QStringLiteral("已登记数据集"));
+    allowLabelToShrink(datasetLibraryCaption);
+    datasetLibraryLayout->addWidget(datasetLibraryCaption);
+    datasetLibraryLayout->addWidget(datasetListTable_, 1);
+    datasetLibraryLayout->addWidget(annotationPanel);
+
+    auto* samplePreviewTab = new QWidget;
+    auto* samplePreviewLayout = new QVBoxLayout(samplePreviewTab);
+    samplePreviewLayout->setContentsMargins(0, 0, 0, 0);
+    samplePreviewLayout->setSpacing(10);
+    auto* samplePreviewHint = mutedLabel(QStringLiteral("划分会复制到新目录，不修改原始数据；支持 YOLO 检测、YOLO 分割、PaddleOCR Det 和 PaddleOCR Rec。"));
+    allowLabelToShrink(samplePreviewHint);
+    samplePreviewLayout->addWidget(datasetPreviewTable_, 1);
+    samplePreviewLayout->addWidget(samplePreviewHint);
+
+    auto* datasetToolsTabs = new QTabWidget;
+    datasetToolsTabs->setObjectName(QStringLiteral("DatasetToolsTabs"));
+    datasetToolsTabs->addTab(datasetLibraryTab, uiText("数据集库"));
+    datasetToolsTabs->addTab(samplePreviewTab, uiText("样本预览"));
+    toolsPanel->bodyLayout()->addWidget(datasetToolsTabs, 1);
 
     splitter->addWidget(toolsPanel);
     splitter->addWidget(resultPanel);
+    splitter->setChildrenCollapsible(false);
     splitter->setStretchFactor(0, 2);
     splitter->setStretchFactor(1, 3);
+    splitter->setSizes(QList<int>() << 480 << 620);
 
     layout->addWidget(inputPanel);
     layout->addWidget(splitter, 1);
@@ -1998,7 +2078,12 @@ QWidget* MainWindow::buildModelRegistryPage()
     layout->setSpacing(16);
 
     auto* toolbar = new InfoPanel(QStringLiteral("模型库"));
-    auto* row = new QHBoxLayout;
+    auto* actionStrip = new QFrame;
+    actionStrip->setObjectName(QStringLiteral("ActionStrip"));
+    auto* actionGrid = new QGridLayout(actionStrip);
+    actionGrid->setContentsMargins(10, 8, 10, 8);
+    actionGrid->setHorizontalSpacing(10);
+    actionGrid->setVerticalSpacing(8);
     auto* refreshButton = primaryButton(QStringLiteral("刷新模型库"));
     auto* inferButton = new QPushButton(QStringLiteral("选中模型用于推理"));
     auto* exportButton = new QPushButton(QStringLiteral("选中模型用于导出"));
@@ -2045,14 +2130,17 @@ QWidget* MainWindow::buildModelRegistryPage()
     });
     connect(pipelineButton, &QPushButton::clicked, this, &MainWindow::runLocalPipelinePlanFromCurrentDataset);
     connect(reportsButton, &QPushButton::clicked, this, &MainWindow::openEvaluationReportsPage);
-    row->addWidget(refreshButton);
-    row->addWidget(inferButton);
-    row->addWidget(exportButton);
-    row->addWidget(pipelineButton);
-    row->addWidget(reportsButton);
-    row->addStretch();
+    actionGrid->addWidget(refreshButton, 0, 0);
+    actionGrid->addWidget(inferButton, 0, 1);
+    actionGrid->addWidget(exportButton, 0, 2);
+    actionGrid->addWidget(pipelineButton, 1, 0);
+    actionGrid->addWidget(reportsButton, 1, 1);
+    for (int column = 0; column < 3; ++column) {
+        actionGrid->setColumnStretch(column, 1);
+    }
     modelRegistrySummaryLabel_ = mutedLabel(QStringLiteral("训练产物可从“任务与产物”注册为模型版本；评估报告已拆分到独立页面，模型库聚焦版本管理、导出和推理入口。"));
-    toolbar->bodyLayout()->addLayout(row);
+    allowLabelToShrink(modelRegistrySummaryLabel_);
+    toolbar->bodyLayout()->addWidget(actionStrip);
     toolbar->bodyLayout()->addWidget(modelRegistrySummaryLabel_);
 
     auto* splitter = new QSplitter(Qt::Vertical);
@@ -2069,6 +2157,19 @@ QWidget* MainWindow::buildModelRegistryPage()
         << QStringLiteral("交付摘要")
         << QStringLiteral("更新时间"));
     configureTable(modelVersionTable_);
+    modelVersionTable_->setWordWrap(true);
+    modelVersionTable_->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    modelVersionTable_->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    modelVersionTable_->verticalHeader()->setDefaultSectionSize(42);
+    modelVersionTable_->horizontalHeader()->setStretchLastSection(false);
+    modelVersionTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    modelVersionTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    modelVersionTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    modelVersionTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
+    modelVersionTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
+    modelVersionTable_->horizontalHeader()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
+    modelVersionTable_->horizontalHeader()->setSectionResizeMode(6, QHeaderView::Stretch);
+    modelVersionTable_->horizontalHeader()->setSectionResizeMode(7, QHeaderView::ResizeToContents);
     modelPanel->bodyLayout()->addWidget(modelVersionTable_);
 
     auto* pipelinePanel = new InfoPanel(QStringLiteral("流水线记录"));
@@ -2080,11 +2181,20 @@ QWidget* MainWindow::buildModelRegistryPage()
         << QStringLiteral("摘要")
         << QStringLiteral("更新时间"));
     configureTable(pipelineRunTable_);
+    pipelineRunTable_->setWordWrap(true);
+    pipelineRunTable_->verticalHeader()->setDefaultSectionSize(42);
+    pipelineRunTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    pipelineRunTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    pipelineRunTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    pipelineRunTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
+    pipelineRunTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
     pipelinePanel->bodyLayout()->addWidget(pipelineRunTable_);
     splitter->addWidget(modelPanel);
     splitter->addWidget(pipelinePanel);
+    splitter->setChildrenCollapsible(false);
     splitter->setStretchFactor(0, 4);
     splitter->setStretchFactor(1, 2);
+    splitter->setSizes(QList<int>() << 520 << 260);
 
     layout->addWidget(toolbar);
     layout->addWidget(splitter, 1);
@@ -2110,7 +2220,9 @@ QWidget* MainWindow::buildEvaluationReportsPage()
     row->addWidget(backToModelsButton);
     row->addStretch();
     toolbar->bodyLayout()->addLayout(row);
-    toolbar->bodyLayout()->addWidget(mutedLabel(QStringLiteral("集中查看最近评估报告、任务类型、报告路径和详细可视化结果；模型版本管理保留在“模型库”。")));
+    auto* reportHint = mutedLabel(QStringLiteral("集中查看最近评估报告、任务类型、报告路径和详细可视化结果；模型版本管理保留在“模型库”。"));
+    allowLabelToShrink(reportHint);
+    toolbar->bodyLayout()->addWidget(reportHint);
 
     auto* splitter = new QSplitter(Qt::Vertical);
 
@@ -2123,6 +2235,13 @@ QWidget* MainWindow::buildEvaluationReportsPage()
         << QStringLiteral("报告")
         << QStringLiteral("时间"));
     configureTable(evaluationReportTable_);
+    evaluationReportTable_->setWordWrap(true);
+    evaluationReportTable_->verticalHeader()->setDefaultSectionSize(42);
+    evaluationReportTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    evaluationReportTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    evaluationReportTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    evaluationReportTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
+    evaluationReportTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
     connect(evaluationReportTable_, &QTableWidget::itemSelectionChanged, this, &MainWindow::updateSelectedEvaluationReportDetails);
     reportPanel->bodyLayout()->addWidget(evaluationReportTable_);
 
@@ -2138,8 +2257,10 @@ QWidget* MainWindow::buildEvaluationReportsPage()
 
     splitter->addWidget(reportPanel);
     splitter->addWidget(reportDetailPanel);
+    splitter->setChildrenCollapsible(false);
     splitter->setStretchFactor(0, 1);
     splitter->setStretchFactor(1, 3);
+    splitter->setSizes(QList<int>() << 260 << 560);
 
     layout->addWidget(toolbar);
     layout->addWidget(splitter, 1);
@@ -2172,6 +2293,7 @@ QWidget* MainWindow::buildConversionPage()
     auto* subtitle = new QLabel(QStringLiteral("从训练产物生成 ONNX、NCNN、TensorRT 或诊断 JSON，并把报告写入任务与产物。"));
     subtitle->setObjectName(QStringLiteral("ExperimentMeta"));
     subtitle->setWordWrap(true);
+    allowLabelToShrink(subtitle);
     titleLayout->addWidget(kicker);
     titleLayout->addWidget(title);
     titleLayout->addWidget(subtitle);
@@ -2190,6 +2312,8 @@ QWidget* MainWindow::buildConversionPage()
     sourceStatus->setObjectName(QStringLiteral("DarkInlineStatus"));
     auto* policyStatus = inlineStatusLabel(QStringLiteral("导出只通过 Worker 执行；TensorRT 仍需 RTX / SM 75+ 外部验收。"));
     policyStatus->setObjectName(QStringLiteral("DarkInlineStatus"));
+    allowLabelToShrink(sourceStatus);
+    allowLabelToShrink(policyStatus);
     headerGrid->addWidget(sourceLabel, 0, 0);
     headerGrid->addWidget(sourceStatus, 0, 1);
     headerGrid->addWidget(policyLabel, 1, 0);
@@ -2264,6 +2388,7 @@ QWidget* MainWindow::buildConversionPage()
     setupPanel->bodyLayout()->addLayout(form);
 
     auto* sourceHelp = emptyStateLabel(QStringLiteral("从“任务与产物”中选中 best.onnx、checkpoint 或官方导出目录后，可点击“用作导出输入”自动带入这里。"));
+    allowLabelToShrink(sourceHelp);
     setupPanel->bodyLayout()->addWidget(sourceHelp);
 
     auto* actionStrip = new QFrame;
@@ -2271,7 +2396,9 @@ QWidget* MainWindow::buildConversionPage()
     auto* actionLayout = new QHBoxLayout(actionStrip);
     actionLayout->setContentsMargins(10, 8, 10, 8);
     actionLayout->setSpacing(10);
-    actionLayout->addWidget(mutedLabel(QStringLiteral("导出任务会记录到任务历史，完成后可直接作为推理输入。")), 1);
+    auto* exportActionHint = mutedLabel(QStringLiteral("导出任务会记录到任务历史，完成后可直接作为推理输入。"));
+    allowLabelToShrink(exportActionHint);
+    actionLayout->addWidget(exportActionHint, 1);
     actionLayout->addWidget(exportButton);
     setupPanel->bodyLayout()->addWidget(actionStrip);
     setupPanel->bodyLayout()->addStretch();
@@ -2325,6 +2452,7 @@ QWidget* MainWindow::buildConversionPage()
 
     mainSplitter->addWidget(setupPanel);
     mainSplitter->addWidget(rightStack);
+    mainSplitter->setChildrenCollapsible(false);
     mainSplitter->setStretchFactor(0, 3);
     mainSplitter->setStretchFactor(1, 4);
     mainSplitter->setSizes(QList<int>() << 520 << 680);
@@ -2362,6 +2490,7 @@ QWidget* MainWindow::buildInferencePage()
     auto* subtitle = new QLabel(QStringLiteral("选择模型和图片，运行 Worker 推理并查看 prediction JSON 与 overlay。这里不直接承载模型后处理逻辑。"));
     subtitle->setObjectName(QStringLiteral("InferenceMeta"));
     subtitle->setWordWrap(true);
+    allowLabelToShrink(subtitle);
     auto* badgeRow = new QWidget;
     auto* badgeLayout = new QHBoxLayout(badgeRow);
     badgeLayout->setContentsMargins(0, 4, 0, 0);
@@ -2390,6 +2519,8 @@ QWidget* MainWindow::buildInferencePage()
     executionStatus->setObjectName(QStringLiteral("DarkInlineStatus"));
     auto* boundaryStatus = inlineStatusLabel(QStringLiteral("C++ ONNX 支持 detection / segmentation / OCR Rec；PaddleOCR System 仍查看官方工具链产物。"));
     boundaryStatus->setObjectName(QStringLiteral("DarkInlineStatus"));
+    allowLabelToShrink(executionStatus);
+    allowLabelToShrink(boundaryStatus);
     headerGrid->addWidget(executionLabel, 0, 0);
     headerGrid->addWidget(executionStatus, 0, 1);
     headerGrid->addWidget(boundaryLabel, 1, 0);
@@ -2469,19 +2600,24 @@ QWidget* MainWindow::buildInferencePage()
     inferForm->addRow(QStringLiteral("推理输出"), outputRow);
     toolbar->bodyLayout()->addLayout(inferForm);
     auto* sourceHelp = emptyStateLabel(QStringLiteral("从“任务与产物”选中 ONNX、AITrain export 或 engine 后，可点击“用作推理模型”自动带入这里。输出目录留空会写到模型同目录 inference。"));
+    allowLabelToShrink(sourceHelp);
     toolbar->bodyLayout()->addWidget(sourceHelp);
     auto* actionStrip = new QFrame;
     actionStrip->setObjectName(QStringLiteral("ActionStrip"));
     auto* actionLayout = new QHBoxLayout(actionStrip);
     actionLayout->setContentsMargins(10, 8, 10, 8);
     actionLayout->setSpacing(10);
-    actionLayout->addWidget(mutedLabel(QStringLiteral("推理任务会记录到任务历史，完成后可在产物详情中复查 JSON、overlay 和耗时。")), 1);
+    auto* inferenceActionHint = mutedLabel(QStringLiteral("推理任务会记录到任务历史，完成后可在产物详情中复查 JSON、overlay 和耗时。"));
+    allowLabelToShrink(inferenceActionHint);
+    actionLayout->addWidget(inferenceActionHint, 1);
     actionLayout->addWidget(inferButton);
     toolbar->bodyLayout()->addWidget(actionStrip);
     toolbar->bodyLayout()->addStretch();
 
     auto* capabilityPanel = new InfoPanel(QStringLiteral("可解析结果"));
-    capabilityPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("推理验证会根据 ONNX 模型族或 AITrain 导出信息选择后处理；scaffold / 官方工具链边界保持显式。")));
+    auto* capabilityHint = mutedLabel(QStringLiteral("推理验证会根据 ONNX 模型族或 AITrain 导出信息选择后处理；scaffold / 官方工具链边界保持显式。"));
+    allowLabelToShrink(capabilityHint);
+    capabilityPanel->bodyLayout()->addWidget(capabilityHint);
     auto* capabilityGrid = new QGridLayout;
     capabilityGrid->setHorizontalSpacing(10);
     capabilityGrid->setVerticalSpacing(10);
@@ -2543,6 +2679,7 @@ QWidget* MainWindow::buildInferencePage()
 
     mainSplitter->addWidget(leftStack);
     mainSplitter->addWidget(rightStack);
+    mainSplitter->setChildrenCollapsible(false);
     mainSplitter->setStretchFactor(0, 3);
     mainSplitter->setStretchFactor(1, 5);
     mainSplitter->setSizes(QList<int>() << 460 << 760);
@@ -2581,6 +2718,7 @@ QWidget* MainWindow::buildPluginsPage()
     auto* subtitle = new QLabel(QStringLiteral("扫描模型、数据集、导出和推理扩展能力；插件仍只通过公共接口暴露能力。"));
     subtitle->setObjectName(QStringLiteral("ExperimentMeta"));
     subtitle->setWordWrap(true);
+    allowLabelToShrink(subtitle);
     titleLayout->addWidget(kicker);
     titleLayout->addWidget(title);
     titleLayout->addWidget(subtitle);
@@ -2601,6 +2739,9 @@ QWidget* MainWindow::buildPluginsPage()
     pluginSearchPathLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
     pluginMarketplaceStatusLabel_ = inlineStatusLabel(QStringLiteral("插件市场：等待加载本地索引。"));
     pluginMarketplaceStatusLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
+    allowLabelToShrink(pluginConsoleStatusLabel_);
+    allowLabelToShrink(pluginSearchPathLabel_);
+    allowLabelToShrink(pluginMarketplaceStatusLabel_);
     headerGrid->addWidget(scanCaption, 0, 0);
     headerGrid->addWidget(pluginConsoleStatusLabel_, 0, 1);
     headerGrid->addWidget(pathCaption, 1, 0);
@@ -2659,7 +2800,8 @@ QWidget* MainWindow::buildPluginsPage()
     connect(pluginMarketplaceWidget_, &PluginMarketplaceWidget::pluginsChanged, this, &MainWindow::refreshPlugins);
     connect(pluginMarketplaceWidget_, &PluginMarketplaceWidget::statusChanged, this, [this](const QString& status) {
         if (pluginMarketplaceStatusLabel_) {
-            pluginMarketplaceStatusLabel_->setText(status);
+            pluginMarketplaceStatusLabel_->setText(compactTextForStatus(status, 108));
+            pluginMarketplaceStatusLabel_->setToolTip(status);
         }
     });
     pluginMarketplaceWidget_->refreshInstalledPlugins();
@@ -2708,6 +2850,7 @@ QWidget* MainWindow::buildEnvironmentPage()
     auto* subtitle = new QLabel(QStringLiteral("检查 NVIDIA 驱动、CUDA、TensorRT、ONNX Runtime、Qt 插件和 Worker 可用性。"));
     subtitle->setObjectName(QStringLiteral("ExperimentMeta"));
     subtitle->setWordWrap(true);
+    allowLabelToShrink(subtitle);
     titleLayout->addWidget(kicker);
     titleLayout->addWidget(title);
     titleLayout->addWidget(subtitle);
@@ -2717,6 +2860,7 @@ QWidget* MainWindow::buildEnvironmentPage()
 
     environmentConsoleStatusLabel_ = inlineStatusLabel(QStringLiteral("尚未执行环境自检。"));
     environmentConsoleStatusLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
+    allowLabelToShrink(environmentConsoleStatusLabel_);
     headerRoot->addWidget(environmentConsoleStatusLabel_);
 
     auto* summaryStrip = new QFrame;
@@ -2769,7 +2913,7 @@ QWidget* MainWindow::buildEnvironmentPage()
     panel->bodyLayout()->addWidget(environmentTable_);
     layout->addWidget(headerPanel);
     layout->addWidget(summaryStrip);
-    layout->addWidget(panel);
+    layout->addWidget(panel, 1);
     updateEnvironmentSummary();
     return page;
 }
@@ -2802,6 +2946,7 @@ QWidget* MainWindow::buildSettingsPage()
     auto* subtitle = new QLabel(uiText("集中管理轻量级应用偏好、授权状态和本地系统入口；训练、导出和推理仍由各自页面和 Worker 执行。"));
     subtitle->setObjectName(QStringLiteral("ExperimentMeta"));
     subtitle->setWordWrap(true);
+    allowLabelToShrink(subtitle);
     titleLayout->addWidget(kicker);
     titleLayout->addWidget(title);
     titleLayout->addWidget(subtitle);
@@ -2814,7 +2959,9 @@ QWidget* MainWindow::buildSettingsPage()
     auto* languageLayout = new QHBoxLayout(languageRow);
     languageLayout->setContentsMargins(10, 8, 10, 8);
     languageLayout->setSpacing(10);
-    languageLayout->addWidget(mutedLabel(uiText("保存后需要重启 AITrain Studio 才会完全切换界面语言。")), 1);
+    auto* languageHint = mutedLabel(uiText("保存后需要重启 AITrain Studio 才会完全切换界面语言。"));
+    allowLabelToShrink(languageHint);
+    languageLayout->addWidget(languageHint, 1);
     auto* languageSwitch = new QFrame;
     languageSwitch->setObjectName(QStringLiteral("LanguageSwitch"));
     auto* switchLayout = new QHBoxLayout(languageSwitch);
@@ -2866,6 +3013,7 @@ QWidget* MainWindow::buildSettingsPage()
     defaultPathActionLayout->setContentsMargins(10, 8, 10, 8);
     defaultPathActionLayout->setSpacing(10);
     settingsDefaultProjectPathStatusLabel_ = mutedLabel(uiText("默认项目目录会作为项目页的初始路径；不会自动打开或迁移现有项目。"));
+    allowLabelToShrink(settingsDefaultProjectPathStatusLabel_);
     auto* saveDefaultPathButton = primaryButton(uiText("保存默认目录"));
     auto* resetDefaultPathButton = new QPushButton(uiText("恢复默认"));
     defaultPathActionLayout->addWidget(settingsDefaultProjectPathStatusLabel_, 1);
@@ -2900,7 +3048,9 @@ QWidget* MainWindow::buildSettingsPage()
     licenseForm->addRow(uiText("授权用户"), new QLabel(licenseOwner_.isEmpty() ? uiText("已注册") : licenseOwner_));
     licenseForm->addRow(uiText("有效期"), new QLabel(licenseExpiry_.isEmpty() ? uiText("未记录") : licenseExpiry_));
     licensePanel->bodyLayout()->addLayout(licenseForm);
-    licensePanel->bodyLayout()->addWidget(mutedLabel(uiText("离线授权已在启动时校验；这里只展示当前授权信息，不提供换绑或激活入口。")));
+    auto* licenseHint = mutedLabel(uiText("离线授权已在启动时校验；这里只展示当前授权信息，不提供换绑或激活入口。"));
+    allowLabelToShrink(licenseHint);
+    licensePanel->bodyLayout()->addWidget(licenseHint);
 
     auto* entryPanel = new InfoPanel(uiText("系统入口"));
     auto* entryActions = new QFrame;
@@ -2925,7 +3075,9 @@ QWidget* MainWindow::buildSettingsPage()
     entryLayout->addWidget(openEnvironmentButton, 1, 0);
     entryLayout->addWidget(runEnvironmentButton, 1, 1);
     entryPanel->bodyLayout()->addWidget(entryActions);
-    entryPanel->bodyLayout()->addWidget(mutedLabel(uiText("环境自检仍通过 Worker 执行，当前有任务运行时会沿用现有 busy guard。")));
+    auto* entryHint = mutedLabel(uiText("环境自检仍通过 Worker 执行，当前有任务运行时会沿用现有 busy guard。"));
+    allowLabelToShrink(entryHint);
+    entryPanel->bodyLayout()->addWidget(entryHint);
 
     auto* pathsPanel = new InfoPanel(uiText("本地路径"));
     auto* pathsGrid = new QGridLayout;
@@ -2949,6 +3101,7 @@ QWidget* MainWindow::buildSettingsPage()
     addStaticPathRow(1, uiText("插件市场目录"), QDir(appDir).filePath(QStringLiteral("plugins/marketplace")));
     auto* currentProjectLabel = new QLabel(uiText("当前项目目录"));
     settingsCurrentProjectPathLabel_ = inlineStatusLabel(uiText("未打开项目"));
+    allowLabelToShrink(settingsCurrentProjectPathLabel_);
     auto* openCurrentProjectButton = new QPushButton(uiText("打开目录"));
     auto* copyCurrentProjectButton = new QPushButton(uiText("复制路径"));
     connect(openCurrentProjectButton, &QPushButton::clicked, this, [this]() { openLocalDirectory(currentProjectPath_); });
@@ -4299,6 +4452,7 @@ void MainWindow::updateAnnotationToolStatus()
 {
     if (annotationToolStatusLabel_) {
         annotationToolStatusLabel_->setText(xAnyLabelingStatusText());
+        annotationToolStatusLabel_->setToolTip(QDir::toNativeSeparators(resolvedXAnyLabelingProgram()));
     }
 }
 
@@ -5937,8 +6091,11 @@ void MainWindow::updateProjectSummary()
     }
     if (projectPathSummaryLabel_) {
         projectPathSummaryLabel_->setText(hasProject
-            ? QDir::toNativeSeparators(currentProjectPath_)
+            ? compactPathForStatus(currentProjectPath_, 74)
             : uiText("未打开"));
+        projectPathSummaryLabel_->setToolTip(hasProject
+            ? QDir::toNativeSeparators(currentProjectPath_)
+            : QString());
     }
     if (projectSqliteSummaryLabel_) {
         projectSqliteSummaryLabel_->setText(hasProject ? uiText("已连接") : uiText("未连接"));
@@ -5985,7 +6142,9 @@ void MainWindow::updatePluginSummary()
             : uiText("已加载 %1 个插件。").arg(plugins.size()));
     }
     if (pluginSearchPathLabel_) {
-        pluginSearchPathLabel_->setText(uiText("插件搜索路径：%1").arg(pluginSearchPaths().join(QStringLiteral(" | "))));
+        const QString searchPaths = pluginSearchPaths().join(QStringLiteral(" | "));
+        pluginSearchPathLabel_->setText(uiText("插件搜索路径：%1").arg(compactTextForStatus(searchPaths, 108)));
+        pluginSearchPathLabel_->setToolTip(searchPaths);
     }
     if (pluginCountSummaryLabel_) {
         pluginCountSummaryLabel_->setText(QString::number(plugins.size()));
@@ -6063,6 +6222,9 @@ void MainWindow::updateSettingsSummary()
     if (settingsCurrentProjectPathLabel_) {
         settingsCurrentProjectPathLabel_->setText(currentProjectPath_.isEmpty()
             ? uiText("未打开项目")
+            : compactPathForStatus(currentProjectPath_, 92));
+        settingsCurrentProjectPathLabel_->setToolTip(currentProjectPath_.isEmpty()
+            ? QString()
             : QDir::toNativeSeparators(currentProjectPath_));
     }
     updateLanguageButtonState();
