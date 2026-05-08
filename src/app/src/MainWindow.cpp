@@ -74,6 +74,24 @@ QLabel* inlineStatusLabel(const QString& text)
     return label;
 }
 
+void allowLabelToShrink(QLabel* label)
+{
+    if (!label) {
+        return;
+    }
+    label->setMinimumWidth(0);
+    label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+}
+
+QString compactPathForStatus(const QString& path, int maxChars = 72)
+{
+    const QString nativePath = QDir::toNativeSeparators(path);
+    if (nativePath.size() <= maxChars) {
+        return nativePath;
+    }
+    return QStringLiteral("...") + nativePath.right(qMax(0, maxChars - 3));
+}
+
 QPushButton* primaryButton(const QString& text)
 {
     auto* button = new QPushButton(text);
@@ -1523,11 +1541,18 @@ QWidget* MainWindow::buildTrainingPage()
         }
         updateTrainingSelectionSummary();
     });
+    connect(modelPresetCombo_, &QComboBox::currentTextChanged, this, &MainWindow::updateTrainingSelectionSummary);
+    connect(epochsEdit_, &QLineEdit::textChanged, this, &MainWindow::updateTrainingSelectionSummary);
+    connect(batchEdit_, &QLineEdit::textChanged, this, &MainWindow::updateTrainingSelectionSummary);
+    connect(imageSizeEdit_, &QLineEdit::textChanged, this, &MainWindow::updateTrainingSelectionSummary);
     trainingDatasetSummaryLabel_ = inlineStatusLabel(QStringLiteral("当前数据集：未选择。请先在数据集页导入并通过校验。"));
     trainingDatasetSummaryLabel_->setMinimumHeight(34);
+    allowLabelToShrink(trainingDatasetSummaryLabel_);
     trainingBackendHintLabel_ = mutedLabel(QStringLiteral("官方后端会由 Worker 启动独立 Python 进程；scaffold 后端只用于高级诊断。"));
+    allowLabelToShrink(trainingBackendHintLabel_);
     trainingRunSummaryLabel_ = inlineStatusLabel(QStringLiteral("等待配置训练实验。"));
     trainingRunSummaryLabel_->setMinimumHeight(42);
+    allowLabelToShrink(trainingRunSummaryLabel_);
 
     auto* startButton = primaryButton(QStringLiteral("启动训练"));
     startButton->setObjectName(QStringLiteral("GreenButton"));
@@ -1559,15 +1584,22 @@ QWidget* MainWindow::buildTrainingPage()
     auto* subtitle = new QLabel(QStringLiteral("按数据集类型优先选择官方 YOLO / OCR 后端；运行结果沉淀到任务与产物。"));
     subtitle->setObjectName(QStringLiteral("ExperimentMeta"));
     subtitle->setWordWrap(true);
+    allowLabelToShrink(subtitle);
     titleLayout->addWidget(kicker);
     titleLayout->addWidget(title);
     titleLayout->addWidget(subtitle);
     headerTop->addWidget(titleBlock, 1);
-    headerTop->addWidget(startButton);
-    headerTop->addWidget(pauseButton);
-    headerTop->addWidget(resumeButton);
-    headerTop->addWidget(cancelButton);
     headerRoot->addLayout(headerTop);
+
+    auto* actionLayout = new QHBoxLayout;
+    actionLayout->setContentsMargins(0, 0, 0, 0);
+    actionLayout->setSpacing(10);
+    actionLayout->addWidget(startButton);
+    actionLayout->addWidget(pauseButton);
+    actionLayout->addWidget(resumeButton);
+    actionLayout->addWidget(cancelButton);
+    actionLayout->addStretch();
+    headerRoot->addLayout(actionLayout);
 
     auto* headerLayout = new QGridLayout;
     headerLayout->setHorizontalSpacing(12);
@@ -1625,9 +1657,10 @@ QWidget* MainWindow::buildTrainingPage()
     setupScroll->setWidgetResizable(true);
     setupScroll->setFrameShape(QFrame::NoFrame);
     setupScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    setupScroll->setMinimumWidth(390);
+    setupScroll->setMinimumWidth(360);
 
     auto* monitorPanel = new InfoPanel(QStringLiteral("训练监控"));
+    monitorPanel->setMinimumWidth(0);
     progressBar_ = new QProgressBar;
     progressBar_->setRange(0, 100);
     progressBar_->setValue(0);
@@ -1636,10 +1669,17 @@ QWidget* MainWindow::buildTrainingPage()
     monitorPanel->bodyLayout()->addWidget(metricsWidget_, 1);
 
     auto* artifactPanel = new InfoPanel(QStringLiteral("任务与产物"));
-    artifactPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("运行后会记录 checkpoint、训练报告、ONNX、预览图和请求参数。完整产物浏览请进入“任务与产物”。")));
-    artifactPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("主流程优先使用官方 YOLO / PaddleOCR 后端；PaddleOCR System 产物来自官方工具链，不代表 C++ DB 后处理已经接入。")));
+    artifactPanel->setMinimumWidth(0);
+    auto* artifactGuideLabel = mutedLabel(QStringLiteral("运行后会记录 checkpoint、训练报告、ONNX、预览图和请求参数。完整产物浏览请进入“任务与产物”。"));
+    auto* artifactBoundaryLabel = mutedLabel(QStringLiteral("主流程优先使用官方 YOLO / PaddleOCR 后端；PaddleOCR System 产物来自官方工具链，不代表 C++ DB 后处理已经接入。"));
+    allowLabelToShrink(artifactGuideLabel);
+    allowLabelToShrink(artifactBoundaryLabel);
+    artifactPanel->bodyLayout()->addWidget(artifactGuideLabel);
+    artifactPanel->bodyLayout()->addWidget(artifactBoundaryLabel);
     latestCheckpointLabel_ = mutedLabel(QStringLiteral("最新 checkpoint：暂无"));
     latestPreviewPathLabel_ = mutedLabel(QStringLiteral("最新预览：暂无"));
+    allowLabelToShrink(latestCheckpointLabel_);
+    allowLabelToShrink(latestPreviewPathLabel_);
     latestPreviewImageLabel_ = new QLabel(QStringLiteral("暂无预览图"));
     latestPreviewImageLabel_->setObjectName(QStringLiteral("MutedText"));
     latestPreviewImageLabel_->setAlignment(Qt::AlignCenter);
@@ -1652,29 +1692,35 @@ QWidget* MainWindow::buildTrainingPage()
     artifactPanel->bodyLayout()->addStretch();
 
     auto* logPanel = new InfoPanel(QStringLiteral("训练日志"));
+    logPanel->setMinimumWidth(0);
     logEdit_ = new QTextEdit;
     logEdit_->setObjectName(QStringLiteral("LogView"));
     logEdit_->setReadOnly(true);
+    logEdit_->setLineWrapMode(QTextEdit::WidgetWidth);
+    logEdit_->setMinimumWidth(0);
+    logEdit_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
     logPanel->bodyLayout()->addWidget(logEdit_);
 
-    auto* lowerSplitter = new QSplitter(Qt::Horizontal);
-    lowerSplitter->addWidget(artifactPanel);
-    lowerSplitter->addWidget(logPanel);
-    lowerSplitter->setStretchFactor(0, 1);
-    lowerSplitter->setStretchFactor(1, 2);
+    auto* detailTabs = new QTabWidget;
+    detailTabs->setObjectName(QStringLiteral("TrainingDetailTabs"));
+    detailTabs->setDocumentMode(true);
+    detailTabs->addTab(logPanel, QStringLiteral("训练日志"));
+    detailTabs->addTab(artifactPanel, QStringLiteral("任务与产物"));
 
     auto* rightSplitter = new QSplitter(Qt::Vertical);
+    rightSplitter->setMinimumWidth(0);
     rightSplitter->addWidget(monitorPanel);
-    rightSplitter->addWidget(lowerSplitter);
+    rightSplitter->addWidget(detailTabs);
     rightSplitter->setStretchFactor(0, 1);
-    rightSplitter->setStretchFactor(1, 2);
+    rightSplitter->setStretchFactor(1, 1);
+    rightSplitter->setSizes(QList<int>() << 330 << 330);
 
     auto* bodySplitter = new QSplitter(Qt::Horizontal);
     bodySplitter->addWidget(setupScroll);
     bodySplitter->addWidget(rightSplitter);
-    bodySplitter->setStretchFactor(0, 5);
-    bodySplitter->setStretchFactor(1, 6);
-    bodySplitter->setSizes(QList<int>() << 520 << 620);
+    bodySplitter->setStretchFactor(0, 4);
+    bodySplitter->setStretchFactor(1, 7);
+    bodySplitter->setSizes(QList<int>() << 390 << 620);
 
     layout->addWidget(headerPanel);
     layout->addWidget(bodySplitter, 1);
@@ -3741,9 +3787,15 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
         const QString kind = payload.value(QStringLiteral("kind")).toString();
         appendLog(uiText("产物：%1").arg(path));
         if (kind == QStringLiteral("checkpoint") && latestCheckpointLabel_) {
-            latestCheckpointLabel_->setText(uiText("最新 checkpoint：%1").arg(QDir::toNativeSeparators(path)));
+            const QString checkpointName = QFileInfo(path).fileName();
+            latestCheckpointLabel_->setText(uiText("最新 checkpoint：%1")
+                .arg(checkpointName.isEmpty() ? compactPathForStatus(path, 44) : checkpointName));
+            latestCheckpointLabel_->setToolTip(QDir::toNativeSeparators(path));
         } else if (kind == QStringLiteral("preview") && latestPreviewPathLabel_) {
-            latestPreviewPathLabel_->setText(uiText("最新预览：%1").arg(QDir::toNativeSeparators(path)));
+            const QString previewName = QFileInfo(path).fileName();
+            latestPreviewPathLabel_->setText(uiText("最新预览：%1")
+                .arg(previewName.isEmpty() ? compactPathForStatus(path, 44) : previewName));
+            latestPreviewPathLabel_->setToolTip(QDir::toNativeSeparators(path));
             if (latestPreviewImageLabel_) {
                 QPixmap preview(path);
                 if (!preview.isNull()) {
@@ -6191,18 +6243,24 @@ void MainWindow::updateTrainingSelectionSummary()
         ? currentDatasetFormat_
         : currentDatasetFormat();
     const QString state = currentDatasetValid_ ? uiText("已校验") : uiText("待校验");
-    const QString pathText = datasetPath.isEmpty() ? uiText("未选择") : QDir::toNativeSeparators(datasetPath);
+    const QString fullPathText = datasetPath.isEmpty() ? QString() : QDir::toNativeSeparators(datasetPath);
+    const QString datasetName = datasetPath.isEmpty() ? QString() : QFileInfo(datasetPath).fileName();
+    const QString headerPathText = datasetPath.isEmpty()
+        ? uiText("未选择")
+        : (datasetName.isEmpty() ? compactPathForStatus(datasetPath, 36) : datasetName);
+    const QString detailPathText = datasetPath.isEmpty() ? uiText("未选择") : compactPathForStatus(datasetPath, 92);
     QString snapshotText = uiText("快照：未选择数据集");
+    QString snapshotManifestPath;
     if (!datasetPath.isEmpty() && repository_.isOpen()) {
         QString error;
         const aitrain::DatasetRecord dataset = repository_.datasetByRootPath(datasetPath, &error);
         const aitrain::DatasetSnapshotRecord snapshot = repository_.latestDatasetSnapshot(dataset.id, &error);
+        snapshotManifestPath = snapshot.manifestPath;
         snapshotText = snapshot.id > 0
-            ? uiText("快照：#%1 | %2 文件 | hash %3 | %4")
+            ? uiText("快照：#%1 | %2 文件 | hash %3")
                 .arg(snapshot.id)
                 .arg(snapshot.fileCount)
                 .arg(snapshot.contentHash.left(12))
-                .arg(QDir::toNativeSeparators(snapshot.manifestPath))
             : uiText("快照：暂无，启动训练时将自动创建。");
     }
 
@@ -6210,13 +6268,17 @@ void MainWindow::updateTrainingSelectionSummary()
         trainingDatasetSummaryLabel_->setText(datasetPath.isEmpty()
             ? uiText("当前数据集：未选择。请先在数据集页导入并通过校验。")
             : uiText("当前数据集：%1 | %2 | %3\n%4")
-                .arg(datasetFormatLabel(datasetFormat), state, pathText, snapshotText));
+                .arg(datasetFormatLabel(datasetFormat), state, headerPathText, snapshotText));
+        trainingDatasetSummaryLabel_->setToolTip(datasetPath.isEmpty()
+            ? QString()
+            : uiText("数据集：%1\n快照：%2")
+                .arg(fullPathText, QDir::toNativeSeparators(snapshotManifestPath)));
     }
     if (datasetDetailLabel_) {
         datasetDetailLabel_->setText(datasetPath.isEmpty()
             ? uiText("选择或导入数据集后显示格式、样本数、校验状态和最近报告。")
             : uiText("格式：%1 | 状态：%2 | 路径：%3\n%4")
-                .arg(datasetFormatLabel(datasetFormat), state, pathText, snapshotText));
+                .arg(datasetFormatLabel(datasetFormat), state, detailPathText, snapshotText));
     }
     if (trainingBackendHintLabel_ && trainingBackendCombo_) {
         trainingBackendHintLabel_->setText(trainingBackendDescription(trainingBackendCombo_->currentData().toString()));
