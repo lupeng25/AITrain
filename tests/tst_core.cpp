@@ -227,14 +227,27 @@ bool zipDirectoryForTest(const QString& sourceDir, const QString& zipPath, QStri
     QDir().mkpath(QFileInfo(zipPath).absolutePath());
     QFile::remove(zipPath);
 
+    QTemporaryDir scriptDir;
+    if (!scriptDir.isValid()) {
+        if (error) {
+            *error = QStringLiteral("Cannot create temporary directory for zip helper.");
+        }
+        return false;
+    }
+    const QString scriptPath = QDir(scriptDir.path()).filePath(QStringLiteral("zip_fixture.ps1"));
+    writeTextFile(scriptPath,
+        QStringLiteral("param([Parameter(Mandatory=$true)][string]$SourceDir,"
+                       "[Parameter(Mandatory=$true)][string]$ZipPath)\n"
+                       "Compress-Archive -Path (Join-Path $SourceDir '*') -DestinationPath $ZipPath -Force\n"));
+
     QProcess process;
     process.start(powershell,
         QStringList()
             << QStringLiteral("-NoProfile")
             << QStringLiteral("-ExecutionPolicy")
             << QStringLiteral("Bypass")
-            << QStringLiteral("-Command")
-            << QStringLiteral("$source=$args[0]; $zip=$args[1]; Compress-Archive -Path (Join-Path $source '*') -DestinationPath $zip -Force")
+            << QStringLiteral("-File")
+            << scriptPath
             << QFileInfo(sourceDir).absoluteFilePath()
             << QFileInfo(zipPath).absoluteFilePath());
     if (!process.waitForStarted(5000) || !process.waitForFinished(30000)

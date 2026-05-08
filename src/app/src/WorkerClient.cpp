@@ -4,6 +4,7 @@
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QEventLoop>
 #include <QFileInfo>
 #include <QUuid>
 
@@ -229,6 +230,7 @@ void WorkerClient::acceptConnection()
     cleanupSocket();
     socket_ = server_.nextPendingConnection();
     connect(socket_, &QLocalSocket::readyRead, this, &WorkerClient::readLines);
+    readLines();
     emit connected();
 }
 
@@ -263,8 +265,11 @@ void WorkerClient::readLines()
                 finishedEmitted_ = true;
                 emit finished(false, payload.value(QStringLiteral("message")).toString());
             } else if (type == QStringLiteral("paused")
-                || type == QStringLiteral("resumed")
-                || type == QStringLiteral("canceled")) {
+                || type == QStringLiteral("resumed")) {
+                emit logLine(payload.value(QStringLiteral("message")).toString());
+            } else if (type == QStringLiteral("canceled")) {
+                finishedEmitted_ = true;
+                emit finished(false, payload.value(QStringLiteral("message")).toString(QStringLiteral("Canceled by user")));
                 emit logLine(payload.value(QStringLiteral("message")).toString());
             }
         } else {
@@ -285,16 +290,28 @@ void WorkerClient::workerFinished(int exitCode, QProcess::ExitStatus status)
                 readLines();
                 continue;
             }
-            if (!socket_->waitForReadyRead(25) && socket_->state() == QLocalSocket::UnconnectedState) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 25);
+            if (!socket_) {
                 break;
             }
+            if (socket_->bytesAvailable() > 0) {
+                continue;
+            }
+            if (socket_->state() == QLocalSocket::UnconnectedState) {
+                break;
+            }
+            socket_->waitForReadyRead(25);
+        }
+        if (socket_ && socket_->bytesAvailable() > 0) {
+            readLines();
         }
     }
-    if (status != QProcess::NormalExit || exitCode != 0) {
-        if (!finishedEmitted_) {
-            finishedEmitted_ = true;
-            emit finished(false, QStringLiteral("Worker exited with code %1").arg(exitCode));
-        }
+    if (!finishedEmitted_) {
+        finishedEmitted_ = true;
+        const QString message = (status != QProcess::NormalExit || exitCode != 0)
+            ? QStringLiteral("Worker exited with code %1").arg(exitCode)
+            : QStringLiteral("Worker exited without a terminal status message");
+        emit finished(false, message);
     }
     cleanupSocket();
     server_.close();

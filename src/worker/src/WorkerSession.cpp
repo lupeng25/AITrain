@@ -12,6 +12,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -631,7 +632,7 @@ void WorkerSession::handleMessage(const QString& type, const QJsonObject& payloa
         payloadObject.insert(QStringLiteral("taskId"), request_.taskId);
         payloadObject.insert(QStringLiteral("message"), QStringLiteral("Canceled by user"));
         send(QStringLiteral("canceled"), payloadObject);
-        qApp->quit();
+        finishSession();
     } else {
         fail(QStringLiteral("Unsupported command: %1").arg(type));
     }
@@ -781,6 +782,10 @@ void WorkerSession::runEnvironmentCheck(const QJsonObject& payload)
     }
 
     send(QStringLiteral("environmentCheck"), result);
+    QJsonObject completed;
+    completed.insert(QStringLiteral("taskId"), QStringLiteral("environment-check"));
+    completed.insert(QStringLiteral("message"), QStringLiteral("Environment check completed"));
+    send(QStringLiteral("completed"), completed);
     finishSession();
 }
 
@@ -853,8 +858,7 @@ void WorkerSession::validateDataset(const QJsonObject& payload)
         ? QStringLiteral("Dataset validation completed")
         : QStringLiteral("Dataset validation failed"));
     send(result.ok ? QStringLiteral("completed") : QStringLiteral("failed"), terminal);
-    socket_.waitForBytesWritten(1000);
-    qApp->quit();
+    finishSession();
 }
 
 void WorkerSession::splitDataset(const QJsonObject& payload)
@@ -919,8 +923,7 @@ void WorkerSession::splitDataset(const QJsonObject& payload)
         ? QStringLiteral("Dataset split completed")
         : QStringLiteral("Dataset split failed"));
     send(result.ok ? QStringLiteral("completed") : QStringLiteral("failed"), terminal);
-    socket_.waitForBytesWritten(1000);
-    qApp->quit();
+    finishSession();
 }
 
 void WorkerSession::curateDataset(const QJsonObject& payload)
@@ -1001,8 +1004,7 @@ void WorkerSession::curateDataset(const QJsonObject& payload)
     completed.insert(QStringLiteral("taskId"), taskId);
     completed.insert(QStringLiteral("message"), QStringLiteral("Dataset quality report completed"));
     send(QStringLiteral("completed"), completed);
-    socket_.waitForBytesWritten(1000);
-    qApp->quit();
+    finishSession();
 }
 
 void WorkerSession::createDatasetSnapshot(const QJsonObject& payload)
@@ -1047,8 +1049,7 @@ void WorkerSession::createDatasetSnapshot(const QJsonObject& payload)
     completed.insert(QStringLiteral("taskId"), taskId);
     completed.insert(QStringLiteral("message"), QStringLiteral("Dataset snapshot completed"));
     send(QStringLiteral("completed"), completed);
-    socket_.waitForBytesWritten(1000);
-    qApp->quit();
+    finishSession();
 }
 
 void WorkerSession::evaluateModel(const QJsonObject& payload)
@@ -1117,8 +1118,7 @@ void WorkerSession::evaluateModel(const QJsonObject& payload)
     completed.insert(QStringLiteral("taskId"), taskId);
     completed.insert(QStringLiteral("message"), QStringLiteral("Model evaluation completed"));
     send(QStringLiteral("completed"), completed);
-    socket_.waitForBytesWritten(1000);
-    qApp->quit();
+    finishSession();
 }
 
 void WorkerSession::benchmarkModel(const QJsonObject& payload)
@@ -1161,8 +1161,7 @@ void WorkerSession::benchmarkModel(const QJsonObject& payload)
     completed.insert(QStringLiteral("taskId"), taskId);
     completed.insert(QStringLiteral("message"), QStringLiteral("Model benchmark completed"));
     send(QStringLiteral("completed"), completed);
-    socket_.waitForBytesWritten(1000);
-    qApp->quit();
+    finishSession();
 }
 
 void WorkerSession::runLocalPipeline(const QJsonObject& payload)
@@ -1287,8 +1286,7 @@ void WorkerSession::runLocalPipeline(const QJsonObject& payload)
         terminal.insert(QStringLiteral("message"), QStringLiteral("Local pipeline execution completed"));
         send(QStringLiteral("completed"), terminal);
     }
-    socket_.waitForBytesWritten(1000);
-    qApp->quit();
+    finishSession();
 }
 
 void WorkerSession::generateDeliveryReport(const QJsonObject& payload)
@@ -1345,8 +1343,7 @@ void WorkerSession::generateDeliveryReport(const QJsonObject& payload)
     completed.insert(QStringLiteral("taskId"), taskId);
     completed.insert(QStringLiteral("message"), QStringLiteral("Training delivery report generated"));
     send(QStringLiteral("completed"), completed);
-    socket_.waitForBytesWritten(1000);
-    qApp->quit();
+    finishSession();
 }
 
 void WorkerSession::exportModel(const QJsonObject& payload)
@@ -1412,8 +1409,7 @@ void WorkerSession::exportModel(const QJsonObject& payload)
     QJsonObject completed;
     completed.insert(QStringLiteral("message"), QStringLiteral("Model export completed"));
     send(QStringLiteral("completed"), completed);
-    socket_.waitForBytesWritten(1000);
-    qApp->quit();
+    finishSession();
 }
 
 void WorkerSession::runInference(const QJsonObject& payload)
@@ -1704,8 +1700,7 @@ void WorkerSession::runPythonTrainer()
         return;
     }
     if (terminalMessageSeen) {
-        socket_.waitForBytesWritten(1000);
-        qApp->quit();
+        finishSession();
         return;
     }
     if (pythonTrainerProcess_.exitStatus() != QProcess::NormalExit || pythonTrainerProcess_.exitCode() != 0) {
@@ -2193,8 +2188,7 @@ void WorkerSession::runDetectionTraining()
     payload.insert(QStringLiteral("modelFamily"), result.modelFamily);
     payload.insert(QStringLiteral("scaffold"), result.scaffold);
     send(QStringLiteral("completed"), payload);
-    socket_.waitForBytesWritten(1000);
-    qApp->quit();
+    finishSession();
 }
 
 void WorkerSession::runSegmentationTraining()
@@ -2339,8 +2333,7 @@ void WorkerSession::runSegmentationTraining()
     QJsonObject payload;
     payload.insert(QStringLiteral("message"), QStringLiteral("Tiny mask segmentation scaffold completed"));
     send(QStringLiteral("completed"), payload);
-    socket_.waitForBytesWritten(1000);
-    qApp->quit();
+    finishSession();
 }
 
 void WorkerSession::runOcrRecTraining()
@@ -2473,8 +2466,7 @@ void WorkerSession::runOcrRecTraining()
     QJsonObject payload;
     payload.insert(QStringLiteral("message"), QStringLiteral("OCR recognition scaffold completed"));
     send(QStringLiteral("completed"), payload);
-    socket_.waitForBytesWritten(1000);
-    qApp->quit();
+    finishSession();
 }
 
 void WorkerSession::emitDetectionPreviewArtifacts(const QString& checkpointPath)
@@ -2572,7 +2564,12 @@ void WorkerSession::send(const QString& type, const QJsonObject& payload)
 void WorkerSession::finishSession()
 {
     socket_.flush();
-    socket_.waitForBytesWritten(1000);
+    QElapsedTimer timer;
+    timer.start();
+    while (socket_.bytesToWrite() > 0 && timer.elapsed() < 3000) {
+        socket_.waitForBytesWritten(100);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 25);
+    }
     if (socket_.state() == QLocalSocket::ConnectedState) {
         socket_.disconnectFromServer();
         socket_.waitForDisconnected(1000);
