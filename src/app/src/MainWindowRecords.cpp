@@ -5,6 +5,7 @@
 #include "LanguageSupport.h"
 #include "MainWindowSupport.h"
 #include "PluginMarketplaceWidget.h"
+#include "TaskArtifactPanel.h"
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/PluginInterfaces.h"
 
@@ -255,27 +256,9 @@ void MainWindow::ensureVisibleTaskSelection()
 
 void MainWindow::clearSelectedTaskDetails()
 {
-    if (selectedTaskSummaryLabel_) {
-        selectedTaskSummaryLabel_->setText(uiText("请选择一个任务查看产物、指标和导出记录。"));
+    if (taskArtifactPanel_) {
+        taskArtifactPanel_->clear();
     }
-
-    auto clearTableWithPlaceholder = [](QTableWidget* table, const QString& placeholder) {
-        if (!table) {
-            return;
-        }
-        table->clearSelection();
-        table->setRowCount(0);
-        table->insertRow(0);
-        table->setItem(0, 0, new QTableWidgetItem(placeholder));
-        for (int column = 1; column < table->columnCount(); ++column) {
-            table->setItem(0, column, new QTableWidgetItem(QString()));
-        }
-    };
-
-    clearTableWithPlaceholder(taskArtifactTable_, uiText("暂无产物"));
-    clearTableWithPlaceholder(taskMetricTable_, uiText("暂无指标"));
-    clearTableWithPlaceholder(taskExportTable_, uiText("暂无导出"));
-    previewArtifactPath(QString());
 }
 
 void MainWindow::updateTaskTable(QTableWidget* table, const QVector<aitrain::TaskRecord>& tasks)

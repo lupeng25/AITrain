@@ -12,12 +12,19 @@ add_executable(AITrainStudio WIN32
     src/MainWindow.h
     src/MainWindow.cpp
     src/MainWindowActions.cpp
+    src/MainWindowDatasetPage.cpp
+    src/MainWindowDeliveryPages.cpp
+    src/MainWindowModelPages.cpp
     src/MainWindowPages.cpp
     src/MainWindowPreviews.cpp
+    src/MainWindowProjectPages.cpp
     src/MainWindowRecords.cpp
     src/MainWindowSummaries.cpp
     src/MainWindowSupport.h
     src/MainWindowSupport.cpp
+    src/MainWindowSystemPages.cpp
+    src/MainWindowTaskPage.cpp
+    src/MainWindowTrainingPage.cpp
     src/MainWindowWorkerMessages.cpp
     src/MetricsWidget.h
     src/MetricsWidget.cpp
@@ -29,6 +36,8 @@ add_executable(AITrainStudio WIN32
     src/Sidebar.cpp
     src/StatusPill.h
     src/StatusPill.cpp
+    src/TaskArtifactPanel.h
+    src/TaskArtifactPanel.cpp
     src/WorkerClient.h
     src/WorkerClient.cpp
     resources/app.qrc

@@ -22,6 +22,7 @@
 class InfoPanel;
 class EvaluationReportView;
 class PluginMarketplaceWidget;
+class TaskArtifactPanel;
 class QToolButton;
 
 class MainWindow : public QMainWindow {
@@ -48,7 +49,6 @@ private slots:
     void refreshPlugins();
     void showPage(int pageIndex, const QString& title);
     void updateSelectedTaskDetails();
-    void updateArtifactPreviewFromSelection();
     void openSelectedArtifactDirectory();
     void copySelectedArtifactPath();
     void useSelectedArtifactForInference();
@@ -159,7 +159,6 @@ private:
     QString createRepositoryTask(aitrain::TaskKind kind, const QString& taskType, const QString& pluginId, const QString& workDir, const QString& message, const QString& requestedTaskId = {});
     QString selectedTaskId() const;
     QString selectedArtifactPath() const;
-    void previewArtifactPath(const QString& path);
     QString selectedEvaluationReportPath() const;
 
     aitrain::PluginManager pluginManager_;
@@ -226,9 +225,7 @@ private:
     QLineEdit* settingsDefaultProjectPathEdit_ = nullptr;
     QTableWidget* recentTasksTable_ = nullptr;
     QTableWidget* taskQueueTable_ = nullptr;
-    QTableWidget* taskArtifactTable_ = nullptr;
-    QTableWidget* taskMetricTable_ = nullptr;
-    QTableWidget* taskExportTable_ = nullptr;
+    TaskArtifactPanel* taskArtifactPanel_ = nullptr;
     QTableWidget* modelVersionTable_ = nullptr;
     QTableWidget* evaluationReportTable_ = nullptr;
     QTableWidget* pipelineRunTable_ = nullptr;
@@ -253,7 +250,6 @@ private:
     QComboBox* trainingBackendCombo_ = nullptr;
     QComboBox* modelPresetCombo_ = nullptr;
     QLabel* validationSummaryLabel_ = nullptr;
-    QLabel* selectedTaskSummaryLabel_ = nullptr;
     QLabel* modelRegistrySummaryLabel_ = nullptr;
     QLabel* datasetDetailLabel_ = nullptr;
     QLabel* annotationToolStatusLabel_ = nullptr;
@@ -283,10 +279,6 @@ private:
     QLabel* latestCheckpointLabel_ = nullptr;
     QLabel* latestPreviewPathLabel_ = nullptr;
     QLabel* latestPreviewImageLabel_ = nullptr;
-    QLabel* artifactImagePreviewLabel_ = nullptr;
-    QPlainTextEdit* artifactPreviewText_ = nullptr;
-    QStackedWidget* artifactPreviewStack_ = nullptr;
-    EvaluationReportView* artifactEvaluationReportView_ = nullptr;
     QTextEdit* logEdit_ = nullptr;
     MetricsWidget* metricsWidget_ = nullptr;
     EvaluationReportView* evaluationReportView_ = nullptr;
