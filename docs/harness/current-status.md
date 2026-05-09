@@ -1,6 +1,6 @@
 # Current Project Status
 
-Last updated: 2026-05-08
+Last updated: 2026-05-09
 
 This file is the source of truth for phase status in new AI coding conversations. Read it before using `AITrainStudio_后续实施方案.md`, because that document is the long-range roadmap and may contain historical phase descriptions.
 
@@ -59,6 +59,10 @@ This file is the source of truth for phase status in new AI coding conversations
 | Phase 47: Real PaddleOCR Det ONNX wiring smoke | Prepared; local PaddleX/Paddle2ONNX conversion blocked | Added `tools\phase47-paddleocr-det-onnx-smoke.ps1` and `aitrain_worker --ocr-det-onnx-smoke`. The script reuses or regenerates Phase 31 official Det artifacts, provisions a dedicated Python 3.12 conversion environment, defaults to Paddle's Windows nightly CPU source for conversion, installs PaddleX 3.5.1 / Paddle2ONNX 2.1.0, attempts official `paddlex --paddle2onnx`, writes a machine-readable `paddleocr_det_onnx_smoke_summary.json`, and runs the C++ ONNX Runtime DB-style smoke only after conversion succeeds. Current local result is `status=conversion-blocked`: even with PaddlePaddle `3.4.0.dev20260407`, Paddle2ONNX 2.1.0 fails to load `paddle2onnx_cpp2py_export`, while Paddle2ONNX 1.3.1 can import but cannot parse PaddlePaddle 3 PIR `inference.json`. No real exported Det ONNX pass is recorded yet. Phase 46 C++ postprocess remains covered by deterministic CTest, and Phase 31 official `predict_system.py` remains the full OCR system acceptance path. Added `tools\production-ocr-acceptance.ps1` as a production OCR evidence gate; it currently blocks without representative non-tiny Det/Rec/System data and official reports. |
 | Phase 48 Lite: Local plugin marketplace v1 | Done locally | Added a local/offline-first plugin marketplace for existing Qt `IModelPlugin` packages: marketplace index loading, expanded/zip package inspection, `plugin.json` layout/hash/compatibility/Qt entrypoint validation, install/enable/disable/uninstall state, GUI plugin page, Worker plugin-smoke marketplace state reporting, package format docs, package template, and demo/package scripts. Local validation generated `.deps\plugin-marketplace-demo\marketplace.json`, Worker plugin smoke saw the three built-in plugins, and `harness-check.ps1` passes. CTest now runs QtTest with file output to avoid the Windows console-capture hang seen during full-suite runs. Signature enforcement remains reserved for a later release; v1 records local packages as unsigned and does not add cloud accounts, payments, remote execution, new training algorithms, or new plugin interfaces. |
 
+## Maintenance Baseline
+
+The first-pass UI and core source-layout refactors are complete locally. `MainWindow` has been split into focused companion files, and `ProductWorkflow.cpp` is now a small public entry anchor with implementation moved into `ProductWorkflowSnapshot.cpp`, `ProductWorkflowQuality.cpp`, `ProductWorkflowEvaluation.cpp`, `ProductWorkflowBenchmark.cpp`, `ProductWorkflowDelivery.cpp`, `ProductWorkflowPipeline.cpp`, and internal `ProductWorkflowSupport.h/.cpp`. These were behavior-preserving maintenance changes only: no Worker JSON protocol, SQLite schema, plugin interface, report JSON field, training, export, inference, evaluation, benchmark, or delivery semantics changed. The latest refactor harness passed locally.
+
 ## Local Hardware Note
 
 Recorded on 2026-04-30:
@@ -74,7 +78,7 @@ Recorded on 2026-04-30:
 
 ## Current Next Task
 
-Current local follow-up: local RC closeout, CPU training smoke, external acceptance handoff package, release-freeze package identity tooling, Phase 45 YOLO11/YOLO12 detection/segmentation model-family smoke, Phase 46 PaddleOCR Det DB-style C++ ONNX postprocess, and Phase 48 local plugin marketplace v1 are complete locally. Phase 47 is prepared but the local PaddleX/Paddle2ONNX conversion chain is blocked before real Det ONNX evidence is produced. A frozen handoff package was generated under `build-vscode` for commit `fcbe55444fa6b6d0619f38fe93626b67a9c8fd5b`; `release_handoff_manifest.json` and `release_handoff_summary.md` record `Worktree dirty: False` and ZIP SHA256 `9F9762B136B124E87232BDE23DC2A03FF7075D3AE3E0B24115C003D7B3510875`. Production OCR acceptance now has a strict evidence gate that blocks without representative non-tiny OCR data and official reports. Collect external acceptance results for clean Windows packaging and TensorRT hardware when available, and resume Phase 47 on an environment where Paddle2ONNX 2.1.0 native plugin loads successfully or where Linux/WSL conversion can produce the Det ONNX artifact.
+Current local follow-up: local RC closeout, CPU training smoke, external acceptance handoff package, release-freeze package identity tooling, Phase 45 YOLO11/YOLO12 detection/segmentation model-family smoke, Phase 46 PaddleOCR Det DB-style C++ ONNX postprocess, Phase 48 local plugin marketplace v1, and the first-pass UI/Core source-layout refactors are complete locally. Phase 47 is prepared but the local PaddleX/Paddle2ONNX conversion chain is blocked before real Det ONNX evidence is produced. A frozen handoff package was generated under `build-vscode` for commit `fcbe55444fa6b6d0619f38fe93626b67a9c8fd5b`; `release_handoff_manifest.json` and `release_handoff_summary.md` record `Worktree dirty: False` and ZIP SHA256 `9F9762B136B124E87232BDE23DC2A03FF7075D3AE3E0B24115C003D7B3510875`. Production OCR acceptance now has a strict evidence gate that blocks without representative non-tiny OCR data and official reports. Collect external acceptance results for clean Windows packaging and TensorRT hardware when available, and resume Phase 47 on an environment where Paddle2ONNX 2.1.0 native plugin loads successfully or where Linux/WSL conversion can produce the Det ONNX artifact.
 
 Recommended implementation order:
 
@@ -87,6 +91,7 @@ Recommended implementation order:
 7. Resume Phase 47 conversion on a clean Python 3.12 environment, alternate Windows machine, or Linux/WSL environment where PaddleX can load Paddle2ONNX 2.1.0 and parse PaddlePaddle 3 PIR inference exports, then record real Det ONNX predictions/overlay evidence.
 8. For production OCR readiness, collect non-tiny PaddleOCR Det/Rec/System datasets and official reports, then run `tools\production-ocr-acceptance.ps1`; current local run is expected to block without those inputs.
 9. Keep Phase 40 backlog deferred unless a new priority is explicitly approved.
+10. Do not continue source-layout refactoring by default; the next refactor should be driven by a concrete maintenance blocker, with `ProductWorkflowQuality.cpp`, `ProductWorkflowEvaluation.cpp`, `DetectionTrainer.cpp`, or `WorkerSession.cpp` evaluated separately.
 
 Current constraints to preserve:
 

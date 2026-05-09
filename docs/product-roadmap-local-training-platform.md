@@ -10,6 +10,8 @@
 
 AITrain Studio 已完成 Worker、SQLite、任务记录、artifact 浏览、YOLO 检测/分割官方训练链路、PaddleOCR Det/Rec/System 官方工具链入口、ONNX Runtime 推理、打包、离线授权、CPU smoke 和成熟 Qt Widgets workbench。
 
+维护基线：UI 与 core 的第一层源文件拆分已经完成。`MainWindow` 和 `ProductWorkflow` 都已拆为 companion 文件；`ProductWorkflow.cpp` 只保留公共入口锚点，snapshot、quality、evaluation、benchmark、delivery、pipeline 逻辑分别落在同目录 companion 文件中。这是行为保持型重构，不改变 Worker protocol、SQLite schema、插件接口、报告 JSON 或算法语义。
+
 当前项目的主要缺口不是继续堆更多 demo 后端，而是把已有 detection / segmentation / OCR 能力打成可交付闭环：
 
 - 数据可质检。

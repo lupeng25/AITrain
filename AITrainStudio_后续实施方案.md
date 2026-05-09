@@ -26,6 +26,7 @@ AITrain Studio 已具备可运行的平台骨架：Qt Widgets GUI、独立 Worke
 - 阶段 17-21 已完成交付验收基线：本机基线冻结、统一验收脚本、TensorRT 外部验收准备、小规模训练/推理/转换 smoke、发布前文档收口。
 - 阶段 22-26 已完成本机后续增强：任务历史与产物索引、GUI 统一 artifact 浏览、三类数据集管理增强、COCO8 / COCO8-seg materialization 稳定化、PaddleOCR 官方 train/export/inference 链路增强。
 - 当前没有 RTX / 第二台主机，因此 TensorRT 真验收继续保持 hardware-blocked，不作为本机阶段完成条件。
+- 近期维护性重构已完成第一层源码拆分：`MainWindow` 和 `ProductWorkflow` 均拆为 companion 文件。`ProductWorkflow.cpp` 现在只作为公共入口锚点，具体 snapshot、quality、evaluation、benchmark、delivery、pipeline 实现位于 `src/core/src/ProductWorkflow*.cpp`；该变更不改变协议、schema、插件接口、报告字段或算法行为。
 
 ## 2. 实施原则
 
