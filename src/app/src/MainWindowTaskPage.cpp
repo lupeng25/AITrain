@@ -17,6 +17,7 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSizePolicy>
 #include <QSplitter>
 #include <QStatusBar>
@@ -27,8 +28,13 @@ using namespace aitrain_app;
 
 QWidget* MainWindow::buildTaskQueuePage()
 {
-    auto* page = new QWidget;
-    auto* layout = new QVBoxLayout(page);
+    auto* page = new QScrollArea;
+    page->setWidgetResizable(true);
+    page->setFrameShape(QFrame::NoFrame);
+    page->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+    auto* content = new QWidget;
+    auto* layout = new QVBoxLayout(content);
     layout->setContentsMargins(18, 18, 18, 18);
     layout->setSpacing(16);
 
@@ -60,7 +66,8 @@ QWidget* MainWindow::buildTaskQueuePage()
     taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Failed), QStringLiteral("failed"));
     taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Canceled), QStringLiteral("canceled"));
     taskSearchEdit_ = new QLineEdit;
-    taskSearchEdit_->setMinimumWidth(260);
+    taskSearchEdit_->setMinimumWidth(0);
+    taskSearchEdit_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     taskSearchEdit_->setPlaceholderText(QStringLiteral("搜索任务、后端、消息"));
     connect(refreshButton, &QPushButton::clicked, this, &MainWindow::updateRecentTasks);
     connect(cancelButton, &QPushButton::clicked, this, &MainWindow::cancelSelectedTask);
@@ -167,5 +174,6 @@ QWidget* MainWindow::buildTaskQueuePage()
             << QStringLiteral("Reports")));
     layout->addWidget(toolbar);
     layout->addWidget(bodySplitter, 1);
+    page->setWidget(content);
     return page;
 }

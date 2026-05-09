@@ -51,7 +51,7 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
         << QStringLiteral("时间"));
     configureTable(artifactTable_);
     artifactTable_->setWordWrap(true);
-    artifactTable_->setMinimumHeight(220);
+    artifactTable_->setMinimumHeight(170);
     artifactTable_->verticalHeader()->setDefaultSectionSize(42);
     artifactTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     artifactTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
@@ -66,7 +66,7 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
         << QStringLiteral("Step")
         << QStringLiteral("Epoch"));
     configureTable(metricTable_);
-    metricTable_->setMinimumHeight(210);
+    metricTable_->setMinimumHeight(160);
     metricTable_->verticalHeader()->setDefaultSectionSize(38);
     metricTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     metricTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
@@ -80,7 +80,7 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
         << QStringLiteral("时间"));
     configureTable(exportTable_);
     exportTable_->setWordWrap(true);
-    exportTable_->setMinimumHeight(210);
+    exportTable_->setMinimumHeight(160);
     exportTable_->verticalHeader()->setDefaultSectionSize(42);
     exportTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     exportTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
@@ -89,12 +89,12 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     imagePreviewLabel_ = new QLabel(QStringLiteral("暂无产物预览"));
     imagePreviewLabel_->setObjectName(QStringLiteral("ArtifactPreviewCanvas"));
     imagePreviewLabel_->setAlignment(Qt::AlignCenter);
-    imagePreviewLabel_->setMinimumHeight(220);
+    imagePreviewLabel_->setMinimumHeight(160);
     imagePreviewLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     previewText_ = new QPlainTextEdit;
     previewText_->setObjectName(QStringLiteral("ArtifactPreviewText"));
     previewText_->setReadOnly(true);
-    previewText_->setMinimumHeight(160);
+    previewText_->setMinimumHeight(120);
     previewText_->setPlainText(QStringLiteral("选择一个产物后显示摘要。"));
     auto* defaultPreview = new QWidget;
     auto* defaultLayout = new QVBoxLayout(defaultPreview);
@@ -103,7 +103,7 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     defaultLayout->addWidget(imagePreviewLabel_, 1);
     defaultLayout->addWidget(previewText_, 2);
     previewStack_ = new QStackedWidget;
-    previewStack_->setMinimumHeight(220);
+    previewStack_->setMinimumHeight(180);
     previewStack_->addWidget(defaultPreview);
     evaluationReportView_ = new EvaluationReportView;
     auto* evaluationScroll = new QScrollArea;
@@ -173,13 +173,13 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     detailTabs->addTab(exportTab, uiText("导出"));
     detailTabs->addTab(previewTab, uiText("预览"));
 
-    detailTabs->setMinimumHeight(420);
+    detailTabs->setMinimumHeight(300);
     detailTabs->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     previewStack_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
     layout->addWidget(selectedTaskSummaryLabel_);
-    layout->addWidget(detailTabs, 1);
     layout->addWidget(actionGridFrame);
+    layout->addWidget(detailTabs, 1);
 
     clear();
 }

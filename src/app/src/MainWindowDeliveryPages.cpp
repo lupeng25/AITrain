@@ -234,8 +234,13 @@ QWidget* MainWindow::buildConversionPage()
 
 QWidget* MainWindow::buildInferencePage()
 {
-    auto* page = new QWidget;
-    auto* layout = new QVBoxLayout(page);
+    auto* page = new QScrollArea;
+    page->setWidgetResizable(true);
+    page->setFrameShape(QFrame::NoFrame);
+    page->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+    auto* content = new QWidget;
+    auto* layout = new QVBoxLayout(content);
     layout->setContentsMargins(18, 18, 18, 18);
     layout->setSpacing(16);
 
@@ -310,6 +315,10 @@ QWidget* MainWindow::buildInferencePage()
     inferenceCheckpointEdit_ = new QLineEdit;
     inferenceImageEdit_ = new QLineEdit;
     inferenceOutputEdit_ = new QLineEdit;
+    for (QLineEdit* edit : {inferenceCheckpointEdit_, inferenceImageEdit_, inferenceOutputEdit_}) {
+        edit->setMinimumWidth(0);
+        edit->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    }
     inferenceCheckpointEdit_->setPlaceholderText(QStringLiteral("从任务产物带入，或选择 ONNX / AITrain export / TensorRT engine"));
     inferenceImageEdit_->setPlaceholderText(QStringLiteral("选择验证图片"));
     inferenceOutputEdit_->setPlaceholderText(QStringLiteral("输出目录；留空则输出到模型同目录 inference"));
@@ -420,29 +429,37 @@ QWidget* MainWindow::buildInferencePage()
     flowGrid->setColumnStretch(1, 1);
     flowPanel->bodyLayout()->addLayout(flowGrid);
 
-    auto* preview = new QSplitter(Qt::Horizontal);
+    auto* preview = new QSplitter(Qt::Vertical);
     auto* summaryPanel = new InfoPanel(QStringLiteral("结果摘要"));
-    summaryPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("Worker 返回的 prediction JSON 会压缩显示任务类型、结果数量、首个类别 / 文本、耗时和结果文件路径。")));
+    auto* summaryHint = mutedLabel(QStringLiteral("Worker 返回的 prediction JSON 会压缩显示任务类型、结果数量、首个类别 / 文本、耗时和结果文件路径。"));
+    allowLabelToShrink(summaryHint);
+    summaryPanel->bodyLayout()->addWidget(summaryHint);
     inferenceResultLabel_ = inlineStatusLabel(QStringLiteral("尚未推理。"));
     inferenceResultLabel_->setObjectName(QStringLiteral("InferenceResultSummary"));
+    allowLabelToShrink(inferenceResultLabel_);
     summaryPanel->bodyLayout()->addWidget(inferenceResultLabel_);
-    summaryPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("完整原始 JSON 可在“任务与产物”的产物详情中查看。")));
+    auto* summaryFootnote = mutedLabel(QStringLiteral("完整原始 JSON 可在“任务与产物”的产物详情中查看。"));
+    allowLabelToShrink(summaryFootnote);
+    summaryPanel->bodyLayout()->addWidget(summaryFootnote);
     summaryPanel->bodyLayout()->addStretch();
 
     auto* resultPanel = new InfoPanel(QStringLiteral("Overlay 预览"));
-    resultPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("完成后显示检测框、分割 mask 或 OCR 可视化图；失败时保留明确状态文本。")));
+    auto* overlayHint = mutedLabel(QStringLiteral("完成后显示检测框、分割 mask 或 OCR 可视化图；失败时保留明确状态文本。"));
+    allowLabelToShrink(overlayHint);
+    resultPanel->bodyLayout()->addWidget(overlayHint);
     inferenceOverlayLabel_ = new QLabel(QStringLiteral("暂无 overlay\n运行推理后显示可视化产物。"));
     inferenceOverlayLabel_->setObjectName(QStringLiteral("InferenceOverlayCanvas"));
     inferenceOverlayLabel_->setAlignment(Qt::AlignCenter);
-    inferenceOverlayLabel_->setMinimumHeight(300);
+    inferenceOverlayLabel_->setMinimumHeight(260);
     inferenceOverlayLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     inferenceOverlayLabel_->setFrameShape(QFrame::NoFrame);
     resultPanel->bodyLayout()->addWidget(inferenceOverlayLabel_);
     preview->addWidget(summaryPanel);
     preview->addWidget(resultPanel);
     preview->setStretchFactor(0, 1);
-    preview->setStretchFactor(1, 2);
-    preview->setSizes(QList<int>() << 300 << 620);
+    preview->setStretchFactor(1, 3);
+    preview->setChildrenCollapsible(false);
+    preview->setSizes(QList<int>() << 180 << 420);
 
     rightLayout->addWidget(flowPanel);
     rightLayout->addWidget(preview, 1);
@@ -457,6 +474,7 @@ QWidget* MainWindow::buildInferencePage()
     connect(headerInferButton, &QPushButton::clicked, this, &MainWindow::startInference);
 
     layout->addWidget(headerPanel);
-    layout->addWidget(mainSplitter, 1);
+    layout->addWidget(mainSplitter);
+    page->setWidget(content);
     return page;
 }
