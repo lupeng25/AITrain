@@ -106,6 +106,16 @@ private:
     QString currentTaskType() const;
     QString currentTaskKindFilter() const;
     QString currentTaskStateFilter() const;
+    void handleProgressMessage(const QJsonObject& payload);
+    void handleMetricMessage(const QJsonObject& payload);
+    void handleArtifactMessage(const QJsonObject& payload);
+    void handleTaskStateMessage(const QString& type, const QJsonObject& payload);
+    void handleDatasetQualityMessage(const QJsonObject& payload);
+    void handleDatasetSnapshotMessage(const QJsonObject& payload);
+    void handleEvaluationReportMessage(const QJsonObject& payload);
+    void handlePipelinePlanMessage(const QJsonObject& payload);
+    void handleModelExportMessage(const QJsonObject& payload);
+    void handleInferenceResultMessage(const QJsonObject& payload);
     void updateRecentTasks();
     void updateDatasetList();
     void updateTaskTable(QTableWidget* table, const QVector<aitrain::TaskRecord>& tasks);

@@ -11,6 +11,14 @@ add_executable(AITrainStudio WIN32
     src/LanguageSupport.cpp
     src/MainWindow.h
     src/MainWindow.cpp
+    src/MainWindowActions.cpp
+    src/MainWindowPages.cpp
+    src/MainWindowPreviews.cpp
+    src/MainWindowRecords.cpp
+    src/MainWindowSummaries.cpp
+    src/MainWindowSupport.h
+    src/MainWindowSupport.cpp
+    src/MainWindowWorkerMessages.cpp
     src/MetricsWidget.h
     src/MetricsWidget.cpp
     src/PluginMarketplaceWidget.h
