@@ -29,6 +29,14 @@ add_library(aitrain_core STATIC
     src/PluginMarketplace.cpp
     src/ProjectRepository.cpp
     src/ProductWorkflow.cpp
+    src/ProductWorkflowBenchmark.cpp
+    src/ProductWorkflowDelivery.cpp
+    src/ProductWorkflowEvaluation.cpp
+    src/ProductWorkflowPipeline.cpp
+    src/ProductWorkflowQuality.cpp
+    src/ProductWorkflowSnapshot.cpp
+    src/ProductWorkflowSupport.h
+    src/ProductWorkflowSupport.cpp
     src/TaskModels.cpp
 )
 
