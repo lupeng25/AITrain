@@ -63,6 +63,8 @@ This file is the source of truth for phase status in new AI coding conversations
 
 The first-pass UI and core source-layout refactors are complete locally. `MainWindow` has been split into focused companion files, and `ProductWorkflow.cpp` is now a small public entry anchor with implementation moved into `ProductWorkflowSnapshot.cpp`, `ProductWorkflowQuality.cpp`, `ProductWorkflowEvaluation.cpp`, `ProductWorkflowBenchmark.cpp`, `ProductWorkflowDelivery.cpp`, `ProductWorkflowPipeline.cpp`, and internal `ProductWorkflowSupport.h/.cpp`. These were behavior-preserving maintenance changes only: no Worker JSON protocol, SQLite schema, plugin interface, report JSON field, training, export, inference, evaluation, benchmark, or delivery semantics changed. The latest refactor harness passed locally.
 
+The first non-fullscreen UI layout pass is complete locally. `推理验证` and `任务与产物` were adjusted for the 1280x820 workbench viewport using scrollable page containers, shrinkable long inputs/text, and first-screen access to key artifact actions. A full sidebar walkthrough at 1280x820 covered `总览`, `项目`, `数据集`, `训练实验`, `任务与产物`, `模型库`, `评估报告`, `模型导出`, `推理验证`, `插件`, `环境`, and `设置`; the UI automation horizontal-overflow check reported no findings. These were UI layout changes only and did not alter Worker JSON, SQLite schema, plugin interfaces, training/export/inference logic, or scaffold/official/hardware-blocked semantics.
+
 ## Local Hardware Note
 
 Recorded on 2026-04-30:

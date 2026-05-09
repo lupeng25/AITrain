@@ -32,6 +32,21 @@
 
 如果只改文档，可以不用编译，但需要说明未运行构建的原因。
 
+如果修改 UI 布局，还需要至少执行一次非全屏 walkthrough：
+
+```powershell
+$pages = @('总览','项目','数据集','训练实验','任务与产物','模型库','评估报告','模型导出','推理验证','插件','环境','设置')
+C:\Users\73200\.codex\skills\qt-gui-walkthrough\scripts\qt_walkthrough.ps1 `
+  -AppPath .\build-vscode\bin\AITrainStudio.exe `
+  -WorkingDirectory .\build-vscode\bin `
+  -OutDir .\.deps\ui-walkthrough `
+  -PageNames $pages `
+  -Width 1280 `
+  -Height 820
+```
+
+验收重点：关键操作按钮不能被非全屏首屏裁切；长路径、长状态文本和表格不能造成横向溢出；允许页面纵向滚动。
+
 ## 回答用户前
 
 说明：
@@ -40,4 +55,3 @@
 - 关键文件在哪里。
 - 验证命令和结果。
 - 没有完成的部分或刻意保留的 scaffold。
-
