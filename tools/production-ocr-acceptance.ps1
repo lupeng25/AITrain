@@ -54,7 +54,7 @@ function Count-RecSamples {
     if (!(Test-Path -LiteralPath $Path)) {
         return 0
     }
-    $labelCandidates = @("rec_gt_test.txt", "rec_gt_val.txt", "rec_gt.txt", "train.txt", "val.txt", "test.txt") |
+    $labelCandidates = @("rec_gt_train.txt", "rec_gt_val.txt", "rec_gt_test.txt", "rec_gt.txt", "train.txt", "val.txt", "test.txt") |
         ForEach-Object { Join-Path $Path $_ } |
         Where-Object { Test-Path -LiteralPath $_ }
     if ($labelCandidates.Count -eq 0) {

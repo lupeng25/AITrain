@@ -163,6 +163,12 @@ def prepare_predict_model_dir(source_dir: Path, target_dir: Path) -> Path:
     return target_dir
 
 
+def checkpoint_file_from_base(base: Path) -> Path:
+    if base.suffix == ".pdparams":
+        return base
+    return Path(str(base) + ".pdparams")
+
+
 def build_config(
     repo: Path | None,
     parameters: dict[str, Any],
@@ -198,6 +204,7 @@ def build_config(
     batch_size = max(1, int(parameters.get("batchSize", 1)))
     _, image_height, image_width = parse_rec_image_shape(parameters)
     max_text_length = max(1, int(parameters.get("maxTextLength", 25)))
+    eval_every_steps = max(1, int(parameters.get("evalEverySteps", 1000000)))
     use_gpu = bool_param(parameters, "useGpu", False)
     save_model_dir = output_path / "official_model"
     save_inference_dir = output_path / "official_inference"
@@ -210,7 +217,7 @@ def build_config(
             "print_batch_step": 1,
             "save_model_dir": str(save_model_dir),
             "save_epoch_step": 1,
-            "eval_batch_step": [0, 1],
+            "eval_batch_step": [0, eval_every_steps],
             "pretrained_model": parameters.get("pretrainedModel") or None,
             "checkpoints": parameters.get("resumeCheckpoint") or None,
             "save_inference_dir": str(save_inference_dir),
@@ -259,7 +266,7 @@ def write_command_file(path: Path, command: list[str], cwd: Path | None) -> None
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def parse_official_metrics(backend: str, line: str, metrics: dict[str, float]) -> None:
+def parse_metrics_line(line: str, metrics: dict[str, float]) -> None:
     name_map = {
         "acc": "accuracy",
         "norm_edit_dis": "normalizedEditDistance",
@@ -274,7 +281,28 @@ def parse_official_metrics(backend: str, line: str, metrics: dict[str, float]) -
             continue
         name = name_map.get(raw_name, raw_name)
         metrics[name] = value
+        if name == "normalizedEditDistance":
+            cer = max(0.0, min(1.0, 1.0 - value))
+            metrics["cer"] = cer
+
+
+def parse_official_metrics(backend: str, line: str, metrics: dict[str, float]) -> None:
+    before = dict(metrics)
+    parse_metrics_line(line, metrics)
+    for name, value in metrics.items():
+        if before.get(name) == value:
+            continue
         emit(backend, "metric", name=name, value=value)
+
+
+def read_existing_train_metrics(log_path: Path) -> dict[str, float]:
+    metrics: dict[str, float] = {}
+    if not log_path.exists():
+        return metrics
+    for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if "best metric" in line or "cur metric" in line:
+            parse_metrics_line(line, metrics)
+    return metrics
 
 
 def run_process(
@@ -395,7 +423,9 @@ def run(request: dict[str, Any]) -> int:
     run_inference_after_export = bool_param(parameters, "runInferenceAfterExport", False)
     _, image_height, image_width = parse_rec_image_shape(parameters)
     rec_image_shape = f"3,{image_height},{image_width}"
-    pretrained_base = Path(str(parameters.get("pretrainedModel") or (output_path / "official_model" / "best_accuracy")))
+    trained_checkpoint_base = output_path / "official_model" / "best_accuracy"
+    pretrained_value = str(parameters.get("pretrainedModel") or "").strip()
+    export_checkpoint_base = Path(pretrained_value) if export_only and pretrained_value else trained_checkpoint_base
     inference_image = resolve_dataset_file(dataset_path, parameters.get("inferenceImage"), samples[0][0])
     predict_model_dir = output_path / "official_inference_predict"
     train_command = [sys.executable, "tools/train.py", "-c", str(config_path)]
@@ -405,7 +435,7 @@ def run(request: dict[str, Any]) -> int:
         "-c",
         str(config_path),
         "-o",
-        f"Global.pretrained_model={pretrained_base}",
+        f"Global.pretrained_model={export_checkpoint_base}",
         f"Global.save_inference_dir={output_path / 'official_inference'}",
     ]
     predict_command = [
@@ -449,6 +479,7 @@ def run(request: dict[str, Any]) -> int:
         "blankIndex": 0,
         "trainCommand": train_command,
         "exportCommand": export_command,
+        "exportCheckpointBase": str(export_checkpoint_base),
         "predictCommand": predict_command,
         "predictModelDir": str(predict_model_dir),
         "trainLogPath": str(train_log_path),
@@ -456,6 +487,12 @@ def run(request: dict[str, Any]) -> int:
         "predictLogPath": str(predict_log_path),
         "metrics": {},
     }
+    existing_train_log_path = output_path / "official_model" / "train.log"
+    if export_only:
+        existing_metrics = read_existing_train_metrics(existing_train_log_path)
+        if existing_metrics:
+            report["metrics"] = existing_metrics
+            report["existingTrainLogPath"] = str(existing_train_log_path)
 
     emit(backend, "artifact", name="aitrain_ppocrv4_rec.yml", path=str(config_path), kind="config")
     emit(backend, "artifact", name="train_list.txt", path=str(train_list_path), kind="dataset")
@@ -483,7 +520,7 @@ def run(request: dict[str, Any]) -> int:
             report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             emit(backend, "artifact", name="paddleocr_official_rec_report.json", path=str(report_path), kind="report")
             return fail(backend, "Official PaddleOCR export failed.", "official_export_failed", {"exitCode": export_exit, "logPath": str(export_log_path)})
-        report["checkpointPath"] = str(output_path / "official_model" / "best_accuracy.pdparams")
+        report["checkpointPath"] = str(checkpoint_file_from_base(export_checkpoint_base))
         report["inferenceModelDir"] = str(output_path / "official_inference")
         emit(backend, "artifact", name="official_model", path=str(output_path / "official_model"), kind="checkpoint_dir")
         emit(backend, "artifact", name="official_inference", path=str(output_path / "official_inference"), kind="model_dir")

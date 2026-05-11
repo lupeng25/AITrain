@@ -122,11 +122,14 @@ def simplify_tiny_det_transforms(transforms: Any, epochs: int, image_size: int, 
     if not isinstance(transforms, list):
         return transforms
     simplified: list[Any] = []
-    unstable_train_transforms = {"IaaAugment", "CopyPaste", "EastRandomCropData"}
+    unstable_train_transforms = {"IaaAugment", "CopyPaste"}
     for transform in transforms:
         if isinstance(transform, dict):
             if training and any(name in transform for name in unstable_train_transforms):
                 continue
+            if training and "EastRandomCropData" in transform and isinstance(transform["EastRandomCropData"], dict):
+                transform["EastRandomCropData"]["size"] = [image_size, image_size]
+                transform["EastRandomCropData"]["keep_ratio"] = True
             if "MakeBorderMap" in transform and isinstance(transform["MakeBorderMap"], dict):
                 transform["MakeBorderMap"]["total_epoch"] = epochs
             if "MakeShrinkMap" in transform and isinstance(transform["MakeShrinkMap"], dict):
@@ -192,6 +195,7 @@ def build_config(
     epochs = max(1, int(parameters.get("epochs", 1)))
     batch_size = max(1, int(parameters.get("batchSize", 1)))
     image_size = max(32, int(parameters.get("imageSize", parameters.get("detImageSize", 640))))
+    eval_every_steps = max(1, int(parameters.get("evalEverySteps", 1000000)))
     save_model_dir = output_path / "official_model"
     save_inference_dir = output_path / "official_inference"
 
@@ -203,7 +207,7 @@ def build_config(
             "print_batch_step": 1,
             "save_model_dir": str(save_model_dir),
             "save_epoch_step": 1,
-            "eval_batch_step": [0, 1],
+            "eval_batch_step": [0, eval_every_steps],
             "pretrained_model": parameters.get("pretrainedModel") or None,
             "checkpoints": parameters.get("resumeCheckpoint") or None,
             "save_inference_dir": str(save_inference_dir),

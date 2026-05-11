@@ -286,6 +286,7 @@ install(FILES
     docs/local-rc-closeout.md
     docs/external-acceptance-handoff.md
     docs/release-freeze-handoff.md
+    docs/production-ocr-acceptance.md
     docs/product-roadmap-local-training-platform.md
     docs/plugin-marketplace.md
     docs/plugin-package-format.md
@@ -312,6 +313,10 @@ install(FILES
     tools/phase16-ocr-official-smoke.ps1
     tools/phase31-paddleocr-full-official-smoke.ps1
     tools/phase47-paddleocr-det-onnx-smoke.ps1
+    tools/prepare-production-ocr-data.ps1
+    tools/prepare_production_ocr_data.py
+    tools/run-production-ocr-rec-experiment.ps1
+    tools/run-production-ocr-official-chain.ps1
     tools/production-ocr-acceptance.ps1
     DESTINATION tools
 )

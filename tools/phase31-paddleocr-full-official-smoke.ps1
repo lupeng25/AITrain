@@ -109,7 +109,7 @@ $detRequest = [ordered]@{
         imageSize = 64
         useGpu = $false
         validationRatio = 0.5
-        calMetricDuringTrain = $true
+        calMetricDuringTrain = $false
     }
 }
 $detRequest | ConvertTo-Json -Depth 20 | Set-Content $detRequestPath -Encoding UTF8
