@@ -21,6 +21,13 @@ add_library(aitrain_core STATIC
     src/DatasetValidators.cpp
     src/DetectionDataset.cpp
     src/DetectionTrainer.cpp
+    src/DetectionTrainerExport.cpp
+    src/DetectionTrainerInternal.h
+    src/DetectionTrainerOnnxRuntime.cpp
+    src/DetectionTrainerOutput.cpp
+    src/DetectionTrainerPostprocess.cpp
+    src/DetectionTrainerTensorRt.cpp
+    src/DetectionTrainerTiny.cpp
     src/OcrRecDataset.cpp
     src/OcrRecTrainer.cpp
     src/SegmentationDataset.cpp

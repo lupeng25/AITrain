@@ -32,7 +32,6 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "Harness check: tests" -ForegroundColor Cyan
 $test = "call `"$vcvars`" >nul && ctest --test-dir $buildDir --output-on-failure --interactive-debug-mode 1"
-$testLog = Join-Path $root "$buildDir\tests\aitrain_core_tests_ctest.txt"
 cmd /c $test
 if ($LASTEXITCODE -ne 0) {
     $firstTestExitCode = $LASTEXITCODE
@@ -40,9 +39,10 @@ if ($LASTEXITCODE -ne 0) {
     Start-Sleep -Seconds 5
     cmd /c $test
     if ($LASTEXITCODE -ne 0) {
-        if (Test-Path -LiteralPath $testLog) {
-            Write-Host "Harness check: aitrain_core_tests log tail" -ForegroundColor Yellow
-            Get-Content -LiteralPath $testLog -Tail 120
+        $testLogs = Get-ChildItem -LiteralPath (Join-Path $root "$buildDir\tests") -Filter "*_ctest.txt" -ErrorAction SilentlyContinue
+        foreach ($testLog in $testLogs) {
+            Write-Host ("Harness check: {0} log tail" -f $testLog.Name) -ForegroundColor Yellow
+            Get-Content -LiteralPath $testLog.FullName -Tail 120
         }
         throw "Tests failed with exit code $LASTEXITCODE"
     }

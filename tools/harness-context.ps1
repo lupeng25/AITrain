@@ -17,7 +17,9 @@ $files = @(
     "src/core/include/aitrain/core/ProjectRepository.h",
     "src/app/src/MainWindow.cpp",
     "src/worker/src/WorkerSession.cpp",
-    "tests/tst_core.cpp"
+    "tests/TestSupport.h",
+    "tests/tst_platform.cpp",
+    "tests/tst_detection_inference.cpp"
 )
 
 foreach ($file in $files) {

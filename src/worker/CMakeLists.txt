@@ -2,6 +2,14 @@ add_executable(aitrain_worker
     src/main.cpp
     src/WorkerSession.h
     src/WorkerSession.cpp
+    src/WorkerSessionDatasetCommands.cpp
+    src/WorkerSessionEnvironment.cpp
+    src/WorkerSessionModelCommands.cpp
+    src/WorkerSessionPipeline.cpp
+    src/WorkerSessionPythonTrainer.cpp
+    src/WorkerSessionSupport.h
+    src/WorkerSessionSupport.cpp
+    src/WorkerSessionTraining.cpp
 )
 
 target_link_libraries(aitrain_worker
