@@ -59,6 +59,7 @@ void WorkerSession::evaluateModel(const QJsonObject& payload)
              qMakePair(QStringLiteral("per_class_metrics"), QStringLiteral("perClassMetricsPath")),
              qMakePair(QStringLiteral("error_samples"), QStringLiteral("errorSamplesPath")),
              qMakePair(QStringLiteral("confusion_matrix"), QStringLiteral("confusionMatrixPath")),
+             qMakePair(QStringLiteral("evaluation_summary"), QStringLiteral("evaluationSummaryPath")),
              qMakePair(QStringLiteral("evaluation_overlays"), QStringLiteral("overlayDir"))}) {
         const QString path = result.payload.value(item.second).toString();
         if (!path.isEmpty()) {
@@ -184,6 +185,15 @@ void WorkerSession::generateDeliveryReport(const QJsonObject& payload)
         inventoryArtifact.insert(QStringLiteral("path"), inventoryPath);
         inventoryArtifact.insert(QStringLiteral("message"), QStringLiteral("Delivery artifact inventory"));
         send(QStringLiteral("artifact"), inventoryArtifact);
+    }
+    const QString manifestPath = result.payload.value(QStringLiteral("deliveryManifestPath")).toString();
+    if (!manifestPath.isEmpty()) {
+        QJsonObject manifestArtifact;
+        manifestArtifact.insert(QStringLiteral("taskId"), taskId);
+        manifestArtifact.insert(QStringLiteral("kind"), QStringLiteral("delivery_manifest"));
+        manifestArtifact.insert(QStringLiteral("path"), manifestPath);
+        manifestArtifact.insert(QStringLiteral("message"), QStringLiteral("Delivery manifest"));
+        send(QStringLiteral("artifact"), manifestArtifact);
     }
     send(QStringLiteral("deliveryReport"), result.payload);
     socket_.waitForBytesWritten(1000);

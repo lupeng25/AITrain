@@ -543,7 +543,39 @@ void MainWindow::startTraining()
         : defaultBackendForTask(currentTaskType());
     const QString backendForRequest = trainingBackend.isEmpty() ? defaultBackendForTask(currentTaskType()) : trainingBackend;
     const QString modelPreset = modelPresetCombo_ ? modelPresetCombo_->currentText().trimmed() : QString();
+    QString latestSnapshotManifest;
+    if (repository_.isOpen()) {
+        QString snapshotError;
+        const aitrain::DatasetRecord dataset = repository_.datasetByRootPath(datasetPath, &snapshotError);
+        const aitrain::DatasetSnapshotRecord snapshot = repository_.latestDatasetSnapshot(dataset.id, &snapshotError);
+        latestSnapshotManifest = snapshot.manifestPath;
+    }
+    const QJsonObject preflight = trainingPreflightReport(
+        datasetPath,
+        datasetFormat,
+        datasetReady,
+        latestSnapshotManifest,
+        currentTaskType(),
+        backendForRequest,
+        modelPreset,
+        epochsEdit_ ? epochsEdit_->text().toInt() : 0,
+        batchEdit_ ? batchEdit_->text().toInt() : 0,
+        imageSizeEdit_ ? imageSizeEdit_->text().toInt() : 0);
+    if (!preflight.value(QStringLiteral("canStart")).toBool()) {
+        QStringList blockers;
+        const QJsonArray blockerArray = preflight.value(QStringLiteral("blockers")).toArray();
+        for (const QJsonValue& value : blockerArray) {
+            blockers.append(value.toString());
+        }
+        QMessageBox::warning(
+            this,
+            uiText("璁粌"),
+            QStringLiteral("Training preflight blocked:\n%1").arg(blockers.join(QStringLiteral("\n"))));
+        return;
+    }
     parameters.insert(QStringLiteral("trainingBackend"), backendForRequest);
+    parameters.insert(QStringLiteral("trainingPreflight"), preflight);
+    parameters.insert(QStringLiteral("trainingTemplate"), QStringLiteral("manual_worker_training_v1"));
     if (!modelPreset.isEmpty()) {
         parameters.insert(QStringLiteral("modelPreset"), modelPreset);
         if (backendForRequest.startsWith(QStringLiteral("ultralytics_yolo"))) {
@@ -1042,7 +1074,20 @@ void MainWindow::generateDeliveryReportFromSelectedArtifact()
     context.insert(QStringLiteral("modelPath"), modelPath);
     context.insert(QStringLiteral("datasetPath"), currentDatasetPath_);
     context.insert(QStringLiteral("datasetFormat"), currentDatasetFormat_);
+    context.insert(QStringLiteral("taskType"), currentTaskType());
+    context.insert(QStringLiteral("trainingBackend"), trainingBackendCombo_ ? trainingBackendCombo_->currentData().toString() : QString());
+    context.insert(QStringLiteral("modelPreset"), modelPresetCombo_ ? modelPresetCombo_->currentText().trimmed() : QString());
     context.insert(QStringLiteral("sourceTaskId"), selectedTaskId());
+    if (repository_.isOpen() && !currentDatasetPath_.isEmpty()) {
+        QString snapshotError;
+        const aitrain::DatasetRecord dataset = repository_.datasetByRootPath(currentDatasetPath_, &snapshotError);
+        const aitrain::DatasetSnapshotRecord snapshot = repository_.latestDatasetSnapshot(dataset.id, &snapshotError);
+        if (snapshot.id > 0) {
+            context.insert(QStringLiteral("datasetSnapshotId"), snapshot.id);
+            context.insert(QStringLiteral("datasetSnapshotHash"), snapshot.contentHash);
+            context.insert(QStringLiteral("datasetSnapshotManifest"), snapshot.manifestPath);
+        }
+    }
     QString error;
     if (!worker_.requestDeliveryReport(workerExecutablePath(), outputPath, context, &error, taskId)) {
         if (!taskId.isEmpty() && repository_.isOpen()) {

@@ -1103,6 +1103,85 @@ QJsonArray issueArray(const DatasetValidationResult& validation, int maxItems)
     }
     return issues;
 }
+
+QJsonObject trainingReadinessObject(
+    const DatasetQualityContext& context,
+    const DatasetValidationResult& validation,
+    const QJsonObject& summary,
+    const QString& xAnyFixListPath,
+    const QString& xAnyFixManifestPath)
+{
+    const int errorCount = context.severityCounts.value(QStringLiteral("error")).toInt();
+    const int warningCount = context.severityCounts.value(QStringLiteral("warning")).toInt();
+    const int infoCount = context.severityCounts.value(QStringLiteral("info")).toInt();
+    const bool canTrain = validation.ok && errorCount == 0;
+
+    QJsonArray gateReasons;
+    if (!validation.ok) {
+        gateReasons.append(QStringLiteral("dataset_validation_failed"));
+    }
+    if (errorCount > 0) {
+        gateReasons.append(QStringLiteral("quality_errors_present"));
+    }
+    if (context.issueLimitReached || context.problemSampleLimitReached || context.scanLimitReached) {
+        gateReasons.append(QStringLiteral("quality_scan_truncated"));
+    }
+
+    QJsonArray requiredActions;
+    if (errorCount > 0) {
+        requiredActions.append(QStringLiteral("fix_error_issues"));
+    }
+    if (warningCount > 0) {
+        requiredActions.append(QStringLiteral("review_warning_issues"));
+    }
+    if (summary.value(QStringLiteral("duplicateImageCount")).toInt() > 0) {
+        requiredActions.append(QStringLiteral("review_duplicate_images"));
+    }
+    if (requiredActions.isEmpty()) {
+        requiredActions.append(QStringLiteral("create_snapshot_before_training"));
+    }
+
+    QJsonArray nextActions;
+    if (canTrain) {
+        nextActions.append(QStringLiteral("create_dataset_snapshot"));
+        nextActions.append(QStringLiteral("start_training"));
+    } else {
+        nextActions.append(QStringLiteral("open_xanylabeling_fix_list"));
+        nextActions.append(QStringLiteral("repair_dataset"));
+        nextActions.append(QStringLiteral("rerun_dataset_validation"));
+        nextActions.append(QStringLiteral("rerun_dataset_quality_report"));
+    }
+
+    QJsonObject repairLoop;
+    repairLoop.insert(QStringLiteral("tool"), QStringLiteral("xanylabeling"));
+    repairLoop.insert(QStringLiteral("fixListPath"), xAnyFixListPath);
+    repairLoop.insert(QStringLiteral("fixManifestPath"), xAnyFixManifestPath);
+    repairLoop.insert(QStringLiteral("mode"), QStringLiteral("external_review"));
+    repairLoop.insert(QStringLiteral("note"), QStringLiteral("AITrain records repair candidates and never overwrites user labels automatically."));
+
+    QJsonObject readiness;
+    readiness.insert(QStringLiteral("schemaVersion"), 1);
+    readiness.insert(QStringLiteral("kind"), QStringLiteral("dataset_training_readiness"));
+    readiness.insert(QStringLiteral("createdAt"), nowIso());
+    readiness.insert(QStringLiteral("datasetPath"), context.datasetPath);
+    readiness.insert(QStringLiteral("format"), context.format);
+    readiness.insert(QStringLiteral("canTrain"), canTrain);
+    readiness.insert(QStringLiteral("status"), canTrain ? QStringLiteral("ready") : QStringLiteral("blocked"));
+    readiness.insert(QStringLiteral("validationOk"), validation.ok);
+    readiness.insert(QStringLiteral("blockingIssueCount"), errorCount);
+    readiness.insert(QStringLiteral("warningIssueCount"), warningCount);
+    readiness.insert(QStringLiteral("infoIssueCount"), infoCount);
+    readiness.insert(QStringLiteral("sampleCount"), summary.value(QStringLiteral("sampleCount")).toInt());
+    readiness.insert(QStringLiteral("problemSampleCount"), summary.value(QStringLiteral("problemSampleCount")).toInt());
+    readiness.insert(QStringLiteral("duplicateImageCount"), summary.value(QStringLiteral("duplicateImageCount")).toInt());
+    readiness.insert(QStringLiteral("gateReasons"), gateReasons);
+    readiness.insert(QStringLiteral("requiredActions"), requiredActions);
+    readiness.insert(QStringLiteral("nextActions"), nextActions);
+    readiness.insert(QStringLiteral("repairLoop"), repairLoop);
+    readiness.insert(QStringLiteral("severityCounts"), context.severityCounts);
+    readiness.insert(QStringLiteral("issueCounts"), context.issueCounts);
+    return readiness;
+}
 } // namespace
 WorkflowResult curateDatasetQualityReport(const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options)
 {
@@ -1184,6 +1263,7 @@ WorkflowResult curateDatasetQualityReport(const QString& datasetPath, const QStr
     const QString xAnyFixManifestPath = QDir(outputPath).filePath(QStringLiteral("xanylabeling_fix_manifest.json"));
     const QString reworkSampleSetPath = QDir(outputPath).filePath(QStringLiteral("rework_sample_set.json"));
     const QString prelabelCandidatesPath = QDir(outputPath).filePath(QStringLiteral("prelabel_candidates.json"));
+    const QString trainingReadinessPath = QDir(outputPath).filePath(QStringLiteral("dataset_training_readiness.json"));
 
     QJsonObject problems;
     problems.insert(QStringLiteral("schemaVersion"), 2);
@@ -1256,13 +1336,23 @@ WorkflowResult curateDatasetQualityReport(const QString& datasetPath, const QStr
     prelabelManifest.insert(QStringLiteral("candidateCount"), prelabelCandidates.size());
     prelabelManifest.insert(QStringLiteral("candidates"), prelabelCandidates);
 
+    QJsonObject trainingReadiness = trainingReadinessObject(
+        context,
+        validation,
+        summary,
+        xAnyFixListPath,
+        xAnyFixManifestPath);
+    trainingReadiness.insert(QStringLiteral("qualityReportPath"), reportPath);
+    trainingReadiness.insert(QStringLiteral("readinessPath"), trainingReadinessPath);
+
     if (!writeTextFile(csvPath, classDistributionCsvV2(context), &error)
         || !writeTextFile(imageStatsPath, imageStatisticsCsv(context), &error)
         || !writeTextFile(splitDistributionPath, splitDistributionCsv(context), &error)
         || !writeTextFile(xAnyFixListPath, context.xAnyFixRows.join(QLatin1Char('\n')) + QLatin1Char('\n'), &error)
         || !writeJsonFile(xAnyFixManifestPath, xAnyManifest, &error)
         || !writeJsonFile(reworkSampleSetPath, reworkSampleSet, &error)
-        || !writeJsonFile(prelabelCandidatesPath, prelabelManifest, &error)) {
+        || !writeJsonFile(prelabelCandidatesPath, prelabelManifest, &error)
+        || !writeJsonFile(trainingReadinessPath, trainingReadiness, &error)) {
         return failedResult(error);
     }
 
@@ -1275,6 +1365,8 @@ WorkflowResult curateDatasetQualityReport(const QString& datasetPath, const QStr
     report.insert(QStringLiteral("xAnyLabelingFixManifestPath"), xAnyFixManifestPath);
     report.insert(QStringLiteral("reworkSampleSetPath"), reworkSampleSetPath);
     report.insert(QStringLiteral("prelabelCandidatesPath"), prelabelCandidatesPath);
+    report.insert(QStringLiteral("trainingReadinessPath"), trainingReadinessPath);
+    report.insert(QStringLiteral("trainingReadiness"), trainingReadiness);
     if (!writeJsonFile(reportPath, report, &error)) {
         return failedResult(error);
     }

@@ -231,12 +231,17 @@ void MainWindow::handleDatasetQualityMessage(const QJsonObject& payload)
     if (validationSummaryLabel_) {
         const QJsonObject severityCounts = payload.value(QStringLiteral("severityCounts")).toObject();
         const QJsonObject summary = payload.value(QStringLiteral("summary")).toObject();
+        const QJsonObject readiness = payload.value(QStringLiteral("trainingReadiness")).toObject();
+        const QString readinessStatus = readiness.value(QStringLiteral("status")).toString(
+            payload.value(QStringLiteral("ok")).toBool() ? QStringLiteral("ready") : QStringLiteral("blocked"));
         validationSummaryLabel_->setText(uiText("质量报告完成：error %1 / warning %2 / info %3，问题样本 %4，重复图片 %5。")
             .arg(severityCounts.value(QStringLiteral("error")).toInt())
             .arg(severityCounts.value(QStringLiteral("warning")).toInt())
             .arg(severityCounts.value(QStringLiteral("info")).toInt())
             .arg(summary.value(QStringLiteral("problemSampleCount")).toInt())
             .arg(summary.value(QStringLiteral("duplicateImageCount")).toInt()));
+        validationSummaryLabel_->setToolTip(uiText("Training readiness: %1. Readiness JSON is attached to the dataset quality artifacts.")
+            .arg(readinessStatus));
     }
     if (validationOutput_) {
         validationOutput_->setPlainText(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Indented)));

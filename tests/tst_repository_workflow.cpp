@@ -296,7 +296,11 @@ private slots:
         QVERIFY(QFileInfo::exists(quality.payload.value(QStringLiteral("problemSamplesPath")).toString()));
         QVERIFY(QFileInfo::exists(quality.payload.value(QStringLiteral("reworkSampleSetPath")).toString()));
         QVERIFY(QFileInfo::exists(quality.payload.value(QStringLiteral("prelabelCandidatesPath")).toString()));
+        QVERIFY(QFileInfo::exists(quality.payload.value(QStringLiteral("trainingReadinessPath")).toString()));
         QVERIFY(quality.payload.value(QStringLiteral("ok")).toBool());
+        const QJsonObject ready = quality.payload.value(QStringLiteral("trainingReadiness")).toObject();
+        QVERIFY(ready.value(QStringLiteral("canTrain")).toBool());
+        QCOMPARE(ready.value(QStringLiteral("status")).toString(), QStringLiteral("ready"));
 
         aitrain::DetectionTrainingOptions evaluationTrainingOptions;
         evaluationTrainingOptions.epochs = 1;
@@ -317,8 +321,11 @@ private slots:
         QVERIFY(QFileInfo::exists(evaluation.payload.value(QStringLiteral("perClassMetricsPath")).toString()));
         QVERIFY(QFileInfo::exists(evaluation.payload.value(QStringLiteral("errorSamplesPath")).toString()));
         QVERIFY(QFileInfo::exists(evaluation.payload.value(QStringLiteral("confusionMatrixPath")).toString()));
+        QVERIFY(QFileInfo::exists(evaluation.payload.value(QStringLiteral("evaluationSummaryPath")).toString()));
         QVERIFY(QFileInfo(evaluation.payload.value(QStringLiteral("overlayDir")).toString()).exists());
         QVERIFY(evaluation.payload.value(QStringLiteral("metrics")).toObject().contains(QStringLiteral("mAP50")));
+        QVERIFY(evaluation.payload.value(QStringLiteral("decisionSummary")).toObject().contains(QStringLiteral("status")));
+        QVERIFY(evaluation.payload.value(QStringLiteral("errorTaxonomy")).toObject().contains(QStringLiteral("reasonCounts")));
 
         const aitrain::WorkflowResult segmentationEvaluation = aitrain::evaluateModelReport(
             modelPath,
@@ -362,8 +369,11 @@ private slots:
         QVERIFY(!delivery.payload.value(QStringLiteral("scaffold")).toBool());
         const QString modelCardPath = delivery.payload.value(QStringLiteral("modelCardPath")).toString();
         const QString inventoryPath = delivery.payload.value(QStringLiteral("artifactInventoryPath")).toString();
+        const QString manifestPath = delivery.payload.value(QStringLiteral("deliveryManifestPath")).toString();
         QVERIFY(QFileInfo::exists(modelCardPath));
         QVERIFY(QFileInfo::exists(inventoryPath));
+        QVERIFY(QFileInfo::exists(manifestPath));
+        QCOMPARE(delivery.payload.value(QStringLiteral("packageStatus")).toString(), QStringLiteral("ready_for_handoff_review"));
         QVERIFY(delivery.payload.value(QStringLiteral("evaluationSummary")).toObject().contains(QStringLiteral("metrics")));
         QVERIFY(delivery.payload.value(QStringLiteral("benchmarkSummary")).toObject().contains(QStringLiteral("latency")));
         QVERIFY(!delivery.payload.value(QStringLiteral("limitations")).toArray().isEmpty());
@@ -383,6 +393,11 @@ private slots:
                 && !item.value(QStringLiteral("sha256")).toString().isEmpty());
         }
         QVERIFY(sawModelHash);
+        QFile manifestFile(manifestPath);
+        QVERIFY(manifestFile.open(QIODevice::ReadOnly));
+        const QJsonObject manifest = QJsonDocument::fromJson(manifestFile.readAll()).object();
+        QCOMPARE(manifest.value(QStringLiteral("packageStatus")).toString(), QStringLiteral("ready_for_handoff_review"));
+        QVERIFY(manifest.value(QStringLiteral("checks")).toArray().size() >= 4);
 
         QJsonObject pipelineOptions;
         pipelineOptions.insert(QStringLiteral("datasetPath"), datasetRoot);
@@ -443,9 +458,12 @@ private slots:
         QVERIFY(QFileInfo::exists(quality.payload.value(QStringLiteral("splitDistributionPath")).toString()));
         QVERIFY(QFileInfo::exists(quality.payload.value(QStringLiteral("xAnyLabelingFixListPath")).toString()));
         QVERIFY(QFileInfo::exists(quality.payload.value(QStringLiteral("xAnyLabelingFixManifestPath")).toString()));
+        QVERIFY(QFileInfo::exists(quality.payload.value(QStringLiteral("trainingReadinessPath")).toString()));
 
         const QJsonObject report = readJsonObject(quality.payload.value(QStringLiteral("reportPath")).toString());
         QCOMPARE(report.value(QStringLiteral("schemaVersion")).toInt(), 2);
+        QCOMPARE(report.value(QStringLiteral("trainingReadiness")).toObject().value(QStringLiteral("status")).toString(), QStringLiteral("blocked"));
+        QVERIFY(!report.value(QStringLiteral("trainingReadiness")).toObject().value(QStringLiteral("canTrain")).toBool());
         QVERIFY(report.value(QStringLiteral("severityCounts")).toObject().value(QStringLiteral("error")).toInt() > 0);
         QVERIFY(jsonArrayContainsCode(report.value(QStringLiteral("issues")).toArray(), QStringLiteral("bbox_out_of_bounds")));
         QVERIFY(jsonArrayContainsCode(report.value(QStringLiteral("issues")).toArray(), QStringLiteral("class_id_out_of_range")));
@@ -673,8 +691,10 @@ private slots:
             << QStringLiteral("image_statistics")
             << QStringLiteral("split_distribution")
             << QStringLiteral("xanylabeling_fix_list")
-            << QStringLiteral("xanylabeling_fix_manifest"));
+            << QStringLiteral("xanylabeling_fix_manifest")
+            << QStringLiteral("dataset_training_readiness"));
         QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-quality/dataset_quality_report.json"))));
+        QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-quality/dataset_training_readiness.json"))));
         QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-quality/image_statistics.csv"))));
         QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-quality/split_distribution.csv"))));
         QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-quality/xanylabeling_fix_list.txt"))));
@@ -689,8 +709,11 @@ private slots:
                 {},
                 error,
                 QStringLiteral("evaluation-task"));
-        }, QStringLiteral("evaluationReport"));
+        }, QStringLiteral("evaluationReport"), QStringList()
+            << QStringLiteral("evaluation_report")
+            << QStringLiteral("evaluation_summary"));
         QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-evaluation/evaluation_report.json"))));
+        QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-evaluation/evaluation_summary.md"))));
 
         runCommand([&](WorkerClient& client, QString* error) {
             return client.requestModelBenchmark(
@@ -710,8 +733,11 @@ private slots:
                 QJsonObject{{QStringLiteral("projectName"), QStringLiteral("demo")}},
                 error,
                 QStringLiteral("delivery-task"));
-        }, QStringLiteral("deliveryReport"));
+        }, QStringLiteral("deliveryReport"), QStringList()
+            << QStringLiteral("training_delivery_report")
+            << QStringLiteral("delivery_manifest"));
         QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-delivery/training_delivery_report.html"))));
+        QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-delivery/delivery_manifest.json"))));
 
         runCommand([&](WorkerClient& client, QString* error) {
             QJsonObject pipelineOptions;

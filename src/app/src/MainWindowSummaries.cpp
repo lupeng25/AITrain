@@ -460,9 +460,14 @@ void MainWindow::updateTrainingSelectionSummary()
     const QString detailPathText = datasetPath.isEmpty() ? uiText("未选择") : compactPathForStatus(datasetPath, 92);
     QString snapshotText = uiText("快照：未选择数据集");
     QString snapshotManifestPath;
+    bool datasetReady = currentDatasetValid_ && currentDatasetPath_ == datasetPath && currentDatasetFormat_ == datasetFormat;
     if (!datasetPath.isEmpty() && repository_.isOpen()) {
         QString error;
         const aitrain::DatasetRecord dataset = repository_.datasetByRootPath(datasetPath, &error);
+        datasetReady = datasetReady
+            || (dataset.rootPath == datasetPath
+                && dataset.format == datasetFormat
+                && dataset.validationStatus == QStringLiteral("valid"));
         const aitrain::DatasetSnapshotRecord snapshot = repository_.latestDatasetSnapshot(dataset.id, &error);
         snapshotManifestPath = snapshot.manifestPath;
         snapshotText = snapshot.id > 0
@@ -497,6 +502,17 @@ void MainWindow::updateTrainingSelectionSummary()
             ? trainingBackendCombo_->currentData().toString()
             : defaultBackendForTask(currentTaskType());
         const QString model = modelPresetCombo_ ? modelPresetCombo_->currentText().trimmed() : QString();
+        const QJsonObject preflight = trainingPreflightReport(
+            datasetPath,
+            datasetFormat,
+            datasetReady,
+            snapshotManifestPath,
+            currentTaskType(),
+            backend,
+            model,
+            epochsEdit_ ? epochsEdit_->text().toInt() : 0,
+            batchEdit_ ? batchEdit_->text().toInt() : 0,
+            imageSizeEdit_ ? imageSizeEdit_->text().toInt() : 0);
         trainingRunSummaryLabel_->setText(uiText("运行摘要：%1 | 后端 %2 | 模型 %3 | epoch %4 / batch %5 / image %6")
             .arg(taskTypeLabel(currentTaskType()),
                 backend.isEmpty() ? uiText("未选择") : backend,
@@ -504,6 +520,7 @@ void MainWindow::updateTrainingSelectionSummary()
                 epochsEdit_ ? epochsEdit_->text() : QStringLiteral("-"),
                 batchEdit_ ? batchEdit_->text() : QStringLiteral("-"),
                 imageSizeEdit_ ? imageSizeEdit_->text() : QStringLiteral("-")));
+        trainingRunSummaryLabel_->setToolTip(trainingPreflightSummaryText(preflight));
     }
 }
 

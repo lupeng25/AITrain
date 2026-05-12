@@ -57,6 +57,18 @@ QString datasetFormatLabel(const QString& format);
 QString defaultBackendForTask(const QString& taskType);
 QString defaultModelForBackend(const QString& backend);
 QString trainingBackendDescription(const QString& backend);
+QJsonObject trainingPreflightReport(
+    const QString& datasetPath,
+    const QString& datasetFormat,
+    bool datasetReady,
+    const QString& datasetSnapshotManifest,
+    const QString& taskType,
+    const QString& backend,
+    const QString& modelPreset,
+    int epochs,
+    int batchSize,
+    int imageSize);
+QString trainingPreflightSummaryText(const QJsonObject& preflight);
 QString exportFormatLabel(const QString& format);
 QString defaultExportFileName(const QString& format);
 QString exportFileFilter(const QString& format);

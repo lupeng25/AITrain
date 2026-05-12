@@ -626,6 +626,153 @@ QString trainingBackendDescription(const QString& backend)
     return uiText("当前模型能力：通过 Worker 执行，产物、指标和失败原因会写入任务历史。");
 }
 
+namespace {
+QString expectedTrainingTaskForDatasetFormat(const QString& format)
+{
+    if (format == QStringLiteral("yolo_detection") || format == QStringLiteral("yolo_txt")) {
+        return QStringLiteral("detection");
+    }
+    if (format == QStringLiteral("yolo_segmentation")) {
+        return QStringLiteral("segmentation");
+    }
+    if (format == QStringLiteral("paddleocr_det")) {
+        return QStringLiteral("ocr_detection");
+    }
+    if (format == QStringLiteral("paddleocr_rec")) {
+        return QStringLiteral("ocr_recognition");
+    }
+    return {};
+}
+
+bool isTrainingBackendCompatible(const QString& format, const QString& backend)
+{
+    const QString normalized = backend.trimmed().toLower();
+    if (normalized == QStringLiteral("python_mock")) {
+        return true;
+    }
+    if (format == QStringLiteral("yolo_detection") || format == QStringLiteral("yolo_txt")) {
+        return normalized == QStringLiteral("ultralytics_yolo")
+            || normalized == QStringLiteral("ultralytics_yolo_detect")
+            || normalized == QStringLiteral("tiny_linear_detector");
+    }
+    if (format == QStringLiteral("yolo_segmentation")) {
+        return normalized == QStringLiteral("ultralytics_yolo_segment")
+            || normalized == QStringLiteral("tiny_linear_detector");
+    }
+    if (format == QStringLiteral("paddleocr_det")) {
+        return normalized == QStringLiteral("paddleocr_det_official")
+            || normalized == QStringLiteral("paddleocr_system_official");
+    }
+    if (format == QStringLiteral("paddleocr_rec")) {
+        return normalized == QStringLiteral("paddleocr_rec")
+            || normalized == QStringLiteral("paddleocr_rec_official")
+            || normalized == QStringLiteral("paddleocr_ppocrv4_rec")
+            || normalized == QStringLiteral("paddleocr_system_official");
+    }
+    return false;
+}
+} // namespace
+
+QJsonObject trainingPreflightReport(
+    const QString& datasetPath,
+    const QString& datasetFormat,
+    bool datasetReady,
+    const QString& datasetSnapshotManifest,
+    const QString& taskType,
+    const QString& backend,
+    const QString& modelPreset,
+    int epochs,
+    int batchSize,
+    int imageSize)
+{
+    QJsonArray blockers;
+    QJsonArray warnings;
+    QJsonArray nextActions;
+
+    if (datasetPath.trimmed().isEmpty()) {
+        blockers.append(QStringLiteral("dataset_missing"));
+    }
+    if (datasetFormat.trimmed().isEmpty()) {
+        blockers.append(QStringLiteral("dataset_format_missing"));
+    }
+    if (!datasetReady) {
+        blockers.append(QStringLiteral("dataset_not_validated"));
+        nextActions.append(QStringLiteral("validate_dataset"));
+        nextActions.append(QStringLiteral("run_dataset_quality_report"));
+    }
+
+    const QString expectedTask = expectedTrainingTaskForDatasetFormat(datasetFormat);
+    if (!expectedTask.isEmpty() && taskType != expectedTask) {
+        blockers.append(QStringLiteral("task_type_dataset_mismatch"));
+    }
+    if (!backend.isEmpty() && !isTrainingBackendCompatible(datasetFormat, backend)) {
+        blockers.append(QStringLiteral("backend_dataset_mismatch"));
+    }
+    if (epochs <= 0) {
+        blockers.append(QStringLiteral("epochs_invalid"));
+    }
+    if (batchSize <= 0) {
+        blockers.append(QStringLiteral("batch_size_invalid"));
+    }
+    if (imageSize <= 0) {
+        blockers.append(QStringLiteral("image_size_invalid"));
+    }
+    if (datasetSnapshotManifest.trimmed().isEmpty()) {
+        warnings.append(QStringLiteral("snapshot_missing_auto_create"));
+    }
+    if (backend == QStringLiteral("tiny_linear_detector") || backend == QStringLiteral("python_mock")) {
+        warnings.append(QStringLiteral("diagnostic_or_scaffold_backend"));
+    }
+    if (modelPreset.trimmed().isEmpty()) {
+        warnings.append(QStringLiteral("model_preset_missing"));
+    }
+    if (nextActions.isEmpty()) {
+        if (blockers.isEmpty()) {
+            nextActions.append(QStringLiteral("create_snapshot_if_missing"));
+            nextActions.append(QStringLiteral("start_worker_training"));
+        } else {
+            nextActions.append(QStringLiteral("fix_preflight_blockers"));
+        }
+    }
+
+    QJsonObject preflight;
+    preflight.insert(QStringLiteral("schemaVersion"), 1);
+    preflight.insert(QStringLiteral("kind"), QStringLiteral("training_preflight"));
+    preflight.insert(QStringLiteral("status"), blockers.isEmpty() ? QStringLiteral("ready") : QStringLiteral("blocked"));
+    preflight.insert(QStringLiteral("canStart"), blockers.isEmpty());
+    preflight.insert(QStringLiteral("datasetPath"), datasetPath);
+    preflight.insert(QStringLiteral("datasetFormat"), datasetFormat);
+    preflight.insert(QStringLiteral("datasetReady"), datasetReady);
+    preflight.insert(QStringLiteral("datasetSnapshotManifest"), datasetSnapshotManifest);
+    preflight.insert(QStringLiteral("taskType"), taskType);
+    preflight.insert(QStringLiteral("expectedTaskType"), expectedTask);
+    preflight.insert(QStringLiteral("trainingBackend"), backend);
+    preflight.insert(QStringLiteral("modelPreset"), modelPreset);
+    preflight.insert(QStringLiteral("epochs"), epochs);
+    preflight.insert(QStringLiteral("batchSize"), batchSize);
+    preflight.insert(QStringLiteral("imageSize"), imageSize);
+    preflight.insert(QStringLiteral("blockers"), blockers);
+    preflight.insert(QStringLiteral("warnings"), warnings);
+    preflight.insert(QStringLiteral("nextActions"), nextActions);
+    return preflight;
+}
+
+QString trainingPreflightSummaryText(const QJsonObject& preflight)
+{
+    const QString status = preflight.value(QStringLiteral("status")).toString(QStringLiteral("blocked"));
+    const int blockerCount = preflight.value(QStringLiteral("blockers")).toArray().size();
+    const int warningCount = preflight.value(QStringLiteral("warnings")).toArray().size();
+    QStringList parts;
+    parts.append(QStringLiteral("preflight %1").arg(status));
+    parts.append(QStringLiteral("blockers=%1").arg(blockerCount));
+    parts.append(QStringLiteral("warnings=%1").arg(warningCount));
+    const QString expectedTask = preflight.value(QStringLiteral("expectedTaskType")).toString();
+    if (!expectedTask.isEmpty() && expectedTask != preflight.value(QStringLiteral("taskType")).toString()) {
+        parts.append(QStringLiteral("expectedTask=%1").arg(expectedTask));
+    }
+    return parts.join(QStringLiteral(" | "));
+}
+
 QString exportFormatLabel(const QString& format)
 {
     if (format == QStringLiteral("onnx")) {

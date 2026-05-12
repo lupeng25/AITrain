@@ -293,6 +293,7 @@ install(FILES
     docs/external-acceptance-handoff.md
     docs/release-freeze-handoff.md
     docs/production-ocr-acceptance.md
+    docs/customer-ocr-validation.md
     docs/product-roadmap-local-training-platform.md
     docs/plugin-marketplace.md
     docs/plugin-package-format.md
@@ -325,6 +326,7 @@ install(FILES
     tools/run-production-ocr-rec-experiment.ps1
     tools/run-production-ocr-official-chain.ps1
     tools/production-ocr-acceptance.ps1
+    tools/customer-ocr-validation.ps1
     DESTINATION tools
 )
 

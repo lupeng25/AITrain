@@ -60,6 +60,119 @@ QJsonObject detectionBoxToJson(const DetectionBox& box)
     };
 }
 
+QJsonObject evaluationDecisionSummary(
+    const QString& taskType,
+    const QJsonObject& metrics,
+    const QJsonArray& errorSamples,
+    int sampleCount)
+{
+    QString primaryMetricName;
+    if (taskType == QStringLiteral("segmentation")) {
+        primaryMetricName = QStringLiteral("maskMap50");
+    } else if (taskType == QStringLiteral("ocr_recognition") || taskType == QStringLiteral("ocr")) {
+        primaryMetricName = QStringLiteral("accuracy");
+    } else {
+        primaryMetricName = QStringLiteral("mAP50");
+    }
+    const double primaryMetric = metrics.value(primaryMetricName).toDouble();
+    const bool hasSamples = sampleCount > 0;
+    const bool hasErrors = !errorSamples.isEmpty();
+
+    QJsonArray actions;
+    QString status;
+    if (!hasSamples) {
+        status = QStringLiteral("blocked");
+        actions.append(QStringLiteral("provide_evaluation_samples"));
+    } else if (hasErrors) {
+        status = QStringLiteral("needs_error_review");
+        actions.append(QStringLiteral("review_error_samples"));
+        actions.append(QStringLiteral("feed_errors_back_to_dataset_quality"));
+    } else {
+        status = QStringLiteral("accepted_for_local_smoke");
+        actions.append(QStringLiteral("run_benchmark"));
+        actions.append(QStringLiteral("generate_delivery_report"));
+    }
+
+    QJsonObject decision;
+    decision.insert(QStringLiteral("schemaVersion"), 1);
+    decision.insert(QStringLiteral("taskType"), taskType);
+    decision.insert(QStringLiteral("status"), status);
+    decision.insert(QStringLiteral("primaryMetric"), primaryMetricName);
+    decision.insert(QStringLiteral("primaryMetricValue"), primaryMetric);
+    decision.insert(QStringLiteral("sampleCount"), sampleCount);
+    decision.insert(QStringLiteral("errorSampleCount"), errorSamples.size());
+    decision.insert(QStringLiteral("recommendedActions"), actions);
+    return decision;
+}
+
+QJsonObject errorTaxonomyObject(
+    const QString& taskType,
+    const QJsonObject& metrics,
+    const QJsonArray& errorSamples,
+    const QJsonArray& lowConfidenceSamples = {})
+{
+    QJsonObject reasonCounts;
+    for (const QJsonValue& value : errorSamples) {
+        const QJsonObject sample = value.toObject();
+        const QString reason = sample.value(QStringLiteral("reason")).toString(
+            taskType == QStringLiteral("ocr_recognition") ? QStringLiteral("ocr_mismatch") : QStringLiteral("unknown"));
+        reasonCounts.insert(reason, reasonCounts.value(reason).toInt() + 1);
+    }
+
+    QJsonObject taxonomy;
+    taxonomy.insert(QStringLiteral("schemaVersion"), 1);
+    taxonomy.insert(QStringLiteral("taskType"), taskType);
+    taxonomy.insert(QStringLiteral("sampleErrorCount"), errorSamples.size());
+    taxonomy.insert(QStringLiteral("lowConfidenceCount"), lowConfidenceSamples.size());
+    taxonomy.insert(QStringLiteral("reasonCounts"), reasonCounts);
+    taxonomy.insert(QStringLiteral("falsePositiveCount"), metrics.value(QStringLiteral("fp")).toInt());
+    taxonomy.insert(QStringLiteral("falseNegativeCount"), metrics.value(QStringLiteral("fn")).toInt());
+    taxonomy.insert(QStringLiteral("truePositiveCount"), metrics.value(QStringLiteral("tp")).toInt());
+    return taxonomy;
+}
+
+QString jsonValueText(const QJsonValue& value)
+{
+    if (value.isDouble()) {
+        return QString::number(value.toDouble(), 'g', 12);
+    }
+    if (value.isBool()) {
+        return value.toBool() ? QStringLiteral("true") : QStringLiteral("false");
+    }
+    if (value.isString()) {
+        return value.toString();
+    }
+    const QString compact = QString::fromUtf8(QJsonDocument(QJsonArray{value}).toJson(QJsonDocument::Compact));
+    return compact.mid(1, qMax(0, compact.size() - 2));
+}
+
+QString evaluationSummaryMarkdown(const QJsonObject& report)
+{
+    const QJsonObject decision = report.value(QStringLiteral("decisionSummary")).toObject();
+    const QJsonObject metrics = report.value(QStringLiteral("metrics")).toObject();
+    const QJsonObject taxonomy = report.value(QStringLiteral("errorTaxonomy")).toObject();
+
+    QString markdown;
+    markdown += QStringLiteral("# Evaluation Summary\n\n");
+    markdown += QStringLiteral("- Task type: %1\n").arg(report.value(QStringLiteral("taskType")).toString());
+    markdown += QStringLiteral("- Status: %1\n").arg(decision.value(QStringLiteral("status")).toString());
+    markdown += QStringLiteral("- Primary metric: %1=%2\n")
+        .arg(decision.value(QStringLiteral("primaryMetric")).toString())
+        .arg(decision.value(QStringLiteral("primaryMetricValue")).toDouble(), 0, 'f', 6);
+    markdown += QStringLiteral("- Samples: %1\n").arg(report.value(QStringLiteral("sampleCount")).toInt());
+    markdown += QStringLiteral("- Error samples: %1\n\n").arg(decision.value(QStringLiteral("errorSampleCount")).toInt());
+    markdown += QStringLiteral("## Metrics\n\n");
+    for (auto it = metrics.constBegin(); it != metrics.constEnd(); ++it) {
+        markdown += QStringLiteral("- %1: %2\n").arg(it.key(), jsonValueText(it.value()));
+    }
+    markdown += QStringLiteral("\n## Error Taxonomy\n\n");
+    markdown += QStringLiteral("- False positives: %1\n").arg(taxonomy.value(QStringLiteral("falsePositiveCount")).toInt());
+    markdown += QStringLiteral("- False negatives: %1\n").arg(taxonomy.value(QStringLiteral("falseNegativeCount")).toInt());
+    markdown += QStringLiteral("- Low confidence samples: %1\n").arg(taxonomy.value(QStringLiteral("lowConfidenceCount")).toInt());
+    markdown += QStringLiteral("\nThis summary is generated from local evaluation artifacts. Inspect the JSON report for full per-sample details.\n");
+    return markdown;
+}
+
 bool detectionSplitExists(const QString& datasetPath, const QString& split)
 {
     const QDir root(datasetPath);
@@ -658,6 +771,8 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         report.insert(QStringLiteral("errorSamples"), errorSamples);
         report.insert(QStringLiteral("lowConfidenceSamples"), lowConfidenceSamples);
         report.insert(QStringLiteral("sampleCount"), dataset.size());
+        report.insert(QStringLiteral("decisionSummary"), evaluationDecisionSummary(QStringLiteral("detection"), metrics, errorSamples, dataset.size()));
+        report.insert(QStringLiteral("errorTaxonomy"), errorTaxonomyObject(QStringLiteral("detection"), metrics, errorSamples, lowConfidenceSamples));
         report.insert(QStringLiteral("parameters"), QJsonObject{
             {QStringLiteral("iouThreshold"), matchIouThreshold},
             {QStringLiteral("confidenceThreshold"), inferenceOptions.confidenceThreshold},
@@ -671,6 +786,7 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         const QString perClassPath = outputDir.filePath(QStringLiteral("per_class_metrics.csv"));
         const QString errorPath = outputDir.filePath(QStringLiteral("error_samples.json"));
         const QString confusionPath = outputDir.filePath(QStringLiteral("confusion_matrix.csv"));
+        const QString summaryPath = outputDir.filePath(QStringLiteral("evaluation_summary.md"));
         if (!writeTextFile(perClassPath, perClassMetricsCsv(classNames, classStats), &error)) {
             return failedResult(error);
         }
@@ -685,6 +801,10 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         report.insert(QStringLiteral("errorSamplesPath"), errorPath);
         report.insert(QStringLiteral("confusionMatrixPath"), confusionPath);
         report.insert(QStringLiteral("overlayDir"), outputDir.filePath(QStringLiteral("overlays")));
+        report.insert(QStringLiteral("evaluationSummaryPath"), summaryPath);
+        if (!writeTextFile(summaryPath, evaluationSummaryMarkdown(report), &error)) {
+            return failedResult(error);
+        }
         if (!writeJsonFile(reportPath, report, &error)) {
             return failedResult(error);
         }
@@ -948,6 +1068,8 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         report.insert(QStringLiteral("samples"), sampleSummaries);
         report.insert(QStringLiteral("errorSamples"), errorSamples);
         report.insert(QStringLiteral("sampleCount"), dataset.size());
+        report.insert(QStringLiteral("decisionSummary"), evaluationDecisionSummary(QStringLiteral("segmentation"), metrics, errorSamples, dataset.size()));
+        report.insert(QStringLiteral("errorTaxonomy"), errorTaxonomyObject(QStringLiteral("segmentation"), metrics, errorSamples));
         report.insert(QStringLiteral("parameters"), QJsonObject{
             {QStringLiteral("iouThreshold"), matchIouThreshold},
             {QStringLiteral("confidenceThreshold"), inferenceOptions.confidenceThreshold},
@@ -960,6 +1082,7 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         const QString perClassPath = outputDir.filePath(QStringLiteral("per_class_metrics.csv"));
         const QString errorPath = outputDir.filePath(QStringLiteral("error_samples.json"));
         const QString confusionPath = outputDir.filePath(QStringLiteral("confusion_matrix.csv"));
+        const QString summaryPath = outputDir.filePath(QStringLiteral("evaluation_summary.md"));
         if (!writeTextFile(perClassPath, segmentationPerClassMetricsCsv(classNames, classStats, classMaskIouSums, classMaskIouCounts), &error)) {
             return failedResult(error);
         }
@@ -974,6 +1097,10 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         report.insert(QStringLiteral("errorSamplesPath"), errorPath);
         report.insert(QStringLiteral("confusionMatrixPath"), confusionPath);
         report.insert(QStringLiteral("overlayDir"), outputDir.filePath(QStringLiteral("overlays")));
+        report.insert(QStringLiteral("evaluationSummaryPath"), summaryPath);
+        if (!writeTextFile(summaryPath, evaluationSummaryMarkdown(report), &error)) {
+            return failedResult(error);
+        }
         if (!writeJsonFile(reportPath, report, &error)) {
             return failedResult(error);
         }
@@ -1107,16 +1234,23 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         report.insert(QStringLiteral("samples"), sampleSummaries);
         report.insert(QStringLiteral("errorSamples"), errorSamples);
         report.insert(QStringLiteral("sampleCount"), dataset.size());
+        report.insert(QStringLiteral("decisionSummary"), evaluationDecisionSummary(QStringLiteral("ocr_recognition"), metrics, errorSamples, dataset.size()));
+        report.insert(QStringLiteral("errorTaxonomy"), errorTaxonomyObject(QStringLiteral("ocr_recognition"), metrics, errorSamples));
         report.insert(QStringLiteral("limitations"), QStringLiteral("Phase 39A OCR evaluation uses exact-match accuracy, CER, and WER from OCR Rec ONNX predictions."));
 
         const QString reportPath = outputDir.filePath(QStringLiteral("evaluation_report.json"));
         const QString errorPath = outputDir.filePath(QStringLiteral("error_samples.json"));
+        const QString summaryPath = outputDir.filePath(QStringLiteral("evaluation_summary.md"));
         if (!writeJsonFile(errorPath, QJsonObject{{QStringLiteral("samples"), errorSamples}}, &error)) {
             return failedResult(error);
         }
         report.insert(QStringLiteral("reportPath"), reportPath);
         report.insert(QStringLiteral("errorSamplesPath"), errorPath);
         report.insert(QStringLiteral("overlayDir"), outputDir.filePath(QStringLiteral("overlays")));
+        report.insert(QStringLiteral("evaluationSummaryPath"), summaryPath);
+        if (!writeTextFile(summaryPath, evaluationSummaryMarkdown(report), &error)) {
+            return failedResult(error);
+        }
         if (!writeJsonFile(reportPath, report, &error)) {
             return failedResult(error);
         }
@@ -1155,13 +1289,21 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
     summary.insert(QStringLiteral("metrics"), metrics);
     summary.insert(QStringLiteral("errorSamples"), QJsonArray());
     summary.insert(QStringLiteral("lowConfidenceSamples"), QJsonArray());
+    summary.insert(QStringLiteral("sampleCount"), 0);
+    summary.insert(QStringLiteral("decisionSummary"), evaluationDecisionSummary(taskType, metrics, QJsonArray(), 0));
+    summary.insert(QStringLiteral("errorTaxonomy"), errorTaxonomyObject(taskType, metrics, QJsonArray()));
 
     QString error;
     const QString reportPath = QDir(outputPath).filePath(QStringLiteral("evaluation_report.json"));
+    const QString summaryPath = QDir(outputPath).filePath(QStringLiteral("evaluation_summary.md"));
+    summary.insert(QStringLiteral("reportPath"), reportPath);
+    summary.insert(QStringLiteral("evaluationSummaryPath"), summaryPath);
+    if (!writeTextFile(summaryPath, evaluationSummaryMarkdown(summary), &error)) {
+        return failedResult(error);
+    }
     if (!writeJsonFile(reportPath, summary, &error)) {
         return failedResult(error);
     }
-    summary.insert(QStringLiteral("reportPath"), reportPath);
     return resultFromReport(reportPath, summary);
 }
 } // namespace aitrain

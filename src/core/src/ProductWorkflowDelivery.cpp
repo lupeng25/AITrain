@@ -96,6 +96,83 @@ QString htmlReport(const QJsonObject& context)
     html += QStringLiteral("</body></html>");
     return html;
 }
+
+QJsonObject deliveryManifestObject(const QJsonObject& context, const QJsonArray& inventory)
+{
+    QJsonArray checks;
+    QJsonArray failures;
+    const auto addCheck = [&checks, &failures](const QString& name, bool passed, const QString& message) {
+        QJsonObject check;
+        check.insert(QStringLiteral("name"), name);
+        check.insert(QStringLiteral("passed"), passed);
+        check.insert(QStringLiteral("message"), message);
+        checks.append(check);
+        if (!passed) {
+            failures.append(check);
+        }
+    };
+
+    bool hasModel = false;
+    bool hasEvaluation = false;
+    bool hasBenchmark = false;
+    bool hasForbiddenPath = false;
+    QString forbiddenPath;
+    for (const QJsonValue& value : inventory) {
+        const QJsonObject item = value.toObject();
+        const QString kind = item.value(QStringLiteral("kind")).toString();
+        const QString path = item.value(QStringLiteral("path")).toString();
+        hasModel = hasModel || kind == QStringLiteral("model");
+        hasEvaluation = hasEvaluation || kind == QStringLiteral("evaluation_report");
+        hasBenchmark = hasBenchmark || kind == QStringLiteral("benchmark_report");
+        const QString lowerPath = QDir::fromNativeSeparators(path).toLower();
+        if (lowerPath.contains(QStringLiteral("/.deps/"))
+            || lowerPath.contains(QStringLiteral("private-key"))
+            || lowerPath.contains(QStringLiteral("license-private-key"))) {
+            hasForbiddenPath = true;
+            forbiddenPath = path;
+        }
+    }
+
+    addCheck(QStringLiteral("model_artifact_present"), hasModel, hasModel
+        ? QStringLiteral("Selected model artifact is present.")
+        : QStringLiteral("No model artifact was attached."));
+    addCheck(QStringLiteral("evaluation_report_present"), hasEvaluation, hasEvaluation
+        ? QStringLiteral("Evaluation report is attached.")
+        : QStringLiteral("Evaluation report is missing; delivery remains review-only."));
+    addCheck(QStringLiteral("benchmark_report_present"), hasBenchmark, hasBenchmark
+        ? QStringLiteral("Benchmark report is attached.")
+        : QStringLiteral("Benchmark report is missing; runtime acceptance remains unproven."));
+    addCheck(QStringLiteral("forbidden_content_absent"), !hasForbiddenPath, hasForbiddenPath
+        ? QStringLiteral("Forbidden path appears in inventory: %1").arg(forbiddenPath)
+        : QStringLiteral("No .deps or private-key paths were found in inventory."));
+
+    QJsonObject reproducibility;
+    reproducibility.insert(QStringLiteral("sourceTaskId"), context.value(QStringLiteral("sourceTaskId")).toString());
+    reproducibility.insert(QStringLiteral("datasetSnapshotId"), context.value(QStringLiteral("datasetSnapshotId")).toInt());
+    reproducibility.insert(QStringLiteral("datasetSnapshotHash"), context.value(QStringLiteral("datasetSnapshotHash")).toString());
+    reproducibility.insert(QStringLiteral("datasetSnapshotManifest"), context.value(QStringLiteral("datasetSnapshotManifest")).toString());
+    reproducibility.insert(QStringLiteral("trainingBackend"), context.value(QStringLiteral("trainingBackend")).toString());
+    reproducibility.insert(QStringLiteral("modelPreset"), context.value(QStringLiteral("modelPreset")).toString());
+
+    QJsonObject manifest;
+    manifest.insert(QStringLiteral("schemaVersion"), 1);
+    manifest.insert(QStringLiteral("kind"), QStringLiteral("delivery_manifest"));
+    manifest.insert(QStringLiteral("createdAt"), nowIso());
+    manifest.insert(QStringLiteral("projectName"), context.value(QStringLiteral("projectName")).toString());
+    manifest.insert(QStringLiteral("modelPath"), context.value(QStringLiteral("modelPath")).toString());
+    manifest.insert(QStringLiteral("datasetPath"), context.value(QStringLiteral("datasetPath")).toString());
+    manifest.insert(QStringLiteral("datasetFormat"), context.value(QStringLiteral("datasetFormat")).toString());
+    manifest.insert(QStringLiteral("taskType"), context.value(QStringLiteral("taskType")).toString());
+    manifest.insert(QStringLiteral("artifactCount"), inventory.size());
+    manifest.insert(QStringLiteral("inventory"), inventory);
+    manifest.insert(QStringLiteral("reproducibility"), reproducibility);
+    manifest.insert(QStringLiteral("checks"), checks);
+    manifest.insert(QStringLiteral("failureCount"), failures.size());
+    manifest.insert(QStringLiteral("failures"), failures);
+    manifest.insert(QStringLiteral("packageStatus"), failures.isEmpty() ? QStringLiteral("ready_for_handoff_review") : QStringLiteral("blocked"));
+    manifest.insert(QStringLiteral("note"), QStringLiteral("Manifest is an offline handoff index. It does not copy artifacts or certify customer acceptance."));
+    return manifest;
+}
 } // namespace
 WorkflowResult generateTrainingDeliveryReport(const QString& outputPath, const QJsonObject& context)
 {
@@ -144,6 +221,8 @@ WorkflowResult generateTrainingDeliveryReport(const QString& outputPath, const Q
     reportContext.insert(QStringLiteral("benchmarkSummary"), benchmarkSummary);
     reportContext.insert(QStringLiteral("limitations"), limitations);
     reportContext.insert(QStringLiteral("inventory"), inventory);
+    QJsonObject deliveryManifest = deliveryManifestObject(reportContext, inventory);
+    reportContext.insert(QStringLiteral("packageStatus"), deliveryManifest.value(QStringLiteral("packageStatus")).toString());
 
     QJsonObject modelCard;
     modelCard.insert(QStringLiteral("schemaVersion"), 1);
@@ -166,10 +245,14 @@ WorkflowResult generateTrainingDeliveryReport(const QString& outputPath, const Q
     modelCard.insert(QStringLiteral("benchmarkSummary"), benchmarkSummary);
     modelCard.insert(QStringLiteral("inventory"), inventory);
     modelCard.insert(QStringLiteral("limitations"), limitations);
+    modelCard.insert(QStringLiteral("packageStatus"), reportContext.value(QStringLiteral("packageStatus")).toString());
 
     QString error;
     const QString modelCardPath = QDir(outputPath).filePath(QStringLiteral("model_card.json"));
     const QString inventoryPath = QDir(outputPath).filePath(QStringLiteral("delivery_artifact_inventory.json"));
+    const QString manifestPath = QDir(outputPath).filePath(QStringLiteral("delivery_manifest.json"));
+    deliveryManifest.insert(QStringLiteral("manifestPath"), manifestPath);
+    modelCard.insert(QStringLiteral("deliveryManifestPath"), manifestPath);
     if (!writeJsonFile(modelCardPath, modelCard, &error)) {
         return failedResult(error);
     }
@@ -180,8 +263,13 @@ WorkflowResult generateTrainingDeliveryReport(const QString& outputPath, const Q
             {QStringLiteral("items"), inventory}}, &error)) {
         return failedResult(error);
     }
+    if (!writeJsonFile(manifestPath, deliveryManifest, &error)) {
+        return failedResult(error);
+    }
     reportContext.insert(QStringLiteral("modelCardPath"), modelCardPath);
     reportContext.insert(QStringLiteral("artifactInventoryPath"), inventoryPath);
+    reportContext.insert(QStringLiteral("deliveryManifestPath"), manifestPath);
+    reportContext.insert(QStringLiteral("deliveryManifest"), deliveryManifest);
     reportContext.insert(QStringLiteral("artifactCount"), inventory.size());
 
     const QString htmlPath = QDir(outputPath).filePath(QStringLiteral("training_delivery_report.html"));

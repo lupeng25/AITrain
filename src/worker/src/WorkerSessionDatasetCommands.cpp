@@ -216,7 +216,8 @@ void WorkerSession::curateDataset(const QJsonObject& payload)
              qMakePair(QStringLiteral("xanylabeling_fix_list"), QStringLiteral("xAnyLabelingFixListPath")),
              qMakePair(QStringLiteral("xanylabeling_fix_manifest"), QStringLiteral("xAnyLabelingFixManifestPath")),
              qMakePair(QStringLiteral("dataset_rework_sample_set"), QStringLiteral("reworkSampleSetPath")),
-             qMakePair(QStringLiteral("prelabel_candidates"), QStringLiteral("prelabelCandidatesPath"))}) {
+             qMakePair(QStringLiteral("prelabel_candidates"), QStringLiteral("prelabelCandidatesPath")),
+             qMakePair(QStringLiteral("dataset_training_readiness"), QStringLiteral("trainingReadinessPath"))}) {
         const QString path = result.payload.value(item.second).toString();
         if (!path.isEmpty()) {
             QJsonObject extraArtifact;
