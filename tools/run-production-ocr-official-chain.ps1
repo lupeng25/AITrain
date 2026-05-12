@@ -15,6 +15,9 @@ param(
     [int]$RecEvalEverySteps = 1000000,
     [int]$RecSubsetTrain = 256,
     [int]$RecSubsetVal = 64,
+    [string]$RecOfficialConfig = "",
+    [string]$RecDictionaryFile = "dict.txt",
+    [string]$RecPretrainedModel = "",
     [switch]$UseGpu,
     [switch]$UseRecCpuSubset,
     [switch]$SkipDataPrep,
@@ -222,12 +225,18 @@ $recRequest = [ordered]@{
         useGpu = [bool]$UseGpu
         trainLabelFile = $recLabels.train
         valLabelFile = $recLabels.val
-        dictionaryFile = "dict.txt"
+        dictionaryFile = $RecDictionaryFile
         runInferenceAfterExport = $true
         inferenceImage = "images/test/totaltext_002700_img589_0.jpg"
         evalEverySteps = $RecEvalEverySteps
         acceptanceNote = $(if ($UseRecCpuSubset) { "CPU subset run from public Total-Text crops; not a production accuracy pass." } else { "Full public Total-Text Rec run; still not customer-domain production evidence." })
     }
+}
+if (-not [string]::IsNullOrWhiteSpace($RecOfficialConfig)) {
+    $recRequest.parameters.officialConfig = $RecOfficialConfig
+}
+if (-not [string]::IsNullOrWhiteSpace($RecPretrainedModel)) {
+    $recRequest.parameters.pretrainedModel = $RecPretrainedModel
 }
 Write-JsonFile -Path $recRequestPath -Value $recRequest
 

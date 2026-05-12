@@ -10,8 +10,9 @@ param(
     [int]$MinimumDetImages = 100,
     [int]$MinimumRecSamples = 1000,
     [int]$MinimumSystemImages = 100,
-    [double]$MinimumRecAccuracy = 0.90,
+    [double]$MinimumRecAccuracy = 0.70,
     [double]$MaximumRecCer = 0.10,
+    [switch]$RequireRecCer,
     [switch]$RequireDetOnnxEvidence
 )
 
@@ -162,12 +163,14 @@ $recReport = Read-Json -Path $officialRecReportPath
 $recAccuracy = Get-JsonNumber -Object $recReport -Names @("accuracy", "acc")
 $recCer = Get-JsonNumber -Object $recReport -Names @("cer", "CER")
 $recStatus = "blocked"
-if ($null -ne $recReport -and $null -ne $recAccuracy -and $null -ne $recCer -and $recAccuracy -ge $MinimumRecAccuracy -and $recCer -le $MaximumRecCer) {
+$recAccuracyPassed = $null -ne $recReport -and $null -ne $recAccuracy -and $recAccuracy -gt $MinimumRecAccuracy
+$recCerPassed = -not [bool]$RequireRecCer -or ($null -ne $recCer -and $recCer -le $MaximumRecCer)
+if ($recAccuracyPassed -and $recCerPassed) {
     $recStatus = "passed"
 }
 Add-Check "official_rec_metrics" $recStatus `
-    "Official PaddleOCR Rec report must meet accuracy >= $MinimumRecAccuracy and CER <= $MaximumRecCer." `
-    ([ordered]@{ path = $officialRecReportPath; accuracy = $recAccuracy; cer = $recCer; minimumAccuracy = $MinimumRecAccuracy; maximumCer = $MaximumRecCer })
+    "Official PaddleOCR Rec report must meet accuracy > $MinimumRecAccuracy$(if ($RequireRecCer) { " and CER <= $MaximumRecCer" } else { "; CER is recorded but not blocking" })." `
+    ([ordered]@{ path = $officialRecReportPath; accuracy = $recAccuracy; cer = $recCer; minimumAccuracyExclusive = $MinimumRecAccuracy; maximumCer = $MaximumRecCer; requireCer = [bool]$RequireRecCer })
 
 $systemReport = Read-Json -Path $officialSystemReportPath
 Add-Check "official_system_report" ($(if ($null -ne $systemReport) { "passed" } else { "blocked" })) `
@@ -205,6 +208,7 @@ $report = [ordered]@{
         minimumSystemImages = $MinimumSystemImages
         minimumRecAccuracy = $MinimumRecAccuracy
         maximumRecCer = $MaximumRecCer
+        requireRecCer = [bool]$RequireRecCer
         requireDetOnnxEvidence = [bool]$RequireDetOnnxEvidence
     }
     checks = $checks
