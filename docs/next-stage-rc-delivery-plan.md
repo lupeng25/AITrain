@@ -7,7 +7,7 @@ This document is the execution plan for the stage after RTX 4090 D validation. I
 ## Summary
 
 - Goal: freeze the current RTX 4090 D validation result into a release-candidate baseline and prepare a traceable local handoff package. External clean-machine/package-root collection is deferred for this lane unless explicitly reopened.
-- Current baseline: RTX 4090 D validation is complete. TensorRT, Phase 45 YOLO11/YOLO12 matrix, Phase 47 PaddleOCR Det ONNX, and Production OCR acceptance all have passing evidence under `.deps\rtx4090-validation`. The current local RC handoff was refreshed from commit `74376c258d0f771e8a2ebd2d7092692e35ec8d03`.
+- Current baseline: RTX 4090 D validation is complete. TensorRT, Phase 45 YOLO11/YOLO12 matrix, Phase 47 PaddleOCR Det ONNX, and Production OCR acceptance all have passing evidence under `.deps\rtx4090-validation`. The current local RC handoff was refreshed from commit `6dac361b83de78f38853e0649fd00f1355b7ccd7`; after the offline-license public-key rebuild, the ZIP SHA256 is `206C10CDB291D8D9A0FA5B5E8B51D30F07CD22B695EE8206E41ED5D08BA70F03`.
 - Production OCR gate: the current default gate accepts Rec when `accuracy > 0.7`; CER is recorded but not blocking unless `-RequireRecCer` is used.
 - Artifact rule: do not commit `.deps`, build outputs, datasets, model weights, ONNX files, TensorRT engines, generated ZIP files, or other generated binaries.
 
