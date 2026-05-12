@@ -636,7 +636,10 @@ PluginMarketplaceReport PluginMarketplace::enablePlugin(const QString& id, const
     QDir().mkpath(activePluginDirectory_);
     for (InstalledPluginRecord& record : records) {
         if (record.id == id && record.enabled) {
-            disablePlugin(record.id);
+            const PluginMarketplaceReport disableReport = disablePlugin(record.id);
+            if (!disableReport.ok) {
+                return disableReport;
+            }
             record.enabled = false;
             record.activeFiles.clear();
         }
@@ -700,7 +703,17 @@ PluginMarketplaceReport PluginMarketplace::disablePlugin(const QString& id)
             continue;
         }
         for (const QString& activeFile : record.activeFiles) {
-            QFile::remove(activeFile);
+            if (!QFileInfo::exists(activeFile)) {
+                continue;
+            }
+            if (!QFile::remove(activeFile)) {
+                report.ok = false;
+                report.status = QStringLiteral("disable-failed");
+                report.message = QStringLiteral("Cannot remove active plugin file: %1. The DLL may still be loaded by the running application or blocked by file permissions.").arg(activeFile);
+                report.errors.append(report.message);
+                report.details.insert(QStringLiteral("activeFile"), activeFile);
+                return report;
+            }
         }
         record.enabled = false;
         record.activeFiles.clear();
@@ -725,7 +738,10 @@ PluginMarketplaceReport PluginMarketplace::disablePlugin(const QString& id)
 PluginMarketplaceReport PluginMarketplace::uninstallPlugin(const QString& id, const QString& version)
 {
     PluginMarketplaceReport report;
-    disablePlugin(id);
+    const PluginMarketplaceReport disableReport = disablePlugin(id);
+    if (!disableReport.ok) {
+        return disableReport;
+    }
     const QString installPath = packageInstallPath(id, version);
     QString error;
     if (!removeDirectorySafely(installPath, &error)) {

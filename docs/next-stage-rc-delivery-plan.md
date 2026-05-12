@@ -78,6 +78,7 @@ This document is the execution plan for the stage after RTX 4090 D validation. I
 - Phase 47 validates PaddleOCR Det ONNX conversion and C++ DB-style postprocess wiring, not PP-OCRv5 accuracy parity.
 - Phase 45 validates YOLO detection and segmentation wiring only. It does not add classification, pose, OBB, anomaly, YOLO-World, or YOLOE support.
 - Plugin marketplace v1 remains local/offline-first and unsigned unless a later phase explicitly adds publisher signature enforcement.
+- Marketplace disable/uninstall is state-safe when Windows keeps an active Qt plugin DLL locked: the GUI reports `disable-failed` and keeps the plugin enabled until the loader is released or the app is restarted.
 - External acceptance is deferred for this lane. Reopening it requires returned evidence before changing status to passed.
 
 ## Verification Commands

@@ -35,7 +35,8 @@ It records installed plugin id, version, enabled state, install path, source pat
 
 - One plugin id can have multiple installed versions, but only one enabled version.
 - Disable removes active DLL entries from `plugins/models` but keeps the installed package.
-- Uninstall removes only the marketplace install directory and state record.
+- If an active DLL is still loaded or blocked by file permissions, disable reports `disable-failed` and keeps the plugin enabled with `activeFiles` unchanged; close/restart the app or release the loader before retrying.
+- Uninstall first disables the plugin; if disable fails, uninstall stops and keeps the install directory plus state record.
 - User projects, datasets, model artifacts, training runs, and `.deps` environments are never removed by marketplace actions.
 - Incompatible packages are rejected before activation.
 

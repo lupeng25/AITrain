@@ -152,6 +152,63 @@ private slots:
         QCOMPARE(report.status, QStringLiteral("hash-mismatch"));
     }
 
+    void pluginMarketplaceKeepsStateWhenDisableCannotRemoveActiveFile()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        const QString marketplaceRoot = dir.filePath(QStringLiteral("marketplace"));
+        const QString activeDir = dir.filePath(QStringLiteral("plugins/models"));
+        const QString statePath = dir.filePath(QStringLiteral("plugin_marketplace_state.json"));
+        QVERIFY(QDir().mkpath(marketplaceRoot));
+        QVERIFY(QDir().mkpath(activeDir));
+
+        const QString blockedActivePath = QDir(activeDir).filePath(QStringLiteral("blocked-active-entry"));
+        QVERIFY(QDir().mkpath(blockedActivePath));
+
+        QJsonObject manifest;
+        manifest.insert(QStringLiteral("schemaVersion"), 1);
+        manifest.insert(QStringLiteral("id"), QStringLiteral("com.aitrain.plugins.dataset_interop"));
+        manifest.insert(QStringLiteral("name"), QStringLiteral("Marketplace Fixture"));
+        manifest.insert(QStringLiteral("version"), QStringLiteral("0.1.4"));
+        manifest.insert(QStringLiteral("entrypoints"), QJsonObject{{QStringLiteral("qtModelPlugin"), QStringLiteral("payload/plugins/models/DatasetInteropPlugin.dll")}});
+
+        QJsonObject record;
+        record.insert(QStringLiteral("id"), QStringLiteral("com.aitrain.plugins.dataset_interop"));
+        record.insert(QStringLiteral("name"), QStringLiteral("Marketplace Fixture"));
+        record.insert(QStringLiteral("version"), QStringLiteral("0.1.4"));
+        record.insert(QStringLiteral("enabled"), true);
+        record.insert(QStringLiteral("installPath"), QDir(marketplaceRoot).filePath(QStringLiteral("com.aitrain.plugins.dataset_interop/0.1.4")));
+        record.insert(QStringLiteral("sourcePath"), QStringLiteral("fixture"));
+        record.insert(QStringLiteral("installedAt"), QStringLiteral("2026-05-12T00:00:00.000Z"));
+        record.insert(QStringLiteral("verificationStatus"), QStringLiteral("verified-local-unsigned"));
+        record.insert(QStringLiteral("message"), QStringLiteral("Plugin enabled."));
+        record.insert(QStringLiteral("activeFiles"), QJsonArray{blockedActivePath});
+        record.insert(QStringLiteral("packageManifest"), manifest);
+
+        QFile stateFile(statePath);
+        QVERIFY(stateFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        stateFile.write(QJsonDocument(QJsonObject{
+            {QStringLiteral("schemaVersion"), 1},
+            {QStringLiteral("installed"), QJsonArray{record}},
+            {QStringLiteral("updatedAt"), QStringLiteral("2026-05-12T00:00:00.000Z")}
+        }).toJson(QJsonDocument::Indented));
+        stateFile.close();
+
+        aitrain::PluginMarketplace marketplace(marketplaceRoot, activeDir, statePath);
+        const aitrain::PluginMarketplaceReport report =
+            marketplace.disablePlugin(QStringLiteral("com.aitrain.plugins.dataset_interop"));
+        QVERIFY(!report.ok);
+        QCOMPARE(report.status, QStringLiteral("disable-failed"));
+        QVERIFY(report.errors.join(QStringLiteral("\n")).contains(blockedActivePath));
+
+        const QVector<aitrain::InstalledPluginRecord> installed = marketplace.installedPlugins();
+        QCOMPARE(installed.size(), 1);
+        QVERIFY(installed.first().enabled);
+        QCOMPARE(installed.first().activeFiles, QStringList{blockedActivePath});
+        QVERIFY(QFileInfo(blockedActivePath).isDir());
+    }
+
     void pluginMarketplaceInstallsZipPackage()
     {
         const QString pluginDll = builtPluginPath(QStringLiteral("DatasetInteropPlugin.dll"));
