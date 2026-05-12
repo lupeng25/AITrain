@@ -6,8 +6,8 @@ This document is the execution plan for the stage after RTX 4090 D validation. I
 
 ## Summary
 
-- Goal: freeze the current RTX 4090 D validation result into a release-candidate baseline, prepare a traceable handoff package, and collect clean-machine package acceptance evidence.
-- Current baseline: RTX 4090 D validation is complete. TensorRT, Phase 45 YOLO11/YOLO12 matrix, Phase 47 PaddleOCR Det ONNX, and Production OCR acceptance all have passing evidence under `.deps\rtx4090-validation`.
+- Goal: freeze the current RTX 4090 D validation result into a release-candidate baseline and prepare a traceable local handoff package. External clean-machine/package-root collection is deferred for this lane unless explicitly reopened.
+- Current baseline: RTX 4090 D validation is complete. TensorRT, Phase 45 YOLO11/YOLO12 matrix, Phase 47 PaddleOCR Det ONNX, and Production OCR acceptance all have passing evidence under `.deps\rtx4090-validation`. The current local RC handoff was refreshed from commit `74376c258d0f771e8a2ebd2d7092692e35ec8d03`.
 - Production OCR gate: the current default gate accepts Rec when `accuracy > 0.7`; CER is recorded but not blocking unless `-RequireRecCer` is used.
 - Artifact rule: do not commit `.deps`, build outputs, datasets, model weights, ONNX files, TensorRT engines, generated ZIP files, or other generated binaries.
 
@@ -29,22 +29,25 @@ This document is the execution plan for the stage after RTX 4090 D validation. I
    - Record the ZIP path, SHA256, commit HEAD, generation timestamp, and dirty-worktree flag from the generated manifest.
    - If the manifest reports a dirty worktree, resolve it before treating the package as a final RC handoff.
 
-4. Send the external acceptance bundle.
+4. Defer the external acceptance bundle for this lane.
    - Include the generated ZIP package.
    - Include `build-vscode\release-freeze-handoff\release_handoff_manifest.json`.
    - Include `build-vscode\release-freeze-handoff\release_handoff_summary.md`.
    - Include `docs\external-acceptance-handoff.md`.
    - Include the templates under `docs\acceptance-templates\`.
+   - Do not send the bundle unless a new priority explicitly reopens external collection.
 
-5. Collect clean-machine package acceptance.
+5. Defer clean-machine package acceptance for this lane.
    - On a clean Windows machine, unzip the package and run `.\tools\acceptance-smoke.ps1 -Package` from the package root.
    - Collect `acceptance_summary.json`, full console output, package layout evidence, and the filled `clean-windows-acceptance-result.md` template.
    - Mark clean-machine acceptance as passed only when the package-root summary is `passed`.
+   - Do not mark this passed without returned external evidence.
 
-6. Optionally repeat TensorRT acceptance.
+6. Defer optional package-root TensorRT acceptance for this lane.
    - On an RTX / SM 75+ machine, run `.\tools\acceptance-smoke.ps1 -TensorRT -WorkDir .deps\acceptance-tensorrt` from the package root.
    - Collect GPU model, driver, CUDA runtime, Worker self-check JSON, TensorRT console output, and the filled `tensorrt-acceptance-result.md` template.
    - Keep GTX 1060 / SM 61 results as `hardware-blocked`; they must not override the RTX 4090 D passing evidence.
+   - Do not mark this passed without returned external evidence.
 
 7. Update status after returned evidence is reviewed.
    - If all required external evidence passes, update `docs/harness/current-status.md` to mark the RC handoff and clean-machine package acceptance as passed.
@@ -64,8 +67,8 @@ This document is the execution plan for the stage after RTX 4090 D validation. I
   - commit HEAD
   - generation timestamp
   - dirty-worktree status
-- External clean-machine package acceptance returns `passed`.
-- Optional TensorRT rerun either returns `passed` on RTX / SM 75+ hardware or records a clear non-overriding blocker.
+- External clean-machine package acceptance is deferred and must not be marked `passed` without returned evidence.
+- Optional TensorRT rerun is deferred and must not be marked `passed` without returned package-root RTX / SM 75+ evidence.
 - No generated artifacts are added to source control.
 
 ## Risk Boundaries
@@ -75,6 +78,7 @@ This document is the execution plan for the stage after RTX 4090 D validation. I
 - Phase 47 validates PaddleOCR Det ONNX conversion and C++ DB-style postprocess wiring, not PP-OCRv5 accuracy parity.
 - Phase 45 validates YOLO detection and segmentation wiring only. It does not add classification, pose, OBB, anomaly, YOLO-World, or YOLOE support.
 - Plugin marketplace v1 remains local/offline-first and unsigned unless a later phase explicitly adds publisher signature enforcement.
+- External acceptance is deferred for this lane. Reopening it requires returned evidence before changing status to passed.
 
 ## Verification Commands
 
