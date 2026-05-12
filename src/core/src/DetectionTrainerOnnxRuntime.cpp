@@ -628,8 +628,11 @@ QVector<OcrDetPrediction> predictOcrDetOnnxRuntime(
             }
             return {};
         }
-        const int inputHeight = inputShape.at(2) > 0 ? static_cast<int>(inputShape.at(2)) : image.height();
-        const int inputWidth = inputShape.at(3) > 0 ? static_cast<int>(inputShape.at(3)) : image.width();
+        const auto alignToStride = [](int value) {
+            return qMax(32, ((value + 31) / 32) * 32);
+        };
+        const int inputHeight = inputShape.at(2) > 0 ? static_cast<int>(inputShape.at(2)) : alignToStride(image.height());
+        const int inputWidth = inputShape.at(3) > 0 ? static_cast<int>(inputShape.at(3)) : alignToStride(image.width());
         if (inputHeight <= 0 || inputWidth <= 0) {
             if (error) {
                 *error = QStringLiteral("OCR Det DB ONNX input dimensions are invalid");

@@ -14,6 +14,8 @@ $ErrorActionPreference = "Stop"
 
 $script:Root = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $PSScriptRoot) "."))
 $script:StartedAt = [DateTime]::UtcNow
+. (Join-Path $PSScriptRoot "toolchain-env.ps1")
+Set-AITrainQtRuntimeEnvironment
 
 function Write-Step {
     param([string]$Message)
@@ -63,19 +65,24 @@ function Invoke-Checked {
 
     Write-Step ("{0} {1}" -f $FilePath, ($Arguments -join " "))
     Push-Location $WorkingDirectory
+    $previousErrorActionPreference = $ErrorActionPreference
     try {
+        $ErrorActionPreference = "Continue"
         if ([System.IO.Path]::GetExtension($FilePath) -ieq ".ps1") {
             $commandOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $FilePath @Arguments 2>&1
         } else {
             $commandOutput = & $FilePath @Arguments 2>&1
         }
+        $exitCode = $LASTEXITCODE
+        $ErrorActionPreference = $previousErrorActionPreference
         foreach ($line in $commandOutput) {
             Write-Host $line
         }
-        if ($LASTEXITCODE -ne 0) {
-            throw "Command failed with exit code $LASTEXITCODE`: $FilePath $($Arguments -join ' ')"
+        if ($exitCode -ne 0) {
+            throw "Command failed with exit code $exitCode`: $FilePath $($Arguments -join ' ')"
         }
     } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
         Pop-Location
     }
 }

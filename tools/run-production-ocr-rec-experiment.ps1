@@ -77,10 +77,16 @@ function Write-SubsetLabel {
     if (!(Test-Path -LiteralPath $Source)) {
         throw "Missing label source: $Source"
     }
-    Get-Content -LiteralPath $Source -Encoding UTF8 -TotalCount $Limit |
-        Set-Content -LiteralPath $Destination -Encoding UTF8
+    if ($Limit -le 0) {
+        Get-Content -LiteralPath $Source -Encoding UTF8 |
+            Set-Content -LiteralPath $Destination -Encoding UTF8
+    } else {
+        Get-Content -LiteralPath $Source -Encoding UTF8 -TotalCount $Limit |
+            Set-Content -LiteralPath $Destination -Encoding UTF8
+    }
     $count = @(Get-Content -LiteralPath $Destination -Encoding UTF8 | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
-    if ($count -lt [Math]::Min($Limit, 1)) {
+    $minimumCount = if ($Limit -le 0) { 1 } else { [Math]::Min($Limit, 1) }
+    if ($count -lt $minimumCount) {
         throw "Subset label file is empty: $Destination"
     }
     return $count

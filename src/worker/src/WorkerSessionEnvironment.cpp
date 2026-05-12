@@ -70,7 +70,9 @@ void WorkerSession::runEnvironmentCheck(const QJsonObject& payload)
     result.insert(QStringLiteral("checks"), checks);
     result.insert(QStringLiteral("profiles"), profiles);
 
-    const QString reportPath = QDir::current().filePath(QStringLiteral("environment_profiles_report.json"));
+    const QString configuredReportDir = QString::fromLocal8Bit(qgetenv("AITRAIN_ENVIRONMENT_REPORT_DIR")).trimmed();
+    const QString reportDir = configuredReportDir.isEmpty() ? QDir::tempPath() : configuredReportDir;
+    const QString reportPath = QDir(reportDir).filePath(QStringLiteral("environment_profiles_report.json"));
     QString reportError;
     if (writeJsonFile(reportPath, result, &reportError)) {
         QJsonObject artifact;

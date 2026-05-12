@@ -215,6 +215,7 @@ def build_config(
             "distributed": False,
             "d2s_train_image_shape": [3, image_size, image_size],
             "cal_metric_during_train": bool_param(parameters, "calMetricDuringTrain", False),
+            "export_with_pir": bool_param(parameters, "exportWithPir", True),
         }
     )
 

@@ -16,6 +16,10 @@ function Resolve-RepoPath([string]$Path) {
 
 $pythonDirFull = Resolve-RepoPath $PythonDir
 $pythonExe = Join-Path $pythonDirFull "python.exe"
+$venvPython = Join-Path $pythonDirFull "Scripts\python.exe"
+if (Test-Path $venvPython) {
+    $pythonExe = $venvPython
+}
 $repoFull = Resolve-RepoPath $PaddleOcrRepo
 $workFull = Resolve-RepoPath $WorkDir
 New-Item -ItemType Directory -Force $workFull | Out-Null

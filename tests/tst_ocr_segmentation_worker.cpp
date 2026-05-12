@@ -739,6 +739,10 @@ private slots:
 
     void workerEnvironmentCheckReportsPythonTrainerBackends()
     {
+        QTemporaryDir reportDir;
+        QVERIFY(reportDir.isValid());
+        ScopedEnvVar reportDirEnv("AITRAIN_ENVIRONMENT_REPORT_DIR", reportDir.path().toLocal8Bit());
+
         WorkerClient client;
         QVector<QPair<QString, QJsonObject>> messages;
         bool finished = false;

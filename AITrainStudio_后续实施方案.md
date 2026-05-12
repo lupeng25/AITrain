@@ -810,3 +810,14 @@ git diff --check
 - 复制机器码到生成器，签发注册码，粘贴后进入主界面。
 - 切换语言并重启后，注册窗口、侧边栏、顶部状态区、主要页面控件、表格空状态和动态摘要切换到对应语言。
 - 确认训练、导出、推理入口在注册后行为不变。
+
+## RTX 4090 验证同步更新（2026-05-12）
+
+以下内容覆盖本文中较早的 GTX 1060 / SM 61、TensorRT external pending、Phase 47 conversion-blocked 等历史描述：
+
+- 当前验证机为 RTX 4090 D；NVIDIA Driver `591.86`、CUDA Runtime `13.1`、`nvcc 12.6` 已记录在 `.deps/rtx4090-validation/00-env`。
+- `tools\harness-check.ps1`、`tools\local-rc-closeout.ps1`、本地包验收、CPU training smoke、TensorRT smoke、Phase 45 YOLO11/YOLO12 矩阵均已通过。
+- TensorRT 已在 RTX 4090 D 上通过 `tools\acceptance-smoke.ps1 -TensorRT -WorkDir .deps\rtx4090-validation\acceptance-tensorrt`；旧 GTX 1060 / SM 61 只保留为历史硬件不支持说明，不再作为当前验收阻塞。
+- Phase 47 PaddleOCR Det ONNX 已通过：使用 Paddle 2.6 old-IR export + Paddle2ONNX 生成 ONNX，并由 `aitrain_worker.exe --ocr-det-onnx-smoke` 产出 C++ predictions 与 overlay，证据在 `.deps/rtx4090-validation/phase47-paddleocr-det-onnx`。
+- Production OCR 数据和官方 Det/Rec/System evidence 已生成；按当前验收口径，暂不考虑 Rec accuracy 精度。原始 `accuracy >= 0.90` / `CER <= 0.10` 门槛未被降低，若后续重新启用生产质量 gate，Rec 指标仍需专项提升。
+- 汇总索引见 `.deps/rtx4090-validation/validation-index.md`。`.deps` 下依赖、数据集、模型权重、ONNX、TensorRT engine、日志和报告均为本地证据产物，不纳入版本控制。

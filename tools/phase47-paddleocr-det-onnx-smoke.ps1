@@ -57,8 +57,10 @@ function Invoke-Checked {
     Write-Step ("{0} {1}" -f $FilePath, ($Arguments -join " "))
     Push-Location $WorkingDirectory
     $previousErrorActionPreference = $ErrorActionPreference
+    $previousPythonNoUserSite = $env:PYTHONNOUSERSITE
     try {
         $ErrorActionPreference = "Continue"
+        $env:PYTHONNOUSERSITE = "1"
         if ([System.IO.Path]::GetExtension($FilePath) -ieq ".ps1") {
             $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $FilePath @Arguments 2>&1
         } else {
@@ -73,6 +75,7 @@ function Invoke-Checked {
         return @($output)
     } finally {
         $ErrorActionPreference = $previousErrorActionPreference
+        $env:PYTHONNOUSERSITE = $previousPythonNoUserSite
         Pop-Location
     }
 }
@@ -86,8 +89,10 @@ function Invoke-Probe {
 
     Push-Location $WorkingDirectory
     $previousErrorActionPreference = $ErrorActionPreference
+    $previousPythonNoUserSite = $env:PYTHONNOUSERSITE
     try {
         $ErrorActionPreference = "Continue"
+        $env:PYTHONNOUSERSITE = "1"
         if ([System.IO.Path]::GetExtension($FilePath) -ieq ".ps1") {
             $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $FilePath @Arguments 2>&1
         } else {
@@ -99,6 +104,7 @@ function Invoke-Probe {
         }
     } finally {
         $ErrorActionPreference = $previousErrorActionPreference
+        $env:PYTHONNOUSERSITE = $previousPythonNoUserSite
         Pop-Location
     }
 }
@@ -140,11 +146,11 @@ function Ensure-EmbeddedPython {
     New-Item -ItemType Directory -Force (Split-Path -Parent $ZipPath) | Out-Null
     if (!(Test-Path -LiteralPath $ZipPath)) {
         Write-Step "download Python 3.12 embeddable runtime"
-        Invoke-Checked -FilePath "curl.exe" -Arguments @("-L", "--fail", "-o", $ZipPath, $DownloadUrl)
+        $null = Invoke-Checked -FilePath "curl.exe" -Arguments @("-L", "--fail", "-sS", "-o", $ZipPath, $DownloadUrl)
     }
 
     New-Item -ItemType Directory -Force $PythonDirPath | Out-Null
-    Expand-Archive -Path $ZipPath -DestinationPath $PythonDirPath -Force
+    $null = Expand-Archive -Path $ZipPath -DestinationPath $PythonDirPath -Force
     $pth = Get-ChildItem -LiteralPath $PythonDirPath -Filter "python*._pth" | Select-Object -First 1
     if ($null -ne $pth) {
         (Get-Content -LiteralPath $pth.FullName) -replace "#import site", "import site" |
@@ -417,7 +423,12 @@ function Invoke-CtestForWorkDir {
 
 $work = Resolve-RepoPath $WorkDir
 $phase31Root = Resolve-RepoPath $Phase31WorkDir
-$pythonExe = Join-Path (Resolve-RepoPath $PythonDir) "python.exe"
+$pythonDirFull = Resolve-RepoPath $PythonDir
+$pythonExe = Join-Path $pythonDirFull "python.exe"
+$venvPython = Join-Path $pythonDirFull "Scripts\python.exe"
+if (Test-Path $venvPython) {
+    $pythonExe = $venvPython
+}
 $paddleRepo = Resolve-RepoPath $PaddleOcrRepo
 $conversionPythonDirFull = Resolve-RepoPath $ConversionPythonDir
 $conversionPythonZipFull = Resolve-RepoPath $ConversionPythonZip
@@ -434,7 +445,6 @@ $summaryPath = Join-Path $work "paddleocr_det_onnx_smoke_summary.json"
 
 New-Item -ItemType Directory -Force $work | Out-Null
 Assert-PathExists $pythonExe "isolated OCR Python"
-Assert-PathExists $paddleRepo "PaddleOCR repo"
 
 try {
     Ensure-Phase31DetArtifacts -Phase31Root $phase31Root

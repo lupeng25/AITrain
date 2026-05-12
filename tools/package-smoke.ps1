@@ -7,8 +7,11 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-$vcvars = "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat"
-$qt = "C:\Qt\Qt5.12.9\5.12.9\msvc2015_64"
+. (Join-Path $PSScriptRoot "toolchain-env.ps1")
+
+$vcvars = Resolve-AITrainVcVars
+$qt = Resolve-AITrainQtRoot
+$commandPrefix = Get-AITrainBuildCommandPrefix -VcVars $vcvars -QtRoot $qt
 
 if (-not (Test-Path $vcvars)) {
     throw "MSVC environment script not found: $vcvars"
@@ -32,14 +35,14 @@ if (-not $prefixFull.StartsWith($expectedPrefixParent, [System.StringComparison]
 
 if (-not $SkipBuild) {
     Write-Host "Package smoke: configure" -ForegroundColor Cyan
-    $configure = "call `"$vcvars`" >nul && cmake -S . -B `"$BuildDir`" -G `"NMake Makefiles`" -DCMAKE_PREFIX_PATH=`"$qt`" -DAITRAIN_BUILD_TESTS=ON"
+    $configure = "$commandPrefix && cmake -S . -B `"$BuildDir`" -G `"NMake Makefiles`" -DCMAKE_PREFIX_PATH=`"$qt`" -DAITRAIN_BUILD_TESTS=ON"
     cmd /c $configure
     if ($LASTEXITCODE -ne 0) {
         throw "Configure failed with exit code $LASTEXITCODE"
     }
 
     Write-Host "Package smoke: build" -ForegroundColor Cyan
-    $build = "call `"$vcvars`" >nul && cmake --build `"$BuildDir`""
+    $build = "$commandPrefix && cmake --build `"$BuildDir`""
     cmd /c $build
     if ($LASTEXITCODE -ne 0) {
         throw "Build failed with exit code $LASTEXITCODE"
@@ -55,7 +58,7 @@ if (Test-Path $prefixFull) {
 }
 
 Write-Host "Package smoke: install" -ForegroundColor Cyan
-$install = "call `"$vcvars`" >nul && cmake --install `"$BuildDir`" --prefix `"$prefixFull`""
+$install = "$commandPrefix && cmake --install `"$BuildDir`" --prefix `"$prefixFull`""
 cmd /c $install
 if ($LASTEXITCODE -ne 0) {
     throw "Install failed with exit code $LASTEXITCODE"

@@ -467,14 +467,14 @@ private slots:
         QCOMPARE(status.toJson().value(QStringLiteral("inferenceAvailable")).toBool(), status.inferenceAvailable);
 
         const aitrain::DetectionExportResult exported = aitrain::exportDetectionCheckpoint(
-            QStringLiteral("missing.aitrain"),
+            QStringLiteral("missing.onnx"),
             QStringLiteral("model.engine"),
             QStringLiteral("tensorrt"));
         QVERIFY(!exported.ok);
         QCOMPARE(exported.format, QStringLiteral("tensorrt"));
         if (status.exportAvailable) {
-            QVERIFY(exported.error.contains(QStringLiteral("checkpoint"))
-                || exported.error.contains(QStringLiteral("Checkpoint")));
+            QVERIFY(exported.error.contains(QStringLiteral("ONNX"))
+                || exported.error.contains(QStringLiteral("onnx")));
         } else {
             QVERIFY(exported.error.contains(QStringLiteral("TensorRT")));
             QVERIFY(exported.error.contains(QStringLiteral("not available")));

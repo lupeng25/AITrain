@@ -8,8 +8,11 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-$vcvars = "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat"
-$qt = "C:\Qt\Qt5.12.9\5.12.9\msvc2015_64"
+. (Join-Path $PSScriptRoot "toolchain-env.ps1")
+
+$vcvars = Resolve-AITrainVcVars
+$qt = Resolve-AITrainQtRoot
+$commandPrefix = Get-AITrainBuildCommandPrefix -VcVars $vcvars -QtRoot $qt
 
 function Invoke-Step {
     param(
@@ -55,18 +58,18 @@ if (-not $SkipLocalRc) {
 
 if (-not $SkipPackageBuild) {
     Invoke-Step "configure package build" {
-        $configure = "call `"$vcvars`" >nul && cmake -S . -B `"$BuildDir`" -G `"NMake Makefiles`" -DCMAKE_PREFIX_PATH=`"$qt`" -DAITRAIN_BUILD_TESTS=ON"
+        $configure = "$commandPrefix && cmake -S . -B `"$BuildDir`" -G `"NMake Makefiles`" -DCMAKE_PREFIX_PATH=`"$qt`" -DAITRAIN_BUILD_TESTS=ON"
         Invoke-CommandLine $configure
     }
 
     Invoke-Step "build package inputs" {
-        $build = "call `"$vcvars`" >nul && cmake --build `"$BuildDir`""
+        $build = "$commandPrefix && cmake --build `"$BuildDir`""
         Invoke-CommandLine $build
     }
 }
 
 Invoke-Step "generate CPack ZIP" {
-    $cpack = "call `"$vcvars`" >nul && cpack --config `"$BuildDir\CPackConfig.cmake`" -B `"$BuildDir`""
+    $cpack = "$commandPrefix && cpack --config `"$BuildDir\CPackConfig.cmake`" -B `"$BuildDir`""
     Invoke-CommandLine $cpack
 }
 

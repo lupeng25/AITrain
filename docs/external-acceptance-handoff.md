@@ -1,6 +1,6 @@
-# AITrain Studio External Acceptance Handoff
+﻿# AITrain Studio External Acceptance Handoff
 
-This handoff package is for Phase 43 Lite external acceptance. It prepares the clean Windows package check and the RTX / SM 75+ TensorRT check without changing training, inference, Worker, or GUI behavior.
+This handoff package is for Phase 43 Lite external acceptance and repeatability. RTX 4090 D TensorRT acceptance has already been recorded; this document remains the clean Windows package check and optional TensorRT rerun guide without changing training, inference, Worker, or GUI behavior.
 
 ## Scope
 
@@ -9,7 +9,7 @@ External acceptance covers:
 - Clean Windows package layout validation from an installed package root.
 - Worker self-check and plugin loading from the package.
 - Optional source-tree local RC repeatability check before handoff.
-- TensorRT engine build and inference smoke on supported RTX / SM 75+ hardware.
+- TensorRT engine build and inference smoke on supported RTX / SM 75+ hardware when reproducing or refreshing the recorded RTX 4090 D pass.
 - Return of machine-readable summaries and enough environment evidence to update `docs\harness\current-status.md`.
 
 Out of scope:
@@ -68,7 +68,7 @@ For the local CPU wiring smoke:
 .\tools\acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr
 ```
 
-These checks do not replace clean Windows or RTX TensorRT acceptance.
+These checks do not replace clean Windows acceptance. RTX 4090 D TensorRT acceptance is already recorded but can be rerun with the TensorRT section below.
 
 ## Clean Windows Package Acceptance
 
@@ -90,7 +90,7 @@ Use `docs\acceptance-templates\clean-windows-acceptance-result.md` to record the
 
 ## TensorRT Acceptance
 
-From a supported RTX / SM 75+ package root or source tree:
+From the recorded RTX 4090 D validation lane, or another supported RTX / SM 75+ package root or source tree:
 
 ```powershell
 .\tools\acceptance-smoke.ps1 -TensorRT -WorkDir .deps\acceptance-tensorrt
@@ -116,7 +116,7 @@ For every external acceptance run, return:
 - Worker self-check JSON.
 - Worker plugin smoke JSON when package mode is run.
 - GPU and driver information for TensorRT mode.
-- TensorRT smoke output or exact failure / hardware-blocked message.
+- TensorRT smoke output or exact failure / hardware-blocked message. Current RTX 4090 D passing evidence lives under `.deps\\rtx4090-validation\\acceptance-tensorrt`.
 - ZIP/package name, hash, and source commit when available.
 
 Suggested commands for environment evidence:
@@ -139,4 +139,4 @@ The following are generated or external dependency artifacts and must not be tre
 - X-AnyLabeling or other annotation tool downloads.
 - Model weights, checkpoints, TensorRT engines, ONNX outputs from smoke runs, and trainer output directories.
 
-Only update `docs\harness\current-status.md` after external evidence is returned. Record clean Windows package acceptance and TensorRT acceptance separately.
+RTX 4090 D TensorRT evidence has been returned and synced to `docs\\harness\\current-status.md`. Continue recording clean Windows package acceptance and any future hardware reruns separately.

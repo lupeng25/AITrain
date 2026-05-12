@@ -38,7 +38,17 @@ function Invoke-PowerShellScript {
 }
 
 Invoke-Step "git diff whitespace check" {
-    git diff --check
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $output = & git diff --check 2>&1
+    $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousErrorActionPreference
+    if ($output) {
+        $output | ForEach-Object { Write-Host $_ }
+    }
+    if ($exitCode -ne 0) {
+        exit $exitCode
+    }
 }
 
 if (-not $SkipHarness) {

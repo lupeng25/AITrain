@@ -122,6 +122,28 @@ def resolve_dataset_file(dataset_path: Path, value: Any, default_name: str) -> P
     return path if path.is_absolute() else dataset_path / path
 
 
+def checkpoint_base_exists(path: Path) -> bool:
+    return path.with_suffix(".pdparams").exists() or path.exists()
+
+
+def select_checkpoint_base(output_path: Path, explicit_base: Any) -> Path:
+    if explicit_base:
+        return Path(str(explicit_base))
+    model_dir = output_path / "official_model"
+    for name in ("best_accuracy", "latest", "iter_epoch_1"):
+        candidate = model_dir / name
+        if checkpoint_base_exists(candidate):
+            return candidate
+    epoch_candidates = []
+    for candidate in model_dir.glob("iter_epoch_*.pdparams"):
+        match = re.search(r"iter_epoch_(\d+)\.pdparams$", candidate.name)
+        epoch = int(match.group(1)) if match else -1
+        epoch_candidates.append((epoch, candidate))
+    for _, candidate in sorted(epoch_candidates, key=lambda item: item[0], reverse=True):
+        return candidate.with_suffix("")
+    return model_dir / "latest"
+
+
 def parse_rec_image_shape(parameters: dict[str, Any]) -> tuple[int, int, int]:
     raw = parameters.get("recImageShape")
     if raw is None:
@@ -423,9 +445,11 @@ def run(request: dict[str, Any]) -> int:
     run_inference_after_export = bool_param(parameters, "runInferenceAfterExport", False)
     _, image_height, image_width = parse_rec_image_shape(parameters)
     rec_image_shape = f"3,{image_height},{image_width}"
-    trained_checkpoint_base = output_path / "official_model" / "best_accuracy"
     pretrained_value = str(parameters.get("pretrainedModel") or "").strip()
-    export_checkpoint_base = Path(pretrained_value) if export_only and pretrained_value else trained_checkpoint_base
+    export_checkpoint_base = select_checkpoint_base(
+        output_path,
+        pretrained_value if export_only and pretrained_value else None,
+    )
     inference_image = resolve_dataset_file(dataset_path, parameters.get("inferenceImage"), samples[0][0])
     predict_model_dir = output_path / "official_inference_predict"
     train_command = [sys.executable, "tools/train.py", "-c", str(config_path)]

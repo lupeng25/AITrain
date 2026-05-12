@@ -23,6 +23,8 @@ $script:AcceptanceModes = @()
 $script:AcceptanceStatus = "running"
 $script:AcceptanceFailure = ""
 $script:AcceptanceHardwareBlocked = ""
+. (Join-Path $PSScriptRoot "toolchain-env.ps1")
+Set-AITrainQtRuntimeEnvironment
 
 function Write-Step {
     param([string]$Message)
@@ -77,15 +79,25 @@ function Invoke-Checked {
     Write-Step ("{0} {1}" -f $FilePath, ($Arguments -join " "))
     Push-Location $WorkingDirectory
     try {
+        $previousErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
         if ([System.IO.Path]::GetExtension($FilePath) -ieq ".ps1") {
-            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $FilePath @Arguments
+            $commandOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $FilePath @Arguments 2>&1
         } else {
-            & $FilePath @Arguments
+            $commandOutput = & $FilePath @Arguments 2>&1
         }
-        if ($LASTEXITCODE -ne 0) {
-            throw "Command failed with exit code $LASTEXITCODE`: $FilePath $($Arguments -join ' ')"
+        $exitCode = $LASTEXITCODE
+        $ErrorActionPreference = $previousErrorActionPreference
+        if ($commandOutput) {
+            $commandOutput | ForEach-Object { Write-Host $_ }
+        }
+        if ($exitCode -ne 0) {
+            throw "Command failed with exit code $exitCode`: $FilePath $($Arguments -join ' ')"
         }
     } finally {
+        if (Get-Variable -Name previousErrorActionPreference -Scope Local -ErrorAction SilentlyContinue) {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
         Pop-Location
     }
 }

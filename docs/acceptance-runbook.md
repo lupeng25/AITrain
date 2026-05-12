@@ -1,6 +1,6 @@
-# AITrain Studio Acceptance Runbook
+﻿# AITrain Studio Acceptance Runbook
 
-This runbook is the Phase 17-47 acceptance path. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, records a traceable release-freeze package identity, validates newer YOLO detection/segmentation model-family candidates, adds C++ PaddleOCR Det DB-style ONNX postprocess coverage, and prepares real exported PaddleOCR Det ONNX wiring evidence collection before clean Windows and RTX / SM 75+ TensorRT validation.
+This runbook is the Phase 17-47 acceptance path. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, records a traceable release-freeze package identity, validates newer YOLO detection/segmentation model-family candidates, adds C++ PaddleOCR Det DB-style ONNX postprocess coverage, and prepares real exported PaddleOCR Det ONNX wiring evidence collection before clean Windows and RTX 4090 D TensorRT smoke evidence is recorded under `.deps\\rtx4090-validation\\acceptance-tensorrt`.
 
 ## Acceptance Modes
 
@@ -86,11 +86,11 @@ Expected result:
 - Runtime folders, docs, examples, Python trainers, requirements, and this acceptance script are present.
 - Worker self-check emits JSON and reports missing optional runtimes clearly.
 
-## Phase 19: TensorRT External Acceptance
+## Phase 19: TensorRT Acceptance
 
-The current GTX 1060 / SM 61 laptop is not a valid TensorRT 10 acceptance machine. On this machine, `-TensorRT` should report `hardware-blocked` instead of pretending the engine path passed.
+RTX 4090 D TensorRT acceptance has passed for the current validation lane, with evidence under `.deps\rtx4090-validation\acceptance-tensorrt`. Older GTX 1060 / SM 61 hardware remains `hardware-blocked` for TensorRT 10 and must not be treated as passing.
 
-Run on an RTX / SM 75+ Windows machine or matching cloud GPU:
+To reproduce or refresh the evidence on an RTX / SM 75+ Windows machine or matching cloud GPU:
 
 ```powershell
 .\tools\acceptance-smoke.ps1 -TensorRT -WorkDir .deps\acceptance-tensorrt
@@ -100,7 +100,7 @@ Acceptance requires:
 
 - Worker self-check resolves CUDA, cuDNN, TensorRT, TensorRT Plugin, TensorRT ONNX Parser, and ONNX Runtime.
 - `aitrain_worker.exe --tensorrt-smoke <work-dir>` builds an engine and runs inference.
-- The result is recorded back in `docs\harness\current-status.md` only after a real RTX / SM 75+ pass.
+- The result is recorded back in `docs\harness\current-status.md`; the current RTX 4090 D pass is already recorded.
 
 ## Phase 43 Lite: External Acceptance Handoff
 
@@ -118,13 +118,13 @@ Clean Windows package acceptance from the unpacked package root:
 .\tools\acceptance-smoke.ps1 -Package
 ```
 
-RTX / SM 75+ TensorRT acceptance from a package root or source tree:
+RTX 4090 D TensorRT smoke evidence is recorded under `.deps\\rtx4090-validation\\acceptance-tensorrt`.
 
 ```powershell
 .\tools\acceptance-smoke.ps1 -TensorRT -WorkDir .deps\acceptance-tensorrt
 ```
 
-Return the filled template, `acceptance_summary.json`, full console output, Worker self-check JSON, package layout summary, GPU/driver evidence for TensorRT, and the exact TensorRT smoke pass/fail/hardware-blocked output. Do not update TensorRT status as passed until a real supported GPU run succeeds.
+Return the filled template, `acceptance_summary.json`, full console output, Worker self-check JSON, package layout summary, GPU/driver evidence for TensorRT, and the exact TensorRT smoke pass/fail/hardware-blocked output. Keep historical unsupported-GPU runs separate from the recorded RTX 4090 D pass.
 
 ## Phase 44 Lite: Release Freeze Handoff
 
@@ -198,7 +198,7 @@ Expected passing artifacts under `.deps\phase47-paddleocr-det-onnx-smoke`:
 
 The script reuses existing Phase 31 Det artifacts when available. If the official Det inference model is missing or failed, it runs `tools\phase31-paddleocr-full-official-smoke.ps1` first. Conversion uses a separate Python 3.12 embeddable environment because the local Python 3.13 OCR environment only sees old `paddle2onnx` wheels that are not compatible with PaddlePaddle 3.x PIR inference exports. By default the conversion environment uses Paddle's Windows nightly CPU package source, which matches the official Windows guidance for Paddle2ONNX conversion; `-UseStablePaddleForConversion` can be used to reproduce the stable-wheel path.
 
-If conversion is blocked, the script writes `paddleocr_det_onnx_smoke_summary.json` with `status=conversion-blocked`, including Python/Paddle/PaddleX/Paddle2ONNX versions, pip index evidence, the Phase 31 Det inference artifact paths, and the PaddleX conversion output. The current local machine reaches this blocked state even with Python 3.12.10, PaddlePaddle `3.4.0.dev20260407`, PaddleX 3.5.1, and Paddle2ONNX 2.1.0 because `paddle2onnx_cpp2py_export` fails to load. Paddle2ONNX 1.3.1 can import on this machine, but it cannot parse PaddlePaddle 3 PIR `inference.json`, so it is not a valid fallback for current Phase 31 Det exports.
+RTX 4090 validation passed Phase 47 by exporting a Paddle 2.6 old-IR PaddleOCR Det inference model, converting it with Paddle2ONNX, writing the AITrain sidecar, and running `aitrain_worker --ocr-det-onnx-smoke`. Passing evidence is under `.deps\rtx4090-validation\phase47-paddleocr-det-onnx`, including `paddleocr_det_onnx_smoke_summary.json`, C++ predictions, and overlay PNG. If a future conversion path is blocked again, preserve the blocked summary instead of weakening the gate.
 
 A passing Phase 47 run is real exported Det ONNX wiring evidence for the C++ postprocess path on a tiny CPU smoke model. It is still not PP-OCRv5 official accuracy parity or a production OCR benchmark.
 
@@ -293,7 +293,7 @@ python examples\create-minimal-datasets.py --output .deps\next-smoke
 .\build-vscode\bin\Release\AITrainStudio.exe
 ```
 
-In the GUI, create or open a project, import the generated detection, segmentation, OCR Rec, and OCR Det datasets, launch X-AnyLabeling from the dataset page, use "标注后刷新 / 重新校验", validate and split each dataset, run one training/export/inference path, then confirm the task queue detail view lists report, checkpoint/model, ONNX, overlay, visualized OCR image, and prediction JSON/TXT artifacts.
+In the GUI, create or open a project, import the generated detection, segmentation, OCR Rec, and OCR Det datasets, launch X-AnyLabeling from the dataset page, use "鏍囨敞鍚庡埛鏂?/ 閲嶆柊鏍￠獙", validate and split each dataset, run one training/export/inference path, then confirm the task queue detail view lists report, checkpoint/model, ONNX, overlay, visualized OCR image, and prediction JSON/TXT artifacts.
 
 X-AnyLabeling is detected from `AITRAIN_XANYLABELING_EXE`, the app directory, `tools\x-anylabeling`, `.deps\annotation-tools\X-AnyLabeling`, or `PATH`. Keep downloaded binaries in `.deps\` unless a separate redistribution review is completed.
 
@@ -313,7 +313,7 @@ Then check:
 
 - `docs\harness\current-status.md` remains the source of truth.
 - `docs\yolo-model-support-matrix.md` remains the source of truth for productized YOLO model-family status.
-- Phase 7 / Phase 10 TensorRT status stays external pending unless RTX / SM 75+ smoke passed.
+- Phase 7 / Phase 10 TensorRT RTX 4090 D acceptance passed unless RTX / SM 75+ smoke passed.
 - Third-party backend license notes remain visible, especially Ultralytics AGPL / Enterprise constraints.
 - C++ tiny detector, segmentation baseline, and OCR baseline are still marked as scaffold/demo/test backends.
-- C++ PaddleOCR Det DB-style ONNX postprocess has a Phase 46 v1 path for probability-map outputs. Phase 47 prepares real exported Det ONNX wiring evidence collection, but the current local PaddleX/Paddle2ONNX conversion chain is blocked; full OCR system acceptance remains official `predict_system.py` until production-quality Det+Rec/System accuracy acceptance is recorded.
+- C++ PaddleOCR Det DB-style ONNX postprocess has a Phase 46 v1 path for probability-map outputs. Phase 47 has real exported Det ONNX wiring evidence under `.deps\rtx4090-validation\phase47-paddleocr-det-onnx`; full OCR system acceptance remains official `predict_system.py`. Per current RTX 4090 validation scope, Rec accuracy is not considered for this pass and remains a future production-quality gate if reinstated.

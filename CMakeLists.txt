@@ -95,6 +95,7 @@ find_file(AITRAIN_TENSORRT_INFER_DLL
     NAMES nvinfer.dll nvinfer_10.dll nvinfer_8.dll
     HINTS
         ${CMAKE_SOURCE_DIR}/.deps/tensorrt-pypi/extracted/tensorrt_cu13_libs-10.16.1.11-py3-none-win_amd64/tensorrt_libs
+        ${AITRAIN_TENSORRT_ROOT}
         ${AITRAIN_TENSORRT_ROOT}/bin
         ${AITRAIN_TENSORRT_ROOT}/lib
         ${AITRAIN_TENSORRT_ROOT}/lib/x64
@@ -109,6 +110,7 @@ find_file(AITRAIN_TENSORRT_PLUGIN_DLL
     NAMES nvinfer_plugin.dll nvinfer_plugin_10.dll nvinfer_plugin_8.dll
     HINTS
         ${CMAKE_SOURCE_DIR}/.deps/tensorrt-pypi/extracted/tensorrt_cu13_libs-10.16.1.11-py3-none-win_amd64/tensorrt_libs
+        ${AITRAIN_TENSORRT_ROOT}
         ${AITRAIN_TENSORRT_ROOT}/bin
         ${AITRAIN_TENSORRT_ROOT}/lib
         ${AITRAIN_TENSORRT_ROOT}/lib/x64
@@ -123,6 +125,7 @@ find_file(AITRAIN_TENSORRT_ONNX_PARSER_DLL
     NAMES nvonnxparser.dll nvonnxparser_10.dll nvonnxparser_8.dll
     HINTS
         ${CMAKE_SOURCE_DIR}/.deps/tensorrt-pypi/extracted/tensorrt_cu13_libs-10.16.1.11-py3-none-win_amd64/tensorrt_libs
+        ${AITRAIN_TENSORRT_ROOT}
         ${AITRAIN_TENSORRT_ROOT}/bin
         ${AITRAIN_TENSORRT_ROOT}/lib
         ${AITRAIN_TENSORRT_ROOT}/lib/x64
@@ -135,6 +138,7 @@ find_file(AITRAIN_TENSORRT_ONNX_PARSER_DLL
 )
 file(GLOB AITRAIN_TENSORRT_BUILDER_RESOURCE_DLLS CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/.deps/tensorrt-pypi/extracted/tensorrt_cu13_libs-10.16.1.11-py3-none-win_amd64/tensorrt_libs/nvinfer_builder_resource_*.dll"
+    "${AITRAIN_TENSORRT_ROOT}/nvinfer_builder_resource_*.dll"
     "${AITRAIN_TENSORRT_ROOT}/bin/nvinfer_builder_resource_*.dll"
     "${AITRAIN_TENSORRT_ROOT}/lib/nvinfer_builder_resource_*.dll"
     "${AITRAIN_TENSORRT_ROOT}/lib/x64/nvinfer_builder_resource_*.dll"
@@ -172,26 +176,28 @@ if(AITRAIN_ENABLE_ONNXRUNTIME)
     find_file(AITRAIN_ONNXRUNTIME_DLL
         NAMES onnxruntime.dll
         HINTS
-            ${CMAKE_SOURCE_DIR}/.deps/onnxruntime-win-x64-1.24.3/lib
-            ${CMAKE_SOURCE_DIR}/.deps/onnxruntime/lib
             ${AITRAIN_ONNXRUNTIME_ROOT}/lib
             ${AITRAIN_ONNXRUNTIME_ROOT}/lib/x64
             $ENV{ONNXRUNTIME_ROOT}/lib
             $ENV{ONNXRUNTIME_ROOT}/lib/x64
             $ENV{ORT_ROOT}/lib
             $ENV{ORT_ROOT}/lib/x64
+            ${CMAKE_SOURCE_DIR}/.deps/onnxruntime-win-x64-1.24.3/lib
+            ${CMAKE_SOURCE_DIR}/.deps/onnxruntime/lib
+        NO_DEFAULT_PATH
     )
     find_file(AITRAIN_ONNXRUNTIME_PROVIDERS_DLL
         NAMES onnxruntime_providers_shared.dll
         HINTS
-            ${CMAKE_SOURCE_DIR}/.deps/onnxruntime-win-x64-1.24.3/lib
-            ${CMAKE_SOURCE_DIR}/.deps/onnxruntime/lib
             ${AITRAIN_ONNXRUNTIME_ROOT}/lib
             ${AITRAIN_ONNXRUNTIME_ROOT}/lib/x64
             $ENV{ONNXRUNTIME_ROOT}/lib
             $ENV{ONNXRUNTIME_ROOT}/lib/x64
             $ENV{ORT_ROOT}/lib
             $ENV{ORT_ROOT}/lib/x64
+            ${CMAKE_SOURCE_DIR}/.deps/onnxruntime-win-x64-1.24.3/lib
+            ${CMAKE_SOURCE_DIR}/.deps/onnxruntime/lib
+        NO_DEFAULT_PATH
     )
     if(AITRAIN_ONNXRUNTIME_INCLUDE_DIR AND AITRAIN_ONNXRUNTIME_LIBRARY AND AITRAIN_ONNXRUNTIME_DLL)
         set(AITRAIN_WITH_ONNXRUNTIME ON)
@@ -303,6 +309,7 @@ install(FILES
 )
 install(FILES
     tools/acceptance-smoke.ps1
+    tools/toolchain-env.ps1
     tools/build-inno-installer.ps1
     tools/phase45-yolo-model-matrix-smoke.ps1
     tools/local-rc-closeout.ps1
