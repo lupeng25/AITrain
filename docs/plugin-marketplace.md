@@ -20,6 +20,7 @@ The marketplace does not add accounts, ratings, payment, remote code execution, 
 4. The marketplace validates `plugin.json`, package layout, hashes, compatibility, and Qt plugin identity.
 5. When enabled, the Qt plugin DLL is copied into `plugins/models`.
 6. Run plugin rescan; enabled plugins appear in the existing plugin matrix and training controls.
+7. Disable or uninstall updates the marketplace installed table immediately. Use the existing plugin rescan button when the global plugin matrix needs an immediate count refresh after those actions.
 
 ## State
 
@@ -37,6 +38,7 @@ It records installed plugin id, version, enabled state, install path, source pat
 - Disable removes active DLL entries from `plugins/models` but keeps the installed package.
 - If an active DLL is still loaded or blocked by file permissions, disable reports `disable-failed` and keeps the plugin enabled with `activeFiles` unchanged; close/restart the app or release the loader before retrying.
 - Uninstall first disables the plugin; if disable fails, uninstall stops and keeps the install directory plus state record.
+- The GUI releases only the marketplace plugin DLLs recorded in state before disable/uninstall. It does not force a full plugin rescan during those actions because hot-unloading every Qt plugin is not stable on Qt 5.12/Windows.
 - User projects, datasets, model artifacts, training runs, and `.deps` environments are never removed by marketplace actions.
 - Incompatible packages are rejected before activation.
 

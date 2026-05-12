@@ -20,6 +20,7 @@ public:
     ~PluginManager() override;
 
     void scan(const QStringList& directories);
+    void releasePluginFiles(const QStringList& pluginFiles);
     QVector<IModelPlugin*> plugins() const;
     IModelPlugin* pluginById(const QString& id) const;
     QStringList errors() const;

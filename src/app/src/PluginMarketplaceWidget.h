@@ -4,6 +4,7 @@
 
 #include <QLabel>
 #include <QLineEdit>
+#include <QStringList>
 #include <QTableWidget>
 #include <QWidget>
 
@@ -27,10 +28,12 @@ public slots:
 signals:
     void pluginsChanged();
     void statusChanged(const QString& status);
-    void releasePluginLoadersRequested();
+    void releasePluginLoadersRequested(const QStringList& activeFiles);
 
 private:
     aitrain::PluginMarketplace marketplace() const;
+    QStringList activeFilesForPlugin(const QString& id) const;
+    QStringList activeFilesForEnabledPlugins() const;
     void buildUi();
     void configureTable(QTableWidget* table) const;
     void appendReport(const aitrain::PluginMarketplaceReport& report);

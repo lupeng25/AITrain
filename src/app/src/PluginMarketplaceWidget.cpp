@@ -71,7 +71,7 @@ void PluginMarketplaceWidget::importPackage()
         return;
     }
 
-    emit releasePluginLoadersRequested();
+    emit releasePluginLoadersRequested(activeFilesForEnabledPlugins());
     const aitrain::PluginMarketplaceReport report = marketplace().installPackage(path, true);
     appendReport(report);
     if (!report.ok) {
@@ -91,7 +91,7 @@ void PluginMarketplaceWidget::enableSelectedPlugin()
         QMessageBox::information(this, QStringLiteral("插件市场"), QStringLiteral("请先在“已安装”表格中选择插件。"));
         return;
     }
-    emit releasePluginLoadersRequested();
+    emit releasePluginLoadersRequested(activeFilesForPlugin(id));
     const aitrain::PluginMarketplaceReport report = marketplace().enablePlugin(id, version);
     appendReport(report);
     if (!report.ok) {
@@ -110,7 +110,7 @@ void PluginMarketplaceWidget::disableSelectedPlugin()
         QMessageBox::information(this, QStringLiteral("插件市场"), QStringLiteral("请先在“已安装”表格中选择插件。"));
         return;
     }
-    emit releasePluginLoadersRequested();
+    emit releasePluginLoadersRequested(activeFilesForPlugin(id));
     const aitrain::PluginMarketplaceReport report = marketplace().disablePlugin(id);
     appendReport(report);
     if (!report.ok) {
@@ -119,7 +119,6 @@ void PluginMarketplaceWidget::disableSelectedPlugin()
         setStatus(QStringLiteral("插件已禁用：%1").arg(id));
     }
     refreshInstalledPlugins();
-    emit pluginsChanged();
 }
 
 void PluginMarketplaceWidget::uninstallSelectedPlugin()
@@ -130,7 +129,7 @@ void PluginMarketplaceWidget::uninstallSelectedPlugin()
         QMessageBox::information(this, QStringLiteral("插件市场"), QStringLiteral("请先在“已安装”表格中选择插件。"));
         return;
     }
-    emit releasePluginLoadersRequested();
+    emit releasePluginLoadersRequested(activeFilesForPlugin(id));
     const aitrain::PluginMarketplaceReport report = marketplace().uninstallPlugin(id, version);
     appendReport(report);
     if (!report.ok) {
@@ -139,7 +138,6 @@ void PluginMarketplaceWidget::uninstallSelectedPlugin()
         setStatus(QStringLiteral("插件已卸载：%1 %2").arg(id, version));
     }
     refreshInstalledPlugins();
-    emit pluginsChanged();
 }
 
 void PluginMarketplaceWidget::refreshInstalledPlugins()
@@ -180,6 +178,32 @@ void PluginMarketplaceWidget::refreshInstalledPlugins()
 aitrain::PluginMarketplace PluginMarketplaceWidget::marketplace() const
 {
     return aitrain::PluginMarketplace(marketplaceRoot_, activePluginDirectory_);
+}
+
+QStringList PluginMarketplaceWidget::activeFilesForPlugin(const QString& id) const
+{
+    QStringList activeFiles;
+    const QVector<aitrain::InstalledPluginRecord> records = marketplace().installedPlugins();
+    for (const aitrain::InstalledPluginRecord& record : records) {
+        if (record.id == id && record.enabled) {
+            activeFiles.append(record.activeFiles);
+        }
+    }
+    activeFiles.removeDuplicates();
+    return activeFiles;
+}
+
+QStringList PluginMarketplaceWidget::activeFilesForEnabledPlugins() const
+{
+    QStringList activeFiles;
+    const QVector<aitrain::InstalledPluginRecord> records = marketplace().installedPlugins();
+    for (const aitrain::InstalledPluginRecord& record : records) {
+        if (record.enabled) {
+            activeFiles.append(record.activeFiles);
+        }
+    }
+    activeFiles.removeDuplicates();
+    return activeFiles;
 }
 
 void PluginMarketplaceWidget::buildUi()

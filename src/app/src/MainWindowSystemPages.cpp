@@ -141,8 +141,8 @@ QWidget* MainWindow::buildPluginsPage()
     pluginMarketplaceWidget_ = new PluginMarketplaceWidget(
         QDir(appDir).filePath(QStringLiteral("plugins/marketplace")),
         QDir(appDir).filePath(QStringLiteral("plugins/models")));
-    connect(pluginMarketplaceWidget_, &PluginMarketplaceWidget::releasePluginLoadersRequested, this, [this]() {
-        pluginManager_.scan(QStringList());
+    connect(pluginMarketplaceWidget_, &PluginMarketplaceWidget::releasePluginLoadersRequested, this, [this](const QStringList& activeFiles) {
+        pluginManager_.releasePluginFiles(activeFiles);
     });
     connect(pluginMarketplaceWidget_, &PluginMarketplaceWidget::pluginsChanged, this, &MainWindow::refreshPlugins);
     connect(pluginMarketplaceWidget_, &PluginMarketplaceWidget::statusChanged, this, [this](const QString& status) {

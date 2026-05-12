@@ -38,6 +38,30 @@ private slots:
         QVERIFY(error.isEmpty());
     }
 
+    void pluginManagerReleasesLoadedPluginFiles()
+    {
+        const QString pluginDll = builtPluginPath(QStringLiteral("DatasetInteropPlugin.dll"));
+        if (pluginDll.isEmpty()) {
+            QSKIP("Built DatasetInteropPlugin.dll is not available for plugin unload fixture.");
+        }
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString activeDir = dir.filePath(QStringLiteral("plugins/models"));
+        QVERIFY(QDir().mkpath(activeDir));
+        const QString activeDll = QDir(activeDir).filePath(QStringLiteral("DatasetInteropPlugin.dll"));
+        QVERIFY(QFile::copy(pluginDll, activeDll));
+
+        aitrain::PluginManager manager;
+        manager.scan(QStringList{activeDir});
+        QCOMPARE(manager.plugins().size(), 1);
+
+        manager.releasePluginFiles(QStringList{activeDll});
+        QVERIFY(manager.plugins().isEmpty());
+        QVERIFY2(QFile::remove(activeDll), qPrintable(QStringLiteral("Plugin DLL remained locked after PluginManager released its loader: %1").arg(activeDll)));
+        QVERIFY(!QFileInfo::exists(activeDll));
+    }
+
     void pluginMarketplaceParsesIndexAndInstallsExpandedPackage()
     {
         const QString pluginDll = builtPluginPath(QStringLiteral("DatasetInteropPlugin.dll"));

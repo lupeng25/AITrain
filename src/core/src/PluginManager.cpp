@@ -2,7 +2,23 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFileInfo>
+#include <QLibrary>
 #include <QPluginLoader>
+#include <QSet>
+
+namespace {
+
+QString normalizedPluginPath(const QString& path)
+{
+    QString normalized = QFileInfo(path).absoluteFilePath();
+#if defined(Q_OS_WIN)
+    normalized = normalized.toCaseFolded();
+#endif
+    return normalized;
+}
+
+} // namespace
 
 namespace aitrain {
 
@@ -102,6 +118,7 @@ void PluginManager::scan(const QStringList& directories)
         const QFileInfoList files = directory.entryInfoList(suffixes, QDir::Files);
         for (const QFileInfo& file : files) {
             auto loader = QSharedPointer<QPluginLoader>::create(file.absoluteFilePath());
+            loader->setLoadHints(QLibrary::LoadHints());
             QObject* instance = loader->instance();
             if (!instance) {
                 errors_.append(file.fileName() + QStringLiteral(": ") + loader->errorString());
@@ -118,6 +135,31 @@ void PluginManager::scan(const QStringList& directories)
             plugins_.append(plugin);
             loaders_.append(loader);
         }
+    }
+}
+
+void PluginManager::releasePluginFiles(const QStringList& pluginFiles)
+{
+    QSet<QString> targets;
+    for (const QString& pluginFile : pluginFiles) {
+        if (!pluginFile.trimmed().isEmpty()) {
+            targets.insert(normalizedPluginPath(pluginFile));
+        }
+    }
+    if (targets.isEmpty()) {
+        return;
+    }
+
+    for (int i = loaders_.size() - 1; i >= 0; --i) {
+        const QSharedPointer<QPluginLoader> loader = loaders_.at(i);
+        if (!loader || !targets.contains(normalizedPluginPath(loader->fileName()))) {
+            continue;
+        }
+        if (i < plugins_.size()) {
+            plugins_.removeAt(i);
+        }
+        loader->unload();
+        loaders_.removeAt(i);
     }
 }
 
