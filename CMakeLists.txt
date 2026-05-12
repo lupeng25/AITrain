@@ -257,6 +257,36 @@ function(aitrain_copy_tensorrt_runtime target_name)
     endif()
 endfunction()
 
+set(AITRAIN_QT_PLATFORM_PLUGIN_DLLS)
+if(WIN32)
+    if(AITRAIN_WINDEPLOYQT_EXECUTABLE)
+        get_filename_component(AITRAIN_QT_RUNTIME_BIN_DIR "${AITRAIN_WINDEPLOYQT_EXECUTABLE}" DIRECTORY)
+    elseif(TARGET Qt${QT_VERSION_MAJOR}::qmake)
+        get_target_property(AITRAIN_QT_RUNTIME_QMAKE_EXECUTABLE Qt${QT_VERSION_MAJOR}::qmake IMPORTED_LOCATION)
+        get_filename_component(AITRAIN_QT_RUNTIME_BIN_DIR "${AITRAIN_QT_RUNTIME_QMAKE_EXECUTABLE}" DIRECTORY)
+    endif()
+
+    if(AITRAIN_QT_RUNTIME_BIN_DIR)
+        get_filename_component(AITRAIN_QT_RUNTIME_ROOT_DIR "${AITRAIN_QT_RUNTIME_BIN_DIR}/.." ABSOLUTE)
+        file(GLOB AITRAIN_QT_PLATFORM_PLUGIN_DLLS CONFIGURE_DEPENDS
+            "${AITRAIN_QT_RUNTIME_ROOT_DIR}/plugins/platforms/qwindows*.dll"
+        )
+    endif()
+endif()
+
+function(aitrain_copy_qt_platform_runtime target_name)
+    if(WIN32 AND AITRAIN_QT_PLATFORM_PLUGIN_DLLS)
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                $<TARGET_FILE_DIR:${target_name}>/platforms
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${AITRAIN_QT_PLATFORM_PLUGIN_DLLS}
+                $<TARGET_FILE_DIR:${target_name}>/platforms
+            VERBATIM
+        )
+    endif()
+endfunction()
+
 add_subdirectory(src/core)
 if(AITRAIN_BUILD_LICENSE_GENERATOR)
     add_subdirectory(src/license_generator)

@@ -22,6 +22,8 @@ set_target_properties(AITrainLicenseGenerator PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
 
+aitrain_copy_qt_platform_runtime(AITrainLicenseGenerator)
+
 if(AITRAIN_INSTALL_LICENSE_GENERATOR)
     install(TARGETS AITrainLicenseGenerator
         RUNTIME DESTINATION tools

@@ -110,6 +110,7 @@ endif()
 
 aitrain_copy_onnxruntime_runtime(AITrainStudio)
 aitrain_copy_tensorrt_runtime(AITrainStudio)
+aitrain_copy_qt_platform_runtime(AITrainStudio)
 
 install(TARGETS AITrainStudio
     RUNTIME DESTINATION .
