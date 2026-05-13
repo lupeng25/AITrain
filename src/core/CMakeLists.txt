@@ -1,6 +1,7 @@
 add_library(aitrain_core STATIC
     include/aitrain/core/PluginInterfaces.h
     include/aitrain/core/Deployment.h
+    include/aitrain/core/DatasetConversion.h
     include/aitrain/core/DatasetValidators.h
     include/aitrain/core/DetectionDataset.h
     include/aitrain/core/DetectionTrainer.h
@@ -18,6 +19,7 @@ add_library(aitrain_core STATIC
     src/JsonProtocol.cpp
     src/LicenseManager.cpp
     src/Deployment.cpp
+    src/DatasetConversion.cpp
     src/DatasetValidators.cpp
     src/DetectionDataset.cpp
     src/DetectionTrainer.cpp
