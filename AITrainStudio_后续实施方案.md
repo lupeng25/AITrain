@@ -6,6 +6,8 @@
 
 > 当前 Phase 39+ 的下一步方向以 `docs/product-roadmap-local-training-platform.md` 和 `docs/harness/current-status.md` 为准。本文保留中长期历史路线、阶段复盘和背景材料，不作为当前下一步优先级的唯一来源。
 
+> 2026-05-13 补充：当前本地状态已推进到 Phase 49 Lite。RTX 4090 D TensorRT 验收、Phase 45 YOLO11/YOLO12、Phase 47 PaddleOCR Det ONNX、插件 marketplace、样本复核、交付验收、客户域 OCR 验收向导、诊断包和部署验证均已记录在 `docs/harness/current-status.md`。本文后续关于 GTX 1060 / SM 61 TensorRT blocked、Phase 39 下一步等内容保留为历史背景，不能覆盖当前状态源。
+
 本文用于规划 AITrain Studio 在阶段 7 之后的中长期路线。阶段状态以 `docs/harness/current-status.md` 为准；本文提供目标、交付、验收标准和风险控制。
 
 ## 1. 当前结论
@@ -16,17 +18,19 @@ AITrain Studio 已具备可运行的平台骨架：Qt Widgets GUI、独立 Worke
 
 - 阶段 1-2 已作为平台和数据系统初版完成。
 - 阶段 3-6 是可执行 scaffold / baseline，不是真正 YOLO/OCR 官方训练。
-- 阶段 7 代码完成，本机自检、打包 smoke、ZIP 生成路径已具备；TensorRT 真 engine 验收因 GTX 1060 / SM 61 被 TensorRT 10 拒绝而挂起，需 RTX / SM 75+ 机器补验收。
+- 阶段 7 代码完成，本机自检、打包 smoke、ZIP 生成路径已具备；TensorRT 真 engine 已在 RTX 4090 D validation lane 通过，GTX 1060 / SM 61 仍保留为 `hardware-blocked` 兼容性说明。
 - 阶段 8 已完成 Python Trainer Adapter，真实训练优先通过 Worker 启动独立 Python 子进程实现。
 - 阶段 9 已接入 Ultralytics YOLO detection 官方训练，并完成本机 CPU 小数据 smoke。
-- 阶段 10 已完成真实 YOLO detection ONNX Runtime 推理和 ONNX 复制导出；TensorRT 转换仍需外部 RTX / SM 75+ 验收。
+- 阶段 10 已完成真实 YOLO detection ONNX Runtime 推理和 ONNX 复制导出；TensorRT 转换已有 RTX 4090 D smoke evidence，外部 package-root rerun 仅在重新打开验收时执行。
 - 阶段 11 已接入 Ultralytics YOLO segmentation 官方训练，并完成本机 CPU 小数据 smoke；C++ ONNX Runtime 已补 YOLOv8-seg mask 后处理和 overlay。
 - 阶段 12 已接入 PaddlePaddle OCR Rec CTC 训练，并完成本机 CPU 小数据 smoke；C++ ONNX Runtime 已补 CTC greedy decode。它兼容 PaddleOCR-style Rec 数据，但还不是完整 PP-OCRv4 官方训练配置和导出链路。
 - 阶段 13 的本机产品化目标是文档、依赖、样例数据生成、硬件兼容矩阵、打包 smoke 和外部 RTX 验收清单。
 - 阶段 17-21 已完成交付验收基线：本机基线冻结、统一验收脚本、TensorRT 外部验收准备、小规模训练/推理/转换 smoke、发布前文档收口。
 - 阶段 22-26 已完成本机后续增强：任务历史与产物索引、GUI 统一 artifact 浏览、三类数据集管理增强、COCO8 / COCO8-seg materialization 稳定化、PaddleOCR 官方 train/export/inference 链路增强。
-- 当前没有 RTX / 第二台主机，因此 TensorRT 真验收继续保持 hardware-blocked，不作为本机阶段完成条件。
+- 当前 RTX 4090 D validation lane 已有 TensorRT passing evidence；旧 GTX 1060 / SM 61 仍应保持 `hardware-blocked`，不能覆盖 RTX 4090 D 证据。
 - 近期维护性重构已完成第一层源码拆分：`MainWindow` 和 `ProductWorkflow` 均拆为 companion 文件。`ProductWorkflow.cpp` 现在只作为公共入口锚点，具体 snapshot、quality、evaluation、benchmark、delivery、pipeline 实现位于 `src/core/src/ProductWorkflow*.cpp`；该变更不改变协议、schema、插件接口、报告字段或算法行为。
+- Phase 49 Lite 已完成本地交付闭环工作台：样本复核、交付验收、客户域 OCR 验收、诊断包、导出后部署验证，以及 detection/segmentation 本地 mAP50-95 报告补强。
+- 客户域 OCR 生产声明必须使用客户/目标域证据；public Total-Text、generated smoke 和 `.deps` 示例只能作为流程 smoke。
 
 ## 2. 实施原则
 
@@ -61,6 +65,8 @@ AITrain Studio 已具备可运行的平台骨架：Qt Widgets GUI、独立 Worke
 | 阶段 14-16 | 已完成本机 CPU smoke | 官方 PaddleOCR Rec 链路 | config、train、export、official inference smoke 可用 |
 | 阶段 17-21 | 已完成本机交付验收基线 | 验收脚本、runbook、公开/生成数据 smoke | `acceptance-smoke.ps1` 和 official OCR smoke 可复验 |
 | 阶段 22-26 | 已完成本机后续增强 | 日常使用、可追踪、可复验 | GUI artifact 浏览、数据集增强、materialization、OCR official report/inference |
+| 阶段 27-48 | 已完成本机产品闭环和 marketplace | 成熟 workbench、授权、环境、pipeline、评估、交付、插件 marketplace、RTX evidence | `harness-check`、package smoke、RTX 4090 validation、GUI walkthrough |
+| 阶段 49 | 已完成本机交付闭环工作台 | 样本复核、交付验收、客户 OCR、诊断包、部署验证 | `git diff --check`、`harness-context`、`harness-check`、package smoke、GUI walkthrough |
 
 ## 4. 已完成阶段复盘
 

@@ -1,13 +1,14 @@
 # Next Stage RC Delivery Plan
 
-Last updated: 2026-05-12
+Last updated: 2026-05-13
 
 This document is the execution plan for the stage after RTX 4090 D validation. It does not replace `docs/harness/current-status.md` as the project status source of truth.
 
 ## Summary
 
 - Goal: freeze the current RTX 4090 D validation result into a release-candidate baseline and prepare a traceable local handoff package. External clean-machine/package-root collection is deferred for this lane unless explicitly reopened.
-- Current baseline: RTX 4090 D validation is complete. TensorRT, Phase 45 YOLO11/YOLO12 matrix, Phase 47 PaddleOCR Det ONNX, and Production OCR acceptance all have passing evidence under `.deps\rtx4090-validation`. The current local RC handoff was refreshed from commit `6dac361b83de78f38853e0649fd00f1355b7ccd7`; after the offline-license public-key rebuild, the ZIP SHA256 is `206C10CDB291D8D9A0FA5B5E8B51D30F07CD22B695EE8206E41ED5D08BA70F03`.
+- Current baseline: RTX 4090 D validation is complete. TensorRT, Phase 45 YOLO11/YOLO12 matrix, Phase 47 PaddleOCR Det ONNX, and Production OCR acceptance all have passing evidence under `.deps\rtx4090-validation`. The current local RC handoff was refreshed from commit `59ad7b129e7e2743893e6b9f5229c8d9b578cb5e`; after the offline-license public-key rebuild, the ZIP SHA256 is `7DE6B015FFD256C2848343EED6AEE4ACB570811E34650269DCD4BEE32F8BE728`.
+- Phase 49 local delivery closeout is complete: the packaged GUI has sample review, delivery acceptance, customer OCR validation, diagnostics, deployment validation, and updated mAP50-95 reporting evidence. These are local report/workflow surfaces and do not replace returned clean-machine or customer-domain evidence.
 - Production OCR gate: the current default gate accepts Rec when `accuracy > 0.7`; CER is recorded but not blocking unless `-RequireRecCer` is used.
 - Artifact rule: do not commit `.deps`, build outputs, datasets, model weights, ONNX files, TensorRT engines, generated ZIP files, or other generated binaries.
 
@@ -53,6 +54,7 @@ This document is the execution plan for the stage after RTX 4090 D validation. I
    - If all required external evidence passes, update `docs/harness/current-status.md` to mark the RC handoff and clean-machine package acceptance as passed.
    - If any external check is blocked or failed, record the blocker and evidence without weakening gates.
    - Keep the RTX 4090 D validation evidence path separate from external clean-machine package evidence.
+   - Keep Phase 49 GUI/imported evidence separate from the underlying script, Worker, clean-machine, TensorRT, and customer-domain evidence sources.
 
 ## Acceptance Criteria
 
@@ -69,11 +71,13 @@ This document is the execution plan for the stage after RTX 4090 D validation. I
   - dirty-worktree status
 - External clean-machine package acceptance is deferred and must not be marked `passed` without returned evidence.
 - Optional TensorRT rerun is deferred and must not be marked `passed` without returned package-root RTX / SM 75+ evidence.
+- Customer-domain OCR acceptance is not passed by public Total-Text or generated smoke data; it needs returned customer/target-domain evidence.
 - No generated artifacts are added to source control.
 
 ## Risk Boundaries
 
 - The current Production OCR result is accepted only under the lowered `accuracy > 0.7` gate. It is public Total-Text evidence, not customer-domain production OCR quality proof.
+- Phase 49 customer OCR validation is the local mechanism for collecting customer-domain evidence, but the data and reports must be real customer/target-domain inputs.
 - The old `accuracy >= 0.90` and `CER <= 0.10` target is not the default blocking gate. If reinstated, it requires a separate model/data/training improvement plan.
 - Phase 47 validates PaddleOCR Det ONNX conversion and C++ DB-style postprocess wiring, not PP-OCRv5 accuracy parity.
 - Phase 45 validates YOLO detection and segmentation wiring only. It does not add classification, pose, OBB, anomaly, YOLO-World, or YOLOE support.

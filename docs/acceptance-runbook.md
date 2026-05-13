@@ -1,6 +1,6 @@
 ﻿# AITrain Studio Acceptance Runbook
 
-This runbook is the Phase 17-47 acceptance path. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, records a traceable release-freeze package identity, validates newer YOLO detection/segmentation model-family candidates, adds C++ PaddleOCR Det DB-style ONNX postprocess coverage, and prepares real exported PaddleOCR Det ONNX wiring evidence collection before clean Windows and RTX 4090 D TensorRT smoke evidence is recorded under `.deps\\rtx4090-validation\\acceptance-tensorrt`.
+This runbook is the Phase 17-49 acceptance path. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, records a traceable release-freeze package identity, validates newer YOLO detection/segmentation model-family candidates, adds C++ PaddleOCR Det DB-style ONNX postprocess coverage, records real exported PaddleOCR Det ONNX wiring evidence, and documents the delivery-closeout workbench. RTX 4090 D TensorRT smoke evidence is recorded under `.deps\\rtx4090-validation\\acceptance-tensorrt`; clean Windows and customer-domain OCR production evidence still require returned external/customer data.
 
 ## Acceptance Modes
 
@@ -14,6 +14,7 @@ Run the unified smoke script from the repository root:
 .\tools\acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr
 .\tools\phase45-yolo-model-matrix-smoke.ps1
 .\tools\acceptance-smoke.ps1 -TensorRT
+.\tools\customer-ocr-validation.ps1
 ```
 
 The same script is also installed into packaged builds under `tools\acceptance-smoke.ps1`. From a package root, run:
@@ -34,6 +35,28 @@ For external handoff, use `docs\external-acceptance-handoff.md` and the result t
 For release-freeze package identity, use `docs\release-freeze-handoff.md` and `tools\release-freeze-handoff.ps1`. This generates the CPack ZIP, SHA256 hashes, and a handoff manifest without marking external acceptance as passed.
 
 For YOLO model-family productization, use `docs\yolo-model-support-matrix.md` and `tools\phase45-yolo-model-matrix-smoke.ps1`. Phase 45 validates newer Ultralytics detection/segmentation model names only; it does not expand the productized scope to classification, pose, OBB, anomaly, YOLO-World, YOLOE, or TensorRT.
+
+## Phase 49 Lite: Delivery Closeout Workbench
+
+The GUI delivery-closeout pages aggregate evidence; they do not replace the scripts or Worker report commands. Use the workbench to display imported JSON/Markdown acceptance evidence, run report-only Worker commands, and review `passed` / `blocked` / `failed` / `hardware-blocked` status.
+
+Current GUI surfaces:
+
+- `样本复核`: load `problem_samples.json`, `error_samples.json`, `rework_sample_set.json`, or evaluation reports; filter by source, reason, class, split, OCR edit distance / CER, or search text; export an X-AnyLabeling review list.
+- `交付验收`: summarize local RC, clean Windows, TensorRT, package integrity, customer OCR, diagnostics, and deployment validation evidence.
+- Customer OCR acceptance wizard: collect Det dataset, Rec dataset, System images, official Det/Rec/System reports, optional Det ONNX evidence, and write customer OCR manifest/summary outputs.
+- Export post-validation: validate ONNX by runnable inference where possible; preserve TensorRT `hardware-blocked`; treat NCNN v1 as artifact-presence validation only.
+- Diagnostics bundle: collect Worker self-check, environment profile, GPU/runtime state, recent task logs/request snippets, artifact index, plugin state, and license summary.
+
+The real execution entries remain:
+
+```powershell
+.\tools\local-rc-closeout.ps1
+.\tools\release-freeze-handoff.ps1
+.\tools\customer-ocr-validation.ps1
+```
+
+Worker command equivalents are `runCustomerOcrAcceptance`, `collectDiagnostics`, and `validateDeploymentArtifact`. These are report/validation commands and must stay outside `MainWindow`.
 
 ## Phase 17: Local Baseline Freeze
 
@@ -227,6 +250,8 @@ Default thresholds are intentionally higher than tiny smoke data: at least 100 D
 
 Current RTX 4090 validation note: the historical CPU/default Rec gate is still blocked with `accuracy=0.0`, but the newer GPU official English PP-OCRv4 Rec run improved to `accuracy=0.7187499750434037` and `CER=0.1415306288038758`. The full GPU gate rerun under `.deps\rtx4090-validation\production-ocr-acceptance-gpu-chain` passes under the current `accuracy>0.70` Rec gate.
 
+Customer-domain production claims require customer/target-domain data and should use `tools\customer-ocr-validation.ps1` or the Phase 49 GUI customer OCR wizard. Public Total-Text, generated smoke data, and `.deps` samples can prove workflow execution only; they must remain `blocked` or smoke-only for production OCR readiness.
+
 ## Phase 20: Small Training Smoke
 
 Run:
@@ -287,6 +312,7 @@ These phases do not change TensorRT acceptance. They make the local RC easier to
 - Official OCR: `phase16-ocr-official-smoke.ps1` covers official Rec train, export, and recognition inference. `phase31-paddleocr-full-official-smoke.ps1` covers official Det + Rec train/export and official System inference.
 - Annotation: the dataset page launches X-AnyLabeling as the default external annotation tool, detects its local path, and provides a post-labeling refresh/revalidation action.
 - UX closeout: task history can be filtered by category, status, and search text; failed tasks show a short diagnostic next-step summary.
+- Delivery closeout: sample review, delivery acceptance, customer OCR validation, diagnostics, and deployment validation are available through the Phase 49 GUI pages and Worker report commands.
 
 Suggested manual GUI walkthrough:
 
@@ -295,7 +321,7 @@ python examples\create-minimal-datasets.py --output .deps\next-smoke
 .\build-vscode\bin\Release\AITrainStudio.exe
 ```
 
-In the GUI, create or open a project, import the generated detection, segmentation, OCR Rec, and OCR Det datasets, launch X-AnyLabeling from the dataset page, use "鏍囨敞鍚庡埛鏂?/ 閲嶆柊鏍￠獙", validate and split each dataset, run one training/export/inference path, then confirm the task queue detail view lists report, checkpoint/model, ONNX, overlay, visualized OCR image, and prediction JSON/TXT artifacts.
+In the GUI, create or open a project, import the generated detection, segmentation, OCR Rec, and OCR Det datasets, launch X-AnyLabeling from the dataset page, use the post-labeling refresh/revalidation action, validate and split each dataset, run one training/export/inference path, then confirm the task queue detail view lists report, checkpoint/model, ONNX, overlay, visualized OCR image, and prediction JSON/TXT artifacts. Also open `样本复核` and `交付验收` to confirm review-list export, diagnostics, customer OCR gate, and deployment validation entries are visible.
 
 X-AnyLabeling is detected from `AITRAIN_XANYLABELING_EXE`, the app directory, `tools\x-anylabeling`, `.deps\annotation-tools\X-AnyLabeling`, or `PATH`. Keep downloaded binaries in `.deps\` unless a separate redistribution review is completed.
 

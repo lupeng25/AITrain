@@ -1,6 +1,6 @@
 # AITrain Studio Local RC Closeout
 
-This checklist is the local, non-external release-candidate closeout path after Phase 39B, Phase 39C, and Phase 41 Lite. It does not add new model backends. It exists to make the current detection, segmentation, OCR, pipeline, benchmark, model registry, delivery report, and environment profile loop repeatable on the development machine.
+This checklist is the local, non-external release-candidate closeout path after Phase 39B, Phase 39C, Phase 41 Lite, and Phase 49 Lite. It does not add new model backends. It exists to make the current detection, segmentation, OCR, pipeline, benchmark, model registry, delivery report, environment profile, sample review, deployment validation, diagnostics, and delivery acceptance loop repeatable on the development machine.
 
 After this local gate passes, use `docs\external-acceptance-handoff.md` and `docs\acceptance-templates\` for the clean Windows package and RTX / SM 75+ TensorRT external acceptance handoff.
 
@@ -13,7 +13,7 @@ Local closeout covers:
 - Worker self-check, plugin smoke, and package documentation/script presence.
 - Optional local baseline acceptance and CPU training smoke.
 - Manual GUI walkthrough for the current workbench.
-- Documentation language check for scaffold, official backend, and TensorRT hardware-blocked boundaries.
+- Documentation language check for scaffold, official backend, TensorRT hardware-blocked, NCNN artifact-only, and customer-domain OCR boundaries.
 
 Out of scope:
 
@@ -69,12 +69,14 @@ Walk through these screens:
 | Project | Create or open a project; dashboard should show project, task, dataset, model, plugin, and environment summaries. |
 | Environment | Run environment check; YOLO, OCR, and TensorRT profile rows should appear with repair hints. GTX 1060 / SM 61 TensorRT must read as `hardware-blocked` / hardware limited, not passed. |
 | Dataset | Import generated YOLO detection, YOLO segmentation, PaddleOCR Rec, and PaddleOCR Det datasets; auto-detection and validation should be visible. |
+| Sample Review | Load problem/error/rework sample JSON when available; filters and X-AnyLabeling review-list export should be visible. |
 | Annotation | X-AnyLabeling remains an external tool; launch/detect actions should not block the GUI or imply embedded annotation. |
 | Training | Official YOLO / OCR backends should be preferred where applicable; tiny/scaffold or mock backends must remain diagnostic/scaffold choices. |
 | Task Artifacts | Select recent tasks and preview JSON/TXT/CSV/image/ONNX/model artifacts; unsupported artifacts should show a clear message. |
 | Evaluation / Benchmark | Run evaluation and benchmark from model artifacts when available; reports should be recorded as Worker artifacts. |
 | Model Registry | Registered model versions should show lineage, evaluation, benchmark, artifact, and limitation summaries. |
 | Delivery Report | Generate a delivery report and confirm HTML, model card, and artifact inventory are present and previewable. |
+| Delivery Acceptance | Open the delivery acceptance page; local RC, clean Windows, TensorRT, customer OCR, package integrity, diagnostics, and deployment validation states should render as `passed`, `blocked`, `failed`, `hardware-blocked`, or `not-run` without horizontal overflow. |
 
 ## Boundary Wording Checklist
 
@@ -85,6 +87,8 @@ Before marking the local RC closeout done, check docs and UI text for:
 - PaddleOCR Rec CTC backend is a small PaddlePaddle CTC trainer, not a full PP-OCRv4 official pipeline.
 - PaddleOCR System is official `predict_system.py` tool orchestration, not C++ DB ONNX postprocess.
 - TensorRT on GTX 1060 / SM 61 is `hardware-blocked`; RTX / SM 75+ is still required for real TensorRT acceptance.
+- Customer-domain OCR production readiness requires customer/target-domain data; Total-Text, generated smoke, and `.deps` examples are workflow smoke only.
+- NCNN v1 deployment validation checks artifact presence only; it is not runtime inference validation.
 - Phase 40 classification / pose / OBB / anomaly backends remain deferred until priorities are reset.
 
 ## Completion Record

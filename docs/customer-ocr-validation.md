@@ -7,6 +7,8 @@ Use it after the official PaddleOCR Det, Rec, and System chain has produced repo
 - `customer_ocr_validation_manifest.json`
 - `customer_ocr_validation_summary.md`
 
+The Phase 49 GUI customer OCR wizard uses the same boundary: it can help collect paths, run the Worker report command, and display `passed` / `blocked` status, but it does not make public or generated data acceptable for production OCR claims.
+
 Example:
 
 ```powershell
