@@ -31,6 +31,8 @@ QString htmlReport(const QJsonObject& context)
 {
     const QJsonObject evaluation = context.value(QStringLiteral("evaluationSummary")).toObject();
     const QJsonObject benchmark = context.value(QStringLiteral("benchmarkSummary")).toObject();
+    const QJsonObject deployment = context.value(QStringLiteral("deploymentValidationSummary")).toObject();
+    const QJsonObject customerOcr = context.value(QStringLiteral("customerOcrAcceptanceSummary")).toObject();
     const QJsonArray inventory = context.value(QStringLiteral("inventory")).toArray();
     const QJsonArray limitations = context.value(QStringLiteral("limitations")).toArray();
     const QJsonObject evaluationMetrics = evaluation.value(QStringLiteral("metrics")).toObject();
@@ -87,6 +89,25 @@ QString htmlReport(const QJsonObject& context)
         .arg(htmlEscape(benchmark.value(QStringLiteral("runtimeStatus")).toString()))
         .arg(latency.value(QStringLiteral("p95Ms")).toDouble(), 0, 'f', 2)
         .arg(latency.value(QStringLiteral("throughput")).toDouble(), 0, 'f', 2);
+    html += QStringLiteral("<section><h2>Deployment Validation</h2><div class=\"grid\">"
+                           "<div class=\"metric\"><b>Status</b><br>%1</div>"
+                           "<div class=\"metric\"><b>Runtime</b><br>%2</div>"
+                           "<div class=\"metric\"><b>Format</b><br>%3</div>"
+                           "<div class=\"metric\"><b>Report</b><br>%4</div>"
+                           "</div></section>")
+        .arg(htmlEscape(deployment.value(QStringLiteral("status")).toString(QStringLiteral("not_provided"))))
+        .arg(htmlEscape(deployment.value(QStringLiteral("runtime")).toString()))
+        .arg(htmlEscape(deployment.value(QStringLiteral("format")).toString()))
+        .arg(htmlEscape(QDir::toNativeSeparators(deployment.value(QStringLiteral("reportPath")).toString())));
+    html += QStringLiteral("<section><h2>Customer OCR Acceptance</h2><div class=\"grid\">"
+                           "<div class=\"metric\"><b>Status</b><br>%1</div>"
+                           "<div class=\"metric\"><b>Rec Accuracy</b><br>%2</div>"
+                           "<div class=\"metric\"><b>Rec CER</b><br>%3</div>"
+                           "<div class=\"metric\"><b>Boundary</b><br>Customer-domain evidence only</div>"
+                           "</div></section>")
+        .arg(htmlEscape(customerOcr.value(QStringLiteral("status")).toString(QStringLiteral("not_provided"))))
+        .arg(customerOcr.value(QStringLiteral("metrics")).toObject().value(QStringLiteral("recAccuracy")).toDouble(), 0, 'f', 6)
+        .arg(customerOcr.value(QStringLiteral("metrics")).toObject().value(QStringLiteral("recCer")).toDouble(), 0, 'f', 6);
     html += QStringLiteral("<section><h2>Artifact Inventory</h2><table><thead><tr><th>Kind</th><th>Path</th><th>Bytes</th><th>SHA256</th></tr></thead><tbody>%1</tbody></table></section>")
         .arg(inventoryRows);
     html += QStringLiteral("<section><h2>Limitations</h2><ul>%1</ul></section>")
@@ -115,6 +136,7 @@ QJsonObject deliveryManifestObject(const QJsonObject& context, const QJsonArray&
     bool hasModel = false;
     bool hasEvaluation = false;
     bool hasBenchmark = false;
+    bool hasDeploymentValidation = false;
     bool hasForbiddenPath = false;
     QString forbiddenPath;
     for (const QJsonValue& value : inventory) {
@@ -124,6 +146,7 @@ QJsonObject deliveryManifestObject(const QJsonObject& context, const QJsonArray&
         hasModel = hasModel || kind == QStringLiteral("model");
         hasEvaluation = hasEvaluation || kind == QStringLiteral("evaluation_report");
         hasBenchmark = hasBenchmark || kind == QStringLiteral("benchmark_report");
+        hasDeploymentValidation = hasDeploymentValidation || kind == QStringLiteral("deployment_validation_report");
         const QString lowerPath = QDir::fromNativeSeparators(path).toLower();
         if (lowerPath.contains(QStringLiteral("/.deps/"))
             || lowerPath.contains(QStringLiteral("private-key"))
@@ -142,6 +165,9 @@ QJsonObject deliveryManifestObject(const QJsonObject& context, const QJsonArray&
     addCheck(QStringLiteral("benchmark_report_present"), hasBenchmark, hasBenchmark
         ? QStringLiteral("Benchmark report is attached.")
         : QStringLiteral("Benchmark report is missing; runtime acceptance remains unproven."));
+    addCheck(QStringLiteral("deployment_validation_present"), hasDeploymentValidation, hasDeploymentValidation
+        ? QStringLiteral("Deployment validation report is attached.")
+        : QStringLiteral("Deployment validation is missing; exported artifact acceptance remains unproven."));
     addCheck(QStringLiteral("forbidden_content_absent"), !hasForbiddenPath, hasForbiddenPath
         ? QStringLiteral("Forbidden path appears in inventory: %1").arg(forbiddenPath)
         : QStringLiteral("No .deps or private-key paths were found in inventory."));
@@ -209,6 +235,8 @@ WorkflowResult generateTrainingDeliveryReport(const QString& outputPath, const Q
     addInventoryPath(QStringLiteral("dataset_snapshot"), reportContext.value(QStringLiteral("datasetSnapshotManifest")).toString(), QStringLiteral("Dataset snapshot manifest"));
     addInventoryPath(QStringLiteral("evaluation_report"), reportContext.value(QStringLiteral("evaluationReportPath")).toString(), QStringLiteral("Evaluation report"));
     addInventoryPath(QStringLiteral("benchmark_report"), reportContext.value(QStringLiteral("benchmarkReportPath")).toString(), QStringLiteral("Benchmark report"));
+    addInventoryPath(QStringLiteral("deployment_validation_report"), reportContext.value(QStringLiteral("deploymentValidationReportPath")).toString(), QStringLiteral("Deployment validation report"));
+    addInventoryPath(QStringLiteral("customer_ocr_acceptance"), reportContext.value(QStringLiteral("customerOcrAcceptanceReportPath")).toString(), QStringLiteral("Customer-domain OCR acceptance report"));
     addInventoryPath(QStringLiteral("export"), reportContext.value(QStringLiteral("exportPath")).toString(), QStringLiteral("Exported model"));
     addInventoryPath(QStringLiteral("export_report"), reportContext.value(QStringLiteral("exportReportPath")).toString(), QStringLiteral("Export report"));
     addInventoryPath(QStringLiteral("inference_predictions"), reportContext.value(QStringLiteral("inferencePredictionsPath")).toString(), QStringLiteral("Inference predictions"));
@@ -216,9 +244,13 @@ WorkflowResult generateTrainingDeliveryReport(const QString& outputPath, const Q
 
     const QJsonObject evaluationSummary = evaluationDeliverySummary(reportContext.value(QStringLiteral("evaluationReportPath")).toString());
     const QJsonObject benchmarkSummary = benchmarkDeliverySummary(reportContext.value(QStringLiteral("benchmarkReportPath")).toString());
+    const QJsonObject deploymentValidationSummary = readJsonObjectIfExists(reportContext.value(QStringLiteral("deploymentValidationReportPath")).toString());
+    const QJsonObject customerOcrAcceptanceSummary = readJsonObjectIfExists(reportContext.value(QStringLiteral("customerOcrAcceptanceReportPath")).toString());
     const QJsonArray limitations = deliveryLimitations(reportContext, evaluationSummary, benchmarkSummary);
     reportContext.insert(QStringLiteral("evaluationSummary"), evaluationSummary);
     reportContext.insert(QStringLiteral("benchmarkSummary"), benchmarkSummary);
+    reportContext.insert(QStringLiteral("deploymentValidationSummary"), deploymentValidationSummary);
+    reportContext.insert(QStringLiteral("customerOcrAcceptanceSummary"), customerOcrAcceptanceSummary);
     reportContext.insert(QStringLiteral("limitations"), limitations);
     reportContext.insert(QStringLiteral("inventory"), inventory);
     QJsonObject deliveryManifest = deliveryManifestObject(reportContext, inventory);
@@ -243,6 +275,8 @@ WorkflowResult generateTrainingDeliveryReport(const QString& outputPath, const Q
     modelCard.insert(QStringLiteral("exportPath"), reportContext.value(QStringLiteral("exportPath")).toString());
     modelCard.insert(QStringLiteral("evaluationSummary"), evaluationSummary);
     modelCard.insert(QStringLiteral("benchmarkSummary"), benchmarkSummary);
+    modelCard.insert(QStringLiteral("deploymentValidationSummary"), deploymentValidationSummary);
+    modelCard.insert(QStringLiteral("customerOcrAcceptanceSummary"), customerOcrAcceptanceSummary);
     modelCard.insert(QStringLiteral("inventory"), inventory);
     modelCard.insert(QStringLiteral("limitations"), limitations);
     modelCard.insert(QStringLiteral("packageStatus"), reportContext.value(QStringLiteral("packageStatus")).toString());

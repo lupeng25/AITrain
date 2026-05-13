@@ -241,7 +241,31 @@ struct DetectionClassStats {
     double precision = 0.0;
     double recall = 0.0;
     double ap50 = 0.0;
+    double map5095 = 0.0;
     QVector<DetectionEvaluationItem> items;
+};
+
+struct DetectionMapSample {
+    QVector<DetectionBox> groundTruth;
+    QVector<DetectionPrediction> predictions;
+};
+
+struct SegmentationMapGroundTruth {
+    int classId = 0;
+    QImage mask;
+};
+
+struct SegmentationMapSample {
+    QVector<SegmentationMapGroundTruth> groundTruth;
+    QVector<SegmentationPrediction> predictions;
+};
+
+struct CocoMapMetrics {
+    double map50 = 0.0;
+    double map5095 = 0.0;
+    QVector<double> perClassMap50;
+    QVector<double> perClassMap5095;
+    QJsonArray thresholds;
 };
 
 double ap50FromItems(QVector<DetectionEvaluationItem> items, int gtCount)
@@ -281,9 +305,216 @@ double ap50FromItems(QVector<DetectionEvaluationItem> items, int gtCount)
     return ap / 101.0;
 }
 
+QVector<double> cocoMapThresholds()
+{
+    QVector<double> thresholds;
+    for (int step = 50; step <= 95; step += 5) {
+        thresholds.append(static_cast<double>(step) / 100.0);
+    }
+    return thresholds;
+}
+
+CocoMapMetrics detectionCocoMapMetrics(const QVector<DetectionMapSample>& samples, int classCount)
+{
+    CocoMapMetrics metrics;
+    metrics.perClassMap50 = QVector<double>(classCount, 0.0);
+    metrics.perClassMap5095 = QVector<double>(classCount, 0.0);
+    const QVector<double> thresholds = cocoMapThresholds();
+    QJsonArray thresholdArray;
+    QVector<int> classGtCounts(classCount, 0);
+    for (const DetectionMapSample& sample : samples) {
+        for (const DetectionBox& gt : sample.groundTruth) {
+            if (gt.classId >= 0 && gt.classId < classCount) {
+                ++classGtCounts[gt.classId];
+            }
+        }
+    }
+
+    for (const double threshold : thresholds) {
+        QJsonArray perClassThresholdArray;
+        double thresholdMap = 0.0;
+        int thresholdClassCount = 0;
+        for (int classId = 0; classId < classCount; ++classId) {
+            QVector<DetectionEvaluationItem> items;
+            for (const DetectionMapSample& sample : samples) {
+                QVector<int> gtIndexes;
+                for (int index = 0; index < sample.groundTruth.size(); ++index) {
+                    if (sample.groundTruth.at(index).classId == classId) {
+                        gtIndexes.append(index);
+                    }
+                }
+                QVector<bool> matched(gtIndexes.size(), false);
+                QVector<DetectionPrediction> predictions;
+                for (const DetectionPrediction& prediction : sample.predictions) {
+                    if (prediction.box.classId == classId) {
+                        predictions.append(prediction);
+                    }
+                }
+                std::sort(predictions.begin(), predictions.end(), [](const DetectionPrediction& left, const DetectionPrediction& right) {
+                    return left.confidence > right.confidence;
+                });
+                for (const DetectionPrediction& prediction : predictions) {
+                    int bestMatch = -1;
+                    double bestIou = 0.0;
+                    for (int localIndex = 0; localIndex < gtIndexes.size(); ++localIndex) {
+                        if (matched.at(localIndex)) {
+                            continue;
+                        }
+                        const double iou = boxIou(prediction.box, sample.groundTruth.at(gtIndexes.at(localIndex)));
+                        if (iou > bestIou) {
+                            bestIou = iou;
+                            bestMatch = localIndex;
+                        }
+                    }
+                    const bool truePositive = bestMatch >= 0 && bestIou >= threshold;
+                    if (truePositive) {
+                        matched[bestMatch] = true;
+                    }
+                    items.append(DetectionEvaluationItem{classId, prediction.confidence, truePositive});
+                }
+            }
+            const double ap = ap50FromItems(items, classGtCounts.value(classId));
+            if (qFuzzyCompare(threshold, 0.5)) {
+                metrics.perClassMap50[classId] = ap;
+            }
+            metrics.perClassMap5095[classId] += ap;
+            if (classGtCounts.value(classId) > 0) {
+                thresholdMap += ap;
+                ++thresholdClassCount;
+            }
+            perClassThresholdArray.append(QJsonObject{
+                {QStringLiteral("classId"), classId},
+                {QStringLiteral("gt"), classGtCounts.value(classId)},
+                {QStringLiteral("ap"), ap}
+            });
+        }
+        const double thresholdAverage = thresholdClassCount > 0
+            ? thresholdMap / static_cast<double>(thresholdClassCount)
+            : 0.0;
+        thresholdArray.append(QJsonObject{
+            {QStringLiteral("iouThreshold"), threshold},
+            {QStringLiteral("mAP"), thresholdAverage},
+            {QStringLiteral("perClass"), perClassThresholdArray}
+        });
+        if (qFuzzyCompare(threshold, 0.5)) {
+            metrics.map50 = thresholdAverage;
+        }
+        metrics.map5095 += thresholdAverage;
+    }
+
+    for (int classId = 0; classId < metrics.perClassMap5095.size(); ++classId) {
+        metrics.perClassMap5095[classId] = thresholds.isEmpty()
+            ? 0.0
+            : metrics.perClassMap5095.at(classId) / static_cast<double>(thresholds.size());
+    }
+    metrics.map5095 = thresholds.isEmpty() ? 0.0 : metrics.map5095 / static_cast<double>(thresholds.size());
+    metrics.thresholds = thresholdArray;
+    return metrics;
+}
+
+double maskIou(const QImage& leftMaskImage, const QImage& rightMaskImage);
+
+CocoMapMetrics segmentationCocoMapMetrics(const QVector<SegmentationMapSample>& samples, int classCount)
+{
+    CocoMapMetrics metrics;
+    metrics.perClassMap50 = QVector<double>(classCount, 0.0);
+    metrics.perClassMap5095 = QVector<double>(classCount, 0.0);
+    const QVector<double> thresholds = cocoMapThresholds();
+    QJsonArray thresholdArray;
+    QVector<int> classGtCounts(classCount, 0);
+    for (const SegmentationMapSample& sample : samples) {
+        for (const SegmentationMapGroundTruth& gt : sample.groundTruth) {
+            if (gt.classId >= 0 && gt.classId < classCount) {
+                ++classGtCounts[gt.classId];
+            }
+        }
+    }
+
+    for (const double threshold : thresholds) {
+        QJsonArray perClassThresholdArray;
+        double thresholdMap = 0.0;
+        int thresholdClassCount = 0;
+        for (int classId = 0; classId < classCount; ++classId) {
+            QVector<DetectionEvaluationItem> items;
+            for (const SegmentationMapSample& sample : samples) {
+                QVector<int> gtIndexes;
+                for (int index = 0; index < sample.groundTruth.size(); ++index) {
+                    if (sample.groundTruth.at(index).classId == classId) {
+                        gtIndexes.append(index);
+                    }
+                }
+                QVector<bool> matched(gtIndexes.size(), false);
+                QVector<SegmentationPrediction> predictions;
+                for (const SegmentationPrediction& prediction : sample.predictions) {
+                    if (prediction.detection.box.classId == classId) {
+                        predictions.append(prediction);
+                    }
+                }
+                std::sort(predictions.begin(), predictions.end(), [](const SegmentationPrediction& left, const SegmentationPrediction& right) {
+                    return left.detection.confidence > right.detection.confidence;
+                });
+                for (const SegmentationPrediction& prediction : predictions) {
+                    int bestMatch = -1;
+                    double bestIou = 0.0;
+                    for (int localIndex = 0; localIndex < gtIndexes.size(); ++localIndex) {
+                        if (matched.at(localIndex)) {
+                            continue;
+                        }
+                        const double iou = maskIou(prediction.mask, sample.groundTruth.at(gtIndexes.at(localIndex)).mask);
+                        if (iou > bestIou) {
+                            bestIou = iou;
+                            bestMatch = localIndex;
+                        }
+                    }
+                    const bool truePositive = bestMatch >= 0 && bestIou >= threshold;
+                    if (truePositive) {
+                        matched[bestMatch] = true;
+                    }
+                    items.append(DetectionEvaluationItem{classId, prediction.detection.confidence, truePositive});
+                }
+            }
+            const double ap = ap50FromItems(items, classGtCounts.value(classId));
+            if (qFuzzyCompare(threshold, 0.5)) {
+                metrics.perClassMap50[classId] = ap;
+            }
+            metrics.perClassMap5095[classId] += ap;
+            if (classGtCounts.value(classId) > 0) {
+                thresholdMap += ap;
+                ++thresholdClassCount;
+            }
+            perClassThresholdArray.append(QJsonObject{
+                {QStringLiteral("classId"), classId},
+                {QStringLiteral("gt"), classGtCounts.value(classId)},
+                {QStringLiteral("ap"), ap}
+            });
+        }
+        const double thresholdAverage = thresholdClassCount > 0
+            ? thresholdMap / static_cast<double>(thresholdClassCount)
+            : 0.0;
+        thresholdArray.append(QJsonObject{
+            {QStringLiteral("iouThreshold"), threshold},
+            {QStringLiteral("mAP"), thresholdAverage},
+            {QStringLiteral("perClass"), perClassThresholdArray}
+        });
+        if (qFuzzyCompare(threshold, 0.5)) {
+            metrics.map50 = thresholdAverage;
+        }
+        metrics.map5095 += thresholdAverage;
+    }
+
+    for (int classId = 0; classId < metrics.perClassMap5095.size(); ++classId) {
+        metrics.perClassMap5095[classId] = thresholds.isEmpty()
+            ? 0.0
+            : metrics.perClassMap5095.at(classId) / static_cast<double>(thresholds.size());
+    }
+    metrics.map5095 = thresholds.isEmpty() ? 0.0 : metrics.map5095 / static_cast<double>(thresholds.size());
+    metrics.thresholds = thresholdArray;
+    return metrics;
+}
+
 QString perClassMetricsCsv(const QStringList& classNames, const QVector<DetectionClassStats>& stats)
 {
-    QString csv = QStringLiteral("classId,className,gt,tp,fp,fn,precision,recall,ap50\n");
+    QString csv = QStringLiteral("classId,className,gt,tp,fp,fn,precision,recall,ap50,map50_95\n");
     for (int classId = 0; classId < stats.size(); ++classId) {
         const DetectionClassStats& item = stats.at(classId);
         const QString className = classId < classNames.size() && !classNames.at(classId).isEmpty()
@@ -298,7 +529,8 @@ QString perClassMetricsCsv(const QStringList& classNames, const QVector<Detectio
             .arg(item.fn)
             .arg(item.precision, 0, 'f', 6)
             .arg(item.recall, 0, 'f', 6)
-            .arg(item.ap50, 0, 'f', 6);
+            .arg(item.ap50, 0, 'f', 6)
+            .arg(item.map5095, 0, 'f', 6);
     }
     return csv;
 }
@@ -379,7 +611,7 @@ QString segmentationPerClassMetricsCsv(
     const QVector<double>& maskIouSums,
     const QVector<int>& maskIouCounts)
 {
-    QString csv = QStringLiteral("classId,className,gt,tp,fp,fn,precision,recall,maskIoU,maskAP50\n");
+    QString csv = QStringLiteral("classId,className,gt,tp,fp,fn,precision,recall,maskIoU,maskAP50,maskMap50_95\n");
     for (int classId = 0; classId < stats.size(); ++classId) {
         const DetectionClassStats& item = stats.at(classId);
         const QString className = classId < classNames.size() && !classNames.at(classId).isEmpty()
@@ -398,7 +630,8 @@ QString segmentationPerClassMetricsCsv(
             .arg(item.precision, 0, 'f', 6)
             .arg(item.recall, 0, 'f', 6)
             .arg(classMaskIou, 0, 'f', 6)
-            .arg(item.ap50, 0, 'f', 6);
+            .arg(item.ap50, 0, 'f', 6)
+            .arg(item.map5095, 0, 'f', 6);
     }
     return csv;
 }
@@ -545,6 +778,7 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         QJsonArray sampleSummaries;
         QJsonArray errorSamples;
         QJsonArray lowConfidenceSamples;
+        QVector<DetectionMapSample> mapSamples;
         QString runtime = QStringLiteral("unknown");
         int totalGt = 0;
         int totalPredictions = 0;
@@ -583,6 +817,7 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
 
             totalGt += sample.boxes.size();
             totalPredictions += predictions.size();
+            mapSamples.append(DetectionMapSample{sample.boxes, predictions});
             for (const DetectionBox& gt : sample.boxes) {
                 if (gt.classId >= 0 && gt.classId < classStats.size()) {
                     classStats[gt.classId].gt += 1;
@@ -712,6 +947,7 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         }
 
         QJsonArray perClassArray;
+        const CocoMapMetrics cocoMetrics = detectionCocoMapMetrics(mapSamples, classCount);
         double map50 = 0.0;
         int apClassCount = 0;
         for (int classId = 0; classId < classStats.size(); ++classId) {
@@ -719,6 +955,7 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
             stats.precision = stats.tp + stats.fp > 0 ? static_cast<double>(stats.tp) / static_cast<double>(stats.tp + stats.fp) : 0.0;
             stats.recall = stats.gt > 0 ? static_cast<double>(stats.tp) / static_cast<double>(stats.gt) : 0.0;
             stats.ap50 = ap50FromItems(stats.items, stats.gt);
+            stats.map5095 = classId < cocoMetrics.perClassMap5095.size() ? cocoMetrics.perClassMap5095.at(classId) : 0.0;
             if (stats.gt > 0) {
                 map50 += stats.ap50;
                 ++apClassCount;
@@ -735,10 +972,12 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
                 {QStringLiteral("fn"), stats.fn},
                 {QStringLiteral("precision"), stats.precision},
                 {QStringLiteral("recall"), stats.recall},
-                {QStringLiteral("ap50"), stats.ap50}
+                {QStringLiteral("ap50"), stats.ap50},
+                {QStringLiteral("map50_95"), stats.map5095}
             });
         }
         map50 = apClassCount > 0 ? map50 / static_cast<double>(apClassCount) : 0.0;
+        const double map5095 = cocoMetrics.map5095;
         const double precision = totalTp + totalFp > 0 ? static_cast<double>(totalTp) / static_cast<double>(totalTp + totalFp) : 0.0;
         const double recall = totalGt > 0 ? static_cast<double>(totalTp) / static_cast<double>(totalGt) : 0.0;
 
@@ -746,6 +985,9 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         metrics.insert(QStringLiteral("precision"), precision);
         metrics.insert(QStringLiteral("recall"), recall);
         metrics.insert(QStringLiteral("mAP50"), map50);
+        metrics.insert(QStringLiteral("mAP50_95"), map5095);
+        metrics.insert(QStringLiteral("cocoMap50"), cocoMetrics.map50);
+        metrics.insert(QStringLiteral("cocoMap50_95"), cocoMetrics.map5095);
         metrics.insert(QStringLiteral("tp"), totalTp);
         metrics.insert(QStringLiteral("fp"), totalFp);
         metrics.insert(QStringLiteral("fn"), totalFn);
@@ -766,6 +1008,7 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         report.insert(QStringLiteral("datasetSnapshotManifest"), options.value(QStringLiteral("datasetSnapshotManifest")).toString());
         report.insert(QStringLiteral("scaffold"), false);
         report.insert(QStringLiteral("metrics"), metrics);
+        report.insert(QStringLiteral("cocoMapThresholds"), cocoMetrics.thresholds);
         report.insert(QStringLiteral("perClass"), perClassArray);
         report.insert(QStringLiteral("samples"), sampleSummaries);
         report.insert(QStringLiteral("errorSamples"), errorSamples);
@@ -780,7 +1023,7 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
             {QStringLiteral("maxDetections"), inferenceOptions.maxDetections},
             {QStringLiteral("lowConfidenceThreshold"), lowConfidenceThreshold}
         });
-        report.insert(QStringLiteral("limitations"), QStringLiteral("Phase 36 computes detection AP50 only. COCO mAP50-95, segmentation mask evaluation, and OCR CER/WER remain follow-up work."));
+        report.insert(QStringLiteral("limitations"), QStringLiteral("Detection evaluation includes local COCO-style mAP50-95 over IoU thresholds 0.50:0.95. Use customer/domain acceptance gates before production claims."));
 
         const QString reportPath = outputDir.filePath(QStringLiteral("evaluation_report.json"));
         const QString perClassPath = outputDir.filePath(QStringLiteral("per_class_metrics.csv"));
@@ -849,6 +1092,7 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         QVector<QVector<int>> confusion(classCount + 1, QVector<int>(classCount + 1, 0));
         QJsonArray sampleSummaries;
         QJsonArray errorSamples;
+        QVector<SegmentationMapSample> mapSamples;
         QString runtime = QStringLiteral("onnxruntime");
         int totalGt = 0;
         int totalPredictions = 0;
@@ -881,6 +1125,12 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
             for (const SegmentationPolygon& gt : sample.polygons) {
                 gtMasks.append(polygonToMask(gt.points, sample.imageSize));
             }
+            QVector<SegmentationMapGroundTruth> mapGroundTruth;
+            mapGroundTruth.reserve(sample.polygons.size());
+            for (int index = 0; index < sample.polygons.size(); ++index) {
+                mapGroundTruth.append(SegmentationMapGroundTruth{sample.polygons.at(index).classId, gtMasks.at(index)});
+            }
+            mapSamples.append(SegmentationMapSample{mapGroundTruth, predictions});
             QVector<bool> gtMatched(sample.polygons.size(), false);
             QVector<SegmentationPrediction> sortedPredictions = predictions;
             std::sort(sortedPredictions.begin(), sortedPredictions.end(), [](const SegmentationPrediction& left, const SegmentationPrediction& right) {
@@ -1003,6 +1253,7 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         }
 
         QJsonArray perClassArray;
+        const CocoMapMetrics cocoMetrics = segmentationCocoMapMetrics(mapSamples, classCount);
         double maskMap50 = 0.0;
         int apClassCount = 0;
         for (int classId = 0; classId < classStats.size(); ++classId) {
@@ -1010,6 +1261,7 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
             stats.precision = stats.tp + stats.fp > 0 ? static_cast<double>(stats.tp) / static_cast<double>(stats.tp + stats.fp) : 0.0;
             stats.recall = stats.gt > 0 ? static_cast<double>(stats.tp) / static_cast<double>(stats.gt) : 0.0;
             stats.ap50 = ap50FromItems(stats.items, stats.gt);
+            stats.map5095 = classId < cocoMetrics.perClassMap5095.size() ? cocoMetrics.perClassMap5095.at(classId) : 0.0;
             const double classMaskIou = classMaskIouCounts.at(classId) > 0
                 ? classMaskIouSums.at(classId) / static_cast<double>(classMaskIouCounts.at(classId))
                 : 0.0;
@@ -1030,10 +1282,12 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
                 {QStringLiteral("precision"), stats.precision},
                 {QStringLiteral("recall"), stats.recall},
                 {QStringLiteral("maskIoU"), classMaskIou},
-                {QStringLiteral("maskAP50"), stats.ap50}
+                {QStringLiteral("maskAP50"), stats.ap50},
+                {QStringLiteral("maskMap50_95"), stats.map5095}
             });
         }
         maskMap50 = apClassCount > 0 ? maskMap50 / static_cast<double>(apClassCount) : 0.0;
+        const double maskMap5095 = cocoMetrics.map5095;
         const double precision = totalTp + totalFp > 0 ? static_cast<double>(totalTp) / static_cast<double>(totalTp + totalFp) : 0.0;
         const double recall = totalGt > 0 ? static_cast<double>(totalTp) / static_cast<double>(totalGt) : 0.0;
         const double meanMaskIou = totalMatchedMasks > 0 ? totalMaskIou / static_cast<double>(totalMatchedMasks) : 0.0;
@@ -1043,6 +1297,9 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         metrics.insert(QStringLiteral("recall"), recall);
         metrics.insert(QStringLiteral("maskIoU"), meanMaskIou);
         metrics.insert(QStringLiteral("maskMap50"), maskMap50);
+        metrics.insert(QStringLiteral("maskMap50_95"), maskMap5095);
+        metrics.insert(QStringLiteral("cocoMaskMap50"), cocoMetrics.map50);
+        metrics.insert(QStringLiteral("cocoMaskMap50_95"), cocoMetrics.map5095);
         metrics.insert(QStringLiteral("tp"), totalTp);
         metrics.insert(QStringLiteral("fp"), totalFp);
         metrics.insert(QStringLiteral("fn"), totalFn);
@@ -1064,6 +1321,7 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         report.insert(QStringLiteral("datasetSnapshotManifest"), options.value(QStringLiteral("datasetSnapshotManifest")).toString());
         report.insert(QStringLiteral("scaffold"), false);
         report.insert(QStringLiteral("metrics"), metrics);
+        report.insert(QStringLiteral("cocoMapThresholds"), cocoMetrics.thresholds);
         report.insert(QStringLiteral("perClass"), perClassArray);
         report.insert(QStringLiteral("samples"), sampleSummaries);
         report.insert(QStringLiteral("errorSamples"), errorSamples);
@@ -1076,7 +1334,7 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
             {QStringLiteral("nmsIouThreshold"), inferenceOptions.iouThreshold},
             {QStringLiteral("maxDetections"), inferenceOptions.maxDetections}
         });
-        report.insert(QStringLiteral("limitations"), QStringLiteral("Phase 39A computes mask AP50 and mask IoU from ONNX segmentation predictions. COCO mask mAP50-95 remains follow-up work."));
+        report.insert(QStringLiteral("limitations"), QStringLiteral("Segmentation evaluation includes local COCO-style mask mAP50-95 over IoU thresholds 0.50:0.95. Use customer/domain acceptance gates before production claims."));
 
         const QString reportPath = outputDir.filePath(QStringLiteral("evaluation_report.json"));
         const QString perClassPath = outputDir.filePath(QStringLiteral("per_class_metrics.csv"));
@@ -1278,6 +1536,7 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
     } else if (taskType == QStringLiteral("segmentation")) {
         metrics.insert(QStringLiteral("maskIoU"), 0.0);
         metrics.insert(QStringLiteral("maskMap50"), 0.0);
+        metrics.insert(QStringLiteral("maskMap50_95"), 0.0);
         metrics.insert(QStringLiteral("precision"), 0.0);
         metrics.insert(QStringLiteral("recall"), 0.0);
     } else {

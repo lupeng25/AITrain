@@ -129,6 +129,44 @@ bool WorkerClient::requestDeliveryReport(const QString& workerProgram, const QSt
     return startWorkerCommand(workerProgram, QStringLiteral("generateDeliveryReport"), payload, error);
 }
 
+bool WorkerClient::requestCustomerOcrAcceptance(const QString& workerProgram, const QString& outputPath, const QJsonObject& options, QString* error, const QString& taskId)
+{
+    QJsonObject payload;
+    payload.insert(QStringLiteral("taskId"), taskId);
+    payload.insert(QStringLiteral("outputPath"), outputPath);
+    payload.insert(QStringLiteral("options"), options);
+    return startWorkerCommand(workerProgram, QStringLiteral("runCustomerOcrAcceptance"), payload, error);
+}
+
+bool WorkerClient::requestDiagnosticsBundle(const QString& workerProgram, const QString& outputPath, const QJsonObject& context, QString* error, const QString& taskId)
+{
+    QJsonObject payload;
+    payload.insert(QStringLiteral("taskId"), taskId);
+    payload.insert(QStringLiteral("outputPath"), outputPath);
+    payload.insert(QStringLiteral("context"), context);
+    return startWorkerCommand(workerProgram, QStringLiteral("collectDiagnostics"), payload, error);
+}
+
+bool WorkerClient::requestDeploymentValidation(
+    const QString& workerProgram,
+    const QString& modelPath,
+    const QString& outputPath,
+    const QString& format,
+    const QString& sampleImagePath,
+    const QJsonObject& options,
+    QString* error,
+    const QString& taskId)
+{
+    QJsonObject payload;
+    payload.insert(QStringLiteral("taskId"), taskId);
+    payload.insert(QStringLiteral("modelPath"), modelPath);
+    payload.insert(QStringLiteral("outputPath"), outputPath);
+    payload.insert(QStringLiteral("format"), format);
+    payload.insert(QStringLiteral("sampleImagePath"), sampleImagePath);
+    payload.insert(QStringLiteral("options"), options);
+    return startWorkerCommand(workerProgram, QStringLiteral("validateDeploymentArtifact"), payload, error);
+}
+
 bool WorkerClient::requestModelExport(const QString& workerProgram, const QString& checkpointPath, const QString& outputPath, const QString& format, QString* error, const QString& taskId)
 {
     QJsonObject payload;

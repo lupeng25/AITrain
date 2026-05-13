@@ -40,6 +40,20 @@ WorkflowResult generateTrainingDeliveryReport(
     const QString& outputPath,
     const QJsonObject& context = {});
 
+WorkflowResult runCustomerOcrAcceptanceReport(
+    const QString& outputPath,
+    const QJsonObject& options = {});
+
+WorkflowResult collectDiagnosticsReport(
+    const QString& outputPath,
+    const QJsonObject& context = {});
+
+WorkflowResult validateDeploymentArtifactReport(
+    const QString& modelPath,
+    const QString& outputPath,
+    const QString& format = QString(),
+    const QJsonObject& options = {});
+
 WorkflowResult runLocalPipelinePlan(
     const QString& outputPath,
     const QString& templateId,

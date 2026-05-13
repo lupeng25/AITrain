@@ -42,6 +42,7 @@
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QTableWidgetItem>
+#include <QTextStream>
 #include <QTime>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -49,6 +50,156 @@
 #include <QUuid>
 
 using namespace aitrain_app;
+
+namespace {
+QString sampleTextField(const QJsonObject& sample, const QStringList& keys)
+{
+    for (const QString& key : keys) {
+        const QJsonValue value = sample.value(key);
+        if (value.isString() && !value.toString().trimmed().isEmpty()) {
+            return value.toString().trimmed();
+        }
+        if (value.isDouble()) {
+            return QString::number(value.toDouble(), 'g', 8);
+        }
+        if (value.isObject() || value.isArray()) {
+            const QString compact = QString::fromUtf8(QJsonDocument(QJsonArray{value}).toJson(QJsonDocument::Compact));
+            return compact.mid(1, qMax(0, compact.size() - 2));
+        }
+    }
+    return QString();
+}
+
+QString samplePathField(const QJsonObject& sample, const QStringList& keys)
+{
+    return QDir::fromNativeSeparators(sampleTextField(sample, keys));
+}
+
+QJsonObject normalizedReviewSample(QJsonObject sample, const QString& source)
+{
+    if (sample.value(QStringLiteral("source")).toString().isEmpty()) {
+        sample.insert(QStringLiteral("source"), source);
+    }
+    if (sample.value(QStringLiteral("reason")).toString().isEmpty()) {
+        const QString reason = sampleTextField(sample, QStringList()
+            << QStringLiteral("code")
+            << QStringLiteral("errorType")
+            << QStringLiteral("type")
+            << QStringLiteral("category"));
+        if (!reason.isEmpty()) {
+            sample.insert(QStringLiteral("reason"), reason);
+        }
+    }
+    return sample;
+}
+
+void appendReviewSamplesFromArray(QJsonArray* target, const QJsonArray& sourceArray, const QString& source)
+{
+    if (!target) {
+        return;
+    }
+    for (const QJsonValue& value : sourceArray) {
+        if (value.isObject()) {
+            target->append(normalizedReviewSample(value.toObject(), source));
+        }
+    }
+}
+
+QJsonArray extractReviewSamples(const QJsonDocument& document)
+{
+    QJsonArray samples;
+    if (document.isArray()) {
+        appendReviewSamplesFromArray(&samples, document.array(), QStringLiteral("array"));
+        return samples;
+    }
+    const QJsonObject root = document.object();
+    const QList<QPair<QString, QString>> keys = {
+        qMakePair(QStringLiteral("problemSamples"), QStringLiteral("problem_samples")),
+        qMakePair(QStringLiteral("errorSamples"), QStringLiteral("error_samples")),
+        qMakePair(QStringLiteral("lowConfidenceSamples"), QStringLiteral("low_confidence")),
+        qMakePair(QStringLiteral("samples"), QStringLiteral("samples")),
+        qMakePair(QStringLiteral("reworkSamples"), QStringLiteral("rework_samples")),
+        qMakePair(QStringLiteral("items"), QStringLiteral("items"))
+    };
+    for (const auto& item : keys) {
+        appendReviewSamplesFromArray(&samples, root.value(item.first).toArray(), item.second);
+    }
+    const QJsonObject nested = root.value(QStringLiteral("payload")).toObject();
+    if (!nested.isEmpty()) {
+        for (const auto& item : keys) {
+            appendReviewSamplesFromArray(&samples, nested.value(item.first).toArray(), item.second);
+        }
+    }
+    return samples;
+}
+
+QString reviewMetricText(const QJsonObject& sample)
+{
+    QStringList parts;
+    for (const QString& key : {
+             QStringLiteral("confidence"),
+             QStringLiteral("matchedIou"),
+             QStringLiteral("matchedMaskIoU"),
+             QStringLiteral("editDistance"),
+             QStringLiteral("cer")}) {
+        if (sample.contains(key)) {
+            parts.append(QStringLiteral("%1=%2").arg(key, sampleTextField(sample, QStringList() << key)));
+        }
+    }
+    const QJsonObject prediction = sample.value(QStringLiteral("prediction")).toObject();
+    if (!prediction.isEmpty()) {
+        const double confidence = prediction.value(QStringLiteral("confidence")).toDouble(-1.0);
+        if (confidence >= 0.0) {
+            parts.append(QStringLiteral("pred_conf=%1").arg(confidence, 0, 'f', 4));
+        }
+    }
+    return parts.join(QStringLiteral(" | "));
+}
+
+QString reviewClassText(const QJsonObject& sample)
+{
+    const QString direct = sampleTextField(sample, QStringList()
+        << QStringLiteral("className")
+        << QStringLiteral("class")
+        << QStringLiteral("category")
+        << QStringLiteral("label"));
+    if (!direct.isEmpty()) {
+        return direct;
+    }
+    const QJsonObject prediction = sample.value(QStringLiteral("prediction")).toObject();
+    const QJsonObject box = prediction.value(QStringLiteral("box")).toObject();
+    if (box.contains(QStringLiteral("classId"))) {
+        return QStringLiteral("class_%1").arg(box.value(QStringLiteral("classId")).toInt());
+    }
+    const QJsonObject groundTruth = sample.value(QStringLiteral("groundTruth")).toObject();
+    if (groundTruth.contains(QStringLiteral("classId"))) {
+        return QStringLiteral("class_%1").arg(groundTruth.value(QStringLiteral("classId")).toInt());
+    }
+    return QString();
+}
+
+void setAcceptanceTableRow(QTableWidget* table, const QString& stage, const QString& status, const QString& evidence, const QString& message)
+{
+    if (!table) {
+        return;
+    }
+    int row = -1;
+    for (int index = 0; index < table->rowCount(); ++index) {
+        if (table->item(index, 0) && table->item(index, 0)->text() == stage) {
+            row = index;
+            break;
+        }
+    }
+    if (row < 0) {
+        row = table->rowCount();
+        table->insertRow(row);
+    }
+    table->setItem(row, 0, new QTableWidgetItem(stage));
+    table->setItem(row, 1, new QTableWidgetItem(status));
+    table->setItem(row, 2, new QTableWidgetItem(QDir::toNativeSeparators(evidence)));
+    table->setItem(row, 3, new QTableWidgetItem(message));
+}
+} // namespace
 
 void MainWindow::openEvaluationReportsPage()
 {
@@ -357,6 +508,242 @@ void MainWindow::launchXAnyLabelingForQualityFix()
     }
 }
 
+void MainWindow::browseSampleReviewFile()
+{
+    const QString file = QFileDialog::getOpenFileName(
+        this,
+        uiText("选择复核样本文件"),
+        currentProjectPath_,
+        QStringLiteral("Review samples (*.json);;All files (*.*)"));
+    if (!file.isEmpty() && reviewSamplePathEdit_) {
+        reviewSamplePathEdit_->setText(QDir::toNativeSeparators(file));
+        loadSampleReviewFile();
+    }
+}
+
+void MainWindow::loadSampleReviewFile()
+{
+    const QString path = QDir::fromNativeSeparators(reviewSamplePathEdit_ ? reviewSamplePathEdit_->text().trimmed() : QString());
+    if (path.isEmpty() || !QFileInfo::exists(path)) {
+        QMessageBox::warning(this, uiText("样本复核"), uiText("请选择存在的复核样本 JSON 文件。"));
+        return;
+    }
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        QMessageBox::critical(this, uiText("样本复核"), uiText("无法读取复核样本文件：%1").arg(QDir::toNativeSeparators(path)));
+        return;
+    }
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || (!document.isObject() && !document.isArray())) {
+        QMessageBox::critical(this, uiText("样本复核"), uiText("复核样本 JSON 解析失败：%1").arg(parseError.errorString()));
+        return;
+    }
+
+    sampleReviewSamples_ = extractReviewSamples(document);
+    if (reviewSourceFilterCombo_) {
+        reviewSourceFilterCombo_->clear();
+        reviewSourceFilterCombo_->addItem(uiText("全部来源"), QString());
+    }
+    if (reviewReasonFilterCombo_) {
+        reviewReasonFilterCombo_->clear();
+        reviewReasonFilterCombo_->addItem(uiText("全部问题"), QString());
+    }
+    QStringList sources;
+    QStringList reasons;
+    for (const QJsonValue& value : sampleReviewSamples_) {
+        const QJsonObject sample = value.toObject();
+        const QString source = sample.value(QStringLiteral("source")).toString();
+        const QString reason = sample.value(QStringLiteral("reason")).toString();
+        if (!source.isEmpty() && !sources.contains(source)) {
+            sources.append(source);
+        }
+        if (!reason.isEmpty() && !reasons.contains(reason)) {
+            reasons.append(reason);
+        }
+    }
+    sources.sort(Qt::CaseInsensitive);
+    reasons.sort(Qt::CaseInsensitive);
+    for (const QString& source : sources) {
+        reviewSourceFilterCombo_->addItem(source, source);
+    }
+    for (const QString& reason : reasons) {
+        reviewReasonFilterCombo_->addItem(reason, reason);
+    }
+    latestReviewListPath_.clear();
+    refreshSampleReviewTable();
+    statusBar()->showMessage(uiText("已加载复核样本：%1 条").arg(sampleReviewSamples_.size()), 4000);
+}
+
+QJsonArray MainWindow::filteredSampleReviewRows() const
+{
+    QJsonArray rows;
+    const QString sourceFilter = reviewSourceFilterCombo_ ? reviewSourceFilterCombo_->currentData().toString() : QString();
+    const QString reasonFilter = reviewReasonFilterCombo_ ? reviewReasonFilterCombo_->currentData().toString() : QString();
+    const QString query = reviewSearchEdit_ ? reviewSearchEdit_->text().trimmed().toLower() : QString();
+    for (const QJsonValue& value : sampleReviewSamples_) {
+        const QJsonObject sample = value.toObject();
+        const QString source = sample.value(QStringLiteral("source")).toString();
+        const QString reason = sample.value(QStringLiteral("reason")).toString();
+        if (!sourceFilter.isEmpty() && source != sourceFilter) {
+            continue;
+        }
+        if (!reasonFilter.isEmpty() && reason != reasonFilter) {
+            continue;
+        }
+        if (!query.isEmpty()) {
+            const QString combined = QString::fromUtf8(QJsonDocument(sample).toJson(QJsonDocument::Compact)).toLower();
+            if (!combined.contains(query)) {
+                continue;
+            }
+        }
+        rows.append(sample);
+    }
+    return rows;
+}
+
+void MainWindow::refreshSampleReviewTable()
+{
+    if (!sampleReviewTable_) {
+        return;
+    }
+    const QJsonArray rows = filteredSampleReviewRows();
+    sampleReviewTable_->setRowCount(0);
+    for (const QJsonValue& value : rows) {
+        const QJsonObject sample = value.toObject();
+        const int row = sampleReviewTable_->rowCount();
+        sampleReviewTable_->insertRow(row);
+        const QString imagePath = samplePathField(sample, QStringList()
+            << QStringLiteral("imagePath")
+            << QStringLiteral("path")
+            << QStringLiteral("filePath"));
+        const QString labelPath = samplePathField(sample, QStringList()
+            << QStringLiteral("labelPath")
+            << QStringLiteral("annotationPath")
+            << QStringLiteral("gtPath"));
+        sampleReviewTable_->setItem(row, 0, new QTableWidgetItem(sample.value(QStringLiteral("source")).toString()));
+        sampleReviewTable_->setItem(row, 1, new QTableWidgetItem(sample.value(QStringLiteral("reason")).toString()));
+        sampleReviewTable_->setItem(row, 2, new QTableWidgetItem(reviewClassText(sample)));
+        sampleReviewTable_->setItem(row, 3, new QTableWidgetItem(reviewMetricText(sample)));
+        auto* imageItem = new QTableWidgetItem(compactPathForStatus(imagePath, 80));
+        imageItem->setData(Qt::UserRole, imagePath);
+        imageItem->setToolTip(QDir::toNativeSeparators(imagePath));
+        sampleReviewTable_->setItem(row, 4, imageItem);
+        auto* labelItem = new QTableWidgetItem(compactPathForStatus(labelPath, 80));
+        labelItem->setData(Qt::UserRole, labelPath);
+        labelItem->setToolTip(QDir::toNativeSeparators(labelPath));
+        sampleReviewTable_->setItem(row, 5, labelItem);
+        sampleReviewTable_->setItem(row, 6, new QTableWidgetItem(sampleTextField(sample, QStringList()
+            << QStringLiteral("message")
+            << QStringLiteral("note")
+            << QStringLiteral("description")
+            << QStringLiteral("groundTruth")
+            << QStringLiteral("prediction"))));
+    }
+    if (sampleReviewSummaryLabel_) {
+        sampleReviewSummaryLabel_->setText(uiText("复核样本：显示 %1 / 总计 %2；清单 %3")
+            .arg(rows.size())
+            .arg(sampleReviewSamples_.size())
+            .arg(latestReviewListPath_.isEmpty() ? uiText("尚未生成") : QDir::toNativeSeparators(latestReviewListPath_)));
+    }
+}
+
+void MainWindow::generateFilteredReviewList()
+{
+    const QJsonArray rows = filteredSampleReviewRows();
+    if (rows.isEmpty()) {
+        QMessageBox::information(this, uiText("样本复核"), uiText("当前过滤条件下没有样本。"));
+        return;
+    }
+    const QString sourcePath = QDir::fromNativeSeparators(reviewSamplePathEdit_ ? reviewSamplePathEdit_->text().trimmed() : QString());
+    const QString outputDir = !currentProjectPath_.isEmpty()
+        ? QDir(currentProjectPath_).filePath(QStringLiteral("datasets/review"))
+        : QFileInfo(sourcePath).absolutePath();
+    QDir().mkpath(outputDir);
+    const QString listPath = QDir(outputDir).filePath(QStringLiteral("xanylabeling_review_list.txt"));
+    const QString manifestPath = QDir(outputDir).filePath(QStringLiteral("rework_sample_set.json"));
+
+    QFile listFile(listPath);
+    if (!listFile.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+        QMessageBox::critical(this, uiText("样本复核"), uiText("无法写入复核清单：%1").arg(QDir::toNativeSeparators(listPath)));
+        return;
+    }
+    QTextStream listStream(&listFile);
+    listStream.setCodec("UTF-8");
+    QJsonArray manifestSamples;
+    for (const QJsonValue& value : rows) {
+        const QJsonObject sample = value.toObject();
+        const QString imagePath = samplePathField(sample, QStringList()
+            << QStringLiteral("imagePath")
+            << QStringLiteral("path")
+            << QStringLiteral("filePath"));
+        if (!imagePath.isEmpty()) {
+            listStream << QDir::toNativeSeparators(imagePath) << QLatin1Char('\n');
+        }
+        manifestSamples.append(sample);
+    }
+    listFile.close();
+
+    QFile manifestFile(manifestPath);
+    if (!manifestFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        QMessageBox::critical(this, uiText("样本复核"), uiText("无法写入复核 manifest：%1").arg(QDir::toNativeSeparators(manifestPath)));
+        return;
+    }
+    QJsonObject manifest;
+    manifest.insert(QStringLiteral("schemaVersion"), 1);
+    manifest.insert(QStringLiteral("kind"), QStringLiteral("rework_sample_set"));
+    manifest.insert(QStringLiteral("sourcePath"), sourcePath);
+    manifest.insert(QStringLiteral("listPath"), listPath);
+    manifest.insert(QStringLiteral("sampleCount"), rows.size());
+    manifest.insert(QStringLiteral("samples"), manifestSamples);
+    manifestFile.write(QJsonDocument(manifest).toJson(QJsonDocument::Indented));
+    manifestFile.close();
+
+    latestReviewListPath_ = listPath;
+    refreshSampleReviewTable();
+    statusBar()->showMessage(uiText("复核清单已生成：%1").arg(QDir::toNativeSeparators(listPath)), 5000);
+}
+
+void MainWindow::openSelectedReviewSample()
+{
+    if (!sampleReviewTable_ || sampleReviewTable_->currentRow() < 0) {
+        QMessageBox::information(this, uiText("样本复核"), uiText("请先选择一条复核样本。"));
+        return;
+    }
+    QTableWidgetItem* item = sampleReviewTable_->item(sampleReviewTable_->currentRow(), 4);
+    const QString path = item ? item->data(Qt::UserRole).toString() : QString();
+    if (path.isEmpty() || !QFileInfo::exists(path)) {
+        QMessageBox::warning(this, uiText("样本复核"), uiText("样本图片不存在。"));
+        return;
+    }
+    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+}
+
+void MainWindow::launchXAnyLabelingForReview()
+{
+    if (latestReviewListPath_.isEmpty()) {
+        generateFilteredReviewList();
+    }
+    const QString program = resolvedXAnyLabelingProgram();
+    if (program.isEmpty()) {
+        updateAnnotationToolStatus();
+        QMessageBox::warning(this, QStringLiteral("X-AnyLabeling"), uiText("未找到 X-AnyLabeling。请确保 xanylabeling 在 PATH 中，或放到程序目录 / tools/x-anylabeling / .deps/annotation-tools/X-AnyLabeling。"));
+        return;
+    }
+    QString targetDir = currentDatasetPath_;
+    if (targetDir.isEmpty() && !latestReviewListPath_.isEmpty()) {
+        targetDir = QFileInfo(latestReviewListPath_).absolutePath();
+    }
+    if (targetDir.isEmpty()) {
+        targetDir = currentProjectPath_;
+    }
+    if (QProcess::startDetached(program, QStringList() << targetDir)) {
+        statusBar()->showMessage(uiText("已启动 X-AnyLabeling；复核清单：%1").arg(QDir::toNativeSeparators(latestReviewListPath_)), 6000);
+    } else {
+        QMessageBox::warning(this, QStringLiteral("X-AnyLabeling"), uiText("X-AnyLabeling 启动失败：%1").arg(QDir::toNativeSeparators(program)));
+    }
+}
+
 void MainWindow::createDatasetSnapshot()
 {
     if (worker_.isRunning()) {
@@ -455,6 +842,248 @@ void MainWindow::startModelExport()
         exportResultLabel_->setText(uiText("正在导出：%1").arg(QDir::toNativeSeparators(outputPath)));
     }
     workerPill_->setStatus(uiText("模型导出中"), StatusPill::Tone::Info);
+}
+
+void MainWindow::validateDeploymentArtifact()
+{
+    if (worker_.isRunning()) {
+        QMessageBox::warning(this, uiText("部署验证"), uiText("Worker 正在执行任务，稍后再验证部署产物。"));
+        return;
+    }
+    QString modelPath = QDir::fromNativeSeparators(conversionOutputEdit_ ? conversionOutputEdit_->text().trimmed() : QString());
+    if (modelPath.isEmpty() || !QFileInfo::exists(modelPath)) {
+        modelPath = QDir::fromNativeSeparators(conversionCheckpointEdit_ ? conversionCheckpointEdit_->text().trimmed() : QString());
+    }
+    if (modelPath.isEmpty()) {
+        QMessageBox::warning(this, uiText("部署验证"), uiText("请选择已导出的模型产物或模型输入。"));
+        return;
+    }
+    const QString sampleImagePath = QDir::fromNativeSeparators(conversionValidationImageEdit_ ? conversionValidationImageEdit_->text().trimmed() : QString());
+    const QString format = conversionFormatCombo_ ? conversionFormatCombo_->currentData().toString() : QString();
+    QString taskId;
+    QString outputPath;
+    if (repository_.isOpen()) {
+        taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        outputPath = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(taskId));
+        taskId = createRepositoryTask(
+            aitrain::TaskKind::Benchmark,
+            QStringLiteral("deployment_validation"),
+            QStringLiteral("com.aitrain.plugins.yolo_native"),
+            outputPath,
+            uiText("部署产物验证中。"),
+            taskId);
+        if (taskId.isEmpty()) {
+            return;
+        }
+    } else {
+        outputPath = QFileInfo(modelPath).absoluteDir().filePath(QStringLiteral("deployment_validation"));
+    }
+
+    QJsonObject options;
+    QString error;
+    if (!worker_.requestDeploymentValidation(workerExecutablePath(), modelPath, outputPath, format, sampleImagePath, options, &error, taskId)) {
+        if (!taskId.isEmpty() && repository_.isOpen()) {
+            QString taskError;
+            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
+            currentTaskId_.clear();
+            updateRecentTasks();
+        }
+        QMessageBox::critical(this, uiText("部署验证"), error);
+        return;
+    }
+    if (deploymentValidationResultLabel_) {
+        deploymentValidationResultLabel_->setText(uiText("正在验证部署产物：%1").arg(QDir::toNativeSeparators(modelPath)));
+    }
+    workerPill_->setStatus(uiText("部署验证中"), StatusPill::Tone::Info);
+}
+
+void MainWindow::runCustomerOcrAcceptance()
+{
+    if (worker_.isRunning()) {
+        QMessageBox::warning(this, uiText("OCR 验收"), uiText("Worker 正在执行任务，稍后再运行 OCR 验收。"));
+        return;
+    }
+    QJsonObject options;
+    options.insert(QStringLiteral("detDatasetPath"), QDir::fromNativeSeparators(customerOcrDetDatasetEdit_ ? customerOcrDetDatasetEdit_->text().trimmed() : QString()));
+    options.insert(QStringLiteral("recDatasetPath"), QDir::fromNativeSeparators(customerOcrRecDatasetEdit_ ? customerOcrRecDatasetEdit_->text().trimmed() : QString()));
+    options.insert(QStringLiteral("systemImagesPath"), QDir::fromNativeSeparators(customerOcrSystemImagesEdit_ ? customerOcrSystemImagesEdit_->text().trimmed() : QString()));
+    options.insert(QStringLiteral("detReportPath"), QDir::fromNativeSeparators(customerOcrDetReportEdit_ ? customerOcrDetReportEdit_->text().trimmed() : QString()));
+    options.insert(QStringLiteral("recReportPath"), QDir::fromNativeSeparators(customerOcrRecReportEdit_ ? customerOcrRecReportEdit_->text().trimmed() : QString()));
+    options.insert(QStringLiteral("systemReportPath"), QDir::fromNativeSeparators(customerOcrSystemReportEdit_ ? customerOcrSystemReportEdit_->text().trimmed() : QString()));
+    options.insert(QStringLiteral("detOnnxEvidencePath"), QDir::fromNativeSeparators(customerOcrDetOnnxEvidenceEdit_ ? customerOcrDetOnnxEvidenceEdit_->text().trimmed() : QString()));
+    options.insert(QStringLiteral("minRecAccuracy"), customerOcrMinAccEdit_ ? customerOcrMinAccEdit_->text().toDouble() : 0.70);
+    options.insert(QStringLiteral("maxRecCer"), customerOcrMaxCerEdit_ ? customerOcrMaxCerEdit_->text().toDouble() : 0.30);
+    options.insert(QStringLiteral("requireFullDomainEvidence"), true);
+    options.insert(QStringLiteral("allowPublicLikeData"), customerOcrAllowPublicCheck_ && customerOcrAllowPublicCheck_->isChecked());
+    options.insert(QStringLiteral("requireDetOnnxEvidence"), customerOcrRequireDetOnnxCheck_ && customerOcrRequireDetOnnxCheck_->isChecked());
+    options.insert(QStringLiteral("minDetSamples"), 1);
+    options.insert(QStringLiteral("minRecSamples"), 1);
+    options.insert(QStringLiteral("minSystemImages"), 1);
+
+    QString taskId;
+    QString outputPath = QDir::fromNativeSeparators(customerOcrOutputEdit_ ? customerOcrOutputEdit_->text().trimmed() : QString());
+    if (repository_.isOpen()) {
+        taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        if (outputPath.isEmpty()) {
+            outputPath = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(taskId));
+        }
+        taskId = createRepositoryTask(
+            aitrain::TaskKind::Report,
+            QStringLiteral("customer_ocr_acceptance"),
+            QStringLiteral("com.aitrain.plugins.ocr_rec_native"),
+            outputPath,
+            uiText("客户域 OCR 验收中。"),
+            taskId);
+        if (taskId.isEmpty()) {
+            return;
+        }
+    }
+
+    QString error;
+    if (!worker_.requestCustomerOcrAcceptance(workerExecutablePath(), outputPath, options, &error, taskId)) {
+        if (!taskId.isEmpty() && repository_.isOpen()) {
+            QString taskError;
+            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
+            currentTaskId_.clear();
+            updateRecentTasks();
+        }
+        QMessageBox::critical(this, uiText("OCR 验收"), error);
+        return;
+    }
+    if (customerOcrStatusLabel_) {
+        customerOcrStatusLabel_->setText(uiText("客户域 OCR 验收运行中。"));
+    }
+    workerPill_->setStatus(uiText("OCR 验收中"), StatusPill::Tone::Info);
+}
+
+void MainWindow::collectDiagnosticsBundle()
+{
+    if (worker_.isRunning()) {
+        QMessageBox::warning(this, uiText("诊断包"), uiText("Worker 正在执行任务，稍后再生成诊断包。"));
+        return;
+    }
+
+    QJsonArray recentTasks;
+    QJsonArray recentFailures;
+    QJsonArray artifactIndex;
+    if (repository_.isOpen()) {
+        QString error;
+        const QVector<aitrain::TaskRecord> tasks = repository_.recentTasks(20, &error);
+        for (const aitrain::TaskRecord& task : tasks) {
+            QJsonObject taskObject;
+            taskObject.insert(QStringLiteral("id"), task.id);
+            taskObject.insert(QStringLiteral("kind"), aitrain::taskKindToString(task.kind));
+            taskObject.insert(QStringLiteral("state"), aitrain::taskStateToString(task.state));
+            taskObject.insert(QStringLiteral("taskType"), task.taskType);
+            taskObject.insert(QStringLiteral("workDir"), task.workDir);
+            taskObject.insert(QStringLiteral("message"), task.message);
+            taskObject.insert(QStringLiteral("updatedAt"), task.updatedAt.toUTC().toString(Qt::ISODateWithMs));
+            recentTasks.append(taskObject);
+            if (task.state == aitrain::TaskState::Failed) {
+                recentFailures.append(taskObject);
+            }
+            const QVector<aitrain::ArtifactRecord> artifacts = repository_.artifactsForTask(task.id, &error);
+            for (const aitrain::ArtifactRecord& artifact : artifacts) {
+                artifactIndex.append(QJsonObject{
+                    {QStringLiteral("taskId"), artifact.taskId},
+                    {QStringLiteral("kind"), artifact.kind},
+                    {QStringLiteral("path"), artifact.path},
+                    {QStringLiteral("message"), artifact.message}
+                });
+            }
+        }
+    }
+
+    QJsonObject context;
+    context.insert(QStringLiteral("projectName"), currentProjectName_);
+    context.insert(QStringLiteral("projectPath"), currentProjectPath_);
+    context.insert(QStringLiteral("workerExecutable"), workerExecutablePath());
+    context.insert(QStringLiteral("recentTasks"), recentTasks);
+    context.insert(QStringLiteral("recentFailures"), recentFailures);
+    context.insert(QStringLiteral("artifactIndex"), artifactIndex);
+    context.insert(QStringLiteral("licenseSummary"), QJsonObject{
+        {QStringLiteral("status"), licenseOwner_.isEmpty() ? QStringLiteral("unknown") : QStringLiteral("registered")},
+        {QStringLiteral("owner"), licenseOwner_},
+        {QStringLiteral("expiry"), licenseExpiry_}
+    });
+    context.insert(QStringLiteral("pluginSummary"), QJsonObject{
+        {QStringLiteral("count"), pluginManager_.plugins().size()},
+        {QStringLiteral("searchPaths"), QJsonArray::fromStringList(pluginSearchPaths())}
+    });
+
+    QString taskId;
+    QString outputPath;
+    if (repository_.isOpen()) {
+        taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        outputPath = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(taskId));
+        taskId = createRepositoryTask(
+            aitrain::TaskKind::Report,
+            QStringLiteral("diagnostic_bundle"),
+            QStringLiteral("com.aitrain.system"),
+            outputPath,
+            uiText("诊断包生成中。"),
+            taskId);
+        if (taskId.isEmpty()) {
+            return;
+        }
+    } else {
+        outputPath = QDir(QDir::tempPath()).filePath(QStringLiteral("aitrain-diagnostics"));
+    }
+
+    QString error;
+    if (!worker_.requestDiagnosticsBundle(workerExecutablePath(), outputPath, context, &error, taskId)) {
+        if (!taskId.isEmpty() && repository_.isOpen()) {
+            QString taskError;
+            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
+            currentTaskId_.clear();
+            updateRecentTasks();
+        }
+        QMessageBox::critical(this, uiText("诊断包"), error);
+        return;
+    }
+    if (diagnosticsStatusLabel_) {
+        diagnosticsStatusLabel_->setText(uiText("诊断包生成中。"));
+    }
+    workerPill_->setStatus(uiText("诊断包生成中"), StatusPill::Tone::Info);
+}
+
+void MainWindow::importAcceptanceEvidence()
+{
+    const QString file = QFileDialog::getOpenFileName(
+        this,
+        uiText("导入验收结果"),
+        currentProjectPath_,
+        QStringLiteral("Acceptance evidence (*.json *.md *.txt);;All files (*.*)"));
+    if (file.isEmpty()) {
+        return;
+    }
+    QString status = QStringLiteral("imported");
+    QString stage = QFileInfo(file).completeBaseName();
+    QString message = uiText("已导入外部验收结果。");
+    if (QFileInfo(file).suffix().compare(QStringLiteral("json"), Qt::CaseInsensitive) == 0) {
+        QFile jsonFile(file);
+        if (jsonFile.open(QIODevice::ReadOnly)) {
+            const QJsonDocument document = QJsonDocument::fromJson(jsonFile.readAll());
+            const QJsonObject object = document.object();
+            status = object.value(QStringLiteral("status")).toString(object.value(QStringLiteral("ok")).toBool(false) ? QStringLiteral("passed") : QStringLiteral("blocked"));
+            stage = object.value(QStringLiteral("kind")).toString(stage);
+            message = object.value(QStringLiteral("message")).toString(object.value(QStringLiteral("note")).toString(message));
+        }
+    } else {
+        QFile textFile(file);
+        if (textFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            const QString text = QString::fromUtf8(textFile.readAll()).toLower();
+            if (text.contains(QStringLiteral("hardware-blocked"))) {
+                status = QStringLiteral("hardware-blocked");
+            } else if (text.contains(QStringLiteral("blocked")) || text.contains(QStringLiteral("failed"))) {
+                status = QStringLiteral("blocked");
+            } else if (text.contains(QStringLiteral("passed"))) {
+                status = QStringLiteral("passed");
+            }
+        }
+    }
+    setAcceptanceTableRow(deliveryAcceptanceTable_, stage, status, file, message);
+    updateDeliveryAcceptanceSummary();
 }
 
 void MainWindow::startInference()

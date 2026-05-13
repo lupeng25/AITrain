@@ -56,12 +56,14 @@ QString MainWindow::pageCaption(int pageIndex) const
     case DashboardPage: return tr("本机项目、数据、训练、模型交付状态总览");
     case ProjectPage: return tr("创建或打开本地训练项目，统一管理数据、运行和模型产物");
     case DatasetPage: return tr("管理数据集库，完成导入、校验、划分和样本预览");
+    case SampleReviewPage: return uiText("汇总质量报告、评估错误和低置信样本，生成 X-AnyLabeling 复核清单");
     case TrainingPage: return tr("启动官方后端优先的训练实验，并监控指标、日志和产物");
     case TaskQueuePage: return tr("追踪历史任务、指标、导出记录和所有 Worker 产物");
     case ModelRegistryPage: return tr("管理模型版本、来源 lineage，以及导出、推理和流水线入口");
     case EvaluationReportsPage: return tr("集中查看最近评估报告、任务类型、报告路径和详细可视化结果");
     case ConversionPage: return tr("将训练产物导出为 ONNX 或外部 TensorRT 验收目标");
     case InferencePage: return tr("选择模型与样本图，验证 detection、segmentation 或 OCR 推理结果");
+    case DeliveryAcceptancePage: return uiText("汇总本机、包体、TensorRT、客户域 OCR 和诊断包验收证据");
     case PluginsPage: return tr("扫描和诊断模型插件");
     case EnvironmentPage: return tr("检查 GPU、CUDA、TensorRT 和运行时依赖");
     case SettingsPage: return uiText("集中管理界面语言、默认项目目录、授权状态和常用系统入口");
@@ -83,6 +85,12 @@ void MainWindow::showPage(int pageIndex, const QString& title)
     }
     if (pageIndex == EvaluationReportsPage) {
         updateModelRegistry();
+    }
+    if (pageIndex == SampleReviewPage) {
+        refreshSampleReviewTable();
+    }
+    if (pageIndex == DeliveryAcceptancePage) {
+        updateDeliveryAcceptanceSummary();
     }
     if (pageIndex == SettingsPage) {
         updateSettingsSummary();
@@ -353,6 +361,62 @@ void MainWindow::updateSettingsSummary()
             : QDir::toNativeSeparators(currentProjectPath_));
     }
     updateLanguageButtonState();
+}
+
+void MainWindow::updateDeliveryAcceptanceSummary()
+{
+    if (!deliveryAcceptanceTable_) {
+        return;
+    }
+    if (deliveryAcceptanceTable_->rowCount() == 0) {
+        const QStringList stages = {
+            uiText("本机 RC"),
+            uiText("Clean Windows"),
+            uiText("TensorRT"),
+            uiText("客户域 OCR"),
+            uiText("包体完整性"),
+            uiText("部署验证"),
+            uiText("诊断包")
+        };
+        for (const QString& stage : stages) {
+            const int row = deliveryAcceptanceTable_->rowCount();
+            deliveryAcceptanceTable_->insertRow(row);
+            deliveryAcceptanceTable_->setItem(row, 0, new QTableWidgetItem(stage));
+            deliveryAcceptanceTable_->setItem(row, 1, new QTableWidgetItem(QStringLiteral("not_run")));
+            deliveryAcceptanceTable_->setItem(row, 2, new QTableWidgetItem(QString()));
+            deliveryAcceptanceTable_->setItem(row, 3, new QTableWidgetItem(uiText("等待导入外部结果或运行对应 Worker/脚本。")));
+        }
+    }
+
+    int passed = 0;
+    int blocked = 0;
+    int hardwareBlocked = 0;
+    int notRun = 0;
+    int collected = 0;
+    for (int row = 0; row < deliveryAcceptanceTable_->rowCount(); ++row) {
+        const QString status = deliveryAcceptanceTable_->item(row, 1)
+            ? deliveryAcceptanceTable_->item(row, 1)->text()
+            : QString();
+        if (status == QStringLiteral("passed")) {
+            ++passed;
+        } else if (status == QStringLiteral("blocked") || status == QStringLiteral("failed")) {
+            ++blocked;
+        } else if (status == QStringLiteral("hardware-blocked")) {
+            ++hardwareBlocked;
+        } else if (status == QStringLiteral("collected") || status == QStringLiteral("imported")) {
+            ++collected;
+        } else {
+            ++notRun;
+        }
+    }
+    if (deliveryAcceptanceSummaryLabel_) {
+        deliveryAcceptanceSummaryLabel_->setText(uiText("验收状态：passed %1 / blocked %2 / hardware-blocked %3 / collected %4 / not-run %5")
+            .arg(passed)
+            .arg(blocked)
+            .arg(hardwareBlocked)
+            .arg(collected)
+            .arg(notRun));
+    }
 }
 
 void MainWindow::updateDashboardSummary()

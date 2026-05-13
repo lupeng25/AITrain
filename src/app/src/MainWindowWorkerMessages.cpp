@@ -50,6 +50,30 @@
 
 using namespace aitrain_app;
 
+namespace {
+void setAcceptanceTableRow(QTableWidget* table, const QString& stage, const QString& status, const QString& evidence, const QString& message)
+{
+    if (!table) {
+        return;
+    }
+    int row = -1;
+    for (int index = 0; index < table->rowCount(); ++index) {
+        if (table->item(index, 0) && table->item(index, 0)->text() == stage) {
+            row = index;
+            break;
+        }
+    }
+    if (row < 0) {
+        row = table->rowCount();
+        table->insertRow(row);
+    }
+    table->setItem(row, 0, new QTableWidgetItem(stage));
+    table->setItem(row, 1, new QTableWidgetItem(status));
+    table->setItem(row, 2, new QTableWidgetItem(QDir::toNativeSeparators(evidence)));
+    table->setItem(row, 3, new QTableWidgetItem(message));
+}
+} // namespace
+
 void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& payload)
 {
     if (type == QStringLiteral("progress")) {
@@ -83,8 +107,14 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
         updateModelRegistry();
     } else if (type == QStringLiteral("modelExport")) {
         handleModelExportMessage(payload);
+    } else if (type == QStringLiteral("deploymentValidation")) {
+        handleDeploymentValidationMessage(payload);
     } else if (type == QStringLiteral("inferenceResult")) {
         handleInferenceResultMessage(payload);
+    } else if (type == QStringLiteral("customerOcrAcceptance")) {
+        handleCustomerOcrAcceptanceMessage(payload);
+    } else if (type == QStringLiteral("diagnosticBundle")) {
+        handleDiagnosticBundleMessage(payload);
     }
 }
 
@@ -432,6 +462,26 @@ void MainWindow::handleModelExportMessage(const QJsonObject& payload)
     updateModelRegistry();
 }
 
+void MainWindow::handleDeploymentValidationMessage(const QJsonObject& payload)
+{
+    latestDeploymentValidationReportPath_ = payload.value(QStringLiteral("reportPath")).toString();
+    const QString status = payload.value(QStringLiteral("status")).toString();
+    const QString runtime = payload.value(QStringLiteral("runtime")).toString();
+    const QString modelPath = payload.value(QStringLiteral("modelPath")).toString();
+    if (deploymentValidationResultLabel_) {
+        deploymentValidationResultLabel_->setText(uiText("部署验证：%1 | runtime %2 | %3")
+            .arg(status, runtime, QDir::toNativeSeparators(latestDeploymentValidationReportPath_)));
+    }
+    setAcceptanceTableRow(
+        deliveryAcceptanceTable_,
+        uiText("部署验证"),
+        status,
+        latestDeploymentValidationReportPath_,
+        uiText("模型：%1").arg(QDir::toNativeSeparators(modelPath)));
+    updateDeliveryAcceptanceSummary();
+    updateModelRegistry();
+}
+
 void MainWindow::handleInferenceResultMessage(const QJsonObject& payload)
 {
     if (inferenceResultLabel_) {
@@ -440,4 +490,41 @@ void MainWindow::handleInferenceResultMessage(const QJsonObject& payload)
             payload));
     }
     loadInferenceOverlay(inferenceOverlayLabel_, payload.value(QStringLiteral("overlayPath")).toString());
+}
+
+void MainWindow::handleCustomerOcrAcceptanceMessage(const QJsonObject& payload)
+{
+    latestCustomerOcrAcceptanceReportPath_ = payload.value(QStringLiteral("reportPath")).toString();
+    const QString status = payload.value(QStringLiteral("status")).toString();
+    const QJsonObject metrics = payload.value(QStringLiteral("metrics")).toObject();
+    if (customerOcrStatusLabel_) {
+        customerOcrStatusLabel_->setText(uiText("客户域 OCR 验收：%1 | accuracy %2 | CER %3 | %4")
+            .arg(status)
+            .arg(metrics.value(QStringLiteral("recAccuracy")).toDouble(), 0, 'f', 4)
+            .arg(metrics.value(QStringLiteral("recCer")).toDouble(), 0, 'f', 4)
+            .arg(QDir::toNativeSeparators(latestCustomerOcrAcceptanceReportPath_)));
+    }
+    setAcceptanceTableRow(
+        deliveryAcceptanceTable_,
+        uiText("客户域 OCR"),
+        status,
+        latestCustomerOcrAcceptanceReportPath_,
+        payload.value(QStringLiteral("publicDataBoundary")).toString());
+    updateDeliveryAcceptanceSummary();
+}
+
+void MainWindow::handleDiagnosticBundleMessage(const QJsonObject& payload)
+{
+    latestDiagnosticBundlePath_ = payload.value(QStringLiteral("bundlePath")).toString();
+    const QString manifestPath = payload.value(QStringLiteral("manifestPath")).toString(payload.value(QStringLiteral("reportPath")).toString());
+    if (diagnosticsStatusLabel_) {
+        diagnosticsStatusLabel_->setText(uiText("诊断包已生成：%1").arg(QDir::toNativeSeparators(latestDiagnosticBundlePath_)));
+    }
+    setAcceptanceTableRow(
+        deliveryAcceptanceTable_,
+        uiText("诊断包"),
+        QStringLiteral("collected"),
+        manifestPath,
+        uiText("包含环境、GPU、最近任务、产物和授权摘要。"));
+    updateDeliveryAcceptanceSummary();
 }

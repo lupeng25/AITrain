@@ -35,6 +35,9 @@ private:
     void benchmarkModel(const QJsonObject& payload);
     void runLocalPipeline(const QJsonObject& payload);
     void generateDeliveryReport(const QJsonObject& payload);
+    void runCustomerOcrAcceptance(const QJsonObject& payload);
+    void collectDiagnostics(const QJsonObject& payload);
+    void validateDeploymentArtifact(const QJsonObject& payload);
     void exportModel(const QJsonObject& payload);
     void runInference(const QJsonObject& payload);
     void runDetectionTraining();

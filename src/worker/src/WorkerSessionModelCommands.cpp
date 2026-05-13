@@ -204,6 +204,174 @@ void WorkerSession::generateDeliveryReport(const QJsonObject& payload)
     finishSession();
 }
 
+void WorkerSession::runCustomerOcrAcceptance(const QJsonObject& payload)
+{
+    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
+    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
+    if (outputPath.isEmpty()) {
+        outputPath = defaultTaskOutputPath(QDir::currentPath(), taskId);
+    }
+    QJsonObject options = payload.value(QStringLiteral("options")).toObject();
+    options.insert(QStringLiteral("taskId"), taskId);
+
+    QJsonObject progress;
+    progress.insert(QStringLiteral("taskId"), taskId);
+    progress.insert(QStringLiteral("percent"), 0);
+    progress.insert(QStringLiteral("message"), QStringLiteral("开始客户域 OCR 验收。"));
+    send(QStringLiteral("progress"), progress);
+
+    const aitrain::WorkflowResult result = aitrain::runCustomerOcrAcceptanceReport(outputPath, options);
+    if (!result.ok) {
+        fail(result.error);
+        return;
+    }
+
+    QJsonObject artifact;
+    artifact.insert(QStringLiteral("taskId"), taskId);
+    artifact.insert(QStringLiteral("kind"), QStringLiteral("customer_ocr_acceptance"));
+    artifact.insert(QStringLiteral("path"), result.reportPath);
+    artifact.insert(QStringLiteral("message"), QStringLiteral("Customer OCR acceptance report"));
+    send(QStringLiteral("artifact"), artifact);
+    const QString summaryPath = result.payload.value(QStringLiteral("summaryPath")).toString();
+    if (!summaryPath.isEmpty()) {
+        QJsonObject summaryArtifact;
+        summaryArtifact.insert(QStringLiteral("taskId"), taskId);
+        summaryArtifact.insert(QStringLiteral("kind"), QStringLiteral("customer_ocr_acceptance_summary"));
+        summaryArtifact.insert(QStringLiteral("path"), summaryPath);
+        summaryArtifact.insert(QStringLiteral("message"), QStringLiteral("Customer OCR acceptance summary"));
+        send(QStringLiteral("artifact"), summaryArtifact);
+    }
+
+    QJsonObject doneProgress;
+    doneProgress.insert(QStringLiteral("taskId"), taskId);
+    doneProgress.insert(QStringLiteral("percent"), 100);
+    doneProgress.insert(QStringLiteral("message"), QStringLiteral("客户域 OCR 验收报告已生成。"));
+    send(QStringLiteral("progress"), doneProgress);
+    send(QStringLiteral("customerOcrAcceptance"), result.payload);
+    socket_.waitForBytesWritten(1000);
+
+    QJsonObject completed;
+    completed.insert(QStringLiteral("taskId"), taskId);
+    completed.insert(QStringLiteral("message"), QStringLiteral("Customer OCR acceptance completed"));
+    send(QStringLiteral("completed"), completed);
+    finishSession();
+}
+
+void WorkerSession::collectDiagnostics(const QJsonObject& payload)
+{
+    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
+    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
+    if (outputPath.isEmpty()) {
+        outputPath = defaultTaskOutputPath(QDir::currentPath(), taskId);
+    }
+    QJsonObject context = payload.value(QStringLiteral("context")).toObject();
+    context.insert(QStringLiteral("taskId"), taskId);
+    if (context.value(QStringLiteral("workerExecutable")).toString().isEmpty()) {
+        context.insert(QStringLiteral("workerExecutable"), QCoreApplication::applicationFilePath());
+    }
+
+    QJsonObject progress;
+    progress.insert(QStringLiteral("taskId"), taskId);
+    progress.insert(QStringLiteral("percent"), 0);
+    progress.insert(QStringLiteral("message"), QStringLiteral("开始收集诊断包。"));
+    send(QStringLiteral("progress"), progress);
+
+    const aitrain::WorkflowResult result = aitrain::collectDiagnosticsReport(outputPath, context);
+    if (!result.ok) {
+        fail(result.error);
+        return;
+    }
+
+    for (const auto& item : {
+             qMakePair(QStringLiteral("diagnostic_manifest"), QStringLiteral("manifestPath")),
+             qMakePair(QStringLiteral("diagnostic_bundle"), QStringLiteral("bundlePath")),
+             qMakePair(QStringLiteral("diagnostic_summary"), QStringLiteral("summaryPath"))}) {
+        const QString path = result.payload.value(item.second).toString();
+        if (path.isEmpty()) {
+            continue;
+        }
+        QJsonObject artifact;
+        artifact.insert(QStringLiteral("taskId"), taskId);
+        artifact.insert(QStringLiteral("kind"), item.first);
+        artifact.insert(QStringLiteral("path"), path);
+        artifact.insert(QStringLiteral("message"), QStringLiteral("Diagnostic bundle artifact"));
+        send(QStringLiteral("artifact"), artifact);
+    }
+
+    QJsonObject doneProgress;
+    doneProgress.insert(QStringLiteral("taskId"), taskId);
+    doneProgress.insert(QStringLiteral("percent"), 100);
+    doneProgress.insert(QStringLiteral("message"), QStringLiteral("诊断包已生成。"));
+    send(QStringLiteral("progress"), doneProgress);
+    send(QStringLiteral("diagnosticBundle"), result.payload);
+    socket_.waitForBytesWritten(1000);
+
+    QJsonObject completed;
+    completed.insert(QStringLiteral("taskId"), taskId);
+    completed.insert(QStringLiteral("message"), QStringLiteral("Diagnostics collected"));
+    send(QStringLiteral("completed"), completed);
+    finishSession();
+}
+
+void WorkerSession::validateDeploymentArtifact(const QJsonObject& payload)
+{
+    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
+    const QString modelPath = payload.value(QStringLiteral("modelPath")).toString();
+    const QString format = payload.value(QStringLiteral("format")).toString();
+    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
+    if (outputPath.isEmpty()) {
+        outputPath = defaultTaskOutputPath(QFileInfo(modelPath).absoluteDir().absolutePath(), taskId);
+    }
+    QJsonObject options = payload.value(QStringLiteral("options")).toObject();
+    const QString sampleImagePath = payload.value(QStringLiteral("sampleImagePath")).toString();
+    if (!sampleImagePath.isEmpty()) {
+        options.insert(QStringLiteral("sampleImagePath"), sampleImagePath);
+    }
+
+    QJsonObject progress;
+    progress.insert(QStringLiteral("taskId"), taskId);
+    progress.insert(QStringLiteral("percent"), 0);
+    progress.insert(QStringLiteral("message"), QStringLiteral("开始验证部署产物。"));
+    send(QStringLiteral("progress"), progress);
+
+    const aitrain::WorkflowResult result = aitrain::validateDeploymentArtifactReport(modelPath, outputPath, format, options);
+    if (!result.ok) {
+        fail(result.error);
+        return;
+    }
+
+    for (const auto& item : {
+             qMakePair(QStringLiteral("deployment_validation_report"), QStringLiteral("reportPath")),
+             qMakePair(QStringLiteral("deployment_validation_summary"), QStringLiteral("summaryPath")),
+             qMakePair(QStringLiteral("deployment_predictions"), QStringLiteral("predictionsPath")),
+             qMakePair(QStringLiteral("deployment_overlay"), QStringLiteral("overlayPath"))}) {
+        const QString path = result.payload.value(item.second).toString();
+        if (path.isEmpty()) {
+            continue;
+        }
+        QJsonObject artifact;
+        artifact.insert(QStringLiteral("taskId"), taskId);
+        artifact.insert(QStringLiteral("kind"), item.first);
+        artifact.insert(QStringLiteral("path"), path);
+        artifact.insert(QStringLiteral("message"), QStringLiteral("Deployment validation artifact"));
+        send(QStringLiteral("artifact"), artifact);
+    }
+
+    QJsonObject doneProgress;
+    doneProgress.insert(QStringLiteral("taskId"), taskId);
+    doneProgress.insert(QStringLiteral("percent"), 100);
+    doneProgress.insert(QStringLiteral("message"), QStringLiteral("部署产物验证已完成。"));
+    send(QStringLiteral("progress"), doneProgress);
+    send(QStringLiteral("deploymentValidation"), result.payload);
+    socket_.waitForBytesWritten(1000);
+
+    QJsonObject completed;
+    completed.insert(QStringLiteral("taskId"), taskId);
+    completed.insert(QStringLiteral("message"), QStringLiteral("Deployment validation completed"));
+    send(QStringLiteral("completed"), completed);
+    finishSession();
+}
+
 void WorkerSession::exportModel(const QJsonObject& payload)
 {
     const QString taskId = payload.value(QStringLiteral("taskId")).toString();

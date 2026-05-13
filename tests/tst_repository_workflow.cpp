@@ -324,6 +324,8 @@ private slots:
         QVERIFY(QFileInfo::exists(evaluation.payload.value(QStringLiteral("evaluationSummaryPath")).toString()));
         QVERIFY(QFileInfo(evaluation.payload.value(QStringLiteral("overlayDir")).toString()).exists());
         QVERIFY(evaluation.payload.value(QStringLiteral("metrics")).toObject().contains(QStringLiteral("mAP50")));
+        QVERIFY(evaluation.payload.value(QStringLiteral("metrics")).toObject().contains(QStringLiteral("mAP50_95")));
+        QVERIFY(!evaluation.payload.value(QStringLiteral("cocoMapThresholds")).toArray().isEmpty());
         QVERIFY(evaluation.payload.value(QStringLiteral("decisionSummary")).toObject().contains(QStringLiteral("status")));
         QVERIFY(evaluation.payload.value(QStringLiteral("errorTaxonomy")).toObject().contains(QStringLiteral("reasonCounts")));
 
@@ -353,6 +355,67 @@ private slots:
         QVERIFY(benchmark.payload.value(QStringLiteral("latency")).toObject().contains(QStringLiteral("p95Ms")));
         QCOMPARE(benchmark.payload.value(QStringLiteral("deploymentConclusion")).toString(), QStringLiteral("local-runtime-available"));
 
+        const aitrain::WorkflowResult deploymentValidation = aitrain::validateDeploymentArtifactReport(
+            modelPath,
+            QDir(outputRoot).filePath(QStringLiteral("deployment-validation")),
+            QStringLiteral("tiny_detector_json"));
+        QVERIFY2(deploymentValidation.ok, qPrintable(deploymentValidation.error));
+        QVERIFY(QFileInfo::exists(deploymentValidation.reportPath));
+        QCOMPARE(deploymentValidation.payload.value(QStringLiteral("status")).toString(), QStringLiteral("passed"));
+
+        const QString ocrRoot = dir.filePath(QStringLiteral("customer-ocr"));
+        const QString detDataset = QDir(ocrRoot).filePath(QStringLiteral("det"));
+        const QString recDataset = QDir(ocrRoot).filePath(QStringLiteral("rec"));
+        const QString systemImages = QDir(ocrRoot).filePath(QStringLiteral("system"));
+        writeTinyPng(QDir(detDataset).filePath(QStringLiteral("images/a.png")));
+        writeTinyPng(QDir(recDataset).filePath(QStringLiteral("images/a.png")));
+        writeTinyPng(QDir(systemImages).filePath(QStringLiteral("a.png")));
+        const QString detReportPath = QDir(ocrRoot).filePath(QStringLiteral("det_report.json"));
+        const QString recReportPath = QDir(ocrRoot).filePath(QStringLiteral("rec_report.json"));
+        const QString systemReportPath = QDir(ocrRoot).filePath(QStringLiteral("system_report.json"));
+        writeTextFile(detReportPath, QStringLiteral("{\"status\":\"passed\"}"));
+        writeTextFile(recReportPath, QStringLiteral("{\"metrics\":{\"accuracy\":0.82,\"cer\":0.12,\"samples\":5}}"));
+        writeTextFile(systemReportPath, QStringLiteral("{\"status\":\"passed\"}"));
+        const aitrain::WorkflowResult ocrAcceptance = aitrain::runCustomerOcrAcceptanceReport(
+            QDir(outputRoot).filePath(QStringLiteral("ocr-acceptance")),
+            QJsonObject{
+                {QStringLiteral("detDatasetPath"), detDataset},
+                {QStringLiteral("recDatasetPath"), recDataset},
+                {QStringLiteral("systemImagesPath"), systemImages},
+                {QStringLiteral("detReportPath"), detReportPath},
+                {QStringLiteral("recReportPath"), recReportPath},
+                {QStringLiteral("systemReportPath"), systemReportPath}
+            });
+        QVERIFY2(ocrAcceptance.ok, qPrintable(ocrAcceptance.error));
+        QCOMPARE(ocrAcceptance.payload.value(QStringLiteral("status")).toString(), QStringLiteral("passed"));
+
+        const QString publicOcrRoot = dir.filePath(QStringLiteral("generated-ocr-smoke"));
+        writeTinyPng(QDir(publicOcrRoot).filePath(QStringLiteral("det/images/a.png")));
+        writeTinyPng(QDir(publicOcrRoot).filePath(QStringLiteral("rec/images/a.png")));
+        writeTinyPng(QDir(publicOcrRoot).filePath(QStringLiteral("system/a.png")));
+        const aitrain::WorkflowResult blockedOcrAcceptance = aitrain::runCustomerOcrAcceptanceReport(
+            QDir(outputRoot).filePath(QStringLiteral("ocr-acceptance-blocked")),
+            QJsonObject{
+                {QStringLiteral("detDatasetPath"), QDir(publicOcrRoot).filePath(QStringLiteral("det"))},
+                {QStringLiteral("recDatasetPath"), QDir(publicOcrRoot).filePath(QStringLiteral("rec"))},
+                {QStringLiteral("systemImagesPath"), QDir(publicOcrRoot).filePath(QStringLiteral("system"))},
+                {QStringLiteral("detReportPath"), detReportPath},
+                {QStringLiteral("recReportPath"), recReportPath},
+                {QStringLiteral("systemReportPath"), systemReportPath}
+            });
+        QVERIFY2(blockedOcrAcceptance.ok, qPrintable(blockedOcrAcceptance.error));
+        QCOMPARE(blockedOcrAcceptance.payload.value(QStringLiteral("status")).toString(), QStringLiteral("blocked"));
+
+        const aitrain::WorkflowResult diagnostics = aitrain::collectDiagnosticsReport(
+            QDir(outputRoot).filePath(QStringLiteral("diagnostics")),
+            QJsonObject{
+                {QStringLiteral("projectName"), QStringLiteral("demo")},
+                {QStringLiteral("projectPath"), dir.path()},
+                {QStringLiteral("workerExecutable"), QStringLiteral("aitrain_worker.exe")}
+            });
+        QVERIFY2(diagnostics.ok, qPrintable(diagnostics.error));
+        QVERIFY(QFileInfo::exists(diagnostics.payload.value(QStringLiteral("bundlePath")).toString()));
+
         const aitrain::WorkflowResult delivery = aitrain::generateTrainingDeliveryReport(
             QDir(outputRoot).filePath(QStringLiteral("delivery")),
             QJsonObject{
@@ -361,7 +424,8 @@ private slots:
                 {QStringLiteral("taskType"), QStringLiteral("detection")},
                 {QStringLiteral("trainingBackend"), QStringLiteral("tiny_linear_detector")},
                 {QStringLiteral("evaluationReportPath"), evaluation.reportPath},
-                {QStringLiteral("benchmarkReportPath"), benchmark.reportPath}
+                {QStringLiteral("benchmarkReportPath"), benchmark.reportPath},
+                {QStringLiteral("deploymentValidationReportPath"), deploymentValidation.reportPath}
             });
         QVERIFY2(delivery.ok, qPrintable(delivery.error));
         QVERIFY(QFileInfo::exists(delivery.reportPath));
@@ -580,6 +644,7 @@ private slots:
         const QJsonObject segMetrics = segEvaluation.payload.value(QStringLiteral("metrics")).toObject();
         QVERIFY(segMetrics.contains(QStringLiteral("maskIoU")));
         QVERIFY(segMetrics.contains(QStringLiteral("maskMap50")));
+        QVERIFY(segMetrics.contains(QStringLiteral("maskMap50_95")));
 
         const aitrain::WorkflowResult ocrEvaluation = aitrain::evaluateModelReport(
             ocrOnnx,
@@ -725,6 +790,66 @@ private slots:
                 QStringLiteral("benchmark-task"));
         }, QStringLiteral("benchmarkReport"));
         QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-benchmark/benchmark_report.json"))));
+
+        runCommand([&](WorkerClient& client, QString* error) {
+            return client.requestDeploymentValidation(
+                workerExecutablePath(),
+                modelPath,
+                dir.filePath(QStringLiteral("worker-deployment-validation")),
+                QStringLiteral("tiny_detector_json"),
+                QString(),
+                {},
+                error,
+                QStringLiteral("deployment-validation-task"));
+        }, QStringLiteral("deploymentValidation"), QStringList()
+            << QStringLiteral("deployment_validation_report")
+            << QStringLiteral("deployment_validation_summary"));
+        QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-deployment-validation/deployment_validation_report.json"))));
+
+        const QString ocrRoot = dir.filePath(QStringLiteral("worker-customer-ocr"));
+        const QString detDataset = QDir(ocrRoot).filePath(QStringLiteral("det"));
+        const QString recDataset = QDir(ocrRoot).filePath(QStringLiteral("rec"));
+        const QString systemImages = QDir(ocrRoot).filePath(QStringLiteral("system"));
+        writeTinyPng(QDir(detDataset).filePath(QStringLiteral("images/a.png")));
+        writeTinyPng(QDir(recDataset).filePath(QStringLiteral("images/a.png")));
+        writeTinyPng(QDir(systemImages).filePath(QStringLiteral("a.png")));
+        const QString detReportPath = QDir(ocrRoot).filePath(QStringLiteral("det_report.json"));
+        const QString recReportPath = QDir(ocrRoot).filePath(QStringLiteral("rec_report.json"));
+        const QString systemReportPath = QDir(ocrRoot).filePath(QStringLiteral("system_report.json"));
+        writeTextFile(detReportPath, QStringLiteral("{\"status\":\"passed\"}"));
+        writeTextFile(recReportPath, QStringLiteral("{\"metrics\":{\"accuracy\":0.8,\"cer\":0.1,\"samples\":3}}"));
+        writeTextFile(systemReportPath, QStringLiteral("{\"status\":\"passed\"}"));
+        runCommand([&](WorkerClient& client, QString* error) {
+            return client.requestCustomerOcrAcceptance(
+                workerExecutablePath(),
+                dir.filePath(QStringLiteral("worker-ocr-acceptance")),
+                QJsonObject{
+                    {QStringLiteral("detDatasetPath"), detDataset},
+                    {QStringLiteral("recDatasetPath"), recDataset},
+                    {QStringLiteral("systemImagesPath"), systemImages},
+                    {QStringLiteral("detReportPath"), detReportPath},
+                    {QStringLiteral("recReportPath"), recReportPath},
+                    {QStringLiteral("systemReportPath"), systemReportPath}
+                },
+                error,
+                QStringLiteral("ocr-acceptance-task"));
+        }, QStringLiteral("customerOcrAcceptance"), QStringList()
+            << QStringLiteral("customer_ocr_acceptance")
+            << QStringLiteral("customer_ocr_acceptance_summary"));
+        QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-ocr-acceptance/customer_ocr_validation_manifest.json"))));
+
+        runCommand([&](WorkerClient& client, QString* error) {
+            return client.requestDiagnosticsBundle(
+                workerExecutablePath(),
+                dir.filePath(QStringLiteral("worker-diagnostics")),
+                QJsonObject{{QStringLiteral("projectName"), QStringLiteral("demo")}},
+                error,
+                QStringLiteral("diagnostics-task"));
+        }, QStringLiteral("diagnosticBundle"), QStringList()
+            << QStringLiteral("diagnostic_manifest")
+            << QStringLiteral("diagnostic_bundle")
+            << QStringLiteral("diagnostic_summary"));
+        QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("worker-diagnostics/diagnostic_bundle.json"))));
 
         runCommand([&](WorkerClient& client, QString* error) {
             return client.requestDeliveryReport(

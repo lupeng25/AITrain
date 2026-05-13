@@ -98,6 +98,12 @@ void WorkerSession::handleMessage(const QString& type, const QJsonObject& payloa
         runLocalPipeline(payload);
     } else if (type == QStringLiteral("generateDeliveryReport")) {
         generateDeliveryReport(payload);
+    } else if (type == QStringLiteral("runCustomerOcrAcceptance")) {
+        runCustomerOcrAcceptance(payload);
+    } else if (type == QStringLiteral("collectDiagnostics")) {
+        collectDiagnostics(payload);
+    } else if (type == QStringLiteral("validateDeploymentArtifact")) {
+        validateDeploymentArtifact(payload);
     } else if (type == QStringLiteral("exportModel")) {
         exportModel(payload);
     } else if (type == QStringLiteral("infer")) {

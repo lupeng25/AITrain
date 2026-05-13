@@ -51,7 +51,7 @@ Plugins are built under `build\plugins\models`. The GUI scans that directory and
 
 ## User Guide
 
-End-user operation is documented in `docs/user-guide.md`. It covers registration, projects, dataset preparation, validation and split, training, artifacts, evaluation, model export, and inference validation through the GUI.
+End-user operation is documented in `docs/user-guide.md`. It covers registration, projects, dataset preparation, validation and split, sample review, training, artifacts, evaluation, model export, deployment validation, inference validation, delivery acceptance, and diagnostic bundles through the GUI.
 
 ## Localization and Offline Licensing
 

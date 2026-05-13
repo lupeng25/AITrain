@@ -268,6 +268,24 @@ QJsonArray deliveryLimitations(const QJsonObject& context, const QJsonObject& ev
     if (benchmarkConclusion == QStringLiteral("hardware-blocked") || benchmarkFailure == QStringLiteral("hardware-blocked")) {
         limitations.append(QStringLiteral("TensorRT remains hardware-blocked on this machine; RTX / SM 75+ acceptance is required."));
     }
+    const QJsonObject deploymentSummary = readJsonObjectIfExists(context.value(QStringLiteral("deploymentValidationReportPath")).toString());
+    const QString deploymentStatus = deploymentSummary.value(QStringLiteral("status")).toString();
+    if (deploymentStatus == QStringLiteral("hardware-blocked")) {
+        limitations.append(QStringLiteral("Deployment validation is hardware-blocked; this artifact still needs compatible hardware acceptance."));
+    } else if (deploymentStatus == QStringLiteral("failed") || deploymentStatus == QStringLiteral("blocked")) {
+        limitations.append(QStringLiteral("Deployment validation is not passed; inspect deployment_validation_report.json before handoff."));
+    } else if (deploymentStatus.isEmpty()) {
+        limitations.append(QStringLiteral("Deployment validation report is not attached; exported runtime acceptance remains unproven."));
+    }
+    const QJsonObject customerOcrSummary = readJsonObjectIfExists(context.value(QStringLiteral("customerOcrAcceptanceReportPath")).toString());
+    const QString customerOcrStatus = customerOcrSummary.value(QStringLiteral("status")).toString();
+    if (context.value(QStringLiteral("taskType")).toString().contains(QStringLiteral("ocr"), Qt::CaseInsensitive)) {
+        if (customerOcrStatus == QStringLiteral("blocked")) {
+            limitations.append(QStringLiteral("Customer-domain OCR acceptance is blocked; public smoke data cannot certify production OCR accuracy."));
+        } else if (customerOcrStatus.isEmpty()) {
+            limitations.append(QStringLiteral("Customer-domain OCR acceptance report is not attached; production OCR claims require customer evidence."));
+        }
+    }
     if (context.value(QStringLiteral("taskType")).toString().contains(QStringLiteral("ocr"), Qt::CaseInsensitive)
         && backend.contains(QStringLiteral("official"), Qt::CaseInsensitive)) {
         limitations.append(QStringLiteral("PaddleOCR official system path is tool-chain orchestration, not C++ DB ONNX postprocess."));

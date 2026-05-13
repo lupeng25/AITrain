@@ -37,6 +37,7 @@ add_library(aitrain_core STATIC
     src/ProjectRepository.cpp
     src/ProductWorkflow.cpp
     src/ProductWorkflowBenchmark.cpp
+    src/ProductWorkflowAcceptance.cpp
     src/ProductWorkflowDelivery.cpp
     src/ProductWorkflowEvaluation.cpp
     src/ProductWorkflowPipeline.cpp

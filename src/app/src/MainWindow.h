@@ -9,6 +9,7 @@
 
 #include <QComboBox>
 #include <QCheckBox>
+#include <QJsonArray>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMainWindow>
@@ -42,9 +43,18 @@ private slots:
     void openDatasetQualityReport();
     void openDatasetQualityFixList();
     void launchXAnyLabelingForQualityFix();
+    void browseSampleReviewFile();
+    void loadSampleReviewFile();
+    void generateFilteredReviewList();
+    void openSelectedReviewSample();
+    void launchXAnyLabelingForReview();
     void startTraining();
     void startModelExport();
+    void validateDeploymentArtifact();
     void startInference();
+    void runCustomerOcrAcceptance();
+    void collectDiagnosticsBundle();
+    void importAcceptanceEvidence();
     void cancelSelectedTask();
     void runEnvironmentCheck();
     void handleWorkerMessage(const QString& type, const QJsonObject& payload);
@@ -73,12 +83,14 @@ private:
         DashboardPage = 0,
         ProjectPage,
         DatasetPage,
+        SampleReviewPage,
         TrainingPage,
         TaskQueuePage,
         ModelRegistryPage,
         EvaluationReportsPage,
         ConversionPage,
         InferencePage,
+        DeliveryAcceptancePage,
         PluginsPage,
         EnvironmentPage,
         SettingsPage
@@ -88,12 +100,14 @@ private:
     QWidget* buildDashboardPage();
     QWidget* buildProjectPage();
     QWidget* buildDatasetPage();
+    QWidget* buildSampleReviewPage();
     QWidget* buildTrainingPage();
     QWidget* buildTaskQueuePage();
     QWidget* buildModelRegistryPage();
     QWidget* buildEvaluationReportsPage();
     QWidget* buildConversionPage();
     QWidget* buildInferencePage();
+    QWidget* buildDeliveryAcceptancePage();
     QWidget* buildPluginsPage();
     QWidget* buildEnvironmentPage();
     QWidget* buildSettingsPage();
@@ -120,7 +134,10 @@ private:
     void handleEvaluationReportMessage(const QJsonObject& payload);
     void handlePipelinePlanMessage(const QJsonObject& payload);
     void handleModelExportMessage(const QJsonObject& payload);
+    void handleDeploymentValidationMessage(const QJsonObject& payload);
     void handleInferenceResultMessage(const QJsonObject& payload);
+    void handleCustomerOcrAcceptanceMessage(const QJsonObject& payload);
+    void handleDiagnosticBundleMessage(const QJsonObject& payload);
     void updateRecentTasks();
     void updateDatasetList();
     void updateTaskTable(QTableWidget* table, const QVector<aitrain::TaskRecord>& tasks);
@@ -147,6 +164,9 @@ private:
     void updatePluginSummary();
     void updateEnvironmentSummary();
     void updateSettingsSummary();
+    void updateDeliveryAcceptanceSummary();
+    void refreshSampleReviewTable();
+    QJsonArray filteredSampleReviewRows() const;
     void updateTrainingSelectionSummary();
     void refreshTrainingDefaults();
     void storeLanguagePreference(const QString& languageCode);
@@ -186,7 +206,12 @@ private:
     QString latestQualityFixListPath_;
     QString latestQualityFixManifestPath_;
     QString latestQualityReportPath_;
+    QString latestReviewListPath_;
+    QString latestDeploymentValidationReportPath_;
+    QString latestCustomerOcrAcceptanceReportPath_;
+    QString latestDiagnosticBundlePath_;
     bool currentDatasetValid_ = false;
+    QJsonArray sampleReviewSamples_;
 
     QVector<PendingTrainingTask> pendingTrainingTasks_;
     PendingTrainingTask activeSnapshotTrainingTask_;
@@ -286,7 +311,9 @@ private:
     QLineEdit* conversionCheckpointEdit_ = nullptr;
     QComboBox* conversionFormatCombo_ = nullptr;
     QLineEdit* conversionOutputEdit_ = nullptr;
+    QLineEdit* conversionValidationImageEdit_ = nullptr;
     QLabel* exportResultLabel_ = nullptr;
+    QLabel* deploymentValidationResultLabel_ = nullptr;
     QLineEdit* inferenceCheckpointEdit_ = nullptr;
     QLineEdit* inferenceImageEdit_ = nullptr;
     QLineEdit* inferenceOutputEdit_ = nullptr;
@@ -294,6 +321,28 @@ private:
     QLabel* inferenceOverlayLabel_ = nullptr;
     QCheckBox* horizontalFlipCheck_ = nullptr;
     QCheckBox* colorJitterCheck_ = nullptr;
+    QLineEdit* reviewSamplePathEdit_ = nullptr;
+    QComboBox* reviewSourceFilterCombo_ = nullptr;
+    QComboBox* reviewReasonFilterCombo_ = nullptr;
+    QLineEdit* reviewSearchEdit_ = nullptr;
+    QTableWidget* sampleReviewTable_ = nullptr;
+    QLabel* sampleReviewSummaryLabel_ = nullptr;
+    QLineEdit* customerOcrDetDatasetEdit_ = nullptr;
+    QLineEdit* customerOcrRecDatasetEdit_ = nullptr;
+    QLineEdit* customerOcrSystemImagesEdit_ = nullptr;
+    QLineEdit* customerOcrDetReportEdit_ = nullptr;
+    QLineEdit* customerOcrRecReportEdit_ = nullptr;
+    QLineEdit* customerOcrSystemReportEdit_ = nullptr;
+    QLineEdit* customerOcrDetOnnxEvidenceEdit_ = nullptr;
+    QLineEdit* customerOcrOutputEdit_ = nullptr;
+    QLineEdit* customerOcrMinAccEdit_ = nullptr;
+    QLineEdit* customerOcrMaxCerEdit_ = nullptr;
+    QCheckBox* customerOcrAllowPublicCheck_ = nullptr;
+    QCheckBox* customerOcrRequireDetOnnxCheck_ = nullptr;
+    QLabel* customerOcrStatusLabel_ = nullptr;
+    QLabel* diagnosticsStatusLabel_ = nullptr;
+    QLabel* deliveryAcceptanceSummaryLabel_ = nullptr;
+    QTableWidget* deliveryAcceptanceTable_ = nullptr;
     QProgressBar* progressBar_ = nullptr;
     QLabel* latestCheckpointLabel_ = nullptr;
     QLabel* latestPreviewPathLabel_ = nullptr;

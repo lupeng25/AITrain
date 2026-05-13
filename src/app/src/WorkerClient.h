@@ -25,6 +25,9 @@ public:
     bool requestModelBenchmark(const QString& workerProgram, const QString& modelPath, const QString& outputPath, const QJsonObject& options, QString* error, const QString& taskId = {});
     bool requestLocalPipeline(const QString& workerProgram, const QString& outputPath, const QString& templateId, const QJsonObject& options, QString* error, const QString& taskId = {});
     bool requestDeliveryReport(const QString& workerProgram, const QString& outputPath, const QJsonObject& context, QString* error, const QString& taskId = {});
+    bool requestCustomerOcrAcceptance(const QString& workerProgram, const QString& outputPath, const QJsonObject& options, QString* error, const QString& taskId = {});
+    bool requestDiagnosticsBundle(const QString& workerProgram, const QString& outputPath, const QJsonObject& context, QString* error, const QString& taskId = {});
+    bool requestDeploymentValidation(const QString& workerProgram, const QString& modelPath, const QString& outputPath, const QString& format, const QString& sampleImagePath, const QJsonObject& options, QString* error, const QString& taskId = {});
     bool requestModelExport(const QString& workerProgram, const QString& checkpointPath, const QString& outputPath, const QString& format, QString* error, const QString& taskId = {});
     bool requestInference(const QString& workerProgram, const QString& checkpointPath, const QString& imagePath, const QString& outputPath, QString* error, const QString& taskId = {});
     void cancel();

@@ -324,3 +324,115 @@ QWidget* MainWindow::buildDatasetPage()
     page->setWidget(content);
     return page;
 }
+
+QWidget* MainWindow::buildSampleReviewPage()
+{
+    auto* page = new QScrollArea;
+    page->setWidgetResizable(true);
+    page->setFrameShape(QFrame::NoFrame);
+    page->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+    auto* content = new QWidget;
+    auto* layout = new QVBoxLayout(content);
+    layout->setContentsMargins(18, 18, 18, 18);
+    layout->setSpacing(16);
+
+    auto* loadButton = primaryButton(uiText("加载复核样本"));
+    connect(loadButton, &QPushButton::clicked, this, &MainWindow::loadSampleReviewFile);
+    auto* header = createWorkbenchHeader(
+        QStringLiteral("SAMPLE REVIEW LOOP"),
+        uiText("样本复核"),
+        uiText("从质量报告、评估错误、低置信预测和 rework 清单中筛出样本，生成 X-AnyLabeling 本地复核队列。"),
+        loadButton,
+        QStringList() << QStringLiteral("problem_samples.json") << QStringLiteral("error_samples.json") << QStringLiteral("rework_sample_set.json"));
+    layout->addWidget(header);
+
+    auto* splitter = new QSplitter(Qt::Horizontal);
+
+    auto* setupPanel = new InfoPanel(uiText("输入与过滤"));
+    reviewSamplePathEdit_ = new QLineEdit;
+    reviewSamplePathEdit_->setPlaceholderText(uiText("选择 problem_samples.json / error_samples.json / rework_sample_set.json / evaluation_report.json"));
+    auto* browseButton = new QPushButton(uiText("选择文件"));
+    connect(browseButton, &QPushButton::clicked, this, &MainWindow::browseSampleReviewFile);
+    auto* pathRow = new QWidget;
+    auto* pathLayout = new QHBoxLayout(pathRow);
+    pathLayout->setContentsMargins(0, 0, 0, 0);
+    pathLayout->setSpacing(8);
+    pathLayout->addWidget(reviewSamplePathEdit_, 1);
+    pathLayout->addWidget(browseButton);
+
+    reviewSourceFilterCombo_ = new QComboBox;
+    reviewSourceFilterCombo_->addItem(uiText("全部来源"), QString());
+    reviewReasonFilterCombo_ = new QComboBox;
+    reviewReasonFilterCombo_->addItem(uiText("全部问题"), QString());
+    reviewSearchEdit_ = new QLineEdit;
+    reviewSearchEdit_->setPlaceholderText(uiText("按图片、标签、类别、说明搜索"));
+    connect(reviewSourceFilterCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::refreshSampleReviewTable);
+    connect(reviewReasonFilterCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::refreshSampleReviewTable);
+    connect(reviewSearchEdit_, &QLineEdit::textChanged, this, &MainWindow::refreshSampleReviewTable);
+
+    auto* form = new QFormLayout;
+    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    form->setHorizontalSpacing(12);
+    form->setVerticalSpacing(10);
+    form->addRow(uiText("样本文件"), pathRow);
+    form->addRow(uiText("来源"), reviewSourceFilterCombo_);
+    form->addRow(uiText("问题类型"), reviewReasonFilterCombo_);
+    form->addRow(uiText("搜索"), reviewSearchEdit_);
+    setupPanel->bodyLayout()->addLayout(form);
+
+    auto* actionStrip = new QFrame;
+    actionStrip->setObjectName(QStringLiteral("ActionStrip"));
+    auto* actionLayout = new QHBoxLayout(actionStrip);
+    actionLayout->setContentsMargins(10, 8, 10, 8);
+    actionLayout->setSpacing(8);
+    auto* openButton = new QPushButton(uiText("打开样本"));
+    auto* generateButton = primaryButton(uiText("生成复核清单"));
+    auto* xAnyButton = new QPushButton(QStringLiteral("X-AnyLabeling"));
+    connect(openButton, &QPushButton::clicked, this, &MainWindow::openSelectedReviewSample);
+    connect(generateButton, &QPushButton::clicked, this, &MainWindow::generateFilteredReviewList);
+    connect(xAnyButton, &QPushButton::clicked, this, &MainWindow::launchXAnyLabelingForReview);
+    actionLayout->addWidget(mutedLabel(uiText("标注完成后回到“数据集”页重新校验并创建快照。")), 1);
+    actionLayout->addWidget(openButton);
+    actionLayout->addWidget(generateButton);
+    actionLayout->addWidget(xAnyButton);
+    setupPanel->bodyLayout()->addWidget(actionStrip);
+
+    sampleReviewSummaryLabel_ = inlineStatusLabel(uiText("尚未加载复核样本。"));
+    setupPanel->bodyLayout()->addWidget(sampleReviewSummaryLabel_);
+    setupPanel->bodyLayout()->addWidget(emptyStateLabel(uiText("v1 只生成本地复核队列，不内嵌标注器，也不实现多人协作。")));
+    setupPanel->bodyLayout()->addStretch();
+
+    auto* tablePanel = new InfoPanel(uiText("复核队列"));
+    sampleReviewTable_ = new QTableWidget(0, 7);
+    sampleReviewTable_->setHorizontalHeaderLabels(QStringList()
+        << uiText("来源")
+        << uiText("问题")
+        << uiText("类别")
+        << uiText("指标")
+        << uiText("图片")
+        << uiText("标签")
+        << uiText("说明"));
+    configureTable(sampleReviewTable_);
+    sampleReviewTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    sampleReviewTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    sampleReviewTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    sampleReviewTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    sampleReviewTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
+    sampleReviewTable_->horizontalHeader()->setSectionResizeMode(5, QHeaderView::Stretch);
+    sampleReviewTable_->horizontalHeader()->setSectionResizeMode(6, QHeaderView::Stretch);
+    sampleReviewTable_->setMinimumHeight(420);
+    tablePanel->bodyLayout()->addWidget(sampleReviewTable_);
+
+    splitter->addWidget(setupPanel);
+    splitter->addWidget(tablePanel);
+    splitter->setChildrenCollapsible(false);
+    splitter->setStretchFactor(0, 2);
+    splitter->setStretchFactor(1, 5);
+    splitter->setSizes(QList<int>() << 360 << 840);
+
+    layout->addWidget(splitter, 1);
+    page->setWidget(content);
+    return page;
+}

@@ -69,6 +69,7 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     sidebar_->addItem(tr("项目"), ProjectPage);
     sidebar_->addSection(tr("数据与训练"));
     sidebar_->addItem(tr("数据集"), DatasetPage);
+    sidebar_->addItem(uiText("样本复核"), SampleReviewPage);
     sidebar_->addItem(tr("训练实验"), TrainingPage);
     sidebar_->addItem(tr("任务与产物"), TaskQueuePage);
     sidebar_->addSection(tr("模型交付"));
@@ -76,6 +77,7 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     sidebar_->addItem(tr("评估报告"), EvaluationReportsPage);
     sidebar_->addItem(tr("模型导出"), ConversionPage);
     sidebar_->addItem(tr("推理验证"), InferencePage);
+    sidebar_->addItem(uiText("交付验收"), DeliveryAcceptancePage);
     sidebar_->addSection(tr("系统"));
     sidebar_->addItem(tr("插件"), PluginsPage);
     sidebar_->addItem(tr("环境"), EnvironmentPage);
@@ -92,12 +94,14 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     stack_->addWidget(buildDashboardPage());
     stack_->addWidget(buildProjectPage());
     stack_->addWidget(buildDatasetPage());
+    stack_->addWidget(buildSampleReviewPage());
     stack_->addWidget(buildTrainingPage());
     stack_->addWidget(buildTaskQueuePage());
     stack_->addWidget(buildModelRegistryPage());
     stack_->addWidget(buildEvaluationReportsPage());
     stack_->addWidget(buildConversionPage());
     stack_->addWidget(buildInferencePage());
+    stack_->addWidget(buildDeliveryAcceptancePage());
     stack_->addWidget(buildPluginsPage());
     stack_->addWidget(buildEnvironmentPage());
     stack_->addWidget(buildSettingsPage());
