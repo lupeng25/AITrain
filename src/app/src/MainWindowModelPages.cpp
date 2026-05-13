@@ -59,6 +59,9 @@ QWidget* MainWindow::buildModelRegistryPage()
     auto* exportButton = new QPushButton(QStringLiteral("选中模型用于导出"));
     auto* pipelineButton = new QPushButton(QStringLiteral("执行本地流水线"));
     auto* reportsButton = new QPushButton(QStringLiteral("查看评估报告"));
+    auto* comparisonInferButton = new QPushButton(QStringLiteral("对比候选用于推理"));
+    auto* comparisonExportButton = new QPushButton(QStringLiteral("对比候选用于导出"));
+    auto* comparisonReportButton = new QPushButton(QStringLiteral("打开候选报告"));
     connect(refreshButton, &QPushButton::clicked, this, &MainWindow::refreshModelRegistry);
     connect(inferButton, &QPushButton::clicked, this, [this]() {
         if (!modelVersionTable_ || modelVersionTable_->selectedItems().isEmpty()) {
@@ -100,11 +103,17 @@ QWidget* MainWindow::buildModelRegistryPage()
     });
     connect(pipelineButton, &QPushButton::clicked, this, &MainWindow::runLocalPipelinePlanFromCurrentDataset);
     connect(reportsButton, &QPushButton::clicked, this, &MainWindow::openEvaluationReportsPage);
+    connect(comparisonInferButton, &QPushButton::clicked, this, &MainWindow::useSelectedComparisonForInference);
+    connect(comparisonExportButton, &QPushButton::clicked, this, &MainWindow::useSelectedComparisonForExport);
+    connect(comparisonReportButton, &QPushButton::clicked, this, &MainWindow::openSelectedComparisonReport);
     actionGrid->addWidget(refreshButton, 0, 0);
     actionGrid->addWidget(inferButton, 0, 1);
     actionGrid->addWidget(exportButton, 0, 2);
     actionGrid->addWidget(pipelineButton, 1, 0);
     actionGrid->addWidget(reportsButton, 1, 1);
+    actionGrid->addWidget(comparisonInferButton, 2, 0);
+    actionGrid->addWidget(comparisonExportButton, 2, 1);
+    actionGrid->addWidget(comparisonReportButton, 2, 2);
     for (int column = 0; column < 3; ++column) {
         actionGrid->setColumnStretch(column, 1);
     }
@@ -142,6 +151,33 @@ QWidget* MainWindow::buildModelRegistryPage()
     modelVersionTable_->horizontalHeader()->setSectionResizeMode(7, QHeaderView::ResizeToContents);
     modelPanel->bodyLayout()->addWidget(modelVersionTable_);
 
+    auto* comparisonPanel = new InfoPanel(QStringLiteral("模型对比看板"));
+    modelComparisonSummaryLabel_ = mutedLabel(QStringLiteral("选择模型版本或运行评估/基准后，这里会按主指标、延迟和限制项给出可交付排序。"));
+    allowLabelToShrink(modelComparisonSummaryLabel_);
+    modelComparisonTable_ = new QTableWidget(0, 8);
+    modelComparisonTable_->setHorizontalHeaderLabels(QStringList()
+        << QStringLiteral("排名")
+        << QStringLiteral("来源")
+        << QStringLiteral("模型 / 版本")
+        << QStringLiteral("任务")
+        << QStringLiteral("主指标")
+        << QStringLiteral("部署基准")
+        << QStringLiteral("限制")
+        << QStringLiteral("建议"));
+    configureTable(modelComparisonTable_);
+    modelComparisonTable_->setWordWrap(true);
+    modelComparisonTable_->verticalHeader()->setDefaultSectionSize(44);
+    modelComparisonTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    modelComparisonTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    modelComparisonTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    modelComparisonTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    modelComparisonTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+    modelComparisonTable_->horizontalHeader()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
+    modelComparisonTable_->horizontalHeader()->setSectionResizeMode(6, QHeaderView::ResizeToContents);
+    modelComparisonTable_->horizontalHeader()->setSectionResizeMode(7, QHeaderView::Stretch);
+    comparisonPanel->bodyLayout()->addWidget(modelComparisonSummaryLabel_);
+    comparisonPanel->bodyLayout()->addWidget(modelComparisonTable_);
+
     auto* pipelinePanel = new InfoPanel(QStringLiteral("流水线记录"));
     pipelineRunTable_ = new QTableWidget(0, 5);
     pipelineRunTable_->setHorizontalHeaderLabels(QStringList()
@@ -159,8 +195,12 @@ QWidget* MainWindow::buildModelRegistryPage()
     pipelineRunTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
     pipelineRunTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
     pipelinePanel->bodyLayout()->addWidget(pipelineRunTable_);
+    auto* modelDetailTabs = new QTabWidget;
+    modelDetailTabs->setObjectName(QStringLiteral("ModelDetailTabs"));
+    modelDetailTabs->addTab(comparisonPanel, uiText("模型对比"));
+    modelDetailTabs->addTab(pipelinePanel, uiText("流水线记录"));
     splitter->addWidget(modelPanel);
-    splitter->addWidget(pipelinePanel);
+    splitter->addWidget(modelDetailTabs);
     splitter->setChildrenCollapsible(false);
     splitter->setStretchFactor(0, 4);
     splitter->setStretchFactor(1, 2);

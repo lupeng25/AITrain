@@ -49,7 +49,242 @@
 #include <QUrl>
 #include <QUuid>
 
+#include <algorithm>
+
 using namespace aitrain_app;
+
+namespace {
+
+struct ModelComparisonCandidate {
+    QString source;
+    QString modelName;
+    QString taskType;
+    QString primaryMetricName;
+    double primaryMetricValue = 0.0;
+    bool lowerIsBetter = false;
+    bool hasMetric = false;
+    QString benchmarkText;
+    bool hasBenchmark = false;
+    QString limitationsText;
+    QString recommendation;
+    QString modelPath;
+    QString reportPath;
+    QDateTime updatedAt;
+};
+
+QJsonObject jsonObjectFromString(const QString& json)
+{
+    if (json.trimmed().isEmpty()) {
+        return {};
+    }
+    QJsonParseError error;
+    const QJsonDocument document = QJsonDocument::fromJson(json.toUtf8(), &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject()) {
+        return {};
+    }
+    return document.object();
+}
+
+QJsonObject evaluationFromSummary(const QJsonObject& summary)
+{
+    QJsonObject evaluation = summary.value(QStringLiteral("evaluation")).toObject();
+    if (evaluation.isEmpty() && summary.value(QStringLiteral("metrics")).isObject()) {
+        evaluation = summary;
+    }
+    return evaluation;
+}
+
+QJsonObject benchmarkFromSummary(const QJsonObject& summary)
+{
+    QJsonObject benchmark = summary.value(QStringLiteral("benchmark")).toObject();
+    if (benchmark.isEmpty()
+        && (summary.contains(QStringLiteral("runtime")) || summary.contains(QStringLiteral("p95Ms")))) {
+        benchmark = summary;
+    }
+    return benchmark;
+}
+
+QString inferredTaskTypeFromMetrics(const QJsonObject& metrics)
+{
+    if (metrics.contains(QStringLiteral("maskMap50")) || metrics.contains(QStringLiteral("maskIoU"))) {
+        return QStringLiteral("segmentation");
+    }
+    if (metrics.contains(QStringLiteral("accuracy")) || metrics.contains(QStringLiteral("cer")) || metrics.contains(QStringLiteral("wer"))) {
+        return QStringLiteral("ocr_recognition");
+    }
+    if (metrics.contains(QStringLiteral("mAP50")) || metrics.contains(QStringLiteral("precision")) || metrics.contains(QStringLiteral("recall"))) {
+        return QStringLiteral("detection");
+    }
+    return {};
+}
+
+QString primaryMetricName(const QJsonObject& metrics, bool* lowerIsBetter)
+{
+    const QVector<QPair<QString, bool>> ordered = {
+        {QStringLiteral("mAP50"), false},
+        {QStringLiteral("mAP50_95"), false},
+        {QStringLiteral("maskMap50"), false},
+        {QStringLiteral("maskIoU"), false},
+        {QStringLiteral("accuracy"), false},
+        {QStringLiteral("precision"), false},
+        {QStringLiteral("recall"), false},
+        {QStringLiteral("averageConfidence"), false},
+        {QStringLiteral("cer"), true},
+        {QStringLiteral("wer"), true},
+        {QStringLiteral("editDistance"), true}
+    };
+    for (const auto& item : ordered) {
+        if (metrics.contains(item.first)) {
+            if (lowerIsBetter) {
+                *lowerIsBetter = item.second;
+            }
+            return item.first;
+        }
+    }
+    if (lowerIsBetter) {
+        *lowerIsBetter = false;
+    }
+    return {};
+}
+
+QString metricDisplay(const QString& name, double value, bool lowerIsBetter)
+{
+    if (name.isEmpty()) {
+        return uiText("未评估");
+    }
+    return QStringLiteral("%1=%2%3")
+        .arg(name)
+        .arg(value, 0, 'f', 4)
+        .arg(lowerIsBetter ? uiText(" 越低越好") : QString());
+}
+
+QString benchmarkDisplay(const QJsonObject& benchmark)
+{
+    if (benchmark.isEmpty()) {
+        return uiText("未运行");
+    }
+    const QString runtime = benchmark.value(QStringLiteral("runtime")).toString(QStringLiteral("runtime"));
+    if (benchmark.value(QStringLiteral("timedInference")).toBool()) {
+        const double p95 = benchmark.value(QStringLiteral("p95Ms")).toDouble();
+        const double throughput = benchmark.value(QStringLiteral("throughput")).toDouble();
+        return QStringLiteral("%1 p95=%2ms, %3/s")
+            .arg(runtime)
+            .arg(p95, 0, 'f', 2)
+            .arg(throughput, 0, 'f', 2);
+    }
+    const QString status = benchmark.value(QStringLiteral("runtimeStatus")).toString(
+        benchmark.value(QStringLiteral("deploymentConclusion")).toString(
+            benchmark.value(QStringLiteral("failureCategory")).toString(QStringLiteral("limited"))));
+    return QStringLiteral("%1 %2").arg(runtime, status);
+}
+
+QStringList limitationStrings(const QJsonObject& summary, const QJsonObject& evaluation, const QJsonObject& benchmark)
+{
+    QStringList limitations;
+    const auto appendUnique = [&limitations](const QString& value) {
+        if (!value.isEmpty() && !limitations.contains(value)) {
+            limitations.append(value);
+        }
+    };
+    for (const QJsonValue& value : summary.value(QStringLiteral("limitations")).toArray()) {
+        appendUnique(value.toString());
+    }
+    for (const QJsonValue& value : evaluation.value(QStringLiteral("limitations")).toArray()) {
+        appendUnique(value.toString());
+    }
+    if (evaluation.value(QStringLiteral("scaffold")).toBool()) {
+        appendUnique(QStringLiteral("scaffold"));
+    }
+    const QString failureCategory = benchmark.value(QStringLiteral("failureCategory")).toString();
+    const QString deploymentConclusion = benchmark.value(QStringLiteral("deploymentConclusion")).toString();
+    if (failureCategory == QStringLiteral("hardware-blocked")
+        || deploymentConclusion == QStringLiteral("hardware-blocked")) {
+        appendUnique(QStringLiteral("hardware-blocked"));
+    }
+    return limitations;
+}
+
+QString comparisonRecommendation(bool registeredModel, bool hasMetric, bool hasBenchmark, const QStringList& limitations)
+{
+    const bool scaffold = limitations.contains(QStringLiteral("scaffold"))
+        || limitations.contains(QStringLiteral("scaffold-or-diagnostic-backend"));
+    if (scaffold) {
+        return uiText("仅作诊断，不纳入交付候选。");
+    }
+    if (limitations.contains(QStringLiteral("hardware-blocked"))) {
+        return uiText("补 RTX / TensorRT 验收后再交付。");
+    }
+    if (!hasMetric) {
+        return uiText("先运行模型评估。");
+    }
+    if (!registeredModel) {
+        return uiText("注册到模型库后补部署基准。");
+    }
+    if (!hasBenchmark) {
+        return uiText("补部署基准后进入交付报告。");
+    }
+    return uiText("可作为当前对比候选继续导出或推理复验。");
+}
+
+ModelComparisonCandidate candidateFromModel(const aitrain::ModelVersionRecord& model)
+{
+    const QJsonObject summary = jsonObjectFromString(model.metricsJson);
+    const QJsonObject evaluation = evaluationFromSummary(summary);
+    const QJsonObject metrics = evaluation.value(QStringLiteral("metrics")).toObject();
+    const QJsonObject benchmark = benchmarkFromSummary(summary);
+    const QStringList limitations = limitationStrings(summary, evaluation, benchmark);
+
+    ModelComparisonCandidate candidate;
+    candidate.source = uiText("模型版本");
+    candidate.modelName = QStringLiteral("%1:%2").arg(model.modelName, model.version);
+    candidate.taskType = evaluation.value(QStringLiteral("taskType")).toString(
+        summary.value(QStringLiteral("taskType")).toString(inferredTaskTypeFromMetrics(metrics)));
+    candidate.primaryMetricName = primaryMetricName(metrics, &candidate.lowerIsBetter);
+    candidate.hasMetric = !candidate.primaryMetricName.isEmpty();
+    candidate.primaryMetricValue = metrics.value(candidate.primaryMetricName).toDouble();
+    candidate.benchmarkText = benchmarkDisplay(benchmark);
+    candidate.hasBenchmark = !benchmark.isEmpty() && benchmark.value(QStringLiteral("timedInference")).toBool();
+    candidate.limitationsText = limitations.isEmpty() ? uiText("无") : limitations.join(QStringLiteral(", "));
+    candidate.recommendation = comparisonRecommendation(true, candidate.hasMetric, candidate.hasBenchmark, limitations);
+    candidate.modelPath = model.onnxPath.isEmpty() ? model.checkpointPath : model.onnxPath;
+    candidate.reportPath = evaluation.value(QStringLiteral("reportPath")).toString(
+        summary.value(QStringLiteral("artifacts")).toObject().value(QStringLiteral("evaluationReportPath")).toString());
+    candidate.updatedAt = model.updatedAt;
+    return candidate;
+}
+
+ModelComparisonCandidate candidateFromReport(const aitrain::EvaluationReportRecord& report)
+{
+    QJsonObject summary = jsonObjectFromString(report.summaryJson);
+    if (summary.isEmpty()) {
+        summary = readJsonObjectFile(report.reportPath);
+    }
+    const QJsonObject evaluation = evaluationFromSummary(summary);
+    const QJsonObject metrics = evaluation.value(QStringLiteral("metrics")).toObject();
+    const QStringList limitations = limitationStrings(summary, evaluation, {});
+
+    ModelComparisonCandidate candidate;
+    candidate.source = uiText("评估报告");
+    candidate.modelName = QFileInfo(report.modelPath).fileName().isEmpty()
+        ? QDir::toNativeSeparators(report.modelPath)
+        : QFileInfo(report.modelPath).fileName();
+    candidate.taskType = report.taskType.isEmpty()
+        ? evaluation.value(QStringLiteral("taskType")).toString(inferredTaskTypeFromMetrics(metrics))
+        : report.taskType;
+    candidate.primaryMetricName = primaryMetricName(metrics, &candidate.lowerIsBetter);
+    candidate.hasMetric = !candidate.primaryMetricName.isEmpty();
+    candidate.primaryMetricValue = metrics.value(candidate.primaryMetricName).toDouble();
+    candidate.benchmarkText = uiText("未关联");
+    candidate.hasBenchmark = false;
+    candidate.limitationsText = limitations.isEmpty() ? uiText("无") : limitations.join(QStringLiteral(", "));
+    candidate.recommendation = comparisonRecommendation(false, candidate.hasMetric, false, limitations);
+    candidate.modelPath = report.modelPath;
+    candidate.reportPath = report.reportPath;
+    candidate.updatedAt = report.createdAt;
+    return candidate;
+}
+
+} // namespace
 
 void MainWindow::updateRecentTasks()
 {
@@ -145,7 +380,114 @@ void MainWindow::refreshAfterAnnotation()
     currentDatasetValid_ = false;
     updateTrainingSelectionSummary();
     refreshTrainingDefaults();
+    if (!latestQualityFixListPath_.isEmpty() || !latestQualityReportPath_.isEmpty()) {
+        curateDataset();
+        return;
+    }
     validateDataset();
+}
+
+void MainWindow::setDatasetRepairLoopRows(const QString& summary, const QVector<QStringList>& rows)
+{
+    if (datasetRepairLoopLabel_) {
+        datasetRepairLoopLabel_->setText(summary);
+    }
+    if (!datasetRepairLoopTable_) {
+        return;
+    }
+
+    datasetRepairLoopTable_->setRowCount(0);
+    if (rows.isEmpty()) {
+        datasetRepairLoopTable_->insertRow(0);
+        datasetRepairLoopTable_->setItem(0, 0, new QTableWidgetItem(uiText("等待")));
+        datasetRepairLoopTable_->setItem(0, 1, new QTableWidgetItem(uiText("未开始")));
+        datasetRepairLoopTable_->setItem(0, 2, new QTableWidgetItem(uiText("生成质量报告后进入修复闭环。")));
+        return;
+    }
+
+    for (const QStringList& rowValues : rows) {
+        const int row = datasetRepairLoopTable_->rowCount();
+        datasetRepairLoopTable_->insertRow(row);
+        for (int column = 0; column < datasetRepairLoopTable_->columnCount(); ++column) {
+            const QString value = rowValues.value(column);
+            auto* item = new QTableWidgetItem(value);
+            item->setToolTip(value);
+            datasetRepairLoopTable_->setItem(row, column, item);
+        }
+    }
+}
+
+void MainWindow::updateDatasetRepairLoopFromQuality(const QJsonObject& payload)
+{
+    const QJsonObject severityCounts = payload.value(QStringLiteral("severityCounts")).toObject();
+    const QJsonObject summary = payload.value(QStringLiteral("summary")).toObject();
+    const QJsonObject readiness = payload.value(QStringLiteral("trainingReadiness")).toObject();
+    const bool canTrain = readiness.value(QStringLiteral("canTrain")).toBool(payload.value(QStringLiteral("ok")).toBool());
+    const int errorCount = severityCounts.value(QStringLiteral("error")).toInt();
+    const int warningCount = severityCounts.value(QStringLiteral("warning")).toInt();
+    const int problemCount = summary.value(QStringLiteral("problemSampleCount")).toInt();
+    const int duplicateCount = summary.value(QStringLiteral("duplicateImageCount")).toInt();
+    const QString fixList = payload.value(QStringLiteral("xAnyLabelingFixListPath")).toString(latestQualityFixListPath_);
+    const QString readinessStatus = readiness.value(QStringLiteral("status")).toString(canTrain ? QStringLiteral("ready") : QStringLiteral("blocked"));
+
+    QVector<QStringList> rows;
+    rows.append(QStringList()
+        << uiText("质量报告")
+        << (canTrain ? uiText("可训练") : uiText("阻塞"))
+        << uiText("error %1 / warning %2 / 问题样本 %3").arg(errorCount).arg(warningCount).arg(problemCount));
+    rows.append(QStringList()
+        << uiText("问题清单")
+        << (fixList.isEmpty() ? uiText("无需") : uiText("已生成"))
+        << (fixList.isEmpty() ? uiText("未发现需要外部修复的样本。") : QDir::toNativeSeparators(fixList)));
+    rows.append(QStringList()
+        << uiText("外部修复")
+        << (problemCount > 0 ? uiText("待处理") : uiText("可跳过"))
+        << (problemCount > 0
+            ? uiText("打开问题清单并用 X-AnyLabeling 修复后执行复检。")
+            : uiText("可直接创建数据快照或启动训练。")));
+    rows.append(QStringList()
+        << uiText("复检")
+        << (canTrain ? uiText("通过") : uiText("待复检"))
+        << (canTrain
+            ? uiText("创建数据快照，进入训练实验。")
+            : uiText("点击“标注后刷新 / 重新校验”重新生成质量报告。")));
+
+    setDatasetRepairLoopRows(
+        uiText("修复闭环：%1；重复图片 %2；readiness=%3。")
+            .arg(canTrain ? uiText("可进入训练") : uiText("需要修复"))
+            .arg(duplicateCount)
+            .arg(readinessStatus),
+        rows);
+}
+
+void MainWindow::updateDatasetRepairLoopFromValidation(const QJsonObject& payload)
+{
+    const bool ok = payload.value(QStringLiteral("ok")).toBool();
+    const int sampleCount = payload.value(QStringLiteral("sampleCount")).toInt();
+    const int issueCount = payload.value(QStringLiteral("issues")).toArray().size();
+
+    QVector<QStringList> rows;
+    rows.append(QStringList()
+        << uiText("数据校验")
+        << (ok ? uiText("通过") : uiText("未通过"))
+        << (ok ? uiText("%1 个样本可用于后续质检或快照。").arg(sampleCount)
+               : uiText("仍有 %1 个校验问题需要修复。").arg(issueCount)));
+    rows.append(QStringList()
+        << uiText("质量报告")
+        << (!latestQualityReportPath_.isEmpty() ? uiText("建议刷新") : uiText("未生成"))
+        << (ok ? uiText("运行质量报告可更新训练 readiness 和修复清单。")
+               : uiText("先修复校验错误，再重新生成质量报告。")));
+    rows.append(QStringList()
+        << uiText("下一步")
+        << (ok ? uiText("可继续") : uiText("阻塞"))
+        << (ok ? uiText("生成质量报告或创建数据快照。")
+               : uiText("打开问题清单或标注工具后复检。")));
+
+    setDatasetRepairLoopRows(
+        ok
+            ? uiText("修复闭环：校验通过；建议刷新质量报告确认修复完成。")
+            : uiText("修复闭环：复检未通过；训练仍被阻止。"),
+        rows);
 }
 
 void MainWindow::applyTaskFilters()
@@ -593,6 +935,12 @@ void MainWindow::updateModelRegistry()
         if (pipelineRunTable_) {
             pipelineRunTable_->setRowCount(0);
         }
+        if (modelComparisonTable_) {
+            modelComparisonTable_->setRowCount(0);
+        }
+        if (modelComparisonSummaryLabel_) {
+            modelComparisonSummaryLabel_->setText(uiText("请先打开项目。"));
+        }
         return;
     }
 
@@ -607,6 +955,8 @@ void MainWindow::updateModelRegistry()
             .arg(reports.size())
             .arg(pipelines.size()));
     }
+
+    updateModelComparison(models, reports);
 
     if (modelVersionTable_) {
         modelVersionTable_->setRowCount(0);
@@ -690,6 +1040,117 @@ void MainWindow::updateModelRegistry()
     }
 }
 
+void MainWindow::updateModelComparison(
+    const QVector<aitrain::ModelVersionRecord>& models,
+    const QVector<aitrain::EvaluationReportRecord>& reports)
+{
+    if (!modelComparisonTable_) {
+        return;
+    }
+
+    QVector<ModelComparisonCandidate> candidates;
+    candidates.reserve(models.size() + reports.size());
+    for (const aitrain::ModelVersionRecord& model : models) {
+        candidates.append(candidateFromModel(model));
+    }
+    for (const aitrain::EvaluationReportRecord& report : reports) {
+        candidates.append(candidateFromReport(report));
+    }
+
+    std::sort(candidates.begin(), candidates.end(), [](const ModelComparisonCandidate& left, const ModelComparisonCandidate& right) {
+        if (left.hasMetric != right.hasMetric) {
+            return left.hasMetric;
+        }
+        if (left.hasMetric && right.hasMetric) {
+            const double leftScore = left.lowerIsBetter ? -left.primaryMetricValue : left.primaryMetricValue;
+            const double rightScore = right.lowerIsBetter ? -right.primaryMetricValue : right.primaryMetricValue;
+            if (!qFuzzyCompare(leftScore + 1.0, rightScore + 1.0)) {
+                return leftScore > rightScore;
+            }
+        }
+        if (left.hasBenchmark != right.hasBenchmark) {
+            return left.hasBenchmark;
+        }
+        return left.updatedAt > right.updatedAt;
+    });
+
+    modelComparisonTable_->setRowCount(0);
+    if (candidates.isEmpty()) {
+        modelComparisonTable_->insertRow(0);
+        modelComparisonTable_->setItem(0, 0, new QTableWidgetItem(QStringLiteral("-")));
+        modelComparisonTable_->setItem(0, 1, new QTableWidgetItem(uiText("暂无")));
+        modelComparisonTable_->setItem(0, 2, new QTableWidgetItem(uiText("暂无可比较模型")));
+        modelComparisonTable_->setItem(0, 3, new QTableWidgetItem(QString()));
+        modelComparisonTable_->setItem(0, 4, new QTableWidgetItem(QString()));
+        modelComparisonTable_->setItem(0, 5, new QTableWidgetItem(QString()));
+        modelComparisonTable_->setItem(0, 6, new QTableWidgetItem(QString()));
+        modelComparisonTable_->setItem(0, 7, new QTableWidgetItem(uiText("先注册模型版本，运行评估和部署基准。")));
+        if (modelComparisonSummaryLabel_) {
+            modelComparisonSummaryLabel_->setText(uiText("模型对比：暂无候选。"));
+        }
+        return;
+    }
+
+    const int maxRows = qMin(20, candidates.size());
+    for (int index = 0; index < maxRows; ++index) {
+        const ModelComparisonCandidate& candidate = candidates.at(index);
+        const int row = modelComparisonTable_->rowCount();
+        modelComparisonTable_->insertRow(row);
+        modelComparisonTable_->setItem(row, 0, new QTableWidgetItem(index == 0 && candidate.hasMetric
+                ? uiText("1 推荐")
+                : QString::number(index + 1)));
+        modelComparisonTable_->setItem(row, 1, new QTableWidgetItem(candidate.source));
+        modelComparisonTable_->setItem(row, 2, new QTableWidgetItem(candidate.modelName));
+        modelComparisonTable_->setItem(row, 3, new QTableWidgetItem(taskTypeLabel(candidate.taskType)));
+        modelComparisonTable_->setItem(row, 4, new QTableWidgetItem(metricDisplay(
+            candidate.primaryMetricName,
+            candidate.primaryMetricValue,
+            candidate.lowerIsBetter)));
+        modelComparisonTable_->setItem(row, 5, new QTableWidgetItem(candidate.benchmarkText));
+        modelComparisonTable_->setItem(row, 6, new QTableWidgetItem(candidate.limitationsText));
+        modelComparisonTable_->setItem(row, 7, new QTableWidgetItem(candidate.recommendation));
+        if (auto* anchor = modelComparisonTable_->item(row, 0)) {
+            anchor->setData(Qt::UserRole, candidate.modelPath);
+            anchor->setData(Qt::UserRole + 1, candidate.reportPath);
+        }
+        for (int column = 0; column < modelComparisonTable_->columnCount(); ++column) {
+            if (auto* item = modelComparisonTable_->item(row, column)) {
+                item->setToolTip(item->text());
+            }
+        }
+    }
+
+    const ModelComparisonCandidate& best = candidates.first();
+    if (modelComparisonSummaryLabel_) {
+        modelComparisonSummaryLabel_->setText(best.hasMetric
+            ? uiText("模型对比：%1 个候选，当前推荐 %2（%3）。")
+                .arg(candidates.size())
+                .arg(best.modelName)
+                .arg(metricDisplay(best.primaryMetricName, best.primaryMetricValue, best.lowerIsBetter))
+        : uiText("模型对比：%1 个候选，但还缺少可排序评估指标。").arg(candidates.size()));
+    }
+}
+
+QString MainWindow::selectedComparisonModelPath() const
+{
+    if (!modelComparisonTable_ || modelComparisonTable_->selectedItems().isEmpty()) {
+        return {};
+    }
+    const int row = modelComparisonTable_->selectedItems().first()->row();
+    auto* anchor = modelComparisonTable_->item(row, 0);
+    return anchor ? anchor->data(Qt::UserRole).toString() : QString();
+}
+
+QString MainWindow::selectedComparisonReportPath() const
+{
+    if (!modelComparisonTable_ || modelComparisonTable_->selectedItems().isEmpty()) {
+        return {};
+    }
+    const int row = modelComparisonTable_->selectedItems().first()->row();
+    auto* anchor = modelComparisonTable_->item(row, 0);
+    return anchor ? anchor->data(Qt::UserRole + 1).toString() : QString();
+}
+
 void MainWindow::refreshModelRegistry()
 {
     updateModelRegistry();
@@ -771,6 +1232,7 @@ void MainWindow::updateDatasetValidationResult(const QJsonObject& payload)
         updateDatasetList();
     }
 
+    updateDatasetRepairLoopFromValidation(payload);
     updateTrainingSelectionSummary();
     refreshTrainingDefaults();
     updateDashboardSummary();

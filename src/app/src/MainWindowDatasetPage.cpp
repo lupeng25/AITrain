@@ -88,6 +88,8 @@ QWidget* MainWindow::buildDatasetPage()
     connect(curateButton, &QPushButton::clicked, this, &MainWindow::curateDataset);
     auto* snapshotButton = new QPushButton(QStringLiteral("创建数据快照"));
     connect(snapshotButton, &QPushButton::clicked, this, &MainWindow::createDatasetSnapshot);
+    auto* openQualityReportButton = new QPushButton(QStringLiteral("打开质量报告"));
+    connect(openQualityReportButton, &QPushButton::clicked, this, &MainWindow::openDatasetQualityReport);
     auto* openFixListButton = new QPushButton(QStringLiteral("打开问题清单"));
     connect(openFixListButton, &QPushButton::clicked, this, &MainWindow::openDatasetQualityFixList);
     auto* fixWithXAnyButton = new QPushButton(QStringLiteral("X-AnyLabeling 修复"));
@@ -112,8 +114,9 @@ QWidget* MainWindow::buildDatasetPage()
     datasetActionGrid->addWidget(splitButton, 0, 1);
     datasetActionGrid->addWidget(snapshotButton, 0, 2);
     datasetActionGrid->addWidget(curateButton, 1, 0);
-    datasetActionGrid->addWidget(openFixListButton, 1, 1);
-    datasetActionGrid->addWidget(fixWithXAnyButton, 1, 2);
+    datasetActionGrid->addWidget(openQualityReportButton, 1, 1);
+    datasetActionGrid->addWidget(openFixListButton, 1, 2);
+    datasetActionGrid->addWidget(fixWithXAnyButton, 2, 0, 1, 3);
     for (int column = 0; column < 3; ++column) {
         datasetActionGrid->setColumnStretch(column, 1);
     }
@@ -125,6 +128,20 @@ QWidget* MainWindow::buildDatasetPage()
     validationSummaryLabel_ = mutedLabel(QStringLiteral("请选择数据集目录和格式，然后执行校验。"));
     allowLabelToShrink(datasetDetailLabel_);
     allowLabelToShrink(validationSummaryLabel_);
+    datasetRepairLoopLabel_ = inlineStatusLabel(QStringLiteral("修复闭环：等待质量报告。"));
+    allowLabelToShrink(datasetRepairLoopLabel_);
+    datasetRepairLoopTable_ = new QTableWidget(0, 3);
+    datasetRepairLoopTable_->setHorizontalHeaderLabels(QStringList()
+        << QStringLiteral("环节")
+        << QStringLiteral("状态")
+        << QStringLiteral("下一步"));
+    configureTable(datasetRepairLoopTable_);
+    datasetRepairLoopTable_->setWordWrap(true);
+    datasetRepairLoopTable_->verticalHeader()->setDefaultSectionSize(34);
+    datasetRepairLoopTable_->setMaximumHeight(156);
+    datasetRepairLoopTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    datasetRepairLoopTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    datasetRepairLoopTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
     validationIssuesTable_ = new QTableWidget(0, 5);
     validationIssuesTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("级别")
@@ -145,6 +162,8 @@ QWidget* MainWindow::buildDatasetPage()
     validationOutput_->setPlainText(QStringLiteral("校验报告 JSON 会显示在这里。"));
     resultPanel->bodyLayout()->addWidget(datasetDetailLabel_);
     resultPanel->bodyLayout()->addWidget(validationSummaryLabel_);
+    resultPanel->bodyLayout()->addWidget(datasetRepairLoopLabel_);
+    resultPanel->bodyLayout()->addWidget(datasetRepairLoopTable_);
     resultPanel->bodyLayout()->addWidget(validationIssuesTable_, 2);
     resultPanel->bodyLayout()->addWidget(validationOutput_);
 

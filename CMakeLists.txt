@@ -315,6 +315,7 @@ install(DIRECTORY docs/harness DESTINATION docs)
 install(DIRECTORY docs/acceptance-templates DESTINATION docs)
 install(DIRECTORY examples DESTINATION .)
 install(FILES
+    docs/user-guide.md
     docs/training-backends.md
     docs/hardware-compatibility.md
     docs/acceptance-runbook.md

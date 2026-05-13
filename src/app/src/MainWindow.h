@@ -15,6 +15,7 @@
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QStackedWidget>
+#include <QStringList>
 #include <QTableWidget>
 #include <QTextEdit>
 #include <QVector>
@@ -38,6 +39,7 @@ private slots:
     void splitDataset();
     void curateDataset();
     void createDatasetSnapshot();
+    void openDatasetQualityReport();
     void openDatasetQualityFixList();
     void launchXAnyLabelingForQualityFix();
     void startTraining();
@@ -60,6 +62,9 @@ private slots:
     void runLocalPipelinePlanFromCurrentDataset();
     void reproduceSelectedTrainingTask();
     void refreshModelRegistry();
+    void useSelectedComparisonForInference();
+    void useSelectedComparisonForExport();
+    void openSelectedComparisonReport();
     void updateSelectedEvaluationReportDetails();
     void openEvaluationReportsPage();
 
@@ -123,6 +128,9 @@ private:
     void updateEnvironmentTable(const QJsonObject& payload);
     void updateDatasetValidationResult(const QJsonObject& payload);
     void updateDatasetSplitResult(const QJsonObject& payload);
+    void updateDatasetRepairLoopFromQuality(const QJsonObject& payload);
+    void updateDatasetRepairLoopFromValidation(const QJsonObject& payload);
+    void setDatasetRepairLoopRows(const QString& summary, const QVector<QStringList>& rows);
     struct PendingTrainingTask {
         QString taskId;
         aitrain::TrainingRequest request;
@@ -152,6 +160,9 @@ private:
     void ensureVisibleTaskSelection();
     void clearSelectedTaskDetails();
     void updateModelRegistry();
+    void updateModelComparison(
+        const QVector<aitrain::ModelVersionRecord>& models,
+        const QVector<aitrain::EvaluationReportRecord>& reports);
     bool attachLatestSnapshotToRequest(aitrain::TrainingRequest& request, int datasetId, QString* error);
     int recordExperimentRunForRequest(const aitrain::TrainingRequest& request, int datasetId, QString* error);
     void updateExperimentRunSummary(const QString& taskId);
@@ -160,6 +171,8 @@ private:
     QString selectedTaskId() const;
     QString selectedArtifactPath() const;
     QString selectedEvaluationReportPath() const;
+    QString selectedComparisonModelPath() const;
+    QString selectedComparisonReportPath() const;
 
     aitrain::PluginManager pluginManager_;
     aitrain::ProjectRepository repository_;
@@ -171,6 +184,8 @@ private:
     QString currentDatasetPath_;
     QString currentDatasetFormat_;
     QString latestQualityFixListPath_;
+    QString latestQualityFixManifestPath_;
+    QString latestQualityReportPath_;
     bool currentDatasetValid_ = false;
 
     QVector<PendingTrainingTask> pendingTrainingTasks_;
@@ -250,13 +265,17 @@ private:
     QComboBox* trainingBackendCombo_ = nullptr;
     QComboBox* modelPresetCombo_ = nullptr;
     QLabel* validationSummaryLabel_ = nullptr;
+    QLabel* datasetRepairLoopLabel_ = nullptr;
     QLabel* modelRegistrySummaryLabel_ = nullptr;
+    QLabel* modelComparisonSummaryLabel_ = nullptr;
     QLabel* datasetDetailLabel_ = nullptr;
     QLabel* annotationToolStatusLabel_ = nullptr;
     QLabel* trainingDatasetSummaryLabel_ = nullptr;
     QLabel* trainingBackendHintLabel_ = nullptr;
     QLabel* trainingRunSummaryLabel_ = nullptr;
     QTableWidget* validationIssuesTable_ = nullptr;
+    QTableWidget* datasetRepairLoopTable_ = nullptr;
+    QTableWidget* modelComparisonTable_ = nullptr;
     QTableWidget* datasetPreviewTable_ = nullptr;
     QPlainTextEdit* validationOutput_ = nullptr;
     QLineEdit* epochsEdit_ = nullptr;

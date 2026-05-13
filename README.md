@@ -49,6 +49,10 @@ For single-config generators such as NMake, use:
 
 Plugins are built under `build\plugins\models`. The GUI scans that directory and the application-local `plugins\models` directory.
 
+## User Guide
+
+End-user operation is documented in `docs/user-guide.md`. It covers registration, projects, dataset preparation, validation and split, training, artifacts, evaluation, model export, and inference validation through the GUI.
+
 ## Localization and Offline Licensing
 
 The main GUI and registration dialog support Chinese and English. The selected language is stored in `QSettings` and takes effect after restarting AITrain Studio. Translation resources are built from `src/app/translations/*.ts` into `.qm` files and copied beside the application under `translations`.

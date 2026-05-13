@@ -228,6 +228,8 @@ void MainWindow::handleTaskStateMessage(const QString& type, const QJsonObject& 
 void MainWindow::handleDatasetQualityMessage(const QJsonObject& payload)
 {
     latestQualityFixListPath_ = payload.value(QStringLiteral("xAnyLabelingFixListPath")).toString();
+    latestQualityFixManifestPath_ = payload.value(QStringLiteral("xAnyLabelingFixManifestPath")).toString();
+    latestQualityReportPath_ = payload.value(QStringLiteral("reportPath")).toString();
     if (validationSummaryLabel_) {
         const QJsonObject severityCounts = payload.value(QStringLiteral("severityCounts")).toObject();
         const QJsonObject summary = payload.value(QStringLiteral("summary")).toObject();
@@ -281,6 +283,7 @@ void MainWindow::handleDatasetQualityMessage(const QJsonObject& payload)
         datasetDetailLabel_->setText(uiText("修复清单：%1")
             .arg(latestQualityFixListPath_.isEmpty() ? uiText("暂无") : QDir::toNativeSeparators(latestQualityFixListPath_)));
     }
+    updateDatasetRepairLoopFromQuality(payload);
     const QString datasetPath = payload.value(QStringLiteral("datasetPath")).toString();
     const QString format = payload.value(QStringLiteral("format")).toString();
     if (!datasetPath.isEmpty()) {

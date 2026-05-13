@@ -302,6 +302,13 @@ void MainWindow::curateDataset()
         return;
     }
     workerPill_->setStatus(uiText("数据质量报告生成中"), StatusPill::Tone::Info);
+    setDatasetRepairLoopRows(
+        uiText("修复闭环：质量报告生成中。"),
+        QVector<QStringList>{
+            QStringList() << uiText("质量报告") << uiText("运行中") << uiText("Worker 正在扫描数据、问题样本和修复清单。"),
+            QStringList() << uiText("外部修复") << uiText("等待") << uiText("报告完成后再打开问题清单。"),
+            QStringList() << uiText("复检") << uiText("等待") << uiText("修复完成后重新生成质量报告。")
+        });
 }
 
 void MainWindow::openDatasetQualityFixList()
@@ -311,6 +318,15 @@ void MainWindow::openDatasetQualityFixList()
         return;
     }
     QDesktopServices::openUrl(QUrl::fromLocalFile(latestQualityFixListPath_));
+}
+
+void MainWindow::openDatasetQualityReport()
+{
+    if (latestQualityReportPath_.isEmpty() || !QFileInfo::exists(latestQualityReportPath_)) {
+        QMessageBox::information(this, uiText("质量报告"), uiText("请先生成数据质量报告。"));
+        return;
+    }
+    QDesktopServices::openUrl(QUrl::fromLocalFile(latestQualityReportPath_));
 }
 
 void MainWindow::launchXAnyLabelingForQualityFix()
@@ -1037,6 +1053,42 @@ void MainWindow::benchmarkSelectedArtifact()
         return;
     }
     workerPill_->setStatus(uiText("部署基准运行中"), StatusPill::Tone::Info);
+}
+
+void MainWindow::useSelectedComparisonForInference()
+{
+    const QString modelPath = selectedComparisonModelPath();
+    if (modelPath.isEmpty()) {
+        QMessageBox::information(this, uiText("模型对比"), uiText("请先选择一个对比候选。"));
+        return;
+    }
+    if (inferenceCheckpointEdit_) {
+        inferenceCheckpointEdit_->setText(QDir::toNativeSeparators(modelPath));
+    }
+    showPage(InferencePage, uiText("推理验证"));
+}
+
+void MainWindow::useSelectedComparisonForExport()
+{
+    const QString modelPath = selectedComparisonModelPath();
+    if (modelPath.isEmpty()) {
+        QMessageBox::information(this, uiText("模型对比"), uiText("请先选择一个对比候选。"));
+        return;
+    }
+    if (conversionCheckpointEdit_) {
+        conversionCheckpointEdit_->setText(QDir::toNativeSeparators(modelPath));
+    }
+    showPage(ConversionPage, uiText("模型导出"));
+}
+
+void MainWindow::openSelectedComparisonReport()
+{
+    const QString reportPath = selectedComparisonReportPath();
+    if (reportPath.isEmpty() || !QFileInfo::exists(reportPath)) {
+        QMessageBox::information(this, uiText("模型对比"), uiText("选中候选没有可打开的评估报告。"));
+        return;
+    }
+    QDesktopServices::openUrl(QUrl::fromLocalFile(reportPath));
 }
 
 void MainWindow::generateDeliveryReportFromSelectedArtifact()
