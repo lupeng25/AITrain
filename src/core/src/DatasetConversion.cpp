@@ -172,23 +172,10 @@ DatasetConversionResult convertCoco(const DatasetConversionRequest& request)
             continue;
         }
 
-        const QJsonArray bbox = annotation.value(QStringLiteral("bbox")).toArray();
-        if (bbox.size() != 4) {
-            result.issues.append(issue(QStringLiteral("warning"), QStringLiteral("invalid_bbox"), result.sourcePath,
-                imagesById.value(imageId).value(QStringLiteral("file_name")).toString(), QString::number(categoryId),
-                QStringLiteral("COCO bbox must contain four numbers."));
-            ++result.skippedAnnotationCount;
-            continue;
-        }
-
         const QJsonObject image = imagesById.value(imageId);
         const double width = image.value(QStringLiteral("width")).toDouble();
         const double height = image.value(QStringLiteral("height")).toDouble();
-        const double x = bbox.at(0).toDouble();
-        const double y = bbox.at(1).toDouble();
-        const double w = bbox.at(2).toDouble();
-        const double h = bbox.at(3).toDouble();
-        if (width <= 0.0 || height <= 0.0 || w <= 0.0 || h <= 0.0) {
+        if (width <= 0.0 || height <= 0.0) {
             result.issues.append(issue(QStringLiteral("warning"), QStringLiteral("invalid_bbox"), result.sourcePath,
                 image.value(QStringLiteral("file_name")).toString(), QString::number(categoryId),
                 QStringLiteral("COCO bbox or image size is invalid."));
@@ -196,14 +183,108 @@ DatasetConversionResult convertCoco(const DatasetConversionRequest& request)
             continue;
         }
 
-        const QString row = QStringLiteral("%1 %2 %3 %4 %5")
-            .arg(categoryIdToClassId.value(categoryId))
-            .arg(yoloNumber((x + w / 2.0) / width))
-            .arg(yoloNumber((y + h / 2.0) / height))
-            .arg(yoloNumber(w / width))
-            .arg(yoloNumber(h / height));
-        labelsByImageId[imageId].append(row);
-        ++result.convertedAnnotationCount;
+        const bool targetDetection = result.targetFormat == QStringLiteral("yolo_detection");
+        if (targetDetection) {
+            const QJsonArray bbox = annotation.value(QStringLiteral("bbox")).toArray();
+            if (bbox.size() != 4) {
+                result.issues.append(issue(QStringLiteral("warning"), QStringLiteral("invalid_bbox"), result.sourcePath,
+                    imagesById.value(imageId).value(QStringLiteral("file_name")).toString(), QString::number(categoryId),
+                    QStringLiteral("COCO bbox must contain four numbers."));
+                ++result.skippedAnnotationCount;
+                continue;
+            }
+            const double x = bbox.at(0).toDouble();
+            const double y = bbox.at(1).toDouble();
+            const double w = bbox.at(2).toDouble();
+            const double h = bbox.at(3).toDouble();
+            if (width <= 0.0 || height <= 0.0 || w <= 0.0 || h <= 0.0) {
+                result.issues.append(issue(QStringLiteral("warning"), QStringLiteral("invalid_bbox"), result.sourcePath,
+                    image.value(QStringLiteral("file_name")).toString(), QString::number(categoryId),
+                    QStringLiteral("COCO bbox or image size is invalid."));
+                ++result.skippedAnnotationCount;
+                continue;
+            }
+            const QString row = QStringLiteral("%1 %2 %3 %4 %5")
+                .arg(categoryIdToClassId.value(categoryId))
+                .arg(yoloNumber((x + w / 2.0) / width))
+                .arg(yoloNumber((y + h / 2.0) / height))
+                .arg(yoloNumber(w / width))
+                .arg(yoloNumber(h / height));
+            labelsByImageId[imageId].append(row);
+            ++result.convertedAnnotationCount;
+            continue;
+        }
+
+        const QJsonValue segmentationValue = annotation.value(QStringLiteral("segmentation"));
+        if (segmentationValue.isObject()) {
+            result.issues.append(issue(QStringLiteral("warning"), QStringLiteral("rle_not_supported"), result.sourcePath,
+                image.value(QStringLiteral("file_name")).toString(), QString::number(categoryId),
+                QStringLiteral("COCO RLE masks are not converted in this version."));
+            ++result.skippedAnnotationCount;
+            continue;
+        }
+
+        const QJsonArray segments = segmentationValue.toArray();
+        if (segments.isEmpty()) {
+            result.issues.append(issue(QStringLiteral("warning"), QStringLiteral("invalid_polygon"), result.sourcePath,
+                image.value(QStringLiteral("file_name")).toString(), QString::number(categoryId),
+                QStringLiteral("COCO polygon segmentation is empty."));
+            ++result.skippedAnnotationCount;
+            continue;
+        }
+
+        const bool nestedPolygons = segments.first().isArray();
+        if (!nestedPolygons && (segments.size() < 6 || segments.size() % 2 != 0)) {
+            result.issues.append(issue(QStringLiteral("warning"), QStringLiteral("invalid_polygon"), result.sourcePath,
+                image.value(QStringLiteral("file_name")).toString(), QString::number(categoryId),
+                QStringLiteral("COCO polygon must contain at least three x/y points."));
+            ++result.skippedAnnotationCount;
+            continue;
+        }
+
+        auto appendPolygon = [&](const QJsonArray& polygon) {
+            if (polygon.size() < 6 || polygon.size() % 2 != 0) {
+                result.issues.append(issue(QStringLiteral("warning"), QStringLiteral("invalid_polygon"), result.sourcePath,
+                    image.value(QStringLiteral("file_name")).toString(), QString::number(categoryId),
+                    QStringLiteral("COCO polygon must contain at least three x/y points."));
+                ++result.skippedAnnotationCount;
+                return;
+            }
+            QStringList parts;
+            parts.append(QString::number(categoryIdToClassId.value(categoryId)));
+            for (int i = 0; i + 1 < polygon.size(); i += 2) {
+                parts.append(yoloNumber(polygon.at(i).toDouble() / width));
+                parts.append(yoloNumber(polygon.at(i + 1).toDouble() / height));
+            }
+            labelsByImageId[imageId].append(parts.join(QLatin1Char(' ')));
+            ++result.convertedAnnotationCount;
+        };
+
+        if (nestedPolygons) {
+            bool convertedAny = false;
+            for (const QJsonValue& segmentValue : segments) {
+                const QJsonArray polygon = segmentValue.toArray();
+                const int before = result.convertedAnnotationCount;
+                appendPolygon(polygon);
+                convertedAny = convertedAny || (result.convertedAnnotationCount > before);
+            }
+            if (!convertedAny) {
+                result.issues.append(issue(QStringLiteral("warning"), QStringLiteral("invalid_polygon"), result.sourcePath,
+                    image.value(QStringLiteral("file_name")).toString(), QString::number(categoryId),
+                    QStringLiteral("COCO polygon segmentation is empty."));
+                ++result.skippedAnnotationCount;
+            }
+            continue;
+        }
+
+        const int before = result.convertedAnnotationCount;
+        appendPolygon(segments);
+        if (result.convertedAnnotationCount == before) {
+            result.issues.append(issue(QStringLiteral("warning"), QStringLiteral("invalid_polygon"), result.sourcePath,
+                image.value(QStringLiteral("file_name")).toString(), QString::number(categoryId),
+                QStringLiteral("COCO polygon must contain at least three x/y points."));
+            ++result.skippedAnnotationCount;
+        }
     }
 
     QDir().mkpath(result.outputPath);
@@ -262,11 +343,16 @@ DatasetConversionResult convertCoco(const DatasetConversionRequest& request)
         return result;
     }
 
-    result.targetValidation = validateYoloDetectionDataset(result.outputPath);
+    const bool targetSegmentation = result.targetFormat == QStringLiteral("yolo_segmentation");
+    result.targetValidation = targetSegmentation
+        ? validateYoloSegmentationDataset(result.outputPath)
+        : validateYoloDetectionDataset(result.outputPath);
     result.ok = result.targetValidation.ok;
     if (!result.ok) {
         result.errorCode = QStringLiteral("target_validation_failed");
-        result.errorMessage = QStringLiteral("Converted YOLO detection dataset failed validation.");
+        result.errorMessage = targetSegmentation
+            ? QStringLiteral("Converted YOLO segmentation dataset failed validation.")
+            : QStringLiteral("Converted YOLO detection dataset failed validation.");
     }
 
     result.reportPath = QDir(result.outputPath).filePath(QStringLiteral("dataset_conversion_report.json"));
@@ -308,7 +394,7 @@ DatasetConversionResult convertDataset(const DatasetConversionRequest& request)
     }
 
     if (sourceFormat == QStringLiteral("coco_json")) {
-        if (targetFormat == QStringLiteral("yolo_detection")) {
+        if (targetFormat == QStringLiteral("yolo_detection") || targetFormat == QStringLiteral("yolo_segmentation")) {
             return convertCoco(request);
         }
         result.errorCode = QStringLiteral("unsupported_target_format");
