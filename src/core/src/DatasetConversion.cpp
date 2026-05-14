@@ -197,6 +197,14 @@ bool copyImageToVal(const QString& sourceImagePath,
     QString* copiedRelativePath,
     QString* error = nullptr);
 
+bool sameCanonicalFile(const QString& leftPath, const QString& rightPath);
+
+QString normalizedOutputTargetKey(const QString& path);
+
+bool containsPlannedOutputTarget(const QStringList& targets, const QSet<QString>& plannedTargets, QString* duplicateTarget);
+
+void insertPlannedOutputTargets(const QStringList& targets, QSet<QString>* plannedTargets);
+
 DatasetConversionResult convertVoc(const DatasetConversionRequest& request)
 {
     DatasetConversionResult result;
@@ -331,13 +339,30 @@ DatasetConversionResult convertVoc(const DatasetConversionRequest& request)
     }
 
     QDir().mkpath(result.outputPath);
+    QSet<QString> plannedOutputTargets;
     int convertedSamples = 0;
     for (auto it = labelsByImage.constBegin(); it != labelsByImage.constEnd(); ++it) {
         const QString fileName = QFileInfo(it.key()).fileName();
-        QString copiedTrainRelativePath;
+        const QString labelFileName = QFileInfo(fileName).completeBaseName() + QStringLiteral(".txt");
+        const QString trainLabelPath = QDir(result.outputPath).filePath(QStringLiteral("labels/train/%1").arg(labelFileName));
+        const QString valLabelPath = QDir(result.outputPath).filePath(QStringLiteral("labels/val/%1").arg(labelFileName));
+        QStringList plannedTargets{trainLabelPath, valLabelPath};
+        if (copyImages) {
+            plannedTargets.append(QDir(result.outputPath).filePath(QStringLiteral("images/train/%1").arg(fileName)));
+            plannedTargets.append(QDir(result.outputPath).filePath(QStringLiteral("images/val/%1").arg(fileName)));
+        }
+        QString duplicateTarget;
+        if (containsPlannedOutputTarget(plannedTargets, plannedOutputTargets, &duplicateTarget)) {
+            result.issues.append(issue(QStringLiteral("warning"), QStringLiteral("duplicate_output_target"), it.key(), fileName,
+                duplicateTarget, QStringLiteral("Skipping VOC sample because it would overwrite an earlier YOLO output target.")));
+            result.convertedAnnotationCount -= it.value().size();
+            result.skippedAnnotationCount += it.value().size();
+            continue;
+        }
+
         if (copyImages) {
             QString copyError;
-            if (!copyImageToTrain(it.key(), result.outputPath, &copiedTrainRelativePath, &copyError)) {
+            if (!copyImageToTrain(it.key(), result.outputPath, nullptr, &copyError)) {
                 result.issues.append(issue(QStringLiteral("warning"), QStringLiteral("image_copy_failed"), it.key(), fileName, QString(), copyError));
                 ++result.skippedSampleCount;
                 continue;
@@ -347,24 +372,20 @@ DatasetConversionResult convertVoc(const DatasetConversionRequest& request)
                 ++result.skippedSampleCount;
                 continue;
             }
-        } else {
-            copiedTrainRelativePath = fileName;
         }
 
-        const QString labelFileName = QFileInfo(copiedTrainRelativePath).completeBaseName() + QStringLiteral(".txt");
-        const QString trainLabelPath = QDir(result.outputPath).filePath(QStringLiteral("labels/train/%1").arg(labelFileName));
         QString writeError;
         if (!writeTextFile(trainLabelPath, it.value().join(QLatin1Char('\n')) + QLatin1Char('\n'), &writeError)) {
             result.errorCode = QStringLiteral("output_write_failed");
             result.errorMessage = writeError;
             return result;
         }
-        const QString valLabelPath = QDir(result.outputPath).filePath(QStringLiteral("labels/val/%1").arg(labelFileName));
         if (!writeTextFile(valLabelPath, it.value().join(QLatin1Char('\n')) + QLatin1Char('\n'), &writeError)) {
             result.errorCode = QStringLiteral("output_write_failed");
             result.errorMessage = writeError;
             return result;
         }
+        insertPlannedOutputTargets(plannedTargets, &plannedOutputTargets);
         ++convertedSamples;
     }
 
@@ -442,6 +463,12 @@ bool copyImageToSplit(const QString& sourceImagePath,
     const QString targetPath = outputRoot.filePath(relativePath);
 
     outputRoot.mkpath(QStringLiteral("images/%1").arg(split));
+    if (QFileInfo::exists(targetPath) && sameCanonicalFile(sourceImagePath, targetPath)) {
+        if (copiedRelativePath) {
+            *copiedRelativePath = relativePath;
+        }
+        return true;
+    }
     if (QFileInfo::exists(targetPath) && !QFile::remove(targetPath)) {
         if (error) {
             *error = QStringLiteral("Cannot clear existing image target: %1").arg(targetPath);
@@ -515,6 +542,52 @@ QString jsonPath(const QString& path)
     return value;
 }
 
+bool sameCanonicalFile(const QString& leftPath, const QString& rightPath)
+{
+    const QString leftCanonicalPath = jsonPath(QFileInfo(leftPath).canonicalFilePath());
+    const QString rightCanonicalPath = jsonPath(QFileInfo(rightPath).canonicalFilePath());
+    if (leftCanonicalPath.isEmpty() || rightCanonicalPath.isEmpty()) {
+        return false;
+    }
+#ifdef Q_OS_WIN
+    return leftCanonicalPath.compare(rightCanonicalPath, Qt::CaseInsensitive) == 0;
+#else
+    return leftCanonicalPath == rightCanonicalPath;
+#endif
+}
+
+QString normalizedOutputTargetKey(const QString& path)
+{
+    QString key = jsonPath(QDir::cleanPath(QFileInfo(path).absoluteFilePath()));
+#ifdef Q_OS_WIN
+    key = key.toLower();
+#endif
+    return key;
+}
+
+bool containsPlannedOutputTarget(const QStringList& targets, const QSet<QString>& plannedTargets, QString* duplicateTarget)
+{
+    for (const QString& target : targets) {
+        if (plannedTargets.contains(normalizedOutputTargetKey(target))) {
+            if (duplicateTarget) {
+                *duplicateTarget = target;
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+void insertPlannedOutputTargets(const QStringList& targets, QSet<QString>* plannedTargets)
+{
+    if (!plannedTargets) {
+        return;
+    }
+    for (const QString& target : targets) {
+        plannedTargets->insert(normalizedOutputTargetKey(target));
+    }
+}
+
 QString xmlEscaped(QString value)
 {
     value.replace(QLatin1Char('&'), QStringLiteral("&amp;"));
@@ -562,22 +635,8 @@ bool copyImageToRelativePath(const QString& sourceImagePath,
         return false;
     }
 
-    const QFileInfo sourceInfo(sourceImagePath);
-    const QFileInfo targetInfo(targetPath);
-    if (targetInfo.exists()) {
-        const QString sourceCanonicalPath = jsonPath(sourceInfo.canonicalFilePath());
-        const QString targetCanonicalPath = jsonPath(targetInfo.canonicalFilePath());
-        if (!sourceCanonicalPath.isEmpty() && !targetCanonicalPath.isEmpty()) {
-#ifdef Q_OS_WIN
-            if (sourceCanonicalPath.compare(targetCanonicalPath, Qt::CaseInsensitive) == 0) {
-                return true;
-            }
-#else
-            if (sourceCanonicalPath == targetCanonicalPath) {
-                return true;
-            }
-#endif
-        }
+    if (QFileInfo::exists(targetPath) && sameCanonicalFile(sourceImagePath, targetPath)) {
+        return true;
     }
 
     outputRoot.mkpath(QFileInfo(targetPath).absolutePath());
@@ -1690,6 +1749,7 @@ DatasetConversionResult convertCoco(const DatasetConversionRequest& request)
     }
 
     QDir().mkpath(result.outputPath);
+    QSet<QString> plannedOutputTargets;
     int convertedSamples = 0;
     for (auto it = labelsByImageId.constBegin(); it != labelsByImageId.constEnd(); ++it) {
         const QJsonObject image = imagesById.value(it.key());
@@ -1697,11 +1757,27 @@ DatasetConversionResult convertCoco(const DatasetConversionRequest& request)
         const QString sourceImagePath = QFileInfo(fileName).isAbsolute()
             ? fileName
             : QFileInfo(result.sourcePath).absoluteDir().filePath(fileName);
+        const QString imageName = QFileInfo(sourceImagePath).fileName();
+        const QString labelFileName = QFileInfo(imageName).completeBaseName() + QStringLiteral(".txt");
+        const QString trainLabelPath = QDir(result.outputPath).filePath(QStringLiteral("labels/train/%1").arg(labelFileName));
+        const QString valLabelPath = QDir(result.outputPath).filePath(QStringLiteral("labels/val/%1").arg(labelFileName));
+        QStringList plannedTargets{trainLabelPath, valLabelPath};
+        if (copyImages) {
+            plannedTargets.append(QDir(result.outputPath).filePath(QStringLiteral("images/train/%1").arg(imageName)));
+            plannedTargets.append(QDir(result.outputPath).filePath(QStringLiteral("images/val/%1").arg(imageName)));
+        }
+        QString duplicateTarget;
+        if (containsPlannedOutputTarget(plannedTargets, plannedOutputTargets, &duplicateTarget)) {
+            result.issues.append(issue(QStringLiteral("warning"), QStringLiteral("duplicate_output_target"), result.sourcePath, fileName,
+                duplicateTarget, QStringLiteral("Skipping COCO sample because it would overwrite an earlier YOLO output target.")));
+            result.convertedAnnotationCount -= it.value().size();
+            result.skippedAnnotationCount += it.value().size();
+            continue;
+        }
 
-        QString copiedRelativePath;
         if (copyImages) {
             QString copyError;
-            if (!copyImageToTrain(sourceImagePath, result.outputPath, &copiedRelativePath, &copyError)) {
+            if (!copyImageToTrain(sourceImagePath, result.outputPath, nullptr, &copyError)) {
                 result.issues.append(issue(QStringLiteral("warning"), QStringLiteral("image_copy_failed"), result.sourcePath, fileName, QString(), copyError));
                 ++result.skippedSampleCount;
                 continue;
@@ -1711,24 +1787,20 @@ DatasetConversionResult convertCoco(const DatasetConversionRequest& request)
                 ++result.skippedSampleCount;
                 continue;
             }
-        } else {
-            copiedRelativePath = fileName;
         }
 
-        const QString labelFileName = QFileInfo(copiedRelativePath).completeBaseName() + QStringLiteral(".txt");
-        const QString trainLabelPath = QDir(result.outputPath).filePath(QStringLiteral("labels/train/%1").arg(labelFileName));
         QString writeError;
         if (!writeTextFile(trainLabelPath, it.value().join(QLatin1Char('\n')) + QLatin1Char('\n'), &writeError)) {
             result.errorCode = QStringLiteral("output_write_failed");
             result.errorMessage = writeError;
             return result;
         }
-        const QString valLabelPath = QDir(result.outputPath).filePath(QStringLiteral("labels/val/%1").arg(labelFileName));
         if (!writeTextFile(valLabelPath, it.value().join(QLatin1Char('\n')) + QLatin1Char('\n'), &writeError)) {
             result.errorCode = QStringLiteral("output_write_failed");
             result.errorMessage = writeError;
             return result;
         }
+        insertPlannedOutputTargets(plannedTargets, &plannedOutputTargets);
         ++convertedSamples;
     }
     result.convertedSampleCount = convertedSamples;

@@ -16,6 +16,8 @@ class DatasetConversionTests : public QObject {
 private slots:
     void unsupportedFormatFails();
     void cocoDetectionConvertsBboxToYolo();
+    void cocoInPlaceYoloCopyDoesNotDeleteSourceImage();
+    void cocoDuplicateImageBasenamesReportIssueAndKeepFirstOutput();
     void cocoSegmentationConvertsPolygonToYolo();
     void cocoSegmentationSkipsRleMasks();
     void vocXmlConvertsBoxesToYoloDetection();
@@ -156,6 +158,71 @@ void DatasetConversionTests::cocoDetectionConvertsBboxToYolo()
     QCOMPARE(report.value(QStringLiteral("sourceFormat")).toString(), QStringLiteral("coco_json"));
     QCOMPARE(report.value(QStringLiteral("targetFormat")).toString(), QStringLiteral("yolo_detection"));
     QVERIFY(report.value(QStringLiteral("targetValidation")).toObject().value(QStringLiteral("ok")).toBool());
+}
+
+void DatasetConversionTests::cocoInPlaceYoloCopyDoesNotDeleteSourceImage()
+{
+    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
+    QVERIFY(temp.isValid());
+    const QDir root(temp.path());
+
+    writeTinyPngWithSize(root.filePath(QStringLiteral("images/train/a.png")), 100, 80);
+    writeTextFile(root.filePath(QStringLiteral("annotations.json")),
+        QStringLiteral("{\"images\":[{\"id\":1,\"file_name\":\"images/train/a.png\",\"width\":100,\"height\":80}],"
+                       "\"categories\":[{\"id\":7,\"name\":\"widget\"}],"
+                       "\"annotations\":[{\"id\":10,\"image_id\":1,\"category_id\":7,\"bbox\":[25,24,50,32]}]}"));
+
+    const QString sourceImagePath = root.filePath(QStringLiteral("images/train/a.png"));
+    QVERIFY(QFileInfo::exists(sourceImagePath));
+
+    aitrain::DatasetConversionRequest request;
+    request.sourcePath = root.filePath(QStringLiteral("annotations.json"));
+    request.sourceFormat = QStringLiteral("coco_json");
+    request.targetFormat = QStringLiteral("yolo_detection");
+    request.outputPath = root.absolutePath();
+    request.options.insert(QStringLiteral("copyImages"), true);
+
+    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
+    QVERIFY2(result.ok, qPrintable(result.errorMessage));
+    QVERIFY(QFileInfo::exists(sourceImagePath));
+    QVERIFY(QFileInfo::exists(root.filePath(QStringLiteral("labels/train/a.txt"))));
+}
+
+void DatasetConversionTests::cocoDuplicateImageBasenamesReportIssueAndKeepFirstOutput()
+{
+    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
+    QVERIFY(temp.isValid());
+    const QDir root(temp.path());
+
+    writeTinyPngWithSize(root.filePath(QStringLiteral("source/left/a.png")), 100, 80);
+    writeTinyPngWithSize(root.filePath(QStringLiteral("source/right/a.png")), 120, 60);
+    writeTextFile(root.filePath(QStringLiteral("source/annotations.json")),
+        QStringLiteral("{\"images\":["
+                       "{\"id\":1,\"file_name\":\"left/a.png\",\"width\":100,\"height\":80},"
+                       "{\"id\":2,\"file_name\":\"right/a.png\",\"width\":120,\"height\":60}],"
+                       "\"categories\":[{\"id\":7,\"name\":\"widget\"}],"
+                       "\"annotations\":["
+                       "{\"id\":10,\"image_id\":1,\"category_id\":7,\"bbox\":[25,24,50,32]},"
+                       "{\"id\":11,\"image_id\":2,\"category_id\":7,\"bbox\":[12,15,36,30]}]}"));
+
+    aitrain::DatasetConversionRequest request;
+    request.sourcePath = root.filePath(QStringLiteral("source/annotations.json"));
+    request.sourceFormat = QStringLiteral("coco_json");
+    request.targetFormat = QStringLiteral("yolo_detection");
+    request.outputPath = root.filePath(QStringLiteral("converted_duplicate_yolo"));
+    request.options.insert(QStringLiteral("copyImages"), true);
+
+    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
+    QVERIFY2(result.ok, qPrintable(result.errorMessage));
+    QCOMPARE(result.convertedSampleCount, 1);
+    QCOMPARE(result.convertedAnnotationCount, 1);
+    QVERIFY(issuesContainCode(result.issues, QStringLiteral("duplicate_output_target")));
+
+    const QString label = readTextForConversionTest(root.filePath(QStringLiteral("converted_duplicate_yolo/labels/train/a.txt"))).trimmed();
+    QCOMPARE(label, QStringLiteral("0 0.500000 0.500000 0.500000 0.400000"));
+    const QImage copied(root.filePath(QStringLiteral("converted_duplicate_yolo/images/train/a.png")));
+    QCOMPARE(copied.width(), 100);
+    QCOMPARE(copied.height(), 80);
 }
 
 void DatasetConversionTests::cocoSegmentationConvertsPolygonToYolo()
