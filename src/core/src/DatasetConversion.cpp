@@ -469,9 +469,9 @@ bool copyImageToSplit(const QString& sourceImagePath,
         }
         return true;
     }
-    if (QFileInfo::exists(targetPath) && !QFile::remove(targetPath)) {
+    if (QFileInfo::exists(targetPath)) {
         if (error) {
-            *error = QStringLiteral("Cannot clear existing image target: %1").arg(targetPath);
+            *error = QStringLiteral("Refusing to overwrite existing image target: %1").arg(targetPath);
         }
         return false;
     }
@@ -640,9 +640,9 @@ bool copyImageToRelativePath(const QString& sourceImagePath,
     }
 
     outputRoot.mkpath(QFileInfo(targetPath).absolutePath());
-    if (QFileInfo::exists(targetPath) && !QFile::remove(targetPath)) {
+    if (QFileInfo::exists(targetPath)) {
         if (error) {
-            *error = QStringLiteral("Cannot clear existing image target: %1").arg(targetPath);
+            *error = QStringLiteral("Refusing to overwrite existing image target: %1").arg(targetPath);
         }
         return false;
     }

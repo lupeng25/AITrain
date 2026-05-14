@@ -18,11 +18,13 @@ private slots:
     void cocoDetectionConvertsBboxToYolo();
     void cocoInPlaceYoloCopyDoesNotDeleteSourceImage();
     void cocoDuplicateImageBasenamesReportIssueAndKeepFirstOutput();
+    void cocoDetectionRefusesToOverwriteExistingYoloImageTarget();
     void cocoSegmentationConvertsPolygonToYolo();
     void cocoSegmentationSkipsRleMasks();
     void vocXmlConvertsBoxesToYoloDetection();
     void yoloDetectionConvertsToCoco();
     void yoloDetectionInPlaceCocoCopyDoesNotDeleteSourceImage();
+    void yoloDetectionRefusesToOverwriteExistingCocoImageTarget();
     void yoloDetectionConvertsToVocXml();
     void yoloSegmentationConvertsToCocoPolygons();
     void copyImagesFalseKeepsReferencedPaths();
@@ -225,6 +227,31 @@ void DatasetConversionTests::cocoDuplicateImageBasenamesReportIssueAndKeepFirstO
     QCOMPARE(copied.height(), 80);
 }
 
+void DatasetConversionTests::cocoDetectionRefusesToOverwriteExistingYoloImageTarget()
+{
+    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
+    QVERIFY(temp.isValid());
+    const QDir root(temp.path());
+    writeTinyPngWithSize(root.filePath(QStringLiteral("images/a.png")), 100, 80);
+    writeTinyPngWithSize(root.filePath(QStringLiteral("converted/images/train/a.png")), 9, 9);
+    writeTextFile(root.filePath(QStringLiteral("annotations.json")),
+        QStringLiteral("{\"images\":[{\"id\":1,\"file_name\":\"images/a.png\",\"width\":100,\"height\":80}],"
+                       "\"categories\":[{\"id\":7,\"name\":\"widget\"}],"
+                       "\"annotations\":[{\"id\":10,\"image_id\":1,\"category_id\":7,\"bbox\":[25,24,50,32]}]}"));
+
+    aitrain::DatasetConversionRequest request;
+    request.sourcePath = root.filePath(QStringLiteral("annotations.json"));
+    request.sourceFormat = QStringLiteral("coco_json");
+    request.targetFormat = QStringLiteral("yolo_detection");
+    request.outputPath = root.filePath(QStringLiteral("converted"));
+    request.options.insert(QStringLiteral("copyImages"), true);
+
+    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
+    QVERIFY(!result.ok);
+    QVERIFY(issuesContainCode(result.issues, QStringLiteral("image_copy_failed")));
+    QCOMPARE(QImage(root.filePath(QStringLiteral("converted/images/train/a.png"))).size(), QSize(9, 9));
+}
+
 void DatasetConversionTests::cocoSegmentationConvertsPolygonToYolo()
 {
     QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
@@ -369,6 +396,32 @@ void DatasetConversionTests::yoloDetectionInPlaceCocoCopyDoesNotDeleteSourceImag
     QVERIFY2(result.ok, qPrintable(result.errorMessage));
     QVERIFY(QFileInfo::exists(sourceImagePath));
     QVERIFY(QFileInfo::exists(source.filePath(QStringLiteral("annotations/train.json"))));
+}
+
+void DatasetConversionTests::yoloDetectionRefusesToOverwriteExistingCocoImageTarget()
+{
+    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
+    QVERIFY(temp.isValid());
+    const QDir root(temp.path());
+    const QDir source(root.filePath(QStringLiteral("source_yolo_collision")));
+    writeTinyPngWithSize(source.filePath(QStringLiteral("images/train/a.png")), 100, 80);
+    writeTextFile(source.filePath(QStringLiteral("labels/train/a.txt")),
+        QStringLiteral("0 0.500000 0.500000 0.500000 0.400000\n"));
+    writeTextFile(source.filePath(QStringLiteral("data.yaml")),
+        QStringLiteral("path: .\ntrain: images/train\nval: images/train\nnc: 1\nnames: [item]\n"));
+    writeTinyPngWithSize(root.filePath(QStringLiteral("converted_coco/images/train/a.png")), 9, 9);
+
+    aitrain::DatasetConversionRequest request;
+    request.sourcePath = source.absolutePath();
+    request.sourceFormat = QStringLiteral("yolo_detection");
+    request.targetFormat = QStringLiteral("coco_json");
+    request.outputPath = root.filePath(QStringLiteral("converted_coco"));
+    request.options.insert(QStringLiteral("copyImages"), true);
+
+    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
+    QVERIFY(!result.ok);
+    QVERIFY(issuesContainCode(result.issues, QStringLiteral("image_copy_failed")));
+    QCOMPARE(QImage(root.filePath(QStringLiteral("converted_coco/images/train/a.png"))).size(), QSize(9, 9));
 }
 
 void DatasetConversionTests::yoloDetectionConvertsToVocXml()
