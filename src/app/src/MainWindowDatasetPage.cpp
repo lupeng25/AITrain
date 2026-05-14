@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 
+#include "DatasetConversionUiModel.h"
 #include "EvaluationReportView.h"
 #include "InfoPanel.h"
 #include "MainWindowSupport.h"
@@ -70,6 +71,7 @@ QWidget* MainWindow::buildDatasetPage()
         currentDatasetValid_ = false;
         updateTrainingSelectionSummary();
         refreshTrainingDefaults();
+        refreshDatasetConversionDefaultsFromCurrentDataset();
     });
     auto* validateButton = primaryButton(QStringLiteral("校验数据集"));
     connect(validateButton, &QPushButton::clicked, this, &MainWindow::validateDataset);
@@ -121,6 +123,102 @@ QWidget* MainWindow::buildDatasetPage()
         datasetActionGrid->setColumnStretch(column, 1);
     }
     inputPanel->bodyLayout()->addWidget(datasetActionStrip);
+
+    auto* conversionStrip = new QFrame;
+    conversionStrip->setObjectName(QStringLiteral("ActionStrip"));
+    auto* conversionLayout = new QVBoxLayout(conversionStrip);
+    conversionLayout->setContentsMargins(10, 10, 10, 10);
+    conversionLayout->setSpacing(8);
+
+    auto* conversionTitle = new QLabel(QStringLiteral("格式转换"));
+    conversionTitle->setObjectName(QStringLiteral("SectionTitle"));
+    datasetConversionStatusLabel_ = mutedLabel(QStringLiteral("选择源格式、目标格式和输出目录后开始转换。"));
+    allowLabelToShrink(datasetConversionStatusLabel_);
+    conversionLayout->addWidget(conversionTitle);
+    conversionLayout->addWidget(datasetConversionStatusLabel_);
+
+    datasetConversionSourceFormatCombo_ = new QComboBox;
+    for (const QString& format : supportedDatasetConversionSourceFormats()) {
+        addComboItem(datasetConversionSourceFormatCombo_, datasetConversionFormatLabel(format), format);
+    }
+    datasetConversionTargetFormatCombo_ = new QComboBox;
+    connect(datasetConversionSourceFormatCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::updateDatasetConversionTargetFormats);
+
+    datasetConversionInputEdit_ = new QLineEdit;
+    datasetConversionBrowseInputButton_ = new QPushButton(QStringLiteral("选择输入"));
+    connect(datasetConversionBrowseInputButton_, &QPushButton::clicked, this, &MainWindow::browseDatasetConversionInput);
+    auto* conversionInputRow = new QWidget;
+    auto* conversionInputLayout = new QHBoxLayout(conversionInputRow);
+    conversionInputLayout->setContentsMargins(0, 0, 0, 0);
+    conversionInputLayout->setSpacing(8);
+    conversionInputLayout->addWidget(datasetConversionInputEdit_, 1);
+    conversionInputLayout->addWidget(datasetConversionBrowseInputButton_);
+
+    datasetConversionOutputEdit_ = new QLineEdit;
+    datasetConversionBrowseOutputButton_ = new QPushButton(QStringLiteral("选择输出"));
+    connect(datasetConversionBrowseOutputButton_, &QPushButton::clicked, this, &MainWindow::browseDatasetConversionOutput);
+    auto* conversionOutputRow = new QWidget;
+    auto* conversionOutputLayout = new QHBoxLayout(conversionOutputRow);
+    conversionOutputLayout->setContentsMargins(0, 0, 0, 0);
+    conversionOutputLayout->setSpacing(8);
+    conversionOutputLayout->addWidget(datasetConversionOutputEdit_, 1);
+    conversionOutputLayout->addWidget(datasetConversionBrowseOutputButton_);
+
+    auto* conversionForm = new QFormLayout;
+    conversionForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    conversionForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    conversionForm->setHorizontalSpacing(12);
+    conversionForm->setVerticalSpacing(6);
+    conversionForm->addRow(QStringLiteral("源格式"), datasetConversionSourceFormatCombo_);
+    datasetConversionSourceErrorLabel_ = new QLabel;
+    datasetConversionSourceErrorLabel_->setStyleSheet(QStringLiteral("color: #DC2626;"));
+    datasetConversionSourceErrorLabel_->hide();
+    conversionForm->addRow(QString(), datasetConversionSourceErrorLabel_);
+    conversionForm->addRow(QStringLiteral("目标格式"), datasetConversionTargetFormatCombo_);
+    datasetConversionTargetErrorLabel_ = new QLabel;
+    datasetConversionTargetErrorLabel_->setStyleSheet(QStringLiteral("color: #DC2626;"));
+    datasetConversionTargetErrorLabel_->hide();
+    conversionForm->addRow(QString(), datasetConversionTargetErrorLabel_);
+    conversionForm->addRow(QStringLiteral("输入目录"), conversionInputRow);
+    datasetConversionInputErrorLabel_ = new QLabel;
+    datasetConversionInputErrorLabel_->setStyleSheet(QStringLiteral("color: #DC2626;"));
+    datasetConversionInputErrorLabel_->hide();
+    conversionForm->addRow(QString(), datasetConversionInputErrorLabel_);
+    conversionForm->addRow(QStringLiteral("输出目录"), conversionOutputRow);
+    datasetConversionOutputErrorLabel_ = new QLabel;
+    datasetConversionOutputErrorLabel_->setStyleSheet(QStringLiteral("color: #DC2626;"));
+    datasetConversionOutputErrorLabel_->hide();
+    conversionForm->addRow(QString(), datasetConversionOutputErrorLabel_);
+    conversionLayout->addLayout(conversionForm);
+
+    auto* conversionActionRow = new QWidget;
+    auto* conversionActionLayout = new QHBoxLayout(conversionActionRow);
+    conversionActionLayout->setContentsMargins(0, 0, 0, 0);
+    conversionActionLayout->setSpacing(8);
+    datasetConversionStartButton_ = primaryButton(QStringLiteral("转换数据集"));
+    datasetConversionCancelButton_ = dangerButton(QStringLiteral("取消转换"));
+    datasetConversionCancelButton_->setEnabled(false);
+    connect(datasetConversionStartButton_, &QPushButton::clicked, this, &MainWindow::startDatasetConversion);
+    connect(datasetConversionCancelButton_, &QPushButton::clicked, this, &MainWindow::cancelDatasetConversion);
+    conversionActionLayout->addStretch();
+    conversionActionLayout->addWidget(datasetConversionStartButton_);
+    conversionActionLayout->addWidget(datasetConversionCancelButton_);
+    conversionLayout->addWidget(conversionActionRow);
+
+    datasetConversionProgressBar_ = new QProgressBar;
+    datasetConversionProgressBar_->setRange(0, 100);
+    datasetConversionProgressBar_->setValue(0);
+    datasetConversionResultLabel_ = inlineStatusLabel(QStringLiteral("转换结果会显示在这里。"));
+    allowLabelToShrink(datasetConversionResultLabel_);
+    datasetConversionLog_ = new QPlainTextEdit;
+    datasetConversionLog_->setReadOnly(true);
+    datasetConversionLog_->setMinimumHeight(96);
+    datasetConversionLog_->setPlainText(QStringLiteral("等待转换。"));
+    conversionLayout->addWidget(datasetConversionProgressBar_);
+    conversionLayout->addWidget(datasetConversionResultLabel_);
+    conversionLayout->addWidget(datasetConversionLog_);
+    inputPanel->bodyLayout()->addWidget(conversionStrip);
+    updateDatasetConversionTargetFormats();
 
     auto* splitter = new QSplitter(Qt::Horizontal);
     auto* resultPanel = new InfoPanel(QStringLiteral("所选数据集详情"));
@@ -202,6 +300,7 @@ QWidget* MainWindow::buildDatasetPage()
                 && datasetListTable_->item(row, 2)->data(Qt::UserRole).toString() == QStringLiteral("valid");
             updateTrainingSelectionSummary();
             refreshTrainingDefaults();
+            refreshDatasetConversionDefaultsFromCurrentDataset();
         }
     });
     datasetPreviewTable_ = new QTableWidget(0, 2);

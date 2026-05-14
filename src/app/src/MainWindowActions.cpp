@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 
+#include "DatasetConversionUiModel.h"
 #include "EvaluationReportView.h"
 #include "InfoPanel.h"
 #include "LanguageSupport.h"
@@ -199,6 +200,35 @@ void setAcceptanceTableRow(QTableWidget* table, const QString& stage, const QStr
     table->setItem(row, 2, new QTableWidgetItem(QDir::toNativeSeparators(evidence)));
     table->setItem(row, 3, new QTableWidgetItem(message));
 }
+
+QString defaultDatasetConversionOutputPath(const QString& sourcePath, const QString& projectPath, const QString& targetFormat)
+{
+    const QString normalizedSourcePath = QDir::fromNativeSeparators(sourcePath.trimmed());
+    if (normalizedSourcePath.isEmpty()) {
+        return QString();
+    }
+
+    QString datasetName = QFileInfo(normalizedSourcePath).fileName();
+    if (datasetName.isEmpty()) {
+        datasetName = QStringLiteral("dataset");
+    }
+    const QString suffix = targetFormat.trimmed().isEmpty() ? QStringLiteral("converted") : targetFormat.trimmed();
+    const QString directoryName = QStringLiteral("%1-%2").arg(datasetName, suffix);
+    const QString normalizedProjectPath = QDir::fromNativeSeparators(projectPath.trimmed());
+    const QString outputPath = normalizedProjectPath.isEmpty()
+        ? QDir(normalizedSourcePath).absoluteFilePath(QStringLiteral("../converted/%1").arg(directoryName))
+        : QDir(normalizedProjectPath).filePath(QStringLiteral("datasets/converted/%1").arg(directoryName));
+    return QDir::cleanPath(outputPath);
+}
+
+void setFieldErrorLabel(QLabel* label, const QString& text)
+{
+    if (!label) {
+        return;
+    }
+    label->setText(text);
+    label->setVisible(!text.isEmpty());
+}
 } // namespace
 
 void MainWindow::openEvaluationReportsPage()
@@ -259,7 +289,272 @@ void MainWindow::browseDataset()
         currentDatasetValid_ = false;
         updateTrainingSelectionSummary();
         refreshTrainingDefaults();
+        refreshDatasetConversionDefaultsFromCurrentDataset();
     }
+}
+
+void MainWindow::updateDatasetConversionTargetFormats()
+{
+    if (!datasetConversionSourceFormatCombo_ || !datasetConversionTargetFormatCombo_) {
+        return;
+    }
+
+    const QString sourceFormat = comboCurrentDataOrText(datasetConversionSourceFormatCombo_);
+    const QString previousTarget = comboCurrentDataOrText(datasetConversionTargetFormatCombo_);
+    const QStringList targets = supportedDatasetConversionTargets(sourceFormat);
+
+    QSignalBlocker blocker(datasetConversionTargetFormatCombo_);
+    datasetConversionTargetFormatCombo_->clear();
+    for (const QString& target : targets) {
+        addComboItem(datasetConversionTargetFormatCombo_, datasetConversionFormatLabel(target), target);
+    }
+    const int previousIndex = previousTarget.isEmpty() ? -1 : datasetConversionTargetFormatCombo_->findData(previousTarget);
+    if (previousIndex >= 0) {
+        datasetConversionTargetFormatCombo_->setCurrentIndex(previousIndex);
+    } else if (datasetConversionTargetFormatCombo_->count() > 0) {
+        datasetConversionTargetFormatCombo_->setCurrentIndex(0);
+    }
+
+    if (datasetConversionOutputEdit_ && datasetConversionOutputEdit_->text().trimmed().isEmpty()) {
+        const QString inputPath = QDir::fromNativeSeparators(datasetConversionInputEdit_ ? datasetConversionInputEdit_->text().trimmed() : QString());
+        const QString targetFormat = comboCurrentDataOrText(datasetConversionTargetFormatCombo_);
+        const QString outputPath = defaultDatasetConversionOutputPath(inputPath, currentProjectPath_, targetFormat);
+        if (!outputPath.isEmpty()) {
+            datasetConversionOutputEdit_->setText(QDir::toNativeSeparators(outputPath));
+        }
+    }
+}
+
+void MainWindow::refreshDatasetConversionDefaultsFromCurrentDataset()
+{
+    if (!datasetConversionInputEdit_ || !datasetConversionSourceFormatCombo_) {
+        return;
+    }
+
+    QString inputPath = datasetPathEdit_ ? QDir::fromNativeSeparators(datasetPathEdit_->text().trimmed()) : QString();
+    if (inputPath.isEmpty()) {
+        inputPath = currentDatasetPath_;
+    }
+    if (!inputPath.isEmpty()) {
+        datasetConversionInputEdit_->setText(QDir::toNativeSeparators(inputPath));
+    }
+
+    QString sourceFormat = currentDatasetFormat_;
+    if (sourceFormat.isEmpty()) {
+        sourceFormat = currentDatasetFormat();
+    }
+    if (!sourceFormat.isEmpty() && datasetConversionSourceFormatCombo_->findData(sourceFormat) >= 0) {
+        setComboCurrentData(datasetConversionSourceFormatCombo_, sourceFormat);
+    } else {
+        updateDatasetConversionTargetFormats();
+    }
+
+    if (datasetConversionOutputEdit_ && datasetConversionOutputEdit_->text().trimmed().isEmpty()) {
+        const QString targetFormat = comboCurrentDataOrText(datasetConversionTargetFormatCombo_);
+        const QString outputPath = defaultDatasetConversionOutputPath(inputPath, currentProjectPath_, targetFormat);
+        if (!outputPath.isEmpty()) {
+            datasetConversionOutputEdit_->setText(QDir::toNativeSeparators(outputPath));
+        }
+    }
+}
+
+void MainWindow::browseDatasetConversionInput()
+{
+    const QString directory = QFileDialog::getExistingDirectory(this, QStringLiteral("选择待转换数据集目录"));
+    if (directory.isEmpty()) {
+        return;
+    }
+
+    const QString normalizedDirectory = QDir::fromNativeSeparators(directory);
+    if (datasetConversionInputEdit_) {
+        datasetConversionInputEdit_->setText(QDir::toNativeSeparators(normalizedDirectory));
+    }
+
+    const QString detectedFormat = detectDatasetFormatFromPath(normalizedDirectory);
+    if (!detectedFormat.isEmpty()
+        && supportedDatasetConversionSourceFormats().contains(detectedFormat)
+        && datasetConversionSourceFormatCombo_) {
+        setComboCurrentData(datasetConversionSourceFormatCombo_, detectedFormat);
+    } else {
+        updateDatasetConversionTargetFormats();
+    }
+
+    if (datasetConversionOutputEdit_) {
+        const QString targetFormat = comboCurrentDataOrText(datasetConversionTargetFormatCombo_);
+        const QString outputPath = defaultDatasetConversionOutputPath(normalizedDirectory, currentProjectPath_, targetFormat);
+        if (!outputPath.isEmpty()) {
+            datasetConversionOutputEdit_->setText(QDir::toNativeSeparators(outputPath));
+        }
+    }
+}
+
+void MainWindow::browseDatasetConversionOutput()
+{
+    const QString directory = QFileDialog::getExistingDirectory(this, QStringLiteral("选择转换输出目录"));
+    if (!directory.isEmpty() && datasetConversionOutputEdit_) {
+        datasetConversionOutputEdit_->setText(QDir::toNativeSeparators(directory));
+    }
+}
+
+void MainWindow::clearDatasetConversionErrors()
+{
+    setFieldErrorLabel(datasetConversionSourceErrorLabel_, QString());
+    setFieldErrorLabel(datasetConversionTargetErrorLabel_, QString());
+    setFieldErrorLabel(datasetConversionInputErrorLabel_, QString());
+    setFieldErrorLabel(datasetConversionOutputErrorLabel_, QString());
+}
+
+void MainWindow::appendDatasetConversionLog(const QString& text)
+{
+    if (!datasetConversionLog_ || text.isEmpty()) {
+        return;
+    }
+    if (datasetConversionLog_->toPlainText().trimmed() == QStringLiteral("等待转换。")) {
+        datasetConversionLog_->clear();
+    }
+    datasetConversionLog_->appendPlainText(text);
+}
+
+void MainWindow::setDatasetConversionFormRunning(bool running)
+{
+    if (datasetConversionSourceFormatCombo_) {
+        datasetConversionSourceFormatCombo_->setEnabled(!running);
+    }
+    if (datasetConversionTargetFormatCombo_) {
+        datasetConversionTargetFormatCombo_->setEnabled(!running);
+    }
+    if (datasetConversionInputEdit_) {
+        datasetConversionInputEdit_->setEnabled(!running);
+    }
+    if (datasetConversionOutputEdit_) {
+        datasetConversionOutputEdit_->setEnabled(!running);
+    }
+    if (datasetConversionBrowseInputButton_) {
+        datasetConversionBrowseInputButton_->setEnabled(!running);
+    }
+    if (datasetConversionBrowseOutputButton_) {
+        datasetConversionBrowseOutputButton_->setEnabled(!running);
+    }
+    if (datasetConversionStartButton_) {
+        datasetConversionStartButton_->setEnabled(!running);
+    }
+    if (datasetConversionCancelButton_) {
+        datasetConversionCancelButton_->setEnabled(running);
+    }
+}
+
+void MainWindow::cancelDatasetConversion()
+{
+    if (!worker_.isRunning()) {
+        return;
+    }
+    worker_.cancel();
+    if (datasetConversionStatusLabel_) {
+        datasetConversionStatusLabel_->setText(QStringLiteral("正在取消数据集转换。"));
+    }
+    appendDatasetConversionLog(QStringLiteral("正在取消数据集转换。"));
+}
+
+void MainWindow::startDatasetConversion()
+{
+    clearDatasetConversionErrors();
+
+    DatasetConversionForm form;
+    form.sourceFormat = comboCurrentDataOrText(datasetConversionSourceFormatCombo_);
+    form.targetFormat = comboCurrentDataOrText(datasetConversionTargetFormatCombo_);
+    form.inputPath = datasetConversionInputEdit_ ? datasetConversionInputEdit_->text() : QString();
+    form.outputPath = datasetConversionOutputEdit_ ? datasetConversionOutputEdit_->text() : QString();
+    form.workerRunning = worker_.isRunning();
+
+    const DatasetConversionValidation validation = validateDatasetConversionForm(form);
+    if (!validation.ok) {
+        if (datasetConversionStatusLabel_) {
+            datasetConversionStatusLabel_->setText(validation.summary);
+        }
+        setFieldErrorLabel(datasetConversionSourceErrorLabel_, validation.sourceFormatError);
+        setFieldErrorLabel(datasetConversionTargetErrorLabel_, validation.targetFormatError);
+        setFieldErrorLabel(datasetConversionInputErrorLabel_, validation.inputPathError);
+        setFieldErrorLabel(datasetConversionOutputErrorLabel_, validation.outputPathError);
+        return;
+    }
+
+    const QString sourcePath = normalizedDatasetConversionPath(form.inputPath);
+    const QString outputPath = normalizedDatasetConversionPath(form.outputPath);
+    if (!QDir().mkpath(outputPath)) {
+        const QString message = QStringLiteral("无法创建输出目录：%1").arg(QDir::toNativeSeparators(outputPath));
+        if (datasetConversionStatusLabel_) {
+            datasetConversionStatusLabel_->setText(message);
+        }
+        setFieldErrorLabel(datasetConversionOutputErrorLabel_, message);
+        appendDatasetConversionLog(message);
+        return;
+    }
+
+    QString taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    if (repository_.isOpen()) {
+        taskId = createRepositoryTask(
+            aitrain::TaskKind::Validate,
+            QStringLiteral("dataset_conversion"),
+            QStringLiteral("com.aitrain.plugins.dataset_interop"),
+            outputPath,
+            uiText("数据集格式转换中。"),
+            taskId);
+        if (taskId.isEmpty()) {
+            return;
+        }
+    } else {
+        currentTaskId_ = taskId;
+    }
+
+    QJsonObject options;
+    options.insert(QStringLiteral("copyImages"), true);
+    options.insert(QStringLiteral("maxIssues"), 200);
+
+    if (datasetConversionProgressBar_) {
+        datasetConversionProgressBar_->setValue(0);
+    }
+    if (datasetConversionLog_) {
+        datasetConversionLog_->clear();
+    }
+    if (datasetConversionResultLabel_) {
+        datasetConversionResultLabel_->setText(QStringLiteral("等待转换结果。"));
+    }
+    if (datasetConversionStatusLabel_) {
+        datasetConversionStatusLabel_->setText(QStringLiteral("正在通过 Worker 转换数据集。"));
+    }
+    appendDatasetConversionLog(QStringLiteral("开始转换数据集。"));
+    currentDatasetConversionTaskId_ = taskId;
+    setDatasetConversionFormRunning(true);
+
+    QString error;
+    if (!worker_.requestDatasetConversion(
+            workerExecutablePath(),
+            sourcePath,
+            outputPath,
+            form.sourceFormat,
+            form.targetFormat,
+            options,
+            &error,
+            taskId)) {
+        if (!taskId.isEmpty() && repository_.isOpen()) {
+            QString taskError;
+            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
+            updateRecentTasks();
+        }
+        currentTaskId_.clear();
+        currentDatasetConversionTaskId_.clear();
+        setDatasetConversionFormRunning(false);
+        const QString message = QStringLiteral("无法启动数据集转换：%1").arg(error);
+        if (datasetConversionStatusLabel_) {
+            datasetConversionStatusLabel_->setText(message);
+        }
+        appendDatasetConversionLog(message);
+        QMessageBox::critical(this, QStringLiteral("数据集转换"), message);
+        return;
+    }
+
+    workerPill_->setStatus(QStringLiteral("数据集转换中"), StatusPill::Tone::Info);
+    statusBar()->showMessage(QStringLiteral("正在转换数据集"), 3000);
 }
 
 void MainWindow::validateDataset()

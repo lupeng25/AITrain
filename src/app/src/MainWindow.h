@@ -25,6 +25,7 @@ class InfoPanel;
 class EvaluationReportView;
 class PluginMarketplaceWidget;
 class TaskArtifactPanel;
+class QPushButton;
 class QToolButton;
 
 class MainWindow : public QMainWindow {
@@ -36,6 +37,11 @@ public:
 private slots:
     void createProject();
     void browseDataset();
+    void browseDatasetConversionInput();
+    void browseDatasetConversionOutput();
+    void updateDatasetConversionTargetFormats();
+    void startDatasetConversion();
+    void cancelDatasetConversion();
     void validateDataset();
     void splitDataset();
     void curateDataset();
@@ -145,6 +151,11 @@ private:
     void updateEnvironmentTable(const QJsonObject& payload);
     void updateDatasetValidationResult(const QJsonObject& payload);
     void updateDatasetSplitResult(const QJsonObject& payload);
+    void updateDatasetConversionResult(const QJsonObject& payload);
+    void setDatasetConversionFormRunning(bool running);
+    void clearDatasetConversionErrors();
+    void appendDatasetConversionLog(const QString& text);
+    void refreshDatasetConversionDefaultsFromCurrentDataset();
     void updateDatasetRepairLoopFromQuality(const QJsonObject& payload);
     void updateDatasetRepairLoopFromValidation(const QJsonObject& payload);
     void setDatasetRepairLoopRows(const QString& summary, const QVector<QStringList>& rows);
@@ -201,6 +212,7 @@ private:
     QString currentProjectPath_;
     QString currentProjectName_;
     QString currentTaskId_;
+    QString currentDatasetConversionTaskId_;
     QString currentDatasetPath_;
     QString currentDatasetFormat_;
     QString latestQualityFixListPath_;
@@ -285,6 +297,22 @@ private:
     QLineEdit* splitTestRatioEdit_ = nullptr;
     QLineEdit* splitSeedEdit_ = nullptr;
     QComboBox* datasetFormatCombo_ = nullptr;
+    QComboBox* datasetConversionSourceFormatCombo_ = nullptr;
+    QComboBox* datasetConversionTargetFormatCombo_ = nullptr;
+    QLineEdit* datasetConversionInputEdit_ = nullptr;
+    QLineEdit* datasetConversionOutputEdit_ = nullptr;
+    QLabel* datasetConversionStatusLabel_ = nullptr;
+    QLabel* datasetConversionSourceErrorLabel_ = nullptr;
+    QLabel* datasetConversionTargetErrorLabel_ = nullptr;
+    QLabel* datasetConversionInputErrorLabel_ = nullptr;
+    QLabel* datasetConversionOutputErrorLabel_ = nullptr;
+    QLabel* datasetConversionResultLabel_ = nullptr;
+    QPushButton* datasetConversionStartButton_ = nullptr;
+    QPushButton* datasetConversionCancelButton_ = nullptr;
+    QPushButton* datasetConversionBrowseInputButton_ = nullptr;
+    QPushButton* datasetConversionBrowseOutputButton_ = nullptr;
+    QProgressBar* datasetConversionProgressBar_ = nullptr;
+    QPlainTextEdit* datasetConversionLog_ = nullptr;
     QComboBox* pluginCombo_ = nullptr;
     QComboBox* taskTypeCombo_ = nullptr;
     QComboBox* trainingBackendCombo_ = nullptr;
