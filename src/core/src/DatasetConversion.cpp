@@ -530,6 +530,17 @@ bool copyImageToRelativePath(const QString& sourceImagePath,
     const QString& relativePath,
     QString* error = nullptr)
 {
+    const QString cleanedRelativePath = jsonPath(relativePath);
+    if (QFileInfo(cleanedRelativePath).isAbsolute()
+        || cleanedRelativePath == QStringLiteral("..")
+        || cleanedRelativePath.startsWith(QStringLiteral("../"))
+        || cleanedRelativePath.contains(QStringLiteral("/../"))) {
+        if (error) {
+            *error = QStringLiteral("Refusing unsafe relative output path: %1").arg(relativePath);
+        }
+        return false;
+    }
+
     if (!QFileInfo::exists(sourceImagePath)) {
         if (error) {
             *error = QStringLiteral("Image file does not exist: %1").arg(sourceImagePath);
@@ -537,7 +548,20 @@ bool copyImageToRelativePath(const QString& sourceImagePath,
         return false;
     }
     const QDir outputRoot(outputPath);
-    const QString targetPath = outputRoot.filePath(relativePath);
+    const QString outputRootPath = jsonPath(QDir::cleanPath(QFileInfo(outputPath).absoluteFilePath()));
+    const QString targetPath = QDir::cleanPath(outputRoot.filePath(cleanedRelativePath));
+    const QString targetAbsolutePath = jsonPath(QDir::cleanPath(QFileInfo(targetPath).absoluteFilePath()));
+    const QString rootPrefix = outputRootPath.endsWith(QLatin1Char('/'))
+        ? outputRootPath
+        : outputRootPath + QStringLiteral("/");
+    if (targetAbsolutePath.compare(outputRootPath, Qt::CaseInsensitive) != 0
+        && !targetAbsolutePath.startsWith(rootPrefix, Qt::CaseInsensitive)) {
+        if (error) {
+            *error = QStringLiteral("Refusing output path outside conversion root: %1").arg(relativePath);
+        }
+        return false;
+    }
+
     outputRoot.mkpath(QFileInfo(targetPath).absolutePath());
     if (QFileInfo::exists(targetPath) && !QFile::remove(targetPath)) {
         if (error) {
@@ -586,6 +610,29 @@ QStringList parseYoloNamesFromYaml(const QString& yamlText, bool* foundNames = n
             }
             return names;
         }
+        if (line.startsWith(QStringLiteral("names:")) && line.contains(QLatin1Char('{'))) {
+            QString inner = line.mid(QStringLiteral("names:").size()).trimmed();
+            inner.remove(QLatin1Char('{'));
+            inner.remove(QLatin1Char('}'));
+            for (QString part : inner.split(QLatin1Char(','), QString::SkipEmptyParts)) {
+                const int colon = part.indexOf(QLatin1Char(':'));
+                if (colon < 0) {
+                    continue;
+                }
+                bool ok = false;
+                const int classId = part.left(colon).trimmed().toInt(&ok);
+                QString value = part.mid(colon + 1).trimmed();
+                value.remove(QLatin1Char('\''));
+                value.remove(QLatin1Char('"'));
+                if (ok && classId >= 0 && !value.isEmpty()) {
+                    mappedNames.insert(classId, value);
+                }
+            }
+            if (foundNames) {
+                *foundNames = !mappedNames.isEmpty();
+            }
+            break;
+        }
         if (line == QStringLiteral("names:")) {
             inBlockNames = true;
             if (foundNames) {
@@ -597,6 +644,15 @@ QStringList parseYoloNamesFromYaml(const QString& yamlText, bool* foundNames = n
             const bool indented = rawLine.startsWith(QLatin1Char(' ')) || rawLine.startsWith(QLatin1Char('\t'));
             if (!indented) {
                 break;
+            }
+            if (line.startsWith(QStringLiteral("- "))) {
+                QString value = line.mid(2).trimmed();
+                value.remove(QLatin1Char('\''));
+                value.remove(QLatin1Char('"'));
+                if (!value.isEmpty()) {
+                    names.append(value);
+                }
+                continue;
             }
             const int colon = line.indexOf(QLatin1Char(':'));
             if (colon < 0) {
@@ -611,6 +667,10 @@ QStringList parseYoloNamesFromYaml(const QString& yamlText, bool* foundNames = n
                 mappedNames.insert(classId, value);
             }
         }
+    }
+
+    if (!names.isEmpty()) {
+        return names;
     }
 
     if (!mappedNames.isEmpty()) {
@@ -1014,7 +1074,7 @@ YoloDataset parseYoloDataset(const DatasetConversionRequest& request, bool segme
         const QString labelsRoot = resolveYoloPath(yamlBasePath, labelPathForYoloImagePath(imagePath));
         const QStringList images = sortedImageFiles(imagesRoot);
         dataset.splitCounts.insert(split, images.size());
-        appendYoloImageForSplit(split, imagesRoot, labelsRoot, jsonPath(imagePath), images, segmentation, dataset.namesFromYaml,
+        appendYoloImageForSplit(split, imagesRoot, labelsRoot, jsonPath(QStringLiteral("images/%1").arg(split)), images, segmentation, dataset.namesFromYaml,
             dataset.classes.size(), &nextImageId, &maxClassId, &dataset, result);
     }
 
@@ -1028,7 +1088,7 @@ YoloDataset parseYoloDataset(const DatasetConversionRequest& request, bool segme
                     QStringLiteral("YOLO dataset has a flat image layout; treating it as train split.")));
             }
             dataset.splitCounts.insert(QStringLiteral("train"), images.size());
-            appendYoloImageForSplit(QStringLiteral("train"), imagesRoot, labelsRoot, QStringLiteral("images"), images, segmentation, dataset.namesFromYaml,
+            appendYoloImageForSplit(QStringLiteral("train"), imagesRoot, labelsRoot, QStringLiteral("images/train"), images, segmentation, dataset.namesFromYaml,
                 dataset.classes.size(), &nextImageId, &maxClassId, &dataset, result);
         }
     }
