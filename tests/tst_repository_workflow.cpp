@@ -795,6 +795,49 @@ private slots:
         QVERIFY(sawFailedPayload);
     }
 
+    void workerClientDefersRestartUntilFinishedCleanup()
+    {
+        QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_worker_restart_guard_XXXXXX")));
+        QVERIFY(temp.isValid());
+#if defined(Q_OS_WIN)
+        const QString scriptPath = QDir(temp.path()).filePath(QStringLiteral("exit-worker.cmd"));
+        writeTextFile(scriptPath, QStringLiteral("@echo off\r\nexit /b 0\r\n"));
+#else
+        const QString scriptPath = QDir(temp.path()).filePath(QStringLiteral("exit-worker.sh"));
+        writeTextFile(scriptPath, QStringLiteral("#!/bin/sh\nexit 0\n"));
+        QFile::setPermissions(scriptPath,
+            QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner
+                | QFile::ReadGroup | QFile::ExeGroup
+                | QFile::ReadOther | QFile::ExeOther);
+#endif
+
+        WorkerClient client;
+        bool finished = false;
+        bool idle = false;
+        bool runningSeenInFinished = false;
+        bool restartRejected = false;
+        QString restartError;
+        connect(&client, &WorkerClient::finished, this, [&](bool, const QString&) {
+            finished = true;
+            runningSeenInFinished = client.isRunning();
+            QString nestedError;
+            restartRejected = !client.requestEnvironmentCheck(scriptPath, &nestedError);
+            restartError = nestedError;
+        });
+        connect(&client, &WorkerClient::idle, this, [&idle]() {
+            idle = true;
+        });
+
+        QString error;
+        QVERIFY2(client.requestEnvironmentCheck(scriptPath, &error), qPrintable(error));
+        QTRY_VERIFY_WITH_TIMEOUT(idle, 10000);
+        QVERIFY(finished);
+        QVERIFY(runningSeenInFinished);
+        QVERIFY(restartRejected);
+        QCOMPARE(restartError, QStringLiteral("Worker is already running"));
+        QVERIFY(!client.isRunning());
+    }
+
     void workerRunsProductWorkflowCommands()
     {
         QTemporaryDir dir;

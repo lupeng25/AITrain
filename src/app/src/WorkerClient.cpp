@@ -237,12 +237,12 @@ void WorkerClient::requestHeartbeat()
 
 bool WorkerClient::isRunning() const
 {
-    return process_.state() != QProcess::NotRunning;
+    return finishing_ || process_.state() != QProcess::NotRunning;
 }
 
 bool WorkerClient::startWorkerCommand(const QString& workerProgram, const QString& commandType, const QJsonObject& payload, QString* error)
 {
-    if (process_.state() != QProcess::NotRunning) {
+    if (finishing_ || process_.state() != QProcess::NotRunning) {
         if (error) {
             *error = QStringLiteral("Worker is already running");
         }
@@ -356,6 +356,7 @@ void WorkerClient::readLines()
 
 void WorkerClient::workerFinished(int exitCode, QProcess::ExitStatus status)
 {
+    finishing_ = true;
     if (socket_) {
         QElapsedTimer drainTimer;
         drainTimer.start();
@@ -402,6 +403,7 @@ void WorkerClient::workerFinished(int exitCode, QProcess::ExitStatus status)
     server_.close();
     pendingCommandType_.clear();
     pendingRequest_ = QJsonObject();
+    finishing_ = false;
     emit idle();
 }
 

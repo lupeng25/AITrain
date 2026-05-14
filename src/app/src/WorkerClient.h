@@ -64,4 +64,5 @@ private:
     bool finishedEmitted_ = false;
     QTimer cancelTimer_;
     bool cancelRequested_ = false;
+    bool finishing_ = false;
 };
