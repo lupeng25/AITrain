@@ -14,6 +14,7 @@
 #include <QJsonArray>
 #include <QMap>
 #include <QRegExp>
+#include <QSet>
 #include <QtMath>
 #include <QStringList>
 #include <QVector>
@@ -621,6 +622,34 @@ QStringList parseYoloNamesFromYaml(const QString& yamlText, bool* foundNames = n
     return names;
 }
 
+QString unquotedYamlScalar(QString value)
+{
+    value = value.trimmed();
+    const int commentIndex = value.indexOf(QLatin1Char('#'));
+    if (commentIndex >= 0) {
+        value = value.left(commentIndex).trimmed();
+    }
+    if ((value.startsWith(QLatin1Char('\'')) && value.endsWith(QLatin1Char('\'')))
+        || (value.startsWith(QLatin1Char('"')) && value.endsWith(QLatin1Char('"')))) {
+        value = value.mid(1, value.size() - 2);
+    }
+    return value.trimmed();
+}
+
+QString parseYoloScalarFromYaml(const QString& yamlText, const QString& key)
+{
+    const QString prefix = key + QLatin1Char(':');
+    const QStringList lines = yamlText.split(QLatin1Char('\n'));
+    for (const QString& rawLine : lines) {
+        const QString line = rawLine.trimmed();
+        if (!line.startsWith(prefix)) {
+            continue;
+        }
+        return unquotedYamlScalar(line.mid(prefix.size()));
+    }
+    return {};
+}
+
 int parseYoloClassCountFromYaml(const QString& yamlText)
 {
     const QStringList lines = yamlText.split(QLatin1Char('\n'));
@@ -636,6 +665,31 @@ int parseYoloClassCountFromYaml(const QString& yamlText)
         }
     }
     return 0;
+}
+
+QString resolveYoloPath(const QString& basePath, const QString& value)
+{
+    if (value.isEmpty()) {
+        return QDir::cleanPath(basePath);
+    }
+    if (QFileInfo(value).isAbsolute()) {
+        return QDir::cleanPath(value);
+    }
+    return QDir(basePath).filePath(value);
+}
+
+QString labelPathForYoloImagePath(QString imagePath)
+{
+    imagePath = jsonPath(imagePath);
+    if (imagePath.startsWith(QStringLiteral("images/"))) {
+        return QStringLiteral("labels/") + imagePath.mid(QStringLiteral("images/").size());
+    }
+    imagePath.replace(QStringLiteral("/images/"), QStringLiteral("/labels/"));
+    if (imagePath.endsWith(QStringLiteral("/images"))) {
+        imagePath.chop(QStringLiteral("/images").size());
+        imagePath += QStringLiteral("/labels");
+    }
+    return imagePath;
 }
 
 QStringList supportedImageNameFilters()
@@ -779,6 +833,7 @@ QJsonArray bboxFromPolygon(const QJsonArray& polygon)
 void appendYoloImageForSplit(const QString& split,
     const QString& imagesRoot,
     const QString& labelsRoot,
+    const QString& outputImagePrefix,
     const QStringList& imagePaths,
     bool segmentation,
     bool namesFromYaml,
@@ -795,9 +850,9 @@ void appendYoloImageForSplit(const QString& split,
         image.split = split;
         const QString relativeWithinSplit = jsonPath(imagesDir.relativeFilePath(imagePath));
         image.fileName = QFileInfo(imagePath).fileName();
-        image.relativeImagePath = split.isEmpty()
-            ? jsonPath(QStringLiteral("images/%1").arg(relativeWithinSplit))
-            : jsonPath(QStringLiteral("images/%1/%2").arg(split, relativeWithinSplit));
+        image.relativeImagePath = outputImagePrefix.isEmpty()
+            ? relativeWithinSplit
+            : jsonPath(QStringLiteral("%1/%2").arg(outputImagePrefix, relativeWithinSplit));
         image.sourceImagePath = QDir::cleanPath(imagePath);
         const QString labelRelative = QFileInfo(relativeWithinSplit).path() == QStringLiteral(".")
             ? QFileInfo(relativeWithinSplit).completeBaseName() + QStringLiteral(".txt")
@@ -901,6 +956,10 @@ YoloDataset parseYoloDataset(const DatasetConversionRequest& request, bool segme
     const QString dataYamlPath = root.filePath(QStringLiteral("data.yaml"));
     QString yamlText;
     int requestedClassCount = 0;
+    QString yamlBasePath = dataset.rootPath;
+    QString trainImagePath = QStringLiteral("images/train");
+    QString valImagePath = QStringLiteral("images/val");
+    bool hasYamlSplitPaths = false;
     if (QFileInfo::exists(dataYamlPath)) {
         QFile yamlFile(dataYamlPath);
         if (yamlFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
@@ -915,6 +974,18 @@ YoloDataset parseYoloDataset(const DatasetConversionRequest& request, bool segme
                 cls.name = names.at(index);
                 dataset.classes.append(cls);
             }
+            const QString yamlPath = parseYoloScalarFromYaml(yamlText, QStringLiteral("path"));
+            yamlBasePath = resolveYoloPath(dataset.rootPath, yamlPath);
+            const QString yamlTrain = parseYoloScalarFromYaml(yamlText, QStringLiteral("train"));
+            const QString yamlVal = parseYoloScalarFromYaml(yamlText, QStringLiteral("val"));
+            if (!yamlTrain.isEmpty()) {
+                trainImagePath = yamlTrain;
+                hasYamlSplitPaths = true;
+            }
+            if (!yamlVal.isEmpty()) {
+                valImagePath = yamlVal;
+                hasYamlSplitPaths = true;
+            }
         }
     }
 
@@ -925,17 +996,29 @@ YoloDataset parseYoloDataset(const DatasetConversionRequest& request, bool segme
 
     int nextImageId = 0;
     int maxClassId = dataset.classes.size() - 1;
-    const QStringList splits{QStringLiteral("train"), QStringLiteral("val")};
-    for (const QString& split : splits) {
-        const QString imagesRoot = root.filePath(QStringLiteral("images/%1").arg(split));
-        const QString labelsRoot = root.filePath(QStringLiteral("labels/%1").arg(split));
+    const QVector<QPair<QString, QString>> splits{
+        qMakePair(QStringLiteral("train"), trainImagePath),
+        qMakePair(QStringLiteral("val"), valImagePath)
+    };
+    QSet<QString> processedImageRoots;
+    for (const QPair<QString, QString>& splitPath : splits) {
+        const QString split = splitPath.first;
+        const QString imagePath = splitPath.second;
+        const QString imagesRoot = resolveYoloPath(yamlBasePath, imagePath);
+        const QString cleanImagesRoot = QDir::cleanPath(imagesRoot).toLower();
+        if (processedImageRoots.contains(cleanImagesRoot)) {
+            dataset.splitCounts.insert(split, 0);
+            continue;
+        }
+        processedImageRoots.insert(cleanImagesRoot);
+        const QString labelsRoot = resolveYoloPath(yamlBasePath, labelPathForYoloImagePath(imagePath));
         const QStringList images = sortedImageFiles(imagesRoot);
         dataset.splitCounts.insert(split, images.size());
-        appendYoloImageForSplit(split, imagesRoot, labelsRoot, images, segmentation, dataset.namesFromYaml,
+        appendYoloImageForSplit(split, imagesRoot, labelsRoot, jsonPath(imagePath), images, segmentation, dataset.namesFromYaml,
             dataset.classes.size(), &nextImageId, &maxClassId, &dataset, result);
     }
 
-    if (dataset.images.isEmpty()) {
+    if (dataset.images.isEmpty() && !hasYamlSplitPaths) {
         const QString imagesRoot = root.filePath(QStringLiteral("images"));
         const QString labelsRoot = root.filePath(QStringLiteral("labels"));
         const QStringList images = sortedImageFiles(imagesRoot);
@@ -945,7 +1028,7 @@ YoloDataset parseYoloDataset(const DatasetConversionRequest& request, bool segme
                     QStringLiteral("YOLO dataset has a flat image layout; treating it as train split.")));
             }
             dataset.splitCounts.insert(QStringLiteral("train"), images.size());
-            appendYoloImageForSplit(QStringLiteral("train"), imagesRoot, labelsRoot, images, segmentation, dataset.namesFromYaml,
+            appendYoloImageForSplit(QStringLiteral("train"), imagesRoot, labelsRoot, QStringLiteral("images"), images, segmentation, dataset.namesFromYaml,
                 dataset.classes.size(), &nextImageId, &maxClassId, &dataset, result);
         }
     }
@@ -983,6 +1066,19 @@ QJsonArray cocoCategories(const YoloDataset& dataset)
         categories.append(category);
     }
     return categories;
+}
+
+bool validateYoloSourceRoot(const QString& sourcePath, DatasetConversionResult* result)
+{
+    const QFileInfo sourceInfo(sourcePath);
+    if (!sourceInfo.exists() || !sourceInfo.isDir() || !sourceInfo.isReadable()) {
+        if (result) {
+            result->errorCode = QStringLiteral("source_read_failed");
+            result->errorMessage = QStringLiteral("Cannot read YOLO dataset source path: %1").arg(sourcePath);
+        }
+        return false;
+    }
+    return true;
 }
 
 bool writeYoloSplitToCoco(const YoloDataset& dataset,
@@ -1107,6 +1203,9 @@ DatasetConversionResult convertYoloToCoco(const DatasetConversionRequest& reques
     result.copyImages = request.options.value(QStringLiteral("copyImages")).toBool(true);
     result.imagePolicy = result.copyImages ? QStringLiteral("copied") : QStringLiteral("referenced");
 
+    if (!validateYoloSourceRoot(result.sourcePath, &result)) {
+        return result;
+    }
     if (!QDir().mkpath(result.outputPath)) {
         result.errorCode = QStringLiteral("output_write_failed");
         result.errorMessage = QStringLiteral("Cannot create output directory: %1").arg(result.outputPath);
@@ -1156,9 +1255,12 @@ DatasetConversionResult convertYoloToCoco(const DatasetConversionRequest& reques
 bool writeVocXmlForImage(const YoloDataset& dataset,
     const YoloImage& image,
     const DatasetConversionRequest& request,
+    QSet<QString>* plannedXmlPaths,
+    QSet<QString>* plannedImagePaths,
     DatasetConversionResult* result)
 {
     QStringList objects;
+    int convertedObjectCount = 0;
     for (const YoloAnnotation& annotation : image.annotations) {
         if (annotation.classId < 0 || annotation.classId >= dataset.classes.size()) {
             continue;
@@ -1196,19 +1298,38 @@ bool writeVocXmlForImage(const YoloDataset& dataset,
             .arg(ymin)
             .arg(xmax)
             .arg(ymax));
-        if (result) {
-            ++result->convertedAnnotationCount;
-        }
+        ++convertedObjectCount;
     }
     if (objects.isEmpty()) {
         return true;
     }
 
     const QString imageName = QFileInfo(image.sourceImagePath).fileName();
+    const QString relativeImageTarget = QStringLiteral("JPEGImages/%1").arg(imageName);
+    const QString xmlPath = QDir(request.outputPath).filePath(QStringLiteral("Annotations/%1.xml").arg(QFileInfo(imageName).completeBaseName()));
+    const QString cleanXmlPath = QDir::cleanPath(xmlPath).toLower();
+    const QString cleanImagePath = QDir::cleanPath(QDir(request.outputPath).filePath(relativeImageTarget)).toLower();
+    if ((plannedXmlPaths && plannedXmlPaths->contains(cleanXmlPath))
+        || (result && result->copyImages && plannedImagePaths && plannedImagePaths->contains(cleanImagePath))) {
+        if (result) {
+            result->issues.append(issue(QStringLiteral("warning"), QStringLiteral("duplicate_output_target"), image.labelPath, image.sourceImagePath, imageName,
+                QStringLiteral("YOLO image would overwrite an existing VOC XML or image output target.")));
+            ++result->skippedSampleCount;
+            result->skippedAnnotationCount += convertedObjectCount;
+        }
+        return true;
+    }
+    if (plannedXmlPaths) {
+        plannedXmlPaths->insert(cleanXmlPath);
+    }
+    if (result && result->copyImages && plannedImagePaths) {
+        plannedImagePaths->insert(cleanImagePath);
+    }
+
     const QString copiedImagePath = QDir(request.outputPath).filePath(QStringLiteral("JPEGImages/%1").arg(imageName));
     if (result && result->copyImages) {
         QString copyError;
-        if (!copyImageToRelativePath(image.sourceImagePath, request.outputPath, QStringLiteral("JPEGImages/%1").arg(imageName), &copyError)) {
+        if (!copyImageToRelativePath(image.sourceImagePath, request.outputPath, relativeImageTarget, &copyError)) {
             result->issues.append(issue(QStringLiteral("warning"), QStringLiteral("image_copy_failed"), image.labelPath, image.sourceImagePath, QString(), copyError));
             ++result->skippedSampleCount;
             return false;
@@ -1232,7 +1353,6 @@ bool writeVocXmlForImage(const YoloDataset& dataset,
         .arg(image.height)
         .arg(objects.join(QString()));
     QString writeError;
-    const QString xmlPath = QDir(request.outputPath).filePath(QStringLiteral("Annotations/%1.xml").arg(QFileInfo(imageName).completeBaseName()));
     if (!writeTextFile(xmlPath, xml, &writeError)) {
         if (result) {
             result->errorCode = QStringLiteral("output_write_failed");
@@ -1242,6 +1362,7 @@ bool writeVocXmlForImage(const YoloDataset& dataset,
     }
     if (result) {
         ++result->convertedSampleCount;
+        result->convertedAnnotationCount += convertedObjectCount;
     }
     return true;
 }
@@ -1257,6 +1378,9 @@ DatasetConversionResult convertYoloToVoc(const DatasetConversionRequest& request
     result.copyImages = request.options.value(QStringLiteral("copyImages")).toBool(true);
     result.imagePolicy = result.copyImages ? QStringLiteral("copied") : QStringLiteral("referenced");
 
+    if (!validateYoloSourceRoot(result.sourcePath, &result)) {
+        return result;
+    }
     if (!QDir().mkpath(result.outputPath)) {
         result.errorCode = QStringLiteral("output_write_failed");
         result.errorMessage = QStringLiteral("Cannot create output directory: %1").arg(result.outputPath);
@@ -1268,8 +1392,10 @@ DatasetConversionResult convertYoloToVoc(const DatasetConversionRequest& request
     for (const YoloClass& cls : dataset.classes) {
         result.classMap.insert(QString::number(cls.id), cls.name);
     }
+    QSet<QString> plannedXmlPaths;
+    QSet<QString> plannedImagePaths;
     for (const YoloImage& image : dataset.images) {
-        if (!writeVocXmlForImage(dataset, image, request, &result) && !result.errorCode.isEmpty()) {
+        if (!writeVocXmlForImage(dataset, image, request, &plannedXmlPaths, &plannedImagePaths, &result) && !result.errorCode.isEmpty()) {
             return result;
         }
     }

@@ -24,6 +24,9 @@ private slots:
     void yoloSegmentationConvertsToCocoPolygons();
     void copyImagesFalseKeepsReferencedPaths();
     void invalidYoloLabelsReportIssues();
+    void yoloDataYamlCustomSplitPathsAreHonored();
+    void missingYoloSourcePathFailsAsSourceReadFailed();
+    void yoloDetectionToVocReportsDuplicateOutputTargets();
 };
 
 void DatasetConversionTests::unsupportedFormatFails()
@@ -385,6 +388,93 @@ void DatasetConversionTests::invalidYoloLabelsReportIssues()
     QCOMPARE(result.convertedAnnotationCount, 1);
     QVERIFY(issuesContainCode(result.issues, QStringLiteral("unknown_class_id")));
     QVERIFY(issuesContainCode(result.issues, QStringLiteral("invalid_bbox")));
+}
+
+void DatasetConversionTests::yoloDataYamlCustomSplitPathsAreHonored()
+{
+    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
+    QVERIFY(temp.isValid());
+    const QDir root(temp.path());
+    const QDir source(root.filePath(QStringLiteral("source_custom_yolo")));
+    writeTinyPngWithSize(source.filePath(QStringLiteral("dataset/train/images/custom_train.png")), 100, 80);
+    writeTinyPngWithSize(source.filePath(QStringLiteral("dataset/validation/images/custom_val.png")), 120, 60);
+    writeTextFile(source.filePath(QStringLiteral("dataset/train/labels/custom_train.txt")),
+        QStringLiteral("0 0.500000 0.500000 0.500000 0.400000\n"));
+    writeTextFile(source.filePath(QStringLiteral("dataset/validation/labels/custom_val.txt")),
+        QStringLiteral("0 0.250000 0.500000 0.300000 0.500000\n"));
+    writeTextFile(source.filePath(QStringLiteral("data.yaml")),
+        QStringLiteral("path: dataset\ntrain: train/images\nval: validation/images\nnc: 1\nnames: [custom]\n"));
+
+    aitrain::DatasetConversionRequest request;
+    request.sourcePath = source.absolutePath();
+    request.sourceFormat = QStringLiteral("yolo_detection");
+    request.targetFormat = QStringLiteral("coco_json");
+    request.outputPath = root.filePath(QStringLiteral("converted_custom"));
+    request.options.insert(QStringLiteral("copyImages"), true);
+
+    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
+    QVERIFY2(result.ok, qPrintable(result.errorMessage));
+    QCOMPARE(result.convertedSampleCount, 2);
+    QCOMPARE(result.convertedAnnotationCount, 2);
+
+    const QJsonObject train = readJsonObjectForConversionTest(root.filePath(QStringLiteral("converted_custom/annotations/train.json")));
+    const QString trainFile = train.value(QStringLiteral("images")).toArray().at(0).toObject().value(QStringLiteral("file_name")).toString();
+    QCOMPARE(trainFile, QStringLiteral("train/images/custom_train.png"));
+    QVERIFY(QFileInfo::exists(root.filePath(QStringLiteral("converted_custom/train/images/custom_train.png"))));
+
+    const QJsonObject val = readJsonObjectForConversionTest(root.filePath(QStringLiteral("converted_custom/annotations/val.json")));
+    const QString valFile = val.value(QStringLiteral("images")).toArray().at(0).toObject().value(QStringLiteral("file_name")).toString();
+    QCOMPARE(valFile, QStringLiteral("validation/images/custom_val.png"));
+    QVERIFY(QFileInfo::exists(root.filePath(QStringLiteral("converted_custom/validation/images/custom_val.png"))));
+}
+
+void DatasetConversionTests::missingYoloSourcePathFailsAsSourceReadFailed()
+{
+    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
+    QVERIFY(temp.isValid());
+    const QDir root(temp.path());
+
+    aitrain::DatasetConversionRequest request;
+    request.sourcePath = root.filePath(QStringLiteral("does_not_exist"));
+    request.sourceFormat = QStringLiteral("yolo_detection");
+    request.targetFormat = QStringLiteral("coco_json");
+    request.outputPath = root.filePath(QStringLiteral("converted_missing"));
+
+    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
+    QVERIFY(!result.ok);
+    QCOMPARE(result.errorCode, QStringLiteral("source_read_failed"));
+    QVERIFY(result.reportPath.isEmpty());
+}
+
+void DatasetConversionTests::yoloDetectionToVocReportsDuplicateOutputTargets()
+{
+    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
+    QVERIFY(temp.isValid());
+    const QDir root(temp.path());
+    const QDir source(root.filePath(QStringLiteral("source_duplicate_yolo")));
+    writeTinyPngWithSize(source.filePath(QStringLiteral("images/train/left/dup.png")), 100, 80);
+    writeTinyPngWithSize(source.filePath(QStringLiteral("images/train/right/dup.png")), 120, 60);
+    writeTextFile(source.filePath(QStringLiteral("labels/train/left/dup.txt")),
+        QStringLiteral("0 0.500000 0.500000 0.500000 0.400000\n"));
+    writeTextFile(source.filePath(QStringLiteral("labels/train/right/dup.txt")),
+        QStringLiteral("0 0.250000 0.500000 0.300000 0.500000\n"));
+    writeTextFile(source.filePath(QStringLiteral("data.yaml")),
+        QStringLiteral("path: .\ntrain: images/train\nval: images/train\nnc: 1\nnames: [duplicate]\n"));
+
+    aitrain::DatasetConversionRequest request;
+    request.sourcePath = source.absolutePath();
+    request.sourceFormat = QStringLiteral("yolo_detection");
+    request.targetFormat = QStringLiteral("voc_xml");
+    request.outputPath = root.filePath(QStringLiteral("converted_duplicate_voc"));
+    request.options.insert(QStringLiteral("copyImages"), true);
+
+    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
+    QVERIFY2(result.ok, qPrintable(result.errorMessage));
+    QCOMPARE(result.convertedSampleCount, 1);
+    QCOMPARE(result.convertedAnnotationCount, 1);
+    QVERIFY(issuesContainCode(result.issues, QStringLiteral("duplicate_output_target")));
+    const QString xml = readTextForConversionTest(root.filePath(QStringLiteral("converted_duplicate_voc/Annotations/dup.xml")));
+    QCOMPARE(xml.count(QStringLiteral("<object>")), 1);
 }
 
 QTEST_MAIN(DatasetConversionTests)
