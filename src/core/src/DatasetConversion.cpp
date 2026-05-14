@@ -562,6 +562,24 @@ bool copyImageToRelativePath(const QString& sourceImagePath,
         return false;
     }
 
+    const QFileInfo sourceInfo(sourceImagePath);
+    const QFileInfo targetInfo(targetPath);
+    if (targetInfo.exists()) {
+        const QString sourceCanonicalPath = jsonPath(sourceInfo.canonicalFilePath());
+        const QString targetCanonicalPath = jsonPath(targetInfo.canonicalFilePath());
+        if (!sourceCanonicalPath.isEmpty() && !targetCanonicalPath.isEmpty()) {
+#ifdef Q_OS_WIN
+            if (sourceCanonicalPath.compare(targetCanonicalPath, Qt::CaseInsensitive) == 0) {
+                return true;
+            }
+#else
+            if (sourceCanonicalPath == targetCanonicalPath) {
+                return true;
+            }
+#endif
+        }
+    }
+
     outputRoot.mkpath(QFileInfo(targetPath).absolutePath());
     if (QFileInfo::exists(targetPath) && !QFile::remove(targetPath)) {
         if (error) {
