@@ -215,9 +215,12 @@ QString defaultDatasetConversionOutputPath(const QString& sourcePath, const QStr
     const QString suffix = targetFormat.trimmed().isEmpty() ? QStringLiteral("converted") : targetFormat.trimmed();
     const QString directoryName = QStringLiteral("%1-%2").arg(datasetName, suffix);
     const QString normalizedProjectPath = QDir::fromNativeSeparators(projectPath.trimmed());
-    const QString outputPath = normalizedProjectPath.isEmpty()
-        ? QDir(normalizedSourcePath).absoluteFilePath(QStringLiteral("../converted/%1").arg(directoryName))
-        : QDir(normalizedProjectPath).filePath(QStringLiteral("datasets/converted/%1").arg(directoryName));
+    if (!normalizedProjectPath.isEmpty()) {
+        const QString conversionRoot = QDir(normalizedProjectPath).filePath(QStringLiteral("datasets/converted"));
+        QDir().mkpath(conversionRoot);
+        return QDir::cleanPath(QDir(conversionRoot).filePath(directoryName));
+    }
+    const QString outputPath = QDir(normalizedSourcePath).absoluteFilePath(QStringLiteral("../converted/%1").arg(directoryName));
     return QDir::cleanPath(outputPath);
 }
 

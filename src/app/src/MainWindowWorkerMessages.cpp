@@ -120,10 +120,20 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
 
 void MainWindow::handleProgressMessage(const QJsonObject& payload)
 {
-    if (!currentTaskId_.isEmpty()) {
-        progressBar_->setValue(payload.value(QStringLiteral("percent")).toInt());
-    }
+    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
+    const int percent = payload.value(QStringLiteral("percent")).toInt();
     const QString message = payload.value(QStringLiteral("message")).toString();
+    if (!currentDatasetConversionTaskId_.isEmpty() && taskId == currentDatasetConversionTaskId_) {
+        if (datasetConversionProgressBar_) {
+            datasetConversionProgressBar_->setValue(percent);
+        }
+        if (!message.isEmpty()) {
+            appendDatasetConversionLog(message);
+        }
+    }
+    if (!currentTaskId_.isEmpty()) {
+        progressBar_->setValue(percent);
+    }
     if (!message.isEmpty()) {
         statusBar()->showMessage(message, 3000);
     }
@@ -214,6 +224,13 @@ void MainWindow::handleTaskStateMessage(const QString& type, const QJsonObject& 
         QString error;
         const QString canceledTaskId = payload.value(QStringLiteral("taskId")).toString(currentTaskId_);
         const QString canceledMessage = payload.value(QStringLiteral("message")).toString();
+        if (!currentDatasetConversionTaskId_.isEmpty() && canceledTaskId == currentDatasetConversionTaskId_) {
+            setDatasetConversionFormRunning(false);
+            if (datasetConversionStatusLabel_) {
+                datasetConversionStatusLabel_->setText(uiText("数据集转换已取消。"));
+            }
+            currentDatasetConversionTaskId_.clear();
+        }
         repository_.updateTaskState(canceledTaskId, aitrain::TaskState::Canceled, canceledMessage, &error);
         if (hasActiveSnapshotTrainingTask_ && canceledTaskId == currentTaskId_) {
             repository_.updateTaskState(
@@ -235,6 +252,13 @@ void MainWindow::handleTaskStateMessage(const QString& type, const QJsonObject& 
     if (type == QStringLiteral("failed")) {
         const QString failedTaskId = payload.value(QStringLiteral("taskId")).toString(currentTaskId_);
         const QString failedMessage = payload.value(QStringLiteral("message")).toString();
+        if (!currentDatasetConversionTaskId_.isEmpty() && failedTaskId == currentDatasetConversionTaskId_) {
+            setDatasetConversionFormRunning(false);
+            if (datasetConversionStatusLabel_) {
+                datasetConversionStatusLabel_->setText(uiText("数据集转换失败：%1").arg(failedMessage));
+            }
+            currentDatasetConversionTaskId_.clear();
+        }
         QString error;
         repository_.updateTaskState(
             failedTaskId,
