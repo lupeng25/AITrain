@@ -86,6 +86,8 @@ void WorkerSession::handleMessage(const QString& type, const QJsonObject& payloa
         validateDataset(payload);
     } else if (type == QStringLiteral("splitDataset")) {
         splitDataset(payload);
+    } else if (type == QStringLiteral("convertDataset")) {
+        convertDataset(payload);
     } else if (type == QStringLiteral("curateDataset")) {
         curateDataset(payload);
     } else if (type == QStringLiteral("createDatasetSnapshot")) {

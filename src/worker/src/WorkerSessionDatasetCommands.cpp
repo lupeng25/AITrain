@@ -1,6 +1,7 @@
 ﻿#include "WorkerSession.h"
 #include "WorkerSessionSupport.h"
 
+#include "aitrain/core/DatasetConversion.h"
 #include "aitrain/core/DatasetValidators.h"
 #include "aitrain/core/Deployment.h"
 #include "aitrain/core/DetectionTrainer.h"
@@ -158,6 +159,57 @@ void WorkerSession::splitDataset(const QJsonObject& payload)
     terminal.insert(QStringLiteral("message"), result.ok
         ? QStringLiteral("Dataset split completed")
         : QStringLiteral("Dataset split failed"));
+    send(result.ok ? QStringLiteral("completed") : QStringLiteral("failed"), terminal);
+    finishSession();
+}
+
+void WorkerSession::convertDataset(const QJsonObject& payload)
+{
+    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
+
+    aitrain::DatasetConversionRequest request;
+    request.sourcePath = payload.value(QStringLiteral("sourcePath")).toString();
+    request.sourceFormat = payload.value(QStringLiteral("sourceFormat")).toString();
+    request.targetFormat = payload.value(QStringLiteral("targetFormat")).toString();
+    request.outputPath = payload.value(QStringLiteral("outputPath")).toString();
+    request.options = payload.value(QStringLiteral("options")).toObject();
+
+    QJsonObject startProgress;
+    startProgress.insert(QStringLiteral("taskId"), taskId);
+    startProgress.insert(QStringLiteral("percent"), 0);
+    startProgress.insert(QStringLiteral("message"), QStringLiteral("开始转换数据集。"));
+    send(QStringLiteral("progress"), startProgress);
+
+    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
+
+    QJsonObject doneProgress;
+    doneProgress.insert(QStringLiteral("taskId"), taskId);
+    doneProgress.insert(QStringLiteral("percent"), 100);
+    doneProgress.insert(QStringLiteral("message"), QStringLiteral("数据集转换完成。"));
+    send(QStringLiteral("progress"), doneProgress);
+
+    QJsonObject response = result.toJson();
+    response.insert(QStringLiteral("taskId"), taskId);
+    send(QStringLiteral("datasetConversion"), response);
+
+    if (!result.reportPath.isEmpty() && QFileInfo::exists(result.reportPath)) {
+        QJsonObject artifact;
+        artifact.insert(QStringLiteral("taskId"), taskId);
+        artifact.insert(QStringLiteral("kind"), QStringLiteral("dataset_conversion_report"));
+        artifact.insert(QStringLiteral("path"), result.reportPath);
+        artifact.insert(QStringLiteral("message"), QStringLiteral("Dataset conversion report"));
+        send(QStringLiteral("artifact"), artifact);
+    }
+
+    QJsonObject terminal;
+    terminal.insert(QStringLiteral("taskId"), taskId);
+    terminal.insert(QStringLiteral("message"), result.ok
+        ? QStringLiteral("Dataset conversion completed")
+        : QStringLiteral("Dataset conversion failed"));
+    if (!result.ok) {
+        terminal.insert(QStringLiteral("errorCode"), result.errorCode);
+        terminal.insert(QStringLiteral("errorMessage"), result.errorMessage);
+    }
     send(result.ok ? QStringLiteral("completed") : QStringLiteral("failed"), terminal);
     finishSession();
 }

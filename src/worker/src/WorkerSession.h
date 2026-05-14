@@ -29,6 +29,7 @@ private:
     void runEnvironmentCheck(const QJsonObject& payload);
     void validateDataset(const QJsonObject& payload);
     void splitDataset(const QJsonObject& payload);
+    void convertDataset(const QJsonObject& payload);
     void curateDataset(const QJsonObject& payload);
     void createDatasetSnapshot(const QJsonObject& payload);
     void evaluateModel(const QJsonObject& payload);

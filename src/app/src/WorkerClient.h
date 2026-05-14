@@ -19,6 +19,7 @@ public:
     bool requestEnvironmentCheck(const QString& workerProgram, QString* error);
     bool requestDatasetValidation(const QString& workerProgram, const QString& datasetPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId = {}, const QString& outputPath = {});
     bool requestDatasetSplit(const QString& workerProgram, const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId = {});
+    bool requestDatasetConversion(const QString& workerProgram, const QString& sourcePath, const QString& outputPath, const QString& sourceFormat, const QString& targetFormat, const QJsonObject& options, QString* error, const QString& taskId = {});
     bool requestDatasetCuration(const QString& workerProgram, const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId = {});
     bool requestDatasetSnapshot(const QString& workerProgram, const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId = {});
     bool requestModelEvaluation(const QString& workerProgram, const QString& modelPath, const QString& datasetPath, const QString& outputPath, const QString& taskType, const QJsonObject& options, QString* error, const QString& taskId = {});

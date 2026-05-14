@@ -663,6 +663,81 @@ private slots:
         QVERIFY(ocrMetrics.contains(QStringLiteral("wer")));
     }
 
+    void workerRunsDatasetConversion()
+    {
+        QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_worker_conversion_XXXXXX")));
+        QVERIFY(temp.isValid());
+        const QDir root(temp.path());
+        const QDir source(root.filePath(QStringLiteral("source_yolo")));
+        writeTinyPng(source.filePath(QStringLiteral("images/train/a.png")));
+        writeTinyPng(source.filePath(QStringLiteral("images/val/a.png")));
+        writeTextFile(source.filePath(QStringLiteral("labels/train/a.txt")), QStringLiteral("0 0.5 0.5 0.25 0.25\n"));
+        writeTextFile(source.filePath(QStringLiteral("labels/val/a.txt")), QStringLiteral("0 0.5 0.5 0.25 0.25\n"));
+        writeTextFile(source.filePath(QStringLiteral("data.yaml")), QStringLiteral("path: .\ntrain: images/train\nval: images/val\nnc: 1\nnames: [item]\n"));
+
+        WorkerClient client;
+        QVector<QPair<QString, QJsonObject>> messages;
+        QStringList logs;
+        bool finished = false;
+        bool ok = false;
+        QString finishedMessage;
+        connect(&client, &WorkerClient::messageReceived, this, [&messages](const QString& type, const QJsonObject& payload) {
+            messages.append(qMakePair(type, payload));
+        });
+        connect(&client, &WorkerClient::logLine, this, [&logs](const QString& line) {
+            logs.append(line);
+        });
+        connect(&client, &WorkerClient::finished, this, [&finished, &ok, &finishedMessage](bool result, const QString& message) {
+            finished = true;
+            ok = result;
+            finishedMessage = message;
+        });
+
+        QString error;
+        QVERIFY2(client.requestDatasetConversion(
+                     workerExecutablePath(),
+                     source.absolutePath(),
+                     root.filePath(QStringLiteral("converted_coco")),
+                     QStringLiteral("yolo_detection"),
+                     QStringLiteral("coco_json"),
+                     QJsonObject{{QStringLiteral("copyImages"), true}},
+                     &error,
+                     QStringLiteral("dataset-conversion-test")),
+            qPrintable(error));
+
+        QTRY_VERIFY2_WITH_TIMEOUT(
+            finished,
+            qPrintable(QStringLiteral("Worker did not finish. Logs:\n%1").arg(logs.join(QStringLiteral("\n")))),
+            30000);
+        QVERIFY2(ok, qPrintable(finishedMessage));
+        QVERIFY(QFileInfo::exists(root.filePath(QStringLiteral("converted_coco/annotations/train.json"))));
+        QVERIFY(QFileInfo::exists(root.filePath(QStringLiteral("converted_coco/dataset_conversion_report.json"))));
+
+        bool sawConversionPayload = false;
+        bool sawReportArtifact = false;
+        bool sawStartProgress = false;
+        bool sawDoneProgress = false;
+        for (const auto& message : messages) {
+            if (message.first == QStringLiteral("datasetConversion")) {
+                sawConversionPayload = true;
+                QCOMPARE(message.second.value(QStringLiteral("taskId")).toString(), QStringLiteral("dataset-conversion-test"));
+                QVERIFY(message.second.value(QStringLiteral("ok")).toBool());
+            } else if (message.first == QStringLiteral("artifact")
+                && message.second.value(QStringLiteral("kind")).toString() == QStringLiteral("dataset_conversion_report")) {
+                sawReportArtifact = true;
+                QCOMPARE(message.second.value(QStringLiteral("taskId")).toString(), QStringLiteral("dataset-conversion-test"));
+            } else if (message.first == QStringLiteral("progress")) {
+                const int percent = message.second.value(QStringLiteral("percent")).toInt();
+                sawStartProgress = sawStartProgress || percent == 0;
+                sawDoneProgress = sawDoneProgress || percent == 100;
+            }
+        }
+        QVERIFY(sawConversionPayload);
+        QVERIFY(sawReportArtifact);
+        QVERIFY(sawStartProgress);
+        QVERIFY(sawDoneProgress);
+    }
+
     void workerRunsProductWorkflowCommands()
     {
         QTemporaryDir dir;

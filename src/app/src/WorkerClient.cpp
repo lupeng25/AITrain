@@ -66,6 +66,18 @@ bool WorkerClient::requestDatasetSplit(const QString& workerProgram, const QStri
     return startWorkerCommand(workerProgram, QStringLiteral("splitDataset"), payload, error);
 }
 
+bool WorkerClient::requestDatasetConversion(const QString& workerProgram, const QString& sourcePath, const QString& outputPath, const QString& sourceFormat, const QString& targetFormat, const QJsonObject& options, QString* error, const QString& taskId)
+{
+    QJsonObject payload;
+    payload.insert(QStringLiteral("taskId"), taskId);
+    payload.insert(QStringLiteral("sourcePath"), sourcePath);
+    payload.insert(QStringLiteral("outputPath"), outputPath);
+    payload.insert(QStringLiteral("sourceFormat"), sourceFormat);
+    payload.insert(QStringLiteral("targetFormat"), targetFormat);
+    payload.insert(QStringLiteral("options"), options);
+    return startWorkerCommand(workerProgram, QStringLiteral("convertDataset"), payload, error);
+}
+
 bool WorkerClient::requestDatasetCuration(const QString& workerProgram, const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId)
 {
     QJsonObject payload;
