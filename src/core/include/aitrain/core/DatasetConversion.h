@@ -44,6 +44,12 @@ struct DatasetConversionResult {
     int convertedAnnotationCount = 0;
     int skippedAnnotationCount = 0;
     QJsonObject classMap;
+    int conversionMatrixVersion = 0;
+    bool copyImages = true;
+    QString imagePolicy;
+    QJsonObject outputFiles;
+    QJsonObject splitCounts;
+    QJsonObject sourceValidation;
     QVector<DatasetConversionIssue> issues;
     DatasetValidationResult targetValidation;
 
