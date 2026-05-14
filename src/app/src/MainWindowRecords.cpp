@@ -1240,6 +1240,70 @@ void MainWindow::updateDatasetValidationResult(const QJsonObject& payload)
     statusBar()->showMessage(ok ? uiText("数据集校验通过") : uiText("数据集校验失败"), 5000);
 }
 
+void MainWindow::updateDatasetConversionResult(const QJsonObject& payload)
+{
+    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
+    if (!currentDatasetConversionTaskId_.isEmpty()
+        && !taskId.isEmpty()
+        && taskId != currentDatasetConversionTaskId_) {
+        return;
+    }
+
+    const bool ok = payload.value(QStringLiteral("ok")).toBool();
+    const QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
+    const QString reportPath = payload.value(QStringLiteral("reportPath")).toString();
+    const QString errorCode = payload.value(QStringLiteral("errorCode")).toString();
+    const QString errorMessage = payload.value(QStringLiteral("errorMessage")).toString();
+    const int convertedSamples = payload.value(QStringLiteral("convertedSampleCount")).toInt();
+    const int skippedSamples = payload.value(QStringLiteral("skippedSampleCount")).toInt();
+    const int convertedAnnotations = payload.value(QStringLiteral("convertedAnnotationCount")).toInt();
+    const int skippedAnnotations = payload.value(QStringLiteral("skippedAnnotationCount")).toInt();
+
+    if (datasetConversionProgressBar_ && ok) {
+        datasetConversionProgressBar_->setValue(100);
+    }
+
+    if (ok) {
+        const QString summary = uiText("转换完成：%1 个样本，跳过 %2 个样本；%3 条标注，跳过 %4 条标注。")
+            .arg(convertedSamples)
+            .arg(skippedSamples)
+            .arg(convertedAnnotations)
+            .arg(skippedAnnotations);
+        const QString reportDisplay = reportPath.isEmpty()
+            ? uiText("未返回报告路径")
+            : QDir::toNativeSeparators(reportPath);
+        const QString resultText = uiText("输出：%1\n报告：%2")
+            .arg(QDir::toNativeSeparators(outputPath), reportDisplay);
+
+        if (datasetConversionStatusLabel_) {
+            datasetConversionStatusLabel_->setText(summary);
+        }
+        if (datasetConversionResultLabel_) {
+            datasetConversionResultLabel_->setText(resultText);
+        }
+        appendDatasetConversionLog(summary);
+    } else {
+        const QString details = errorMessage.isEmpty()
+            ? uiText("Worker 未返回详细错误。")
+            : errorMessage;
+        const QString summary = errorCode.isEmpty()
+            ? uiText("转换失败：%1").arg(details)
+            : uiText("转换失败：%1 | %2").arg(errorCode, details);
+
+        if (datasetConversionStatusLabel_) {
+            datasetConversionStatusLabel_->setText(summary);
+        }
+        if (datasetConversionResultLabel_) {
+            datasetConversionResultLabel_->setText(summary);
+        }
+        appendDatasetConversionLog(summary);
+    }
+
+    appendDatasetConversionLog(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Indented)));
+    setDatasetConversionFormRunning(false);
+    currentDatasetConversionTaskId_.clear();
+}
+
 void MainWindow::updateDatasetSplitResult(const QJsonObject& payload)
 {
     const bool ok = payload.value(QStringLiteral("ok")).toBool();

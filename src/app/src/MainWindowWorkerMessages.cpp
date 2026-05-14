@@ -93,6 +93,8 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
         updateDatasetValidationResult(payload);
     } else if (type == QStringLiteral("datasetSplit")) {
         updateDatasetSplitResult(payload);
+    } else if (type == QStringLiteral("datasetConversion")) {
+        updateDatasetConversionResult(payload);
     } else if (type == QStringLiteral("datasetQuality")) {
         handleDatasetQualityMessage(payload);
     } else if (type == QStringLiteral("datasetSnapshot")) {
