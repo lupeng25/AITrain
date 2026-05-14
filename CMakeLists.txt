@@ -29,8 +29,8 @@ if(MSVC)
     add_compile_options(/utf-8)
 endif()
 
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Gui Widgets Network Sql Test)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Widgets Network Sql Test)
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Gui Widgets Network Sql Test Xml)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Widgets Network Sql Test Xml)
 
 if(WIN32 AND AITRAIN_INSTALL_QT_RUNTIME AND NOT AITRAIN_WINDEPLOYQT_EXECUTABLE)
     if(TARGET Qt${QT_VERSION_MAJOR}::qmake)

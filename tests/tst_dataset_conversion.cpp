@@ -16,11 +16,12 @@ private slots:
     void cocoDetectionConvertsBboxToYolo();
     void cocoSegmentationConvertsPolygonToYolo();
     void cocoSegmentationSkipsRleMasks();
+    void vocXmlConvertsBoxesToYoloDetection();
 };
 
 void DatasetConversionTests::unsupportedFormatFails()
 {
-    QTemporaryDir temp;
+    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
     QVERIFY(temp.isValid());
 
     aitrain::DatasetConversionRequest request;
@@ -35,22 +36,6 @@ void DatasetConversionTests::unsupportedFormatFails()
     QVERIFY(result.reportPath.isEmpty());
 }
 
-namespace {
-
-QString readTextFile(const QString& path)
-{
-    QFile file(path);
-    QVERIFY(file.open(QIODevice::ReadOnly | QIODevice::Text));
-    return QString::fromUtf8(file.readAll());
-}
-
-QJsonObject readJsonObjectForTest(const QString& path)
-{
-    QFile file(path);
-    QVERIFY(file.open(QIODevice::ReadOnly));
-    return QJsonDocument::fromJson(file.readAll()).object();
-}
-
 void writeTinyPngWithSize(const QString& path, int width, int height)
 {
     QDir().mkpath(QFileInfo(path).absolutePath());
@@ -59,11 +44,9 @@ void writeTinyPngWithSize(const QString& path, int width, int height)
     QVERIFY(image.save(path));
 }
 
-} // namespace
-
 void DatasetConversionTests::cocoDetectionConvertsBboxToYolo()
 {
-    QTemporaryDir temp;
+    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
     QVERIFY(temp.isValid());
     const QDir root(temp.path());
 
@@ -87,10 +70,14 @@ void DatasetConversionTests::cocoDetectionConvertsBboxToYolo()
 
     QVERIFY(QFileInfo::exists(root.filePath(QStringLiteral("converted/data.yaml"))));
     QVERIFY(QFileInfo::exists(root.filePath(QStringLiteral("converted/images/train/a.png"))));
-    const QString label = readTextFile(root.filePath(QStringLiteral("converted/labels/train/a.txt"))).trimmed();
+    QFile labelFile(root.filePath(QStringLiteral("converted/labels/train/a.txt")));
+    QVERIFY(labelFile.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QString label = QString::fromUtf8(labelFile.readAll()).trimmed();
     QCOMPARE(label, QStringLiteral("0 0.500000 0.375000 0.500000 0.250000"));
 
-    const QJsonObject report = readJsonObjectForTest(result.reportPath);
+    QFile reportFile(result.reportPath);
+    QVERIFY(reportFile.open(QIODevice::ReadOnly));
+    const QJsonObject report = QJsonDocument::fromJson(reportFile.readAll()).object();
     QCOMPARE(report.value(QStringLiteral("sourceFormat")).toString(), QStringLiteral("coco_json"));
     QCOMPARE(report.value(QStringLiteral("targetFormat")).toString(), QStringLiteral("yolo_detection"));
     QVERIFY(report.value(QStringLiteral("targetValidation")).toObject().value(QStringLiteral("ok")).toBool());
@@ -98,7 +85,7 @@ void DatasetConversionTests::cocoDetectionConvertsBboxToYolo()
 
 void DatasetConversionTests::cocoSegmentationConvertsPolygonToYolo()
 {
-    QTemporaryDir temp;
+    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
     QVERIFY(temp.isValid());
     const QDir root(temp.path());
     writeTinyPngWithSize(root.filePath(QStringLiteral("images/seg.png")), 100, 100);
@@ -117,14 +104,16 @@ void DatasetConversionTests::cocoSegmentationConvertsPolygonToYolo()
 
     const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
     QVERIFY2(result.ok, qPrintable(result.errorMessage));
-    const QString label = readTextFile(root.filePath(QStringLiteral("converted_seg/labels/train/seg.txt"))).trimmed();
+    QFile segLabelFile(root.filePath(QStringLiteral("converted_seg/labels/train/seg.txt")));
+    QVERIFY(segLabelFile.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QString label = QString::fromUtf8(segLabelFile.readAll()).trimmed();
     QCOMPARE(label, QStringLiteral("0 0.100000 0.100000 0.900000 0.100000 0.900000 0.900000 0.100000 0.900000"));
     QVERIFY(result.targetValidation.ok);
 }
 
 void DatasetConversionTests::cocoSegmentationSkipsRleMasks()
 {
-    QTemporaryDir temp;
+    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
     QVERIFY(temp.isValid());
     const QDir root(temp.path());
     writeTinyPngWithSize(root.filePath(QStringLiteral("images/rle.png")), 20, 20);
@@ -145,6 +134,36 @@ void DatasetConversionTests::cocoSegmentationSkipsRleMasks()
     QCOMPARE(result.errorCode, QStringLiteral("no_convertible_samples"));
     QVERIFY(!result.issues.isEmpty());
     QCOMPARE(result.issues.first().code, QStringLiteral("rle_not_supported"));
+}
+
+void DatasetConversionTests::vocXmlConvertsBoxesToYoloDetection()
+{
+    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
+    QVERIFY(temp.isValid());
+    const QDir root(temp.path());
+    writeTinyPngWithSize(root.filePath(QStringLiteral("JPEGImages/a.png")), 100, 80);
+    writeTextFile(root.filePath(QStringLiteral("Annotations/a.xml")),
+        QStringLiteral("<annotation>"
+                       "<filename>a.png</filename>"
+                       "<size><width>100</width><height>80</height></size>"
+                       "<object><name>part</name><bndbox>"
+                       "<xmin>10</xmin><ymin>20</ymin><xmax>40</xmax><ymax>36</ymax>"
+                       "</bndbox></object>"
+                       "</annotation>"));
+
+    aitrain::DatasetConversionRequest request;
+    request.sourcePath = root.filePath(QStringLiteral("Annotations"));
+    request.sourceFormat = QStringLiteral("voc_xml");
+    request.targetFormat = QStringLiteral("yolo_detection");
+    request.outputPath = root.filePath(QStringLiteral("converted_voc"));
+    request.options.insert(QStringLiteral("copyImages"), true);
+
+    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
+    QVERIFY2(result.ok, qPrintable(result.errorMessage));
+    QFile vocLabelFile(root.filePath(QStringLiteral("converted_voc/labels/train/a.txt")));
+    QVERIFY(vocLabelFile.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QString label = QString::fromUtf8(vocLabelFile.readAll()).trimmed();
+    QCOMPARE(label, QStringLiteral("0 0.250000 0.350000 0.300000 0.200000"));
 }
 
 QTEST_MAIN(DatasetConversionTests)
