@@ -1,5 +1,7 @@
 function(add_aitrain_qt_test target source)
     add_executable(${target}
+        ../src/app/src/DatasetConversionUiModel.h
+        ../src/app/src/DatasetConversionUiModel.cpp
         ../src/app/src/WorkerClient.h
         ../src/app/src/WorkerClient.cpp
         TestSupport.h
@@ -39,5 +41,6 @@ add_aitrain_qt_test(aitrain_platform_tests tst_platform.cpp)
 add_aitrain_qt_test(aitrain_repository_workflow_tests tst_repository_workflow.cpp)
 add_aitrain_qt_test(aitrain_dataset_tests tst_datasets.cpp)
 add_aitrain_qt_test(aitrain_dataset_conversion_tests tst_dataset_conversion.cpp)
+add_aitrain_qt_test(aitrain_dataset_conversion_ui_tests tst_dataset_conversion_ui.cpp)
 add_aitrain_qt_test(aitrain_detection_inference_tests tst_detection_inference.cpp)
 add_aitrain_qt_test(aitrain_ocr_segmentation_worker_tests tst_ocr_segmentation_worker.cpp)
