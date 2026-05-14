@@ -738,6 +738,63 @@ private slots:
         QVERIFY(sawDoneProgress);
     }
 
+    void workerReportsDatasetConversionFailureMessage()
+    {
+        QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_worker_conversion_fail_XXXXXX")));
+        QVERIFY(temp.isValid());
+        const QDir root(temp.path());
+
+        WorkerClient client;
+        QVector<QPair<QString, QJsonObject>> messages;
+        QStringList logs;
+        bool finished = false;
+        bool ok = true;
+        QString finishedMessage;
+        connect(&client, &WorkerClient::messageReceived, this, [&messages](const QString& type, const QJsonObject& payload) {
+            messages.append(qMakePair(type, payload));
+        });
+        connect(&client, &WorkerClient::logLine, this, [&logs](const QString& line) {
+            logs.append(line);
+        });
+        connect(&client, &WorkerClient::finished, this, [&finished, &ok, &finishedMessage](bool result, const QString& message) {
+            finished = true;
+            ok = result;
+            finishedMessage = message;
+        });
+
+        QString error;
+        QVERIFY2(client.requestDatasetConversion(
+                     workerExecutablePath(),
+                     root.filePath(QStringLiteral("source")),
+                     root.filePath(QStringLiteral("converted")),
+                     QStringLiteral("unknown_format"),
+                     QStringLiteral("coco_json"),
+                     QJsonObject{},
+                     &error,
+                     QStringLiteral("dataset-conversion-fail-test")),
+            qPrintable(error));
+
+        QTRY_VERIFY2_WITH_TIMEOUT(
+            finished,
+            qPrintable(QStringLiteral("Worker did not finish. Logs:\n%1").arg(logs.join(QStringLiteral("\n")))),
+            30000);
+        QVERIFY(!ok);
+        QVERIFY2(finishedMessage.contains(QStringLiteral("Unsupported dataset source format")),
+            qPrintable(finishedMessage));
+
+        bool sawFailedPayload = false;
+        for (const auto& message : messages) {
+            if (message.first != QStringLiteral("failed")) {
+                continue;
+            }
+            sawFailedPayload = true;
+            QCOMPARE(message.second.value(QStringLiteral("taskId")).toString(), QStringLiteral("dataset-conversion-fail-test"));
+            QCOMPARE(message.second.value(QStringLiteral("errorCode")).toString(), QStringLiteral("unsupported_source_format"));
+            QVERIFY(message.second.value(QStringLiteral("message")).toString().contains(QStringLiteral("Unsupported dataset source format")));
+        }
+        QVERIFY(sawFailedPayload);
+    }
+
     void workerRunsProductWorkflowCommands()
     {
         QTemporaryDir dir;

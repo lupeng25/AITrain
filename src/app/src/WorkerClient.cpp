@@ -19,6 +19,18 @@ WorkerClient::WorkerClient(QObject* parent)
             emit logLine(output.trimmed());
         }
     });
+    cancelTimer_.setSingleShot(true);
+    connect(&cancelTimer_, &QTimer::timeout, this, [this]() {
+        if (!cancelRequested_ || process_.state() == QProcess::NotRunning) {
+            return;
+        }
+        process_.terminate();
+        QTimer::singleShot(1500, this, [this]() {
+            if (cancelRequested_ && process_.state() != QProcess::NotRunning) {
+                process_.kill();
+            }
+        });
+    });
 }
 
 WorkerClient::~WorkerClient()
@@ -201,7 +213,11 @@ bool WorkerClient::requestInference(const QString& workerProgram, const QString&
 
 void WorkerClient::cancel()
 {
+    cancelRequested_ = true;
     send(QStringLiteral("cancel"), {});
+    if (process_.state() != QProcess::NotRunning) {
+        cancelTimer_.start(2000);
+    }
 }
 
 void WorkerClient::pause()
@@ -258,6 +274,8 @@ bool WorkerClient::startWorkerCommand(const QString& workerProgram, const QStrin
     pendingCommandType_ = commandType;
     pendingRequest_ = payload;
     finishedEmitted_ = false;
+    cancelRequested_ = false;
+    cancelTimer_.stop();
     process_.setProgram(workerProgram);
     process_.setArguments({QStringLiteral("--server"), serverName});
     process_.setProcessChannelMode(QProcess::MergedChannels);
@@ -309,15 +327,21 @@ void WorkerClient::readLines()
             } else if (type == QStringLiteral("log")) {
                 emit logLine(payload.value(QStringLiteral("message")).toString());
             } else if (type == QStringLiteral("completed")) {
+                cancelRequested_ = false;
+                cancelTimer_.stop();
                 finishedEmitted_ = true;
                 emit finished(true, payload.value(QStringLiteral("message")).toString());
             } else if (type == QStringLiteral("failed")) {
+                cancelRequested_ = false;
+                cancelTimer_.stop();
                 finishedEmitted_ = true;
                 emit finished(false, payload.value(QStringLiteral("message")).toString());
             } else if (type == QStringLiteral("paused")
                 || type == QStringLiteral("resumed")) {
                 emit logLine(payload.value(QStringLiteral("message")).toString());
             } else if (type == QStringLiteral("canceled")) {
+                cancelRequested_ = false;
+                cancelTimer_.stop();
                 finishedEmitted_ = true;
                 emit finished(false, payload.value(QStringLiteral("message")).toString(QStringLiteral("Canceled by user")));
                 emit logLine(payload.value(QStringLiteral("message")).toString());
@@ -358,11 +382,22 @@ void WorkerClient::workerFinished(int exitCode, QProcess::ExitStatus status)
     }
     if (!finishedEmitted_) {
         finishedEmitted_ = true;
-        const QString message = (status != QProcess::NormalExit || exitCode != 0)
-            ? QStringLiteral("Worker exited with code %1").arg(exitCode)
-            : QStringLiteral("Worker exited without a terminal status message");
-        emit finished(false, message);
+        if (cancelRequested_) {
+            const QString message = QStringLiteral("Canceled by user");
+            QJsonObject payload;
+            payload.insert(QStringLiteral("taskId"), pendingRequest_.value(QStringLiteral("taskId")).toString());
+            payload.insert(QStringLiteral("message"), message);
+            emit messageReceived(QStringLiteral("canceled"), payload);
+            emit finished(false, message);
+        } else {
+            const QString message = (status != QProcess::NormalExit || exitCode != 0)
+                ? QStringLiteral("Worker exited with code %1").arg(exitCode)
+                : QStringLiteral("Worker exited without a terminal status message");
+            emit finished(false, message);
+        }
     }
+    cancelRequested_ = false;
+    cancelTimer_.stop();
     cleanupSocket();
     server_.close();
     pendingCommandType_.clear();

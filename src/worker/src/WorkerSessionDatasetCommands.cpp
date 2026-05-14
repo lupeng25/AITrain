@@ -166,6 +166,9 @@ void WorkerSession::splitDataset(const QJsonObject& payload)
 void WorkerSession::convertDataset(const QJsonObject& payload)
 {
     const QString taskId = payload.value(QStringLiteral("taskId")).toString();
+    activeTaskId_ = taskId;
+    canceled_ = false;
+    running_ = true;
 
     aitrain::DatasetConversionRequest request;
     request.sourcePath = payload.value(QStringLiteral("sourcePath")).toString();
@@ -181,6 +184,10 @@ void WorkerSession::convertDataset(const QJsonObject& payload)
     send(QStringLiteral("progress"), startProgress);
 
     const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
+    running_ = false;
+    if (canceled_) {
+        return;
+    }
 
     QJsonObject doneProgress;
     doneProgress.insert(QStringLiteral("taskId"), taskId);
@@ -203,9 +210,12 @@ void WorkerSession::convertDataset(const QJsonObject& payload)
 
     QJsonObject terminal;
     terminal.insert(QStringLiteral("taskId"), taskId);
+    const QString failureMessage = result.errorMessage.isEmpty()
+        ? QStringLiteral("Dataset conversion failed")
+        : QStringLiteral("Dataset conversion failed: %1").arg(result.errorMessage);
     terminal.insert(QStringLiteral("message"), result.ok
         ? QStringLiteral("Dataset conversion completed")
-        : QStringLiteral("Dataset conversion failed"));
+        : failureMessage);
     if (!result.ok) {
         terminal.insert(QStringLiteral("errorCode"), result.errorCode);
         terminal.insert(QStringLiteral("errorMessage"), result.errorMessage);

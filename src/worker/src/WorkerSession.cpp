@@ -123,7 +123,7 @@ void WorkerSession::handleMessage(const QString& type, const QJsonObject& payloa
             }
         }
         QJsonObject payloadObject;
-        payloadObject.insert(QStringLiteral("taskId"), request_.taskId);
+        payloadObject.insert(QStringLiteral("taskId"), activeTaskId_.isEmpty() ? request_.taskId : activeTaskId_);
         payloadObject.insert(QStringLiteral("message"), QStringLiteral("Canceled by user"));
         send(QStringLiteral("canceled"), payloadObject);
         finishSession();
@@ -151,6 +151,7 @@ void WorkerSession::send(const QString& type, const QJsonObject& payload)
 
 void WorkerSession::finishSession()
 {
+    activeTaskId_.clear();
     socket_.flush();
     QElapsedTimer timer;
     timer.start();

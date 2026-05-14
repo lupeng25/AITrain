@@ -88,4 +88,5 @@ private:
     bool canceled_ = false;
     QProcess pythonTrainerProcess_;
     bool interceptPythonTrainerMessages_ = false;
+    QString activeTaskId_;
 };

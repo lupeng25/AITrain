@@ -7,6 +7,7 @@
 #include <QJsonObject>
 #include <QObject>
 #include <QProcess>
+#include <QTimer>
 
 class WorkerClient : public QObject {
     Q_OBJECT
@@ -61,4 +62,6 @@ private:
     QString pendingCommandType_;
     QJsonObject pendingRequest_;
     bool finishedEmitted_ = false;
+    QTimer cancelTimer_;
+    bool cancelRequested_ = false;
 };
