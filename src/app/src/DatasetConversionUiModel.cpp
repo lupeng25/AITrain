@@ -110,16 +110,19 @@ DatasetConversionValidation validateDatasetConversionForm(const DatasetConversio
         return validation;
     }
 
-    if (form.sourceFormat.trimmed().isEmpty()) {
+    const QString sourceFormat = form.sourceFormat.trimmed();
+    const QString targetFormat = form.targetFormat.trimmed();
+
+    if (sourceFormat.isEmpty()) {
         validation.sourceFormatError = QStringLiteral("请选择源格式。");
-    } else if (!supportedDatasetConversionSourceFormats().contains(form.sourceFormat)) {
+    } else if (!supportedDatasetConversionSourceFormats().contains(sourceFormat)) {
         validation.sourceFormatError = QStringLiteral("当前不支持该源格式。");
     }
 
-    if (form.targetFormat.trimmed().isEmpty()) {
+    if (targetFormat.isEmpty()) {
         validation.targetFormatError = QStringLiteral("请选择目标格式。");
-    } else if (validation.sourceFormatError.isEmpty()
-        && !isSupportedDatasetConversionPair(form.sourceFormat, form.targetFormat)) {
+    } else if (!sourceFormat.isEmpty()
+        && !isSupportedDatasetConversionPair(sourceFormat, targetFormat)) {
         validation.targetFormatError = QStringLiteral("当前源格式不支持转换到该目标格式。");
     }
 
