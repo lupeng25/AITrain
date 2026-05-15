@@ -10,6 +10,16 @@
 
 ---
 
+## 完成记录
+
+已于 2026-05-15 本地完成。
+
+- 最终实现提交：`3579239 feat: show dataset conversion worker results`。
+- 验证：转换相关 focused tests、`.\tools\harness-check.ps1`、`git diff --check`、1280x820 Qt walkthrough（`.deps\ui-walkthrough-dataset-conversion\walkthrough-summary.json`）均通过。
+- 范围边界保持不变：未修改 core 转换语义、未修改 SQLite schema、未修改插件接口、未自动登记转换产物为数据集。
+
+---
+
 ## Scope Check
 
 本计划只实现设计规格中的 GUI 入口，不扩展 core 转换矩阵，不新增 SQLite schema，不新增插件接口，不自动登记转换产物为数据集。任务是单一 UI/Worker 编排功能，适合一个实施计划。
@@ -47,7 +57,7 @@
 - Create: `tests/tst_dataset_conversion_ui.cpp`
 - Modify: `tests/CMakeLists.txt`
 
-- [ ] **Step 1: Write the failing test file**
+- [x] **Step 1: Write the failing test file**
 
 Create `tests/tst_dataset_conversion_ui.cpp`:
 
@@ -175,7 +185,7 @@ QTEST_MAIN(DatasetConversionUiTests)
 #include "tst_dataset_conversion_ui.moc"
 ```
 
-- [ ] **Step 2: Register the failing test target**
+- [x] **Step 2: Register the failing test target**
 
 Modify `tests/CMakeLists.txt` so every test target can compile the new helper and the new test is registered:
 
@@ -198,7 +208,7 @@ Add this line after `aitrain_dataset_conversion_tests`:
 add_aitrain_qt_test(aitrain_dataset_conversion_ui_tests tst_dataset_conversion_ui.cpp)
 ```
 
-- [ ] **Step 3: Run the new test to verify it fails**
+- [x] **Step 3: Run the new test to verify it fails**
 
 Run:
 
@@ -208,7 +218,7 @@ cmake --build build-vscode --target aitrain_dataset_conversion_ui_tests
 
 Expected: FAIL because `DatasetConversionUiModel.h` and `DatasetConversionUiModel.cpp` do not exist yet.
 
-- [ ] **Step 4: Keep the failing test uncommitted**
+- [x] **Step 4: Keep the failing test uncommitted**
 
 Do not commit this state. The next task adds the implementation and commits the passing helper plus test together, so no commit leaves the branch unable to build.
 
@@ -222,7 +232,7 @@ Do not commit this state. The next task adds the implementation and commits the 
 - Modify: `src/app/CMakeLists.txt`
 - Test: `tests/tst_dataset_conversion_ui.cpp`
 
-- [ ] **Step 1: Add helper header**
+- [x] **Step 1: Add helper header**
 
 Create `src/app/src/DatasetConversionUiModel.h`:
 
@@ -262,7 +272,7 @@ DatasetConversionValidation validateDatasetConversionForm(const DatasetConversio
 } // namespace aitrain_app
 ```
 
-- [ ] **Step 2: Add helper implementation**
+- [x] **Step 2: Add helper implementation**
 
 Create `src/app/src/DatasetConversionUiModel.cpp`:
 
@@ -422,7 +432,7 @@ DatasetConversionValidation validateDatasetConversionForm(const DatasetConversio
 } // namespace aitrain_app
 ```
 
-- [ ] **Step 3: Add helper to app target**
+- [x] **Step 3: Add helper to app target**
 
 Modify `src/app/CMakeLists.txt` and insert these files near `MainWindowSupport`:
 
@@ -431,7 +441,7 @@ Modify `src/app/CMakeLists.txt` and insert these files near `MainWindowSupport`:
     src/DatasetConversionUiModel.cpp
 ```
 
-- [ ] **Step 4: Run focused UI model test**
+- [x] **Step 4: Run focused UI model test**
 
 Run:
 
@@ -442,7 +452,7 @@ ctest --test-dir build-vscode -R aitrain_dataset_conversion_ui_tests --output-on
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit helper implementation**
+- [x] **Step 5: Commit helper implementation**
 
 ```powershell
 git add src/app/CMakeLists.txt src/app/src/DatasetConversionUiModel.h src/app/src/DatasetConversionUiModel.cpp tests/CMakeLists.txt tests/tst_dataset_conversion_ui.cpp
@@ -457,7 +467,7 @@ git commit -m "feat: add dataset conversion gui model"
 - Modify: `src/app/src/MainWindow.h`
 - Modify: `src/app/src/MainWindowDatasetPage.cpp`
 
-- [ ] **Step 1: Add declarations to `MainWindow.h`**
+- [x] **Step 1: Add declarations to `MainWindow.h`**
 
 Add `class QPushButton;` near the existing forward declarations:
 
@@ -510,7 +520,7 @@ Add these widget members near the existing dataset widgets:
     QPlainTextEdit* datasetConversionLog_ = nullptr;
 ```
 
-- [ ] **Step 2: Include the new helper in `MainWindowDatasetPage.cpp`**
+- [x] **Step 2: Include the new helper in `MainWindowDatasetPage.cpp`**
 
 Add this include:
 
@@ -518,7 +528,7 @@ Add this include:
 #include "DatasetConversionUiModel.h"
 ```
 
-- [ ] **Step 3: Build the conversion form inside `buildDatasetPage()`**
+- [x] **Step 3: Build the conversion form inside `buildDatasetPage()`**
 
 Insert this block after the split ratio row is added and before `inputPanel->bodyLayout()->addWidget(datasetActionStrip);`:
 
@@ -618,7 +628,7 @@ Insert this block after the split ratio row is added and before `inputPanel->bod
     updateDatasetConversionTargetFormats();
 ```
 
-- [ ] **Step 4: Synchronize dataset selection into conversion form**
+- [x] **Step 4: Synchronize dataset selection into conversion form**
 
 Inside the existing `datasetListTable_` selection lambda, after `currentDatasetFormat_ = format;`, insert:
 
@@ -632,7 +642,7 @@ Inside `MainWindow::browseDataset()`, after `currentDatasetFormat_ = selectedFor
         refreshDatasetConversionDefaultsFromCurrentDataset();
 ```
 
-- [ ] **Step 5: Build to catch declaration/layout errors**
+- [x] **Step 5: Build to catch declaration/layout errors**
 
 Run:
 
@@ -642,7 +652,7 @@ cmake --build build-vscode --target AITrainStudio
 
 Expected: FAIL because the new slots and helpers are declared but not implemented yet.
 
-- [ ] **Step 6: Keep the form shell uncommitted**
+- [x] **Step 6: Keep the form shell uncommitted**
 
 Do not commit this state. The next task implements the declared methods and commits the passing UI shell plus actions together, so no commit leaves `AITrainStudio` unable to build.
 
@@ -655,7 +665,7 @@ Do not commit this state. The next task implements the declared methods and comm
 - Modify: `src/app/src/MainWindowDatasetPage.cpp`
 - Test: `tests/tst_dataset_conversion_ui.cpp`
 
-- [ ] **Step 1: Include helper in `MainWindowActions.cpp`**
+- [x] **Step 1: Include helper in `MainWindowActions.cpp`**
 
 Add:
 
@@ -663,7 +673,7 @@ Add:
 #include "DatasetConversionUiModel.h"
 ```
 
-- [ ] **Step 2: Add local helper for default output paths**
+- [x] **Step 2: Add local helper for default output paths**
 
 In the anonymous namespace of `MainWindowActions.cpp`, add:
 
@@ -693,7 +703,7 @@ void setFieldErrorLabel(QLabel* label, const QString& text)
 }
 ```
 
-- [ ] **Step 3: Implement target filtering and default sync**
+- [x] **Step 3: Implement target filtering and default sync**
 
 Add these methods to `MainWindowActions.cpp`:
 
@@ -743,7 +753,7 @@ void MainWindow::refreshDatasetConversionDefaultsFromCurrentDataset()
 }
 ```
 
-- [ ] **Step 4: Implement browsing and validation display**
+- [x] **Step 4: Implement browsing and validation display**
 
 Add:
 
@@ -793,7 +803,7 @@ void MainWindow::appendDatasetConversionLog(const QString& text)
 }
 ```
 
-- [ ] **Step 5: Implement running state and cancellation**
+- [x] **Step 5: Implement running state and cancellation**
 
 Add:
 
@@ -833,7 +843,7 @@ void MainWindow::cancelDatasetConversion()
 }
 ```
 
-- [ ] **Step 6: Implement Worker start**
+- [x] **Step 6: Implement Worker start**
 
 Add:
 
@@ -941,7 +951,7 @@ void MainWindow::startDatasetConversion()
 }
 ```
 
-- [ ] **Step 7: Build app**
+- [x] **Step 7: Build app**
 
 Run:
 
@@ -951,7 +961,7 @@ cmake --build build-vscode --target AITrainStudio
 
 Expected: PASS after all declared methods are implemented.
 
-- [ ] **Step 8: Commit form behavior**
+- [x] **Step 8: Commit form behavior**
 
 ```powershell
 git add src/app/src/MainWindow.h src/app/src/MainWindowDatasetPage.cpp src/app/src/MainWindowActions.cpp
@@ -966,7 +976,7 @@ git commit -m "feat: wire dataset conversion form actions"
 - Modify: `src/app/src/MainWindowWorkerMessages.cpp`
 - Modify: `src/app/src/MainWindow.cpp`
 
-- [ ] **Step 1: Route `datasetConversion` messages**
+- [x] **Step 1: Route `datasetConversion` messages**
 
 In `MainWindow::handleWorkerMessage`, insert after `datasetSplit`:
 
@@ -975,7 +985,7 @@ In `MainWindow::handleWorkerMessage`, insert after `datasetSplit`:
         updateDatasetConversionResult(payload);
 ```
 
-- [ ] **Step 2: Update conversion progress inside `handleProgressMessage`**
+- [x] **Step 2: Update conversion progress inside `handleProgressMessage`**
 
 Add after the global progress bar update:
 
@@ -997,7 +1007,7 @@ Keep the existing status-bar message block, and add this inside that block after
         }
 ```
 
-- [ ] **Step 3: Implement result rendering**
+- [x] **Step 3: Implement result rendering**
 
 Add this method to `MainWindowWorkerMessages.cpp`:
 
@@ -1053,7 +1063,7 @@ void MainWindow::updateDatasetConversionResult(const QJsonObject& payload)
 }
 ```
 
-- [ ] **Step 4: Reset conversion UI on canceled/failed task-state messages**
+- [x] **Step 4: Reset conversion UI on canceled/failed task-state messages**
 
 Inside `handleTaskStateMessage`, in the `canceled` branch before `currentTaskId_.clear();`, add:
 
@@ -1079,7 +1089,7 @@ Inside the `failed` branch after `updateModelRegistry();`, add:
         }
 ```
 
-- [ ] **Step 5: Reset conversion UI from Worker finished fallback**
+- [x] **Step 5: Reset conversion UI from Worker finished fallback**
 
 In `src/app/src/MainWindow.cpp`, inside the `WorkerClient::finished` lambda after the existing `appendLog` call, add:
 
@@ -1093,7 +1103,7 @@ In `src/app/src/MainWindow.cpp`, inside the `WorkerClient::finished` lambda afte
         }
 ```
 
-- [ ] **Step 6: Run focused build**
+- [x] **Step 6: Run focused build**
 
 Run:
 
@@ -1103,7 +1113,7 @@ cmake --build build-vscode --target AITrainStudio
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit message handling**
+- [x] **Step 7: Commit message handling**
 
 ```powershell
 git add src/app/src/MainWindowWorkerMessages.cpp src/app/src/MainWindow.cpp
@@ -1118,7 +1128,7 @@ git commit -m "feat: show dataset conversion worker results"
 - Modify: `src/app/src/LanguageSupport.cpp`
 - Test: full harness and UI walkthrough
 
-- [ ] **Step 1: Add fallback translations**
+- [x] **Step 1: Add fallback translations**
 
 In `fallbackEnglishTranslation`, add these entries to the static hash:
 
@@ -1174,7 +1184,7 @@ In `fallbackEnglishTranslation`, add these entries to the static hash:
         {QStringLiteral("数据集转换失败：%1"), QStringLiteral("Dataset conversion failed: %1")},
 ```
 
-- [ ] **Step 2: Run focused tests**
+- [x] **Step 2: Run focused tests**
 
 Run:
 
@@ -1185,7 +1195,7 @@ ctest --test-dir build-vscode -R "aitrain_dataset_conversion_ui_tests|aitrain_da
 
 Expected: PASS.
 
-- [ ] **Step 3: Run full harness**
+- [x] **Step 3: Run full harness**
 
 Run:
 
@@ -1195,7 +1205,7 @@ Run:
 
 Expected: configure/build succeeds and all CTest tests pass.
 
-- [ ] **Step 4: Run UI walkthrough**
+- [x] **Step 4: Run UI walkthrough**
 
 Run:
 
@@ -1212,7 +1222,7 @@ C:\Users\73200\.codex\skills\qt-gui-walkthrough\scripts\qt_walkthrough.ps1 `
 
 Expected: PASS or produces screenshots with no horizontal overflow on the 数据集 page. If the walkthrough cannot run because license or GUI automation is unavailable, record the exact failure and verify at least the 数据集 page manually before claiming UI validation.
 
-- [ ] **Step 5: Check whitespace and status**
+- [x] **Step 5: Check whitespace and status**
 
 Run:
 
@@ -1223,7 +1233,7 @@ git status --short
 
 Expected: `git diff --check` returns success. `git status --short` lists only intentional source, test, translation, and plan/spec changes until commit.
 
-- [ ] **Step 6: Commit final UI verification updates**
+- [x] **Step 6: Commit final UI verification updates**
 
 ```powershell
 git add src/app/src/LanguageSupport.cpp
