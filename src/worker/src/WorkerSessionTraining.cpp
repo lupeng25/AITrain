@@ -1,4 +1,4 @@
-﻿#include "WorkerSession.h"
+#include "WorkerSession.h"
 #include "WorkerSessionSupport.h"
 
 #include "aitrain/core/DatasetValidators.h"
@@ -669,4 +669,3 @@ void WorkerSession::emitDetectionPreviewArtifacts(const QString& checkpointPath)
         send(QStringLiteral("log"), payload);
     }
 }
-

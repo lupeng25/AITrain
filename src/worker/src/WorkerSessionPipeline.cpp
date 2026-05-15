@@ -1,4 +1,4 @@
-﻿#include "WorkerSession.h"
+#include "WorkerSession.h"
 #include "WorkerSessionSupport.h"
 
 #include "aitrain/core/DatasetValidators.h"
@@ -385,5 +385,3 @@ bool WorkerSession::forwardPipelinePythonTrainerLine(const QByteArray& line, Pip
     }
     return true;
 }
-
-

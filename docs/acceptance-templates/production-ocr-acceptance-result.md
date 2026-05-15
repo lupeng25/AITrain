@@ -112,7 +112,7 @@ Paste the final console output:
 
 List any blocked checks exactly as reported by `production_ocr_acceptance_report.json`:
 
-- 
+-
 
 ## Attachments
 

@@ -111,6 +111,19 @@ QFileInfoList imageFiles(const QDir& directory)
     return files;
 }
 
+QString canonicalImageKey(const QFileInfo& imageInfo)
+{
+    QString key = imageInfo.canonicalFilePath();
+    if (key.isEmpty()) {
+        key = imageInfo.absoluteFilePath();
+    }
+    key = QDir::cleanPath(key);
+#if defined(Q_OS_WIN)
+    key = key.toLower();
+#endif
+    return key;
+}
+
 int parseClassCount(const QString& yamlPath, DatasetValidationResult& result)
 {
     QFile file(yamlPath);
@@ -347,6 +360,7 @@ DatasetValidationResult validateYoloDataset(const QString& datasetPath, const QJ
     }
 
     int inspectedFiles = 0;
+    QSet<QString> seenImages;
     const QStringList splits = {QStringLiteral("train"), QStringLiteral("val")};
     for (const QString& split : splits) {
         const YoloSplitPaths splitPaths = yoloSplitPaths(layout, split);
@@ -370,6 +384,11 @@ DatasetValidationResult validateYoloDataset(const QString& datasetPath, const QJ
         }
 
         for (const QFileInfo& imageInfo : images) {
+            const QString imageKey = canonicalImageKey(imageInfo);
+            if (seenImages.contains(imageKey)) {
+                continue;
+            }
+            seenImages.insert(imageKey);
             if (++inspectedFiles > maxFiles) {
                 addIssue(result, QStringLiteral("warning"), QStringLiteral("file_limit"), datasetPath, 0,
                     QStringLiteral("数据集较大，已在 %1 个样本后截断校验。").arg(maxFiles));
@@ -414,6 +433,8 @@ QVector<YoloSample> collectYoloSamples(const QString& datasetPath, DatasetSplitR
         return samples;
     }
     const QStringList splits = {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")};
+    QSet<QString> seenImages;
+    bool duplicateIgnored = false;
     for (const QString& split : splits) {
         const YoloSplitPaths splitPaths = yoloSplitPaths(layout, split);
         const QDir imageDir(splitPaths.imageDir);
@@ -422,6 +443,12 @@ QVector<YoloSample> collectYoloSamples(const QString& datasetPath, DatasetSplitR
             continue;
         }
         for (const QFileInfo& imageInfo : imageFiles(imageDir)) {
+            const QString imageKey = canonicalImageKey(imageInfo);
+            if (seenImages.contains(imageKey)) {
+                duplicateIgnored = true;
+                continue;
+            }
+            seenImages.insert(imageKey);
             const QFileInfo labelInfo(labelDir.filePath(imageInfo.completeBaseName() + QStringLiteral(".txt")));
             if (!labelInfo.exists()) {
                 result.ok = false;
@@ -435,6 +462,9 @@ QVector<YoloSample> collectYoloSamples(const QString& datasetPath, DatasetSplitR
             sample.baseName = imageInfo.completeBaseName();
             samples.append(sample);
         }
+    }
+    if (duplicateIgnored) {
+        result.warnings.append(QStringLiteral("Duplicate YOLO images were ignored while collecting split samples."));
     }
     return samples;
 }

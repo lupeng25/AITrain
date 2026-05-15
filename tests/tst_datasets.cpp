@@ -67,7 +67,7 @@ private slots:
         const QString root = dir.filePath(QStringLiteral("custom-detection"));
         const QDir rootDir(root);
         writeTextFile(rootDir.filePath(QStringLiteral("data.yaml")),
-            QStringLiteral("path: raw\ntrain: custom/images/train\nval: custom/images/val\nnc: 2\nnames:\n  0: widget\n  1: part\n"));
+            QStringLiteral("path : raw\ntrain : custom/images/train\nval : custom/images/val\nnc : 2\nnames :\n  0: widget\n  1: part\n"));
         writeTinyPng(rootDir.filePath(QStringLiteral("raw/custom/images/train/a.jpg")));
         writeTinyPng(rootDir.filePath(QStringLiteral("raw/custom/images/val/b.jpg")));
         writeTextFile(rootDir.filePath(QStringLiteral("raw/custom/labels/train/a.txt")), QStringLiteral("0 0.5 0.5 0.25 0.25\n"));
@@ -101,6 +101,39 @@ private slots:
         QVERIFY(dataYamlText.contains(QStringLiteral("path: .")));
         QVERIFY(dataYamlText.contains(QStringLiteral("train: images/train")));
         QVERIFY(!dataYamlText.contains(QStringLiteral("custom/images")));
+
+        const aitrain::DatasetValidationResult normalized = aitrain::validateYoloDetectionDataset(output);
+        QVERIFY2(normalized.ok, qPrintable(normalized.errors.join(QStringLiteral("\n"))));
+        QCOMPARE(normalized.sampleCount, 2);
+    }
+
+    void yoloSplitIgnoresDuplicateCustomSplitImages()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("duplicate-splits"));
+        const QDir rootDir(root);
+        writeTextFile(rootDir.filePath(QStringLiteral("data.yaml")),
+            QStringLiteral("path: .\ntrain: images/shared\nval: images/shared\nnc: 1\nnames: [item]\n"));
+        writeTinyPng(rootDir.filePath(QStringLiteral("images/shared/a.jpg")));
+        writeTinyPng(rootDir.filePath(QStringLiteral("images/shared/b.jpg")));
+        writeTextFile(rootDir.filePath(QStringLiteral("labels/shared/a.txt")), QStringLiteral("0 0.5 0.5 0.25 0.25\n"));
+        writeTextFile(rootDir.filePath(QStringLiteral("labels/shared/b.txt")), QStringLiteral("0 0.5 0.5 0.20 0.20\n"));
+
+        const aitrain::DatasetValidationResult valid = aitrain::validateYoloDetectionDataset(root);
+        QVERIFY2(valid.ok, qPrintable(valid.errors.join(QStringLiteral("\n"))));
+        QCOMPARE(valid.sampleCount, 2);
+
+        QJsonObject options;
+        options.insert(QStringLiteral("trainRatio"), 0.5);
+        options.insert(QStringLiteral("valRatio"), 0.5);
+        options.insert(QStringLiteral("testRatio"), 0.0);
+        options.insert(QStringLiteral("seed"), 7);
+        const QString output = dir.filePath(QStringLiteral("normalized-duplicates"));
+        const aitrain::DatasetSplitResult split = aitrain::splitYoloDetectionDataset(root, output, options);
+        QVERIFY2(split.ok, qPrintable(split.errors.join(QStringLiteral("\n"))));
+        QCOMPARE(split.trainCount + split.valCount + split.testCount, 2);
+        QCOMPARE(split.warnings.filter(QStringLiteral("Duplicate YOLO images")).size(), 1);
 
         const aitrain::DatasetValidationResult normalized = aitrain::validateYoloDetectionDataset(output);
         QVERIFY2(normalized.ok, qPrintable(normalized.errors.join(QStringLiteral("\n"))));
@@ -147,7 +180,7 @@ private slots:
         const QString root = dir.filePath(QStringLiteral("custom-segmentation"));
         const QDir rootDir(root);
         writeTextFile(rootDir.filePath(QStringLiteral("data.yaml")),
-            QStringLiteral("path: raw\ntrain: custom/images/train\nval: custom/images/val\nnc: 1\nnames:\n  - part\n"));
+            QStringLiteral("path : raw\ntrain : custom/images/train\nval : custom/images/val\nnc : 1\nnames :\n  - part\n"));
         writeTinyPng(rootDir.filePath(QStringLiteral("raw/custom/images/train/a.png")));
         writeTinyPng(rootDir.filePath(QStringLiteral("raw/custom/images/val/b.png")));
         writeTextFile(rootDir.filePath(QStringLiteral("raw/custom/labels/train/a.txt")),

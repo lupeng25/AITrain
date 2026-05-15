@@ -176,6 +176,92 @@ private slots:
         QCOMPARE(report.status, QStringLiteral("hash-mismatch"));
     }
 
+    void pluginMarketplaceRejectsUnsafeManifestPaths()
+    {
+        const QString pluginDll = builtPluginPath(QStringLiteral("DatasetInteropPlugin.dll"));
+        if (pluginDll.isEmpty()) {
+            QSKIP("Built DatasetInteropPlugin.dll is not available for marketplace fixture.");
+        }
+
+        const auto inspectMutatedPackage = [&pluginDll](const QString& version, const std::function<void(QJsonObject*)>& mutate) {
+            QTemporaryDir dir;
+            QVERIFY(dir.isValid());
+            const QString packageRoot = writeMarketplacePackageFixture(
+                dir.path(),
+                pluginDll,
+                QStringLiteral("com.aitrain.plugins.dataset_interop"),
+                version);
+            QVERIFY(!packageRoot.isEmpty());
+            QJsonObject manifest = readJsonObject(QDir(packageRoot).filePath(QStringLiteral("plugin.json")));
+            mutate(&manifest);
+            QFile manifestFile(QDir(packageRoot).filePath(QStringLiteral("plugin.json")));
+            QVERIFY(manifestFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            manifestFile.write(QJsonDocument(manifest).toJson(QJsonDocument::Indented));
+            manifestFile.close();
+
+            aitrain::PluginMarketplace marketplace(
+                dir.filePath(QStringLiteral("marketplace")),
+                dir.filePath(QStringLiteral("plugins/models")),
+                dir.filePath(QStringLiteral("plugin_marketplace_state.json")));
+            const aitrain::PluginMarketplaceReport report = marketplace.inspectPackage(packageRoot);
+            QVERIFY(!report.ok);
+            QCOMPARE(report.status, QStringLiteral("invalid-package-path"));
+        };
+
+        inspectMutatedPackage(QStringLiteral("0.1.5"), [](QJsonObject* manifest) {
+            manifest->insert(QStringLiteral("entrypoints"),
+                QJsonObject{{QStringLiteral("qtModelPlugin"), QStringLiteral("../outside/DatasetInteropPlugin.dll")}});
+        });
+        inspectMutatedPackage(QStringLiteral("0.1.6"), [&pluginDll](QJsonObject* manifest) {
+            manifest->insert(QStringLiteral("entrypoints"),
+                QJsonObject{{QStringLiteral("qtModelPlugin"), QFileInfo(pluginDll).absoluteFilePath()}});
+        });
+        inspectMutatedPackage(QStringLiteral("0.1.7"), [](QJsonObject* manifest) {
+            manifest->insert(QStringLiteral("files"), QJsonArray{QStringLiteral("../outside.txt")});
+            manifest->insert(QStringLiteral("hashes"), QJsonObject{{QStringLiteral("../outside.txt"), QStringLiteral("0000")}});
+        });
+    }
+
+    void pluginMarketplaceRejectsZipTraversalEntry()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString zipPath = dir.filePath(QStringLiteral("evil.aitrain-plugin.zip"));
+        const QString scriptPath = dir.filePath(QStringLiteral("create_evil_zip.ps1"));
+        writeTextFile(scriptPath,
+            QStringLiteral("param([string]$ZipPath)\n"
+                           "Add-Type -AssemblyName System.IO.Compression\n"
+                           "Add-Type -AssemblyName System.IO.Compression.FileSystem\n"
+                           "$archive = [System.IO.Compression.ZipFile]::Open($ZipPath, [System.IO.Compression.ZipArchiveMode]::Create)\n"
+                           "try {\n"
+                           "  $entry = $archive.CreateEntry('../evil.txt')\n"
+                           "  $writer = New-Object System.IO.StreamWriter($entry.Open())\n"
+                           "  try { $writer.Write('escape') } finally { $writer.Dispose() }\n"
+                           "} finally { $archive.Dispose() }\n"));
+        QProcess process;
+        process.start(QStringLiteral("powershell"),
+            QStringList()
+                << QStringLiteral("-NoProfile")
+                << QStringLiteral("-ExecutionPolicy")
+                << QStringLiteral("Bypass")
+                << QStringLiteral("-File")
+                << scriptPath
+                << zipPath);
+        QVERIFY(process.waitForStarted(5000));
+        QVERIFY(process.waitForFinished(30000));
+        QCOMPARE(process.exitCode(), 0);
+        QVERIFY(QFileInfo::exists(zipPath));
+
+        aitrain::PluginMarketplace marketplace(
+            dir.filePath(QStringLiteral("marketplace")),
+            dir.filePath(QStringLiteral("plugins/models")),
+            dir.filePath(QStringLiteral("plugin_marketplace_state.json")));
+        const aitrain::PluginMarketplaceReport report = marketplace.inspectPackage(zipPath);
+        QVERIFY(!report.ok);
+        QCOMPARE(report.status, QStringLiteral("extract-failed"));
+        QVERIFY(!QFileInfo::exists(dir.filePath(QStringLiteral("evil.txt"))));
+    }
+
     void pluginMarketplaceKeepsStateWhenDisableCannotRemoveActiveFile()
     {
         QTemporaryDir dir;

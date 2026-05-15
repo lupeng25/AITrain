@@ -1,4 +1,4 @@
-﻿#include "WorkerSession.h"
+#include "WorkerSession.h"
 #include "WorkerSessionSupport.h"
 
 #include "aitrain/core/DatasetValidators.h"
@@ -634,4 +634,3 @@ void WorkerSession::runInference(const QJsonObject& payload)
     send(QStringLiteral("completed"), completed);
     finishSession();
 }
-

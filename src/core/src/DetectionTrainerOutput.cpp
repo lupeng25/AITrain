@@ -1,4 +1,4 @@
-﻿#include "DetectionTrainerInternal.h"
+#include "DetectionTrainerInternal.h"
 
 #include "aitrain/core/Deployment.h"
 
@@ -322,4 +322,3 @@ QImage renderOcrDetPredictions(
 
 
 } // namespace aitrain
-

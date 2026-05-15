@@ -18,3 +18,4 @@ __pycache__/
 *.VC.db
 *.VC.VC.opendb
 demo_project/
+/environment_profiles_report.json

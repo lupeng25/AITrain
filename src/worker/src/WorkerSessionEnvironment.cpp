@@ -1,4 +1,4 @@
-﻿#include "WorkerSession.h"
+#include "WorkerSession.h"
 #include "WorkerSessionSupport.h"
 
 #include "aitrain/core/DatasetValidators.h"
@@ -95,4 +95,3 @@ void WorkerSession::runEnvironmentCheck(const QJsonObject& payload)
     send(QStringLiteral("completed"), completed);
     finishSession();
 }
-

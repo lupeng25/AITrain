@@ -1,4 +1,4 @@
-﻿#include "WorkerClient.h"
+#include "WorkerClient.h"
 
 #include "aitrain/core/DatasetValidators.h"
 #include "aitrain/core/Deployment.h"
@@ -487,4 +487,3 @@ void writeFakeUltralyticsPackage(const QString& root)
 }
 
 } // namespace
-

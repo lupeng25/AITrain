@@ -1,4 +1,4 @@
-﻿#include "WorkerSession.h"
+#include "WorkerSession.h"
 #include "WorkerSessionSupport.h"
 
 #include "aitrain/core/DatasetConversion.h"
@@ -350,4 +350,3 @@ void WorkerSession::createDatasetSnapshot(const QJsonObject& payload)
     send(QStringLiteral("completed"), completed);
     finishSession();
 }
-

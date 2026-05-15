@@ -15,6 +15,7 @@
 #include <QNetworkRequest>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QSet>
 #include <QTimer>
 #include <QTemporaryDir>
 
@@ -175,13 +176,110 @@ QString fileSha256(const QString& path, QString* error)
     return QString::fromLatin1(hash.result().toHex());
 }
 
-QString cleanRelativePath(const QString& path)
+QString invalidPackagePathMessage(const QString& path)
 {
+    return QStringLiteral("Plugin package path is not a safe package-relative path: %1").arg(path);
+}
+
+bool safePackageRelativePath(const QString& path, QString* relativePath, QString* error)
+{
+    const QString original = path;
     QString normalized = QDir::fromNativeSeparators(path).trimmed();
-    while (normalized.startsWith(QLatin1Char('/'))) {
-        normalized.remove(0, 1);
+    if (normalized.isEmpty()
+        || normalized.contains(QLatin1Char(':'))
+        || QDir::isAbsolutePath(normalized)
+        || normalized.startsWith(QStringLiteral("//"))) {
+        if (error) {
+            *error = invalidPackagePathMessage(original);
+        }
+        return false;
     }
-    return QDir::cleanPath(normalized);
+
+    const QStringList parts = normalized.split(QLatin1Char('/'),
+#if QT_VERSION < QT_VERSION_CHECK(5, 15, 0)
+        QString::SkipEmptyParts
+#else
+        Qt::SkipEmptyParts
+#endif
+    );
+    for (const QString& part : parts) {
+        if (part == QStringLiteral("..")) {
+            if (error) {
+                *error = invalidPackagePathMessage(original);
+            }
+            return false;
+        }
+    }
+
+    const QString cleaned = QDir::cleanPath(normalized);
+    if (cleaned.isEmpty() || cleaned == QStringLiteral(".") || cleaned.startsWith(QStringLiteral("../"))) {
+        if (error) {
+            *error = invalidPackagePathMessage(original);
+        }
+        return false;
+    }
+    if (relativePath) {
+        *relativePath = cleaned;
+    }
+    return true;
+}
+
+bool pathIsWithinRoot(const QString& rootPath, const QString& path)
+{
+    const QString root = QFileInfo(rootPath).canonicalFilePath();
+    const QString candidate = QFileInfo(path).canonicalFilePath();
+    if (root.isEmpty() || candidate.isEmpty()) {
+        return false;
+    }
+    const QString rootWithSlash = root.endsWith(QLatin1Char('/')) || root.endsWith(QLatin1Char('\\'))
+        ? root
+        : root + QLatin1Char('/');
+#if defined(Q_OS_WIN)
+    return candidate.compare(root, Qt::CaseInsensitive) == 0
+        || candidate.startsWith(rootWithSlash, Qt::CaseInsensitive);
+#else
+    return candidate == root || candidate.startsWith(rootWithSlash);
+#endif
+}
+
+bool resolvePackageRelativePath(const QString& packageRoot,
+    const QString& rawPath,
+    QString* absolutePath,
+    QString* error)
+{
+    QString relativePath;
+    if (!safePackageRelativePath(rawPath, &relativePath, error)) {
+        return false;
+    }
+    const QString resolved = QDir(packageRoot).filePath(relativePath);
+    if (!QFileInfo::exists(resolved) || !pathIsWithinRoot(packageRoot, resolved)) {
+        if (error) {
+            *error = invalidPackagePathMessage(rawPath);
+        }
+        return false;
+    }
+    if (absolutePath) {
+        *absolutePath = resolved;
+    }
+    return true;
+}
+
+bool packageTreeHasLinks(const QString& rootPath, QString* offendingPath)
+{
+    const QDir root(rootPath);
+    const QFileInfoList entries = root.entryInfoList(QDir::NoDotAndDotDot | QDir::Files | QDir::Dirs | QDir::Hidden | QDir::System);
+    for (const QFileInfo& entry : entries) {
+        if (entry.isSymLink()) {
+            if (offendingPath) {
+                *offendingPath = entry.absoluteFilePath();
+            }
+            return true;
+        }
+        if (entry.isDir() && packageTreeHasLinks(entry.absoluteFilePath(), offendingPath)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool removeDirectorySafely(const QString& path, QString* error)
@@ -311,7 +409,7 @@ PluginPackageManifest PluginPackageManifest::fromJson(const QJsonObject& object)
     manifest.category = object.value(QStringLiteral("category")).toString();
     manifest.capabilities = readStringList(object.value(QStringLiteral("capabilities")).toArray());
     const QJsonObject entrypoints = object.value(QStringLiteral("entrypoints")).toObject();
-    manifest.qtModelPlugin = cleanRelativePath(entrypoints.value(QStringLiteral("qtModelPlugin")).toString());
+    manifest.qtModelPlugin = entrypoints.value(QStringLiteral("qtModelPlugin")).toString().trimmed();
     const QJsonObject compatibility = object.value(QStringLiteral("compatibility")).toObject();
     manifest.minAitrainVersion = compatibility.value(QStringLiteral("minAitrainVersion")).toString();
     manifest.qtAbi = compatibility.value(QStringLiteral("qtAbi")).toString();
@@ -548,6 +646,16 @@ PluginMarketplaceReport PluginMarketplace::installPackage(const QString& package
     };
 
     QString error;
+    QString linkedPath;
+    if (packageTreeHasLinks(sourceRoot, &linkedPath)) {
+        report.ok = false;
+        report.status = QStringLiteral("invalid-package-path");
+        report.message = QStringLiteral("Plugin package contains a symbolic link or reparse-style entry: %1").arg(linkedPath);
+        report.errors.append(report.message);
+        cleanupTemporaryRoot();
+        return report;
+    }
+
     QDir().mkpath(marketplaceRoot_);
     const QString targetPath = packageInstallPath(manifest.id, manifest.version);
     const QString stagingPath = QStringLiteral("%1.staging.%2")
@@ -647,7 +755,14 @@ PluginMarketplaceReport PluginMarketplace::enablePlugin(const QString& id, const
 
     InstalledPluginRecord target = records.at(targetIndex);
     const PluginPackageManifest manifest = PluginPackageManifest::fromJson(target.packageManifest);
-    const QString sourceDll = QDir(target.installPath).filePath(manifest.qtModelPlugin);
+    QString sourceDll;
+    if (!resolvePackageRelativePath(target.installPath, manifest.qtModelPlugin, &sourceDll, &error)) {
+        report.ok = false;
+        report.status = QStringLiteral("invalid-package-path");
+        report.message = error;
+        report.errors.append(error);
+        return report;
+    }
     if (!QFileInfo::exists(sourceDll)) {
         report.ok = false;
         report.status = QStringLiteral("missing-entrypoint");
@@ -855,19 +970,43 @@ PluginMarketplaceReport PluginMarketplace::validateManifest(const QString& packa
             .arg(manifest.qtAbi, currentQtAbi()));
     }
 
+    const auto appendInvalidPath = [&report](const QString& message) {
+        report.ok = false;
+        report.status = QStringLiteral("invalid-package-path");
+        report.errors.append(message);
+    };
+
+    for (const QJsonValue& value : manifest.files) {
+        QString error;
+        QString resolvedPath;
+        if (!resolvePackageRelativePath(packageRoot, value.toString(), &resolvedPath, &error)) {
+            appendInvalidPath(error);
+        }
+    }
+
+    QString entrypointError;
+    if (!resolvePackageRelativePath(packageRoot, manifest.qtModelPlugin, nullptr, &entrypointError)) {
+        appendInvalidPath(entrypointError);
+    }
+
     for (auto it = manifest.hashes.constBegin(); it != manifest.hashes.constEnd(); ++it) {
-        const QString relativePath = cleanRelativePath(it.key());
+        QString resolvedPath;
+        QString pathError;
+        if (!resolvePackageRelativePath(packageRoot, it.key(), &resolvedPath, &pathError)) {
+            appendInvalidPath(pathError);
+            continue;
+        }
         const QString expected = it.value().toString().trimmed().toLower();
         if (expected.isEmpty()) {
             continue;
         }
         QString error;
-        const QString actual = fileSha256(QDir(packageRoot).filePath(relativePath), &error);
+        const QString actual = fileSha256(resolvedPath, &error);
         if (!error.isEmpty() || actual.toLower() != expected) {
             report.ok = false;
             report.status = QStringLiteral("hash-mismatch");
             report.errors.append(error.isEmpty()
-                    ? QStringLiteral("SHA256 mismatch for %1.").arg(relativePath)
+                    ? QStringLiteral("SHA256 mismatch for %1.").arg(it.key())
                     : error);
         }
     }
@@ -884,7 +1023,16 @@ PluginMarketplaceReport PluginMarketplace::validateManifest(const QString& packa
 PluginMarketplaceReport PluginMarketplace::validateQtEntrypoint(const QString& packageRoot, const PluginPackageManifest& manifest) const
 {
     PluginMarketplaceReport report;
-    const QString entrypoint = QDir(packageRoot).filePath(manifest.qtModelPlugin);
+    QString error;
+    QString relativePath;
+    if (!safePackageRelativePath(manifest.qtModelPlugin, &relativePath, &error)) {
+        report.ok = false;
+        report.status = QStringLiteral("invalid-package-path");
+        report.message = error;
+        report.errors.append(error);
+        return report;
+    }
+    const QString entrypoint = QDir(packageRoot).filePath(relativePath);
     if (!QFileInfo::exists(entrypoint)) {
         report.ok = false;
         report.status = QStringLiteral("missing-entrypoint");
@@ -1063,7 +1211,25 @@ QString PluginMarketplace::normalizedPackageRoot(const QString& packagePath, QSt
     scriptFile.write(
         "param([Parameter(Mandatory=$true)][string]$PackagePath,"
         "[Parameter(Mandatory=$true)][string]$DestinationPath)\n"
-        "Expand-Archive -LiteralPath $PackagePath -DestinationPath $DestinationPath -Force\n");
+        "Add-Type -AssemblyName System.IO.Compression\n"
+        "Add-Type -AssemblyName System.IO.Compression.FileSystem\n"
+        "$destinationRoot = [System.IO.Path]::GetFullPath($DestinationPath)\n"
+        "if (-not $destinationRoot.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {\n"
+        "  $destinationRoot = $destinationRoot + [System.IO.Path]::DirectorySeparatorChar\n"
+        "}\n"
+        "$archive = [System.IO.Compression.ZipFile]::OpenRead($PackagePath)\n"
+        "try {\n"
+        "  foreach ($entry in $archive.Entries) {\n"
+        "    if ([string]::IsNullOrWhiteSpace($entry.FullName)) { continue }\n"
+        "    $target = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($DestinationPath, $entry.FullName))\n"
+        "    if (-not $target.StartsWith($destinationRoot, [System.StringComparison]::OrdinalIgnoreCase)) {\n"
+        "      throw \"Zip entry escapes plugin package root: $($entry.FullName)\"\n"
+        "    }\n"
+        "  }\n"
+        "} finally {\n"
+        "  $archive.Dispose()\n"
+        "}\n"
+        "[System.IO.Compression.ZipFile]::ExtractToDirectory($PackagePath, $DestinationPath)\n");
     scriptFile.close();
     process.start(QStringLiteral("powershell"),
         QStringList()

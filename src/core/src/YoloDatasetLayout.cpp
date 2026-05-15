@@ -94,16 +94,31 @@ QString labelPathForImagePath(const QString& imagePath, const QString& split)
 
 QString scalarValueFromLine(const QString& line, const QString& key)
 {
-    const QString prefix = key + QStringLiteral(":");
     const QString trimmed = line.trimmed();
-    if (!trimmed.startsWith(prefix)) {
+    const QRegularExpression pattern(QStringLiteral("^%1\\s*:\\s*(.*)$").arg(QRegularExpression::escape(key)));
+    const QRegularExpressionMatch match = pattern.match(trimmed);
+    if (!match.hasMatch()) {
         return {};
     }
-    QString value = trimmed.mid(prefix.size()).trimmed();
+    QString value = match.captured(1).trimmed();
     if (value.startsWith(QLatin1Char('[')) || value.startsWith(QLatin1Char('{'))) {
         return {};
     }
     return unquoteYamlScalar(value);
+}
+
+bool yamlKeyValue(const QString& line, const QString& key, QString* value)
+{
+    const QString trimmed = line.trimmed();
+    const QRegularExpression pattern(QStringLiteral("^%1\\s*:\\s*(.*)$").arg(QRegularExpression::escape(key)));
+    const QRegularExpressionMatch match = pattern.match(trimmed);
+    if (!match.hasMatch()) {
+        return false;
+    }
+    if (value) {
+        *value = match.captured(1).trimmed();
+    }
+    return true;
 }
 
 } // namespace
@@ -170,9 +185,10 @@ YoloDataYaml parseYoloDataYaml(const QString& datasetPath, QString* error)
             inNamesBlock = false;
         }
 
-        if (trimmed.startsWith(QStringLiteral("nc:"))) {
+        QString yamlValue;
+        if (yamlKeyValue(trimmed, QStringLiteral("nc"), &yamlValue)) {
             bool ok = false;
-            const int classCount = trimmed.mid(3).trimmed().toInt(&ok);
+            const int classCount = yamlValue.toInt(&ok);
             if (!ok || classCount <= 0) {
                 if (error) {
                     *error = QStringLiteral("data.yaml:%1 nc must be a positive integer").arg(lineNumber);
@@ -184,12 +200,11 @@ YoloDataYaml parseYoloDataYaml(const QString& datasetPath, QString* error)
             continue;
         }
 
-        if (trimmed.startsWith(QStringLiteral("names:"))) {
-            const QString value = trimmed.mid(6).trimmed();
-            if (value.isEmpty()) {
+        if (yamlKeyValue(trimmed, QStringLiteral("names"), &yamlValue)) {
+            if (yamlValue.isEmpty()) {
                 inNamesBlock = true;
             } else {
-                layout.classNames = parseInlineNames(value);
+                layout.classNames = parseInlineNames(yamlValue);
             }
             continue;
         }

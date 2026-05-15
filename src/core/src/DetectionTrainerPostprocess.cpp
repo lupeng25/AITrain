@@ -1,4 +1,4 @@
-﻿#include "DetectionTrainerInternal.h"
+#include "DetectionTrainerInternal.h"
 
 #include "aitrain/core/Deployment.h"
 
@@ -185,4 +185,3 @@ QVector<OcrDetPrediction> postProcessPaddleOcrDetDbMap(
 }
 
 } // namespace aitrain
-
