@@ -1,6 +1,7 @@
 #include "aitrain/core/ProductWorkflow.h"
 
 #include "ProductWorkflowSupport.h"
+#include "YoloDatasetLayout.h"
 #include "aitrain/core/DatasetValidators.h"
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/OcrRecDataset.h"
@@ -69,9 +70,14 @@ QJsonObject validationIssueCounts(const DatasetValidationResult& validation)
 QJsonObject countYoloClasses(const QString& datasetPath)
 {
     QJsonObject classCounts;
-    const QDir root(datasetPath);
+    QString yamlError;
+    const YoloDataYaml layout = parseYoloDataYaml(datasetPath, &yamlError);
+    if (!yamlError.isEmpty()) {
+        return classCounts;
+    }
     for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
-        const QDir labelDir(root.filePath(QStringLiteral("labels/%1").arg(split)));
+        const YoloSplitPaths splitPaths = yoloSplitPaths(layout, split);
+        const QDir labelDir(splitPaths.labelDir);
         if (!labelDir.exists()) {
             continue;
         }
@@ -99,9 +105,14 @@ QJsonObject countYoloClasses(const QString& datasetPath)
 QJsonObject countImageSplits(const QString& datasetPath)
 {
     QJsonObject splits;
-    const QDir root(datasetPath);
+    QString yamlError;
+    const YoloDataYaml layout = parseYoloDataYaml(datasetPath, &yamlError);
+    if (!yamlError.isEmpty()) {
+        return splits;
+    }
     for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
-        const QDir imageDir(root.filePath(QStringLiteral("images/%1").arg(split)));
+        const YoloSplitPaths splitPaths = yoloSplitPaths(layout, split);
+        const QDir imageDir(splitPaths.imageDir);
         int count = 0;
         if (imageDir.exists()) {
             for (const QString& filter : imageNameFilters()) {
@@ -177,6 +188,9 @@ WorkflowResult createDatasetSnapshotReport(const QString& datasetPath, const QSt
     manifest.insert(QStringLiteral("totalBytes"), QString::number(totalBytes));
     manifest.insert(QStringLiteral("contentHash"), QString::fromLatin1(manifestHash.result().toHex()));
     manifest.insert(QStringLiteral("splits"), countImageSplits(datasetPath));
+    if (format == QStringLiteral("yolo_detection") || format == QStringLiteral("yolo_segmentation")) {
+        manifest.insert(QStringLiteral("classCounts"), countYoloClasses(datasetPath));
+    }
     manifest.insert(QStringLiteral("roleCounts"), roleCounts);
     manifest.insert(QStringLiteral("keyFiles"), keyFileArray);
     manifest.insert(QStringLiteral("imageCount"), roleCounts.value(QStringLiteral("image")).toInt());

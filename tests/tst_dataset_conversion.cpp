@@ -27,6 +27,7 @@ private slots:
     void yoloDetectionRefusesToOverwriteExistingCocoImageTarget();
     void yoloDetectionConvertsToVocXml();
     void yoloSegmentationConvertsToCocoPolygons();
+    void yoloSegmentationCustomSplitPathsAreHonored();
     void copyImagesFalseKeepsReferencedPaths();
     void invalidYoloLabelsReportIssues();
     void yoloDataYamlCustomSplitPathsAreHonored();
@@ -487,6 +488,49 @@ void DatasetConversionTests::yoloSegmentationConvertsToCocoPolygons()
     QVERIFY(QFileInfo::exists(root.filePath(QStringLiteral("converted_coco_seg/images/train/seg.png"))));
 }
 
+void DatasetConversionTests::yoloSegmentationCustomSplitPathsAreHonored()
+{
+    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
+    QVERIFY(temp.isValid());
+    const QDir root(temp.path());
+    const QDir source(root.filePath(QStringLiteral("source_custom_yolo_seg")));
+    writeTinyPngWithSize(source.filePath(QStringLiteral("raw/custom/images/train/seg_train.png")), 100, 80);
+    writeTinyPngWithSize(source.filePath(QStringLiteral("raw/custom/images/val/seg_val.png")), 120, 60);
+    writeTextFile(source.filePath(QStringLiteral("raw/custom/labels/train/seg_train.txt")),
+        QStringLiteral("0 0.100000 0.100000 0.900000 0.100000 0.900000 0.900000 0.100000 0.900000\n"));
+    writeTextFile(source.filePath(QStringLiteral("raw/custom/labels/val/seg_val.txt")),
+        QStringLiteral("0 0.200000 0.200000 0.800000 0.200000 0.800000 0.800000 0.200000 0.800000\n"));
+    writeTextFile(source.filePath(QStringLiteral("data.yaml")),
+        QStringLiteral("path : raw\ntrain : custom/images/train\nval : custom/images/val\nnc : 1\nnames : [part]\n"));
+
+    aitrain::DatasetConversionRequest request;
+    request.sourcePath = source.absolutePath();
+    request.sourceFormat = QStringLiteral("yolo_segmentation");
+    request.targetFormat = QStringLiteral("coco_json");
+    request.outputPath = root.filePath(QStringLiteral("converted_custom_seg"));
+    request.options.insert(QStringLiteral("copyImages"), true);
+
+    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
+    QVERIFY2(result.ok, qPrintable(result.errorMessage));
+    QCOMPARE(result.convertedSampleCount, 2);
+    QCOMPARE(result.convertedAnnotationCount, 2);
+
+    const QJsonObject train = readJsonObjectForConversionTest(root.filePath(QStringLiteral("converted_custom_seg/annotations/train.json")));
+    const QJsonArray trainImages = train.value(QStringLiteral("images")).toArray();
+    QCOMPARE(trainImages.size(), 1);
+    QCOMPARE(trainImages.at(0).toObject().value(QStringLiteral("file_name")).toString(), QStringLiteral("images/train/seg_train.png"));
+    const QJsonArray trainAnnotations = train.value(QStringLiteral("annotations")).toArray();
+    QCOMPARE(trainAnnotations.size(), 1);
+    QVERIFY(!trainAnnotations.at(0).toObject().value(QStringLiteral("segmentation")).toArray().isEmpty());
+    QVERIFY(QFileInfo::exists(root.filePath(QStringLiteral("converted_custom_seg/images/train/seg_train.png"))));
+
+    const QJsonObject val = readJsonObjectForConversionTest(root.filePath(QStringLiteral("converted_custom_seg/annotations/val.json")));
+    const QJsonArray valImages = val.value(QStringLiteral("images")).toArray();
+    QCOMPARE(valImages.size(), 1);
+    QCOMPARE(valImages.at(0).toObject().value(QStringLiteral("file_name")).toString(), QStringLiteral("images/val/seg_val.png"));
+    QVERIFY(QFileInfo::exists(root.filePath(QStringLiteral("converted_custom_seg/images/val/seg_val.png"))));
+}
+
 void DatasetConversionTests::copyImagesFalseKeepsReferencedPaths()
 {
     QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
@@ -550,7 +594,7 @@ void DatasetConversionTests::yoloDataYamlCustomSplitPathsAreHonored()
     writeTextFile(source.filePath(QStringLiteral("dataset/validation/labels/custom_val.txt")),
         QStringLiteral("0 0.250000 0.500000 0.300000 0.500000\n"));
     writeTextFile(source.filePath(QStringLiteral("data.yaml")),
-        QStringLiteral("path: dataset\ntrain: train/images\nval: validation/images\nnc: 1\nnames: [custom]\n"));
+        QStringLiteral("path : dataset\ntrain : train/images\nval : validation/images\nnc : 1\nnames : [custom]\n"));
 
     aitrain::DatasetConversionRequest request;
     request.sourcePath = source.absolutePath();
@@ -677,7 +721,7 @@ void DatasetConversionTests::customSplitPathsCopyToControlledImageLayout()
     writeTextFile(source.filePath(QStringLiteral("raw/custom/labels/val/nested_val.txt")),
         QStringLiteral("0 0.500000 0.500000 0.500000 0.400000\n"));
     writeTextFile(source.filePath(QStringLiteral("data.yaml")),
-        QStringLiteral("path: raw\ntrain: custom/images/train\nval: custom/images/val\nnc: 1\nnames: [item]\n"));
+        QStringLiteral("path : raw\ntrain : custom/images/train\nval : custom/images/val\nnc : 1\nnames : [item]\n"));
 
     aitrain::DatasetConversionRequest request;
     request.sourcePath = source.absolutePath();

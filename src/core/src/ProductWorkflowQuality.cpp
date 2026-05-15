@@ -1,6 +1,7 @@
 #include "aitrain/core/ProductWorkflow.h"
 
 #include "ProductWorkflowSupport.h"
+#include "YoloDatasetLayout.h"
 #include "aitrain/core/DatasetValidators.h"
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/OcrRecDataset.h"
@@ -520,11 +521,12 @@ void scanYoloQuality(DatasetQualityContext& context, bool segmentation)
         context.classNames.append(QStringLiteral("class_%1").arg(context.classNames.size()));
     }
     const int classCount = info.classCount;
-    const QDir root(context.datasetPath);
+    const YoloDataYaml layout = parseYoloDataYaml(context.datasetPath);
 
     for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
-        const QDir imageDir(root.filePath(QStringLiteral("images/%1").arg(split)));
-        const QDir labelDir(root.filePath(QStringLiteral("labels/%1").arg(split)));
+        const YoloSplitPaths splitPaths = yoloSplitPaths(layout, split);
+        const QDir imageDir(splitPaths.imageDir);
+        const QDir labelDir(splitPaths.labelDir);
         QSet<QString> imageBases;
         const QFileInfoList images = imageDir.exists() ? qualityImageFiles(imageDir) : QFileInfoList();
         for (const QFileInfo& imageInfo : images) {

@@ -485,6 +485,60 @@ private slots:
         QVERIFY(!pipeline.payload.value(QStringLiteral("taskIds")).toArray().isEmpty());
     }
 
+    void yoloCustomLayoutReportsUseDataYamlSplitPaths()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("custom-yolo"));
+        writeTextFile(QDir(root).filePath(QStringLiteral("data.yaml")),
+            QStringLiteral("path : raw\ntrain : custom/images/train\nval : custom/images/val\nnc : 2\nnames : [widget, part]\n"));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("raw/custom/images/train/good.png")));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("raw/custom/images/train/no_label.png")));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("raw/custom/images/val/val.png")));
+        writeTextFile(QDir(root).filePath(QStringLiteral("raw/custom/labels/train/good.txt")),
+            QStringLiteral("0 0.5 0.5 0.25 0.25\n"));
+        writeTextFile(QDir(root).filePath(QStringLiteral("raw/custom/labels/val/val.txt")),
+            QStringLiteral("1 0.5 0.5 0.25 0.25\n"));
+
+        const aitrain::WorkflowResult quality = aitrain::curateDatasetQualityReport(
+            root,
+            dir.filePath(QStringLiteral("quality-custom-yolo")),
+            QStringLiteral("yolo_detection"),
+            QJsonObject{{QStringLiteral("maxFiles"), 100}, {QStringLiteral("maxIssues"), 1000}, {QStringLiteral("maxProblemSamples"), 1000}});
+        QVERIFY2(quality.ok, qPrintable(quality.error));
+        const QJsonObject qualityReport = readJsonObject(quality.payload.value(QStringLiteral("reportPath")).toString());
+        const QJsonObject splitCounts = qualityReport.value(QStringLiteral("splitCounts")).toObject();
+        QCOMPARE(splitCounts.value(QStringLiteral("train")).toInt(), 2);
+        QCOMPARE(splitCounts.value(QStringLiteral("val")).toInt(), 1);
+        QCOMPARE(splitCounts.value(QStringLiteral("test")).toInt(), 0);
+        const QJsonObject classDistribution = qualityReport.value(QStringLiteral("classDistribution")).toObject();
+        QCOMPARE(classDistribution.value(QStringLiteral("0")).toInt(), 1);
+        QCOMPARE(classDistribution.value(QStringLiteral("1")).toInt(), 1);
+        const QJsonArray problemSamples = qualityReport.value(QStringLiteral("problemSamples")).toArray();
+        bool sawCustomMissingLabel = false;
+        for (const QJsonValue& value : problemSamples) {
+            const QJsonObject sample = value.toObject();
+            const QString imagePath = QDir::fromNativeSeparators(sample.value(QStringLiteral("imagePath")).toString());
+            sawCustomMissingLabel = sawCustomMissingLabel
+                || (sample.value(QStringLiteral("reason")).toString() == QStringLiteral("missing_label")
+                    && imagePath.endsWith(QStringLiteral("raw/custom/images/train/no_label.png")));
+        }
+        QVERIFY(sawCustomMissingLabel);
+
+        const aitrain::WorkflowResult snapshot = aitrain::createDatasetSnapshotReport(
+            root,
+            dir.filePath(QStringLiteral("snapshot-custom-yolo")),
+            QStringLiteral("yolo_detection"));
+        QVERIFY2(snapshot.ok, qPrintable(snapshot.error));
+        const QJsonObject imageSplits = snapshot.payload.value(QStringLiteral("splits")).toObject();
+        QCOMPARE(imageSplits.value(QStringLiteral("train")).toInt(), 2);
+        QCOMPARE(imageSplits.value(QStringLiteral("val")).toInt(), 1);
+        QCOMPARE(imageSplits.value(QStringLiteral("test")).toInt(), 0);
+        const QJsonObject classCounts = snapshot.payload.value(QStringLiteral("classCounts")).toObject();
+        QCOMPARE(classCounts.value(QStringLiteral("0")).toInt(), 1);
+        QCOMPARE(classCounts.value(QStringLiteral("1")).toInt(), 1);
+    }
+
     void datasetQualityCatchesProblemSamples()
     {
         QTemporaryDir dir;

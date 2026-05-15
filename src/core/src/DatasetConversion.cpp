@@ -1,5 +1,6 @@
 #include "aitrain/core/DatasetConversion.h"
 
+#include "YoloDatasetLayout.h"
 #include "aitrain/core/DatasetValidators.h"
 
 #include <QDateTime>
@@ -759,76 +760,6 @@ QStringList parseYoloNamesFromYaml(const QString& yamlText, bool* foundNames = n
     return names;
 }
 
-QString unquotedYamlScalar(QString value)
-{
-    value = value.trimmed();
-    const int commentIndex = value.indexOf(QLatin1Char('#'));
-    if (commentIndex >= 0) {
-        value = value.left(commentIndex).trimmed();
-    }
-    if ((value.startsWith(QLatin1Char('\'')) && value.endsWith(QLatin1Char('\'')))
-        || (value.startsWith(QLatin1Char('"')) && value.endsWith(QLatin1Char('"')))) {
-        value = value.mid(1, value.size() - 2);
-    }
-    return value.trimmed();
-}
-
-QString parseYoloScalarFromYaml(const QString& yamlText, const QString& key)
-{
-    const QString prefix = key + QLatin1Char(':');
-    const QStringList lines = yamlText.split(QLatin1Char('\n'));
-    for (const QString& rawLine : lines) {
-        const QString line = rawLine.trimmed();
-        if (!line.startsWith(prefix)) {
-            continue;
-        }
-        return unquotedYamlScalar(line.mid(prefix.size()));
-    }
-    return {};
-}
-
-int parseYoloClassCountFromYaml(const QString& yamlText)
-{
-    const QStringList lines = yamlText.split(QLatin1Char('\n'));
-    for (const QString& rawLine : lines) {
-        const QString line = rawLine.trimmed();
-        if (!line.startsWith(QStringLiteral("nc:"))) {
-            continue;
-        }
-        bool ok = false;
-        const int count = line.mid(QStringLiteral("nc:").size()).trimmed().toInt(&ok);
-        if (ok && count > 0) {
-            return count;
-        }
-    }
-    return 0;
-}
-
-QString resolveYoloPath(const QString& basePath, const QString& value)
-{
-    if (value.isEmpty()) {
-        return QDir::cleanPath(basePath);
-    }
-    if (QFileInfo(value).isAbsolute()) {
-        return QDir::cleanPath(value);
-    }
-    return QDir(basePath).filePath(value);
-}
-
-QString labelPathForYoloImagePath(QString imagePath)
-{
-    imagePath = jsonPath(imagePath);
-    if (imagePath.startsWith(QStringLiteral("images/"))) {
-        return QStringLiteral("labels/") + imagePath.mid(QStringLiteral("images/").size());
-    }
-    imagePath.replace(QStringLiteral("/images/"), QStringLiteral("/labels/"));
-    if (imagePath.endsWith(QStringLiteral("/images"))) {
-        imagePath.chop(QStringLiteral("/images").size());
-        imagePath += QStringLiteral("/labels");
-    }
-    return imagePath;
-}
-
 QStringList supportedImageNameFilters()
 {
     return QStringList{
@@ -1093,37 +1024,35 @@ YoloDataset parseYoloDataset(const DatasetConversionRequest& request, bool segme
     const QString dataYamlPath = root.filePath(QStringLiteral("data.yaml"));
     QString yamlText;
     int requestedClassCount = 0;
-    QString yamlBasePath = dataset.rootPath;
-    QString trainImagePath = QStringLiteral("images/train");
-    QString valImagePath = QStringLiteral("images/val");
     bool hasYamlSplitPaths = false;
+    QString yamlError;
+    const YoloDataYaml layout = parseYoloDataYaml(dataset.rootPath, &yamlError);
     if (QFileInfo::exists(dataYamlPath)) {
         QFile yamlFile(dataYamlPath);
         if (yamlFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
             yamlText = QString::fromUtf8(yamlFile.readAll());
-            bool foundNames = false;
-            const QStringList names = parseYoloNamesFromYaml(yamlText, &foundNames);
-            dataset.namesFromYaml = foundNames && !names.isEmpty();
-            requestedClassCount = parseYoloClassCountFromYaml(yamlText);
+            QStringList names = layout.classNames;
+            if (names.isEmpty()) {
+                bool foundNames = false;
+                names = parseYoloNamesFromYaml(yamlText, &foundNames);
+                dataset.namesFromYaml = foundNames && !names.isEmpty();
+            } else {
+                dataset.namesFromYaml = true;
+            }
+            requestedClassCount = layout.classCount;
             for (int index = 0; index < names.size(); ++index) {
                 YoloClass cls;
                 cls.id = index;
                 cls.name = names.at(index);
                 dataset.classes.append(cls);
             }
-            const QString yamlPath = parseYoloScalarFromYaml(yamlText, QStringLiteral("path"));
-            yamlBasePath = resolveYoloPath(dataset.rootPath, yamlPath);
-            const QString yamlTrain = parseYoloScalarFromYaml(yamlText, QStringLiteral("train"));
-            const QString yamlVal = parseYoloScalarFromYaml(yamlText, QStringLiteral("val"));
-            if (!yamlTrain.isEmpty()) {
-                trainImagePath = yamlTrain;
-                hasYamlSplitPaths = true;
-            }
-            if (!yamlVal.isEmpty()) {
-                valImagePath = yamlVal;
-                hasYamlSplitPaths = true;
-            }
+            hasYamlSplitPaths = layout.splitImagePaths.contains(QStringLiteral("train"))
+                || layout.splitImagePaths.contains(QStringLiteral("val"));
         }
+    }
+    if (!yamlError.isEmpty() && result) {
+        result->issues.append(issue(QStringLiteral("warning"), QStringLiteral("invalid_data_yaml"), dataYamlPath, dataset.rootPath, QString(),
+            yamlError));
     }
 
     if (result) {
@@ -1133,22 +1062,17 @@ YoloDataset parseYoloDataset(const DatasetConversionRequest& request, bool segme
 
     int nextImageId = 0;
     int maxClassId = dataset.classes.size() - 1;
-    const QVector<QPair<QString, QString>> splits{
-        qMakePair(QStringLiteral("train"), trainImagePath),
-        qMakePair(QStringLiteral("val"), valImagePath)
-    };
     QSet<QString> processedImageRoots;
-    for (const QPair<QString, QString>& splitPath : splits) {
-        const QString split = splitPath.first;
-        const QString imagePath = splitPath.second;
-        const QString imagesRoot = resolveYoloPath(yamlBasePath, imagePath);
+    for (const QString& split : {QStringLiteral("train"), QStringLiteral("val")}) {
+        const YoloSplitPaths splitPaths = yoloSplitPaths(layout, split);
+        const QString imagesRoot = splitPaths.imageDir;
         const QString cleanImagesRoot = QDir::cleanPath(imagesRoot).toLower();
         if (processedImageRoots.contains(cleanImagesRoot)) {
             dataset.splitCounts.insert(split, 0);
             continue;
         }
         processedImageRoots.insert(cleanImagesRoot);
-        const QString labelsRoot = resolveYoloPath(yamlBasePath, labelPathForYoloImagePath(imagePath));
+        const QString labelsRoot = splitPaths.labelDir;
         const QStringList images = sortedImageFiles(imagesRoot);
         dataset.splitCounts.insert(split, images.size());
         appendYoloImageForSplit(split, imagesRoot, labelsRoot, jsonPath(QStringLiteral("images/%1").arg(split)), images, segmentation, dataset.namesFromYaml,
