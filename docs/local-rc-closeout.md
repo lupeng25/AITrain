@@ -2,7 +2,7 @@
 
 This checklist is the local, non-external release-candidate closeout path after Phase 39B, Phase 39C, Phase 41 Lite, and Phase 49 Lite. It does not add new model backends. It exists to make the current detection, segmentation, OCR, pipeline, benchmark, model registry, delivery report, environment profile, sample review, deployment validation, diagnostics, and delivery acceptance loop repeatable on the development machine.
 
-After this local gate passes, use `docs\external-acceptance-handoff.md` and `docs\acceptance-templates\` for the clean Windows package and RTX / SM 75+ TensorRT external acceptance handoff.
+After this local gate passes, use `docs\external-acceptance-handoff.md` and `docs\acceptance-templates\` for the clean Windows package handoff and for any explicitly reopened package-root RTX / SM 75+ TensorRT rerun. The RTX 4090 D source-side TensorRT validation lane already has passing evidence recorded under `.deps\rtx4090-validation`; do not weaken or overwrite that lane with package-root or clean-machine status.
 
 ## Scope
 
@@ -18,7 +18,7 @@ Local closeout covers:
 Out of scope:
 
 - Clean Windows machine acceptance.
-- RTX / SM 75+ TensorRT engine acceptance.
+- Clean Windows package-root TensorRT rerun or independent external TensorRT refresh. The existing RTX 4090 D validation evidence remains the recorded passing TensorRT lane unless a new package-root rerun is explicitly requested and returned.
 - New classification, pose, OBB, or anomaly training backends.
 - Embedding Python training or annotation tools into the GUI process.
 
@@ -86,7 +86,7 @@ Before marking the local RC closeout done, check docs and UI text for:
 - Ultralytics YOLO official backends require installed official Python packages and license review before redistribution.
 - PaddleOCR Rec CTC backend is a small PaddlePaddle CTC trainer, not a full PP-OCRv4 official pipeline.
 - PaddleOCR System is official `predict_system.py` tool orchestration, not C++ DB ONNX postprocess.
-- TensorRT on GTX 1060 / SM 61 is `hardware-blocked`; RTX / SM 75+ is still required for real TensorRT acceptance.
+- TensorRT on GTX 1060 / SM 61 is `hardware-blocked`; RTX / SM 75+ is still required for real TensorRT acceptance. The RTX 4090 D validation lane already passed, while clean Windows package-root reruns remain separate evidence.
 - Customer-domain OCR production readiness requires customer/target-domain data; Total-Text, generated smoke, and `.deps` examples are workflow smoke only.
 - NCNN v1 deployment validation checks artifact presence only; it is not runtime inference validation.
 - Phase 40 classification / pose / OBB / anomaly backends remain deferred until priorities are reset.
@@ -98,6 +98,6 @@ After closeout passes locally, update `docs/harness/current-status.md` with:
 - Phase 42 Lite local RC closeout status.
 - Commands run and whether CPU training smoke was included.
 - Any skipped heavy smoke and why.
-- External clean Windows and RTX TensorRT acceptance remaining pending.
+- External clean Windows package acceptance remaining pending, and any package-root TensorRT rerun marked separately from the already-passed RTX 4090 D validation lane.
 
-The next handoff step is to send the package plus `docs\external-acceptance-handoff.md` and collect filled templates from the external clean Windows and TensorRT machines.
+The next handoff step, when explicitly reopened, is to send the package plus `docs\external-acceptance-handoff.md` and collect filled templates from the external clean Windows machine and any requested package-root TensorRT machine.

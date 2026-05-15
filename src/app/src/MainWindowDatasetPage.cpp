@@ -179,7 +179,7 @@ QWidget* MainWindow::buildDatasetPage()
     datasetConversionTargetErrorLabel_->setStyleSheet(QStringLiteral("color: #DC2626;"));
     datasetConversionTargetErrorLabel_->hide();
     conversionForm->addRow(QString(), datasetConversionTargetErrorLabel_);
-    conversionForm->addRow(QStringLiteral("输入目录"), conversionInputRow);
+    conversionForm->addRow(QStringLiteral("输入路径"), conversionInputRow);
     datasetConversionInputErrorLabel_ = new QLabel;
     datasetConversionInputErrorLabel_->setStyleSheet(QStringLiteral("color: #DC2626;"));
     datasetConversionInputErrorLabel_->hide();

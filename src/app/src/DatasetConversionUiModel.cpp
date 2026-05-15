@@ -128,12 +128,21 @@ DatasetConversionValidation validateDatasetConversionForm(const DatasetConversio
 
     QString normalizedInputPath;
     if (form.inputPath.trimmed().isEmpty()) {
-        validation.inputPathError = QStringLiteral("请选择输入目录。");
+        validation.inputPathError = QStringLiteral("请选择输入路径。");
     } else {
         normalizedInputPath = normalizedDatasetConversionPath(form.inputPath);
         const QFileInfo inputInfo(normalizedInputPath);
         if (!inputInfo.exists()) {
-            validation.inputPathError = QStringLiteral("输入目录不存在。");
+            validation.inputPathError = QStringLiteral("输入路径不存在。");
+        } else if (sourceFormat == QStringLiteral("coco_json")) {
+            if (!inputInfo.isFile() || inputInfo.suffix().compare(QStringLiteral("json"), Qt::CaseInsensitive) != 0) {
+                validation.inputPathError = QStringLiteral("COCO 输入路径必须是 JSON 文件。");
+            }
+        } else if (sourceFormat == QStringLiteral("voc_xml")) {
+            if (!inputInfo.isDir()
+                && !(inputInfo.isFile() && inputInfo.suffix().compare(QStringLiteral("xml"), Qt::CaseInsensitive) == 0)) {
+                validation.inputPathError = QStringLiteral("VOC 输入路径必须是 XML 文件或目录。");
+            }
         } else if (!inputInfo.isDir()) {
             validation.inputPathError = QStringLiteral("输入路径必须是目录。");
         }
@@ -153,7 +162,7 @@ DatasetConversionValidation validateDatasetConversionForm(const DatasetConversio
             && normalizedOutputPath == normalizedInputPath
 #endif
         ) {
-            validation.outputPathError = QStringLiteral("输出目录不能与输入目录相同。");
+            validation.outputPathError = QStringLiteral("输出目录不能与输入路径相同。");
         } else {
             const QDir outputParent = outputInfo.absoluteDir();
             const QFileInfo outputParentInfo(outputParent.absolutePath());

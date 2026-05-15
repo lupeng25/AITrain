@@ -208,7 +208,8 @@ QString defaultDatasetConversionOutputPath(const QString& sourcePath, const QStr
         return QString();
     }
 
-    QString datasetName = QFileInfo(normalizedSourcePath).fileName();
+    const QFileInfo sourceInfo(normalizedSourcePath);
+    QString datasetName = sourceInfo.isFile() ? sourceInfo.completeBaseName() : sourceInfo.fileName();
     if (datasetName.isEmpty()) {
         datasetName = QStringLiteral("dataset");
     }
@@ -220,7 +221,8 @@ QString defaultDatasetConversionOutputPath(const QString& sourcePath, const QStr
         QDir().mkpath(conversionRoot);
         return QDir::cleanPath(QDir(conversionRoot).filePath(directoryName));
     }
-    const QString outputPath = QDir(normalizedSourcePath).absoluteFilePath(QStringLiteral("../converted/%1").arg(directoryName));
+    const QDir sourceDir(sourceInfo.isFile() ? sourceInfo.absolutePath() : normalizedSourcePath);
+    const QString outputPath = sourceDir.absoluteFilePath(QStringLiteral("../converted/%1").arg(directoryName));
     return QDir::cleanPath(outputPath);
 }
 
@@ -363,28 +365,34 @@ void MainWindow::refreshDatasetConversionDefaultsFromCurrentDataset()
 
 void MainWindow::browseDatasetConversionInput()
 {
-    const QString directory = QFileDialog::getExistingDirectory(this, QStringLiteral("选择待转换数据集目录"));
-    if (directory.isEmpty()) {
+    const QString sourceFormat = comboCurrentDataOrText(datasetConversionSourceFormatCombo_);
+    const bool expectsCocoJsonFile = sourceFormat == QStringLiteral("coco_json");
+    const QString selectedPath = expectsCocoJsonFile
+        ? QFileDialog::getOpenFileName(this, QStringLiteral("选择 COCO JSON 标注文件"), QString(), QStringLiteral("JSON 文件 (*.json);;所有文件 (*)"))
+        : QFileDialog::getExistingDirectory(this, QStringLiteral("选择待转换数据集目录"));
+    if (selectedPath.isEmpty()) {
         return;
     }
 
-    const QString normalizedDirectory = QDir::fromNativeSeparators(directory);
+    const QString normalizedInputPath = QDir::fromNativeSeparators(selectedPath);
     if (datasetConversionInputEdit_) {
-        datasetConversionInputEdit_->setText(QDir::toNativeSeparators(normalizedDirectory));
+        datasetConversionInputEdit_->setText(QDir::toNativeSeparators(normalizedInputPath));
     }
 
-    const QString detectedFormat = detectDatasetFormatFromPath(normalizedDirectory);
-    if (!detectedFormat.isEmpty()
-        && supportedDatasetConversionSourceFormats().contains(detectedFormat)
-        && datasetConversionSourceFormatCombo_) {
-        setComboCurrentData(datasetConversionSourceFormatCombo_, detectedFormat);
-    } else {
-        updateDatasetConversionTargetFormats();
+    if (!expectsCocoJsonFile) {
+        const QString detectedFormat = detectDatasetFormatFromPath(normalizedInputPath);
+        if (!detectedFormat.isEmpty()
+            && supportedDatasetConversionSourceFormats().contains(detectedFormat)
+            && datasetConversionSourceFormatCombo_) {
+            setComboCurrentData(datasetConversionSourceFormatCombo_, detectedFormat);
+        } else {
+            updateDatasetConversionTargetFormats();
+        }
     }
 
     if (datasetConversionOutputEdit_) {
         const QString targetFormat = comboCurrentDataOrText(datasetConversionTargetFormatCombo_);
-        const QString outputPath = defaultDatasetConversionOutputPath(normalizedDirectory, currentProjectPath_, targetFormat);
+        const QString outputPath = defaultDatasetConversionOutputPath(normalizedInputPath, currentProjectPath_, targetFormat);
         if (!outputPath.isEmpty()) {
             datasetConversionOutputEdit_->setText(QDir::toNativeSeparators(outputPath));
         }

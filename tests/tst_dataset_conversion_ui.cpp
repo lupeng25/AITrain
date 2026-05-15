@@ -13,6 +13,7 @@ private slots:
     void targetFormatsFollowConversionMatrix();
     void unsupportedSourceHasNoTargets();
     void validFormPassesPreflight();
+    void cocoJsonFileInputPassesPreflight();
     void validFormTrimsFormatFields();
     void sameInputAndOutputDirectoryIsRejected();
     void unsupportedPairAndMissingInputAreRejected();
@@ -54,8 +55,8 @@ void DatasetConversionUiTests::validFormPassesPreflight()
     QVERIFY(root.mkpath(QStringLiteral("input")));
 
     aitrain_app::DatasetConversionForm form;
-    form.sourceFormat = QStringLiteral("coco_json");
-    form.targetFormat = QStringLiteral("yolo_detection");
+    form.sourceFormat = QStringLiteral("yolo_detection");
+    form.targetFormat = QStringLiteral("coco_json");
     form.inputPath = root.filePath(QStringLiteral("input"));
     form.outputPath = root.filePath(QStringLiteral("output"));
     form.workerRunning = false;
@@ -63,6 +64,27 @@ void DatasetConversionUiTests::validFormPassesPreflight()
     const aitrain_app::DatasetConversionValidation validation = aitrain_app::validateDatasetConversionForm(form);
     QVERIFY(validation.ok);
     QCOMPARE(validation.summary, QStringLiteral("可以开始转换。"));
+    QVERIFY(validation.messages.isEmpty());
+}
+
+void DatasetConversionUiTests::cocoJsonFileInputPassesPreflight()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QDir root(temp.path());
+    QFile annotations(root.filePath(QStringLiteral("annotations.json")));
+    QVERIFY(annotations.open(QIODevice::WriteOnly));
+    annotations.write("{}");
+    annotations.close();
+
+    aitrain_app::DatasetConversionForm form;
+    form.sourceFormat = QStringLiteral("coco_json");
+    form.targetFormat = QStringLiteral("yolo_detection");
+    form.inputPath = annotations.fileName();
+    form.outputPath = root.filePath(QStringLiteral("output"));
+
+    const aitrain_app::DatasetConversionValidation validation = aitrain_app::validateDatasetConversionForm(form);
+    QVERIFY(validation.ok);
     QVERIFY(validation.messages.isEmpty());
 }
 
@@ -74,8 +96,8 @@ void DatasetConversionUiTests::validFormTrimsFormatFields()
     QVERIFY(root.mkpath(QStringLiteral("input")));
 
     aitrain_app::DatasetConversionForm form;
-    form.sourceFormat = QStringLiteral(" coco_json ");
-    form.targetFormat = QStringLiteral(" yolo_detection ");
+    form.sourceFormat = QStringLiteral(" yolo_detection ");
+    form.targetFormat = QStringLiteral(" coco_json ");
     form.inputPath = root.filePath(QStringLiteral("input"));
     form.outputPath = root.filePath(QStringLiteral("output"));
 
@@ -91,14 +113,14 @@ void DatasetConversionUiTests::sameInputAndOutputDirectoryIsRejected()
     QVERIFY(temp.isValid());
 
     aitrain_app::DatasetConversionForm form;
-    form.sourceFormat = QStringLiteral("coco_json");
-    form.targetFormat = QStringLiteral("yolo_detection");
+    form.sourceFormat = QStringLiteral("yolo_detection");
+    form.targetFormat = QStringLiteral("coco_json");
     form.inputPath = temp.path();
     form.outputPath = temp.path();
 
     const aitrain_app::DatasetConversionValidation validation = aitrain_app::validateDatasetConversionForm(form);
     QVERIFY(!validation.ok);
-    QCOMPARE(validation.outputPathError, QStringLiteral("输出目录不能与输入目录相同。"));
+    QCOMPARE(validation.outputPathError, QStringLiteral("输出目录不能与输入路径相同。"));
 }
 
 void DatasetConversionUiTests::unsupportedPairAndMissingInputAreRejected()
@@ -116,7 +138,7 @@ void DatasetConversionUiTests::unsupportedPairAndMissingInputAreRejected()
     const aitrain_app::DatasetConversionValidation validation = aitrain_app::validateDatasetConversionForm(form);
     QVERIFY(!validation.ok);
     QCOMPARE(validation.targetFormatError, QStringLiteral("当前源格式不支持转换到该目标格式。"));
-    QCOMPARE(validation.inputPathError, QStringLiteral("输入目录不存在。"));
+    QCOMPARE(validation.inputPathError, QStringLiteral("输入路径不存在。"));
 }
 
 void DatasetConversionUiTests::invalidSourceStillReportsTargetPairError()
@@ -135,7 +157,7 @@ void DatasetConversionUiTests::invalidSourceStillReportsTargetPairError()
     QVERIFY(!validation.ok);
     QCOMPARE(validation.sourceFormatError, QStringLiteral("当前不支持该源格式。"));
     QCOMPARE(validation.targetFormatError, QStringLiteral("当前源格式不支持转换到该目标格式。"));
-    QCOMPARE(validation.inputPathError, QStringLiteral("输入目录不存在。"));
+    QCOMPARE(validation.inputPathError, QStringLiteral("输入路径不存在。"));
     QCOMPARE(validation.summary, QStringLiteral("请修正 3 个字段后再转换。"));
 }
 
