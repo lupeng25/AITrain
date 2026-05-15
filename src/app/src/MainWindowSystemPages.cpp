@@ -256,7 +256,7 @@ QWidget* MainWindow::buildEnvironmentPage()
         environmentTable_->setItem(row, 1, new QTableWidgetItem(uiText("未检测")));
         environmentTable_->setItem(row, 2, new QTableWidgetItem(uiText("点击执行环境自检。")));
     }
-    panel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("TensorRT 真机验收仍需要 RTX / SM 75+。当前 GTX 1060 / SM 61 只能记录为 hardware-blocked。")));
+    panel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("TensorRT 已有 RTX 4090 D 验收证据；不兼容 GPU/runtime 会记录为 hardware-blocked，包体或客户机验收需以实际环境证据为准。")));
     panel->bodyLayout()->addWidget(environmentTable_);
     layout->addWidget(headerPanel);
     layout->addWidget(summaryStrip);

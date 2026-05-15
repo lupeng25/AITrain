@@ -461,7 +461,13 @@ private slots:
         QTemporaryDir dir;
         QVERIFY(dir.isValid());
         const QString root = dir.filePath(QStringLiteral("dataset"));
-        writeTinyDetectionDataset(root);
+        const QDir rootDir(root);
+        writeTextFile(rootDir.filePath(QStringLiteral("data.yaml")),
+            QStringLiteral("path: raw\ntrain: custom/images/train\nval: custom/images/val\nnc: 1\nnames: [item]\n"));
+        writeTinyPng(rootDir.filePath(QStringLiteral("raw/custom/images/train/a.png")));
+        writeTinyPng(rootDir.filePath(QStringLiteral("raw/custom/images/val/b.png")));
+        writeTextFile(rootDir.filePath(QStringLiteral("raw/custom/labels/train/a.txt")), QStringLiteral("0 0.5 0.5 0.25 0.25\n"));
+        writeTextFile(rootDir.filePath(QStringLiteral("raw/custom/labels/val/b.txt")), QStringLiteral("0 0.5 0.5 0.25 0.25\n"));
         const QString fakePackageRoot = dir.filePath(QStringLiteral("fake-pythonpath"));
         writeFakeUltralyticsPackage(fakePackageRoot);
         const QString outputPath = dir.filePath(QStringLiteral("worker-ultralytics-yolo"));
@@ -522,7 +528,14 @@ private slots:
         }
         QVERIFY(sawBackend);
         QVERIFY(sawCompletedOnnx);
-        QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("aitrain_yolo_data.yaml"))));
+        const QString normalizedDataYamlPath = QDir(outputPath).filePath(QStringLiteral("aitrain_yolo_data.yaml"));
+        QVERIFY(QFileInfo::exists(normalizedDataYamlPath));
+        QFile normalizedDataYaml(normalizedDataYamlPath);
+        QVERIFY(normalizedDataYaml.open(QIODevice::ReadOnly | QIODevice::Text));
+        const QString normalizedDataYamlText = QString::fromUtf8(normalizedDataYaml.readAll());
+        QVERIFY(normalizedDataYamlText.contains(QStringLiteral("raw")));
+        QVERIFY(normalizedDataYamlText.contains(QStringLiteral("custom/images/train")));
+        QVERIFY(normalizedDataYamlText.contains(QStringLiteral("custom/images/val")));
         QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("ultralytics_training_report.json"))));
         QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("ultralytics_runs/fake-run/weights/best.pt"))));
         QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("ultralytics_runs/fake-run/weights/best.onnx"))));

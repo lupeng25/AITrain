@@ -1,6 +1,7 @@
 #include "aitrain/core/ProductWorkflow.h"
 
 #include "ProductWorkflowSupport.h"
+#include "YoloDatasetLayout.h"
 #include "aitrain/core/DatasetValidators.h"
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/OcrRecDataset.h"
@@ -175,9 +176,14 @@ QString evaluationSummaryMarkdown(const QJsonObject& report)
 
 bool detectionSplitExists(const QString& datasetPath, const QString& split)
 {
-    const QDir root(datasetPath);
-    return QDir(root.filePath(QStringLiteral("images/%1").arg(split))).exists()
-        && QDir(root.filePath(QStringLiteral("labels/%1").arg(split))).exists();
+    QString yamlError;
+    const YoloDataYaml layout = parseYoloDataYaml(datasetPath, &yamlError);
+    if (!yamlError.isEmpty()) {
+        return false;
+    }
+    const YoloSplitPaths splitPaths = yoloSplitPaths(layout, split);
+    return QDir(splitPaths.imageDir).exists()
+        && QDir(splitPaths.labelDir).exists();
 }
 
 QString selectDetectionSplit(const QString& datasetPath)

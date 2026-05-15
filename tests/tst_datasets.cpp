@@ -60,6 +60,53 @@ private slots:
         QVERIFY(QFileInfo::exists(QDir(root).filePath(QStringLiteral("images/train/sample_0.jpg"))));
     }
 
+    void yoloDetectionCustomDataYamlPaths()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("custom-detection"));
+        const QDir rootDir(root);
+        writeTextFile(rootDir.filePath(QStringLiteral("data.yaml")),
+            QStringLiteral("path: raw\ntrain: custom/images/train\nval: custom/images/val\nnc: 2\nnames:\n  0: widget\n  1: part\n"));
+        writeTinyPng(rootDir.filePath(QStringLiteral("raw/custom/images/train/a.jpg")));
+        writeTinyPng(rootDir.filePath(QStringLiteral("raw/custom/images/val/b.jpg")));
+        writeTextFile(rootDir.filePath(QStringLiteral("raw/custom/labels/train/a.txt")), QStringLiteral("0 0.5 0.5 0.25 0.25\n"));
+        writeTextFile(rootDir.filePath(QStringLiteral("raw/custom/labels/val/b.txt")), QStringLiteral("1 0.5 0.5 0.20 0.20\n"));
+
+        const aitrain::DatasetValidationResult valid = aitrain::validateYoloDetectionDataset(root);
+        QVERIFY2(valid.ok, qPrintable(valid.errors.join(QStringLiteral("\n"))));
+        QCOMPARE(valid.sampleCount, 2);
+
+        QString error;
+        aitrain::DetectionDataset dataset;
+        QVERIFY2(dataset.load(root, QStringLiteral("train"), &error), qPrintable(error));
+        QCOMPARE(dataset.size(), 1);
+        QCOMPARE(dataset.info().classNames.at(1), QStringLiteral("part"));
+        QVERIFY(dataset.samples().first().imagePath.contains(QStringLiteral("raw/custom/images/train")));
+
+        QJsonObject options;
+        options.insert(QStringLiteral("trainRatio"), 0.5);
+        options.insert(QStringLiteral("valRatio"), 0.5);
+        options.insert(QStringLiteral("testRatio"), 0.0);
+        options.insert(QStringLiteral("seed"), 11);
+        const QString output = dir.filePath(QStringLiteral("normalized-detection"));
+        const aitrain::DatasetSplitResult split = aitrain::splitYoloDetectionDataset(root, output, options);
+        QVERIFY2(split.ok, qPrintable(split.errors.join(QStringLiteral("\n"))));
+        QCOMPARE(split.trainCount, 1);
+        QCOMPARE(split.valCount, 1);
+
+        QFile dataYaml(QDir(output).filePath(QStringLiteral("data.yaml")));
+        QVERIFY(dataYaml.open(QIODevice::ReadOnly | QIODevice::Text));
+        const QString dataYamlText = QString::fromUtf8(dataYaml.readAll());
+        QVERIFY(dataYamlText.contains(QStringLiteral("path: .")));
+        QVERIFY(dataYamlText.contains(QStringLiteral("train: images/train")));
+        QVERIFY(!dataYamlText.contains(QStringLiteral("custom/images")));
+
+        const aitrain::DatasetValidationResult normalized = aitrain::validateYoloDetectionDataset(output);
+        QVERIFY2(normalized.ok, qPrintable(normalized.errors.join(QStringLiteral("\n"))));
+        QCOMPARE(normalized.sampleCount, 2);
+    }
+
     void yoloSegmentationAndOcrDatasetSplit()
     {
         QTemporaryDir dir;
@@ -91,6 +138,45 @@ private slots:
         QVERIFY(QFileInfo::exists(QDir(ocrOutput).filePath(QStringLiteral("split_report.json"))));
         const aitrain::DatasetValidationResult validation = aitrain::validatePaddleOcrRecDataset(ocrOutput);
         QVERIFY2(validation.ok, qPrintable(validation.errors.join(QStringLiteral("\n"))));
+    }
+
+    void yoloSegmentationCustomDataYamlPaths()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("custom-segmentation"));
+        const QDir rootDir(root);
+        writeTextFile(rootDir.filePath(QStringLiteral("data.yaml")),
+            QStringLiteral("path: raw\ntrain: custom/images/train\nval: custom/images/val\nnc: 1\nnames:\n  - part\n"));
+        writeTinyPng(rootDir.filePath(QStringLiteral("raw/custom/images/train/a.png")));
+        writeTinyPng(rootDir.filePath(QStringLiteral("raw/custom/images/val/b.png")));
+        writeTextFile(rootDir.filePath(QStringLiteral("raw/custom/labels/train/a.txt")),
+            QStringLiteral("0 0.10 0.10 0.80 0.10 0.80 0.80 0.10 0.80\n"));
+        writeTextFile(rootDir.filePath(QStringLiteral("raw/custom/labels/val/b.txt")),
+            QStringLiteral("0 0.20 0.20 0.70 0.20 0.70 0.70 0.20 0.70\n"));
+
+        const aitrain::DatasetValidationResult valid = aitrain::validateYoloSegmentationDataset(root);
+        QVERIFY2(valid.ok, qPrintable(valid.errors.join(QStringLiteral("\n"))));
+        QCOMPARE(valid.sampleCount, 2);
+
+        QString error;
+        aitrain::SegmentationDataset dataset;
+        QVERIFY2(dataset.load(root, QStringLiteral("val"), &error), qPrintable(error));
+        QCOMPARE(dataset.size(), 1);
+        QVERIFY(dataset.samples().first().imagePath.contains(QStringLiteral("raw/custom/images/val")));
+
+        QJsonObject options;
+        options.insert(QStringLiteral("trainRatio"), 0.5);
+        options.insert(QStringLiteral("valRatio"), 0.5);
+        options.insert(QStringLiteral("testRatio"), 0.0);
+        options.insert(QStringLiteral("seed"), 13);
+        const QString output = dir.filePath(QStringLiteral("normalized-segmentation"));
+        const aitrain::DatasetSplitResult split = aitrain::splitYoloSegmentationDataset(root, output, options);
+        QVERIFY2(split.ok, qPrintable(split.errors.join(QStringLiteral("\n"))));
+
+        const aitrain::DatasetValidationResult normalized = aitrain::validateYoloSegmentationDataset(output);
+        QVERIFY2(normalized.ok, qPrintable(normalized.errors.join(QStringLiteral("\n"))));
+        QCOMPARE(normalized.sampleCount, 2);
     }
 
     void detectionDatasetLoadsSplit()

@@ -1,5 +1,7 @@
 #include "aitrain/core/SegmentationDataset.h"
 
+#include "YoloDatasetLayout.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -163,8 +165,17 @@ bool SegmentationDataset::load(const QString& datasetPath, const QString& split,
         return false;
     }
 
-    const QDir imageDir(QDir(rootPath_).filePath(QStringLiteral("images/%1").arg(split_)));
-    const QDir labelDir(QDir(rootPath_).filePath(QStringLiteral("labels/%1").arg(split_)));
+    QString yamlError;
+    const YoloDataYaml layout = parseYoloDataYaml(rootPath_, &yamlError);
+    if (!yamlError.isEmpty()) {
+        if (error) {
+            *error = yamlError;
+        }
+        return false;
+    }
+    const YoloSplitPaths splitPaths = yoloSplitPaths(layout, split_);
+    const QDir imageDir(splitPaths.imageDir);
+    const QDir labelDir(splitPaths.labelDir);
     if (!imageDir.exists()) {
         if (error) {
             *error = QStringLiteral("Missing image split directory: %1").arg(imageDir.path());

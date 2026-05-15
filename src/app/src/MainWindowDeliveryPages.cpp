@@ -236,7 +236,7 @@ QWidget* MainWindow::buildConversionPage()
     resultPanel->bodyLayout()->addWidget(exportResultLabel_);
     deploymentValidationResultLabel_ = inlineStatusLabel(uiText("尚未执行导出后验证。"));
     resultPanel->bodyLayout()->addWidget(deploymentValidationResultLabel_);
-    resultPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("ONNX 会写入 AITrain sidecar；NCNN 依赖本机 onnx2ncnn；TensorRT 在当前 GTX 1060 / SM 61 上保持 hardware-blocked。")));
+    resultPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("ONNX 会写入 AITrain sidecar；NCNN 依赖本机 onnx2ncnn；TensorRT 需兼容 GPU/runtime，不兼容硬件会记录为 hardware-blocked。")));
     resultPanel->bodyLayout()->addStretch();
 
     rightLayout->addWidget(matrixPanel);

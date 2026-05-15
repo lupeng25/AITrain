@@ -1,5 +1,7 @@
 #include "aitrain/core/DetectionDataset.h"
 
+#include "YoloDatasetLayout.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -40,42 +42,6 @@ QFileInfoList imageFiles(const QDir& directory)
         files.append(directory.entryInfoList({filter}, QDir::Files, QDir::Name));
     }
     return files;
-}
-
-QString stripComment(QString line)
-{
-    const int commentIndex = line.indexOf(QLatin1Char('#'));
-    if (commentIndex >= 0) {
-        line = line.left(commentIndex);
-    }
-    return line.trimmed();
-}
-
-QStringList parseInlineNames(const QString& value)
-{
-    QString trimmed = value.trimmed();
-    if (!trimmed.startsWith(QLatin1Char('[')) || !trimmed.endsWith(QLatin1Char(']'))) {
-        return {};
-    }
-    trimmed = trimmed.mid(1, trimmed.size() - 2);
-    QStringList names;
-    for (QString name : trimmed.split(QLatin1Char(','),
-#if QT_VERSION < QT_VERSION_CHECK(5, 15, 0)
-             QString::SkipEmptyParts
-#else
-             Qt::SkipEmptyParts
-#endif
-             )) {
-        name = name.trimmed();
-        if ((name.startsWith(QLatin1Char('\'')) && name.endsWith(QLatin1Char('\'')))
-            || (name.startsWith(QLatin1Char('"')) && name.endsWith(QLatin1Char('"')))) {
-            name = name.mid(1, name.size() - 2);
-        }
-        if (!name.isEmpty()) {
-            names.append(name);
-        }
-    }
-    return names;
 }
 
 bool parseDetectionLabelFile(const QString& labelPath, int classCount, QVector<DetectionBox>* boxes, QString* error)
@@ -146,50 +112,28 @@ bool parseDetectionLabelFile(const QString& labelPath, int classCount, QVector<D
 DetectionDatasetInfo readDetectionDatasetInfo(const QString& datasetPath, QString* error)
 {
     DetectionDatasetInfo info;
-    const QString yamlPath = QDir(datasetPath).filePath(QStringLiteral("data.yaml"));
-    QFile file(yamlPath);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    QString yamlError;
+    const YoloDataYaml layout = parseYoloDataYaml(datasetPath, &yamlError);
+    if (!layout.exists) {
         if (error) {
-            *error = QStringLiteral("Cannot open data.yaml: %1").arg(yamlPath);
+            *error = QStringLiteral("Cannot open data.yaml: %1").arg(layout.yamlPath);
         }
         return info;
     }
-
-    bool hasClassCount = false;
-    while (!file.atEnd()) {
-        const QString line = stripComment(QString::fromUtf8(file.readLine()));
-        if (line.startsWith(QStringLiteral("nc:"))) {
-            bool ok = false;
-            const int classCount = line.mid(3).trimmed().toInt(&ok);
-            if (!ok || classCount <= 0) {
-                if (error) {
-                    *error = QStringLiteral("data.yaml nc must be a positive integer");
-                }
-                return {};
-            }
-            info.classCount = classCount;
-            hasClassCount = true;
-        } else if (line.startsWith(QStringLiteral("names:"))) {
-            info.classNames = parseInlineNames(line.mid(6));
+    if (!yamlError.isEmpty()) {
+        if (error) {
+            *error = yamlError;
         }
+        return {};
     }
-
-    if (!hasClassCount && !info.classNames.isEmpty()) {
-        info.classCount = info.classNames.size();
-        hasClassCount = true;
-    }
-    if (!hasClassCount) {
+    if (layout.classCount <= 0) {
         if (error) {
             *error = QStringLiteral("data.yaml must define nc or inline names");
         }
         return {};
     }
-    if (!info.classNames.isEmpty() && info.classNames.size() != info.classCount) {
-        if (error) {
-            *error = QStringLiteral("data.yaml names count does not match nc");
-        }
-        return {};
-    }
+    info.classCount = layout.classCount;
+    info.classNames = layout.classNames;
     return info;
 }
 
@@ -205,8 +149,17 @@ bool DetectionDataset::load(const QString& datasetPath, const QString& split, QS
         return false;
     }
 
-    const QDir imageDir(QDir(rootPath_).filePath(QStringLiteral("images/%1").arg(split_)));
-    const QDir labelDir(QDir(rootPath_).filePath(QStringLiteral("labels/%1").arg(split_)));
+    QString yamlError;
+    const YoloDataYaml layout = parseYoloDataYaml(rootPath_, &yamlError);
+    if (!yamlError.isEmpty()) {
+        if (error) {
+            *error = yamlError;
+        }
+        return false;
+    }
+    const YoloSplitPaths splitPaths = yoloSplitPaths(layout, split_);
+    const QDir imageDir(splitPaths.imageDir);
+    const QDir labelDir(splitPaths.labelDir);
     if (!imageDir.exists()) {
         if (error) {
             *error = QStringLiteral("Missing image split directory: %1").arg(imageDir.path());

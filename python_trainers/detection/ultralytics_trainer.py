@@ -66,58 +66,179 @@ def yaml_scalar(value: str) -> str:
     return f"\"{escaped}\""
 
 
-def read_existing_data_yaml(dataset_path: Path) -> tuple[int | None, list[str] | None]:
+def _strip_yaml_quotes(value: Any) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if (text.startswith("'") and text.endswith("'")) or (text.startswith('"') and text.endswith('"')):
+        text = text[1:-1]
+    return text.strip()
+
+
+def _parse_inline_names(value: str) -> list[str]:
+    value = value.strip()
+    if not value.startswith("[") or not value.endswith("]"):
+        return []
+    names: list[str] = []
+    for part in value[1:-1].split(","):
+        name = _strip_yaml_quotes(part)
+        if name:
+            names.append(name)
+    return names
+
+
+def _names_from_yaml_mapping(value: Any) -> list[str] | None:
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item)]
+    if isinstance(value, dict):
+        names: list[str] = []
+        def sort_key(item: Any) -> tuple[int, int | str]:
+            text = str(item)
+            return (0, int(text)) if text.isdigit() else (1, text)
+
+        for key in sorted(value.keys(), key=sort_key):
+            names.append(str(value[key]))
+        return names
+    return None
+
+
+def _read_with_pyyaml(text: str) -> dict[str, Any] | None:
+    try:
+        import yaml  # type: ignore
+    except Exception:
+        return None
+    try:
+        loaded = yaml.safe_load(text)
+    except Exception:
+        return None
+    if isinstance(loaded, dict):
+        return dict(loaded)
+    return None
+
+
+def _read_with_fallback_yaml(text: str) -> dict[str, Any]:
+    info: dict[str, Any] = {}
+    names: list[str] | None = None
+    indexed_names: dict[int, str] = {}
+    list_names: list[str] = []
+    in_names_block = False
+
+    for raw_line in text.splitlines():
+        line = raw_line.split("#", 1)[0].rstrip()
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        if in_names_block:
+            if line[:1].isspace():
+                if stripped.startswith("-"):
+                    name = _strip_yaml_quotes(stripped[1:])
+                    if name:
+                        list_names.append(name)
+                    continue
+                item = re.match(r"^(\d+)\s*:\s*(.+)$", stripped)
+                if item:
+                    indexed_names[int(item.group(1))] = _strip_yaml_quotes(item.group(2))
+                    continue
+            in_names_block = False
+
+        scalar = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$", stripped)
+        if not scalar:
+            continue
+        key = scalar.group(1)
+        value = scalar.group(2).strip()
+        if key == "names":
+            if value:
+                names = _parse_inline_names(value)
+            else:
+                in_names_block = True
+            continue
+        if key in {"path", "train", "val", "test"} and value and not value.startswith(("[", "{")):
+            info[key] = _strip_yaml_quotes(value)
+        elif key == "nc":
+            try:
+                info[key] = int(value)
+            except ValueError:
+                pass
+
+    if indexed_names:
+        names = [indexed_names[key] for key in sorted(indexed_names)]
+    elif list_names:
+        names = list_names
+    if names:
+        info["names"] = names
+    return info
+
+
+def read_existing_data_yaml(dataset_path: Path) -> dict[str, Any]:
     yaml_path = dataset_path / "data.yaml"
     if not yaml_path.exists():
-        return None, None
+        return {}
 
     text = yaml_path.read_text(encoding="utf-8-sig")
-    nc_match = re.search(r"(?m)^\s*nc\s*:\s*(\d+)\s*$", text)
-    nc = int(nc_match.group(1)) if nc_match else None
+    info = _read_with_pyyaml(text) or _read_with_fallback_yaml(text)
+    names = _names_from_yaml_mapping(info.get("names"))
+    if names is not None:
+        info["names"] = names
+    if "nc" in info:
+        try:
+            info["nc"] = int(info["nc"])
+        except (TypeError, ValueError):
+            info.pop("nc", None)
+    return info
 
-    names_match = re.search(r"(?ms)^\s*names\s*:\s*(\[[^\]]*\])", text)
-    names: list[str] | None = None
-    if names_match:
-        raw_names = names_match.group(1).strip()[1:-1]
-        names = []
-        for part in raw_names.split(","):
-            name = part.strip().strip("'\"")
-            if name:
-                names.append(name)
-    else:
-        block_match = re.search(r"(?ms)^\s*names\s*:\s*\n((?:\s+\d+\s*:\s*.+\n?)+)", text)
-        if block_match:
-            names = []
-            for line in block_match.group(1).splitlines():
-                item = re.match(r"\s*(\d+)\s*:\s*(.+)\s*$", line)
-                if item:
-                    names.append(item.group(2).strip().strip("'\""))
 
-    return nc, names
+def _resolve_yaml_path(base: Path, value: Any) -> Path:
+    text = _strip_yaml_quotes(value)
+    if not text:
+        return base.resolve()
+    path = Path(text)
+    if path.is_absolute():
+        return path.resolve()
+    return (base / path).resolve()
+
+
+def _relative_to_base_or_absolute(path: Path, base: Path) -> str:
+    try:
+        return path.resolve().relative_to(base.resolve()).as_posix()
+    except ValueError:
+        return path.resolve().as_posix()
 
 
 def normalize_data_yaml(dataset_path: Path, output_path: Path) -> Path:
-    nc, names = read_existing_data_yaml(dataset_path)
+    existing = read_existing_data_yaml(dataset_path)
+    nc = existing.get("nc")
+    names = existing.get("names")
     if names:
         class_names = names
     else:
-        inferred_nc = nc if nc and nc > 0 else 1
+        inferred_nc = nc if isinstance(nc, int) and nc > 0 else 1
         class_names = [f"class_{index}" for index in range(inferred_nc)]
 
-    if nc is not None and nc > 0 and len(class_names) != nc:
+    if isinstance(nc, int) and nc > 0 and len(class_names) != nc:
         if len(class_names) < nc:
             class_names.extend(f"class_{index}" for index in range(len(class_names), nc))
         else:
             class_names = class_names[:nc]
 
+    yaml_base = _resolve_yaml_path(dataset_path, existing.get("path", ""))
+    train_path = _resolve_yaml_path(yaml_base, existing.get("train", "images/train"))
+    val_path = _resolve_yaml_path(yaml_base, existing.get("val", "images/val"))
+    test_value = existing.get("test")
+
     data_yaml = output_path / "aitrain_yolo_data.yaml"
     lines = [
-        f"path: {yaml_scalar(dataset_path.resolve().as_posix())}",
-        "train: images/train",
-        "val: images/val",
+        f"path: {yaml_scalar(yaml_base.as_posix())}",
+        f"train: {yaml_scalar(_relative_to_base_or_absolute(train_path, yaml_base))}",
+        f"val: {yaml_scalar(_relative_to_base_or_absolute(val_path, yaml_base))}",
+    ]
+    if test_value:
+        test_path = _resolve_yaml_path(yaml_base, test_value)
+        lines.append(f"test: {yaml_scalar(_relative_to_base_or_absolute(test_path, yaml_base))}")
+    lines.extend([
         f"nc: {len(class_names)}",
         "names:",
-    ]
+    ])
     lines.extend(f"  {index}: {yaml_scalar(name)}" for index, name in enumerate(class_names))
     data_yaml.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return data_yaml

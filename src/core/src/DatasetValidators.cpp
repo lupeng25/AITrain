@@ -1,5 +1,7 @@
 #include "aitrain/core/DatasetValidators.h"
 
+#include "YoloDatasetLayout.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -330,18 +332,26 @@ DatasetValidationResult validateYoloDataset(const QString& datasetPath, const QJ
         return result;
     }
 
-    const QString yamlPath = root.filePath(QStringLiteral("data.yaml"));
-    if (!QFileInfo::exists(yamlPath)) {
-        addIssue(result, QStringLiteral("error"), QStringLiteral("missing_data_yaml"), yamlPath, 0,
+    QString yamlError;
+    const YoloDataYaml layout = parseYoloDataYaml(datasetPath, &yamlError);
+    if (!layout.exists) {
+        addIssue(result, QStringLiteral("error"), QStringLiteral("missing_data_yaml"), layout.yamlPath, 0,
             QStringLiteral("缺少 data.yaml。"));
+    } else if (!yamlError.isEmpty()) {
+        addIssue(result, QStringLiteral("error"), QStringLiteral("invalid_data_yaml"), layout.yamlPath, 0, yamlError);
     }
-    const int classCount = QFileInfo::exists(yamlPath) ? parseClassCount(yamlPath, result) : -1;
+    const int classCount = layout.exists ? layout.classCount : -1;
+    if (layout.exists && classCount < 0) {
+        addIssue(result, QStringLiteral("error"), QStringLiteral("missing_class_count"), layout.yamlPath, 0,
+            QStringLiteral("data.yaml must define nc or names."));
+    }
 
     int inspectedFiles = 0;
     const QStringList splits = {QStringLiteral("train"), QStringLiteral("val")};
     for (const QString& split : splits) {
-        const QDir imageDir(root.filePath(QStringLiteral("images/%1").arg(split)));
-        const QDir labelDir(root.filePath(QStringLiteral("labels/%1").arg(split)));
+        const YoloSplitPaths splitPaths = yoloSplitPaths(layout, split);
+        const QDir imageDir(splitPaths.imageDir);
+        const QDir labelDir(splitPaths.labelDir);
         if (!imageDir.exists()) {
             addIssue(result, QStringLiteral("error"), QStringLiteral("missing_image_split"), imageDir.path(), 0,
                 QStringLiteral("缺少图片目录。"));
@@ -396,11 +406,18 @@ DatasetValidationResult validateYoloDataset(const QString& datasetPath, const QJ
 QVector<YoloSample> collectYoloSamples(const QString& datasetPath, DatasetSplitResult& result)
 {
     QVector<YoloSample> samples;
-    const QDir root(datasetPath);
+    QString yamlError;
+    const YoloDataYaml layout = parseYoloDataYaml(datasetPath, &yamlError);
+    if (!yamlError.isEmpty()) {
+        result.ok = false;
+        result.errors.append(yamlError);
+        return samples;
+    }
     const QStringList splits = {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")};
     for (const QString& split : splits) {
-        const QDir imageDir(root.filePath(QStringLiteral("images/%1").arg(split)));
-        const QDir labelDir(root.filePath(QStringLiteral("labels/%1").arg(split)));
+        const YoloSplitPaths splitPaths = yoloSplitPaths(layout, split);
+        const QDir imageDir(splitPaths.imageDir);
+        const QDir labelDir(splitPaths.labelDir);
         if (!imageDir.exists() || !labelDir.exists()) {
             continue;
         }
@@ -645,8 +662,12 @@ DatasetSplitResult splitYoloDataset(const QString& datasetPath,
         copyFileReplacing(sample.labelPath, labelTarget, result.errors);
     }
 
-    const QString sourceYaml = QDir(datasetPath).filePath(QStringLiteral("data.yaml"));
-    copyFileReplacing(sourceYaml, outputRoot.filePath(QStringLiteral("data.yaml")), result.errors);
+    QString yamlError;
+    const YoloDataYaml sourceLayout = parseYoloDataYaml(datasetPath, &yamlError);
+    if (!yamlError.isEmpty()) {
+        result.errors.append(yamlError);
+    }
+    writeNormalizedYoloDataYaml(outputRoot.path(), sourceLayout, result.testCount > 0, &result.errors);
 
     if (!result.errors.isEmpty()) {
         result.ok = false;

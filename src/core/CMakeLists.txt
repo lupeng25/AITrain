@@ -21,6 +21,8 @@ add_library(aitrain_core STATIC
     src/Deployment.cpp
     src/DatasetConversion.cpp
     src/DatasetValidators.cpp
+    src/YoloDatasetLayout.h
+    src/YoloDatasetLayout.cpp
     src/DetectionDataset.cpp
     src/DetectionTrainer.cpp
     src/DetectionTrainerExport.cpp
