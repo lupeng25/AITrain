@@ -451,6 +451,76 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
     }
 
+    void workerConvertsPythonTrainerMockCrashToStructuredFailure()
+    {
+        const QString python = pythonExecutablePath();
+        if (python.isEmpty()) {
+            QSKIP("Python executable is not available.");
+        }
+        const QString trainerScript = mockPythonTrainerScriptPath();
+        QVERIFY2(!trainerScript.isEmpty(), "Mock Python trainer script is not available.");
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("dataset"));
+        writeTinyDetectionDataset(root);
+
+        aitrain::TrainingRequest request;
+        request.taskId = QStringLiteral("python-mock-crash-task");
+        request.projectPath = dir.path();
+        request.pluginId = QStringLiteral("com.aitrain.plugins.yolo_native");
+        request.taskType = QStringLiteral("detection");
+        request.datasetPath = root;
+        request.outputPath = dir.filePath(QStringLiteral("worker-python-mock-crash"));
+        request.parameters.insert(QStringLiteral("trainingBackend"), QStringLiteral("python_mock"));
+        request.parameters.insert(QStringLiteral("pythonExecutable"), python);
+        request.parameters.insert(QStringLiteral("pythonTrainerScript"), trainerScript);
+        request.parameters.insert(QStringLiteral("mockMode"), QStringLiteral("crash"));
+
+        WorkerClient client;
+        QVector<QPair<QString, QJsonObject>> messages;
+        QStringList logs;
+        bool finished = false;
+        bool ok = true;
+        QString finishedMessage;
+        connect(&client, &WorkerClient::messageReceived, this, [&messages](const QString& type, const QJsonObject& payload) {
+            messages.append(qMakePair(type, payload));
+        });
+        connect(&client, &WorkerClient::logLine, this, [&logs](const QString& line) {
+            logs.append(line);
+        });
+        connect(&client, &WorkerClient::finished, this, [&finished, &ok, &finishedMessage](bool success, const QString& message) {
+            finished = true;
+            ok = success;
+            finishedMessage = message;
+        });
+
+        QString error;
+        QVERIFY2(client.startTraining(workerExecutablePath(), request, &error), qPrintable(error));
+        QTRY_VERIFY2_WITH_TIMEOUT(
+            finished,
+            qPrintable(QStringLiteral("Worker did not finish. Logs:\n%1").arg(logs.join(QStringLiteral("\n")))),
+            15000);
+        QVERIFY(!ok);
+        QVERIFY(finishedMessage.contains(QStringLiteral("trainer_unhandled_exception")));
+        QVERIFY(!finishedMessage.contains(QStringLiteral("Python trainer exited with code")));
+        QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
+
+        bool sawStructuredFailure = false;
+        for (const auto& message : messages) {
+            if (message.first != QStringLiteral("failed")) {
+                continue;
+            }
+            sawStructuredFailure = true;
+            QCOMPARE(message.second.value(QStringLiteral("backend")).toString(), QStringLiteral("python_mock"));
+            QCOMPARE(message.second.value(QStringLiteral("code")).toString(), QStringLiteral("trainer_unhandled_exception"));
+            const QJsonObject details = message.second.value(QStringLiteral("details")).toObject();
+            QCOMPARE(details.value(QStringLiteral("exceptionType")).toString(), QStringLiteral("RuntimeError"));
+            QVERIFY(details.value(QStringLiteral("exception")).toString().contains(QStringLiteral("Mock Python trainer crash requested")));
+        }
+        QVERIFY(sawStructuredFailure);
+    }
+
     void workerRunsUltralyticsYoloDetectionAdapterWithFakeOfficialPackage()
     {
         const QString python = pythonExecutablePath();

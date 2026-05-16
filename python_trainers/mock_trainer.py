@@ -12,6 +12,14 @@ import sys
 import time
 from pathlib import Path
 
+TRAINER_ROOT = Path(__file__).resolve().parent
+if str(TRAINER_ROOT) not in sys.path:
+    sys.path.insert(0, str(TRAINER_ROOT))
+
+from trainer_protocol import configure_stdio, unhandled_failure
+
+configure_stdio()
+
 
 def emit(message_type: str, payload: dict) -> None:
     sys.stdout.write(json.dumps({"type": message_type, "payload": payload}, separators=(",", ":")) + "\n")
@@ -104,6 +112,8 @@ def main() -> int:
             "backend": backend,
         })
         return 2
+    if mode == "crash":
+        raise RuntimeError("Mock Python trainer crash requested")
 
     total_steps = epochs * steps_per_epoch
     step = 0
@@ -207,4 +217,9 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except SystemExit:
+        raise
+    except Exception as exc:
+        raise SystemExit(unhandled_failure("python_mock", exc))

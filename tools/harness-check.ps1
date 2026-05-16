@@ -7,7 +7,46 @@ $root = Split-Path -Parent $PSScriptRoot
 $vcvars = Resolve-AITrainVcVars
 $qt = Resolve-AITrainQtRoot
 $commandPrefix = Get-AITrainBuildCommandPrefix -VcVars $vcvars -QtRoot $qt
-$buildDir = "build-vscode"
+$buildDir = if ($env:AITRAIN_BUILD_DIR) { $env:AITRAIN_BUILD_DIR } else { "build-vscode" }
+$buildPath = if ([System.IO.Path]::IsPathRooted($buildDir)) {
+    [System.IO.Path]::GetFullPath($buildDir)
+} else {
+    [System.IO.Path]::GetFullPath((Join-Path $root $buildDir))
+}
+
+function Get-CachedCxxCompiler {
+    param([string]$CachePath)
+
+    if (-not (Test-Path -LiteralPath $CachePath)) {
+        return $null
+    }
+
+    $match = Select-String -LiteralPath $CachePath -Pattern '^CMAKE_CXX_COMPILER:[^=]*=(.+)$' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $match) {
+        return $null
+    }
+    return [string]$match.Matches[0].Groups[1].Value
+}
+
+function Clear-CMakeConfigureCache {
+    param([string]$BuildPath)
+
+    $items = @(
+        "CMakeCache.txt",
+        "CMakeFiles",
+        "cmake_install.cmake",
+        "Makefile",
+        "CTestTestfile.cmake",
+        "DartConfiguration.tcl"
+    )
+
+    foreach ($item in $items) {
+        $path = Join-Path $BuildPath $item
+        if (Test-Path -LiteralPath $path) {
+            Remove-Item -LiteralPath $path -Recurse -Force
+        }
+    }
+}
 
 if (-not (Test-Path $vcvars)) {
     throw "MSVC environment script not found: $vcvars"
@@ -18,6 +57,14 @@ if (-not (Test-Path $qt)) {
 }
 
 Set-Location $root
+Write-AITrainToolchainSelection -VcVars $vcvars -QtRoot $qt
+
+$cachedCompiler = Get-CachedCxxCompiler -CachePath (Join-Path $buildPath "CMakeCache.txt")
+if ($cachedCompiler -and -not (Test-Path -LiteralPath $cachedCompiler)) {
+    Write-Host "Harness check: cached compiler no longer exists; clearing CMake configure cache." -ForegroundColor Yellow
+    Write-Host ("Harness check: stale compiler = {0}" -f $cachedCompiler) -ForegroundColor Yellow
+    Clear-CMakeConfigureCache -BuildPath $buildPath
+}
 
 Write-Host "Harness check: configure" -ForegroundColor Cyan
 $configure = "$commandPrefix && cmake -S . -B $buildDir -G `"NMake Makefiles`" -DCMAKE_PREFIX_PATH=$qt -DAITRAIN_BUILD_TESTS=ON"

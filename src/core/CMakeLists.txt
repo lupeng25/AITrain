@@ -59,6 +59,7 @@ target_include_directories(aitrain_core
 
 target_link_libraries(aitrain_core
     PUBLIC
+        aitrain_qt5_msvc_compat
         Qt${QT_VERSION_MAJOR}::Core
         Qt${QT_VERSION_MAJOR}::Gui
         Qt${QT_VERSION_MAJOR}::Network

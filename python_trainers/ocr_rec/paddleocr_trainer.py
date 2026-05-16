@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -17,8 +18,15 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
+TRAINER_ROOT = Path(__file__).resolve().parents[1]
+if str(TRAINER_ROOT) not in sys.path:
+    sys.path.insert(0, str(TRAINER_ROOT))
+
+from trainer_protocol import configure_stdio, emit_failed, exception_details, unhandled_failure  # noqa: E402
+
 
 BACKEND_ID = "paddleocr_rec"
+configure_stdio()
 
 
 def emit(event_type: str, **payload: Any) -> None:
@@ -28,8 +36,7 @@ def emit(event_type: str, **payload: Any) -> None:
 
 
 def fail(message: str, code: str, details: dict[str, Any] | None = None) -> int:
-    emit("failed", code=code, message=message, details=details or {})
-    return 1
+    return emit_failed(BACKEND_ID, message, code, details)
 
 
 def read_request(path: Path) -> dict[str, Any]:
@@ -169,7 +176,13 @@ def run(request: dict[str, Any]) -> int:
     label_lengths = []
     for relative_image, text in samples:
         image_path = dataset_path / relative_image
-        images.append(image_tensor(image_path, width, height))
+        try:
+            images.append(image_tensor(image_path, width, height))
+        except Exception as exc:
+            details = exception_details(exc)
+            details["imagePath"] = str(image_path)
+            details["sample"] = relative_image
+            return fail(f"failed to read OCR Rec image: {image_path}", "bad_dataset", details)
         encoded = [chars.index(ch) + 1 for ch in text if ch in chars][:max_text_length]
         labels.append(encoded + [0] * (max_text_length - len(encoded)))
         label_lengths.append(len(encoded))
@@ -269,8 +282,11 @@ def main() -> int:
     try:
         request = read_request(args.request)
     except Exception as exc:
-        return fail(f"failed to read trainer request: {exc}", "bad_request")
-    return run(request)
+        return fail(f"failed to read trainer request: {exc}", "bad_request", exception_details(exc))
+    try:
+        return run(request)
+    except Exception as exc:
+        return unhandled_failure(BACKEND_ID, exc)
 
 
 if __name__ == "__main__":

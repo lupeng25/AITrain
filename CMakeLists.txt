@@ -32,6 +32,14 @@ endif()
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Gui Widgets Network Sql Test Xml)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Widgets Network Sql Test Xml)
 
+add_library(aitrain_qt5_msvc_compat INTERFACE)
+if(MSVC AND QT_VERSION_MAJOR EQUAL 5)
+    target_compile_options(aitrain_qt5_msvc_compat
+        INTERFACE
+            "/FI${CMAKE_SOURCE_DIR}/src/core/include/aitrain/core/Qt5MsvcCompat.h"
+    )
+endif()
+
 if(WIN32 AND AITRAIN_INSTALL_QT_RUNTIME AND NOT AITRAIN_WINDEPLOYQT_EXECUTABLE)
     if(TARGET Qt${QT_VERSION_MAJOR}::qmake)
         get_target_property(AITRAIN_QMAKE_EXECUTABLE Qt${QT_VERSION_MAJOR}::qmake IMPORTED_LOCATION)
