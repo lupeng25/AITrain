@@ -62,6 +62,55 @@ private slots:
         QVERIFY(!QFileInfo::exists(activeDll));
     }
 
+    void datasetInteropPluginRejectsMalformedCocoAndVoc()
+    {
+        const QString pluginDll = builtPluginPath(QStringLiteral("DatasetInteropPlugin.dll"));
+        if (pluginDll.isEmpty()) {
+            QSKIP("Built DatasetInteropPlugin.dll is not available for dataset interop fixture.");
+        }
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString pluginDir = dir.filePath(QStringLiteral("plugins/models"));
+        QVERIFY(QDir().mkpath(pluginDir));
+        const QString activeDll = QDir(pluginDir).filePath(QStringLiteral("DatasetInteropPlugin.dll"));
+        QVERIFY(QFile::copy(pluginDll, activeDll));
+
+        aitrain::PluginManager manager;
+        manager.scan(QStringList{pluginDir});
+        aitrain::IModelPlugin* plugin = manager.pluginById(QStringLiteral("com.aitrain.plugins.dataset_interop"));
+        QVERIFY2(plugin, qPrintable(manager.errors().join(QStringLiteral("\n"))));
+
+        aitrain::IDatasetAdapter* coco = plugin->datasetAdapter(QStringLiteral("coco_json"));
+        QVERIFY(coco);
+        const QString cocoDir = dir.filePath(QStringLiteral("coco"));
+        writeTextFile(QDir(cocoDir).filePath(QStringLiteral("bad.json")), QStringLiteral("{\"annotations\": []}\n"));
+        aitrain::DatasetValidationResult invalidCoco = coco->validateDataset(cocoDir, {});
+        QVERIFY(!invalidCoco.ok);
+        QVERIFY(invalidCoco.errors.join(QStringLiteral("\n")).contains(QStringLiteral("images array")));
+        QFile::remove(QDir(cocoDir).filePath(QStringLiteral("bad.json")));
+        writeTextFile(QDir(cocoDir).filePath(QStringLiteral("instances.json")),
+            QStringLiteral("{\"images\":[{\"id\":1,\"file_name\":\"a.png\"}],\"annotations\":[]}\n"));
+        aitrain::DatasetValidationResult validCoco = coco->validateDataset(cocoDir, {});
+        QVERIFY2(validCoco.ok, qPrintable(validCoco.errors.join(QStringLiteral("\n"))));
+        QCOMPARE(validCoco.sampleCount, 1);
+
+        aitrain::IDatasetAdapter* voc = plugin->datasetAdapter(QStringLiteral("voc_xml"));
+        QVERIFY(voc);
+        const QString vocDir = dir.filePath(QStringLiteral("voc"));
+        writeTextFile(QDir(vocDir).filePath(QStringLiteral("bad.xml")),
+            QStringLiteral("<annotation><filename>a.png</filename></annotation>\n"));
+        aitrain::DatasetValidationResult invalidVoc = voc->validateDataset(vocDir, {});
+        QVERIFY(!invalidVoc.ok);
+        QVERIFY(invalidVoc.errors.join(QStringLiteral("\n")).contains(QStringLiteral("object entries")));
+        QFile::remove(QDir(vocDir).filePath(QStringLiteral("bad.xml")));
+        writeTextFile(QDir(vocDir).filePath(QStringLiteral("a.xml")),
+            QStringLiteral("<annotation><filename>a.png</filename><object><name>item</name></object></annotation>\n"));
+        aitrain::DatasetValidationResult validVoc = voc->validateDataset(vocDir, {});
+        QVERIFY2(validVoc.ok, qPrintable(validVoc.errors.join(QStringLiteral("\n"))));
+        QCOMPARE(validVoc.sampleCount, 1);
+    }
+
     void pluginMarketplaceParsesIndexAndInstallsExpandedPackage()
     {
         const QString pluginDll = builtPluginPath(QStringLiteral("DatasetInteropPlugin.dll"));

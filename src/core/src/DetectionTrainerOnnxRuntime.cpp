@@ -18,6 +18,7 @@
 #include <QtMath>
 #include <algorithm>
 #include <cstring>
+#include <exception>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -39,6 +40,14 @@ bool isOnnxRuntimeInferenceAvailable()
 
 QString inferOnnxModelFamily(const QString& onnxPath)
 {
+    return inferOnnxModelFamily(onnxPath, nullptr);
+}
+
+QString inferOnnxModelFamily(const QString& onnxPath, QString* warning)
+{
+    if (warning) {
+        warning->clear();
+    }
     const QJsonObject config = loadOnnxExportConfig(onnxPath);
     const QString configuredFamily = config.value(QStringLiteral("modelFamily")).toString();
     const QString configuredBackend = config.value(QStringLiteral("backend")).toString();
@@ -112,7 +121,19 @@ QString inferOnnxModelFamily(const QString& onnxPath)
                 return QStringLiteral("yolo_detection");
             }
         }
+    } catch (const std::exception& exception) {
+        if (warning) {
+            *warning = QStringLiteral("ONNX model-family inference failed for %1: %2")
+                .arg(onnxPath, QString::fromUtf8(exception.what()));
+        }
     } catch (...) {
+        if (warning) {
+            *warning = QStringLiteral("ONNX model-family inference failed for %1: unknown exception").arg(onnxPath);
+        }
+    }
+#else
+    if (warning) {
+        *warning = QStringLiteral("ONNX Runtime SDK is not enabled; model-family inference is limited to sidecar/report metadata.");
     }
 #endif
     return {};

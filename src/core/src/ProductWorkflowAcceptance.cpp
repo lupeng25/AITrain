@@ -1005,7 +1005,8 @@ WorkflowResult validateDeploymentArtifactReport(
             QImage overlay;
             QJsonArray predictionArray;
             QString taskType = QStringLiteral("detection");
-            const QString family = inferOnnxModelFamily(normalizedModelPath);
+            QString modelFamilyWarning;
+            const QString family = inferOnnxModelFamily(normalizedModelPath, &modelFamilyWarning);
             QElapsedTimer timer;
             timer.start();
             if (family == QStringLiteral("yolo_segmentation")) {
@@ -1063,6 +1064,10 @@ WorkflowResult validateDeploymentArtifactReport(
             if (error.isEmpty() && (overlay.isNull() || !overlay.save(overlayPath))) {
                 error = QStringLiteral("Cannot write deployment overlay: %1").arg(overlayPath);
             }
+            QJsonObject inferenceDetails{{QStringLiteral("modelFamily"), family}, {QStringLiteral("taskType"), taskType}};
+            if (!modelFamilyWarning.isEmpty()) {
+                inferenceDetails.insert(QStringLiteral("modelFamilyWarning"), modelFamilyWarning);
+            }
             checks.append(checkObjectWithDetails(
                 QStringLiteral("onnx_runtime_inference"),
                 error.isEmpty() ? QStringLiteral("passed") : QStringLiteral("failed"),
@@ -1070,9 +1075,12 @@ WorkflowResult validateDeploymentArtifactReport(
                 error.isEmpty()
                     ? QStringLiteral("ONNX artifact ran inference successfully.")
                     : error,
-                QJsonObject{{QStringLiteral("modelFamily"), family}, {QStringLiteral("taskType"), taskType}}));
+                inferenceDetails));
             report.insert(QStringLiteral("runtime"), QStringLiteral("onnxruntime"));
             report.insert(QStringLiteral("modelFamily"), family);
+            if (!modelFamilyWarning.isEmpty()) {
+                report.insert(QStringLiteral("modelFamilyWarning"), modelFamilyWarning);
+            }
             report.insert(QStringLiteral("taskType"), taskType);
             report.insert(QStringLiteral("elapsedMs"), elapsedMs);
             if (error.isEmpty()) {

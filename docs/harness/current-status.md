@@ -1,6 +1,6 @@
 ﻿# Current Project Status
 
-Last updated: 2026-05-16
+Last updated: 2026-05-17
 
 This file is the source of truth for phase status in new AI coding conversations. Read it before using `AITrainStudio_后续实施方案.md`, because that document is the long-range roadmap and may contain historical phase descriptions.
 
@@ -73,6 +73,8 @@ The first non-fullscreen UI layout pass is complete locally. `推理验证` and 
 The delivery-closeout UI walkthrough is complete locally. The 1280x820 pass now covers the added `样本复核` and `交付验收` pages in addition to the existing workbench pages. It verified the sample-review filters/export path, delivery acceptance summary, diagnostics bundle entry, customer OCR acceptance form, deployment validation entry, and export-page validation controls with no horizontal overflow findings. These additions use Worker/core report commands and do not move training, evaluation, export, inference, OCR acceptance, or diagnostics logic into `MainWindow`.
 
 The RC hardening pass now makes the non-fullscreen GUI walkthrough repeatable through `tools\ui-workbench-walkthrough.ps1`, which runs the fixed 1280x820 page set and writes `ui_walkthrough_rc_summary.json`. NCNN deployment validation failed reports now include `errorCode`, `failureCategory`, `nextAction`, and `diagnosticHints` with categories `sdk_missing`, `sample_missing`, `sidecar_missing`, `unsupported_layer`, and `runtime_failed`. Worker terminal failures/cancellations now carry `taskId`, `command`, `status`, `errorCode`, and `outputPath`/`reportPath` where available, while preserving the existing Worker command names and JSON message types.
+
+The claudereport hardening pass treats the previously tracked `tools\aitrain-license-private-key.json` as leaked key material. The real private key file is removed from the working tree, `.gitignore` blocks future `*aitrain-license-private-key*.json` files, and only `tools\aitrain-license-private-key.example.json` may remain in source. Operators must rotate to a new key pair outside the repo, rebuild with the new `AITRAIN_LICENSE_PUBLIC_KEY`, and handle any Git history purge as a separate security procedure if the repository has been pushed or distributed.
 
 The GUI walkthrough wrapper treats the offline registration dialog as `status=blocked` / `errorCode=license_required`; that is environment setup evidence, not a GUI layout pass. Use a licensed build before claiming the walkthrough gate passed.
 

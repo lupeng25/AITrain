@@ -14,7 +14,7 @@ WorkerClient::WorkerClient(QObject* parent)
     connect(&server_, &QLocalServer::newConnection, this, &WorkerClient::acceptConnection);
     connect(&process_, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, &WorkerClient::workerFinished);
     connect(&process_, &QProcess::readyReadStandardOutput, this, [this]() {
-        const QString output = QString::fromLocal8Bit(process_.readAllStandardOutput());
+        const QString output = QString::fromUtf8(process_.readAllStandardOutput());
         if (!output.trimmed().isEmpty()) {
             emit logLine(output.trimmed());
         }
@@ -387,7 +387,14 @@ void WorkerClient::workerFinished(int exitCode, QProcess::ExitStatus status)
             const QString message = QStringLiteral("Canceled by user");
             QJsonObject payload;
             payload.insert(QStringLiteral("taskId"), pendingRequest_.value(QStringLiteral("taskId")).toString());
+            payload.insert(QStringLiteral("command"), pendingCommandType_);
+            payload.insert(QStringLiteral("status"), QStringLiteral("canceled"));
+            payload.insert(QStringLiteral("errorCode"), QStringLiteral("canceled"));
             payload.insert(QStringLiteral("message"), message);
+            const QString outputPath = pendingRequest_.value(QStringLiteral("outputPath")).toString();
+            if (!outputPath.isEmpty()) {
+                payload.insert(QStringLiteral("outputPath"), outputPath);
+            }
             emit messageReceived(QStringLiteral("canceled"), payload);
             emit finished(false, message);
         } else {

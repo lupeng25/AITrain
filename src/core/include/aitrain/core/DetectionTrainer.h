@@ -172,6 +172,7 @@ QVector<DetectionPrediction> predictDetectionBaseline(
 
 bool isOnnxRuntimeInferenceAvailable();
 QString inferOnnxModelFamily(const QString& onnxPath);
+QString inferOnnxModelFamily(const QString& onnxPath, QString* warning);
 QJsonObject detectionTrainingBackendStatus();
 TensorRtBackendStatus tensorRtBackendStatus();
 bool isTensorRtInferenceAvailable();

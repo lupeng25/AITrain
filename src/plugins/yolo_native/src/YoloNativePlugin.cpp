@@ -30,7 +30,7 @@ private:
 
 class NativeTrainer final : public aitrain::ITrainer {
 public:
-    QString backendName() const override { return QStringLiteral("LibTorch/CUDA native YOLO scaffold"); }
+    QString backendName() const override { return QStringLiteral("C++ tiny/scaffold YOLO backend"); }
 };
 
 class NativeValidator final : public aitrain::IValidator {

@@ -407,6 +407,293 @@ private slots:
         QVERIFY(QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("python_mock_training_report.json"))));
     }
 
+    void workerRunsPythonTrainerWithUtf8Environment()
+    {
+        const QString python = pythonExecutablePath();
+        if (python.isEmpty()) {
+            QSKIP("Python executable is not available.");
+        }
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("dataset"));
+        writeTinyDetectionDataset(root);
+        const QString trainerScript = dir.filePath(QStringLiteral("utf8_trainer.py"));
+        writeTextFile(trainerScript,
+            QStringLiteral(
+                "import argparse, json, os, sys\n"
+                "parser = argparse.ArgumentParser()\n"
+                "parser.add_argument('--request', required=True)\n"
+                "args = parser.parse_args()\n"
+                "request = json.load(open(args.request, encoding='utf-8-sig'))\n"
+                "task_id = request.get('taskId', '')\n"
+                "payload = {\n"
+                "  'taskId': task_id,\n"
+                "  'backend': request.get('backend', 'python_mock'),\n"
+                "  'message': '中文输出',\n"
+                "  'pythonUtf8': os.environ.get('PYTHONUTF8'),\n"
+                "  'pythonIoEncoding': os.environ.get('PYTHONIOENCODING'),\n"
+                "  'stdoutEncoding': sys.stdout.encoding,\n"
+                "}\n"
+                "print(json.dumps({'type': 'log', 'payload': payload}, ensure_ascii=False), flush=True)\n"
+                "print(json.dumps({'type': 'completed', 'payload': {'taskId': task_id, 'message': 'done', 'backend': request.get('backend', 'python_mock')}}, ensure_ascii=False), flush=True)\n"));
+
+        aitrain::TrainingRequest request;
+        request.taskId = QStringLiteral("python-utf8-task");
+        request.projectPath = dir.path();
+        request.pluginId = QStringLiteral("com.aitrain.plugins.yolo_native");
+        request.taskType = QStringLiteral("detection");
+        request.datasetPath = root;
+        request.outputPath = dir.filePath(QStringLiteral("worker-python-utf8"));
+        request.parameters.insert(QStringLiteral("trainingBackend"), QStringLiteral("python_mock"));
+        request.parameters.insert(QStringLiteral("pythonExecutable"), python);
+        request.parameters.insert(QStringLiteral("pythonTrainerScript"), trainerScript);
+
+        WorkerClient client;
+        QVector<QPair<QString, QJsonObject>> messages;
+        bool finished = false;
+        bool ok = false;
+        QString finishedMessage;
+        connect(&client, &WorkerClient::messageReceived, this, [&messages](const QString& type, const QJsonObject& payload) {
+            messages.append(qMakePair(type, payload));
+        });
+        connect(&client, &WorkerClient::finished, this, [&finished, &ok, &finishedMessage](bool success, const QString& message) {
+            finished = true;
+            ok = success;
+            finishedMessage = message;
+        });
+
+        QString error;
+        QVERIFY2(client.startTraining(workerExecutablePath(), request, &error), qPrintable(error));
+        QTRY_VERIFY_WITH_TIMEOUT(finished, 15000);
+        QVERIFY2(ok, qPrintable(finishedMessage));
+        QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
+
+        bool sawUtf8Log = false;
+        for (const auto& message : messages) {
+            if (message.first != QStringLiteral("log")) {
+                continue;
+            }
+            if (message.second.value(QStringLiteral("message")).toString() != QStringLiteral("中文输出")) {
+                continue;
+            }
+            sawUtf8Log = true;
+            QCOMPARE(message.second.value(QStringLiteral("pythonUtf8")).toString(), QStringLiteral("1"));
+            QCOMPARE(message.second.value(QStringLiteral("pythonIoEncoding")).toString(), QStringLiteral("utf-8"));
+            QVERIFY(message.second.value(QStringLiteral("stdoutEncoding")).toString().contains(QStringLiteral("utf"), Qt::CaseInsensitive));
+        }
+        QVERIFY(sawUtf8Log);
+    }
+
+    void workerCancelsLongRunningPythonTrainerAsCanceled()
+    {
+        const QString python = pythonExecutablePath();
+        if (python.isEmpty()) {
+            QSKIP("Python executable is not available.");
+        }
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("dataset"));
+        writeTinyDetectionDataset(root);
+        const QString trainerScript = dir.filePath(QStringLiteral("long_trainer.py"));
+        writeTextFile(trainerScript,
+            QStringLiteral(
+                "import argparse, json, time\n"
+                "parser = argparse.ArgumentParser()\n"
+                "parser.add_argument('--request', required=True)\n"
+                "args = parser.parse_args()\n"
+                "request = json.load(open(args.request, encoding='utf-8-sig'))\n"
+                "task_id = request.get('taskId', '')\n"
+                "print(json.dumps({'type': 'log', 'payload': {'taskId': task_id, 'message': 'started', 'backend': request.get('backend', 'python_mock')}}), flush=True)\n"
+                "while True:\n"
+                "    time.sleep(0.1)\n"));
+
+        const QString outputPath = dir.filePath(QStringLiteral("worker-python-cancel"));
+        aitrain::TrainingRequest request;
+        request.taskId = QStringLiteral("python-cancel-task");
+        request.projectPath = dir.path();
+        request.pluginId = QStringLiteral("com.aitrain.plugins.yolo_native");
+        request.taskType = QStringLiteral("detection");
+        request.datasetPath = root;
+        request.outputPath = outputPath;
+        request.parameters.insert(QStringLiteral("trainingBackend"), QStringLiteral("python_mock"));
+        request.parameters.insert(QStringLiteral("pythonExecutable"), python);
+        request.parameters.insert(QStringLiteral("pythonTrainerScript"), trainerScript);
+
+        WorkerClient client;
+        QVector<QPair<QString, QJsonObject>> messages;
+        bool cancelSent = false;
+        bool finished = false;
+        bool ok = true;
+        QString finishedMessage;
+        connect(&client, &WorkerClient::messageReceived, this, [&client, &messages, &cancelSent](const QString& type, const QJsonObject& payload) {
+            messages.append(qMakePair(type, payload));
+            if (!cancelSent && type == QStringLiteral("log") && payload.value(QStringLiteral("message")).toString() == QStringLiteral("started")) {
+                cancelSent = true;
+                client.cancel();
+            }
+        });
+        connect(&client, &WorkerClient::finished, this, [&finished, &ok, &finishedMessage](bool success, const QString& message) {
+            finished = true;
+            ok = success;
+            finishedMessage = message;
+        });
+
+        QString error;
+        QVERIFY2(client.startTraining(workerExecutablePath(), request, &error), qPrintable(error));
+        QTRY_VERIFY_WITH_TIMEOUT(finished, 20000);
+        QVERIFY(cancelSent);
+        QVERIFY(!ok);
+        QVERIFY(finishedMessage.contains(QStringLiteral("Canceled")));
+        QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
+
+        bool sawCanceled = false;
+        for (const auto& message : messages) {
+            if (message.first != QStringLiteral("canceled")) {
+                continue;
+            }
+            sawCanceled = true;
+            QCOMPARE(message.second.value(QStringLiteral("taskId")).toString(), request.taskId);
+            QCOMPARE(message.second.value(QStringLiteral("command")).toString(), QStringLiteral("startTrain"));
+            QCOMPARE(message.second.value(QStringLiteral("status")).toString(), QStringLiteral("canceled"));
+            QCOMPARE(message.second.value(QStringLiteral("errorCode")).toString(), QStringLiteral("canceled"));
+            QCOMPARE(message.second.value(QStringLiteral("outputPath")).toString(), outputPath);
+        }
+        QVERIFY(sawCanceled);
+    }
+
+    void workerDisconnectTerminatesPythonTrainer()
+    {
+        const QString python = pythonExecutablePath();
+        if (python.isEmpty()) {
+            QSKIP("Python executable is not available.");
+        }
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("dataset"));
+        writeTinyDetectionDataset(root);
+        const QString pidPath = dir.filePath(QStringLiteral("trainer.pid"));
+        const QString trainerScript = dir.filePath(QStringLiteral("disconnect_trainer.py"));
+        writeTextFile(trainerScript,
+            QStringLiteral(
+                "import argparse, json, os, time\n"
+                "parser = argparse.ArgumentParser()\n"
+                "parser.add_argument('--request', required=True)\n"
+                "args = parser.parse_args()\n"
+                "request = json.load(open(args.request, encoding='utf-8-sig'))\n"
+                "params = request.get('parameters', {})\n"
+                "with open(params.get('pidFile'), 'w', encoding='utf-8') as f:\n"
+                "    f.write(str(os.getpid()))\n"
+                "task_id = request.get('taskId', '')\n"
+                "print(json.dumps({'type': 'log', 'payload': {'taskId': task_id, 'message': 'started'}}), flush=True)\n"
+                "while True:\n"
+                "    time.sleep(0.1)\n"));
+
+        aitrain::TrainingRequest request;
+        request.taskId = QStringLiteral("python-disconnect-task");
+        request.projectPath = dir.path();
+        request.pluginId = QStringLiteral("com.aitrain.plugins.yolo_native");
+        request.taskType = QStringLiteral("detection");
+        request.datasetPath = root;
+        request.outputPath = dir.filePath(QStringLiteral("worker-python-disconnect"));
+        request.parameters.insert(QStringLiteral("trainingBackend"), QStringLiteral("python_mock"));
+        request.parameters.insert(QStringLiteral("pythonExecutable"), python);
+        request.parameters.insert(QStringLiteral("pythonTrainerScript"), trainerScript);
+        request.parameters.insert(QStringLiteral("pidFile"), pidPath);
+
+        const QString serverName = QStringLiteral("aitrain_disconnect_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+        QLocalServer::removeServer(serverName);
+        QLocalServer server;
+        QVERIFY2(server.listen(serverName), qPrintable(server.errorString()));
+
+        QProcess worker;
+        worker.setProgram(workerExecutablePath());
+        worker.setArguments({QStringLiteral("--server"), serverName});
+        worker.setProcessChannelMode(QProcess::MergedChannels);
+
+        QLocalSocket* socket = nullptr;
+        QByteArray buffer;
+        bool ready = false;
+        bool started = false;
+        connect(&server, &QLocalServer::newConnection, this, [&]() {
+            socket = server.nextPendingConnection();
+            connect(socket, &QLocalSocket::readyRead, this, [&]() {
+                buffer.append(socket->readAll());
+                int newline = buffer.indexOf('\n');
+                while (newline >= 0) {
+                    const QByteArray line = buffer.left(newline);
+                    buffer.remove(0, newline + 1);
+
+                    QString type;
+                    QJsonObject payload;
+                    QString requestId;
+                    QString error;
+                    QVERIFY2(aitrain::protocol::decodeMessage(line, &type, &payload, &requestId, &error), qPrintable(error));
+                    if (type == QStringLiteral("ready")) {
+                        ready = true;
+                        socket->write(aitrain::protocol::encodeMessage(QStringLiteral("startTrain"), request.toJson()));
+                        socket->flush();
+                    } else if (type == QStringLiteral("log")
+                        && payload.value(QStringLiteral("message")).toString() == QStringLiteral("started")) {
+                        started = true;
+                    }
+                    newline = buffer.indexOf('\n');
+                }
+            });
+        });
+
+        worker.start();
+        QVERIFY2(worker.waitForStarted(5000), qPrintable(worker.errorString()));
+        QTRY_VERIFY_WITH_TIMEOUT(ready, 5000);
+        QTRY_VERIFY_WITH_TIMEOUT(started, 10000);
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(pidPath), 5000);
+
+        QFile pidFile(pidPath);
+        QVERIFY(pidFile.open(QIODevice::ReadOnly));
+        const QString pid = QString::fromUtf8(pidFile.readAll()).trimmed();
+        QVERIFY(!pid.isEmpty());
+
+        QVERIFY(socket);
+        socket->disconnectFromServer();
+        if (socket->state() != QLocalSocket::UnconnectedState) {
+            QVERIFY(socket->waitForDisconnected(3000));
+        }
+        QVERIFY2(worker.waitForFinished(10000), qPrintable(QString::fromUtf8(worker.readAllStandardOutput())));
+
+        auto processExists = [](const QString& pidString) {
+#ifdef Q_OS_WIN
+            const QString powershell = powershellExecutablePath();
+            if (powershell.isEmpty()) {
+                return false;
+            }
+            QProcess check;
+            check.start(powershell, {
+                QStringLiteral("-NoProfile"),
+                QStringLiteral("-Command"),
+                QStringLiteral("if (Get-Process -Id %1 -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }").arg(pidString)
+            });
+#else
+            QProcess check;
+            check.start(QStringLiteral("sh"), {
+                QStringLiteral("-c"),
+                QStringLiteral("kill -0 %1 2>/dev/null").arg(pidString)
+            });
+#endif
+            if (!check.waitForFinished(3000)) {
+                check.kill();
+                check.waitForFinished(3000);
+                return true;
+            }
+            return check.exitStatus() == QProcess::NormalExit && check.exitCode() == 0;
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(!processExists(pid), 5000);
+
+        server.close();
+        QLocalServer::removeServer(serverName);
+    }
+
     void workerPropagatesPythonTrainerMockFailure()
     {
         const QString python = pythonExecutablePath();

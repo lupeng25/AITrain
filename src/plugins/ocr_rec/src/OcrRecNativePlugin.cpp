@@ -28,7 +28,7 @@ public:
 
 class NativeTrainer final : public aitrain::ITrainer {
 public:
-    QString backendName() const override { return QStringLiteral("LibTorch/CUDA CTC OCR scaffold"); }
+    QString backendName() const override { return QStringLiteral("C++ OCR scaffold backend"); }
 };
 
 class NativeValidator final : public aitrain::IValidator {

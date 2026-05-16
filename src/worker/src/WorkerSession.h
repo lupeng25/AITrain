@@ -20,6 +20,7 @@ public:
 private slots:
     void readLines();
     void tickTraining();
+    void handleSocketDisconnected();
 
 private:
     void handleMessage(const QString& type, const QJsonObject& payload);
@@ -53,6 +54,8 @@ private:
     void emitDetectionPreviewArtifacts(const QString& checkpointPath);
     void send(const QString& type, const QJsonObject& payload);
     aitrain::CancellationCallback cancellationCallback();
+    void shutdownPythonTrainer(const QString& reason, bool notifyClient);
+    bool pollPendingCancel(int timeoutMs = 100);
     void sendCanceledAndFinish(const QString& taskId, const QString& message);
     void finishSession();
     void fail(const QString& message);
@@ -92,6 +95,7 @@ private:
     bool canceled_ = false;
     QProcess pythonTrainerProcess_;
     bool interceptPythonTrainerMessages_ = false;
+    bool finishingSession_ = false;
     QString activeTaskId_;
     QString activeCommand_;
     QString activeOutputPath_;

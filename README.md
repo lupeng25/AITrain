@@ -74,7 +74,7 @@ Build-time licensing knobs:
 - `AITRAIN_BUILD_LICENSE_GENERATOR`: builds `AITrainLicenseGenerator.exe` when enabled.
 - `AITRAIN_INSTALL_LICENSE_GENERATOR`: installs the generator only when explicitly enabled; it defaults off so customer packages do not accidentally include it.
 
-The generator uses a private key file to issue customer license codes. Keep private keys local and out of customer packages and source control.
+The generator uses a private key file to issue customer license codes. Keep private keys local and out of customer packages and source control. The tracked repository must contain only `tools/aitrain-license-private-key.example.json`; any real `aitrain-license-private-key.json` must live in a secured operator path outside the repo. If a private key has ever been committed, treat it as leaked: rotate to a newly generated key pair, rebuild with the new `AITRAIN_LICENSE_PUBLIC_KEY`, and handle history purging through a separate security procedure if the repository was pushed or distributed.
 
 ## Project Layout
 

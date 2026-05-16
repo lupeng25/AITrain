@@ -15,6 +15,20 @@ private slots:
         QVERIFY(!status.value(QStringLiteral("availableBackends")).toArray().isEmpty());
     }
 
+    void onnxModelFamilyInferenceReportsLoadWarnings()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString onnxPath = dir.filePath(QStringLiteral("bad.onnx"));
+        writeTextFile(onnxPath, QStringLiteral("not an onnx model\n"));
+
+        QString warning;
+        const QString family = aitrain::inferOnnxModelFamily(onnxPath, &warning);
+        QVERIFY(family.isEmpty());
+        QVERIFY(!warning.isEmpty());
+        QVERIFY(warning.contains(QStringLiteral("ONNX")));
+    }
+
     void detectionTrainerWritesTinyDetectorCheckpoint()
     {
         QTemporaryDir dir;

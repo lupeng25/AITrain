@@ -411,3 +411,7 @@ python examples\create-minimal-datasets.py --output .deps\examples-smoke
 7. 将 `best.onnx` 用作推理模型，进入“推理验证”页选择一张图片运行验证。
 
 该流程用于确认安装、环境和闭环是否正常，不代表训练精度。
+
+## 授权私钥安全说明
+
+正式私钥文件必须保存在授权方本机或受控密钥目录，不能放进项目仓库、客户交付包、日志、诊断包或证据目录。仓库内只允许保留 `tools/aitrain-license-private-key.example.json` 这类无敏感内容模板。如果旧私钥曾进入源码或对外分发，应视为已泄漏：生成新的 key pair，用新公钥重新构建 `AITRAIN_LICENSE_PUBLIC_KEY`，旧私钥不再用于任何客户注册码。

@@ -44,6 +44,10 @@ void WorkerSession::validateDataset(const QJsonObject& payload)
     startProgress.insert(QStringLiteral("percent"), 0);
     startProgress.insert(QStringLiteral("message"), QStringLiteral("开始校验数据集。"));
     send(QStringLiteral("progress"), startProgress);
+    if (pollPendingCancel()) {
+        sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
+        return;
+    }
 
     aitrain::DatasetValidationResult result;
     if (format == QStringLiteral("yolo_detection") || format == QStringLiteral("yolo_txt")) {
@@ -123,6 +127,10 @@ void WorkerSession::splitDataset(const QJsonObject& payload)
     startProgress.insert(QStringLiteral("percent"), 0);
     startProgress.insert(QStringLiteral("message"), QStringLiteral("开始划分数据集。"));
     send(QStringLiteral("progress"), startProgress);
+    if (pollPendingCancel()) {
+        sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
+        return;
+    }
 
     aitrain::DatasetSplitResult result;
     if (format == QStringLiteral("yolo_detection") || format == QStringLiteral("yolo_txt")) {
@@ -203,6 +211,10 @@ void WorkerSession::convertDataset(const QJsonObject& payload)
     startProgress.insert(QStringLiteral("percent"), 0);
     startProgress.insert(QStringLiteral("message"), QStringLiteral("开始转换数据集。"));
     send(QStringLiteral("progress"), startProgress);
+    if (pollPendingCancel()) {
+        sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
+        return;
+    }
 
     const aitrain::DatasetConversionResult result = aitrain::convertDataset(request, cancellationCallback());
     running_ = false;
@@ -275,6 +287,10 @@ void WorkerSession::curateDataset(const QJsonObject& payload)
     progress.insert(QStringLiteral("percent"), 0);
     progress.insert(QStringLiteral("message"), QStringLiteral("开始生成数据质量报告。"));
     send(QStringLiteral("progress"), progress);
+    if (pollPendingCancel()) {
+        sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
+        return;
+    }
 
     const aitrain::WorkflowResult result = aitrain::curateDatasetQualityReport(datasetPath, outputPath, format, options, cancellationCallback());
     running_ = false;
@@ -369,6 +385,10 @@ void WorkerSession::createDatasetSnapshot(const QJsonObject& payload)
     progress.insert(QStringLiteral("percent"), 0);
     progress.insert(QStringLiteral("message"), QStringLiteral("开始生成数据集快照。"));
     send(QStringLiteral("progress"), progress);
+    if (pollPendingCancel()) {
+        sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
+        return;
+    }
 
     const aitrain::WorkflowResult result = aitrain::createDatasetSnapshotReport(datasetPath, outputPath, format, options, cancellationCallback());
     running_ = false;

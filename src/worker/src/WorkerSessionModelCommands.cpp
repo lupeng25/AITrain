@@ -46,6 +46,10 @@ void WorkerSession::evaluateModel(const QJsonObject& payload)
     progress.insert(QStringLiteral("percent"), 0);
     progress.insert(QStringLiteral("message"), QStringLiteral("开始评估模型。"));
     send(QStringLiteral("progress"), progress);
+    if (pollPendingCancel()) {
+        sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
+        return;
+    }
 
     const aitrain::WorkflowResult result = aitrain::evaluateModelReport(modelPath, datasetPath, outputPath, taskType, options, cancellationCallback());
     running_ = false;
@@ -126,6 +130,10 @@ void WorkerSession::benchmarkModel(const QJsonObject& payload)
     progress.insert(QStringLiteral("percent"), 0);
     progress.insert(QStringLiteral("message"), QStringLiteral("开始部署基准测试。"));
     send(QStringLiteral("progress"), progress);
+    if (pollPendingCancel()) {
+        sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
+        return;
+    }
 
     const aitrain::WorkflowResult result = aitrain::benchmarkModelReport(modelPath, outputPath, options, cancellationCallback());
     running_ = false;
@@ -247,6 +255,10 @@ void WorkerSession::runCustomerOcrAcceptance(const QJsonObject& payload)
     progress.insert(QStringLiteral("percent"), 0);
     progress.insert(QStringLiteral("message"), QStringLiteral("开始客户域 OCR 验收。"));
     send(QStringLiteral("progress"), progress);
+    if (pollPendingCancel()) {
+        sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
+        return;
+    }
 
     const aitrain::WorkflowResult result = aitrain::runCustomerOcrAcceptanceReport(outputPath, options);
     if (!result.ok) {
@@ -305,6 +317,10 @@ void WorkerSession::collectDiagnostics(const QJsonObject& payload)
     progress.insert(QStringLiteral("percent"), 0);
     progress.insert(QStringLiteral("message"), QStringLiteral("开始收集诊断包。"));
     send(QStringLiteral("progress"), progress);
+    if (pollPendingCancel()) {
+        sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
+        return;
+    }
 
     const aitrain::WorkflowResult result = aitrain::collectDiagnosticsReport(outputPath, context);
     if (!result.ok) {
@@ -365,6 +381,10 @@ void WorkerSession::validateDeploymentArtifact(const QJsonObject& payload)
     progress.insert(QStringLiteral("percent"), 0);
     progress.insert(QStringLiteral("message"), QStringLiteral("开始验证部署产物。"));
     send(QStringLiteral("progress"), progress);
+    if (pollPendingCancel()) {
+        sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
+        return;
+    }
 
     const aitrain::WorkflowResult result = aitrain::validateDeploymentArtifactReport(modelPath, outputPath, format, options);
     if (!result.ok) {
@@ -432,6 +452,10 @@ void WorkerSession::exportModel(const QJsonObject& payload)
     startProgress.insert(QStringLiteral("percent"), 0);
     startProgress.insert(QStringLiteral("message"), QStringLiteral("开始导出模型。"));
     send(QStringLiteral("progress"), startProgress);
+    if (pollPendingCancel()) {
+        sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
+        return;
+    }
 
     const aitrain::DetectionExportResult result = aitrain::exportDetectionCheckpoint(checkpointPath, outputPath, format, cancellationCallback());
     running_ = false;
@@ -520,6 +544,10 @@ void WorkerSession::runInference(const QJsonObject& payload)
     startProgress.insert(QStringLiteral("percent"), 0);
     startProgress.insert(QStringLiteral("message"), QStringLiteral("开始推理。"));
     send(QStringLiteral("progress"), startProgress);
+    if (pollPendingCancel()) {
+        sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
+        return;
+    }
 
     QElapsedTimer elapsed;
     elapsed.start();

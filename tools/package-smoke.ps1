@@ -144,6 +144,18 @@ if ($pythonCacheDirs.Count -gt 0 -or $pythonCacheFiles.Count -gt 0) {
 }
 Write-Host "  [ok] no Python cache artifacts"
 
+$privateKeyFiles = @(Get-ChildItem -LiteralPath $prefixFull -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.Name -like "*aitrain-license-private-key*.json" -or
+        $_.Name -like "*license-private-key*.json" -or
+        $_.Name -like "*private-key*.json"
+    })
+if ($privateKeyFiles.Count -gt 0) {
+    $privateKeyItems = $privateKeyFiles | Select-Object -First 10 | ForEach-Object { $_.FullName }
+    throw ("Package contains license private-key material: {0}" -f ($privateKeyItems -join "; "))
+}
+Write-Host "  [ok] no license private-key artifacts"
+
 $onnxRuntimeRootDll = Join-Path $prefixFull "onnxruntime.dll"
 $onnxRuntimeFolderDll = Join-Path $prefixFull "runtimes\onnxruntime\onnxruntime.dll"
 if ((Test-Path $onnxRuntimeRootDll) -or (Test-Path $onnxRuntimeFolderDll)) {

@@ -95,8 +95,12 @@ void WorkerSession::runPythonTrainer()
     adapterLog.insert(QStringLiteral("backend"), backend);
     send(QStringLiteral("log"), adapterLog);
 
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
+    environment.insert(QStringLiteral("PYTHONIOENCODING"), QStringLiteral("utf-8"));
+    pythonTrainerProcess_.setProcessEnvironment(environment);
     pythonTrainerProcess_.setProgram(pythonExecutable);
-    pythonTrainerProcess_.setArguments(QStringList() << trainerScript << QStringLiteral("--request") << requestPath);
+    pythonTrainerProcess_.setArguments(QStringList() << QStringLiteral("-u") << trainerScript << QStringLiteral("--request") << requestPath);
     pythonTrainerProcess_.setProcessChannelMode(QProcess::SeparateChannels);
     pythonTrainerProcess_.start();
     if (!pythonTrainerProcess_.waitForStarted(5000)) {

@@ -11,6 +11,7 @@
 
 #include <QDateTime>
 #include <QCoreApplication>
+#include <QDebug>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QEventLoop>
@@ -29,7 +30,7 @@ WorkerSession::WorkerSession(QObject* parent)
     : QObject(parent)
 {
     connect(&socket_, &QLocalSocket::readyRead, this, &WorkerSession::readLines);
-    connect(&socket_, &QLocalSocket::disconnected, qApp, &QCoreApplication::quit);
+    connect(&socket_, &QLocalSocket::disconnected, this, &WorkerSession::handleSocketDisconnected);
     connect(&timer_, &QTimer::timeout, this, &WorkerSession::tickTraining);
     timer_.setInterval(500);
 }
@@ -124,27 +125,25 @@ void WorkerSession::handleMessage(const QString& type, const QJsonObject& payloa
         paused_ = false;
         canceled_ = true;
         timer_.stop();
-        if (pythonTrainerProcess_.state() != QProcess::NotRunning) {
-            QJsonObject terminateLog;
-            terminateLog.insert(QStringLiteral("taskId"), activeTaskId_.isEmpty() ? request_.taskId : activeTaskId_);
-            terminateLog.insert(QStringLiteral("command"), activeCommand_);
-            terminateLog.insert(QStringLiteral("message"), QStringLiteral("Terminating Python trainer process after user cancel."));
-            send(QStringLiteral("log"), terminateLog);
-            pythonTrainerProcess_.terminate();
-            if (!pythonTrainerProcess_.waitForFinished(1500)) {
-                QJsonObject killLog;
-                killLog.insert(QStringLiteral("taskId"), activeTaskId_.isEmpty() ? request_.taskId : activeTaskId_);
-                killLog.insert(QStringLiteral("command"), activeCommand_);
-                killLog.insert(QStringLiteral("message"), QStringLiteral("Killing Python trainer process after terminate timeout."));
-                send(QStringLiteral("log"), killLog);
-                pythonTrainerProcess_.kill();
-                pythonTrainerProcess_.waitForFinished(1500);
-            }
-        }
+        shutdownPythonTrainer(QStringLiteral("Canceled by user"), true);
         sendCanceledAndFinish(activeTaskId_.isEmpty() ? request_.taskId : activeTaskId_, QStringLiteral("Canceled by user"));
     } else {
         fail(QStringLiteral("Unsupported command: %1").arg(type));
     }
+}
+
+void WorkerSession::handleSocketDisconnected()
+{
+    if (finishingSession_) {
+        return;
+    }
+
+    running_ = false;
+    paused_ = false;
+    canceled_ = true;
+    timer_.stop();
+    shutdownPythonTrainer(QStringLiteral("Worker client disconnected."), false);
+    qApp->quit();
 }
 
 void WorkerSession::sendHeartbeat()
@@ -167,9 +166,77 @@ void WorkerSession::send(const QString& type, const QJsonObject& payload)
 aitrain::CancellationCallback WorkerSession::cancellationCallback()
 {
     return [this]() {
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
         return canceled_;
     };
+}
+
+bool WorkerSession::pollPendingCancel(int timeoutMs)
+{
+    const qint64 deadline = QDateTime::currentMSecsSinceEpoch() + qMax(0, timeoutMs);
+    do {
+        if (!socket_.bytesAvailable()) {
+            const qint64 remaining = deadline - QDateTime::currentMSecsSinceEpoch();
+            if (remaining <= 0 || !socket_.waitForReadyRead(qMin<qint64>(remaining, 20))) {
+                continue;
+            }
+        }
+
+        buffer_.append(socket_.readAll());
+        int newline = buffer_.indexOf('\n');
+        while (newline >= 0) {
+            const QByteArray line = buffer_.left(newline);
+            buffer_.remove(0, newline + 1);
+
+            QString type;
+            QJsonObject payload;
+            QString requestId;
+            QString error;
+            if (!aitrain::protocol::decodeMessage(line, &type, &payload, &requestId, &error)) {
+                continue;
+            }
+            if (type == QStringLiteral("cancel")) {
+                running_ = false;
+                paused_ = false;
+                canceled_ = true;
+                timer_.stop();
+                shutdownPythonTrainer(QStringLiteral("Canceled by user"), true);
+                return true;
+            }
+            if (type == QStringLiteral("heartbeat")) {
+                sendHeartbeat();
+            }
+        }
+    } while (QDateTime::currentMSecsSinceEpoch() < deadline && !canceled_);
+
+    return canceled_;
+}
+
+void WorkerSession::shutdownPythonTrainer(const QString& reason, bool notifyClient)
+{
+    if (pythonTrainerProcess_.state() == QProcess::NotRunning) {
+        return;
+    }
+
+    const QString taskId = activeTaskId_.isEmpty() ? request_.taskId : activeTaskId_;
+    const auto emitShutdownLog = [this, notifyClient, &taskId](const QString& message) {
+        if (notifyClient && socket_.state() == QLocalSocket::ConnectedState) {
+            QJsonObject payload;
+            payload.insert(QStringLiteral("taskId"), taskId);
+            payload.insert(QStringLiteral("command"), activeCommand_);
+            payload.insert(QStringLiteral("message"), message);
+            send(QStringLiteral("log"), payload);
+        } else {
+            qWarning().noquote() << message;
+        }
+    };
+
+    emitShutdownLog(QStringLiteral("Terminating Python trainer process: %1").arg(reason));
+    pythonTrainerProcess_.terminate();
+    if (!pythonTrainerProcess_.waitForFinished(1500)) {
+        emitShutdownLog(QStringLiteral("Killing Python trainer process after terminate timeout: %1").arg(reason));
+        pythonTrainerProcess_.kill();
+        pythonTrainerProcess_.waitForFinished(1500);
+    }
 }
 
 void WorkerSession::sendCanceledAndFinish(const QString& taskId, const QString& message)
@@ -198,6 +265,7 @@ void WorkerSession::sendCanceledAndFinish(const QString& taskId, const QString& 
 
 void WorkerSession::finishSession()
 {
+    finishingSession_ = true;
     activeTaskId_.clear();
     activeCommand_.clear();
     activeOutputPath_.clear();

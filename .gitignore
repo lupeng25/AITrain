@@ -19,3 +19,7 @@ __pycache__/
 *.VC.VC.opendb
 demo_project/
 /environment_profiles_report.json
+tools/aitrain-license-private-key.json
+aitrain-license-private-key.json
+*aitrain-license-private-key*.json
+!tools/aitrain-license-private-key.example.json

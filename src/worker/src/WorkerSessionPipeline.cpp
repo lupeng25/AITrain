@@ -40,6 +40,10 @@ void WorkerSession::runLocalPipeline(const QJsonObject& payload)
     progress.insert(QStringLiteral("percent"), 0);
     progress.insert(QStringLiteral("message"), QStringLiteral("开始执行本地流水线。"));
     send(QStringLiteral("progress"), progress);
+    if (pollPendingCancel()) {
+        sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
+        return;
+    }
 
     QJsonObject pipelineOptions = options;
     const QString resolvedTemplate = templateId.isEmpty()
@@ -214,8 +218,12 @@ WorkerSession::PipelineTrainResult WorkerSession::runPipelineTrainingStep(
     adapterLog.insert(QStringLiteral("backend"), backend);
     send(QStringLiteral("log"), adapterLog);
 
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
+    environment.insert(QStringLiteral("PYTHONIOENCODING"), QStringLiteral("utf-8"));
+    pythonTrainerProcess_.setProcessEnvironment(environment);
     pythonTrainerProcess_.setProgram(pythonExecutable);
-    pythonTrainerProcess_.setArguments(QStringList() << trainerScript << QStringLiteral("--request") << requestPath);
+    pythonTrainerProcess_.setArguments(QStringList() << QStringLiteral("-u") << trainerScript << QStringLiteral("--request") << requestPath);
     pythonTrainerProcess_.setProcessChannelMode(QProcess::SeparateChannels);
     pythonTrainerProcess_.start();
     if (!pythonTrainerProcess_.waitForStarted(5000)) {
