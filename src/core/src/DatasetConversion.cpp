@@ -71,6 +71,33 @@ DatasetConversionIssue issue(const QString& severity,
     return conversionIssue;
 }
 
+bool conversionCanceled(const CancellationCallback& shouldCancel)
+{
+    return isCancellationRequested(shouldCancel);
+}
+
+DatasetConversionResult canceledConversionResult(const DatasetConversionRequest& request)
+{
+    DatasetConversionResult result;
+    result.sourceFormat = request.sourceFormat;
+    result.targetFormat = request.targetFormat;
+    result.sourcePath = QDir::cleanPath(request.sourcePath);
+    result.outputPath = QDir::cleanPath(request.outputPath);
+    result.errorCode = QStringLiteral("canceled");
+    result.errorMessage = QStringLiteral("Canceled by user");
+    return result;
+}
+
+void markCanceled(DatasetConversionResult* result)
+{
+    if (!result) {
+        return;
+    }
+    result->ok = false;
+    result->errorCode = QStringLiteral("canceled");
+    result->errorMessage = QStringLiteral("Canceled by user");
+}
+
 QString yoloNumber(double value)
 {
     return QString::number(value, 'f', 6);
@@ -206,8 +233,11 @@ bool containsPlannedOutputTarget(const QStringList& targets, const QSet<QString>
 
 void insertPlannedOutputTargets(const QStringList& targets, QSet<QString>* plannedTargets);
 
-DatasetConversionResult convertVoc(const DatasetConversionRequest& request)
+DatasetConversionResult convertVoc(const DatasetConversionRequest& request, const CancellationCallback& shouldCancel)
 {
+    if (conversionCanceled(shouldCancel)) {
+        return canceledConversionResult(request);
+    }
     DatasetConversionResult result;
     result.sourceFormat = request.sourceFormat;
     result.targetFormat = request.targetFormat;
@@ -237,6 +267,9 @@ DatasetConversionResult convertVoc(const DatasetConversionRequest& request)
     if (sourceInfo.isDir()) {
         QDirIterator it(sourceDir, QStringList{QStringLiteral("*.xml")}, QDir::Files);
         while (it.hasNext()) {
+            if (conversionCanceled(shouldCancel)) {
+                return canceledConversionResult(request);
+            }
             xmlPaths.append(it.next());
         }
     } else if (sourceInfo.isFile() && sourceInfo.suffix().compare(QStringLiteral("xml"), Qt::CaseInsensitive) == 0) {
@@ -253,6 +286,10 @@ DatasetConversionResult convertVoc(const DatasetConversionRequest& request)
 
     QVector<VocAnnotation> annotations;
     for (const QString& xmlPath : xmlPaths) {
+        if (conversionCanceled(shouldCancel)) {
+            markCanceled(&result);
+            return result;
+        }
         VocAnnotation annotation;
         QString parseError;
         if (!parseVocXml(xmlPath, annotation, &parseError)) {
@@ -279,6 +316,10 @@ DatasetConversionResult convertVoc(const DatasetConversionRequest& request)
 
     QStringList classNames;
     for (const VocAnnotation& annotation : annotations) {
+        if (conversionCanceled(shouldCancel)) {
+            markCanceled(&result);
+            return result;
+        }
         for (const VocObject& object : annotation.objects) {
             const QString className = object.name.trimmed();
             if (!className.isEmpty()) {
@@ -302,6 +343,10 @@ DatasetConversionResult convertVoc(const DatasetConversionRequest& request)
 
     QMap<QString, QStringList> labelsByImage;
     for (const VocAnnotation& annotation : annotations) {
+        if (conversionCanceled(shouldCancel)) {
+            markCanceled(&result);
+            return result;
+        }
         const QString imagePath = resolveVocImagePath(sourceDir, annotation);
         if (imagePath.isEmpty()) {
             result.issues.append(issue(QStringLiteral("warning"), QStringLiteral("image_not_found"), annotation.filename,
@@ -343,6 +388,10 @@ DatasetConversionResult convertVoc(const DatasetConversionRequest& request)
     QSet<QString> plannedOutputTargets;
     int convertedSamples = 0;
     for (auto it = labelsByImage.constBegin(); it != labelsByImage.constEnd(); ++it) {
+        if (conversionCanceled(shouldCancel)) {
+            markCanceled(&result);
+            return result;
+        }
         const QString fileName = QFileInfo(it.key()).fileName();
         const QString labelFileName = QFileInfo(fileName).completeBaseName() + QStringLiteral(".txt");
         const QString trainLabelPath = QDir(result.outputPath).filePath(QStringLiteral("labels/train/%1").arg(labelFileName));
@@ -421,6 +470,10 @@ DatasetConversionResult convertVoc(const DatasetConversionRequest& request)
     result.splitCounts.insert(QStringLiteral("train"), convertedSamples);
     result.splitCounts.insert(QStringLiteral("val"), convertedSamples);
 
+    if (conversionCanceled(shouldCancel)) {
+        markCanceled(&result);
+        return result;
+    }
     result.targetValidation = validateYoloDetectionDataset(result.outputPath);
     result.ok = result.targetValidation.ok;
     if (!result.ok) {
@@ -436,6 +489,10 @@ DatasetConversionResult convertVoc(const DatasetConversionRequest& request)
         {QStringLiteral("imagesRoot"), QDir(result.outputPath).filePath(QStringLiteral("images"))},
         {QStringLiteral("labelsRoot"), QDir(result.outputPath).filePath(QStringLiteral("labels"))}
     });
+    if (conversionCanceled(shouldCancel)) {
+        markCanceled(&result);
+        return result;
+    }
     if (!writeJsonFile(result.reportPath, report, &writeError)) {
         result.ok = false;
         result.errorCode = QStringLiteral("report_write_failed");
@@ -909,10 +966,15 @@ void appendYoloImageForSplit(const QString& split,
     int* nextImageId,
     int* maxClassId,
     YoloDataset* dataset,
-    DatasetConversionResult* result)
+    DatasetConversionResult* result,
+    const CancellationCallback& shouldCancel)
 {
     const QDir imagesDir(imagesRoot);
     for (const QString& imagePath : imagePaths) {
+        if (conversionCanceled(shouldCancel)) {
+            markCanceled(result);
+            return;
+        }
         YoloImage image;
         image.id = ++(*nextImageId);
         image.split = split;
@@ -949,6 +1011,10 @@ void appendYoloImageForSplit(const QString& split,
         const QStringList lines = QString::fromUtf8(labelFile.readAll()).split(QLatin1Char('\n'));
         int lineNumber = 0;
         for (const QString& rawLine : lines) {
+            if (conversionCanceled(shouldCancel)) {
+                markCanceled(result);
+                return;
+            }
             ++lineNumber;
             const QString line = rawLine.trimmed();
             if (line.isEmpty()) {
@@ -1016,7 +1082,11 @@ void appendYoloImageForSplit(const QString& split,
     }
 }
 
-YoloDataset parseYoloDataset(const DatasetConversionRequest& request, bool segmentation, DatasetConversionResult* result)
+YoloDataset parseYoloDataset(
+    const DatasetConversionRequest& request,
+    bool segmentation,
+    DatasetConversionResult* result,
+    const CancellationCallback& shouldCancel)
 {
     YoloDataset dataset;
     dataset.rootPath = QDir::cleanPath(request.sourcePath);
@@ -1064,6 +1134,10 @@ YoloDataset parseYoloDataset(const DatasetConversionRequest& request, bool segme
     int maxClassId = dataset.classes.size() - 1;
     QSet<QString> processedImageRoots;
     for (const QString& split : {QStringLiteral("train"), QStringLiteral("val")}) {
+        if (conversionCanceled(shouldCancel)) {
+            markCanceled(result);
+            return dataset;
+        }
         const YoloSplitPaths splitPaths = yoloSplitPaths(layout, split);
         const QString imagesRoot = splitPaths.imageDir;
         const QString cleanImagesRoot = QDir::cleanPath(imagesRoot).toLower();
@@ -1076,7 +1150,10 @@ YoloDataset parseYoloDataset(const DatasetConversionRequest& request, bool segme
         const QStringList images = sortedImageFiles(imagesRoot);
         dataset.splitCounts.insert(split, images.size());
         appendYoloImageForSplit(split, imagesRoot, labelsRoot, jsonPath(QStringLiteral("images/%1").arg(split)), images, segmentation, dataset.namesFromYaml,
-            dataset.classes.size(), &nextImageId, &maxClassId, &dataset, result);
+            dataset.classes.size(), &nextImageId, &maxClassId, &dataset, result, shouldCancel);
+        if (result && result->errorCode == QStringLiteral("canceled")) {
+            return dataset;
+        }
     }
 
     if (dataset.images.isEmpty() && !hasYamlSplitPaths) {
@@ -1090,7 +1167,10 @@ YoloDataset parseYoloDataset(const DatasetConversionRequest& request, bool segme
             }
             dataset.splitCounts.insert(QStringLiteral("train"), images.size());
             appendYoloImageForSplit(QStringLiteral("train"), imagesRoot, labelsRoot, QStringLiteral("images/train"), images, segmentation, dataset.namesFromYaml,
-                dataset.classes.size(), &nextImageId, &maxClassId, &dataset, result);
+                dataset.classes.size(), &nextImageId, &maxClassId, &dataset, result, shouldCancel);
+            if (result && result->errorCode == QStringLiteral("canceled")) {
+                return dataset;
+            }
         }
     }
 
@@ -1148,19 +1228,28 @@ bool writeYoloSplitToCoco(const YoloDataset& dataset,
     bool segmentation,
     DatasetConversionResult* result,
     int* nextAnnotationId,
-    int* convertedSamples)
+    int* convertedSamples,
+    const CancellationCallback& shouldCancel)
 {
     QJsonArray images;
     QJsonArray annotations;
     const QJsonArray categories = cocoCategories(dataset);
 
     for (const YoloImage& image : dataset.images) {
+        if (conversionCanceled(shouldCancel)) {
+            markCanceled(result);
+            return false;
+        }
         if (image.split != split || image.annotations.isEmpty()) {
             continue;
         }
 
         QJsonArray imageAnnotations;
         for (const YoloAnnotation& annotation : image.annotations) {
+            if (conversionCanceled(shouldCancel)) {
+                markCanceled(result);
+                return false;
+            }
             if (annotation.classId < 0 || annotation.classId >= dataset.classes.size()) {
                 continue;
             }
@@ -1253,8 +1342,14 @@ bool writeYoloSplitToCoco(const YoloDataset& dataset,
     return true;
 }
 
-DatasetConversionResult convertYoloToCoco(const DatasetConversionRequest& request, bool segmentation)
+DatasetConversionResult convertYoloToCoco(
+    const DatasetConversionRequest& request,
+    bool segmentation,
+    const CancellationCallback& shouldCancel)
 {
+    if (conversionCanceled(shouldCancel)) {
+        return canceledConversionResult(request);
+    }
     DatasetConversionResult result;
     result.sourceFormat = request.sourceFormat;
     result.targetFormat = request.targetFormat;
@@ -1273,19 +1368,26 @@ DatasetConversionResult convertYoloToCoco(const DatasetConversionRequest& reques
         return result;
     }
 
-    const YoloDataset dataset = parseYoloDataset(request, segmentation, &result);
+    const YoloDataset dataset = parseYoloDataset(request, segmentation, &result, shouldCancel);
+    if (result.errorCode == QStringLiteral("canceled")) {
+        return result;
+    }
     result.splitCounts = dataset.splitCounts;
     for (const YoloClass& cls : dataset.classes) {
+        if (conversionCanceled(shouldCancel)) {
+            markCanceled(&result);
+            return result;
+        }
         result.classMap.insert(QString::number(cls.id), cls.name);
     }
 
     int nextAnnotationId = 0;
     int trainSamples = 0;
     int valSamples = 0;
-    if (!writeYoloSplitToCoco(dataset, QStringLiteral("train"), request, segmentation, &result, &nextAnnotationId, &trainSamples)) {
+    if (!writeYoloSplitToCoco(dataset, QStringLiteral("train"), request, segmentation, &result, &nextAnnotationId, &trainSamples, shouldCancel)) {
         return result;
     }
-    if (!writeYoloSplitToCoco(dataset, QStringLiteral("val"), request, segmentation, &result, &nextAnnotationId, &valSamples)) {
+    if (!writeYoloSplitToCoco(dataset, QStringLiteral("val"), request, segmentation, &result, &nextAnnotationId, &valSamples, shouldCancel)) {
         return result;
     }
     result.splitCounts.insert(QStringLiteral("convertedTrain"), trainSamples);
@@ -1305,6 +1407,10 @@ DatasetConversionResult convertYoloToCoco(const DatasetConversionRequest& reques
     QJsonObject report = result.toJson();
     report.insert(QStringLiteral("convertedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     QString writeError;
+    if (conversionCanceled(shouldCancel)) {
+        markCanceled(&result);
+        return result;
+    }
     if (!writeJsonFile(result.reportPath, report, &writeError)) {
         result.ok = false;
         result.errorCode = QStringLiteral("report_write_failed");
@@ -1318,11 +1424,16 @@ bool writeVocXmlForImage(const YoloDataset& dataset,
     const DatasetConversionRequest& request,
     QSet<QString>* plannedXmlPaths,
     QSet<QString>* plannedImagePaths,
-    DatasetConversionResult* result)
+    DatasetConversionResult* result,
+    const CancellationCallback& shouldCancel)
 {
     QStringList objects;
     int convertedObjectCount = 0;
     for (const YoloAnnotation& annotation : image.annotations) {
+        if (conversionCanceled(shouldCancel)) {
+            markCanceled(result);
+            return false;
+        }
         if (annotation.classId < 0 || annotation.classId >= dataset.classes.size()) {
             continue;
         }
@@ -1428,8 +1539,11 @@ bool writeVocXmlForImage(const YoloDataset& dataset,
     return true;
 }
 
-DatasetConversionResult convertYoloToVoc(const DatasetConversionRequest& request)
+DatasetConversionResult convertYoloToVoc(const DatasetConversionRequest& request, const CancellationCallback& shouldCancel)
 {
+    if (conversionCanceled(shouldCancel)) {
+        return canceledConversionResult(request);
+    }
     DatasetConversionResult result;
     result.sourceFormat = request.sourceFormat;
     result.targetFormat = request.targetFormat;
@@ -1448,15 +1562,26 @@ DatasetConversionResult convertYoloToVoc(const DatasetConversionRequest& request
         return result;
     }
 
-    const YoloDataset dataset = parseYoloDataset(request, false, &result);
+    const YoloDataset dataset = parseYoloDataset(request, false, &result, shouldCancel);
+    if (result.errorCode == QStringLiteral("canceled")) {
+        return result;
+    }
     result.splitCounts = dataset.splitCounts;
     for (const YoloClass& cls : dataset.classes) {
+        if (conversionCanceled(shouldCancel)) {
+            markCanceled(&result);
+            return result;
+        }
         result.classMap.insert(QString::number(cls.id), cls.name);
     }
     QSet<QString> plannedXmlPaths;
     QSet<QString> plannedImagePaths;
     for (const YoloImage& image : dataset.images) {
-        if (!writeVocXmlForImage(dataset, image, request, &plannedXmlPaths, &plannedImagePaths, &result) && !result.errorCode.isEmpty()) {
+        if (conversionCanceled(shouldCancel)) {
+            markCanceled(&result);
+            return result;
+        }
+        if (!writeVocXmlForImage(dataset, image, request, &plannedXmlPaths, &plannedImagePaths, &result, shouldCancel) && !result.errorCode.isEmpty()) {
             return result;
         }
     }
@@ -1475,6 +1600,10 @@ DatasetConversionResult convertYoloToVoc(const DatasetConversionRequest& request
     QJsonObject report = result.toJson();
     report.insert(QStringLiteral("convertedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     QString writeError;
+    if (conversionCanceled(shouldCancel)) {
+        markCanceled(&result);
+        return result;
+    }
     if (!writeJsonFile(result.reportPath, report, &writeError)) {
         result.ok = false;
         result.errorCode = QStringLiteral("report_write_failed");
@@ -1483,8 +1612,11 @@ DatasetConversionResult convertYoloToVoc(const DatasetConversionRequest& request
     return result;
 }
 
-DatasetConversionResult convertCoco(const DatasetConversionRequest& request)
+DatasetConversionResult convertCoco(const DatasetConversionRequest& request, const CancellationCallback& shouldCancel)
 {
+    if (conversionCanceled(shouldCancel)) {
+        return canceledConversionResult(request);
+    }
     DatasetConversionResult result;
     result.sourceFormat = request.sourceFormat;
     result.targetFormat = request.targetFormat;
@@ -1524,12 +1656,20 @@ DatasetConversionResult convertCoco(const DatasetConversionRequest& request)
 
     QMap<int, QJsonObject> imagesById;
     for (const QJsonValue& value : images) {
+        if (conversionCanceled(shouldCancel)) {
+            markCanceled(&result);
+            return result;
+        }
         const QJsonObject image = value.toObject();
         imagesById.insert(image.value(QStringLiteral("id")).toInt(), image);
     }
 
     QMap<int, QString> categoryNames;
     for (const QJsonValue& value : categories) {
+        if (conversionCanceled(shouldCancel)) {
+            markCanceled(&result);
+            return result;
+        }
         const QJsonObject category = value.toObject();
         categoryNames.insert(category.value(QStringLiteral("id")).toInt(), category.value(QStringLiteral("name")).toString().trimmed());
     }
@@ -1547,6 +1687,10 @@ DatasetConversionResult convertCoco(const DatasetConversionRequest& request)
 
     QMap<int, QStringList> labelsByImageId;
     for (const QJsonValue& value : annotations) {
+        if (conversionCanceled(shouldCancel)) {
+            markCanceled(&result);
+            return result;
+        }
         const QJsonObject annotation = value.toObject();
         const int imageId = annotation.value(QStringLiteral("image_id")).toInt();
         const int categoryId = annotation.value(QStringLiteral("category_id")).toInt();
@@ -1648,6 +1792,10 @@ DatasetConversionResult convertCoco(const DatasetConversionRequest& request)
         if (nestedPolygons) {
             bool convertedAny = false;
             for (const QJsonValue& segmentValue : segments) {
+                if (conversionCanceled(shouldCancel)) {
+                    markCanceled(&result);
+                    return result;
+                }
                 const QJsonArray polygon = segmentValue.toArray();
                 const int before = result.convertedAnnotationCount;
                 appendPolygon(polygon);
@@ -1676,6 +1824,10 @@ DatasetConversionResult convertCoco(const DatasetConversionRequest& request)
     QSet<QString> plannedOutputTargets;
     int convertedSamples = 0;
     for (auto it = labelsByImageId.constBegin(); it != labelsByImageId.constEnd(); ++it) {
+        if (conversionCanceled(shouldCancel)) {
+            markCanceled(&result);
+            return result;
+        }
         const QJsonObject image = imagesById.value(it.key());
         const QString fileName = image.value(QStringLiteral("file_name")).toString();
         const QString sourceImagePath = QFileInfo(fileName).isAbsolute()
@@ -1758,6 +1910,10 @@ DatasetConversionResult convertCoco(const DatasetConversionRequest& request)
     result.splitCounts.insert(QStringLiteral("train"), convertedSamples);
     result.splitCounts.insert(QStringLiteral("val"), convertedSamples);
 
+    if (conversionCanceled(shouldCancel)) {
+        markCanceled(&result);
+        return result;
+    }
     const bool targetSegmentation = result.targetFormat == QStringLiteral("yolo_segmentation");
     result.targetValidation = targetSegmentation
         ? validateYoloSegmentationDataset(result.outputPath)
@@ -1778,6 +1934,10 @@ DatasetConversionResult convertCoco(const DatasetConversionRequest& request)
         {QStringLiteral("imagesRoot"), QDir(result.outputPath).filePath(QStringLiteral("images"))},
         {QStringLiteral("labelsRoot"), QDir(result.outputPath).filePath(QStringLiteral("labels"))}
     });
+    if (conversionCanceled(shouldCancel)) {
+        markCanceled(&result);
+        return result;
+    }
     if (!writeJsonFile(result.reportPath, report, &writeError)) {
         result.ok = false;
         result.errorCode = QStringLiteral("report_write_failed");
@@ -1791,6 +1951,11 @@ DatasetConversionResult convertCoco(const DatasetConversionRequest& request)
 
 DatasetConversionResult convertDataset(const DatasetConversionRequest& request)
 {
+    return convertDataset(request, CancellationCallback());
+}
+
+DatasetConversionResult convertDataset(const DatasetConversionRequest& request, const CancellationCallback& shouldCancel)
+{
     DatasetConversionResult result;
     result.sourceFormat = request.sourceFormat;
     result.targetFormat = request.targetFormat;
@@ -1799,6 +1964,9 @@ DatasetConversionResult convertDataset(const DatasetConversionRequest& request)
 
     const QString sourceFormat = normalizedFormat(request.sourceFormat);
     const QString targetFormat = normalizedFormat(request.targetFormat);
+    if (conversionCanceled(shouldCancel)) {
+        return canceledConversionResult(request);
+    }
 
     if (sourceFormat != QStringLiteral("coco_json")
         && sourceFormat != QStringLiteral("voc_xml")
@@ -1812,21 +1980,21 @@ DatasetConversionResult convertDataset(const DatasetConversionRequest& request)
 
     if (sourceFormat == QStringLiteral("coco_json")) {
         if (targetFormat == QStringLiteral("yolo_detection") || targetFormat == QStringLiteral("yolo_segmentation")) {
-            return convertCoco(request);
+            return convertCoco(request, shouldCancel);
         }
         result.errorCode = QStringLiteral("unsupported_target_format");
         result.errorMessage = QStringLiteral("Unsupported dataset target format: %1").arg(request.targetFormat);
         return result;
     }
     if (sourceFormat == QStringLiteral("voc_xml")) {
-        return convertVoc(request);
+        return convertVoc(request, shouldCancel);
     }
     if (sourceFormat == QStringLiteral("yolo_detection")) {
         if (targetFormat == QStringLiteral("coco_json")) {
-            return convertYoloToCoco(request, false);
+            return convertYoloToCoco(request, false, shouldCancel);
         }
         if (targetFormat == QStringLiteral("voc_xml")) {
-            return convertYoloToVoc(request);
+            return convertYoloToVoc(request, shouldCancel);
         }
         result.errorCode = QStringLiteral("unsupported_target_format");
         result.errorMessage = QStringLiteral("Unsupported dataset target format: %1").arg(request.targetFormat);
@@ -1834,7 +2002,7 @@ DatasetConversionResult convertDataset(const DatasetConversionRequest& request)
     }
     if (sourceFormat == QStringLiteral("yolo_segmentation")) {
         if (targetFormat == QStringLiteral("coco_json")) {
-            return convertYoloToCoco(request, true);
+            return convertYoloToCoco(request, true, shouldCancel);
         }
         if (targetFormat == QStringLiteral("voc_xml")) {
             result.errorCode = QStringLiteral("unsupported_target_format");

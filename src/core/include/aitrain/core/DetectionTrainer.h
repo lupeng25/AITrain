@@ -1,5 +1,6 @@
 #pragma once
 
+#include "aitrain/core/Cancellation.h"
 #include "aitrain/core/DetectionDataset.h"
 
 #include <QImage>
@@ -235,5 +236,10 @@ DetectionExportResult exportDetectionCheckpoint(
     const QString& checkpointPath,
     const QString& outputPath,
     const QString& format = QStringLiteral("tiny_detector_json"));
+DetectionExportResult exportDetectionCheckpoint(
+    const QString& checkpointPath,
+    const QString& outputPath,
+    const QString& format,
+    const CancellationCallback& shouldCancel);
 
 } // namespace aitrain

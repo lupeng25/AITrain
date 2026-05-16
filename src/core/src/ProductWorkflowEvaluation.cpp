@@ -744,6 +744,20 @@ QString resolveOcrDictionaryPath(const QString& datasetPath, const QJsonObject& 
 } // namespace
 WorkflowResult evaluateModelReport(const QString& modelPath, const QString& datasetPath, const QString& outputPath, const QString& taskType, const QJsonObject& options)
 {
+    return evaluateModelReport(modelPath, datasetPath, outputPath, taskType, options, CancellationCallback());
+}
+
+WorkflowResult evaluateModelReport(
+    const QString& modelPath,
+    const QString& datasetPath,
+    const QString& outputPath,
+    const QString& taskType,
+    const QJsonObject& options,
+    const CancellationCallback& shouldCancel)
+{
+    if (isCancellationRequested(shouldCancel)) {
+        return canceledResult();
+    }
     const QFileInfo modelInfo(modelPath);
     if (!modelInfo.exists()) {
         return failedResult(QStringLiteral("Model file does not exist: %1").arg(modelPath));
@@ -763,6 +777,9 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         QString error;
         if (!dataset.load(datasetPath, split, &error)) {
             return failedResult(error);
+        }
+        if (isCancellationRequested(shouldCancel)) {
+            return canceledResult();
         }
 
         DetectionInferenceOptions inferenceOptions;
@@ -796,6 +813,9 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         QDir().mkpath(outputDir.filePath(QStringLiteral("overlays")));
 
         for (const DetectionSample& sample : dataset.samples()) {
+            if (isCancellationRequested(shouldCancel)) {
+                return canceledResult();
+            }
             QString predictionError;
             const QVector<DetectionPrediction> predictions = runDetectionPredictions(modelPath, sample.imagePath, inferenceOptions, &runtime, &predictionError);
             if (!predictionError.isEmpty()) {
@@ -839,6 +859,9 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
             QJsonArray samplePredictions;
             bool sampleHasError = false;
             for (const DetectionPrediction& prediction : sortedPredictions) {
+                if (isCancellationRequested(shouldCancel)) {
+                    return canceledResult();
+                }
                 int bestMatch = -1;
                 double bestIou = 0.0;
                 int bestAny = -1;
@@ -904,6 +927,9 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
             }
 
             for (int index = 0; index < sample.boxes.size(); ++index) {
+                if (isCancellationRequested(shouldCancel)) {
+                    return canceledResult();
+                }
                 if (!gtMatched.at(index)) {
                     const DetectionBox& gt = sample.boxes.at(index);
                     if (gt.classId >= 0 && gt.classId < classStats.size()) {
@@ -1036,6 +1062,9 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         const QString errorPath = outputDir.filePath(QStringLiteral("error_samples.json"));
         const QString confusionPath = outputDir.filePath(QStringLiteral("confusion_matrix.csv"));
         const QString summaryPath = outputDir.filePath(QStringLiteral("evaluation_summary.md"));
+        if (isCancellationRequested(shouldCancel)) {
+            return canceledResult();
+        }
         if (!writeTextFile(perClassPath, perClassMetricsCsv(classNames, classStats), &error)) {
             return failedResult(error);
         }
@@ -1078,6 +1107,9 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         if (!dataset.load(datasetPath, split, &error)) {
             return failedResult(error);
         }
+        if (isCancellationRequested(shouldCancel)) {
+            return canceledResult();
+        }
 
         DetectionInferenceOptions inferenceOptions;
         inferenceOptions.iouThreshold = options.value(QStringLiteral("nmsIouThreshold")).toDouble(0.45);
@@ -1112,6 +1144,9 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         QDir().mkpath(outputDir.filePath(QStringLiteral("overlays")));
 
         for (const SegmentationSample& sample : dataset.samples()) {
+            if (isCancellationRequested(shouldCancel)) {
+                return canceledResult();
+            }
             QString predictionError;
             const QVector<SegmentationPrediction> predictions = predictSegmentationOnnxRuntime(modelPath, sample.imagePath, inferenceOptions, &predictionError);
             if (!predictionError.isEmpty()) {
@@ -1146,6 +1181,9 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
             QJsonArray samplePredictions;
             bool sampleHasError = false;
             for (const SegmentationPrediction& prediction : sortedPredictions) {
+                if (isCancellationRequested(shouldCancel)) {
+                    return canceledResult();
+                }
                 int bestMatch = -1;
                 double bestIou = 0.0;
                 int bestAny = -1;
@@ -1210,6 +1248,9 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
             }
 
             for (int index = 0; index < sample.polygons.size(); ++index) {
+                if (isCancellationRequested(shouldCancel)) {
+                    return canceledResult();
+                }
                 if (!gtMatched.at(index)) {
                     const SegmentationPolygon& gt = sample.polygons.at(index);
                     if (gt.classId >= 0 && gt.classId < classStats.size()) {
@@ -1347,6 +1388,9 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         const QString errorPath = outputDir.filePath(QStringLiteral("error_samples.json"));
         const QString confusionPath = outputDir.filePath(QStringLiteral("confusion_matrix.csv"));
         const QString summaryPath = outputDir.filePath(QStringLiteral("evaluation_summary.md"));
+        if (isCancellationRequested(shouldCancel)) {
+            return canceledResult();
+        }
         if (!writeTextFile(perClassPath, segmentationPerClassMetricsCsv(classNames, classStats, classMaskIouSums, classMaskIouCounts), &error)) {
             return failedResult(error);
         }
@@ -1391,6 +1435,9 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         if (!dataset.load(datasetPath, labelFilePath, dictionaryPath, maxTextLength, &error)) {
             return failedResult(error);
         }
+        if (isCancellationRequested(shouldCancel)) {
+            return canceledResult();
+        }
 
         int correctCount = 0;
         int totalCount = 0;
@@ -1406,6 +1453,9 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         QDir().mkpath(outputDir.filePath(QStringLiteral("overlays")));
 
         for (const OcrRecSample& sample : dataset.samples()) {
+            if (isCancellationRequested(shouldCancel)) {
+                return canceledResult();
+            }
             QString predictionError;
             const OcrRecPrediction prediction = predictOcrRecOnnxRuntime(modelPath, sample.imagePath, &predictionError);
             if (!predictionError.isEmpty()) {
@@ -1505,6 +1555,9 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
         const QString reportPath = outputDir.filePath(QStringLiteral("evaluation_report.json"));
         const QString errorPath = outputDir.filePath(QStringLiteral("error_samples.json"));
         const QString summaryPath = outputDir.filePath(QStringLiteral("evaluation_summary.md"));
+        if (isCancellationRequested(shouldCancel)) {
+            return canceledResult();
+        }
         if (!writeJsonFile(errorPath, QJsonObject{{QStringLiteral("samples"), errorSamples}}, &error)) {
             return failedResult(error);
         }
@@ -1563,6 +1616,9 @@ WorkflowResult evaluateModelReport(const QString& modelPath, const QString& data
     const QString summaryPath = QDir(outputPath).filePath(QStringLiteral("evaluation_summary.md"));
     summary.insert(QStringLiteral("reportPath"), reportPath);
     summary.insert(QStringLiteral("evaluationSummaryPath"), summaryPath);
+    if (isCancellationRequested(shouldCancel)) {
+        return canceledResult();
+    }
     if (!writeTextFile(summaryPath, evaluationSummaryMarkdown(summary), &error)) {
         return failedResult(error);
     }

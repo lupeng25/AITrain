@@ -1,5 +1,6 @@
 add_library(aitrain_core STATIC
     include/aitrain/core/PluginInterfaces.h
+    include/aitrain/core/Cancellation.h
     include/aitrain/core/Deployment.h
     include/aitrain/core/DatasetConversion.h
     include/aitrain/core/DatasetValidators.h

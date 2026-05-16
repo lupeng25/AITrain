@@ -122,11 +122,7 @@ void WorkerSession::handleMessage(const QString& type, const QJsonObject& payloa
                 pythonTrainerProcess_.waitForFinished(1500);
             }
         }
-        QJsonObject payloadObject;
-        payloadObject.insert(QStringLiteral("taskId"), activeTaskId_.isEmpty() ? request_.taskId : activeTaskId_);
-        payloadObject.insert(QStringLiteral("message"), QStringLiteral("Canceled by user"));
-        send(QStringLiteral("canceled"), payloadObject);
-        finishSession();
+        sendCanceledAndFinish(activeTaskId_.isEmpty() ? request_.taskId : activeTaskId_, QStringLiteral("Canceled by user"));
     } else {
         fail(QStringLiteral("Unsupported command: %1").arg(type));
     }
@@ -147,6 +143,28 @@ void WorkerSession::send(const QString& type, const QJsonObject& payload)
 {
     socket_.write(aitrain::protocol::encodeMessage(type, payload));
     socket_.flush();
+}
+
+aitrain::CancellationCallback WorkerSession::cancellationCallback()
+{
+    return [this]() {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
+        return canceled_;
+    };
+}
+
+void WorkerSession::sendCanceledAndFinish(const QString& taskId, const QString& message)
+{
+    running_ = false;
+    paused_ = false;
+    canceled_ = true;
+    timer_.stop();
+
+    QJsonObject payload;
+    payload.insert(QStringLiteral("taskId"), taskId.isEmpty() ? request_.taskId : taskId);
+    payload.insert(QStringLiteral("message"), message.isEmpty() ? QStringLiteral("Canceled by user") : message);
+    send(QStringLiteral("canceled"), payload);
+    finishSession();
 }
 
 void WorkerSession::finishSession()

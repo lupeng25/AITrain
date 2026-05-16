@@ -28,6 +28,9 @@ using namespace worker_support;
 void WorkerSession::evaluateModel(const QJsonObject& payload)
 {
     const QString taskId = payload.value(QStringLiteral("taskId")).toString();
+    activeTaskId_ = taskId;
+    canceled_ = false;
+    running_ = true;
     const QString modelPath = payload.value(QStringLiteral("modelPath")).toString();
     const QString datasetPath = payload.value(QStringLiteral("datasetPath")).toString();
     const QString taskType = payload.value(QStringLiteral("taskType")).toString(QStringLiteral("detection"));
@@ -43,7 +46,15 @@ void WorkerSession::evaluateModel(const QJsonObject& payload)
     progress.insert(QStringLiteral("message"), QStringLiteral("开始评估模型。"));
     send(QStringLiteral("progress"), progress);
 
-    const aitrain::WorkflowResult result = aitrain::evaluateModelReport(modelPath, datasetPath, outputPath, taskType, options);
+    const aitrain::WorkflowResult result = aitrain::evaluateModelReport(modelPath, datasetPath, outputPath, taskType, options, cancellationCallback());
+    running_ = false;
+    if (canceled_) {
+        return;
+    }
+    if (!result.ok && result.error == QStringLiteral("Canceled by user")) {
+        sendCanceledAndFinish(taskId, result.error);
+        return;
+    }
     if (!result.ok) {
         fail(result.error);
         return;
@@ -98,6 +109,9 @@ void WorkerSession::evaluateModel(const QJsonObject& payload)
 void WorkerSession::benchmarkModel(const QJsonObject& payload)
 {
     const QString taskId = payload.value(QStringLiteral("taskId")).toString();
+    activeTaskId_ = taskId;
+    canceled_ = false;
+    running_ = true;
     const QString modelPath = payload.value(QStringLiteral("modelPath")).toString();
     QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
     const QJsonObject options = payload.value(QStringLiteral("options")).toObject();
@@ -111,7 +125,15 @@ void WorkerSession::benchmarkModel(const QJsonObject& payload)
     progress.insert(QStringLiteral("message"), QStringLiteral("开始部署基准测试。"));
     send(QStringLiteral("progress"), progress);
 
-    const aitrain::WorkflowResult result = aitrain::benchmarkModelReport(modelPath, outputPath, options);
+    const aitrain::WorkflowResult result = aitrain::benchmarkModelReport(modelPath, outputPath, options, cancellationCallback());
+    running_ = false;
+    if (canceled_) {
+        return;
+    }
+    if (!result.ok && result.error == QStringLiteral("Canceled by user")) {
+        sendCanceledAndFinish(taskId, result.error);
+        return;
+    }
     if (!result.ok) {
         fail(result.error);
         return;
@@ -375,6 +397,9 @@ void WorkerSession::validateDeploymentArtifact(const QJsonObject& payload)
 void WorkerSession::exportModel(const QJsonObject& payload)
 {
     const QString taskId = payload.value(QStringLiteral("taskId")).toString();
+    activeTaskId_ = taskId;
+    canceled_ = false;
+    running_ = true;
     const QString checkpointPath = payload.value(QStringLiteral("checkpointPath")).toString();
     const QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
     const QString format = payload.value(QStringLiteral("format")).toString(QStringLiteral("tiny_detector_json"));
@@ -384,7 +409,15 @@ void WorkerSession::exportModel(const QJsonObject& payload)
     startProgress.insert(QStringLiteral("message"), QStringLiteral("开始导出模型。"));
     send(QStringLiteral("progress"), startProgress);
 
-    const aitrain::DetectionExportResult result = aitrain::exportDetectionCheckpoint(checkpointPath, outputPath, format);
+    const aitrain::DetectionExportResult result = aitrain::exportDetectionCheckpoint(checkpointPath, outputPath, format, cancellationCallback());
+    running_ = false;
+    if (canceled_) {
+        return;
+    }
+    if (!result.ok && result.error == QStringLiteral("Canceled by user")) {
+        sendCanceledAndFinish(taskId, result.error);
+        return;
+    }
     if (!result.ok) {
         fail(result.error);
         return;

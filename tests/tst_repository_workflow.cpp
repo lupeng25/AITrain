@@ -234,6 +234,58 @@ private slots:
         QVERIFY(tasks.first().finishedAt.isValid());
     }
 
+    void productWorkflowCancellationCallbacksReturnCanceled()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString datasetRoot = dir.filePath(QStringLiteral("dataset"));
+        writeTinyDetectionDataset(datasetRoot);
+        const QString outputRoot = dir.filePath(QStringLiteral("reports"));
+        const auto cancelImmediately = []() {
+            return true;
+        };
+
+        const aitrain::WorkflowResult snapshot = aitrain::createDatasetSnapshotReport(
+            datasetRoot,
+            QDir(outputRoot).filePath(QStringLiteral("snapshot")),
+            QStringLiteral("yolo_detection"),
+            {},
+            cancelImmediately);
+        QVERIFY(!snapshot.ok);
+        QCOMPARE(snapshot.error, QStringLiteral("Canceled by user"));
+        QVERIFY(!QFileInfo::exists(QDir(outputRoot).filePath(QStringLiteral("snapshot/dataset_snapshot_manifest.json"))));
+
+        const aitrain::WorkflowResult quality = aitrain::curateDatasetQualityReport(
+            datasetRoot,
+            QDir(outputRoot).filePath(QStringLiteral("quality")),
+            QStringLiteral("yolo_detection"),
+            {},
+            cancelImmediately);
+        QVERIFY(!quality.ok);
+        QCOMPARE(quality.error, QStringLiteral("Canceled by user"));
+        QVERIFY(!QFileInfo::exists(QDir(outputRoot).filePath(QStringLiteral("quality/dataset_quality_report.json"))));
+
+        const aitrain::WorkflowResult evaluation = aitrain::evaluateModelReport(
+            QStringLiteral("missing.aitrain"),
+            datasetRoot,
+            QDir(outputRoot).filePath(QStringLiteral("evaluation")),
+            QStringLiteral("detection"),
+            {},
+            cancelImmediately);
+        QVERIFY(!evaluation.ok);
+        QCOMPARE(evaluation.error, QStringLiteral("Canceled by user"));
+        QVERIFY(!QFileInfo::exists(QDir(outputRoot).filePath(QStringLiteral("evaluation/evaluation_report.json"))));
+
+        const aitrain::WorkflowResult benchmark = aitrain::benchmarkModelReport(
+            QStringLiteral("missing.aitrain"),
+            QDir(outputRoot).filePath(QStringLiteral("benchmark")),
+            {},
+            cancelImmediately);
+        QVERIFY(!benchmark.ok);
+        QCOMPARE(benchmark.error, QStringLiteral("Canceled by user"));
+        QVERIFY(!QFileInfo::exists(QDir(outputRoot).filePath(QStringLiteral("benchmark/benchmark_report.json"))));
+    }
+
     void productWorkflowWritesReports()
     {
         QTemporaryDir dir;
@@ -890,6 +942,129 @@ private slots:
         QVERIFY(restartRejected);
         QCOMPARE(restartError, QStringLiteral("Worker is already running"));
         QVERIFY(!client.isRunning());
+    }
+
+    void workerDatasetConversionCancelEmitsCanceledNotFailed()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString sourceRoot = dir.filePath(QStringLiteral("source-yolo"));
+        writeTextFile(QDir(sourceRoot).filePath(QStringLiteral("data.yaml")),
+            QStringLiteral("path: .\ntrain: images/train\nval: images/train\nnc: 1\nnames: [item]\n"));
+        for (int index = 0; index < 250; ++index) {
+            const QString name = QStringLiteral("sample_%1").arg(index, 4, 10, QLatin1Char('0'));
+            writeTinyPng(QDir(sourceRoot).filePath(QStringLiteral("images/train/%1.png").arg(name)));
+            writeTextFile(QDir(sourceRoot).filePath(QStringLiteral("labels/train/%1.txt").arg(name)),
+                QStringLiteral("0 0.5 0.5 0.25 0.25\n"));
+        }
+
+        WorkerClient client;
+        QVector<QPair<QString, QJsonObject>> messages;
+        bool cancelSent = false;
+        bool finished = false;
+        bool ok = true;
+        QString finishedMessage;
+        connect(&client, &WorkerClient::messageReceived, this, [&](const QString& type, const QJsonObject& payload) {
+            messages.append(qMakePair(type, payload));
+            if (!cancelSent && type == QStringLiteral("progress")) {
+                cancelSent = true;
+                client.cancel();
+            }
+        });
+        connect(&client, &WorkerClient::finished, this, [&](bool result, const QString& message) {
+            finished = true;
+            ok = result;
+            finishedMessage = message;
+        });
+
+        const QString outputPath = dir.filePath(QStringLiteral("converted-canceled"));
+        QString error;
+        QVERIFY2(client.requestDatasetConversion(
+            workerExecutablePath(),
+            sourceRoot,
+            outputPath,
+            QStringLiteral("yolo_detection"),
+            QStringLiteral("coco_json"),
+            QJsonObject{{QStringLiteral("copyImages"), true}},
+            &error,
+            QStringLiteral("conversion-cancel-task")), qPrintable(error));
+        QTRY_VERIFY_WITH_TIMEOUT(finished, 30000);
+        QVERIFY(!ok);
+        QCOMPARE(finishedMessage, QStringLiteral("Canceled by user"));
+        QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
+
+        bool sawCanceled = false;
+        bool sawFailed = false;
+        bool sawCompleted = false;
+        for (const auto& message : messages) {
+            sawCanceled = sawCanceled || message.first == QStringLiteral("canceled");
+            sawFailed = sawFailed || message.first == QStringLiteral("failed");
+            sawCompleted = sawCompleted || message.first == QStringLiteral("completed");
+        }
+        QVERIFY(cancelSent);
+        QVERIFY(sawCanceled);
+        QVERIFY(!sawFailed);
+        QVERIFY(!sawCompleted);
+        QVERIFY(!QFileInfo::exists(QDir(outputPath).filePath(QStringLiteral("dataset_conversion_report.json"))));
+    }
+
+    void workerSnapshotCancelEmitsCanceledNotFailed()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString datasetRoot = dir.filePath(QStringLiteral("dataset"));
+        writeTinyDetectionDataset(datasetRoot);
+        for (int index = 0; index < 1000; ++index) {
+            writeTextFile(QDir(datasetRoot).filePath(QStringLiteral("extra/file_%1.txt").arg(index, 4, 10, QLatin1Char('0'))),
+                QStringLiteral("payload %1\n").arg(index));
+        }
+
+        WorkerClient client;
+        QVector<QPair<QString, QJsonObject>> messages;
+        bool cancelSent = false;
+        bool finished = false;
+        bool ok = true;
+        QString finishedMessage;
+        connect(&client, &WorkerClient::messageReceived, this, [&](const QString& type, const QJsonObject& payload) {
+            messages.append(qMakePair(type, payload));
+            if (!cancelSent && type == QStringLiteral("progress")) {
+                cancelSent = true;
+                client.cancel();
+            }
+        });
+        connect(&client, &WorkerClient::finished, this, [&](bool result, const QString& message) {
+            finished = true;
+            ok = result;
+            finishedMessage = message;
+        });
+
+        QString error;
+        QVERIFY2(client.requestDatasetSnapshot(
+            workerExecutablePath(),
+            datasetRoot,
+            dir.filePath(QStringLiteral("worker-canceled-snapshot")),
+            QStringLiteral("yolo_detection"),
+            {},
+            &error,
+            QStringLiteral("snapshot-cancel-task")), qPrintable(error));
+        QTRY_VERIFY_WITH_TIMEOUT(finished, 30000);
+        QVERIFY(!ok);
+        QCOMPARE(finishedMessage, QStringLiteral("Canceled by user"));
+        QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
+
+        bool sawCanceled = false;
+        bool sawFailed = false;
+        bool sawCompleted = false;
+        for (const auto& message : messages) {
+            sawCanceled = sawCanceled || message.first == QStringLiteral("canceled");
+            sawFailed = sawFailed || message.first == QStringLiteral("failed");
+            sawCompleted = sawCompleted || message.first == QStringLiteral("completed");
+        }
+        QVERIFY(cancelSent);
+        QVERIFY(sawCanceled);
+        QVERIFY(!sawFailed);
+        QVERIFY(!sawCompleted);
+        QVERIFY(!QFileInfo::exists(dir.filePath(QStringLiteral("worker-canceled-snapshot/dataset_snapshot_manifest.json"))));
     }
 
     void workerRunsProductWorkflowCommands()

@@ -56,6 +56,18 @@ double averageMs(const QVector<double>& values)
 
 WorkflowResult benchmarkModelReport(const QString& modelPath, const QString& outputPath, const QJsonObject& options)
 {
+    return benchmarkModelReport(modelPath, outputPath, options, CancellationCallback());
+}
+
+WorkflowResult benchmarkModelReport(
+    const QString& modelPath,
+    const QString& outputPath,
+    const QJsonObject& options,
+    const CancellationCallback& shouldCancel)
+{
+    if (isCancellationRequested(shouldCancel)) {
+        return canceledResult();
+    }
     const QFileInfo modelInfo(modelPath);
     if (!modelInfo.exists()) {
         return failedResult(QStringLiteral("Model file does not exist: %1").arg(modelPath));
@@ -108,6 +120,11 @@ WorkflowResult benchmarkModelReport(const QString& modelPath, const QString& out
     QString failureCategory;
 
     const auto runTimedInference = [&]() -> bool {
+        if (isCancellationRequested(shouldCancel)) {
+            inferenceError = QStringLiteral("Canceled by user");
+            failureCategory = QStringLiteral("canceled");
+            return false;
+        }
         if (runtime == QStringLiteral("onnxruntime")) {
             if (!isOnnxRuntimeInferenceAvailable()) {
                 inferenceError = QStringLiteral("ONNX Runtime is not available in this build.");
@@ -125,6 +142,11 @@ WorkflowResult benchmarkModelReport(const QString& modelPath, const QString& out
             inferenceOptions.maxDetections = options.value(QStringLiteral("maxDetections")).toInt(100);
             const int totalRuns = warmupIterations + iterations;
             for (int index = 0; index < totalRuns; ++index) {
+                if (isCancellationRequested(shouldCancel)) {
+                    inferenceError = QStringLiteral("Canceled by user");
+                    failureCategory = QStringLiteral("canceled");
+                    return false;
+                }
                 QElapsedTimer timer;
                 timer.start();
                 if (modelFamily == QStringLiteral("yolo_segmentation")) {
@@ -176,6 +198,11 @@ WorkflowResult benchmarkModelReport(const QString& modelPath, const QString& out
         inferenceOptions.maxDetections = options.value(QStringLiteral("maxDetections")).toInt(100);
         const int totalRuns = warmupIterations + iterations;
         for (int index = 0; index < totalRuns; ++index) {
+            if (isCancellationRequested(shouldCancel)) {
+                inferenceError = QStringLiteral("Canceled by user");
+                failureCategory = QStringLiteral("canceled");
+                return false;
+            }
             QElapsedTimer timer;
             timer.start();
             const QVector<DetectionPrediction> predictions = predictDetectionBaseline(checkpoint, sampleImagePath, inferenceOptions, &inferenceError);
@@ -195,6 +222,9 @@ WorkflowResult benchmarkModelReport(const QString& modelPath, const QString& out
     };
 
     runTimedInference();
+    if (failureCategory == QStringLiteral("canceled") || isCancellationRequested(shouldCancel)) {
+        return canceledResult();
+    }
 
     QString modelDigestError;
     const QJsonObject modelDigest = fileDigestObject(modelPath, &modelDigestError);
@@ -208,6 +238,9 @@ WorkflowResult benchmarkModelReport(const QString& modelPath, const QString& out
     }
 
     if (!timedInference) {
+        if (isCancellationRequested(shouldCancel)) {
+            return canceledResult();
+        }
         QElapsedTimer timer;
         timer.start();
         QFile file(modelPath);
@@ -292,6 +325,9 @@ WorkflowResult benchmarkModelReport(const QString& modelPath, const QString& out
 
     QString error;
     const QString reportPath = QDir(outputPath).filePath(QStringLiteral("benchmark_report.json"));
+    if (isCancellationRequested(shouldCancel)) {
+        return canceledResult();
+    }
     if (!writeJsonFile(reportPath, report, &error)) {
         return failedResult(error);
     }

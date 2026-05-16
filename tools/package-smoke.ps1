@@ -131,6 +131,17 @@ Assert-PathExists "tools\run-production-ocr-official-chain.ps1" "production OCR 
 Assert-PathExists "tools\production-ocr-acceptance.ps1" "production OCR acceptance script"
 Assert-PathExists "tools\customer-ocr-validation.ps1" "customer OCR validation script"
 
+$pythonCacheDirs = @(Get-ChildItem -LiteralPath $prefixFull -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue)
+$pythonCacheFiles = @(Get-ChildItem -LiteralPath $prefixFull -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Extension -eq ".pyc" -or $_.Extension -eq ".pyo" })
+if ($pythonCacheDirs.Count -gt 0 -or $pythonCacheFiles.Count -gt 0) {
+    $cacheItems = @()
+    $cacheItems += $pythonCacheDirs | Select-Object -First 10 | ForEach-Object { $_.FullName }
+    $cacheItems += $pythonCacheFiles | Select-Object -First 10 | ForEach-Object { $_.FullName }
+    throw ("Package contains Python cache artifacts: {0}" -f ($cacheItems -join "; "))
+}
+Write-Host "  [ok] no Python cache artifacts"
+
 $onnxRuntimeRootDll = Join-Path $prefixFull "onnxruntime.dll"
 $onnxRuntimeFolderDll = Join-Path $prefixFull "runtimes\onnxruntime\onnxruntime.dll"
 if ((Test-Path $onnxRuntimeRootDll) -or (Test-Path $onnxRuntimeFolderDll)) {

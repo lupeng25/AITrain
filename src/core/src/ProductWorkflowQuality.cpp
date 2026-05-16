@@ -99,6 +99,7 @@ struct SplitQualityStats {
 struct DatasetQualityContext {
     QString datasetPath;
     QString format;
+    CancellationCallback shouldCancel;
     QStringList classNames;
     int maxIssues = 500;
     int maxProblemSamples = 500;
@@ -121,6 +122,11 @@ struct DatasetQualityContext {
     QStringList xAnyFixRows;
     QMap<QString, SplitQualityStats> splits;
 };
+
+bool qualityCanceled(const DatasetQualityContext& context)
+{
+    return isCancellationRequested(context.shouldCancel);
+}
 
 bool isSupportedQualityFormat(const QString& format)
 {
@@ -209,6 +215,9 @@ void addValidationIssues(DatasetQualityContext& context, const DatasetValidation
 
 bool scanLimitReached(DatasetQualityContext& context, const QString& filePath)
 {
+    if (qualityCanceled(context)) {
+        return true;
+    }
     if (context.maxFiles > 0 && context.scannedFiles >= context.maxFiles) {
         if (!context.scanLimitReached) {
             context.scanLimitReached = true;
@@ -514,6 +523,9 @@ QFileInfoList qualityImageFiles(const QDir& directory)
 
 void scanYoloQuality(DatasetQualityContext& context, bool segmentation)
 {
+    if (qualityCanceled(context)) {
+        return;
+    }
     QString infoError;
     const DetectionDatasetInfo info = readDetectionDatasetInfo(context.datasetPath, &infoError);
     context.classNames = info.classNames;
@@ -524,12 +536,18 @@ void scanYoloQuality(DatasetQualityContext& context, bool segmentation)
     const YoloDataYaml layout = parseYoloDataYaml(context.datasetPath);
 
     for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
+        if (qualityCanceled(context)) {
+            return;
+        }
         const YoloSplitPaths splitPaths = yoloSplitPaths(layout, split);
         const QDir imageDir(splitPaths.imageDir);
         const QDir labelDir(splitPaths.labelDir);
         QSet<QString> imageBases;
         const QFileInfoList images = imageDir.exists() ? qualityImageFiles(imageDir) : QFileInfoList();
         for (const QFileInfo& imageInfo : images) {
+            if (qualityCanceled(context)) {
+                return;
+            }
             if (scanLimitReached(context, imageInfo.absoluteFilePath())) {
                 return;
             }
@@ -557,6 +575,9 @@ void scanYoloQuality(DatasetQualityContext& context, bool segmentation)
         if (labelDir.exists()) {
             const QFileInfoList labels = labelDir.entryInfoList({QStringLiteral("*.txt")}, QDir::Files, QDir::Name);
             for (const QFileInfo& labelInfo : labels) {
+                if (qualityCanceled(context)) {
+                    return;
+                }
                 if (!imageBases.contains(labelInfo.completeBaseName())) {
                     QualityIssue issue;
                     issue.severity = QStringLiteral("warning");
@@ -608,6 +629,9 @@ QSet<QChar> loadQualityDictionary(const QString& path)
 
 void scanOcrRecQuality(DatasetQualityContext& context, const QJsonObject& options)
 {
+    if (qualityCanceled(context)) {
+        return;
+    }
     const QDir root(context.datasetPath);
     const QString labelFilePath = defaultOcrLabelFile(root, QStringLiteral("paddleocr_rec"), options);
     QFile labelFile(labelFilePath);
@@ -628,6 +652,9 @@ void scanOcrRecQuality(DatasetQualityContext& context, const QJsonObject& option
     QSet<QString> seenImages;
     int lineNumber = 0;
     while (!labelFile.atEnd()) {
+        if (qualityCanceled(context)) {
+            return;
+        }
         ++lineNumber;
         const QString line = QString::fromUtf8(labelFile.readLine()).trimmed();
         if (line.isEmpty()) {
@@ -689,6 +716,9 @@ void scanOcrRecQuality(DatasetQualityContext& context, const QJsonObject& option
         }
         if (!dictionary.isEmpty()) {
             for (const QChar ch : text) {
+                if (qualityCanceled(context)) {
+                    return;
+                }
                 if (!dictionary.contains(ch)) {
                     QualityIssue issue;
                     issue.severity = QStringLiteral("error");
@@ -712,6 +742,9 @@ void scanOcrRecQuality(DatasetQualityContext& context, const QJsonObject& option
 
 void scanOcrDetQuality(DatasetQualityContext& context, const QJsonObject& options)
 {
+    if (qualityCanceled(context)) {
+        return;
+    }
     const QDir root(context.datasetPath);
     const QString labelFilePath = defaultOcrLabelFile(root, QStringLiteral("paddleocr_det"), options);
     QFile labelFile(labelFilePath);
@@ -730,6 +763,9 @@ void scanOcrDetQuality(DatasetQualityContext& context, const QJsonObject& option
     QSet<QString> seenImages;
     int lineNumber = 0;
     while (!labelFile.atEnd()) {
+        if (qualityCanceled(context)) {
+            return;
+        }
         ++lineNumber;
         const QString line = QString::fromUtf8(labelFile.readLine()).trimmed();
         if (line.isEmpty()) {
@@ -809,6 +845,9 @@ void scanOcrDetQuality(DatasetQualityContext& context, const QJsonObject& option
             addQualityIssue(context, issue);
         }
         for (const QJsonValue& boxValue : boxes) {
+            if (qualityCanceled(context)) {
+                return;
+            }
             const QJsonObject box = boxValue.toObject();
             if (!box.contains(QStringLiteral("transcription"))) {
                 QualityIssue issue;
@@ -844,6 +883,9 @@ void scanOcrDetQuality(DatasetQualityContext& context, const QJsonObject& option
             bool pointsOk = true;
             bool pointOutOfBounds = false;
             for (const QJsonValue& pointValue : points) {
+                if (qualityCanceled(context)) {
+                    return;
+                }
                 const QJsonArray point = pointValue.toArray();
                 if (point.size() < 2 || !point.at(0).isDouble() || !point.at(1).isDouble()) {
                     pointsOk = false;
@@ -1187,6 +1229,19 @@ QJsonObject trainingReadinessObject(
 } // namespace
 WorkflowResult curateDatasetQualityReport(const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options)
 {
+    return curateDatasetQualityReport(datasetPath, outputPath, format, options, CancellationCallback());
+}
+
+WorkflowResult curateDatasetQualityReport(
+    const QString& datasetPath,
+    const QString& outputPath,
+    const QString& format,
+    const QJsonObject& options,
+    const CancellationCallback& shouldCancel)
+{
+    if (isCancellationRequested(shouldCancel)) {
+        return canceledResult();
+    }
     const QDir root(datasetPath);
     if (!root.exists()) {
         return failedResult(QStringLiteral("Dataset directory does not exist for quality scan: %1").arg(datasetPath));
@@ -1198,6 +1253,7 @@ WorkflowResult curateDatasetQualityReport(const QString& datasetPath, const QStr
     DatasetQualityContext context;
     context.datasetPath = datasetPath;
     context.format = format;
+    context.shouldCancel = shouldCancel;
     context.maxIssues = options.value(QStringLiteral("maxIssues")).toInt(500);
     context.maxProblemSamples = options.value(QStringLiteral("maxProblemSamples")).toInt(500);
     context.maxFiles = options.value(QStringLiteral("maxFiles")).toInt(20000);
@@ -1206,6 +1262,9 @@ WorkflowResult curateDatasetQualityReport(const QString& datasetPath, const QStr
     context.exportXAnyLabelingFixList = options.value(QStringLiteral("exportXAnyLabelingFixList")).toBool(true);
 
     DatasetValidationResult validation = validateByFormat(datasetPath, format, options);
+    if (qualityCanceled(context)) {
+        return canceledResult();
+    }
     addValidationIssues(context, validation);
     if (format == QStringLiteral("yolo_detection") || format == QStringLiteral("yolo_txt")) {
         scanYoloQuality(context, false);
@@ -1216,7 +1275,13 @@ WorkflowResult curateDatasetQualityReport(const QString& datasetPath, const QStr
     } else if (format == QStringLiteral("paddleocr_det")) {
         scanOcrDetQuality(context, options);
     }
+    if (qualityCanceled(context)) {
+        return canceledResult();
+    }
     addDistributionWarnings(context);
+    if (qualityCanceled(context)) {
+        return canceledResult();
+    }
 
     const QJsonObject classCounts = classDistributionObject(context);
     const QJsonObject imageStats = imageStatisticsObject(context);
@@ -1276,6 +1341,9 @@ WorkflowResult curateDatasetQualityReport(const QString& datasetPath, const QStr
     problems.insert(QStringLiteral("issueCounts"), context.issueCounts);
     problems.insert(QStringLiteral("severityCounts"), context.severityCounts);
     problems.insert(QStringLiteral("truncated"), context.problemSampleLimitReached);
+    if (qualityCanceled(context)) {
+        return canceledResult();
+    }
     if (!writeJsonFile(problemPath, problems, &error)) {
         return failedResult(error);
     }
@@ -1317,6 +1385,9 @@ WorkflowResult curateDatasetQualityReport(const QString& datasetPath, const QStr
 
     QJsonArray prelabelCandidates;
     for (const QJsonValue& value : reworkSamples) {
+        if (qualityCanceled(context)) {
+            return canceledResult();
+        }
         const QJsonObject sample = value.toObject();
         const QString imagePath = sample.value(QStringLiteral("imagePath")).toString();
         if (imagePath.isEmpty()) {
@@ -1347,6 +1418,9 @@ WorkflowResult curateDatasetQualityReport(const QString& datasetPath, const QStr
     trainingReadiness.insert(QStringLiteral("qualityReportPath"), reportPath);
     trainingReadiness.insert(QStringLiteral("readinessPath"), trainingReadinessPath);
 
+    if (qualityCanceled(context)) {
+        return canceledResult();
+    }
     if (!writeTextFile(csvPath, classDistributionCsvV2(context), &error)
         || !writeTextFile(imageStatsPath, imageStatisticsCsv(context), &error)
         || !writeTextFile(splitDistributionPath, splitDistributionCsv(context), &error)
@@ -1369,6 +1443,9 @@ WorkflowResult curateDatasetQualityReport(const QString& datasetPath, const QStr
     report.insert(QStringLiteral("prelabelCandidatesPath"), prelabelCandidatesPath);
     report.insert(QStringLiteral("trainingReadinessPath"), trainingReadinessPath);
     report.insert(QStringLiteral("trainingReadiness"), trainingReadiness);
+    if (qualityCanceled(context)) {
+        return canceledResult();
+    }
     if (!writeJsonFile(reportPath, report, &error)) {
         return failedResult(error);
     }

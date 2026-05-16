@@ -326,6 +326,25 @@ private slots:
         QCOMPARE(predictions.size(), 1);
     }
 
+    void detectionExportHonorsCancellation()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString exportPath = dir.filePath(QStringLiteral("exports/model.aitrain-export.json"));
+
+        const aitrain::DetectionExportResult exported = aitrain::exportDetectionCheckpoint(
+            dir.filePath(QStringLiteral("missing.aitrain")),
+            exportPath,
+            QStringLiteral("tiny_detector_json"),
+            []() {
+                return true;
+            });
+        QVERIFY(!exported.ok);
+        QCOMPARE(exported.error, QStringLiteral("Canceled by user"));
+        QVERIFY(exported.exportPath.isEmpty());
+        QVERIFY(!QFileInfo::exists(exportPath));
+    }
+
     void detectionExportWritesTinyDetectorOnnx()
     {
         QTemporaryDir dir;

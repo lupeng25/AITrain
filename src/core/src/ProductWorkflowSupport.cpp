@@ -356,5 +356,9 @@ WorkflowResult failedResult(const QString& error)
     return result;
 }
 
+WorkflowResult canceledResult()
+{
+    return failedResult(QStringLiteral("Canceled by user"));
+}
 
 } // namespace aitrain::workflow_detail

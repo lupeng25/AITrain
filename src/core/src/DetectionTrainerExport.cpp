@@ -149,9 +149,16 @@ bool runOnnx2Ncnn(
     const QString& sourceOnnxPath,
     const QString& paramPath,
     const QString& binPath,
+    const CancellationCallback& shouldCancel,
     QString* converterPath,
     QString* error)
 {
+    if (isCancellationRequested(shouldCancel)) {
+        if (error) {
+            *error = QStringLiteral("Canceled by user");
+        }
+        return false;
+    }
     const NcnnConverterResolution converter = resolveNcnnOnnx2Ncnn();
     if (converter.executablePath.isEmpty()) {
         if (error) {
@@ -200,7 +207,25 @@ bool runOnnx2Ncnn(
         }
         return false;
     }
-    if (!process.waitForFinished(-1)) {
+    while (!process.waitForFinished(100)) {
+        if (isCancellationRequested(shouldCancel)) {
+            process.terminate();
+            if (!process.waitForFinished(1500)) {
+                process.kill();
+                process.waitForFinished(1500);
+            }
+            QFile::remove(paramPath);
+            QFile::remove(binPath);
+            if (error) {
+                *error = QStringLiteral("Canceled by user");
+            }
+            return false;
+        }
+        if (process.state() == QProcess::NotRunning) {
+            break;
+        }
+    }
+    if (process.state() != QProcess::NotRunning) {
         if (error) {
             *error = QStringLiteral("NCNN converter did not finish: %1").arg(process.errorString());
         }
@@ -307,6 +332,15 @@ DetectionExportResult exportDetectionCheckpoint(
     const QString& outputPath,
     const QString& format)
 {
+    return exportDetectionCheckpoint(checkpointPath, outputPath, format, CancellationCallback());
+}
+
+DetectionExportResult exportDetectionCheckpoint(
+    const QString& checkpointPath,
+    const QString& outputPath,
+    const QString& format,
+    const CancellationCallback& shouldCancel)
+{
     DetectionExportResult result;
     const QString normalizedFormat = format.isEmpty() ? QStringLiteral("tiny_detector_json") : format.toLower();
     const bool tensorRtFormat = normalizedFormat == QStringLiteral("tensorrt")
@@ -314,6 +348,10 @@ DetectionExportResult exportDetectionCheckpoint(
     const bool ncnnFormat = normalizedFormat == QStringLiteral("ncnn");
     result.format = normalizedFormat;
     result.sourceCheckpointPath = checkpointPath;
+    if (isCancellationRequested(shouldCancel)) {
+        result.error = QStringLiteral("Canceled by user");
+        return result;
+    }
     if (normalizedFormat != QStringLiteral("tiny_detector_json")
         && normalizedFormat != QStringLiteral("onnx")
         && !ncnnFormat
@@ -348,6 +386,10 @@ DetectionExportResult exportDetectionCheckpoint(
         }
 
         if (normalizedFormat == QStringLiteral("onnx")) {
+            if (isCancellationRequested(shouldCancel)) {
+                result.error = QStringLiteral("Canceled by user");
+                return result;
+            }
             if (QFileInfo(checkpointPath).absoluteFilePath() != QFileInfo(finalOutputPath).absoluteFilePath()) {
                 QFile::remove(finalOutputPath);
                 if (!QFile::copy(checkpointPath, finalOutputPath)) {
@@ -357,6 +399,10 @@ DetectionExportResult exportDetectionCheckpoint(
             }
             const QString reportPath = onnxExportReportPath(finalOutputPath);
             const QJsonObject config = yoloOnnxExportConfig(checkpointPath, finalOutputPath, normalizedFormat);
+            if (isCancellationRequested(shouldCancel)) {
+                result.error = QStringLiteral("Canceled by user");
+                return result;
+            }
             if (!writeJsonObject(reportPath, config, &result.error)) {
                 return result;
             }
@@ -370,11 +416,15 @@ DetectionExportResult exportDetectionCheckpoint(
         if (ncnnFormat) {
             const QString binPath = ncnnBinPathForParam(finalOutputPath);
             QString converterPath;
-            if (!runOnnx2Ncnn(checkpointPath, finalOutputPath, binPath, &converterPath, &result.error)) {
+            if (!runOnnx2Ncnn(checkpointPath, finalOutputPath, binPath, shouldCancel, &converterPath, &result.error)) {
                 return result;
             }
             const QString reportPath = onnxExportReportPath(finalOutputPath);
             const QJsonObject config = ncnnOnnxExportConfig(checkpointPath, finalOutputPath, binPath, converterPath);
+            if (isCancellationRequested(shouldCancel)) {
+                result.error = QStringLiteral("Canceled by user");
+                return result;
+            }
             if (!writeJsonObject(reportPath, config, &result.error)) {
                 return result;
             }
@@ -396,6 +446,10 @@ DetectionExportResult exportDetectionCheckpoint(
                 return result;
             }
             const QByteArray onnxModel = onnxFile.readAll();
+            if (isCancellationRequested(shouldCancel)) {
+                result.error = QStringLiteral("Canceled by user");
+                return result;
+            }
             const bool fp16 = normalizedFormat == QStringLiteral("tensorrt_fp16");
             if (!writeTensorRtEngineFromOnnx(onnxModel, finalOutputPath, fp16, &result.error)) {
                 return result;
@@ -408,6 +462,10 @@ DetectionExportResult exportDetectionCheckpoint(
                 {QStringLiteral("workspaceBytes"), static_cast<double>(size_t{1} << 30)},
                 {QStringLiteral("sourceOnnx"), checkpointPath}
             });
+            if (isCancellationRequested(shouldCancel)) {
+                result.error = QStringLiteral("Canceled by user");
+                return result;
+            }
             if (!writeJsonObject(reportPath, config, &result.error)) {
                 return result;
             }
@@ -453,11 +511,19 @@ DetectionExportResult exportDetectionCheckpoint(
     }
 
     if (normalizedFormat == QStringLiteral("onnx")) {
+        if (isCancellationRequested(shouldCancel)) {
+            result.error = QStringLiteral("Canceled by user");
+            return result;
+        }
         if (!writeTinyDetectorOnnxModel(checkpoint, finalOutputPath, &result.error)) {
             return result;
         }
         const QString reportPath = onnxExportReportPath(finalOutputPath);
         const QJsonObject config = tinyDetectorExportConfig(checkpoint, checkpointPath, finalOutputPath, normalizedFormat);
+        if (isCancellationRequested(shouldCancel)) {
+            result.error = QStringLiteral("Canceled by user");
+            return result;
+        }
         if (!writeJsonObject(reportPath, config, &result.error)) {
             return result;
         }
@@ -475,19 +541,27 @@ DetectionExportResult exportDetectionCheckpoint(
             return result;
         }
         const QString tempOnnxPath = tempDir.filePath(QStringLiteral("tiny_detector.onnx"));
+        if (isCancellationRequested(shouldCancel)) {
+            result.error = QStringLiteral("Canceled by user");
+            return result;
+        }
         if (!writeTinyDetectorOnnxModel(checkpoint, tempOnnxPath, &result.error)) {
             return result;
         }
 
         const QString binPath = ncnnBinPathForParam(finalOutputPath);
         QString converterPath;
-        if (!runOnnx2Ncnn(tempOnnxPath, finalOutputPath, binPath, &converterPath, &result.error)) {
+        if (!runOnnx2Ncnn(tempOnnxPath, finalOutputPath, binPath, shouldCancel, &converterPath, &result.error)) {
             return result;
         }
 
         const QString reportPath = onnxExportReportPath(finalOutputPath);
         QJsonObject config = tinyDetectorExportConfig(checkpoint, checkpointPath, finalOutputPath, normalizedFormat);
         config.insert(QStringLiteral("ncnn"), ncnnMetadata(finalOutputPath, binPath, converterPath, tempOnnxPath));
+        if (isCancellationRequested(shouldCancel)) {
+            result.error = QStringLiteral("Canceled by user");
+            return result;
+        }
         if (!writeJsonObject(reportPath, config, &result.error)) {
             return result;
         }
@@ -503,6 +577,10 @@ DetectionExportResult exportDetectionCheckpoint(
         result.error = QStringLiteral("TensorRT export is not available: %1").arg(tensorRtBackendStatus().message);
         return result;
 #else
+        if (isCancellationRequested(shouldCancel)) {
+            result.error = QStringLiteral("Canceled by user");
+            return result;
+        }
         const QByteArray onnxModel = tinyDetectorOnnxModel(checkpoint, &result.error);
         if (onnxModel.isEmpty()) {
             return result;
@@ -521,6 +599,10 @@ DetectionExportResult exportDetectionCheckpoint(
             {QStringLiteral("dynamicShape"), false},
             {QStringLiteral("engineCache"), true}
         });
+        if (isCancellationRequested(shouldCancel)) {
+            result.error = QStringLiteral("Canceled by user");
+            return result;
+        }
         if (!writeJsonObject(reportPath, config, &result.error)) {
             return result;
         }
@@ -554,6 +636,10 @@ DetectionExportResult exportDetectionCheckpoint(
         {QStringLiteral("mAP50"), checkpoint.map50}
     });
 
+    if (isCancellationRequested(shouldCancel)) {
+        result.error = QStringLiteral("Canceled by user");
+        return result;
+    }
     QFile file(finalOutputPath);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         result.error = QStringLiteral("Cannot write export artifact: %1").arg(finalOutputPath);

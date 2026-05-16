@@ -1,5 +1,6 @@
 #pragma once
 
+#include "aitrain/core/Cancellation.h"
 #include "aitrain/core/TaskModels.h"
 
 #include <QJsonArray>
@@ -51,6 +52,8 @@ private:
     bool forwardPythonTrainerLine(const QByteArray& line, bool* terminalMessageSeen);
     void emitDetectionPreviewArtifacts(const QString& checkpointPath);
     void send(const QString& type, const QJsonObject& payload);
+    aitrain::CancellationCallback cancellationCallback();
+    void sendCanceledAndFinish(const QString& taskId, const QString& message);
     void finishSession();
     void fail(const QString& message);
     void complete();

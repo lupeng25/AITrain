@@ -1,5 +1,7 @@
 #pragma once
 
+#include "aitrain/core/Cancellation.h"
+
 #include <QJsonObject>
 #include <QString>
 
@@ -17,12 +19,24 @@ WorkflowResult createDatasetSnapshotReport(
     const QString& outputPath,
     const QString& format,
     const QJsonObject& options = {});
+WorkflowResult createDatasetSnapshotReport(
+    const QString& datasetPath,
+    const QString& outputPath,
+    const QString& format,
+    const QJsonObject& options,
+    const CancellationCallback& shouldCancel);
 
 WorkflowResult curateDatasetQualityReport(
     const QString& datasetPath,
     const QString& outputPath,
     const QString& format,
     const QJsonObject& options = {});
+WorkflowResult curateDatasetQualityReport(
+    const QString& datasetPath,
+    const QString& outputPath,
+    const QString& format,
+    const QJsonObject& options,
+    const CancellationCallback& shouldCancel);
 
 WorkflowResult evaluateModelReport(
     const QString& modelPath,
@@ -30,11 +44,23 @@ WorkflowResult evaluateModelReport(
     const QString& outputPath,
     const QString& taskType,
     const QJsonObject& options = {});
+WorkflowResult evaluateModelReport(
+    const QString& modelPath,
+    const QString& datasetPath,
+    const QString& outputPath,
+    const QString& taskType,
+    const QJsonObject& options,
+    const CancellationCallback& shouldCancel);
 
 WorkflowResult benchmarkModelReport(
     const QString& modelPath,
     const QString& outputPath,
     const QJsonObject& options = {});
+WorkflowResult benchmarkModelReport(
+    const QString& modelPath,
+    const QString& outputPath,
+    const QJsonObject& options,
+    const CancellationCallback& shouldCancel);
 
 WorkflowResult generateTrainingDeliveryReport(
     const QString& outputPath,

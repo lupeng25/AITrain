@@ -321,7 +321,10 @@ install(DIRECTORY DESTINATION runtimes/tensorrt)
 install(DIRECTORY DESTINATION docs)
 install(DIRECTORY docs/harness DESTINATION docs)
 install(DIRECTORY docs/acceptance-templates DESTINATION docs)
-install(DIRECTORY examples DESTINATION .)
+install(DIRECTORY examples DESTINATION .
+    PATTERN "__pycache__" EXCLUDE
+    PATTERN "*.pyc" EXCLUDE
+    PATTERN "*.pyo" EXCLUDE)
 install(FILES
     docs/user-guide.md
     docs/training-backends.md

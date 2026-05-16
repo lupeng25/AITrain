@@ -183,9 +183,13 @@ void WorkerSession::convertDataset(const QJsonObject& payload)
     startProgress.insert(QStringLiteral("message"), QStringLiteral("开始转换数据集。"));
     send(QStringLiteral("progress"), startProgress);
 
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
+    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request, cancellationCallback());
     running_ = false;
     if (canceled_) {
+        return;
+    }
+    if (!result.ok && result.errorCode == QStringLiteral("canceled")) {
+        sendCanceledAndFinish(taskId, result.errorMessage);
         return;
     }
 
@@ -227,6 +231,9 @@ void WorkerSession::convertDataset(const QJsonObject& payload)
 void WorkerSession::curateDataset(const QJsonObject& payload)
 {
     const QString taskId = payload.value(QStringLiteral("taskId")).toString();
+    activeTaskId_ = taskId;
+    canceled_ = false;
+    running_ = true;
     const QString datasetPath = payload.value(QStringLiteral("datasetPath")).toString();
     const QString format = payload.value(QStringLiteral("format")).toString();
     QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
@@ -241,7 +248,15 @@ void WorkerSession::curateDataset(const QJsonObject& payload)
     progress.insert(QStringLiteral("message"), QStringLiteral("开始生成数据质量报告。"));
     send(QStringLiteral("progress"), progress);
 
-    const aitrain::WorkflowResult result = aitrain::curateDatasetQualityReport(datasetPath, outputPath, format, options);
+    const aitrain::WorkflowResult result = aitrain::curateDatasetQualityReport(datasetPath, outputPath, format, options, cancellationCallback());
+    running_ = false;
+    if (canceled_) {
+        return;
+    }
+    if (!result.ok && result.error == QStringLiteral("Canceled by user")) {
+        sendCanceledAndFinish(taskId, result.error);
+        return;
+    }
     if (!result.ok) {
         fail(QStringLiteral("Dataset quality report failed for %1 (%2): %3").arg(datasetPath, format, result.error));
         return;
@@ -309,6 +324,9 @@ void WorkerSession::curateDataset(const QJsonObject& payload)
 void WorkerSession::createDatasetSnapshot(const QJsonObject& payload)
 {
     const QString taskId = payload.value(QStringLiteral("taskId")).toString();
+    activeTaskId_ = taskId;
+    canceled_ = false;
+    running_ = true;
     const QString datasetPath = payload.value(QStringLiteral("datasetPath")).toString();
     const QString format = payload.value(QStringLiteral("format")).toString();
     QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
@@ -323,7 +341,15 @@ void WorkerSession::createDatasetSnapshot(const QJsonObject& payload)
     progress.insert(QStringLiteral("message"), QStringLiteral("开始生成数据集快照。"));
     send(QStringLiteral("progress"), progress);
 
-    const aitrain::WorkflowResult result = aitrain::createDatasetSnapshotReport(datasetPath, outputPath, format, options);
+    const aitrain::WorkflowResult result = aitrain::createDatasetSnapshotReport(datasetPath, outputPath, format, options, cancellationCallback());
+    running_ = false;
+    if (canceled_) {
+        return;
+    }
+    if (!result.ok && result.error == QStringLiteral("Canceled by user")) {
+        sendCanceledAndFinish(taskId, result.error);
+        return;
+    }
     if (!result.ok) {
         fail(result.error);
         return;
