@@ -225,12 +225,20 @@ if(AITRAIN_ENABLE_NCNN)
         HINTS
             ${CMAKE_SOURCE_DIR}/.deps/ncnn/include/ncnn
             ${CMAKE_SOURCE_DIR}/.deps/ncnn/include
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/x64/include/ncnn
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/x64/include
             ${AITRAIN_NCNN_ROOT}/include/ncnn
             ${AITRAIN_NCNN_ROOT}/include
+            ${AITRAIN_NCNN_ROOT}/x64/include/ncnn
+            ${AITRAIN_NCNN_ROOT}/x64/include
             $ENV{AITRAIN_NCNN_ROOT}/include/ncnn
             $ENV{AITRAIN_NCNN_ROOT}/include
+            $ENV{AITRAIN_NCNN_ROOT}/x64/include/ncnn
+            $ENV{AITRAIN_NCNN_ROOT}/x64/include
             $ENV{NCNN_ROOT}/include/ncnn
             $ENV{NCNN_ROOT}/include
+            $ENV{NCNN_ROOT}/x64/include/ncnn
+            $ENV{NCNN_ROOT}/x64/include
     )
     find_library(AITRAIN_NCNN_LIBRARY
         NAMES ncnn libncnn
@@ -238,26 +246,34 @@ if(AITRAIN_ENABLE_NCNN)
             ${CMAKE_SOURCE_DIR}/.deps/ncnn/lib
             ${CMAKE_SOURCE_DIR}/.deps/ncnn/lib/x64
             ${CMAKE_SOURCE_DIR}/.deps/ncnn/lib64
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/x64/lib
             ${AITRAIN_NCNN_ROOT}/lib
             ${AITRAIN_NCNN_ROOT}/lib/x64
             ${AITRAIN_NCNN_ROOT}/lib64
+            ${AITRAIN_NCNN_ROOT}/x64/lib
             $ENV{AITRAIN_NCNN_ROOT}/lib
             $ENV{AITRAIN_NCNN_ROOT}/lib/x64
             $ENV{AITRAIN_NCNN_ROOT}/lib64
+            $ENV{AITRAIN_NCNN_ROOT}/x64/lib
             $ENV{NCNN_ROOT}/lib
             $ENV{NCNN_ROOT}/lib/x64
             $ENV{NCNN_ROOT}/lib64
+            $ENV{NCNN_ROOT}/x64/lib
     )
     find_file(AITRAIN_NCNN_DLL
         NAMES ncnn.dll
         HINTS
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/x64/bin
             ${AITRAIN_NCNN_ROOT}/bin
+            ${AITRAIN_NCNN_ROOT}/x64/bin
             ${AITRAIN_NCNN_ROOT}/lib
             ${AITRAIN_NCNN_ROOT}/lib/x64
             $ENV{AITRAIN_NCNN_ROOT}/bin
+            $ENV{AITRAIN_NCNN_ROOT}/x64/bin
             $ENV{AITRAIN_NCNN_ROOT}/lib
             $ENV{AITRAIN_NCNN_ROOT}/lib/x64
             $ENV{NCNN_ROOT}/bin
+            $ENV{NCNN_ROOT}/x64/bin
             $ENV{NCNN_ROOT}/lib
             $ENV{NCNN_ROOT}/lib/x64
             ${CMAKE_SOURCE_DIR}/.deps/ncnn/bin
@@ -269,14 +285,21 @@ if(AITRAIN_ENABLE_NCNN)
         find_program(AITRAIN_NCNN_ONNX2NCNN_DISCOVERED
             NAMES onnx2ncnn.exe onnx2ncnn
             HINTS
-                ${AITRAIN_NCNN_ROOT}/bin
-                ${AITRAIN_NCNN_ROOT}/tools/onnx
-                $ENV{AITRAIN_NCNN_ROOT}/bin
-                $ENV{AITRAIN_NCNN_ROOT}/tools/onnx
-                $ENV{NCNN_ROOT}/bin
-                $ENV{NCNN_ROOT}/tools/onnx
-                ${CMAKE_SOURCE_DIR}/.deps/ncnn/bin
-                ${CMAKE_SOURCE_DIR}/.deps/ncnn/tools/onnx
+                ${CMAKE_SOURCE_DIR}/.deps/ncnn/x64/bin
+            ${AITRAIN_NCNN_ROOT}/bin
+            ${AITRAIN_NCNN_ROOT}/tools/onnx
+            ${AITRAIN_NCNN_ROOT}/x64/bin
+            ${AITRAIN_NCNN_ROOT}/x64/tools/onnx
+            $ENV{AITRAIN_NCNN_ROOT}/bin
+            $ENV{AITRAIN_NCNN_ROOT}/tools/onnx
+            $ENV{AITRAIN_NCNN_ROOT}/x64/bin
+            $ENV{AITRAIN_NCNN_ROOT}/x64/tools/onnx
+            $ENV{NCNN_ROOT}/bin
+            $ENV{NCNN_ROOT}/tools/onnx
+            $ENV{NCNN_ROOT}/x64/bin
+            $ENV{NCNN_ROOT}/x64/tools/onnx
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/bin
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/tools/onnx
             NO_DEFAULT_PATH
         )
         if(AITRAIN_NCNN_ONNX2NCNN_DISCOVERED)

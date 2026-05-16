@@ -185,6 +185,8 @@ NcnnConverterResolution resolveNcnnOnnx2Ncnn()
         const QDir rootDir(root);
         candidates << rootDir.filePath(QStringLiteral("bin/%1").arg(executableName))
                    << rootDir.filePath(QStringLiteral("tools/onnx/%1").arg(executableName))
+                   << rootDir.filePath(QStringLiteral("x64/bin/%1").arg(executableName))
+                   << rootDir.filePath(QStringLiteral("x64/tools/onnx/%1").arg(executableName))
                    << rootDir.filePath(executableName);
     };
     appendRootCandidates(QString::fromLocal8Bit(qgetenv("AITRAIN_NCNN_ROOT")));
@@ -194,7 +196,9 @@ NcnnConverterResolution resolveNcnnOnnx2Ncnn()
     candidates << appDir.filePath(QStringLiteral("runtimes/ncnn/%1").arg(executableName))
                << appDir.filePath(QStringLiteral("../runtimes/ncnn/%1").arg(executableName))
                << QDir::current().filePath(QStringLiteral(".deps/ncnn/bin/%1").arg(executableName))
-               << QDir::current().filePath(QStringLiteral(".deps/ncnn/tools/onnx/%1").arg(executableName));
+               << QDir::current().filePath(QStringLiteral(".deps/ncnn/tools/onnx/%1").arg(executableName))
+               << QDir::current().filePath(QStringLiteral(".deps/ncnn/x64/bin/%1").arg(executableName))
+               << QDir::current().filePath(QStringLiteral(".deps/ncnn/x64/tools/onnx/%1").arg(executableName));
 
     for (const QString& candidate : candidates) {
         const QString executable = existingExecutablePath(candidate);

@@ -31,9 +31,13 @@ function Resolve-Onnx2Ncnn {
     $candidates = @(
         (Join-Path $Root "bin\onnx2ncnn.exe"),
         (Join-Path $Root "tools\onnx\onnx2ncnn.exe"),
+        (Join-Path $Root "x64\bin\onnx2ncnn.exe"),
+        (Join-Path $Root "x64\tools\onnx\onnx2ncnn.exe"),
         (Join-Path $Root "onnx2ncnn.exe"),
         (Join-Path $Root "bin\onnx2ncnn"),
         (Join-Path $Root "tools\onnx\onnx2ncnn"),
+        (Join-Path $Root "x64\bin\onnx2ncnn"),
+        (Join-Path $Root "x64\tools\onnx\onnx2ncnn"),
         (Join-Path $Root "onnx2ncnn")
     )
     foreach ($candidate in $candidates) {
