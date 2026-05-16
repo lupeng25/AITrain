@@ -72,6 +72,10 @@ The first non-fullscreen UI layout pass is complete locally. `推理验证` and 
 
 The delivery-closeout UI walkthrough is complete locally. The 1280x820 pass now covers the added `样本复核` and `交付验收` pages in addition to the existing workbench pages. It verified the sample-review filters/export path, delivery acceptance summary, diagnostics bundle entry, customer OCR acceptance form, deployment validation entry, and export-page validation controls with no horizontal overflow findings. These additions use Worker/core report commands and do not move training, evaluation, export, inference, OCR acceptance, or diagnostics logic into `MainWindow`.
 
+The RC hardening pass now makes the non-fullscreen GUI walkthrough repeatable through `tools\ui-workbench-walkthrough.ps1`, which runs the fixed 1280x820 page set and writes `ui_walkthrough_rc_summary.json`. NCNN deployment validation failed reports now include `errorCode`, `failureCategory`, `nextAction`, and `diagnosticHints` with categories `sdk_missing`, `sample_missing`, `sidecar_missing`, `unsupported_layer`, and `runtime_failed`. Worker terminal failures/cancellations now carry `taskId`, `command`, `status`, `errorCode`, and `outputPath`/`reportPath` where available, while preserving the existing Worker command names and JSON message types.
+
+The GUI walkthrough wrapper treats the offline registration dialog as `status=blocked` / `errorCode=license_required`; that is environment setup evidence, not a GUI layout pass. Use a licensed build before claiming the walkthrough gate passed.
+
 ## Local Hardware Note
 
 Recorded validation baseline on 2026-05-12:
@@ -92,6 +96,7 @@ Recorded NCNN runtime validation refresh on 2026-05-16:
 - YOLOv8-seg ONNX conversion was tested with Hyuto and X-AnyLabeling segmentation ONNX files. Both converted NCNN params still contained unsupported `Shape` layers, so AITrain now returns a failed deployment validation report instead of crashing Worker. These runs are blocked conversion compatibility evidence, not passing segmentation runtime evidence.
 - nihui `ncnn-android-yolov8` preconverted `yolov8n_seg.ncnn.param/.bin` passed the NCNN DFL segmentation runtime path after providing an AITrain sidecar with `inputBlob=in0`, `outputBlobs=["out0","out1","out2"]`, `decoder=dfl`, `inputSize=640`, `strides=[8,16,32]`, and `regMax=16`. Evidence is under `.deps\github-ncnn-smoke\nihui-yolov8n-seg-ncnn\runtime-output\deployment-validation` and reported `predictionCount=100`.
 - New Worker CLI helper `aitrain_worker.exe --ncnn-param-smoke <model.param> --image <sample.png> --output <dir> --task-type detection|segmentation` validates existing external `.param/.bin` artifacts with sidecar/config, without forcing a fresh ONNX export.
+- Deployment reports distinguish NCNN `sdk_missing`, `sample_missing`, `sidecar_missing`, `unsupported_layer`, and `runtime_failed`. Unsupported layers such as `Shape` must remain failed compatibility evidence with a report and next action, not a runtime pass.
 
 ## Current Next Task
 

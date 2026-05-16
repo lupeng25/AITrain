@@ -481,6 +481,7 @@ install(FILES
     tools/acceptance-smoke.ps1
     tools/toolchain-env.ps1
     tools/build-inno-installer.ps1
+    tools/ui-workbench-walkthrough.ps1
     tools/phase45-yolo-model-matrix-smoke.ps1
     tools/phase-ncnn-runtime-smoke.ps1
     tools/local-rc-closeout.ps1

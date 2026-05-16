@@ -56,6 +56,7 @@ The real execution entries remain:
 .\tools\customer-ocr-validation.ps1
 .\tools\phase-ncnn-runtime-smoke.ps1 -NcnnRoot <ncnn-sdk-root> -OnnxPath <best.onnx> -SampleImagePath <sample.png> -OutputDir <smoke-output> -TaskType detection
 .\build-vscode\bin\aitrain_worker.exe --ncnn-param-smoke <model.param> --image <sample.png> --output <smoke-output> --task-type segmentation
+.\tools\ui-workbench-walkthrough.ps1
 ```
 
 Worker command equivalents are `runCustomerOcrAcceptance`, `collectDiagnostics`, and `validateDeploymentArtifact`. These are report/validation commands and must stay outside `MainWindow`.
@@ -65,6 +66,7 @@ NCNN evidence refresh on 2026-05-16:
 - Hyuto YOLOv8 detection ONNX -> NCNN passed runtime deployment validation with `predictionCount=14` under `.deps\github-ncnn-smoke\hyuto-yolov8\runtime-output`.
 - nihui `ncnn-android-yolov8` preconverted YOLOv8n-seg pnnx/DFL NCNN passed segmentation runtime deployment validation with an explicit AITrain sidecar and `predictionCount=100` under `.deps\github-ncnn-smoke\nihui-yolov8n-seg-ncnn\runtime-output\deployment-validation`.
 - Hyuto and X-AnyLabeling YOLOv8-seg ONNX -> `onnx2ncnn` attempts currently fail preflight because the generated NCNN param still contains unsupported `Shape` layers. The expected behavior is a failed validation report, not a Worker crash.
+- NCNN failed reports now include `errorCode`, `failureCategory`, `nextAction`, and `diagnosticHints`. Expected categories are `sdk_missing`, `sample_missing`, `sidecar_missing`, `unsupported_layer`, and `runtime_failed`.
 
 ## Phase 17: Local Baseline Freeze
 
@@ -325,11 +327,16 @@ These phases do not change TensorRT acceptance. They make the local RC easier to
 Suggested manual GUI walkthrough:
 
 ```powershell
-python examples\create-minimal-datasets.py --output .deps\next-smoke
-.\build-vscode\bin\Release\AITrainStudio.exe
+.\tools\ui-workbench-walkthrough.ps1
 ```
 
-In the GUI, create or open a project, import the generated detection, segmentation, OCR Rec, and OCR Det datasets, launch X-AnyLabeling from the dataset page, use the post-labeling refresh/revalidation action, validate and split each dataset, run one training/export/inference path, then confirm the task queue detail view lists report, checkpoint/model, ONNX, overlay, visualized OCR image, and prediction JSON/TXT artifacts. Also open `样本复核` and `交付验收` to confirm review-list export, diagnostics, customer OCR gate, and deployment validation entries are visible.
+The RC walkthrough wrapper runs the 1280x820 non-fullscreen page set: `总览`, `项目`, `数据集`, `样本复核`, `训练实验`, `任务与产物`, `模型库`, `评估报告`, `模型导出`, `推理验证`, `交付验收`, `插件`, `环境`, and `设置`. It writes `ui_walkthrough_rc_summary.json` under `.deps\ui-walkthrough-rc` by default and should be treated as the repeatable GUI usability gate.
+
+If offline licensing stops startup at the registration dialog, the wrapper records `status=blocked` and `errorCode=license_required`. That is not a GUI layout pass; configure a valid license token and build-time public key, then rerun the wrapper.
+
+`tools\local-rc-closeout.ps1` runs this walkthrough by default after harness/package smoke. Use `-SkipGuiWalkthrough` only for intentionally headless environments, and record that omission in the handoff notes.
+
+For manual exploration beyond the automated pass, create or open a project, import generated detection, segmentation, OCR Rec, and OCR Det datasets, launch X-AnyLabeling from the dataset page, use post-labeling refresh/revalidation, validate and split each dataset, run one training/export/inference path, then confirm the task queue detail view lists report, checkpoint/model, ONNX, overlay, visualized OCR image, and prediction JSON/TXT artifacts. Also open `样本复核` and `交付验收` to confirm review-list export, diagnostics, customer OCR gate, and deployment validation entries are visible.
 
 X-AnyLabeling is detected from `AITRAIN_XANYLABELING_EXE`, the app directory, `tools\x-anylabeling`, `.deps\annotation-tools\X-AnyLabeling`, or `PATH`. Keep downloaded binaries in `.deps\` unless a separate redistribution review is completed.
 

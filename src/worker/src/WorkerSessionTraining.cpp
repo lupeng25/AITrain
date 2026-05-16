@@ -76,6 +76,8 @@ void WorkerSession::tickTraining()
 void WorkerSession::startTraining(const aitrain::TrainingRequest& request)
 {
     request_ = request;
+    activeTaskId_ = request_.taskId;
+    activeOutputPath_ = request_.outputPath;
     step_ = 0;
     maxSteps_ = qMax(4, request.parameters.value(QStringLiteral("epochs")).toInt(20));
     running_ = true;

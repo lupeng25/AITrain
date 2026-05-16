@@ -319,6 +319,110 @@ QString ncnnBinPathForParam(const QString& modelPath)
     return QDir(info.absolutePath()).filePath(info.completeBaseName() + QStringLiteral(".bin"));
 }
 
+QString ncnnFailureCategory(const QString& checkName, const QString& message)
+{
+    const QString lower = message.toLower();
+    if (checkName == QStringLiteral("ncnn_runtime_available")
+        || lower.contains(QStringLiteral("configure aitrain_ncnn_root"))
+        || lower.contains(QStringLiteral("ncnn inference is not enabled"))) {
+        return QStringLiteral("sdk_missing");
+    }
+    if (checkName == QStringLiteral("ncnn_sample_image_present")) {
+        return QStringLiteral("sample_missing");
+    }
+    if (checkName == QStringLiteral("ncnn_sidecar_bin_exists")
+        || lower.contains(QStringLiteral("sidecar"))
+        || lower.contains(QStringLiteral("explicit ncnn runtime config"))
+        || lower.contains(QStringLiteral("missing inputblob"))
+        || lower.contains(QStringLiteral("missing outputblobs"))
+        || lower.contains(QStringLiteral("inferred model family: <empty>"))) {
+        return QStringLiteral("sidecar_missing");
+    }
+    if (lower.contains(QStringLiteral("unsupported layer type"))
+        || lower.contains(QStringLiteral(" shape "))
+        || lower.contains(QStringLiteral("'shape'"))) {
+        return QStringLiteral("unsupported_layer");
+    }
+    return QStringLiteral("runtime_failed");
+}
+
+QString ncnnNextAction(const QString& failureCategory)
+{
+    if (failureCategory == QStringLiteral("sdk_missing")) {
+        return QStringLiteral("Configure AITRAIN_NCNN_ROOT with an NCNN SDK/runtime, rebuild, then rerun deployment validation.");
+    }
+    if (failureCategory == QStringLiteral("sample_missing")) {
+        return QStringLiteral("Provide sampleImagePath so the NCNN artifact can be loaded and executed.");
+    }
+    if (failureCategory == QStringLiteral("sidecar_missing")) {
+        return QStringLiteral("Provide the AITrain export sidecar or explicit modelFamily, classNames, inputBlob, outputBlobs, decoder, inputSize, strides, and regMax.");
+    }
+    if (failureCategory == QStringLiteral("unsupported_layer")) {
+        return QStringLiteral("Re-export a static-shape NCNN artifact or use a pnnx-compatible preconverted model; unsupported layers such as Shape are not accepted as passed smoke evidence.");
+    }
+    return QStringLiteral("Inspect deployment_validation_report.json, Worker logs, blob names, decoder config, and NCNN runtime DLL layout.");
+}
+
+QJsonArray ncnnDiagnosticHints(const QString& failureCategory)
+{
+    QJsonArray hints;
+    if (failureCategory == QStringLiteral("sdk_missing")) {
+        hints.append(QStringLiteral("Set CMake -DAITRAIN_NCNN_ROOT=<ncnn-sdk-root> and keep ncnn.dll next to the Worker or under runtimes/ncnn."));
+        hints.append(QStringLiteral("Run tools/phase-ncnn-runtime-smoke.ps1 after rebuilding with NCNN enabled."));
+    } else if (failureCategory == QStringLiteral("sample_missing")) {
+        hints.append(QStringLiteral("Use a readable jpg/png/bmp/tif sample image representative of the exported model input domain."));
+    } else if (failureCategory == QStringLiteral("sidecar_missing")) {
+        hints.append(QStringLiteral("AITrain-exported NCNN artifacts should keep the matching .aitrain-export.json sidecar next to the .param/.bin files."));
+        hints.append(QStringLiteral("External nihui/Tencent/pnnx artifacts must pass explicit blob and decoder config; blind auto-detection is intentionally blocked."));
+    } else if (failureCategory == QStringLiteral("unsupported_layer")) {
+        hints.append(QStringLiteral("YOLOv8-seg ONNX converted by onnx2ncnn may retain Shape layers; this is recorded as failed compatibility evidence."));
+        hints.append(QStringLiteral("Use preconverted pnnx/DFL NCNN artifacts with an explicit AITrain sidecar for segmentation smoke."));
+    } else {
+        hints.append(QStringLiteral("Check input/output blob names, class count, decoder type, and mask prototype outputs."));
+        hints.append(QStringLiteral("Keep CPU NCNN as the default acceptance path; Vulkan is not required for the RC gate."));
+    }
+    return hints;
+}
+
+QJsonObject withNcnnFailureDetails(
+    const QString& checkName,
+    const QString& message,
+    QJsonObject details = {})
+{
+    const QString category = ncnnFailureCategory(checkName, message);
+    details.insert(QStringLiteral("errorCode"), category);
+    details.insert(QStringLiteral("failureCategory"), category);
+    details.insert(QStringLiteral("nextAction"), ncnnNextAction(category));
+    details.insert(QStringLiteral("diagnosticHints"), ncnnDiagnosticHints(category));
+    return details;
+}
+
+void applyFailureSummaryFromChecks(QJsonObject* report, const QJsonArray& checks)
+{
+    if (!report || report->value(QStringLiteral("ok")).toBool()) {
+        return;
+    }
+    if (report->contains(QStringLiteral("failureCategory"))) {
+        return;
+    }
+    for (const QJsonValue& value : checks) {
+        const QJsonObject check = value.toObject();
+        if (check.value(QStringLiteral("passed")).toBool()) {
+            continue;
+        }
+        const QJsonObject details = check.value(QStringLiteral("details")).toObject();
+        const QString category = details.value(QStringLiteral("failureCategory")).toString();
+        if (category.isEmpty()) {
+            continue;
+        }
+        report->insert(QStringLiteral("errorCode"), details.value(QStringLiteral("errorCode")).toString(category));
+        report->insert(QStringLiteral("failureCategory"), category);
+        report->insert(QStringLiteral("nextAction"), details.value(QStringLiteral("nextAction")).toString());
+        report->insert(QStringLiteral("diagnosticHints"), details.value(QStringLiteral("diagnosticHints")).toArray());
+        return;
+    }
+}
+
 QString deploymentSummaryMarkdown(const QJsonObject& report)
 {
     QString markdown;
@@ -328,6 +432,11 @@ QString deploymentSummaryMarkdown(const QJsonObject& report)
     markdown += QStringLiteral("- Runtime: %1\n").arg(report.value(QStringLiteral("runtime")).toString());
     markdown += QStringLiteral("- Model: %1\n").arg(QDir::toNativeSeparators(report.value(QStringLiteral("modelPath")).toString()));
     markdown += QStringLiteral("- Sample image: %1\n\n").arg(QDir::toNativeSeparators(report.value(QStringLiteral("sampleImagePath")).toString()));
+    const QString failureCategory = report.value(QStringLiteral("failureCategory")).toString();
+    if (!failureCategory.isEmpty()) {
+        markdown += QStringLiteral("- Failure category: %1\n").arg(failureCategory);
+        markdown += QStringLiteral("- Next action: %1\n\n").arg(report.value(QStringLiteral("nextAction")).toString());
+    }
     markdown += QStringLiteral("## Checks\n\n");
     const QJsonArray checks = report.value(QStringLiteral("checks")).toArray();
     for (const QJsonValue& value : checks) {
@@ -742,7 +851,12 @@ WorkflowResult validateDeploymentArtifactReport(
             binExists
                 ? QStringLiteral("NCNN .bin sidecar exists.")
                 : QStringLiteral("NCNN .bin sidecar is missing."),
-            pathEvidenceObject(binPath)));
+            binExists
+                ? pathEvidenceObject(binPath)
+                : withNcnnFailureDetails(
+                    QStringLiteral("ncnn_sidecar_bin_exists"),
+                    QStringLiteral("NCNN .bin sidecar is missing."),
+                    pathEvidenceObject(binPath))));
         report.insert(QStringLiteral("runtime"), QStringLiteral("ncnn"));
         report.insert(QStringLiteral("ncnnBinPath"), binPath);
         report.insert(QStringLiteral("runtimeValidation"), QStringLiteral("runtime-inference"));
@@ -760,7 +874,12 @@ WorkflowResult validateDeploymentArtifactReport(
                     : (backendStatus.message.isEmpty()
                         ? QStringLiteral("NCNN runtime is not available in this build or runtime layout.")
                         : backendStatus.message),
-                backendStatus.toJson()));
+                backendStatus.inferenceAvailable
+                    ? backendStatus.toJson()
+                    : withNcnnFailureDetails(
+                        QStringLiteral("ncnn_runtime_available"),
+                        backendStatus.message,
+                        backendStatus.toJson())));
             if (!backendStatus.inferenceAvailable) {
                 report.insert(QStringLiteral("checks"), checks);
                 setDeploymentStatusFromChecks(&report, checks, QStringLiteral("failed"));
@@ -773,7 +892,12 @@ WorkflowResult validateDeploymentArtifactReport(
                     sampleImageExists
                         ? QStringLiteral("NCNN sample image is available for runtime inference.")
                         : QStringLiteral("NCNN deployment validation requires a sample image to prove runtime inference."),
-                    pathEvidenceObject(sampleImagePath)));
+                    sampleImageExists
+                        ? pathEvidenceObject(sampleImagePath)
+                        : withNcnnFailureDetails(
+                            QStringLiteral("ncnn_sample_image_present"),
+                            QStringLiteral("NCNN deployment validation requires a sample image to prove runtime inference."),
+                            pathEvidenceObject(sampleImagePath))));
                 if (!sampleImageExists) {
                     report.insert(QStringLiteral("checks"), checks);
                     setDeploymentStatusFromChecks(&report, checks, QStringLiteral("blocked"));
@@ -835,7 +959,14 @@ WorkflowResult validateDeploymentArtifactReport(
                         error.isEmpty()
                             ? QStringLiteral("NCNN artifact ran inference successfully.")
                             : error,
-                        QJsonObject{{QStringLiteral("modelFamily"), family}, {QStringLiteral("taskType"), taskType}}));
+                        error.isEmpty()
+                            ? QJsonObject{{QStringLiteral("modelFamily"), family}, {QStringLiteral("taskType"), taskType}}
+                            : withNcnnFailureDetails(
+                                QStringLiteral("ncnn_runtime_inference"),
+                                error,
+                                QJsonObject{
+                                    {QStringLiteral("modelFamily"), family},
+                                    {QStringLiteral("taskType"), taskType}})));
                     report.insert(QStringLiteral("modelFamily"), family);
                     report.insert(QStringLiteral("taskType"), taskType);
                     report.insert(QStringLiteral("elapsedMs"), elapsedMs);
@@ -1095,6 +1226,7 @@ WorkflowResult validateDeploymentArtifactReport(
     const QString summaryPath = outputDir.filePath(QStringLiteral("deployment_validation_summary.md"));
     report.insert(QStringLiteral("reportPath"), reportPath);
     report.insert(QStringLiteral("summaryPath"), summaryPath);
+    applyFailureSummaryFromChecks(&report, report.value(QStringLiteral("checks")).toArray());
     if (!writeTextFile(summaryPath, deploymentSummaryMarkdown(report), &error)) {
         return failedResult(error);
     }

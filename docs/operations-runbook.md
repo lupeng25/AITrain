@@ -83,6 +83,14 @@
 .\tools\acceptance-smoke.ps1 -Package -SkipBuild
 ```
 
+GUI 1280x820 RC walkthrough：
+
+```powershell
+.\tools\ui-workbench-walkthrough.ps1
+```
+
+If the result summary reports `errorCode=license_required`, the app is blocked at offline registration. Configure a valid license token and `AITRAIN_LICENSE_PUBLIC_KEY`, then rerun the walkthrough before claiming a GUI pass.
+
 RTX / SM 75+ TensorRT 验收：
 
 ```powershell
@@ -109,6 +117,8 @@ NCNN runtime smoke：
 ```
 
 2026-05-16 本机证据显示：Hyuto YOLOv8 detection ONNX -> NCNN passed；nihui 预转换 YOLOv8n-seg pnnx/DFL NCNN + AITrain sidecar passed。若 YOLOv8-seg ONNX 转换后 `.param` 仍包含 unsupported `Shape` layer，应记录为 failed report，并换用静态/兼容导出或已验证的预转换 NCNN artifact。
+
+NCNN failed report 的标准分类为 `sdk_missing`、`sample_missing`、`sidecar_missing`、`unsupported_layer`、`runtime_failed`。报告 JSON 和 Markdown summary 应包含下一步建议；Worker 不应因为 unsupported layer 或缺配置崩溃。
 
 ## 外部验收收集
 
@@ -142,6 +152,9 @@ package-root TensorRT rerun：
 | OCR 后端启动失败 | PaddlePaddle、PaddleOCR、源码 checkout、Python 环境隔离。 |
 | TensorRT 为 `hardware-blocked` | GPU compute capability、驱动、CUDA、TensorRT runtime。旧 GPU 不应强行通过。 |
 | NCNN 导出失败 | `AITRAIN_NCNN_ONNX2NCNN` 或 `AITRAIN_NCNN_ROOT` 是否指向有效工具。 |
+| NCNN 部署验证返回 `sdk_missing` | 重新配置 `AITRAIN_NCNN_ROOT`，确认 `ncnn.dll` 位于 Worker 同目录或 `runtimes\ncnn`。 |
+| NCNN 部署验证返回 `sample_missing` | 提供可读取的 `sampleImagePath`，否则只记录 blocked，不声明 runtime passed。 |
+| NCNN 部署验证返回 `sidecar_missing` | 为外部 `.param/.bin` 提供 AITrain sidecar，或显式传入 `modelFamily`、`classNames`、`inputBlob`、`outputBlobs`、`decoder` 等配置。 |
 | NCNN 部署验证失败并提示 unsupported `Shape` layer | 当前 `.param` 来自不兼容的 ONNX 转换；使用静态/兼容导出的 ONNX，或改用带 sidecar/config 的预转换 NCNN artifact 后运行 `--ncnn-param-smoke`。 |
 | 插件禁用失败 | Windows 是否锁定 Qt plugin DLL；关闭相关任务或重启后重新扫描。 |
 | 数据集转换后无法训练 | 是否手动选择转换输出目录并重新运行数据集校验。 |

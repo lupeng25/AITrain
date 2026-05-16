@@ -36,6 +36,8 @@ void WorkerSession::validateDataset(const QJsonObject& payload)
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QFileInfo(datasetPath).absoluteDir().absolutePath(), taskId);
     }
+    activeTaskId_ = taskId;
+    activeOutputPath_ = outputPath;
 
     QJsonObject startProgress;
     startProgress.insert(QStringLiteral("taskId"), taskId);
@@ -76,6 +78,7 @@ void WorkerSession::validateDataset(const QJsonObject& payload)
     response.insert(QStringLiteral("format"), format);
     response.insert(QStringLiteral("checkedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     const QString reportPath = QDir(outputPath).filePath(QStringLiteral("dataset_validation_report.json"));
+    activeReportPath_ = reportPath;
     response.insert(QStringLiteral("reportPath"), reportPath);
     QString writeError;
     if (!writeJsonFile(reportPath, response, &writeError)) {
@@ -91,9 +94,16 @@ void WorkerSession::validateDataset(const QJsonObject& payload)
     send(QStringLiteral("datasetValidation"), response);
     QJsonObject terminal;
     terminal.insert(QStringLiteral("taskId"), taskId);
+    terminal.insert(QStringLiteral("command"), activeCommand_);
+    terminal.insert(QStringLiteral("status"), result.ok ? QStringLiteral("completed") : QStringLiteral("failed"));
+    terminal.insert(QStringLiteral("reportPath"), reportPath);
+    terminal.insert(QStringLiteral("outputPath"), outputPath);
     terminal.insert(QStringLiteral("message"), result.ok
         ? QStringLiteral("Dataset validation completed")
         : QStringLiteral("Dataset validation failed"));
+    if (!result.ok) {
+        terminal.insert(QStringLiteral("errorCode"), QStringLiteral("dataset_validation_failed"));
+    }
     send(result.ok ? QStringLiteral("completed") : QStringLiteral("failed"), terminal);
     finishSession();
 }
@@ -105,6 +115,8 @@ void WorkerSession::splitDataset(const QJsonObject& payload)
     const QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
     const QString format = payload.value(QStringLiteral("format")).toString();
     const QJsonObject options = payload.value(QStringLiteral("options")).toObject();
+    activeTaskId_ = taskId;
+    activeOutputPath_ = outputPath;
 
     QJsonObject startProgress;
     startProgress.insert(QStringLiteral("taskId"), taskId);
@@ -139,6 +151,7 @@ void WorkerSession::splitDataset(const QJsonObject& payload)
     response.insert(QStringLiteral("format"), format);
     response.insert(QStringLiteral("checkedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     const QString reportPath = QDir(outputPath).filePath(QStringLiteral("split_report.json"));
+    activeReportPath_ = reportPath;
     response.insert(QStringLiteral("reportPath"), reportPath);
     if (!QFileInfo::exists(reportPath)) {
         QString writeError;
@@ -156,9 +169,16 @@ void WorkerSession::splitDataset(const QJsonObject& payload)
     send(QStringLiteral("datasetSplit"), response);
     QJsonObject terminal;
     terminal.insert(QStringLiteral("taskId"), taskId);
+    terminal.insert(QStringLiteral("command"), activeCommand_);
+    terminal.insert(QStringLiteral("status"), result.ok ? QStringLiteral("completed") : QStringLiteral("failed"));
+    terminal.insert(QStringLiteral("reportPath"), reportPath);
+    terminal.insert(QStringLiteral("outputPath"), outputPath);
     terminal.insert(QStringLiteral("message"), result.ok
         ? QStringLiteral("Dataset split completed")
         : QStringLiteral("Dataset split failed"));
+    if (!result.ok) {
+        terminal.insert(QStringLiteral("errorCode"), QStringLiteral("dataset_split_failed"));
+    }
     send(result.ok ? QStringLiteral("completed") : QStringLiteral("failed"), terminal);
     finishSession();
 }
@@ -176,6 +196,7 @@ void WorkerSession::convertDataset(const QJsonObject& payload)
     request.targetFormat = payload.value(QStringLiteral("targetFormat")).toString();
     request.outputPath = payload.value(QStringLiteral("outputPath")).toString();
     request.options = payload.value(QStringLiteral("options")).toObject();
+    activeOutputPath_ = request.outputPath;
 
     QJsonObject startProgress;
     startProgress.insert(QStringLiteral("taskId"), taskId);
@@ -214,6 +235,12 @@ void WorkerSession::convertDataset(const QJsonObject& payload)
 
     QJsonObject terminal;
     terminal.insert(QStringLiteral("taskId"), taskId);
+    terminal.insert(QStringLiteral("command"), activeCommand_);
+    terminal.insert(QStringLiteral("status"), result.ok ? QStringLiteral("completed") : QStringLiteral("failed"));
+    terminal.insert(QStringLiteral("outputPath"), request.outputPath);
+    if (!result.reportPath.isEmpty()) {
+        terminal.insert(QStringLiteral("reportPath"), result.reportPath);
+    }
     const QString failureMessage = result.errorMessage.isEmpty()
         ? QStringLiteral("Dataset conversion failed")
         : QStringLiteral("Dataset conversion failed: %1").arg(result.errorMessage);
@@ -241,6 +268,7 @@ void WorkerSession::curateDataset(const QJsonObject& payload)
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QFileInfo(datasetPath).absoluteDir().absolutePath(), taskId);
     }
+    activeOutputPath_ = outputPath;
 
     QJsonObject progress;
     progress.insert(QStringLiteral("taskId"), taskId);
@@ -334,6 +362,7 @@ void WorkerSession::createDatasetSnapshot(const QJsonObject& payload)
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QFileInfo(datasetPath).absoluteDir().absolutePath(), taskId);
     }
+    activeOutputPath_ = outputPath;
 
     QJsonObject progress;
     progress.insert(QStringLiteral("taskId"), taskId);

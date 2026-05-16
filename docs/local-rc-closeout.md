@@ -12,7 +12,7 @@ Local closeout covers:
 - Packaged layout smoke from the source tree.
 - Worker self-check, plugin smoke, and package documentation/script presence.
 - Optional local baseline acceptance and CPU training smoke.
-- Manual GUI walkthrough for the current workbench.
+- Automated 1280x820 GUI walkthrough for the current workbench; use `-SkipGuiWalkthrough` only in intentionally headless environments.
 - Documentation language check for scaffold, official backend, TensorRT hardware-blocked, NCNN runtime/SDK requirements, and customer-domain OCR boundaries.
 
 Out of scope:
@@ -36,6 +36,7 @@ This runs:
 git diff --check
 .\tools\harness-check.ps1
 .\tools\package-smoke.ps1 -SkipBuild
+.\tools\ui-workbench-walkthrough.ps1
 ```
 
 Fuller local closeout, still without external hardware:
@@ -53,16 +54,19 @@ This additionally runs:
 
 The CPU training smoke is intentionally heavier. It validates integration and artifacts, not production model accuracy.
 
-## Manual GUI Walkthrough
+## GUI Walkthrough
 
-Start with generated sample data:
+The default RC command runs the fixed 1280x820 walkthrough wrapper:
 
 ```powershell
-python examples\create-minimal-datasets.py --output .deps\next-smoke
-.\build-vscode\bin\AITrainStudio.exe
+.\tools\ui-workbench-walkthrough.ps1
 ```
 
-Walk through these screens:
+It covers `总览`, `项目`, `数据集`, `样本复核`, `训练实验`, `任务与产物`, `模型库`, `评估报告`, `模型导出`, `推理验证`, `交付验收`, `插件`, `环境`, and `设置`, and writes `.deps\ui-walkthrough-rc\ui_walkthrough_rc_summary.json`.
+
+If the app opens the offline registration dialog before the workbench, the wrapper writes a blocked summary with `errorCode=license_required`. Treat that as environment/configuration blocked evidence: configure a valid offline license token and build-time `AITRAIN_LICENSE_PUBLIC_KEY`, then rerun the walkthrough instead of marking the GUI gate passed.
+
+For manual exploration beyond the automated gate, walk through these screens:
 
 | Area | Check |
 |---|---|

@@ -39,6 +39,7 @@ void WorkerSession::evaluateModel(const QJsonObject& payload)
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QFileInfo(modelPath).absoluteDir().absolutePath(), taskId);
     }
+    activeOutputPath_ = outputPath;
 
     QJsonObject progress;
     progress.insert(QStringLiteral("taskId"), taskId);
@@ -118,6 +119,7 @@ void WorkerSession::benchmarkModel(const QJsonObject& payload)
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QFileInfo(modelPath).absoluteDir().absolutePath(), taskId);
     }
+    activeOutputPath_ = outputPath;
 
     QJsonObject progress;
     progress.insert(QStringLiteral("taskId"), taskId);
@@ -167,6 +169,8 @@ void WorkerSession::generateDeliveryReport(const QJsonObject& payload)
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QDir::currentPath(), taskId);
     }
+    activeTaskId_ = taskId;
+    activeOutputPath_ = outputPath;
     QJsonObject context = payload.value(QStringLiteral("context")).toObject();
     context.insert(QStringLiteral("taskId"), taskId);
 
@@ -233,6 +237,8 @@ void WorkerSession::runCustomerOcrAcceptance(const QJsonObject& payload)
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QDir::currentPath(), taskId);
     }
+    activeTaskId_ = taskId;
+    activeOutputPath_ = outputPath;
     QJsonObject options = payload.value(QStringLiteral("options")).toObject();
     options.insert(QStringLiteral("taskId"), taskId);
 
@@ -286,6 +292,8 @@ void WorkerSession::collectDiagnostics(const QJsonObject& payload)
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QDir::currentPath(), taskId);
     }
+    activeTaskId_ = taskId;
+    activeOutputPath_ = outputPath;
     QJsonObject context = payload.value(QStringLiteral("context")).toObject();
     context.insert(QStringLiteral("taskId"), taskId);
     if (context.value(QStringLiteral("workerExecutable")).toString().isEmpty()) {
@@ -344,6 +352,8 @@ void WorkerSession::validateDeploymentArtifact(const QJsonObject& payload)
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QFileInfo(modelPath).absoluteDir().absolutePath(), taskId);
     }
+    activeTaskId_ = taskId;
+    activeOutputPath_ = outputPath;
     QJsonObject options = payload.value(QStringLiteral("options")).toObject();
     const QString sampleImagePath = payload.value(QStringLiteral("sampleImagePath")).toString();
     if (!sampleImagePath.isEmpty()) {
@@ -358,9 +368,13 @@ void WorkerSession::validateDeploymentArtifact(const QJsonObject& payload)
 
     const aitrain::WorkflowResult result = aitrain::validateDeploymentArtifactReport(modelPath, outputPath, format, options);
     if (!result.ok) {
-        fail(result.error);
+        failWithDetails(
+            result.error,
+            QStringLiteral("deployment_validation_failed"),
+            QJsonObject{{QStringLiteral("outputPath"), outputPath}});
         return;
     }
+    activeReportPath_ = result.payload.value(QStringLiteral("reportPath")).toString();
 
     for (const auto& item : {
              qMakePair(QStringLiteral("deployment_validation_report"), QStringLiteral("reportPath")),
@@ -389,6 +403,15 @@ void WorkerSession::validateDeploymentArtifact(const QJsonObject& payload)
 
     QJsonObject completed;
     completed.insert(QStringLiteral("taskId"), taskId);
+    completed.insert(QStringLiteral("command"), activeCommand_);
+    completed.insert(QStringLiteral("status"), result.payload.value(QStringLiteral("status")).toString(QStringLiteral("passed")));
+    completed.insert(QStringLiteral("reportPath"), result.payload.value(QStringLiteral("reportPath")).toString());
+    completed.insert(QStringLiteral("outputPath"), outputPath);
+    if (!result.payload.value(QStringLiteral("ok")).toBool(true)) {
+        completed.insert(QStringLiteral("errorCode"), result.payload.value(QStringLiteral("errorCode")).toString());
+        completed.insert(QStringLiteral("failureCategory"), result.payload.value(QStringLiteral("failureCategory")).toString());
+        completed.insert(QStringLiteral("nextAction"), result.payload.value(QStringLiteral("nextAction")).toString());
+    }
     completed.insert(QStringLiteral("message"), QStringLiteral("Deployment validation completed"));
     send(QStringLiteral("completed"), completed);
     finishSession();
@@ -403,6 +426,7 @@ void WorkerSession::exportModel(const QJsonObject& payload)
     const QString checkpointPath = payload.value(QStringLiteral("checkpointPath")).toString();
     const QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
     const QString format = payload.value(QStringLiteral("format")).toString(QStringLiteral("tiny_detector_json"));
+    activeOutputPath_ = outputPath;
 
     QJsonObject startProgress;
     startProgress.insert(QStringLiteral("percent"), 0);
@@ -484,6 +508,8 @@ void WorkerSession::runInference(const QJsonObject& payload)
     if (outputPath.isEmpty()) {
         outputPath = QFileInfo(checkpointPath).absoluteDir().filePath(QStringLiteral("inference"));
     }
+    activeTaskId_ = taskId;
+    activeOutputPath_ = outputPath;
     if (!QDir().mkpath(outputPath)) {
         fail(QStringLiteral("Cannot create inference output directory: %1").arg(outputPath));
         return;

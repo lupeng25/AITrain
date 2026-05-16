@@ -19,7 +19,7 @@
 | Production OCR public workflow | 已通过 public workflow lane | `.deps\rtx4090-validation\production-ocr-acceptance-gpu-chain` | Public Total-Text 证据不能证明客户域生产精度。 |
 | Customer-domain OCR | 需要客户/目标域证据 | `.\tools\customer-ocr-validation.ps1`；交付验收页导入结果 | 只有真实客户/目标域数据和报告才能支撑生产声明。 |
 | 数据集转换 GUI closeout | 已完成本地验证 | `.deps\ui-walkthrough-dataset-conversion\walkthrough-summary.json` | 转换产物不自动注册为数据集。 |
-| GUI walkthrough | 已有本地证据 | 当前状态文档记录的 1280x820 Qt walkthrough | 覆盖主要页面和无横向溢出检查。 |
+| GUI walkthrough | 已固化为本地 RC gate | `.\tools\ui-workbench-walkthrough.ps1`；`.deps\ui-walkthrough-rc\ui_walkthrough_rc_summary.json` | 固定 1280x820，覆盖 14 个主页面和无横向溢出检查。 |
 | 诊断包 | GUI/Worker 能力已落地 | 交付验收页“一键诊断包”；Worker `collectDiagnostics` | 诊断包是只读证据，不修改全局环境。 |
 | 部署验证 | GUI/Worker 能力已落地 | 交付验收页“部署验证”；Worker `validateDeploymentArtifact` | ONNX 需要可运行推理；TensorRT 可返回 `hardware-blocked`；NCNN 在配置 SDK/runtime 和样本图时执行 YOLO 检测/分割 runtime inference。 |
 | NCNN runtime smoke | 本机检测/分割 runtime 已有证据 | `.deps\github-ncnn-smoke\hyuto-yolov8\runtime-output`；`.deps\github-ncnn-smoke\nihui-yolov8n-seg-ncnn\runtime-output\deployment-validation` | Hyuto YOLOv8 detection ONNX -> NCNN passed，nihui 预转换 YOLOv8n-seg pnnx/DFL NCNN passed；YOLOv8-seg ONNX 若残留 unsupported `Shape` layer，则记录为 failed report。 |
@@ -27,6 +27,7 @@
 ## 证据分层
 
 - 本地源码证据：`git diff --check`、`.\tools\harness-context.ps1`、`.\tools\harness-check.ps1`、本地 GUI walkthrough。
+- GUI walkthrough 若记录 `errorCode=license_required`，只能作为授权配置 blocked 证据，不能当作布局通过证据。
 - 本地 package 证据：`.\tools\package-smoke.ps1 -SkipBuild`、`.\tools\acceptance-smoke.ps1 -Package -SkipBuild`。
 - RTX validation lane：`.deps\rtx4090-validation` 下的 TensorRT、YOLO matrix、PaddleOCR Det ONNX、Production OCR evidence。
 - 外部 clean-machine 证据：clean Windows package root 执行结果和填写后的模板。
@@ -39,6 +40,7 @@
 - Public Total-Text 或 generated smoke 通过，不代表客户域 OCR 生产精度通过。
 - GUI 交付验收页显示导入结果，不替代底层脚本、Worker、外部机器或客户数据证据。
 - NCNN 部署验证不再使用 artifact-only 通过条件；无 SDK/runtime 会失败，缺少样本图会阻塞，外部模型需要 sidecar 或显式 blob/decoder 配置。
+- NCNN failed report 必须带 `errorCode` / `failureCategory` / `nextAction` / `diagnosticHints`；当前分类为 `sdk_missing`、`sample_missing`、`sidecar_missing`、`unsupported_layer`、`runtime_failed`。
 - NCNN 分割 runtime 当前通过证据来自 nihui 预转换 pnnx/DFL artifact；不要把失败的 YOLOv8-seg ONNX -> `onnx2ncnn` `Shape` layer case 说成分割 runtime 通过。
 
 ## 维护规则

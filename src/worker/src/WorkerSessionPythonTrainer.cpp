@@ -35,18 +35,32 @@ void WorkerSession::runPythonTrainer()
     const QString backend = requestedTrainingBackend(request_);
     const QString pythonExecutable = firstUsablePythonExecutable(request_.parameters);
     if (pythonExecutable.isEmpty()) {
-        fail(QStringLiteral("Python trainer backend '%1' requires a usable Python executable. Configure pythonExecutable or install Python.").arg(backend));
+        failWithDetails(
+            QStringLiteral("Python trainer backend '%1' requires a usable Python executable. Configure pythonExecutable or install Python.").arg(backend),
+            QStringLiteral("python_missing"),
+            QJsonObject{
+                {QStringLiteral("backend"), backend},
+                {QStringLiteral("outputPath"), request_.outputPath}});
         return;
     }
 
     const QString trainerScript = pythonTrainerScriptPath(request_.parameters, backend);
     if (!QFileInfo::exists(trainerScript)) {
-        fail(QStringLiteral("Python trainer script not found: %1").arg(trainerScript));
+        failWithDetails(
+            QStringLiteral("Python trainer script not found: %1").arg(trainerScript),
+            QStringLiteral("python_trainer_script_missing"),
+            QJsonObject{
+                {QStringLiteral("backend"), backend},
+                {QStringLiteral("trainerScript"), trainerScript},
+                {QStringLiteral("outputPath"), request_.outputPath}});
         return;
     }
 
     if (!QDir().mkpath(request_.outputPath)) {
-        fail(QStringLiteral("Cannot create Python trainer output directory: %1").arg(request_.outputPath));
+        failWithDetails(
+            QStringLiteral("Cannot create Python trainer output directory: %1").arg(request_.outputPath),
+            QStringLiteral("output_create_failed"),
+            QJsonObject{{QStringLiteral("backend"), backend}, {QStringLiteral("outputPath"), request_.outputPath}});
         return;
     }
 
@@ -63,7 +77,13 @@ void WorkerSession::runPythonTrainer()
 
     QFile requestFile(requestPath);
     if (!requestFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        fail(QStringLiteral("Cannot write Python trainer request: %1").arg(requestPath));
+        failWithDetails(
+            QStringLiteral("Cannot write Python trainer request: %1").arg(requestPath),
+            QStringLiteral("python_trainer_request_write_failed"),
+            QJsonObject{
+                {QStringLiteral("backend"), backend},
+                {QStringLiteral("requestPath"), requestPath},
+                {QStringLiteral("outputPath"), request_.outputPath}});
         return;
     }
     requestFile.write(QJsonDocument(trainerRequest).toJson(QJsonDocument::Indented));
@@ -80,7 +100,16 @@ void WorkerSession::runPythonTrainer()
     pythonTrainerProcess_.setProcessChannelMode(QProcess::SeparateChannels);
     pythonTrainerProcess_.start();
     if (!pythonTrainerProcess_.waitForStarted(5000)) {
-        fail(QStringLiteral("Cannot start Python trainer: %1").arg(pythonTrainerProcess_.errorString()));
+        failWithDetails(
+            QStringLiteral("Cannot start Python trainer: %1").arg(pythonTrainerProcess_.errorString()),
+            QStringLiteral("python_trainer_start_failed"),
+            QJsonObject{
+                {QStringLiteral("backend"), backend},
+                {QStringLiteral("pythonExecutable"), pythonExecutable},
+                {QStringLiteral("trainerScript"), trainerScript},
+                {QStringLiteral("requestPath"), requestPath},
+                {QStringLiteral("outputPath"), request_.outputPath},
+                {QStringLiteral("processError"), pythonTrainerProcess_.errorString()}});
         return;
     }
 
@@ -120,10 +149,28 @@ void WorkerSession::runPythonTrainer()
         return;
     }
     if (pythonTrainerProcess_.exitStatus() != QProcess::NormalExit || pythonTrainerProcess_.exitCode() != 0) {
-        fail(QStringLiteral("Python trainer exited with code %1").arg(pythonTrainerProcess_.exitCode()));
+        failWithDetails(
+            QStringLiteral("Python trainer exited with code %1").arg(pythonTrainerProcess_.exitCode()),
+            QStringLiteral("python_trainer_process_failed"),
+            QJsonObject{
+                {QStringLiteral("backend"), backend},
+                {QStringLiteral("pythonExecutable"), pythonExecutable},
+                {QStringLiteral("trainerScript"), trainerScript},
+                {QStringLiteral("requestPath"), requestPath},
+                {QStringLiteral("outputPath"), request_.outputPath},
+                {QStringLiteral("exitCode"), pythonTrainerProcess_.exitCode()},
+                {QStringLiteral("exitStatus"), pythonTrainerProcess_.exitStatus() == QProcess::NormalExit ? QStringLiteral("normal") : QStringLiteral("crash")}});
         return;
     }
-    fail(QStringLiteral("Python trainer exited without a completed or failed message"));
+    failWithDetails(
+        QStringLiteral("Python trainer exited without a completed or failed message"),
+        QStringLiteral("python_trainer_no_terminal_message"),
+        QJsonObject{
+            {QStringLiteral("backend"), backend},
+            {QStringLiteral("pythonExecutable"), pythonExecutable},
+            {QStringLiteral("trainerScript"), trainerScript},
+            {QStringLiteral("requestPath"), requestPath},
+            {QStringLiteral("outputPath"), request_.outputPath}});
 }
 void WorkerSession::drainPythonTrainerOutput(QByteArray* buffer, bool* terminalMessageSeen)
 {
@@ -195,6 +242,19 @@ bool WorkerSession::forwardPythonTrainerLine(const QByteArray& line, bool* termi
     }
     if (!payload.contains(QStringLiteral("backend"))) {
         payload.insert(QStringLiteral("backend"), requestedTrainingBackend(request_));
+    }
+    if (type == QStringLiteral("failed")) {
+        payload.insert(QStringLiteral("status"), QStringLiteral("failed"));
+        payload.insert(QStringLiteral("command"), activeCommand_);
+        if (!payload.contains(QStringLiteral("errorCode"))) {
+            payload.insert(QStringLiteral("errorCode"), payload.value(QStringLiteral("code")).toString(QStringLiteral("python_trainer_failed")));
+        }
+        if (!payload.contains(QStringLiteral("outputPath")) && !request_.outputPath.isEmpty()) {
+            payload.insert(QStringLiteral("outputPath"), request_.outputPath);
+        }
+    } else if (type == QStringLiteral("completed")) {
+        payload.insert(QStringLiteral("status"), QStringLiteral("completed"));
+        payload.insert(QStringLiteral("command"), activeCommand_);
     }
 
     send(type, payload);

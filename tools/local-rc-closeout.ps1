@@ -3,6 +3,7 @@ param(
     [switch]$RunCpuTrainingSmoke,
     [switch]$SkipHarness,
     [switch]$SkipPackageSmoke,
+    [switch]$SkipGuiWalkthrough,
     [string]$BuildDir = "build-vscode"
 )
 
@@ -60,6 +61,16 @@ if (-not $SkipHarness) {
 if (-not $SkipPackageSmoke) {
     Invoke-Step "package smoke" {
         Invoke-PowerShellScript -ScriptPath (Join-Path $root "tools\package-smoke.ps1") -Arguments @("-BuildDir", $BuildDir, "-SkipBuild")
+    }
+}
+
+if (-not $SkipGuiWalkthrough) {
+    Invoke-Step "GUI 1280x820 walkthrough" {
+        $binDir = Join-Path $root (Join-Path $BuildDir "bin")
+        Invoke-PowerShellScript -ScriptPath (Join-Path $root "tools\ui-workbench-walkthrough.ps1") -Arguments @(
+            "-AppPath", (Join-Path $binDir "AITrainStudio.exe"),
+            "-WorkingDirectory", $binDir,
+            "-OutDir", (Join-Path $root ".deps\ui-walkthrough-rc"))
     }
 }
 

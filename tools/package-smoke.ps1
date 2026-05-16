@@ -116,6 +116,7 @@ Assert-PathExists "python_trainers\ocr_system\paddleocr_system_official_adapter.
 Assert-PathExists "installer\AITrainStudio.iss" "Inno Setup installer script"
 Assert-PathExists "tools\acceptance-smoke.ps1" "acceptance smoke script"
 Assert-PathExists "tools\build-inno-installer.ps1" "Inno Setup installer build script"
+Assert-PathExists "tools\ui-workbench-walkthrough.ps1" "UI workbench walkthrough RC script"
 Assert-PathExists "tools\phase45-yolo-model-matrix-smoke.ps1" "Phase 45 YOLO model matrix smoke script"
 Assert-PathExists "tools\phase-ncnn-runtime-smoke.ps1" "NCNN runtime smoke script"
 Assert-PathExists "tools\local-rc-closeout.ps1" "local RC closeout script"

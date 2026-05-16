@@ -742,6 +742,9 @@ private slots:
         QCOMPARE(result.payload.value(QStringLiteral("status")).toString(), QStringLiteral("failed"));
         QCOMPARE(result.payload.value(QStringLiteral("runtime")).toString(), QStringLiteral("ncnn"));
         QVERIFY(result.payload.value(QStringLiteral("runtimeValidation")).toString() != QStringLiteral("artifact-only"));
+        QCOMPARE(result.payload.value(QStringLiteral("failureCategory")).toString(), QStringLiteral("sdk_missing"));
+        QCOMPARE(result.payload.value(QStringLiteral("errorCode")).toString(), QStringLiteral("sdk_missing"));
+        QVERIFY(!result.payload.value(QStringLiteral("nextAction")).toString().isEmpty());
 
         bool sawRuntimeCheck = false;
         for (const QJsonValue& value : result.payload.value(QStringLiteral("checks")).toArray()) {
@@ -749,6 +752,7 @@ private slots:
             if (check.value(QStringLiteral("name")).toString() == QStringLiteral("ncnn_runtime_available")) {
                 sawRuntimeCheck = true;
                 QCOMPARE(check.value(QStringLiteral("status")).toString(), QStringLiteral("failed"));
+                QCOMPARE(check.value(QStringLiteral("details")).toObject().value(QStringLiteral("failureCategory")).toString(), QStringLiteral("sdk_missing"));
             }
         }
         QVERIFY(sawRuntimeCheck);
@@ -774,6 +778,7 @@ private slots:
             QJsonObject());
         QVERIFY2(result.ok, qPrintable(result.error));
         QCOMPARE(result.payload.value(QStringLiteral("status")).toString(), QStringLiteral("blocked"));
+        QCOMPARE(result.payload.value(QStringLiteral("failureCategory")).toString(), QStringLiteral("sample_missing"));
 
         bool sawRuntimeCheck = false;
         bool sawSampleCheck = false;
@@ -786,10 +791,38 @@ private slots:
             } else if (name == QStringLiteral("ncnn_sample_image_present")) {
                 sawSampleCheck = true;
                 QCOMPARE(check.value(QStringLiteral("status")).toString(), QStringLiteral("blocked"));
+                QCOMPARE(check.value(QStringLiteral("details")).toObject().value(QStringLiteral("failureCategory")).toString(), QStringLiteral("sample_missing"));
             }
         }
         QVERIFY(sawRuntimeCheck);
         QVERIFY(sawSampleCheck);
+    }
+
+    void deploymentValidationNcnnRequiresSidecarOrExplicitConfig()
+    {
+        if (!aitrain::isNcnnInferenceAvailable()) {
+            QSKIP("NCNN SDK is not enabled in this build.");
+        }
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString paramPath = dir.filePath(QStringLiteral("model.param"));
+        const QString binPath = dir.filePath(QStringLiteral("model.bin"));
+        const QString samplePath = dir.filePath(QStringLiteral("sample.png"));
+        writeTextFile(paramPath, QStringLiteral("7767517\n1 1\nInput in0 0 1 in0 0=32 1=32 2=3\n"));
+        writeTextFile(binPath, QStringLiteral("fake bin\n"));
+        writeTinyPng(samplePath);
+
+        QJsonObject options;
+        options.insert(QStringLiteral("sampleImagePath"), samplePath);
+        const aitrain::WorkflowResult result = aitrain::validateDeploymentArtifactReport(
+            paramPath,
+            dir.filePath(QStringLiteral("deployment-validation")),
+            QStringLiteral("ncnn"),
+            options);
+        QVERIFY2(result.ok, qPrintable(result.error));
+        QCOMPARE(result.payload.value(QStringLiteral("status")).toString(), QStringLiteral("failed"));
+        QCOMPARE(result.payload.value(QStringLiteral("failureCategory")).toString(), QStringLiteral("sidecar_missing"));
     }
 
     void deploymentValidationNcnnReportsUnsupportedLayerWithoutCrash()
@@ -823,6 +856,7 @@ private slots:
             options);
         QVERIFY2(result.ok, qPrintable(result.error));
         QCOMPARE(result.payload.value(QStringLiteral("status")).toString(), QStringLiteral("failed"));
+        QCOMPARE(result.payload.value(QStringLiteral("failureCategory")).toString(), QStringLiteral("unsupported_layer"));
 
         bool sawInferenceCheck = false;
         for (const QJsonValue& value : result.payload.value(QStringLiteral("checks")).toArray()) {
@@ -833,6 +867,7 @@ private slots:
                 const QString message = check.value(QStringLiteral("message")).toString();
                 QVERIFY(message.contains(QStringLiteral("unsupported layer type")));
                 QVERIFY(message.contains(QStringLiteral("Shape")));
+                QCOMPARE(check.value(QStringLiteral("details")).toObject().value(QStringLiteral("failureCategory")).toString(), QStringLiteral("unsupported_layer"));
             }
         }
         QVERIFY(sawInferenceCheck);

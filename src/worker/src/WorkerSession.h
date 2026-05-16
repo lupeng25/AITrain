@@ -56,6 +56,7 @@ private:
     void sendCanceledAndFinish(const QString& taskId, const QString& message);
     void finishSession();
     void fail(const QString& message);
+    void failWithDetails(const QString& message, const QString& errorCode, const QJsonObject& details = {});
     void complete();
 
     struct PipelineTrainResult {
@@ -92,4 +93,7 @@ private:
     QProcess pythonTrainerProcess_;
     bool interceptPythonTrainerMessages_ = false;
     QString activeTaskId_;
+    QString activeCommand_;
+    QString activeOutputPath_;
+    QString activeReportPath_;
 };

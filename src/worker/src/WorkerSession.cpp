@@ -72,6 +72,15 @@ void WorkerSession::readLines()
 
 void WorkerSession::handleMessage(const QString& type, const QJsonObject& payload)
 {
+    if (type != QStringLiteral("heartbeat")
+        && type != QStringLiteral("cancel")
+        && type != QStringLiteral("pause")
+        && type != QStringLiteral("resume")) {
+        activeCommand_ = type;
+        activeTaskId_ = payload.value(QStringLiteral("taskId")).toString(activeTaskId_);
+        activeOutputPath_ = payload.value(QStringLiteral("outputPath")).toString();
+        activeReportPath_.clear();
+    }
     if (type == QStringLiteral("startTrain")) {
         startTraining(aitrain::TrainingRequest::fromJson(payload));
     } else if (type == QStringLiteral("pause")) {
@@ -116,8 +125,18 @@ void WorkerSession::handleMessage(const QString& type, const QJsonObject& payloa
         canceled_ = true;
         timer_.stop();
         if (pythonTrainerProcess_.state() != QProcess::NotRunning) {
+            QJsonObject terminateLog;
+            terminateLog.insert(QStringLiteral("taskId"), activeTaskId_.isEmpty() ? request_.taskId : activeTaskId_);
+            terminateLog.insert(QStringLiteral("command"), activeCommand_);
+            terminateLog.insert(QStringLiteral("message"), QStringLiteral("Terminating Python trainer process after user cancel."));
+            send(QStringLiteral("log"), terminateLog);
             pythonTrainerProcess_.terminate();
             if (!pythonTrainerProcess_.waitForFinished(1500)) {
+                QJsonObject killLog;
+                killLog.insert(QStringLiteral("taskId"), activeTaskId_.isEmpty() ? request_.taskId : activeTaskId_);
+                killLog.insert(QStringLiteral("command"), activeCommand_);
+                killLog.insert(QStringLiteral("message"), QStringLiteral("Killing Python trainer process after terminate timeout."));
+                send(QStringLiteral("log"), killLog);
                 pythonTrainerProcess_.kill();
                 pythonTrainerProcess_.waitForFinished(1500);
             }
@@ -162,7 +181,17 @@ void WorkerSession::sendCanceledAndFinish(const QString& taskId, const QString& 
 
     QJsonObject payload;
     payload.insert(QStringLiteral("taskId"), taskId.isEmpty() ? request_.taskId : taskId);
+    payload.insert(QStringLiteral("command"), activeCommand_);
+    payload.insert(QStringLiteral("status"), QStringLiteral("canceled"));
+    payload.insert(QStringLiteral("errorCode"), QStringLiteral("canceled"));
     payload.insert(QStringLiteral("message"), message.isEmpty() ? QStringLiteral("Canceled by user") : message);
+    if (!activeReportPath_.isEmpty()) {
+        payload.insert(QStringLiteral("reportPath"), activeReportPath_);
+    } else if (!activeOutputPath_.isEmpty()) {
+        payload.insert(QStringLiteral("outputPath"), activeOutputPath_);
+    } else if (!request_.outputPath.isEmpty()) {
+        payload.insert(QStringLiteral("outputPath"), request_.outputPath);
+    }
     send(QStringLiteral("canceled"), payload);
     finishSession();
 }
@@ -170,6 +199,9 @@ void WorkerSession::sendCanceledAndFinish(const QString& taskId, const QString& 
 void WorkerSession::finishSession()
 {
     activeTaskId_.clear();
+    activeCommand_.clear();
+    activeOutputPath_.clear();
+    activeReportPath_.clear();
     socket_.flush();
     QElapsedTimer timer;
     timer.start();
@@ -186,11 +218,39 @@ void WorkerSession::finishSession()
 
 void WorkerSession::fail(const QString& message)
 {
+    failWithDetails(message, QStringLiteral("worker_failed"));
+}
+
+void WorkerSession::failWithDetails(const QString& message, const QString& errorCode, const QJsonObject& details)
+{
     running_ = false;
     paused_ = false;
     timer_.stop();
     QJsonObject payload;
+    payload.insert(QStringLiteral("taskId"), activeTaskId_.isEmpty() ? request_.taskId : activeTaskId_);
+    payload.insert(QStringLiteral("command"), activeCommand_);
+    payload.insert(QStringLiteral("status"), QStringLiteral("failed"));
+    payload.insert(QStringLiteral("errorCode"), errorCode.isEmpty() ? QStringLiteral("worker_failed") : errorCode);
     payload.insert(QStringLiteral("message"), message);
+    if (!details.isEmpty()) {
+        payload.insert(QStringLiteral("details"), details);
+        if (details.contains(QStringLiteral("reportPath"))) {
+            payload.insert(QStringLiteral("reportPath"), details.value(QStringLiteral("reportPath")).toString());
+        }
+        if (details.contains(QStringLiteral("outputPath"))) {
+            payload.insert(QStringLiteral("outputPath"), details.value(QStringLiteral("outputPath")).toString());
+        }
+    }
+    if (!payload.contains(QStringLiteral("reportPath")) && !activeReportPath_.isEmpty()) {
+        payload.insert(QStringLiteral("reportPath"), activeReportPath_);
+    }
+    if (!payload.contains(QStringLiteral("outputPath"))) {
+        if (!activeOutputPath_.isEmpty()) {
+            payload.insert(QStringLiteral("outputPath"), activeOutputPath_);
+        } else if (!request_.outputPath.isEmpty()) {
+            payload.insert(QStringLiteral("outputPath"), request_.outputPath);
+        }
+    }
     send(QStringLiteral("failed"), payload);
     finishSession();
 }

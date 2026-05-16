@@ -451,6 +451,65 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
     }
 
+    void workerReportsMissingPythonTrainerScriptWithDiagnostics()
+    {
+        const QString python = pythonExecutablePath();
+        if (python.isEmpty()) {
+            QSKIP("Python executable is not available.");
+        }
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("dataset"));
+        writeTinyDetectionDataset(root);
+        const QString missingScript = dir.filePath(QStringLiteral("missing_trainer.py"));
+
+        aitrain::TrainingRequest request;
+        request.taskId = QStringLiteral("python-missing-script-task");
+        request.projectPath = dir.path();
+        request.pluginId = QStringLiteral("com.aitrain.plugins.yolo_native");
+        request.taskType = QStringLiteral("detection");
+        request.datasetPath = root;
+        request.outputPath = dir.filePath(QStringLiteral("worker-python-missing-script"));
+        request.parameters.insert(QStringLiteral("trainingBackend"), QStringLiteral("python_mock"));
+        request.parameters.insert(QStringLiteral("pythonExecutable"), python);
+        request.parameters.insert(QStringLiteral("pythonTrainerScript"), missingScript);
+
+        WorkerClient client;
+        QVector<QPair<QString, QJsonObject>> messages;
+        bool finished = false;
+        bool ok = true;
+        connect(&client, &WorkerClient::messageReceived, this, [&messages](const QString& type, const QJsonObject& payload) {
+            messages.append(qMakePair(type, payload));
+        });
+        connect(&client, &WorkerClient::finished, this, [&finished, &ok](bool success, const QString&) {
+            finished = true;
+            ok = success;
+        });
+
+        QString error;
+        QVERIFY2(client.startTraining(workerExecutablePath(), request, &error), qPrintable(error));
+        QTRY_VERIFY_WITH_TIMEOUT(finished, 15000);
+        QVERIFY(!ok);
+
+        bool sawFailure = false;
+        for (const auto& message : messages) {
+            if (message.first != QStringLiteral("failed")) {
+                continue;
+            }
+            sawFailure = true;
+            QCOMPARE(message.second.value(QStringLiteral("taskId")).toString(), request.taskId);
+            QCOMPARE(message.second.value(QStringLiteral("command")).toString(), QStringLiteral("startTrain"));
+            QCOMPARE(message.second.value(QStringLiteral("status")).toString(), QStringLiteral("failed"));
+            QCOMPARE(message.second.value(QStringLiteral("errorCode")).toString(), QStringLiteral("python_trainer_script_missing"));
+            QCOMPARE(message.second.value(QStringLiteral("outputPath")).toString(), request.outputPath);
+            const QJsonObject details = message.second.value(QStringLiteral("details")).toObject();
+            QCOMPARE(details.value(QStringLiteral("trainerScript")).toString(), QFileInfo(missingScript).absoluteFilePath());
+        }
+        QVERIFY(sawFailure);
+        QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
+    }
+
     void workerConvertsPythonTrainerMockCrashToStructuredFailure()
     {
         const QString python = pythonExecutablePath();
