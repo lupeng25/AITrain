@@ -4,6 +4,7 @@
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/PluginManager.h"
 #include "aitrain/core/PluginMarketplace.h"
+#include "aitrain/core/ProductWorkflow.h"
 
 #include <QCoreApplication>
 #include <QCommandLineParser>
@@ -44,6 +45,7 @@ int runSelfCheck()
         ? QStringLiteral("missing")
         : (hasWarning ? QStringLiteral("warning") : QStringLiteral("ok")));
     result.insert(QStringLiteral("applicationDir"), QCoreApplication::applicationDirPath());
+    result.insert(QStringLiteral("ncnnBackend"), aitrain::ncnnBackendStatus().toJson());
     result.insert(QStringLiteral("tensorRtBackend"), aitrain::tensorRtBackendStatus().toJson());
     result.insert(QStringLiteral("checks"), checks);
     writeJsonLine(result);
@@ -223,6 +225,78 @@ int runTensorRtSmoke(const QString& workDirectory)
     return 0;
 }
 
+int runNcnnSmoke(
+    const QString& onnxPath,
+    const QString& imagePath,
+    const QString& outputDirectory,
+    const QString& taskType)
+{
+    const QString modelPath = QFileInfo(onnxPath).absoluteFilePath();
+    const QString samplePath = QFileInfo(imagePath).absoluteFilePath();
+    const QString outputPath = QFileInfo(outputDirectory.isEmpty()
+        ? QFileInfo(modelPath).absoluteDir().filePath(QStringLiteral("aitrain_ncnn_smoke"))
+        : outputDirectory).absoluteFilePath();
+    const QString exportPath = QDir(outputPath).filePath(QStringLiteral("export/model.param"));
+    const QString validationPath = QDir(outputPath).filePath(QStringLiteral("deployment-validation"));
+
+    if (!QFileInfo::exists(modelPath)) {
+        writeJsonLine(QJsonObject{
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("stage"), QStringLiteral("input")},
+            {QStringLiteral("status"), QStringLiteral("blocked")},
+            {QStringLiteral("error"), QStringLiteral("NCNN smoke requires an existing ONNX model: %1").arg(modelPath)}
+        });
+        return 9;
+    }
+    if (samplePath.isEmpty() || !QFileInfo::exists(samplePath)) {
+        writeJsonLine(QJsonObject{
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("stage"), QStringLiteral("input")},
+            {QStringLiteral("status"), QStringLiteral("blocked")},
+            {QStringLiteral("error"), QStringLiteral("NCNN smoke requires an existing sample image: %1").arg(samplePath)}
+        });
+        return 9;
+    }
+
+    const aitrain::DetectionExportResult exported =
+        aitrain::exportDetectionCheckpoint(modelPath, exportPath, QStringLiteral("ncnn"));
+    if (!exported.ok) {
+        writeJsonLine(QJsonObject{
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("stage"), QStringLiteral("export")},
+            {QStringLiteral("status"), QStringLiteral("failed")},
+            {QStringLiteral("onnxPath"), modelPath},
+            {QStringLiteral("error"), exported.error},
+            {QStringLiteral("ncnnBackend"), aitrain::ncnnBackendStatus().toJson()}
+        });
+        return 10;
+    }
+
+    QJsonObject options;
+    options.insert(QStringLiteral("sampleImagePath"), samplePath);
+    if (taskType == QStringLiteral("segmentation")) {
+        options.insert(QStringLiteral("modelFamily"), QStringLiteral("yolo_segmentation"));
+    } else {
+        options.insert(QStringLiteral("modelFamily"), QStringLiteral("yolo_detection"));
+    }
+    const aitrain::WorkflowResult validation =
+        aitrain::validateDeploymentArtifactReport(exported.exportPath, validationPath, QStringLiteral("ncnn"), options);
+    const QString status = validation.payload.value(QStringLiteral("status")).toString(QStringLiteral("failed"));
+    const bool ok = validation.ok && status == QStringLiteral("passed");
+    writeJsonLine(QJsonObject{
+        {QStringLiteral("ok"), ok},
+        {QStringLiteral("stage"), ok ? QStringLiteral("completed") : QStringLiteral("validation")},
+        {QStringLiteral("status"), status},
+        {QStringLiteral("onnxPath"), modelPath},
+        {QStringLiteral("paramPath"), exported.exportPath},
+        {QStringLiteral("exportReportPath"), exported.reportPath},
+        {QStringLiteral("validationReportPath"), validation.reportPath},
+        {QStringLiteral("validation"), validation.payload},
+        {QStringLiteral("ncnnBackend"), aitrain::ncnnBackendStatus().toJson()}
+    });
+    return ok ? 0 : 11;
+}
+
 int runOcrDetOnnxSmoke(
     const QString& onnxPath,
     const QString& imagePath,
@@ -374,9 +448,11 @@ int main(int argc, char* argv[])
     QCommandLineOption selfCheckOption(QStringLiteral("self-check"), QStringLiteral("Run package/runtime self-check and print JSON."));
     QCommandLineOption pluginSmokeOption(QStringLiteral("plugin-smoke"), QStringLiteral("Scan model plugin directory and print JSON."), QStringLiteral("directory"));
     QCommandLineOption tensorRtSmokeOption(QStringLiteral("tensorrt-smoke"), QStringLiteral("Run a tiny TensorRT export/inference smoke check and print JSON."), QStringLiteral("directory"));
+    QCommandLineOption ncnnSmokeOption(QStringLiteral("ncnn-smoke"), QStringLiteral("Run NCNN export and deployment validation smoke and print JSON."), QStringLiteral("onnx"));
     QCommandLineOption ocrDetOnnxSmokeOption(QStringLiteral("ocr-det-onnx-smoke"), QStringLiteral("Run OCR Det ONNX Runtime DB postprocess smoke and print JSON."), QStringLiteral("onnx"));
     QCommandLineOption imageOption(QStringLiteral("image"), QStringLiteral("Image path for smoke checks."), QStringLiteral("path"));
     QCommandLineOption outputOption(QStringLiteral("output"), QStringLiteral("Output directory for smoke artifacts."), QStringLiteral("directory"));
+    QCommandLineOption taskTypeOption(QStringLiteral("task-type"), QStringLiteral("Task type for model smoke checks."), QStringLiteral("type"), QStringLiteral("detection"));
     QCommandLineOption binaryThresholdOption(QStringLiteral("binary-threshold"), QStringLiteral("OCR Det binary threshold."), QStringLiteral("value"), QStringLiteral("0.05"));
     QCommandLineOption boxThresholdOption(QStringLiteral("box-threshold"), QStringLiteral("OCR Det box confidence threshold."), QStringLiteral("value"), QStringLiteral("0.0"));
     QCommandLineOption minAreaOption(QStringLiteral("min-area"), QStringLiteral("OCR Det minimum connected component area."), QStringLiteral("pixels"), QStringLiteral("1"));
@@ -385,9 +461,11 @@ int main(int argc, char* argv[])
     parser.addOption(selfCheckOption);
     parser.addOption(pluginSmokeOption);
     parser.addOption(tensorRtSmokeOption);
+    parser.addOption(ncnnSmokeOption);
     parser.addOption(ocrDetOnnxSmokeOption);
     parser.addOption(imageOption);
     parser.addOption(outputOption);
+    parser.addOption(taskTypeOption);
     parser.addOption(binaryThresholdOption);
     parser.addOption(boxThresholdOption);
     parser.addOption(minAreaOption);
@@ -402,6 +480,13 @@ int main(int argc, char* argv[])
     }
     if (parser.isSet(tensorRtSmokeOption)) {
         return runTensorRtSmoke(parser.value(tensorRtSmokeOption));
+    }
+    if (parser.isSet(ncnnSmokeOption)) {
+        return runNcnnSmoke(
+            parser.value(ncnnSmokeOption),
+            parser.value(imageOption),
+            parser.value(outputOption),
+            parser.value(taskTypeOption).trimmed().toLower());
     }
     if (parser.isSet(ocrDetOnnxSmokeOption)) {
         return runOcrDetOnnxSmoke(

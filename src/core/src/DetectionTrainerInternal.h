@@ -102,6 +102,14 @@ QStringList classNamesFromYoloDataYaml(const QString& yamlPath);
 QJsonObject loadUltralyticsTrainingReport(const QString& onnxPath);
 QStringList ultralyticsClassNames(const QString& onnxPath);
 QVector<float> yoloImageTensorFromLetterbox(const QImage& image, const QSize& inputSize, LetterboxTransform* transform);
+DetectionBox yoloBoxFromInputPixels(
+    double xCenter,
+    double yCenter,
+    double width,
+    double height,
+    int classId,
+    const QSize& inputSize,
+    const LetterboxTransform& transform);
 QVector<DetectionPrediction> yoloPredictionsFromOutput(
     const float* output,
     const std::vector<int64_t>& shape,
@@ -111,12 +119,46 @@ QVector<DetectionPrediction> yoloPredictionsFromOutput(
     const DetectionInferenceOptions& options,
     QString* error);
 QColor overlayColorForClass(int classId, int alpha);
+QImage maskFromPrototype(
+    const QVector<float>& coefficients,
+    const float* prototypes,
+    const std::vector<int64_t>& prototypeShape,
+    const DetectionBox& box,
+    const QSize& inputSize,
+    const LetterboxTransform& transform,
+    double threshold,
+    double* maskArea);
 QVector<SegmentationPrediction> yoloSegmentationPredictionsFromOutputs(
     const float* boxesAndMasks,
     const std::vector<int64_t>& boxesShape,
     const float* prototypes,
     const std::vector<int64_t>& prototypeShape,
     const QStringList& classNames,
+    const QSize& inputSize,
+    const LetterboxTransform& transform,
+    const DetectionInferenceOptions& options,
+    QString* error);
+QVector<DetectionPrediction> ncnnDflPredictionsFromOutput(
+    const float* output,
+    const std::vector<int64_t>& shape,
+    const QStringList& classNames,
+    const QVector<int>& strides,
+    int regMax,
+    const QSize& inputSize,
+    const LetterboxTransform& transform,
+    const DetectionInferenceOptions& options,
+    QString* error);
+QVector<SegmentationPrediction> ncnnDflSegmentationPredictionsFromOutputs(
+    const float* boxes,
+    const std::vector<int64_t>& boxesShape,
+    const float* maskFeatures,
+    int maskFeatureRows,
+    int maskFeatureColumns,
+    const float* prototypes,
+    const std::vector<int64_t>& prototypeShape,
+    const QStringList& classNames,
+    const QVector<int>& strides,
+    int regMax,
     const QSize& inputSize,
     const LetterboxTransform& transform,
     const DetectionInferenceOptions& options,

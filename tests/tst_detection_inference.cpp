@@ -1,4 +1,5 @@
 ﻿#include "TestSupport.h"
+#include "../src/core/src/DetectionTrainerInternal.h"
 
 class DetectionInferenceTests : public QObject {
     Q_OBJECT
@@ -450,6 +451,8 @@ private slots:
         const QString binPath = ncnn.value(QStringLiteral("binPath")).toString();
         QCOMPARE(exported.config.value(QStringLiteral("format")).toString(), QStringLiteral("ncnn"));
         QCOMPARE(ncnn.value(QStringLiteral("paramPath")).toString(), exported.exportPath);
+        QCOMPARE(ncnn.value(QStringLiteral("runtime")).toString(), QStringLiteral("ncnn"));
+        QCOMPARE(ncnn.value(QStringLiteral("runtimeValidation")).toString(), QStringLiteral("runtime-inference"));
         QVERIFY(QFileInfo::exists(binPath));
         QCOMPARE(QFileInfo(binPath).fileName(), QStringLiteral("mobile-model.bin"));
 
@@ -474,6 +477,267 @@ private slots:
         QCOMPARE(exported.format, QStringLiteral("ncnn"));
         QVERIFY(exported.error.contains(QStringLiteral("NCNN")));
         QVERIFY(exported.error.contains(QStringLiteral("not found")));
+    }
+
+    void detectionNcnnBackendStatusAndSidecarMetadataAreExplicit()
+    {
+        const aitrain::NcnnBackendStatus status = aitrain::ncnnBackendStatus();
+        QVERIFY(!status.message.isEmpty());
+        QVERIFY(status.status == QStringLiteral("sdk_missing")
+            || status.status == QStringLiteral("backend_available"));
+        QCOMPARE(status.toJson().value(QStringLiteral("inferenceAvailable")).toBool(), status.inferenceAvailable);
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString paramPath = dir.filePath(QStringLiteral("model.param"));
+        const QString binPath = dir.filePath(QStringLiteral("model.bin"));
+        writeTextFile(paramPath,
+            QStringLiteral("7767517\n"
+                           "3 3\n"
+                           "Input data 0 1 data 0=32 1=32 2=3\n"
+                           "Dummy layer0 1 1 data hidden\n"
+                           "Dummy layer1 1 1 hidden prob\n"));
+        writeTextFile(binPath, QStringLiteral("fake bin\n"));
+        writeTextFile(dir.filePath(QStringLiteral("model.aitrain-export.json")),
+            QStringLiteral("{\n"
+                           "  \"format\": \"ncnn\",\n"
+                           "  \"modelFamily\": \"yolo_detection\",\n"
+                           "  \"classNames\": [\"item\"],\n"
+                           "  \"ncnn\": {\n"
+                           "    \"inputBlob\": \"data\",\n"
+                           "    \"outputBlobs\": [\"prob\"],\n"
+                           "    \"decoder\": \"dfl\",\n"
+                           "    \"inputSize\": 32,\n"
+                           "    \"strides\": [8, 16, 32],\n"
+                           "    \"regMax\": 16\n"
+                           "  }\n"
+                           "}\n"));
+
+        QCOMPARE(aitrain::inferNcnnModelFamily(paramPath), QStringLiteral("yolo_detection"));
+    }
+
+    void detectionNcnnUltralyticsOutputDecoderGeneratesBox()
+    {
+        aitrain::LetterboxTransform transform;
+        transform.sourceSize = QSize(32, 32);
+        transform.targetSize = QSize(32, 32);
+        transform.scale = 1.0;
+
+        const float output[] = {16.0f, 16.0f, 12.0f, 10.0f, 0.90f};
+        aitrain::DetectionInferenceOptions options;
+        options.confidenceThreshold = 0.50;
+        QString error;
+        const QVector<aitrain::DetectionPrediction> predictions =
+            aitrain::detection_detail::yoloPredictionsFromOutput(
+                output,
+                std::vector<int64_t>{1, 5, 1},
+                QStringList{QStringLiteral("item")},
+                QSize(32, 32),
+                transform,
+                options,
+                &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(predictions.size(), 1);
+        QCOMPARE(predictions.first().className, QStringLiteral("item"));
+        QVERIFY(predictions.first().box.width > 0.0);
+        QVERIFY(predictions.first().box.height > 0.0);
+    }
+
+    void detectionNcnnDflDecoderGeneratesBox()
+    {
+        aitrain::LetterboxTransform transform;
+        transform.sourceSize = QSize(4, 4);
+        transform.targetSize = QSize(4, 4);
+        transform.scale = 1.0;
+
+        QVector<float> output;
+        output.fill(0.0f, 9);
+        output[8] = 8.0f;
+
+        aitrain::DetectionInferenceOptions options;
+        options.confidenceThreshold = 0.50;
+        QString error;
+        const QVector<aitrain::DetectionPrediction> predictions =
+            aitrain::detection_detail::ncnnDflPredictionsFromOutput(
+                output.constData(),
+                std::vector<int64_t>{1, 1, 9},
+                QStringList{QStringLiteral("item")},
+                QVector<int>{4},
+                2,
+                QSize(4, 4),
+                transform,
+                options,
+                &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(predictions.size(), 1);
+        QCOMPARE(predictions.first().className, QStringLiteral("item"));
+        QVERIFY(predictions.first().confidence > 0.50);
+        QVERIFY(predictions.first().box.width > 0.0);
+        QVERIFY(predictions.first().box.height > 0.0);
+    }
+
+    void detectionNcnnSyntheticSegmentationOutputsGenerateMask()
+    {
+        aitrain::LetterboxTransform transform;
+        transform.sourceSize = QSize(4, 4);
+        transform.targetSize = QSize(4, 4);
+        transform.scale = 1.0;
+
+        const float boxesAndMasks[] = {2.0f, 2.0f, 4.0f, 4.0f, 0.95f, 8.0f};
+        QVector<float> prototypes;
+        prototypes.fill(1.0f, 16);
+
+        aitrain::DetectionInferenceOptions options;
+        options.confidenceThreshold = 0.50;
+        QString error;
+        const QVector<aitrain::SegmentationPrediction> predictions =
+            aitrain::detection_detail::yoloSegmentationPredictionsFromOutputs(
+                boxesAndMasks,
+                std::vector<int64_t>{1, 6, 1},
+                prototypes.constData(),
+                std::vector<int64_t>{1, 1, 4, 4},
+                QStringList{QStringLiteral("item")},
+                QSize(4, 4),
+                transform,
+                options,
+                &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(predictions.size(), 1);
+        QVERIFY(!predictions.first().mask.isNull());
+        QVERIFY(predictions.first().maskArea > 0.0);
+    }
+
+    void detectionNcnnDflSegmentationOutputsGenerateMask()
+    {
+        aitrain::LetterboxTransform transform;
+        transform.sourceSize = QSize(4, 4);
+        transform.targetSize = QSize(4, 4);
+        transform.scale = 1.0;
+
+        QVector<float> boxes;
+        boxes.fill(0.0f, 9);
+        boxes[8] = 8.0f;
+        const float maskFeatures[] = {8.0f};
+        QVector<float> prototypes;
+        prototypes.fill(1.0f, 16);
+
+        aitrain::DetectionInferenceOptions options;
+        options.confidenceThreshold = 0.50;
+        QString error;
+        const QVector<aitrain::SegmentationPrediction> predictions =
+            aitrain::detection_detail::ncnnDflSegmentationPredictionsFromOutputs(
+                boxes.constData(),
+                std::vector<int64_t>{1, 1, 9},
+                maskFeatures,
+                1,
+                1,
+                prototypes.constData(),
+                std::vector<int64_t>{1, 1, 4, 4},
+                QStringList{QStringLiteral("item")},
+                QVector<int>{4},
+                2,
+                QSize(4, 4),
+                transform,
+                options,
+                &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(predictions.size(), 1);
+        QVERIFY(!predictions.first().mask.isNull());
+        QVERIFY(predictions.first().maskArea > 0.0);
+    }
+
+    void detectionNcnnRuntimeReportsUnavailableWhenSdkMissing()
+    {
+        if (aitrain::isNcnnInferenceAvailable()) {
+            QSKIP("NCNN SDK is enabled in this build.");
+        }
+
+        QString error;
+        aitrain::DetectionInferenceOptions options;
+        const QVector<aitrain::DetectionPrediction> predictions = aitrain::predictDetectionNcnnRuntime(
+            QStringLiteral("model.param"),
+            QStringLiteral("image.png"),
+            options,
+            &error);
+        QVERIFY(predictions.isEmpty());
+        QVERIFY(error.contains(QStringLiteral("NCNN")));
+        QVERIFY(error.contains(QStringLiteral("not enabled")));
+    }
+
+    void deploymentValidationNcnnFailsWhenRuntimeMissing()
+    {
+        if (aitrain::isNcnnInferenceAvailable()) {
+            QSKIP("NCNN SDK is enabled in this build.");
+        }
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString paramPath = dir.filePath(QStringLiteral("model.param"));
+        const QString binPath = dir.filePath(QStringLiteral("model.bin"));
+        const QString samplePath = dir.filePath(QStringLiteral("sample.png"));
+        writeTextFile(paramPath, QStringLiteral("7767517\n1 1\nInput in0 0 1 in0 0=32 1=32 2=3\n"));
+        writeTextFile(binPath, QStringLiteral("fake bin\n"));
+        writeTinyPng(samplePath);
+
+        QJsonObject options;
+        options.insert(QStringLiteral("sampleImagePath"), samplePath);
+        const aitrain::WorkflowResult result = aitrain::validateDeploymentArtifactReport(
+            paramPath,
+            dir.filePath(QStringLiteral("deployment-validation")),
+            QStringLiteral("ncnn"),
+            options);
+        QVERIFY2(result.ok, qPrintable(result.error));
+        QCOMPARE(result.payload.value(QStringLiteral("status")).toString(), QStringLiteral("failed"));
+        QCOMPARE(result.payload.value(QStringLiteral("runtime")).toString(), QStringLiteral("ncnn"));
+        QVERIFY(result.payload.value(QStringLiteral("runtimeValidation")).toString() != QStringLiteral("artifact-only"));
+
+        bool sawRuntimeCheck = false;
+        for (const QJsonValue& value : result.payload.value(QStringLiteral("checks")).toArray()) {
+            const QJsonObject check = value.toObject();
+            if (check.value(QStringLiteral("name")).toString() == QStringLiteral("ncnn_runtime_available")) {
+                sawRuntimeCheck = true;
+                QCOMPARE(check.value(QStringLiteral("status")).toString(), QStringLiteral("failed"));
+            }
+        }
+        QVERIFY(sawRuntimeCheck);
+    }
+
+    void deploymentValidationNcnnBlocksWhenSampleMissing()
+    {
+        if (!aitrain::isNcnnInferenceAvailable()) {
+            QSKIP("NCNN SDK is not enabled in this build.");
+        }
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString paramPath = dir.filePath(QStringLiteral("model.param"));
+        const QString binPath = dir.filePath(QStringLiteral("model.bin"));
+        writeTextFile(paramPath, QStringLiteral("7767517\n1 1\nInput in0 0 1 in0 0=32 1=32 2=3\n"));
+        writeTextFile(binPath, QStringLiteral("fake bin\n"));
+
+        const aitrain::WorkflowResult result = aitrain::validateDeploymentArtifactReport(
+            paramPath,
+            dir.filePath(QStringLiteral("deployment-validation")),
+            QStringLiteral("ncnn"),
+            QJsonObject());
+        QVERIFY2(result.ok, qPrintable(result.error));
+        QCOMPARE(result.payload.value(QStringLiteral("status")).toString(), QStringLiteral("blocked"));
+
+        bool sawRuntimeCheck = false;
+        bool sawSampleCheck = false;
+        for (const QJsonValue& value : result.payload.value(QStringLiteral("checks")).toArray()) {
+            const QJsonObject check = value.toObject();
+            const QString name = check.value(QStringLiteral("name")).toString();
+            if (name == QStringLiteral("ncnn_runtime_available")) {
+                sawRuntimeCheck = true;
+                QCOMPARE(check.value(QStringLiteral("status")).toString(), QStringLiteral("passed"));
+            } else if (name == QStringLiteral("ncnn_sample_image_present")) {
+                sawSampleCheck = true;
+                QCOMPARE(check.value(QStringLiteral("status")).toString(), QStringLiteral("blocked"));
+            }
+        }
+        QVERIFY(sawRuntimeCheck);
+        QVERIFY(sawSampleCheck);
     }
 
     void detectionTensorRtBackendStatusIsExplicit()

@@ -45,7 +45,7 @@ Current GUI surfaces:
 - `样本复核`: load `problem_samples.json`, `error_samples.json`, `rework_sample_set.json`, or evaluation reports; filter by source, reason, class, split, OCR edit distance / CER, or search text; export an X-AnyLabeling review list.
 - `交付验收`: summarize local RC, clean Windows, TensorRT, package integrity, customer OCR, diagnostics, and deployment validation evidence.
 - Customer OCR acceptance wizard: collect Det dataset, Rec dataset, System images, official Det/Rec/System reports, optional Det ONNX evidence, and write customer OCR manifest/summary outputs.
-- Export post-validation: validate ONNX by runnable inference where possible; preserve TensorRT `hardware-blocked`; treat NCNN v1 as artifact-presence validation only.
+- Export post-validation: validate ONNX by runnable inference where possible; preserve TensorRT `hardware-blocked`; validate NCNN by runtime inference for YOLO detection/segmentation when NCNN SDK/runtime and a sample image are available, otherwise report failed/blocked explicitly.
 - Diagnostics bundle: collect Worker self-check, environment profile, GPU/runtime state, recent task logs/request snippets, artifact index, plugin state, and license summary.
 
 The real execution entries remain:
@@ -54,6 +54,7 @@ The real execution entries remain:
 .\tools\local-rc-closeout.ps1
 .\tools\release-freeze-handoff.ps1
 .\tools\customer-ocr-validation.ps1
+.\tools\phase-ncnn-runtime-smoke.ps1 -NcnnRoot <ncnn-sdk-root> -OnnxPath <best.onnx> -SampleImagePath <sample.png> -OutputDir <smoke-output> -TaskType detection
 ```
 
 Worker command equivalents are `runCustomerOcrAcceptance`, `collectDiagnostics`, and `validateDeploymentArtifact`. These are report/validation commands and must stay outside `MainWindow`.

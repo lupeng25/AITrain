@@ -78,6 +78,15 @@ struct TensorRtBackendStatus {
     QJsonObject toJson() const;
 };
 
+struct NcnnBackendStatus {
+    bool sdkAvailable = false;
+    bool inferenceAvailable = false;
+    QString status;
+    QString message;
+
+    QJsonObject toJson() const;
+};
+
 struct DetectionBaselineCheckpoint {
     QString type;
     int checkpointSchemaVersion = 1;
@@ -166,6 +175,9 @@ QString inferOnnxModelFamily(const QString& onnxPath);
 QJsonObject detectionTrainingBackendStatus();
 TensorRtBackendStatus tensorRtBackendStatus();
 bool isTensorRtInferenceAvailable();
+NcnnBackendStatus ncnnBackendStatus();
+bool isNcnnInferenceAvailable();
+QString inferNcnnModelFamily(const QString& paramPath);
 
 QVector<DetectionPrediction> predictDetectionOnnxRuntime(
     const QString& onnxPath,
@@ -194,6 +206,32 @@ QVector<DetectionPrediction> predictDetectionTensorRt(
     const QString& enginePath,
     const QString& imagePath,
     const DetectionInferenceOptions& options,
+    QString* error = nullptr);
+
+QVector<DetectionPrediction> predictDetectionNcnnRuntime(
+    const QString& paramPath,
+    const QString& imagePath,
+    const DetectionInferenceOptions& options,
+    QString* error = nullptr);
+
+QVector<DetectionPrediction> predictDetectionNcnnRuntime(
+    const QString& paramPath,
+    const QString& imagePath,
+    const DetectionInferenceOptions& options,
+    const QJsonObject& runtimeOptions,
+    QString* error = nullptr);
+
+QVector<SegmentationPrediction> predictSegmentationNcnnRuntime(
+    const QString& paramPath,
+    const QString& imagePath,
+    const DetectionInferenceOptions& options,
+    QString* error = nullptr);
+
+QVector<SegmentationPrediction> predictSegmentationNcnnRuntime(
+    const QString& paramPath,
+    const QString& imagePath,
+    const DetectionInferenceOptions& options,
+    const QJsonObject& runtimeOptions,
     QString* error = nullptr);
 
 QVector<DetectionPrediction> postProcessDetectionPredictions(

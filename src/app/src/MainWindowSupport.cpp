@@ -821,7 +821,7 @@ QString exportFormatNote(const QString& format)
         return uiText("主交付格式，可继续进入推理验证。");
     }
     if (format == QStringLiteral("ncnn")) {
-        return uiText("需要配置 onnx2ncnn，输出 param/bin。");
+        return uiText("需要配置 onnx2ncnn，输出 param/bin；部署验证需要 NCNN SDK/runtime 和样本图。");
     }
     if (format == QStringLiteral("tensorrt")) {
         return uiText("需要 RTX / SM 75+ 真机外部验收。");

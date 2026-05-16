@@ -47,13 +47,13 @@
 - Ultralytics / Torch / ONNX / ONNX Runtime：用于官方 YOLO 训练、导出和 smoke。
 - PaddlePaddle / PaddleOCR / PaddleOCR 源码 checkout：用于官方 OCR 工具链。
 - CUDA / cuDNN / TensorRT：用于 TensorRT engine build 和推理验收。
-- NCNN 工具：用于 NCNN artifact 导出；v1 不执行 NCNN runtime 推理。
+- NCNN 工具：用于 NCNN `.param/.bin` 导出；配置 NCNN SDK/runtime 后，部署验证可执行 YOLO 检测/分割 runtime 推理。
 - X-AnyLabeling：作为外部标注工具。
 
 常见配置：
 
 - `AITRAIN_XANYLABELING_EXE`：指定 X-AnyLabeling 可执行文件。
-- `AITRAIN_NCNN_ONNX2NCNN` 或 `AITRAIN_NCNN_ROOT`：指定 NCNN 转换工具。
+- `AITRAIN_NCNN_ONNX2NCNN` 或 `AITRAIN_NCNN_ROOT`：指定 NCNN 转换工具；`AITRAIN_NCNN_ROOT` 同时用于启用 C++ NCNN runtime。
 - Python、CUDA、TensorRT、PaddleOCR 等路径优先通过“环境”页自检和修复建议确认。
 
 ## 验收命令

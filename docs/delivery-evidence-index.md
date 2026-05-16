@@ -21,7 +21,7 @@
 | 数据集转换 GUI closeout | 已完成本地验证 | `.deps\ui-walkthrough-dataset-conversion\walkthrough-summary.json` | 转换产物不自动注册为数据集。 |
 | GUI walkthrough | 已有本地证据 | 当前状态文档记录的 1280x820 Qt walkthrough | 覆盖主要页面和无横向溢出检查。 |
 | 诊断包 | GUI/Worker 能力已落地 | 交付验收页“一键诊断包”；Worker `collectDiagnostics` | 诊断包是只读证据，不修改全局环境。 |
-| 部署验证 | GUI/Worker 能力已落地 | 交付验收页“部署验证”；Worker `validateDeploymentArtifact` | ONNX 需要可运行推理；TensorRT 可返回 `hardware-blocked`；NCNN v1 为 artifact-only。 |
+| 部署验证 | GUI/Worker 能力已落地 | 交付验收页“部署验证”；Worker `validateDeploymentArtifact` | ONNX 需要可运行推理；TensorRT 可返回 `hardware-blocked`；NCNN 在配置 SDK/runtime 和样本图时执行 YOLO 检测/分割 runtime inference。 |
 
 ## 证据分层
 
@@ -37,7 +37,7 @@
 - RTX 4090 D TensorRT 通过，不代表未来 package-root TensorRT rerun 自动通过。
 - Public Total-Text 或 generated smoke 通过，不代表客户域 OCR 生产精度通过。
 - GUI 交付验收页显示导入结果，不替代底层脚本、Worker、外部机器或客户数据证据。
-- NCNN v1 部署验证只证明 `.param` / `.bin` 等产物存在，不证明 NCNN runtime 推理通过。
+- NCNN 部署验证不再使用 artifact-only 通过条件；无 SDK/runtime 会失败，缺少样本图会阻塞，外部模型需要 sidecar 或显式 blob/decoder 配置。
 
 ## 维护规则
 

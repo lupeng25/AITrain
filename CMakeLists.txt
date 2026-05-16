@@ -17,9 +17,12 @@ option(AITRAIN_BUILD_TESTS "Build AITrain Studio tests" ON)
 option(AITRAIN_BUILD_LICENSE_GENERATOR "Build the AITrain graphical license generator" ON)
 option(AITRAIN_INSTALL_LICENSE_GENERATOR "Install the AITrain license generator with the package" OFF)
 option(AITRAIN_ENABLE_ONNXRUNTIME "Enable ONNX Runtime inference when an SDK is available" ON)
+option(AITRAIN_ENABLE_NCNN "Enable NCNN inference when an SDK is available" ON)
 option(AITRAIN_INSTALL_QT_RUNTIME "Run windeployqt during install on Windows when available" ON)
 set(AITRAIN_LICENSE_PUBLIC_KEY "" CACHE STRING "Base64 encoded ECDSA P-256 public key for offline license verification")
 set(AITRAIN_ONNXRUNTIME_ROOT "" CACHE PATH "Optional ONNX Runtime SDK root containing include and lib directories")
+set(AITRAIN_NCNN_ROOT "" CACHE PATH "Optional NCNN SDK root containing include, lib, bin, and tools directories")
+set(AITRAIN_NCNN_ONNX2NCNN "" CACHE FILEPATH "Optional onnx2ncnn converter executable")
 set(AITRAIN_CUDA_ROOT "" CACHE PATH "Optional CUDA Toolkit root used for packaging runtime DLLs")
 set(AITRAIN_CUDNN_ROOT "" CACHE PATH "Optional cuDNN root used for packaging runtime DLLs")
 set(AITRAIN_TENSORRT_ROOT "" CACHE PATH "Optional TensorRT SDK root used for packaging runtime DLLs")
@@ -216,6 +219,80 @@ if(AITRAIN_ENABLE_ONNXRUNTIME)
     endif()
 endif()
 
+if(AITRAIN_ENABLE_NCNN)
+    find_path(AITRAIN_NCNN_INCLUDE_DIR
+        NAMES net.h
+        HINTS
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/include/ncnn
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/include
+            ${AITRAIN_NCNN_ROOT}/include/ncnn
+            ${AITRAIN_NCNN_ROOT}/include
+            $ENV{AITRAIN_NCNN_ROOT}/include/ncnn
+            $ENV{AITRAIN_NCNN_ROOT}/include
+            $ENV{NCNN_ROOT}/include/ncnn
+            $ENV{NCNN_ROOT}/include
+    )
+    find_library(AITRAIN_NCNN_LIBRARY
+        NAMES ncnn libncnn
+        HINTS
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/lib
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/lib/x64
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/lib64
+            ${AITRAIN_NCNN_ROOT}/lib
+            ${AITRAIN_NCNN_ROOT}/lib/x64
+            ${AITRAIN_NCNN_ROOT}/lib64
+            $ENV{AITRAIN_NCNN_ROOT}/lib
+            $ENV{AITRAIN_NCNN_ROOT}/lib/x64
+            $ENV{AITRAIN_NCNN_ROOT}/lib64
+            $ENV{NCNN_ROOT}/lib
+            $ENV{NCNN_ROOT}/lib/x64
+            $ENV{NCNN_ROOT}/lib64
+    )
+    find_file(AITRAIN_NCNN_DLL
+        NAMES ncnn.dll
+        HINTS
+            ${AITRAIN_NCNN_ROOT}/bin
+            ${AITRAIN_NCNN_ROOT}/lib
+            ${AITRAIN_NCNN_ROOT}/lib/x64
+            $ENV{AITRAIN_NCNN_ROOT}/bin
+            $ENV{AITRAIN_NCNN_ROOT}/lib
+            $ENV{AITRAIN_NCNN_ROOT}/lib/x64
+            $ENV{NCNN_ROOT}/bin
+            $ENV{NCNN_ROOT}/lib
+            $ENV{NCNN_ROOT}/lib/x64
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/bin
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/lib
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/lib/x64
+        NO_DEFAULT_PATH
+    )
+    if(NOT AITRAIN_NCNN_ONNX2NCNN)
+        find_program(AITRAIN_NCNN_ONNX2NCNN_DISCOVERED
+            NAMES onnx2ncnn.exe onnx2ncnn
+            HINTS
+                ${AITRAIN_NCNN_ROOT}/bin
+                ${AITRAIN_NCNN_ROOT}/tools/onnx
+                $ENV{AITRAIN_NCNN_ROOT}/bin
+                $ENV{AITRAIN_NCNN_ROOT}/tools/onnx
+                $ENV{NCNN_ROOT}/bin
+                $ENV{NCNN_ROOT}/tools/onnx
+                ${CMAKE_SOURCE_DIR}/.deps/ncnn/bin
+                ${CMAKE_SOURCE_DIR}/.deps/ncnn/tools/onnx
+            NO_DEFAULT_PATH
+        )
+        if(AITRAIN_NCNN_ONNX2NCNN_DISCOVERED)
+            set(AITRAIN_NCNN_ONNX2NCNN "${AITRAIN_NCNN_ONNX2NCNN_DISCOVERED}" CACHE FILEPATH "Optional onnx2ncnn converter executable" FORCE)
+        endif()
+    endif()
+
+    if(AITRAIN_NCNN_INCLUDE_DIR AND AITRAIN_NCNN_LIBRARY)
+        set(AITRAIN_WITH_NCNN ON)
+        message(STATUS "NCNN SDK found: ${AITRAIN_NCNN_INCLUDE_DIR}")
+    else()
+        set(AITRAIN_WITH_NCNN OFF)
+        message(STATUS "NCNN SDK not found; NCNN runtime validation will report unavailable")
+    endif()
+endif()
+
 function(aitrain_copy_onnxruntime_runtime target_name)
     if(AITRAIN_WITH_ONNXRUNTIME)
         add_custom_command(TARGET ${target_name} POST_BUILD
@@ -232,6 +309,32 @@ function(aitrain_copy_onnxruntime_runtime target_name)
                 VERBATIM
             )
         endif()
+    endif()
+endfunction()
+
+function(aitrain_copy_ncnn_runtime target_name)
+    if(AITRAIN_WITH_NCNN AND AITRAIN_NCNN_DLL)
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                $<TARGET_FILE_DIR:${target_name}>/runtimes/ncnn
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${AITRAIN_NCNN_DLL}
+                $<TARGET_FILE_DIR:${target_name}>
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${AITRAIN_NCNN_DLL}
+                $<TARGET_FILE_DIR:${target_name}>/runtimes/ncnn
+            VERBATIM
+        )
+    endif()
+    if(AITRAIN_NCNN_ONNX2NCNN)
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                $<TARGET_FILE_DIR:${target_name}>/runtimes/ncnn
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${AITRAIN_NCNN_ONNX2NCNN}
+                $<TARGET_FILE_DIR:${target_name}>/runtimes/ncnn
+            VERBATIM
+        )
     endif()
 endfunction()
 
@@ -317,6 +420,7 @@ add_dependencies(aitrain_worker aitrain_python_trainers_copy)
 install(DIRECTORY DESTINATION plugins/models)
 install(DIRECTORY DESTINATION plugins/marketplace)
 install(DIRECTORY DESTINATION runtimes/onnxruntime)
+install(DIRECTORY DESTINATION runtimes/ncnn)
 install(DIRECTORY DESTINATION runtimes/tensorrt)
 install(DIRECTORY DESTINATION docs)
 install(DIRECTORY docs/harness DESTINATION docs)
@@ -355,6 +459,7 @@ install(FILES
     tools/toolchain-env.ps1
     tools/build-inno-installer.ps1
     tools/phase45-yolo-model-matrix-smoke.ps1
+    tools/phase-ncnn-runtime-smoke.ps1
     tools/local-rc-closeout.ps1
     tools/release-freeze-handoff.ps1
     tools/create-plugin-package.ps1
@@ -379,6 +484,14 @@ if(AITRAIN_WITH_ONNXRUNTIME)
         install(FILES ${AITRAIN_ONNXRUNTIME_PROVIDERS_DLL} DESTINATION .)
         install(FILES ${AITRAIN_ONNXRUNTIME_PROVIDERS_DLL} DESTINATION runtimes/onnxruntime)
     endif()
+endif()
+
+if(AITRAIN_WITH_NCNN AND AITRAIN_NCNN_DLL)
+    install(FILES ${AITRAIN_NCNN_DLL} DESTINATION .)
+    install(FILES ${AITRAIN_NCNN_DLL} DESTINATION runtimes/ncnn)
+endif()
+if(AITRAIN_NCNN_ONNX2NCNN)
+    install(FILES ${AITRAIN_NCNN_ONNX2NCNN} DESTINATION runtimes/ncnn)
 endif()
 
 if(AITRAIN_PACKAGED_ACCELERATOR_DLLS)

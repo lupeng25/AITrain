@@ -126,7 +126,13 @@ The GUI model export page routes conversion through `aitrain_worker`; conversion
 - `ncnn`: converts an ONNX source or generated tiny-detector ONNX into NCNN `.param` and `.bin` files through the external `onnx2ncnn` tool. Configure it with `AITRAIN_NCNN_ONNX2NCNN` or an NCNN install root in `AITRAIN_NCNN_ROOT`.
 - `tensorrt`: RTX 4090 D acceptance has passed for the current validation lane; unsupported GPUs such as GTX 1060 / SM 61 still report `hardware-blocked`.
 
-NCNN export creates deployment artifacts only. AITrain Studio does not yet run NCNN inference in the C++ inference page.
+NCNN export creates `.param/.bin` deployment artifacts and writes an AITrain sidecar. Deployment validation can run NCNN CPU inference for supported YOLO detection and segmentation models when the build is configured with an NCNN SDK/runtime and a sample image is supplied. External NCNN models are not guessed blindly: provide the sidecar or explicit `modelFamily`, `classNames`, `inputBlob`, `outputBlobs`, and `decoder` settings.
+
+NCNN runtime smoke:
+
+```powershell
+.\tools\phase-ncnn-runtime-smoke.ps1 -NcnnRoot <ncnn-sdk-root> -OnnxPath <best.onnx> -SampleImagePath <sample.png> -OutputDir <smoke-output> -TaskType detection
+```
 
 ## Acceptance Smoke
 

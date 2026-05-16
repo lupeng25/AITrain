@@ -337,7 +337,7 @@ QString deploymentSummaryMarkdown(const QJsonObject& report)
             .arg(check.value(QStringLiteral("name")).toString())
             .arg(check.value(QStringLiteral("message")).toString());
     }
-    markdown += QStringLiteral("\nNCNN v1 validation is artifact-presence only. ONNX and TensorRT require runtime inference to pass.\n");
+    markdown += QStringLiteral("\nNCNN validation requires a configured NCNN SDK/runtime and a sample image for runtime inference.\n");
     return markdown;
 }
 
@@ -741,13 +741,114 @@ WorkflowResult validateDeploymentArtifactReport(
             binExists,
             binExists
                 ? QStringLiteral("NCNN .bin sidecar exists.")
-                : QStringLiteral("NCNN .bin sidecar is missing; v1 only validates artifact presence."),
+                : QStringLiteral("NCNN .bin sidecar is missing."),
             pathEvidenceObject(binPath)));
-        report.insert(QStringLiteral("runtime"), QStringLiteral("ncnn-artifact-only"));
+        report.insert(QStringLiteral("runtime"), QStringLiteral("ncnn"));
         report.insert(QStringLiteral("ncnnBinPath"), binPath);
-        report.insert(QStringLiteral("runtimeValidation"), QStringLiteral("artifact-only"));
-        report.insert(QStringLiteral("checks"), checks);
-        setDeploymentStatusFromChecks(&report, checks);
+        report.insert(QStringLiteral("runtimeValidation"), QStringLiteral("runtime-inference"));
+        if (!binExists) {
+            report.insert(QStringLiteral("checks"), checks);
+            setDeploymentStatusFromChecks(&report, checks, QStringLiteral("failed"));
+        } else {
+            const NcnnBackendStatus backendStatus = ncnnBackendStatus();
+            checks.append(checkObjectWithDetails(
+                QStringLiteral("ncnn_runtime_available"),
+                backendStatus.inferenceAvailable ? QStringLiteral("passed") : QStringLiteral("failed"),
+                backendStatus.inferenceAvailable,
+                backendStatus.inferenceAvailable
+                    ? QStringLiteral("NCNN runtime is available for deployment validation.")
+                    : (backendStatus.message.isEmpty()
+                        ? QStringLiteral("NCNN runtime is not available in this build or runtime layout.")
+                        : backendStatus.message),
+                backendStatus.toJson()));
+            if (!backendStatus.inferenceAvailable) {
+                report.insert(QStringLiteral("checks"), checks);
+                setDeploymentStatusFromChecks(&report, checks, QStringLiteral("failed"));
+            } else {
+                const bool sampleImageExists = !sampleImagePath.isEmpty() && QFileInfo::exists(sampleImagePath);
+                checks.append(checkObjectWithDetails(
+                    QStringLiteral("ncnn_sample_image_present"),
+                    sampleImageExists ? QStringLiteral("passed") : QStringLiteral("blocked"),
+                    sampleImageExists,
+                    sampleImageExists
+                        ? QStringLiteral("NCNN sample image is available for runtime inference.")
+                        : QStringLiteral("NCNN deployment validation requires a sample image to prove runtime inference."),
+                    pathEvidenceObject(sampleImagePath)));
+                if (!sampleImageExists) {
+                    report.insert(QStringLiteral("checks"), checks);
+                    setDeploymentStatusFromChecks(&report, checks, QStringLiteral("blocked"));
+                } else {
+                    QString error;
+                    QImage overlay;
+                    QJsonArray predictionArray;
+                    QString taskType = QStringLiteral("detection");
+                    QString family = inferNcnnModelFamily(normalizedModelPath);
+                    if (family.isEmpty()) {
+                        family = options.value(QStringLiteral("modelFamily")).toString();
+                    }
+                    DetectionInferenceOptions inferenceOptions;
+                    const QJsonObject ncnnRuntimeOptions = options;
+                    QElapsedTimer timer;
+                    timer.start();
+                    if (family == QStringLiteral("yolo_segmentation")) {
+                        taskType = QStringLiteral("segmentation");
+                        const QVector<SegmentationPrediction> predictions =
+                            predictSegmentationNcnnRuntime(normalizedModelPath, sampleImagePath, inferenceOptions, ncnnRuntimeOptions, &error);
+                        for (const SegmentationPrediction& prediction : predictions) {
+                            predictionArray.append(segmentationPredictionToJson(prediction));
+                        }
+                        if (error.isEmpty()) {
+                            overlay = renderSegmentationPredictions(sampleImagePath, predictions, &error);
+                        }
+                    } else if (family == QStringLiteral("yolo_detection")) {
+                        const QVector<DetectionPrediction> predictions =
+                            predictDetectionNcnnRuntime(normalizedModelPath, sampleImagePath, inferenceOptions, ncnnRuntimeOptions, &error);
+                        for (const DetectionPrediction& prediction : predictions) {
+                            predictionArray.append(detectionPredictionToJson(prediction));
+                        }
+                        if (error.isEmpty()) {
+                            overlay = renderDetectionPredictions(sampleImagePath, predictions, &error);
+                        }
+                    } else {
+                        error = QStringLiteral("NCNN deployment validation supports YOLO detection/segmentation sidecars only. Inferred model family: %1")
+                            .arg(family.isEmpty() ? QStringLiteral("<empty>") : family);
+                    }
+                    const int elapsedMs = static_cast<int>(timer.elapsed());
+                    const QString predictionsPath = outputDir.filePath(QStringLiteral("deployment_predictions.json"));
+                    const QString overlayPath = outputDir.filePath(QStringLiteral("deployment_overlay.png"));
+                    if (error.isEmpty() && !writeJsonFile(predictionsPath, predictionsDocument(
+                            normalizedModelPath,
+                            sampleImagePath,
+                            taskType,
+                            QStringLiteral("ncnn"),
+                            elapsedMs,
+                            predictionArray), &error)) {
+                        // writeJsonFile sets error.
+                    }
+                    if (error.isEmpty() && (overlay.isNull() || !overlay.save(overlayPath))) {
+                        error = QStringLiteral("Cannot write deployment overlay: %1").arg(overlayPath);
+                    }
+                    checks.append(checkObjectWithDetails(
+                        QStringLiteral("ncnn_runtime_inference"),
+                        error.isEmpty() ? QStringLiteral("passed") : QStringLiteral("failed"),
+                        error.isEmpty(),
+                        error.isEmpty()
+                            ? QStringLiteral("NCNN artifact ran inference successfully.")
+                            : error,
+                        QJsonObject{{QStringLiteral("modelFamily"), family}, {QStringLiteral("taskType"), taskType}}));
+                    report.insert(QStringLiteral("modelFamily"), family);
+                    report.insert(QStringLiteral("taskType"), taskType);
+                    report.insert(QStringLiteral("elapsedMs"), elapsedMs);
+                    if (error.isEmpty()) {
+                        report.insert(QStringLiteral("predictionsPath"), predictionsPath);
+                        report.insert(QStringLiteral("overlayPath"), overlayPath);
+                        report.insert(QStringLiteral("predictionCount"), predictionArray.size());
+                    }
+                    report.insert(QStringLiteral("checks"), checks);
+                    setDeploymentStatusFromChecks(&report, checks);
+                }
+            }
+        }
     } else if (detectedFormat == QStringLiteral("onnx")) {
         if (sampleImagePath.isEmpty() || !QFileInfo::exists(sampleImagePath)) {
             checks.append(checkObjectWithDetails(

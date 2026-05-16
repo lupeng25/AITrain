@@ -28,6 +28,7 @@ add_library(aitrain_core STATIC
     src/DetectionTrainer.cpp
     src/DetectionTrainerExport.cpp
     src/DetectionTrainerInternal.h
+    src/DetectionTrainerNcnn.cpp
     src/DetectionTrainerOnnxRuntime.cpp
     src/DetectionTrainerOutput.cpp
     src/DetectionTrainerPostprocess.cpp
@@ -85,6 +86,21 @@ if(AITRAIN_WITH_ONNXRUNTIME)
     target_link_libraries(aitrain_core
         PRIVATE
             ${AITRAIN_ONNXRUNTIME_LIBRARY}
+    )
+endif()
+
+if(AITRAIN_WITH_NCNN)
+    target_compile_definitions(aitrain_core
+        PUBLIC
+            AITRAIN_WITH_NCNN
+    )
+    target_include_directories(aitrain_core
+        PRIVATE
+            ${AITRAIN_NCNN_INCLUDE_DIR}
+    )
+    target_link_libraries(aitrain_core
+        PRIVATE
+            ${AITRAIN_NCNN_LIBRARY}
     )
 endif()
 

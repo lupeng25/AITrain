@@ -12,8 +12,10 @@
 #include <QPainter>
 #include <QProcess>
 #include <QQueue>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QSet>
 #include <QtEndian>
 #include <QtMath>
 #include <algorithm>
@@ -80,6 +82,81 @@ QString ncnnBinPathForParam(const QString& paramPath)
 {
     const QFileInfo info(paramPath);
     return info.absoluteDir().filePath(QStringLiteral("%1.bin").arg(info.completeBaseName()));
+}
+
+struct NcnnExportParamMetadata {
+    QString inputBlob;
+    QStringList outputBlobs;
+    QSize inputSize;
+};
+
+NcnnExportParamMetadata parseNcnnParamForExportSidecar(const QString& paramPath)
+{
+    NcnnExportParamMetadata metadata;
+    QFile file(paramPath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return metadata;
+    }
+
+    QSet<QString> produced;
+    QSet<QString> consumed;
+    while (!file.atEnd()) {
+        const QString line = QString::fromUtf8(file.readLine()).trimmed();
+        if (line.isEmpty() || line.startsWith(QLatin1Char('#')) || line == QStringLiteral("7767517")) {
+            continue;
+        }
+        const QStringList tokens = line.split(QRegularExpression(QStringLiteral("\\s+")), QString::SkipEmptyParts);
+        if (tokens.size() < 4) {
+            continue;
+        }
+        bool okBottom = false;
+        bool okTop = false;
+        const int bottomCount = tokens.at(2).toInt(&okBottom);
+        const int topCount = tokens.at(3).toInt(&okTop);
+        if (!okBottom || !okTop || bottomCount < 0 || topCount < 0 || tokens.size() < 4 + bottomCount + topCount) {
+            continue;
+        }
+
+        for (int index = 0; index < bottomCount; ++index) {
+            consumed.insert(tokens.at(4 + index));
+        }
+        QStringList topBlobs;
+        for (int index = 0; index < topCount; ++index) {
+            const QString blob = tokens.at(4 + bottomCount + index);
+            topBlobs.append(blob);
+            produced.insert(blob);
+        }
+
+        if (tokens.at(0) == QStringLiteral("Input") && !topBlobs.isEmpty()) {
+            metadata.inputBlob = topBlobs.first();
+            int width = 0;
+            int height = 0;
+            for (int index = 4 + bottomCount + topCount; index < tokens.size(); ++index) {
+                const QString token = tokens.at(index);
+                const int equalIndex = token.indexOf(QLatin1Char('='));
+                if (equalIndex <= 0) {
+                    continue;
+                }
+                const int key = token.left(equalIndex).toInt();
+                const int value = token.mid(equalIndex + 1).toInt();
+                if (key == 0) width = value;
+                if (key == 1) height = value;
+            }
+            if (width > 0 && height > 0) {
+                metadata.inputSize = QSize(width, height);
+            }
+        }
+    }
+
+    QStringList outputBlobs;
+    for (const QString& blob : produced) {
+        if (!consumed.contains(blob)) {
+            outputBlobs.append(blob);
+        }
+    }
+    outputBlobs.sort();
+    metadata.outputBlobs = outputBlobs;
+    return metadata;
 }
 
 struct NcnnConverterResolution {
@@ -258,14 +335,31 @@ QJsonObject ncnnMetadata(
     const QString& converterPath,
     const QString& sourceOnnxPath)
 {
-    return QJsonObject{
+    const QString modelFamily = inferOnnxModelFamily(sourceOnnxPath);
+    const NcnnExportParamMetadata paramMetadata = parseNcnnParamForExportSidecar(paramPath);
+    QJsonObject metadata{
         {QStringLiteral("paramPath"), paramPath},
         {QStringLiteral("binPath"), binPath},
         {QStringLiteral("converter"), converterPath},
         {QStringLiteral("sourceOnnx"), sourceOnnxPath},
         {QStringLiteral("runtime"), QStringLiteral("ncnn")},
-        {QStringLiteral("note"), QStringLiteral("NCNN runtime inference is not implemented in AITrain Studio yet; this export produces param/bin deployment artifacts.")}
+        {QStringLiteral("runtimeValidation"), QStringLiteral("runtime-inference")},
+        {QStringLiteral("note"), QStringLiteral("NCNN runtime validation is available when this build is configured with an NCNN SDK/runtime.")}
     };
+    if (!paramMetadata.inputBlob.isEmpty()) {
+        metadata.insert(QStringLiteral("inputBlob"), paramMetadata.inputBlob);
+    }
+    if (!paramMetadata.outputBlobs.isEmpty()) {
+        metadata.insert(QStringLiteral("outputBlobs"), QJsonArray::fromStringList(paramMetadata.outputBlobs));
+    }
+    metadata.insert(QStringLiteral("inputSize"),
+        paramMetadata.inputSize.isValid() && !paramMetadata.inputSize.isEmpty() ? paramMetadata.inputSize.width() : 640);
+    if (modelFamily == QStringLiteral("yolo_detection") || modelFamily == QStringLiteral("yolo_segmentation")) {
+        metadata.insert(QStringLiteral("decoder"), QStringLiteral("auto"));
+        metadata.insert(QStringLiteral("strides"), QJsonArray{8, 16, 32});
+        metadata.insert(QStringLiteral("regMax"), 16);
+    }
+    return metadata;
 }
 
 QJsonObject ncnnOnnxExportConfig(
