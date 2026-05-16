@@ -1,6 +1,6 @@
 # AITrain Studio 运维交付 Runbook
 
-最后更新：2026-05-15
+最后更新：2026-05-16
 
 本文面向打包、安装、现场运维和交付验收人员，说明 AITrain Studio 的包体边界、依赖准备、证据采集和常见处置。开发架构见 `docs/developer-architecture.md`，用户操作见 `docs/user-guide.md`。
 
@@ -47,7 +47,7 @@
 - Ultralytics / Torch / ONNX / ONNX Runtime：用于官方 YOLO 训练、导出和 smoke。
 - PaddlePaddle / PaddleOCR / PaddleOCR 源码 checkout：用于官方 OCR 工具链。
 - CUDA / cuDNN / TensorRT：用于 TensorRT engine build 和推理验收。
-- NCNN 工具：用于 NCNN `.param/.bin` 导出；配置 NCNN SDK/runtime 后，部署验证可执行 YOLO 检测/分割 runtime 推理。
+- NCNN 工具和 SDK/runtime：用于 NCNN `.param/.bin` 导出和部署验证；配置 NCNN SDK/runtime 后，部署验证可执行 YOLO 检测/分割 runtime 推理。本机验证根目录为 `.deps\ncnn`，交付机器应使用等价 SDK/runtime 路径。
 - X-AnyLabeling：作为外部标注工具。
 
 常见配置：
@@ -101,6 +101,15 @@ RTX / SM 75+ TensorRT 验收：
 .\tools\release-freeze-handoff.ps1
 ```
 
+NCNN runtime smoke：
+
+```powershell
+.\tools\phase-ncnn-runtime-smoke.ps1 -NcnnRoot <ncnn-sdk-root> -OnnxPath <best.onnx> -SampleImagePath <sample.png> -OutputDir <smoke-output> -TaskType detection
+.\build-vscode\bin\aitrain_worker.exe --ncnn-param-smoke <model.param> --image <sample.png> --output <smoke-output> --task-type segmentation
+```
+
+2026-05-16 本机证据显示：Hyuto YOLOv8 detection ONNX -> NCNN passed；nihui 预转换 YOLOv8n-seg pnnx/DFL NCNN + AITrain sidecar passed。若 YOLOv8-seg ONNX 转换后 `.param` 仍包含 unsupported `Shape` layer，应记录为 failed report，并换用静态/兼容导出或已验证的预转换 NCNN artifact。
+
 ## 外部验收收集
 
 clean Windows package acceptance：
@@ -133,6 +142,7 @@ package-root TensorRT rerun：
 | OCR 后端启动失败 | PaddlePaddle、PaddleOCR、源码 checkout、Python 环境隔离。 |
 | TensorRT 为 `hardware-blocked` | GPU compute capability、驱动、CUDA、TensorRT runtime。旧 GPU 不应强行通过。 |
 | NCNN 导出失败 | `AITRAIN_NCNN_ONNX2NCNN` 或 `AITRAIN_NCNN_ROOT` 是否指向有效工具。 |
+| NCNN 部署验证失败并提示 unsupported `Shape` layer | 当前 `.param` 来自不兼容的 ONNX 转换；使用静态/兼容导出的 ONNX，或改用带 sidecar/config 的预转换 NCNN artifact 后运行 `--ncnn-param-smoke`。 |
 | 插件禁用失败 | Windows 是否锁定 Qt plugin DLL；关闭相关任务或重启后重新扫描。 |
 | 数据集转换后无法训练 | 是否手动选择转换输出目录并重新运行数据集校验。 |
 

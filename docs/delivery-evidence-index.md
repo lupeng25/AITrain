@@ -1,6 +1,6 @@
 # 交付证据索引
 
-最后更新：2026-05-15
+最后更新：2026-05-16
 
 本文把当前 RC、RTX 验证、打包、OCR、诊断和外部验收相关证据集中列出，避免把本地证据、RTX 4090 D 证据、clean Windows 证据和客户域证据混在一起。阶段状态仍以 `docs/harness/current-status.md` 为准。
 
@@ -22,6 +22,7 @@
 | GUI walkthrough | 已有本地证据 | 当前状态文档记录的 1280x820 Qt walkthrough | 覆盖主要页面和无横向溢出检查。 |
 | 诊断包 | GUI/Worker 能力已落地 | 交付验收页“一键诊断包”；Worker `collectDiagnostics` | 诊断包是只读证据，不修改全局环境。 |
 | 部署验证 | GUI/Worker 能力已落地 | 交付验收页“部署验证”；Worker `validateDeploymentArtifact` | ONNX 需要可运行推理；TensorRT 可返回 `hardware-blocked`；NCNN 在配置 SDK/runtime 和样本图时执行 YOLO 检测/分割 runtime inference。 |
+| NCNN runtime smoke | 本机检测/分割 runtime 已有证据 | `.deps\github-ncnn-smoke\hyuto-yolov8\runtime-output`；`.deps\github-ncnn-smoke\nihui-yolov8n-seg-ncnn\runtime-output\deployment-validation` | Hyuto YOLOv8 detection ONNX -> NCNN passed，nihui 预转换 YOLOv8n-seg pnnx/DFL NCNN passed；YOLOv8-seg ONNX 若残留 unsupported `Shape` layer，则记录为 failed report。 |
 
 ## 证据分层
 
@@ -38,6 +39,7 @@
 - Public Total-Text 或 generated smoke 通过，不代表客户域 OCR 生产精度通过。
 - GUI 交付验收页显示导入结果，不替代底层脚本、Worker、外部机器或客户数据证据。
 - NCNN 部署验证不再使用 artifact-only 通过条件；无 SDK/runtime 会失败，缺少样本图会阻塞，外部模型需要 sidecar 或显式 blob/decoder 配置。
+- NCNN 分割 runtime 当前通过证据来自 nihui 预转换 pnnx/DFL artifact；不要把失败的 YOLOv8-seg ONNX -> `onnx2ncnn` `Shape` layer case 说成分割 runtime 通过。
 
 ## 维护规则
 

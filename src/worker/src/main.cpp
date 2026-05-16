@@ -297,6 +297,62 @@ int runNcnnSmoke(
     return ok ? 0 : 11;
 }
 
+int runNcnnParamSmoke(
+    const QString& paramPath,
+    const QString& imagePath,
+    const QString& outputDirectory,
+    const QString& taskType)
+{
+    const QString modelPath = QFileInfo(paramPath).absoluteFilePath();
+    const QString samplePath = QFileInfo(imagePath).absoluteFilePath();
+    const QString outputPath = QFileInfo(outputDirectory.isEmpty()
+        ? QFileInfo(modelPath).absoluteDir().filePath(QStringLiteral("aitrain_ncnn_param_smoke"))
+        : outputDirectory).absoluteFilePath();
+    const QString validationPath = QDir(outputPath).filePath(QStringLiteral("deployment-validation"));
+
+    if (!QFileInfo::exists(modelPath)) {
+        writeJsonLine(QJsonObject{
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("stage"), QStringLiteral("input")},
+            {QStringLiteral("status"), QStringLiteral("blocked")},
+            {QStringLiteral("error"), QStringLiteral("NCNN param smoke requires an existing param model: %1").arg(modelPath)}
+        });
+        return 9;
+    }
+    if (samplePath.isEmpty() || !QFileInfo::exists(samplePath)) {
+        writeJsonLine(QJsonObject{
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("stage"), QStringLiteral("input")},
+            {QStringLiteral("status"), QStringLiteral("blocked")},
+            {QStringLiteral("error"), QStringLiteral("NCNN param smoke requires an existing sample image: %1").arg(samplePath)}
+        });
+        return 9;
+    }
+
+    QJsonObject options;
+    options.insert(QStringLiteral("sampleImagePath"), samplePath);
+    if (taskType == QStringLiteral("segmentation")) {
+        options.insert(QStringLiteral("modelFamily"), QStringLiteral("yolo_segmentation"));
+    } else {
+        options.insert(QStringLiteral("modelFamily"), QStringLiteral("yolo_detection"));
+    }
+
+    const aitrain::WorkflowResult validation =
+        aitrain::validateDeploymentArtifactReport(modelPath, validationPath, QStringLiteral("ncnn"), options);
+    const QString status = validation.payload.value(QStringLiteral("status")).toString(QStringLiteral("failed"));
+    const bool ok = validation.ok && status == QStringLiteral("passed");
+    writeJsonLine(QJsonObject{
+        {QStringLiteral("ok"), ok},
+        {QStringLiteral("stage"), ok ? QStringLiteral("completed") : QStringLiteral("validation")},
+        {QStringLiteral("status"), status},
+        {QStringLiteral("paramPath"), modelPath},
+        {QStringLiteral("validationReportPath"), validation.reportPath},
+        {QStringLiteral("validation"), validation.payload},
+        {QStringLiteral("ncnnBackend"), aitrain::ncnnBackendStatus().toJson()}
+    });
+    return ok ? 0 : 11;
+}
+
 int runOcrDetOnnxSmoke(
     const QString& onnxPath,
     const QString& imagePath,
@@ -449,6 +505,7 @@ int main(int argc, char* argv[])
     QCommandLineOption pluginSmokeOption(QStringLiteral("plugin-smoke"), QStringLiteral("Scan model plugin directory and print JSON."), QStringLiteral("directory"));
     QCommandLineOption tensorRtSmokeOption(QStringLiteral("tensorrt-smoke"), QStringLiteral("Run a tiny TensorRT export/inference smoke check and print JSON."), QStringLiteral("directory"));
     QCommandLineOption ncnnSmokeOption(QStringLiteral("ncnn-smoke"), QStringLiteral("Run NCNN export and deployment validation smoke and print JSON."), QStringLiteral("onnx"));
+    QCommandLineOption ncnnParamSmokeOption(QStringLiteral("ncnn-param-smoke"), QStringLiteral("Run NCNN deployment validation smoke for an existing .param/.bin artifact and print JSON."), QStringLiteral("param"));
     QCommandLineOption ocrDetOnnxSmokeOption(QStringLiteral("ocr-det-onnx-smoke"), QStringLiteral("Run OCR Det ONNX Runtime DB postprocess smoke and print JSON."), QStringLiteral("onnx"));
     QCommandLineOption imageOption(QStringLiteral("image"), QStringLiteral("Image path for smoke checks."), QStringLiteral("path"));
     QCommandLineOption outputOption(QStringLiteral("output"), QStringLiteral("Output directory for smoke artifacts."), QStringLiteral("directory"));
@@ -462,6 +519,7 @@ int main(int argc, char* argv[])
     parser.addOption(pluginSmokeOption);
     parser.addOption(tensorRtSmokeOption);
     parser.addOption(ncnnSmokeOption);
+    parser.addOption(ncnnParamSmokeOption);
     parser.addOption(ocrDetOnnxSmokeOption);
     parser.addOption(imageOption);
     parser.addOption(outputOption);
@@ -484,6 +542,13 @@ int main(int argc, char* argv[])
     if (parser.isSet(ncnnSmokeOption)) {
         return runNcnnSmoke(
             parser.value(ncnnSmokeOption),
+            parser.value(imageOption),
+            parser.value(outputOption),
+            parser.value(taskTypeOption).trimmed().toLower());
+    }
+    if (parser.isSet(ncnnParamSmokeOption)) {
+        return runNcnnParamSmoke(
+            parser.value(ncnnParamSmokeOption),
             parser.value(imageOption),
             parser.value(outputOption),
             parser.value(taskTypeOption).trimmed().toLower());

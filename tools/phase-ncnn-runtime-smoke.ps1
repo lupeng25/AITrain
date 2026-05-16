@@ -95,12 +95,22 @@ if (![string]::IsNullOrWhiteSpace($NcnnRoot)) {
     }
 }
 
-$workerOutput = & $WorkerExe `
-    --ncnn-smoke $OnnxPath `
-    --image $SampleImagePath `
-    --output $OutputDir `
-    --task-type $TaskType 2>&1
-$workerExitCode = $LASTEXITCODE
+$previousErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+try {
+    $workerOutput = & $WorkerExe `
+        --ncnn-smoke $OnnxPath `
+        --image $SampleImagePath `
+        --output $OutputDir `
+        --task-type $TaskType 2>&1
+    $workerExitCode = $LASTEXITCODE
+} catch {
+    $workerOutput = @($_.Exception.Message)
+    $lastExitCodeValue = Get-Variable -Name LASTEXITCODE -ValueOnly -ErrorAction SilentlyContinue
+    $workerExitCode = if ($null -ne $lastExitCodeValue) { [int]$lastExitCodeValue } else { 1 }
+} finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+}
 $workerText = ($workerOutput | Out-String).Trim()
 $jsonLine = ($workerOutput | Where-Object { $_ -match '^\s*\{' } | Select-Object -Last 1)
 $workerJson = $null

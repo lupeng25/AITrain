@@ -1,6 +1,6 @@
 ﻿# Current Project Status
 
-Last updated: 2026-05-15
+Last updated: 2026-05-16
 
 This file is the source of truth for phase status in new AI coding conversations. Read it before using `AITrainStudio_后续实施方案.md`, because that document is the long-range roadmap and may contain historical phase descriptions.
 
@@ -83,9 +83,21 @@ Recorded validation baseline on 2026-05-12:
 - Historical GTX 1060 / SM 61 results remain useful only as compatibility notes for older machines; they are not the current acceptance baseline.
 - Python note: downloaded Python runtimes and venvs under `.deps/` are ignored and should not be committed.
 
+## NCNN Runtime Smoke Note
+
+Recorded NCNN runtime validation refresh on 2026-05-16:
+
+- NCNN SDK/runtime is installed locally at `.deps\ncnn` with `include\ncnn\net.h`, `lib\ncnn.lib`, `bin\ncnn.dll`, and `bin\onnx2ncnn.exe`.
+- Hyuto YOLOv8 detection ONNX from `https://raw.githubusercontent.com/Hyuto/yolov8-onnxruntime-web/master/public/model/yolov8n.onnx` converted through `onnx2ncnn` and passed runtime deployment validation with the sample image from `https://raw.githubusercontent.com/Hyuto/yolov8-onnxruntime-web/master/sample.png`; evidence is under `.deps\github-ncnn-smoke\hyuto-yolov8\runtime-output` and reported `predictionCount=14`.
+- YOLOv8-seg ONNX conversion was tested with Hyuto and X-AnyLabeling segmentation ONNX files. Both converted NCNN params still contained unsupported `Shape` layers, so AITrain now returns a failed deployment validation report instead of crashing Worker. These runs are blocked conversion compatibility evidence, not passing segmentation runtime evidence.
+- nihui `ncnn-android-yolov8` preconverted `yolov8n_seg.ncnn.param/.bin` passed the NCNN DFL segmentation runtime path after providing an AITrain sidecar with `inputBlob=in0`, `outputBlobs=["out0","out1","out2"]`, `decoder=dfl`, `inputSize=640`, `strides=[8,16,32]`, and `regMax=16`. Evidence is under `.deps\github-ncnn-smoke\nihui-yolov8n-seg-ncnn\runtime-output\deployment-validation` and reported `predictionCount=100`.
+- New Worker CLI helper `aitrain_worker.exe --ncnn-param-smoke <model.param> --image <sample.png> --output <dir> --task-type detection|segmentation` validates existing external `.param/.bin` artifacts with sidecar/config, without forcing a fresh ONNX export.
+
 ## Current Next Task
 
 The Phase 49 delivery closeout workbench is implemented and locally validated. The current codebase can present sample review, delivery acceptance, diagnostics, customer OCR gate results, deployment validation, and updated evaluation metrics in the packaged GUI. Remaining release evidence tasks are external: returned clean Windows package acceptance, any package-root TensorRT rerun that is intentionally reopened, and customer-domain OCR evidence from real customer data. Do not use public Total-Text, generated smoke data, or `.deps` examples as a production OCR claim.
+
+NCNN runtime closeout on 2026-05-16 is locally refreshed: detection ONNX -> NCNN runtime validation passed with a public Hyuto YOLOv8 model/sample, and segmentation runtime validation passed with nihui's preconverted pnnx/DFL YOLOv8n-seg NCNN artifact plus an explicit AITrain sidecar. Generic YOLOv8-seg ONNX -> `onnx2ncnn` remains compatibility-sensitive because unsupported `Shape` layers may survive conversion; current behavior is to write a clear failed deployment report rather than crash Worker.
 
 Dataset conversion GUI closeout on 2026-05-15 is complete locally: the dataset page exposes the implemented conversion matrix through a Worker-backed form with preflight validation, progress/log/cancel handling, result rendering, and English fallback text. Validation passed focused conversion tests, the full harness, and a 1280x820 Qt walkthrough with no horizontal overflow. A follow-up UI preflight fix aligns COCO JSON source conversion with the core converter by allowing JSON file input, while keeping YOLO inputs directory-based and VOC inputs file-or-directory based. This did not change core conversion semantics, SQLite schema, plugin interfaces, or automatic dataset registration.
 
@@ -120,7 +132,7 @@ Current constraints to preserve:
 - Phase 45 validates newer YOLO detection/segmentation model names only; do not imply product support for classification, pose, OBB, anomaly, YOLO-World, or YOLOE.
 - Phase 46 adds C++ OCR Det DB-style postprocess for probability maps. Phase 47 has passing Det ONNX wiring smoke on RTX 4090 validation evidence; this validates conversion and C++ postprocess wiring, not PP-OCRv5 official accuracy parity.
 - Phase 48 plugin marketplace v1 is local/offline-first around existing Qt `IModelPlugin` packages. Do not claim publisher signature enforcement, remote marketplace services, payment/account features, or new training backends from this phase.
-- Phase 49 delivery closeout is a local report/GUI/workflow layer over existing capabilities. Do not claim new algorithms, clean Windows acceptance, customer OCR production readiness, NCNN runtime validation without SDK/sample smoke evidence, or TensorRT success on unsupported hardware from this phase.
+- Phase 49 delivery closeout is a local report/GUI/workflow layer over existing capabilities. Do not claim new algorithms, clean Windows acceptance, customer OCR production readiness, NCNN runtime validation without SDK/sample smoke evidence, or TensorRT success on unsupported hardware from this phase. Current NCNN local evidence covers Hyuto YOLOv8 detection ONNX -> NCNN and nihui preconverted YOLOv8n-seg pnnx/DFL NCNN; YOLOv8-seg ONNX conversion that leaves unsupported `Shape` layers is a failed/blocked conversion case, not a passed runtime case.
 - Keep training, evaluation, export, inference, benchmark, and report logic inside core/plugin/Worker boundaries, not in `MainWindow`.
 - Keep C++ tiny detector, segmentation baseline, and OCR baseline as scaffold/demo/test backends only.
 - Do not prioritize Phase 40 classification / pose / OBB / anomaly backends until external acceptance and release priorities are explicitly reset.
@@ -197,6 +209,6 @@ RTX 4090 TensorRT acceptance evidence was recorded with:
 - Phase 45 YOLO11/YOLO12 matrix validates productized detection/segmentation wiring and artifacts only; it is not an accuracy benchmark and does not expand scope to other YOLO tasks.
 - Phase 46 PaddleOCR Det C++ ONNX postprocess is v1 probability-map postprocess coverage; full official OCR system acceptance still uses PaddleOCR `predict_system.py`.
 - Phase 47 PaddleOCR Det ONNX smoke is passed on RTX 4090 validation evidence; it validates conversion and C++ postprocess wiring only, not a production OCR benchmark.
-- Phase 49 adds sample review, customer OCR acceptance, diagnostics, and deployment validation surfaces. Customer OCR production claims still require customer-domain evidence; NCNN runtime validation requires SDK/runtime plus sample evidence; TensorRT may correctly remain `hardware-blocked`.
+- Phase 49 adds sample review, customer OCR acceptance, diagnostics, and deployment validation surfaces. Customer OCR production claims still require customer-domain evidence; NCNN runtime validation requires SDK/runtime plus sample evidence and currently has local Hyuto detection plus nihui pnnx/DFL segmentation smoke evidence; TensorRT may correctly remain `hardware-blocked`.
 - Keep long-running execution in `aitrain_worker`.
 - Keep model-specific behavior behind core/plugin/Worker boundaries, not in `MainWindow`.

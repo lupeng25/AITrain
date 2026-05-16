@@ -461,6 +461,58 @@ private slots:
         QVERIFY(paramFile.readAll().contains("fake ncnn param"));
     }
 
+    void detectionNcnnExportPreservesYoloSegmentationSidecar()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        const QString converterPath = dir.filePath(
+#ifdef Q_OS_WIN
+            QStringLiteral("onnx2ncnn.cmd")
+#else
+            QStringLiteral("onnx2ncnn")
+#endif
+        );
+#ifdef Q_OS_WIN
+        writeTextFile(converterPath,
+            QStringLiteral("@echo off\r\n"
+                           "echo fake ncnn param from %~1> \"%~2\"\r\n"
+                           "echo fake ncnn bin from %~1> \"%~3\"\r\n"
+                           "exit /b 0\r\n"));
+#else
+        writeTextFile(converterPath,
+            QStringLiteral("#!/bin/sh\n"
+                           "printf 'fake ncnn param from %s\\n' \"$1\" > \"$2\"\n"
+                           "printf 'fake ncnn bin from %s\\n' \"$1\" > \"$3\"\n"));
+        QFile::setPermissions(converterPath, QFile::permissions(converterPath)
+            | QFileDevice::ExeOwner | QFileDevice::ExeUser | QFileDevice::ExeGroup | QFileDevice::ExeOther);
+#endif
+        ScopedEnvVar converterEnv("AITRAIN_NCNN_ONNX2NCNN", QFile::encodeName(converterPath));
+
+        const QString sourceOnnx = dir.filePath(QStringLiteral("yolov8n-seg.onnx"));
+        writeTextFile(sourceOnnx, QStringLiteral("fake segmentation onnx\n"));
+        writeTextFile(dir.filePath(QStringLiteral("yolov8n-seg.aitrain-export.json")),
+            QStringLiteral("{\n"
+                           "  \"format\": \"onnx\",\n"
+                           "  \"backend\": \"ultralytics_yolo_segment\",\n"
+                           "  \"modelFamily\": \"yolo_segmentation\",\n"
+                           "  \"classNames\": [\"person\", \"car\"],\n"
+                           "  \"postprocess\": {\"decoder\": \"yolo_v8_segmentation\"}\n"
+                           "}\n"));
+
+        const aitrain::DetectionExportResult exported = aitrain::exportDetectionCheckpoint(
+            sourceOnnx,
+            dir.filePath(QStringLiteral("exports/model.param")),
+            QStringLiteral("ncnn"));
+        QVERIFY2(exported.ok, qPrintable(exported.error));
+        QCOMPARE(exported.config.value(QStringLiteral("backend")).toString(), QStringLiteral("ultralytics_yolo_segment"));
+        QCOMPARE(exported.config.value(QStringLiteral("modelFamily")).toString(), QStringLiteral("yolo_segmentation"));
+        QCOMPARE(exported.config.value(QStringLiteral("postprocess")).toObject().value(QStringLiteral("decoder")).toString(),
+            QStringLiteral("yolo_v8_segmentation"));
+        QCOMPARE(exported.config.value(QStringLiteral("ncnn")).toObject().value(QStringLiteral("runtimeValidation")).toString(),
+            QStringLiteral("runtime-inference"));
+    }
+
     void detectionNcnnExportReportsMissingConverter()
     {
         QTemporaryDir dir;
@@ -738,6 +790,52 @@ private slots:
         }
         QVERIFY(sawRuntimeCheck);
         QVERIFY(sawSampleCheck);
+    }
+
+    void deploymentValidationNcnnReportsUnsupportedLayerWithoutCrash()
+    {
+        if (!aitrain::isNcnnInferenceAvailable()) {
+            QSKIP("NCNN SDK is not enabled in this build.");
+        }
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString paramPath = dir.filePath(QStringLiteral("model.param"));
+        const QString binPath = dir.filePath(QStringLiteral("model.bin"));
+        const QString samplePath = dir.filePath(QStringLiteral("sample.png"));
+        writeTextFile(paramPath,
+            QStringLiteral("7767517\n"
+                           "2 2\n"
+                           "Input images 0 1 images 0=32 1=32 2=3\n"
+                           "Shape Shape_0 1 1 images output\n"));
+        writeTextFile(binPath, QStringLiteral("fake bin\n"));
+        writeTinyPng(samplePath);
+
+        QJsonObject options;
+        options.insert(QStringLiteral("sampleImagePath"), samplePath);
+        options.insert(QStringLiteral("modelFamily"), QStringLiteral("yolo_segmentation"));
+        options.insert(QStringLiteral("decoder"), QStringLiteral("ultralytics_output"));
+        options.insert(QStringLiteral("classNames"), QJsonArray{QStringLiteral("item")});
+        const aitrain::WorkflowResult result = aitrain::validateDeploymentArtifactReport(
+            paramPath,
+            dir.filePath(QStringLiteral("deployment-validation")),
+            QStringLiteral("ncnn"),
+            options);
+        QVERIFY2(result.ok, qPrintable(result.error));
+        QCOMPARE(result.payload.value(QStringLiteral("status")).toString(), QStringLiteral("failed"));
+
+        bool sawInferenceCheck = false;
+        for (const QJsonValue& value : result.payload.value(QStringLiteral("checks")).toArray()) {
+            const QJsonObject check = value.toObject();
+            if (check.value(QStringLiteral("name")).toString() == QStringLiteral("ncnn_runtime_inference")) {
+                sawInferenceCheck = true;
+                QCOMPARE(check.value(QStringLiteral("status")).toString(), QStringLiteral("failed"));
+                const QString message = check.value(QStringLiteral("message")).toString();
+                QVERIFY(message.contains(QStringLiteral("unsupported layer type")));
+                QVERIFY(message.contains(QStringLiteral("Shape")));
+            }
+        }
+        QVERIFY(sawInferenceCheck);
     }
 
     void detectionTensorRtBackendStatusIsExplicit()

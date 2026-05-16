@@ -88,7 +88,7 @@ Before marking the local RC closeout done, check docs and UI text for:
 - PaddleOCR System is official `predict_system.py` tool orchestration, not C++ DB ONNX postprocess.
 - TensorRT on GTX 1060 / SM 61 is `hardware-blocked`; RTX / SM 75+ is still required for real TensorRT acceptance. The RTX 4090 D validation lane already passed, while clean Windows package-root reruns remain separate evidence.
 - Customer-domain OCR production readiness requires customer/target-domain data; Total-Text, generated smoke, and `.deps` examples are workflow smoke only.
-- NCNN deployment validation runs runtime inference for supported YOLO detection/segmentation artifacts when NCNN SDK/runtime and a sample image are available; otherwise it reports failed/blocked instead of artifact-only passed.
+- NCNN deployment validation runs runtime inference for supported YOLO detection/segmentation artifacts when NCNN SDK/runtime and a sample image are available; otherwise it reports failed/blocked instead of artifact-only passed. Current local evidence covers Hyuto YOLOv8 detection ONNX -> NCNN and nihui preconverted YOLOv8n-seg pnnx/DFL NCNN; YOLOv8-seg ONNX conversion with unsupported `Shape` layers is failed conversion evidence.
 - Phase 40 classification / pose / OBB / anomaly backends remain deferred until priorities are reset.
 
 ## Completion Record

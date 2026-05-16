@@ -405,8 +405,14 @@ QJsonObject ncnnOnnxExportConfig(
 QJsonObject yoloOnnxExportConfig(const QString& sourceOnnxPath, const QString& exportPath, const QString& format)
 {
     const QStringList classNames = ultralyticsClassNames(sourceOnnxPath);
+    const QJsonObject exportSidecar = loadOnnxExportConfig(sourceOnnxPath);
     QJsonObject report = loadUltralyticsTrainingReport(sourceOnnxPath);
-    const bool segmentation = report.value(QStringLiteral("backend")).toString() == QStringLiteral("ultralytics_yolo_segment");
+    const QString configuredFamily = exportSidecar.value(QStringLiteral("modelFamily")).toString();
+    const QString configuredBackend = exportSidecar.value(QStringLiteral("backend")).toString();
+    const QString reportBackend = report.value(QStringLiteral("backend")).toString();
+    const bool segmentation = configuredFamily == QStringLiteral("yolo_segmentation")
+        || configuredBackend == QStringLiteral("ultralytics_yolo_segment")
+        || reportBackend == QStringLiteral("ultralytics_yolo_segment");
     return QJsonObject{
         {QStringLiteral("format"), format},
         {QStringLiteral("backend"), segmentation ? QStringLiteral("ultralytics_yolo_segment") : QStringLiteral("ultralytics_yolo_detect")},

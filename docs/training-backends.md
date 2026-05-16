@@ -134,6 +134,18 @@ NCNN runtime smoke:
 .\tools\phase-ncnn-runtime-smoke.ps1 -NcnnRoot <ncnn-sdk-root> -OnnxPath <best.onnx> -SampleImagePath <sample.png> -OutputDir <smoke-output> -TaskType detection
 ```
 
+For existing external NCNN `.param/.bin` artifacts, provide an AITrain sidecar or explicit blob/decoder settings, then use the Worker helper without forcing an ONNX conversion:
+
+```powershell
+.\build-vscode\bin\aitrain_worker.exe --ncnn-param-smoke <model.param> --image <sample.png> --output <smoke-output> --task-type segmentation
+```
+
+Current local NCNN evidence on 2026-05-16:
+
+- Detection passed with Hyuto YOLOv8 ONNX converted through `onnx2ncnn`; output is under `.deps\github-ncnn-smoke\hyuto-yolov8\runtime-output` and reported `predictionCount=14`.
+- Segmentation passed with nihui `ncnn-android-yolov8` preconverted `yolov8n_seg.ncnn.param/.bin` plus an explicit AITrain sidecar using `decoder=dfl`; output is under `.deps\github-ncnn-smoke\nihui-yolov8n-seg-ncnn\runtime-output\deployment-validation` and reported `predictionCount=100`.
+- Hyuto and X-AnyLabeling YOLOv8-seg ONNX conversion attempts currently leave unsupported NCNN `Shape` layers. AITrain records these as failed deployment validation reports instead of crashing Worker; they are not passing segmentation ONNX-conversion evidence.
+
 ## Acceptance Smoke
 
 The unified Phase 17-21 acceptance entry point is:

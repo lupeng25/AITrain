@@ -55,9 +55,16 @@ The real execution entries remain:
 .\tools\release-freeze-handoff.ps1
 .\tools\customer-ocr-validation.ps1
 .\tools\phase-ncnn-runtime-smoke.ps1 -NcnnRoot <ncnn-sdk-root> -OnnxPath <best.onnx> -SampleImagePath <sample.png> -OutputDir <smoke-output> -TaskType detection
+.\build-vscode\bin\aitrain_worker.exe --ncnn-param-smoke <model.param> --image <sample.png> --output <smoke-output> --task-type segmentation
 ```
 
 Worker command equivalents are `runCustomerOcrAcceptance`, `collectDiagnostics`, and `validateDeploymentArtifact`. These are report/validation commands and must stay outside `MainWindow`.
+
+NCNN evidence refresh on 2026-05-16:
+
+- Hyuto YOLOv8 detection ONNX -> NCNN passed runtime deployment validation with `predictionCount=14` under `.deps\github-ncnn-smoke\hyuto-yolov8\runtime-output`.
+- nihui `ncnn-android-yolov8` preconverted YOLOv8n-seg pnnx/DFL NCNN passed segmentation runtime deployment validation with an explicit AITrain sidecar and `predictionCount=100` under `.deps\github-ncnn-smoke\nihui-yolov8n-seg-ncnn\runtime-output\deployment-validation`.
+- Hyuto and X-AnyLabeling YOLOv8-seg ONNX -> `onnx2ncnn` attempts currently fail preflight because the generated NCNN param still contains unsupported `Shape` layers. The expected behavior is a failed validation report, not a Worker crash.
 
 ## Phase 17: Local Baseline Freeze
 

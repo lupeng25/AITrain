@@ -15,6 +15,7 @@
 #include <vector>
 
 #ifdef AITRAIN_WITH_NCNN
+#include <layer.h>
 #include <net.h>
 #endif
 
@@ -689,6 +690,52 @@ NcnnTensor tensorFromMat(const ncnn::Mat& mat)
     return tensor;
 }
 
+bool validateNcnnLayerTypes(const QString& paramPath, QString* error)
+{
+#if NCNN_STRING
+    QFile file(paramPath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        if (error) {
+            *error = QStringLiteral("Cannot read NCNN param file: %1").arg(paramPath);
+        }
+        return false;
+    }
+
+    QSet<QByteArray> checkedLayerTypes;
+    int lineNumber = 0;
+    while (!file.atEnd()) {
+        ++lineNumber;
+        const QByteArray line = file.readLine().trimmed();
+        if (lineNumber <= 2 || line.isEmpty() || line.startsWith('#')) {
+            continue;
+        }
+        const QList<QByteArray> parts = line.simplified().split(' ');
+        if (parts.isEmpty()) {
+            continue;
+        }
+        const QByteArray layerType = parts.first();
+        if (checkedLayerTypes.contains(layerType)) {
+            continue;
+        }
+        checkedLayerTypes.insert(layerType);
+        ncnn::Layer* layer = ncnn::create_layer(layerType.constData());
+        if (!layer) {
+            if (error) {
+                *error = QStringLiteral("NCNN param contains unsupported layer type '%1' at line %2. The ONNX to NCNN conversion left an operator that this SDK runtime cannot load; export a static-shape NCNN artifact or provide a pnnx-compatible model.")
+                    .arg(QString::fromUtf8(layerType), QString::number(lineNumber));
+            }
+            return false;
+        }
+        delete layer;
+    }
+    return true;
+#else
+    Q_UNUSED(paramPath)
+    Q_UNUSED(error)
+    return true;
+#endif
+}
+
 bool loadNcnnNet(const QString& paramPath, const QString& binPath, ncnn::Net* net, QString* error)
 {
     if (!net) {
@@ -704,6 +751,9 @@ bool loadNcnnNet(const QString& paramPath, const QString& binPath, ncnn::Net* ne
 
     const QByteArray paramBytes = QFile::encodeName(paramPath);
     const QByteArray binBytes = QFile::encodeName(binPath);
+    if (!validateNcnnLayerTypes(paramPath, error)) {
+        return false;
+    }
     if (net->load_param(paramBytes.constData()) != 0) {
         if (error) {
             *error = QStringLiteral("NCNN failed to load param file: %1").arg(paramPath);
