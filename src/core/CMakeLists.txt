@@ -21,6 +21,11 @@ add_library(aitrain_core STATIC
     src/LicenseManager.cpp
     src/Deployment.cpp
     src/DatasetConversion.cpp
+    src/DatasetConversionCoco.cpp
+    src/DatasetConversionCommon.cpp
+    src/DatasetConversionInternal.h
+    src/DatasetConversionVoc.cpp
+    src/DatasetConversionYolo.cpp
     src/DatasetValidators.cpp
     src/YoloDatasetLayout.h
     src/YoloDatasetLayout.cpp
@@ -29,11 +34,15 @@ add_library(aitrain_core STATIC
     src/DetectionTrainerExport.cpp
     src/DetectionTrainerInternal.h
     src/DetectionTrainerNcnn.cpp
+    src/DetectionTrainerOcrPostprocess.cpp
     src/DetectionTrainerOnnxRuntime.cpp
     src/DetectionTrainerOutput.cpp
     src/DetectionTrainerPostprocess.cpp
+    src/DetectionTrainerRuntimeHelpers.cpp
     src/DetectionTrainerTensorRt.cpp
     src/DetectionTrainerTiny.cpp
+    src/DetectionTrainerTinyOnnxWriter.cpp
+    src/DetectionTrainerYoloPostprocess.cpp
     src/OcrRecDataset.cpp
     src/OcrRecTrainer.cpp
     src/SegmentationDataset.cpp

@@ -14,12 +14,16 @@ add_executable(AITrainStudio WIN32
     src/MainWindow.h
     src/MainWindow.cpp
     src/MainWindowActions.cpp
+    src/MainWindowDatasetActions.cpp
+    src/MainWindowDeliveryActions.cpp
     src/MainWindowDatasetPage.cpp
     src/MainWindowDeliveryPages.cpp
+    src/MainWindowModelActions.cpp
     src/MainWindowModelPages.cpp
     src/MainWindowPages.cpp
     src/MainWindowPreviews.cpp
     src/MainWindowProjectPages.cpp
+    src/MainWindowQueueActions.cpp
     src/MainWindowRecords.cpp
     src/MainWindowSummaries.cpp
     src/MainWindowSupport.h
