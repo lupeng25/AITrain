@@ -156,6 +156,18 @@ if ($privateKeyFiles.Count -gt 0) {
 }
 Write-Host "  [ok] no license private-key artifacts"
 
+$cmakeCachePath = Join-Path $buildPathFull "CMakeCache.txt"
+$publicKeyLine = if (Test-Path -LiteralPath $cmakeCachePath) {
+    Select-String -LiteralPath $cmakeCachePath -Pattern '^AITRAIN_LICENSE_PUBLIC_KEY:[^=]*=(.*)$' -ErrorAction SilentlyContinue | Select-Object -First 1
+} else {
+    $null
+}
+$configuredPublicKey = if ($publicKeyLine) { [string]$publicKeyLine.Matches[0].Groups[1].Value } else { "" }
+if ([string]::IsNullOrWhiteSpace($configuredPublicKey)) {
+    throw "Package build has no AITRAIN_LICENSE_PUBLIC_KEY configured. Set AITRAIN_LICENSE_PUBLIC_KEY or create .deps\local-license\aitrain-license-private-key.json before packaging."
+}
+Write-Host "  [ok] license public key configured"
+
 $onnxRuntimeRootDll = Join-Path $prefixFull "onnxruntime.dll"
 $onnxRuntimeFolderDll = Join-Path $prefixFull "runtimes\onnxruntime\onnxruntime.dll"
 if ((Test-Path $onnxRuntimeRootDll) -or (Test-Path $onnxRuntimeFolderDll)) {

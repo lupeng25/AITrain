@@ -20,6 +20,7 @@ option(AITRAIN_ENABLE_ONNXRUNTIME "Enable ONNX Runtime inference when an SDK is 
 option(AITRAIN_ENABLE_NCNN "Enable NCNN inference when an SDK is available" ON)
 option(AITRAIN_INSTALL_QT_RUNTIME "Run windeployqt during install on Windows when available" ON)
 set(AITRAIN_LICENSE_PUBLIC_KEY "" CACHE STRING "Base64 encoded ECDSA P-256 public key for offline license verification")
+set(AITRAIN_LICENSE_KEY_FILE "" CACHE FILEPATH "Optional local JSON key file containing publicKey for offline license verification")
 set(AITRAIN_ONNXRUNTIME_ROOT "" CACHE PATH "Optional ONNX Runtime SDK root containing include and lib directories")
 set(AITRAIN_NCNN_ROOT "" CACHE PATH "Optional NCNN SDK root containing include, lib, bin, and tools directories")
 set(AITRAIN_NCNN_ONNX2NCNN "" CACHE FILEPATH "Optional onnx2ncnn converter executable")
@@ -30,6 +31,48 @@ set(AITRAIN_WINDEPLOYQT_EXECUTABLE "" CACHE FILEPATH "Optional path to windeploy
 
 if(MSVC)
     add_compile_options(/utf-8)
+endif()
+
+if(NOT AITRAIN_LICENSE_PUBLIC_KEY AND DEFINED ENV{AITRAIN_LICENSE_PUBLIC_KEY})
+    set(AITRAIN_LICENSE_PUBLIC_KEY "$ENV{AITRAIN_LICENSE_PUBLIC_KEY}" CACHE STRING "Base64 encoded ECDSA P-256 public key for offline license verification" FORCE)
+endif()
+
+if(NOT AITRAIN_LICENSE_KEY_FILE AND DEFINED ENV{AITRAIN_LICENSE_KEY_FILE})
+    set(AITRAIN_LICENSE_KEY_FILE "$ENV{AITRAIN_LICENSE_KEY_FILE}" CACHE FILEPATH "Optional local JSON key file containing publicKey for offline license verification" FORCE)
+endif()
+
+if(NOT AITRAIN_LICENSE_PUBLIC_KEY AND NOT AITRAIN_LICENSE_KEY_FILE)
+    foreach(AITRAIN_LICENSE_KEY_CANDIDATE
+        "${CMAKE_SOURCE_DIR}/.deps/local-license/aitrain-license-private-key.json"
+        "${CMAKE_SOURCE_DIR}/tools/aitrain-license-private-key.json"
+    )
+        if(EXISTS "${AITRAIN_LICENSE_KEY_CANDIDATE}")
+            set(AITRAIN_LICENSE_KEY_FILE "${AITRAIN_LICENSE_KEY_CANDIDATE}" CACHE FILEPATH "Optional local JSON key file containing publicKey for offline license verification" FORCE)
+            break()
+        endif()
+    endforeach()
+endif()
+
+if(NOT AITRAIN_LICENSE_PUBLIC_KEY AND AITRAIN_LICENSE_KEY_FILE)
+    if(EXISTS "${AITRAIN_LICENSE_KEY_FILE}")
+        file(READ "${AITRAIN_LICENSE_KEY_FILE}" AITRAIN_LICENSE_KEY_JSON)
+        string(JSON AITRAIN_LICENSE_KEY_JSON_PUBLIC_KEY ERROR_VARIABLE AITRAIN_LICENSE_KEY_JSON_ERROR GET "${AITRAIN_LICENSE_KEY_JSON}" publicKey)
+        if(NOT AITRAIN_LICENSE_KEY_JSON_ERROR AND AITRAIN_LICENSE_KEY_JSON_PUBLIC_KEY AND NOT AITRAIN_LICENSE_KEY_JSON_PUBLIC_KEY MATCHES "^<")
+            set(AITRAIN_LICENSE_PUBLIC_KEY "${AITRAIN_LICENSE_KEY_JSON_PUBLIC_KEY}" CACHE STRING "Base64 encoded ECDSA P-256 public key for offline license verification" FORCE)
+        else()
+            message(WARNING "License key file does not contain a usable publicKey: ${AITRAIN_LICENSE_KEY_FILE}")
+        endif()
+    else()
+        message(WARNING "AITRAIN_LICENSE_KEY_FILE does not exist: ${AITRAIN_LICENSE_KEY_FILE}")
+    endif()
+endif()
+
+if(AITRAIN_LICENSE_PUBLIC_KEY)
+    string(STRIP "${AITRAIN_LICENSE_PUBLIC_KEY}" AITRAIN_LICENSE_PUBLIC_KEY)
+    set(AITRAIN_LICENSE_PUBLIC_KEY "${AITRAIN_LICENSE_PUBLIC_KEY}" CACHE STRING "Base64 encoded ECDSA P-256 public key for offline license verification" FORCE)
+    message(STATUS "License public key configured for AITrain Studio")
+else()
+    message(WARNING "AITRAIN_LICENSE_PUBLIC_KEY is empty; AITrain Studio will report that the license public key is not configured")
 endif()
 
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Gui Widgets Network Sql Test Xml)
