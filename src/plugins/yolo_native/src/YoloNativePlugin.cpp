@@ -30,7 +30,7 @@ private:
 
 class NativeTrainer final : public aitrain::ITrainer {
 public:
-    QString backendName() const override { return QStringLiteral("C++ tiny/scaffold YOLO backend"); }
+    QString backendName() const override { return QStringLiteral("Official Ultralytics YOLO backend"); }
 };
 
 class NativeValidator final : public aitrain::IValidator {
@@ -40,12 +40,12 @@ public:
 
 class NativeExporter final : public aitrain::IExporter {
 public:
-    QStringList supportedFormats() const override { return QStringList() << QStringLiteral("tiny_detector_json") << QStringLiteral("onnx") << QStringLiteral("ncnn"); }
+    QStringList supportedFormats() const override { return QStringList() << QStringLiteral("onnx") << QStringLiteral("ncnn") << QStringLiteral("tensorrt"); }
 };
 
 class NativeInferencer final : public aitrain::IInferencer {
 public:
-    QString backendName() const override { return QStringLiteral("Tiny detector checkpoint inferencer scaffold; ONNX Runtime/TensorRT pending"); }
+    QString backendName() const override { return QStringLiteral("Official ONNX/NCNN inference through Worker runtime"); }
 };
 
 } // namespace

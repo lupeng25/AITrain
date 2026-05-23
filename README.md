@@ -14,12 +14,12 @@ This repository implements the first usable platform layer from the requested pl
 - Dataset validation and split helpers for YOLO detection, YOLO segmentation, PaddleOCR Det, and PaddleOCR Rec label files.
 - Worker-backed dataset conversion GUI for the implemented COCO / Pascal VOC / YOLO detection / YOLO segmentation conversion matrix.
 - External annotation workflow entrypoint for X-AnyLabeling, with local tool detection and a post-labeling refresh/revalidation path.
-- Segmentation admission scaffold with dataset loading, polygon-to-mask conversion, overlay preview, Worker metrics, and scaffold checkpoints.
+- Segmentation dataset admission with dataset loading, polygon-to-mask conversion, overlay preview, and Worker metrics; model training is routed through the official Ultralytics segmentation backend.
 - Worker-managed Python trainer adapters for official Ultralytics YOLO detection, official Ultralytics YOLO segmentation, and official PaddleOCR Det/Rec train/export/inference orchestration.
 - Delivery-closeout workbench surfaces for sample review, delivery acceptance, customer OCR validation, diagnostics, deployment validation, and model-card/report generation.
 - QtTest coverage for JSONL protocol, project repository behavior, detection workflow, and segmentation admission behavior.
 
-The native C++ training implementation remains an executable workflow scaffold for diagnostic/test-only coverage. Production training is routed through Worker-managed official Python trainer subprocesses: Ultralytics for YOLO detection/segmentation and PaddleOCR official adapters for Det/Rec. Tiny detector, small PaddleOCR CTC, and `python_mock` fixtures are not delivery training capabilities and require `AITRAIN_ENABLE_DIAGNOSTIC_BACKENDS=1`. RTX 4090 D TensorRT acceptance has passing evidence for the current validation lane; clean Windows package acceptance and any package-root TensorRT rerun still require returned external evidence before they can be marked passed.
+Production training is routed through Worker-managed official Python trainer subprocesses: Ultralytics for YOLO detection/segmentation and PaddleOCR official adapters for Det/Rec. The legacy tiny detector, small PaddleOCR CTC trainer, C++ segmentation/OCR training scaffolds, and shipped `python_mock` trainer have been physically removed from the product path. RTX 4090 D TensorRT acceptance has passing evidence for the current validation lane; clean Windows package acceptance and any package-root TensorRT rerun still require returned external evidence before they can be marked passed.
 
 ## Build
 
@@ -147,7 +147,7 @@ TensorRT acceptance must be run on an RTX / SM 75+ machine. The RTX 4090 D valid
 
 Environment and backend notes are documented in `docs/training-backends.md`.
 
-Production training entry points expose only official backends: Ultralytics for YOLO detection/segmentation and PaddleOCR official adapters for Det/Rec. Diagnostic fixtures such as `tiny_linear_detector`, the small `paddleocr_rec` CTC trainer, and `python_mock` are not delivery training capabilities; they require `AITRAIN_ENABLE_DIAGNOSTIC_BACKENDS=1` and are kept for internal tests.
+Production training entry points expose only official backends: Ultralytics for YOLO detection/segmentation and PaddleOCR official adapters for Det/Rec. Legacy diagnostic training implementations have been removed instead of hidden behind user-facing switches. `paddleocr_rec` remains only a dataset format; production OCR Rec training uses `paddleocr_rec_official` or `paddleocr_ppocrv4_rec`.
 
 Minimal sample datasets can be generated with:
 

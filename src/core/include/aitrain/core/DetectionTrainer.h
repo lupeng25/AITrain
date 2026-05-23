@@ -87,31 +87,6 @@ struct NcnnBackendStatus {
     QJsonObject toJson() const;
 };
 
-struct DetectionBaselineCheckpoint {
-    QString type;
-    int checkpointSchemaVersion = 1;
-    QString trainingBackend;
-    QString modelFamily;
-    bool scaffold = false;
-    QJsonObject modelArchitecture;
-    QJsonObject phase8;
-    QString datasetPath;
-    QSize imageSize;
-    int gridSize = 1;
-    int featureCount = 0;
-    int steps = 0;
-    double finalLoss = 0.0;
-    double precision = 0.0;
-    double recall = 0.0;
-    double map50 = 0.0;
-    QStringList classNames;
-    QVector<double> classLogits;
-    QVector<double> objectnessWeights;
-    QVector<double> classWeights;
-    QVector<double> boxWeights;
-    DetectionBox priorBox;
-};
-
 struct DetectionPrediction {
     DetectionBox box;
     QString className;
@@ -148,27 +123,6 @@ struct OcrDetPrediction {
 };
 
 using DetectionTrainingCallback = std::function<bool(const DetectionTrainingMetrics&)>;
-
-DetectionTrainingResult trainDetectionBaseline(
-    const QString& datasetPath,
-    const DetectionTrainingOptions& options,
-    const DetectionTrainingCallback& callback = DetectionTrainingCallback());
-
-bool loadDetectionBaselineCheckpoint(
-    const QString& checkpointPath,
-    DetectionBaselineCheckpoint* checkpoint,
-    QString* error = nullptr);
-
-QVector<DetectionPrediction> predictDetectionBaseline(
-    const DetectionBaselineCheckpoint& checkpoint,
-    const QString& imagePath,
-    QString* error = nullptr);
-
-QVector<DetectionPrediction> predictDetectionBaseline(
-    const DetectionBaselineCheckpoint& checkpoint,
-    const QString& imagePath,
-    const DetectionInferenceOptions& options,
-    QString* error = nullptr);
 
 bool isOnnxRuntimeInferenceAvailable();
 QString inferOnnxModelFamily(const QString& onnxPath);
@@ -274,7 +228,7 @@ QImage renderOcrDetPredictions(
 DetectionExportResult exportDetectionCheckpoint(
     const QString& checkpointPath,
     const QString& outputPath,
-    const QString& format = QStringLiteral("tiny_detector_json"));
+    const QString& format = QStringLiteral("onnx"));
 DetectionExportResult exportDetectionCheckpoint(
     const QString& checkpointPath,
     const QString& outputPath,

@@ -5,9 +5,7 @@
 #include "aitrain/core/Deployment.h"
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/JsonProtocol.h"
-#include "aitrain/core/OcrRecTrainer.h"
 #include "aitrain/core/ProductWorkflow.h"
-#include "aitrain/core/SegmentationTrainer.h"
 
 #include <QDateTime>
 #include <QCoreApplication>
@@ -67,15 +65,9 @@ void WorkerSession::runLocalPipeline(const QJsonObject& payload)
                 {QStringLiteral("outputPath"), outputPath}});
         return;
     }
-    const bool pipelineTinyDiagnostic =
-        diagnosticTrainingBackendsEnabled()
-        && (pipelineBackend == QStringLiteral("tiny_linear_detector")
-            || pipelineBackend == QStringLiteral("tiny_detector")
-            || pipelineBackend == QStringLiteral("tiny_linear"));
     const bool needsOfficialPipelineTraining =
         resolvedTemplate == QStringLiteral("train-evaluate-export-register")
-        && !pipelineBackend.isEmpty()
-        && !pipelineTinyDiagnostic;
+        && !pipelineBackend.isEmpty();
 
     if (needsOfficialPipelineTraining) {
         if (!isSupportedTrainingBackendId(pipelineBackend, pipelineOptions)) {
@@ -85,7 +77,6 @@ void WorkerSession::runLocalPipeline(const QJsonObject& payload)
                 QJsonObject{
                     {QStringLiteral("backend"), pipelineBackend},
                     {QStringLiteral("taskType"), pipelineTaskType},
-                    {QStringLiteral("diagnosticBackendsEnabled"), diagnosticTrainingBackendsEnabled()},
                     {QStringLiteral("outputPath"), outputPath}});
             return;
         }

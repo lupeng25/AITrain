@@ -27,7 +27,7 @@
 重要边界：
 
 - 主流程优先使用官方 YOLO / PaddleOCR 后端，训练由 Worker 启动独立 Python 进程执行。
-- `tiny_linear_detector` 和 `python_mock` 只用于诊断、演示或协议测试，不是真实 YOLO/OCR 训练能力。
+- 生产训练只使用官方后端；旧的 tiny detector、Python mock、小型 OCR CTC 和 C++ 分割/OCR 训练 scaffold 已从产品训练路径中物理删除。
 - TensorRT 需要兼容的 NVIDIA RTX / SM 75+ 环境；不支持的 GPU 会显示为 `hardware-blocked`。
 - OCR 的公开数据或生成数据 smoke 只能证明流程和产物可用，不能替代客户业务数据上的精度验收。
 
@@ -217,7 +217,7 @@ images/sample.png<TAB>[{"transcription":"text","points":[[1,1],[30,1],[30,20],[1
 
 官方后端依赖第三方包和许可条款。商业分发前需要单独审查 Ultralytics、PaddleOCR、PaddlePaddle、Torch 等依赖的许可证。
 
-`tiny_linear_detector`、小型 `paddleocr_rec` CTC trainer 和 `python_mock` 只保留为内部诊断/test fixture。它们不会出现在用户训练后端列表中，也不会作为主验收 passed 依据；需要显式设置 `AITRAIN_ENABLE_DIAGNOSTIC_BACKENDS=1` 才能走诊断入口。
+旧的 `tiny_linear_detector`、小型 `paddleocr_rec` CTC trainer、`python_mock` 和 C++ 分割/OCR 训练 scaffold 已物理删除，不会出现在用户训练后端列表中，也不会作为主验收 passed 依据。`paddleocr_rec` 仅作为数据集格式保留。
 
 ## 7. 任务与产物
 
@@ -268,7 +268,6 @@ images/sample.png<TAB>[{"transcription":"text","points":[[1,1],[30,1],[30,20],[1
 | ONNX | checkpoint、已有 ONNX、AITrain export | `.onnx` 和 sidecar report | 主交付格式，可继续推理验证 |
 | NCNN | ONNX 或可生成 ONNX 的输入 | `.param` 和 `.bin` | 导出依赖本机 `onnx2ncnn`；部署验证在配置 NCNN SDK/runtime 且提供样本图时运行 YOLO 检测/分割推理 |
 | TensorRT | ONNX | `.engine` / `.plan` | 需要 RTX / SM 75+ 和 TensorRT runtime；旧 GPU 会 `hardware-blocked` |
-| tiny detector JSON | tiny detector checkpoint | 诊断 JSON | 仅用于 scaffold 诊断，不是主交付格式 |
 
 输出路径留空时，已打开项目会默认写入项目的 `models/exported`；未打开项目时通常写入输入模型同目录。
 
@@ -277,7 +276,6 @@ images/sample.png<TAB>[{"transcription":"text","points":[[1,1],[30,1],[30,20],[1
 - ONNX：必须能通过 ONNX Runtime 对样本图完成推理，才视为 `passed`。
 - TensorRT：兼容硬件和 runtime 上可推理为 `passed`；旧 GPU 或 runtime 不满足时显示 `hardware-blocked`。
 - NCNN：已支持 YOLO 检测/分割的 runtime 部署验证；无 NCNN SDK/runtime 时会明确失败，缺少样本图时会返回 `blocked`。
-- tiny detector JSON：仅用于诊断，不能作为正式部署验收结论。
 
 NCNN 当前本机验证边界：检测模型已经通过 Hyuto YOLOv8 ONNX -> NCNN runtime smoke；分割模型已经通过 nihui 预转换 YOLOv8n-seg pnnx/DFL NCNN artifact + AITrain sidecar 的 runtime smoke。部分 YOLOv8-seg ONNX 经 `onnx2ncnn` 后仍可能包含 NCNN 不支持的 `Shape` layer，此时会生成失败报告，不应标记为通过。
 

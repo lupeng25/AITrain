@@ -4,9 +4,7 @@
 #include "aitrain/core/Deployment.h"
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/JsonProtocol.h"
-#include "aitrain/core/OcrRecTrainer.h"
 #include "aitrain/core/ProductWorkflow.h"
-#include "aitrain/core/SegmentationTrainer.h"
 
 #include <QDateTime>
 #include <QCoreApplication>
@@ -135,9 +133,6 @@ QString pythonTrainerScriptFileForBackend(const QString& backend)
     if (normalized == QStringLiteral("ultralytics_yolo_segment")) {
         return QStringLiteral("python_trainers/segmentation/ultralytics_trainer.py");
     }
-    if (normalized == QStringLiteral("paddleocr_rec") && diagnosticTrainingBackendsEnabled()) {
-        return QStringLiteral("python_trainers/ocr_rec/paddleocr_trainer.py");
-    }
     if (normalized == QStringLiteral("paddleocr_rec_official") || normalized == QStringLiteral("paddleocr_ppocrv4_rec")) {
         return QStringLiteral("python_trainers/ocr_rec/paddleocr_official_adapter.py");
     }
@@ -146,10 +141,6 @@ QString pythonTrainerScriptFileForBackend(const QString& backend)
     }
     if (normalized == QStringLiteral("paddleocr_system_official")) {
         return QStringLiteral("python_trainers/ocr_system/paddleocr_system_official_adapter.py");
-    }
-    if (diagnosticTrainingBackendsEnabled()
-        && (normalized == QStringLiteral("python_mock") || normalized == QStringLiteral("python_trainer_mock"))) {
-        return QStringLiteral("python_trainers/mock_trainer.py");
     }
     return {};
 }
@@ -223,11 +214,16 @@ bool isOfficialWorkerBackendId(const QString& normalized)
         || normalized == QStringLiteral("ultralytics_yolo_segment")
         || normalized == QStringLiteral("paddleocr_det_official")
         || normalized == QStringLiteral("paddleocr_rec_official")
-        || normalized == QStringLiteral("paddleocr_ppocrv4_rec")
-        || normalized == QStringLiteral("paddleocr_system_official");
+        || normalized == QStringLiteral("paddleocr_ppocrv4_rec");
 }
 
-bool isDiagnosticBackendId(const QString& normalized, const QJsonObject& parameters)
+bool hasTrainerScriptOverride(const QJsonObject& parameters)
+{
+    return parameters.contains(QStringLiteral("pythonTrainerScript"))
+        || !QString::fromLocal8Bit(qgetenv("AITRAIN_PYTHON_TRAINER_SCRIPT")).trimmed().isEmpty();
+}
+
+bool isRemovedTrainingBackendId(const QString& normalized)
 {
     return normalized == QStringLiteral("python_mock")
         || normalized == QStringLiteral("python_trainer_mock")
@@ -235,26 +231,26 @@ bool isDiagnosticBackendId(const QString& normalized, const QJsonObject& paramet
         || normalized == QStringLiteral("tiny_detector")
         || normalized == QStringLiteral("tiny_linear")
         || normalized == QStringLiteral("paddleocr_rec")
-        || parameters.contains(QStringLiteral("pythonTrainerScript"));
+        || normalized == QStringLiteral("paddleocr_rec_ctc");
 }
 } // namespace
 
 bool isSupportedTrainingBackendId(const QString& backend, const QJsonObject& parameters)
 {
     const QString normalized = backend.trimmed().toLower();
-    const bool hasTrainerScriptOverride =
-        parameters.contains(QStringLiteral("pythonTrainerScript"))
-        || !QString::fromLocal8Bit(qgetenv("AITRAIN_PYTHON_TRAINER_SCRIPT")).trimmed().isEmpty();
-    if (hasTrainerScriptOverride && !diagnosticTrainingBackendsEnabled()) {
+    if (normalized.isEmpty()) {
         return false;
     }
-    if (normalized.isEmpty()) {
+    if (isRemovedTrainingBackendId(normalized)) {
+        return false;
+    }
+    if (hasTrainerScriptOverride(parameters) && !diagnosticTrainingBackendsEnabled()) {
         return false;
     }
     if (isOfficialWorkerBackendId(normalized)) {
         return true;
     }
-    return diagnosticTrainingBackendsEnabled() && isDiagnosticBackendId(normalized, parameters);
+    return false;
 }
 
 bool isPythonTrainingBackendId(const QString& backend, const QJsonObject& parameters)
@@ -266,11 +262,7 @@ bool isPythonTrainingBackendId(const QString& backend, const QJsonObject& parame
     if (isOfficialWorkerBackendId(normalized)) {
         return true;
     }
-    return diagnosticTrainingBackendsEnabled()
-        && (parameters.contains(QStringLiteral("pythonTrainerScript"))
-            || normalized == QStringLiteral("python_mock")
-            || normalized == QStringLiteral("python_trainer_mock")
-            || normalized == QStringLiteral("paddleocr_rec"));
+    return false;
 }
 
 QJsonObject runPythonCommandCheck(

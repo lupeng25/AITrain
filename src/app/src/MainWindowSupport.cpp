@@ -148,12 +148,6 @@ QString backendLabel(const QString& backend)
     if (backend == QStringLiteral("paddleocr_system_official")) {
         return uiText("PaddleOCR System 推理（官方）");
     }
-    if (backend == QStringLiteral("tiny_linear_detector")) {
-        return uiText("Tiny detector（高级/占位）");
-    }
-    if (backend == QStringLiteral("python_mock")) {
-        return uiText("Python mock（高级/协议测试）");
-    }
     return backend;
 }
 
@@ -274,9 +268,6 @@ QString exportComboLabel(const QString& format)
     }
     if (format == QStringLiteral("ncnn")) {
         return uiText("NCNN param/bin（onnx2ncnn）");
-    }
-    if (format == QStringLiteral("tiny_detector_json")) {
-        return uiText("AITrain JSON（诊断）");
     }
     if (format == QStringLiteral("tensorrt")) {
         return uiText("TensorRT Engine（RTX / SM 75+ 外部验收）");
@@ -605,21 +596,10 @@ QString trainingBackendDescription(const QString& backend)
     if (backend == QStringLiteral("paddleocr_system_official")) {
         return uiText("当前模型能力：官方 PaddleOCR 端到端推理编排。使用已导出的 Det/Rec inference model 调用 predict_system.py；本阶段不做 C++ DB 后处理。");
     }
-    if (backend == QStringLiteral("tiny_linear_detector")) {
-        return uiText("高级/诊断：C++ tiny detector 占位训练，仅验证平台链路、checkpoint、ONNX 和回归测试，不代表真实 YOLO 能力。");
-    }
-    if (backend == QStringLiteral("python_mock")) {
-        return uiText("高级/诊断：Python 协议测试后端，只验证 Worker JSON Lines 协议，不产生真实模型。");
-    }
     return uiText("当前模型能力：通过 Worker 执行，产物、指标和失败原因会写入任务历史。");
 }
 
 namespace {
-bool diagnosticTrainingBackendsEnabled()
-{
-    return QString::fromLocal8Bit(qgetenv("AITRAIN_ENABLE_DIAGNOSTIC_BACKENDS")).trimmed() == QStringLiteral("1");
-}
-
 bool paddleOcrOfficialRepoConfigured()
 {
     const QString repo = QString::fromLocal8Bit(qgetenv("AITRAIN_PADDLEOCR_REPO")).trimmed();
@@ -647,12 +627,6 @@ QString expectedTrainingTaskForDatasetFormat(const QString& format)
 bool isTrainingBackendCompatible(const QString& format, const QString& backend)
 {
     const QString normalized = backend.trimmed().toLower();
-    if (diagnosticTrainingBackendsEnabled()
-        && (normalized == QStringLiteral("python_mock")
-            || normalized == QStringLiteral("tiny_linear_detector")
-            || normalized == QStringLiteral("paddleocr_rec"))) {
-        return true;
-    }
     if (format == QStringLiteral("yolo_detection") || format == QStringLiteral("yolo_txt")) {
         return normalized == QStringLiteral("ultralytics_yolo")
             || normalized == QStringLiteral("ultralytics_yolo_detect");
@@ -725,11 +699,6 @@ QJsonObject trainingPreflightReport(
     }
     if (datasetSnapshotManifest.trimmed().isEmpty()) {
         warnings.append(QStringLiteral("snapshot_missing_auto_create"));
-    }
-    if (backend == QStringLiteral("tiny_linear_detector")
-        || backend == QStringLiteral("python_mock")
-        || backend == QStringLiteral("paddleocr_rec")) {
-        warnings.append(QStringLiteral("diagnostic_or_scaffold_backend"));
     }
     if (modelPreset.trimmed().isEmpty()) {
         warnings.append(QStringLiteral("model_preset_missing"));
@@ -834,7 +803,7 @@ QString exportFormatNote(const QString& format)
     if (format == QStringLiteral("tensorrt")) {
         return uiText("需要 RTX / SM 75+ 真机外部验收。");
     }
-    return uiText("仅用于 tiny detector 诊断，不代表真实 YOLO/OCR。");
+    return uiText("仅支持官方模型导出格式。");
 }
 
 QString compactListSummary(const QStringList& values, int maxItems)

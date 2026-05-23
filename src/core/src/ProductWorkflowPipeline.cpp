@@ -28,11 +28,6 @@ namespace aitrain {
 using namespace workflow_detail;
 
 namespace {
-bool diagnosticTrainingBackendsEnabledForPipeline()
-{
-    return QString::fromLocal8Bit(qgetenv("AITRAIN_ENABLE_DIAGNOSTIC_BACKENDS")).trimmed() == QStringLiteral("1");
-}
-
 QString officialTrainingBackendForPipelineTask(const QString& taskType)
 {
     const QString normalized = taskType.trimmed().toLower();
@@ -49,13 +44,6 @@ QString officialTrainingBackendForPipelineTask(const QString& taskType)
         return QStringLiteral("paddleocr_rec_official");
     }
     return {};
-}
-
-bool isTinyDiagnosticBackend(const QString& backend)
-{
-    return backend == QStringLiteral("tiny_linear_detector")
-        || backend == QStringLiteral("tiny_detector")
-        || backend == QStringLiteral("tiny_linear");
 }
 } // namespace
 
@@ -211,35 +199,6 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
         const QString resolvedTrainingBackend = backend.isEmpty()
             ? officialTrainingBackendForPipelineTask(taskType)
             : backend;
-        if (taskType == QStringLiteral("detection")
-            && isTinyDiagnosticBackend(resolvedTrainingBackend)) {
-            if (!diagnosticTrainingBackendsEnabledForPipeline()) {
-                failureReason = QStringLiteral("Training backend '%1' is diagnostic-only. Set AITRAIN_ENABLE_DIAGNOSTIC_BACKENDS=1 for test fixtures; production training must use official backends.")
-                                    .arg(resolvedTrainingBackend);
-                return false;
-            }
-            DetectionTrainingOptions trainOptions;
-            trainOptions.epochs = epochs;
-            trainOptions.batchSize = qMax(1, options.value(QStringLiteral("batchSize")).toInt(1));
-            const int imageSize = qMax(32, options.value(QStringLiteral("imageSize")).toInt(320));
-            trainOptions.imageSize = QSize(imageSize, imageSize);
-            trainOptions.outputPath = QDir(outputPath).filePath(QStringLiteral("training"));
-            trainOptions.trainingBackend = resolvedTrainingBackend;
-            const DetectionTrainingResult trainingResult = trainDetectionBaseline(datasetPath, trainOptions);
-            if (!trainingResult.ok) {
-                failureReason = trainingResult.error;
-                return false;
-            }
-            modelPath = trainingResult.checkpointPath;
-            artifactArray.append(pathArtifact(QStringLiteral("checkpoint"), modelPath, QStringLiteral("Trained checkpoint")));
-            appendStep(QStringLiteral("startTrain"),
-                QStringLiteral("completed"),
-                QStringLiteral("Detection training completed with local tiny backend."),
-                modelPath,
-                QJsonArray{pathArtifact(QStringLiteral("checkpoint"), modelPath)});
-            return true;
-        }
-
         if (options.value(QStringLiteral("pipelineOfficialTrainingCompleted")).toBool(false)) {
             const QJsonObject completedPayload = options.value(QStringLiteral("pipelineOfficialTrainingPayload")).toObject();
             const QJsonArray trainingArtifacts = options.value(QStringLiteral("pipelineOfficialTrainingArtifacts")).toArray();
@@ -370,7 +329,8 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
         const QString outputModelPath = QDir(exportDir).filePath(
             exportFormat == QStringLiteral("onnx")
                 ? QStringLiteral("model.onnx")
-                : (exportFormat.startsWith(QStringLiteral("tensorrt")) ? QStringLiteral("model.engine") : QStringLiteral("model.export.json")));
+                : (exportFormat == QStringLiteral("ncnn") ? QStringLiteral("model.param")
+                : (exportFormat.startsWith(QStringLiteral("tensorrt")) ? QStringLiteral("model.engine") : QStringLiteral("model.export.json"))));
         const DetectionExportResult exportResult = exportDetectionCheckpoint(
             modelPath,
             outputModelPath,
@@ -448,17 +408,8 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
                 overlay = renderDetectionPredictions(imagePath, detPredictions, &error);
             }
         } else {
-            DetectionBaselineCheckpoint checkpoint;
-            if (!loadDetectionBaselineCheckpoint(candidateModel, &checkpoint, &error)) {
-                failureReason = error;
-                return false;
-            }
-            DetectionInferenceOptions inferenceOptions;
-            const QVector<DetectionPrediction> detPredictions = predictDetectionBaseline(checkpoint, imagePath, inferenceOptions, &error);
-            for (const DetectionPrediction& prediction : detPredictions) {
-                predictions.append(detectionPredictionToJson(prediction));
-            }
-            overlay = renderDetectionPredictions(imagePath, detPredictions, &error);
+            failureReason = QStringLiteral("Inference smoke supports official ONNX model artifacts only. Unsupported model format: %1").arg(candidateModel);
+            return false;
         }
         if (!error.isEmpty()) {
             failureReason = error;

@@ -114,7 +114,7 @@ WorkflowResult benchmarkModelReport(
 
     QVector<double> timings;
     QString inferenceError;
-    QString modelFamily = suffix == QStringLiteral("onnx") ? inferOnnxModelFamily(modelPath) : QStringLiteral("tiny_detector");
+    QString modelFamily = suffix == QStringLiteral("onnx") ? inferOnnxModelFamily(modelPath) : QStringLiteral("unsupported_model_format");
     int outputCount = 0;
     bool timedInference = false;
     QString failureCategory;
@@ -187,38 +187,9 @@ WorkflowResult benchmarkModelReport(
             failureCategory = QStringLiteral("sample-required");
             return false;
         }
-        DetectionBaselineCheckpoint checkpoint;
-        if (!loadDetectionBaselineCheckpoint(modelPath, &checkpoint, &inferenceError)) {
-            failureCategory = QStringLiteral("unsupported-model");
-            return false;
-        }
-        DetectionInferenceOptions inferenceOptions;
-        inferenceOptions.confidenceThreshold = options.value(QStringLiteral("confidenceThreshold")).toDouble(0.25);
-        inferenceOptions.iouThreshold = options.value(QStringLiteral("iouThreshold")).toDouble(0.45);
-        inferenceOptions.maxDetections = options.value(QStringLiteral("maxDetections")).toInt(100);
-        const int totalRuns = warmupIterations + iterations;
-        for (int index = 0; index < totalRuns; ++index) {
-            if (isCancellationRequested(shouldCancel)) {
-                inferenceError = QStringLiteral("Canceled by user");
-                failureCategory = QStringLiteral("canceled");
-                return false;
-            }
-            QElapsedTimer timer;
-            timer.start();
-            const QVector<DetectionPrediction> predictions = predictDetectionBaseline(checkpoint, sampleImagePath, inferenceOptions, &inferenceError);
-            if (!inferenceError.isEmpty()) {
-                failureCategory = QStringLiteral("unsupported-model");
-                return false;
-            }
-            outputCount = predictions.size();
-            const double elapsedMs = static_cast<double>(timer.nsecsElapsed()) / 1000000.0;
-            if (index >= warmupIterations) {
-                timings.append(elapsedMs);
-            }
-        }
-        modelFamily = QStringLiteral("tiny_detector");
-        timedInference = true;
-        return true;
+        inferenceError = QStringLiteral("Unsupported model benchmark format: %1. Production benchmark requires official ONNX, NCNN, or TensorRT artifacts.").arg(modelPath);
+        failureCategory = QStringLiteral("unsupported-model");
+        return false;
     };
 
     runTimedInference();
@@ -321,7 +292,7 @@ WorkflowResult benchmarkModelReport(
     }
     report.insert(QStringLiteral("note"), timedInference
         ? QStringLiteral("Timed local inference benchmark completed with warmup and repeated measurements.")
-        : QStringLiteral("No timed inference was run. Provide an ONNX/tiny detector model and sampleImagePath or datasetPath for full local benchmark."));
+        : QStringLiteral("No timed inference was run. Provide an official ONNX model and sampleImagePath or datasetPath for full local benchmark."));
 
     QString error;
     const QString reportPath = QDir(outputPath).filePath(QStringLiteral("benchmark_report.json"));

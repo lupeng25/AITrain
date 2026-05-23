@@ -98,9 +98,10 @@ From the recorded RTX 4090 D validation lane, or another supported RTX / SM 75+ 
 
 Acceptance requires:
 
-- Worker self-check resolves the CUDA/TensorRT runtime components needed for TensorRT inference.
+- Worker self-check resolves the CUDA/TensorRT runtime components needed for TensorRT ONNX-to-engine export.
 - GPU compute capability is accepted by the TensorRT release.
-- `aitrain_worker.exe --tensorrt-smoke <work-dir>` builds an engine and runs inference.
+- `acceptance-smoke.ps1 -TensorRT` generates a small official Ultralytics YOLO ONNX artifact, or uses `-TensorRtOnnxPath <official.onnx>` when supplied.
+- `aitrain_worker.exe --tensorrt-smoke <official.onnx>` builds a TensorRT engine. The current official-only smoke does not use the removed tiny-detector TensorRT inference fixture.
 - The command finishes with `passed`, not `hardware-blocked`.
 
 Use `docs\acceptance-templates\tensorrt-acceptance-result.md` to record the result.

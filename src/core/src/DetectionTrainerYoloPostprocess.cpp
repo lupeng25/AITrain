@@ -113,8 +113,8 @@ QJsonObject loadUltralyticsTrainingReport(const QString& onnxPath)
 
 QStringList ultralyticsClassNames(const QString& onnxPath)
 {
-    const QJsonObject tinyConfig = loadOnnxExportConfig(onnxPath);
-    QStringList classNames = stringListFromArray(tinyConfig.value(QStringLiteral("classNames")).toArray());
+    const QJsonObject exportConfig = loadOnnxExportConfig(onnxPath);
+    QStringList classNames = stringListFromArray(exportConfig.value(QStringLiteral("classNames")).toArray());
     if (!classNames.isEmpty()) {
         return classNames;
     }

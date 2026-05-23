@@ -304,9 +304,6 @@ QString detectDeploymentFormat(const QString& modelPath, const QString& requeste
     if (suffix == QStringLiteral("engine") || suffix == QStringLiteral("plan")) {
         return QStringLiteral("tensorrt");
     }
-    if (suffix == QStringLiteral("json") || suffix == QStringLiteral("aitrain")) {
-        return QStringLiteral("tiny_detector_json");
-    }
     return QStringLiteral("unknown");
 }
 
@@ -1160,65 +1157,6 @@ WorkflowResult validateDeploymentArtifactReport(
             report.insert(QStringLiteral("checks"), checks);
             setDeploymentStatusFromChecks(&report, checks);
         }
-    } else if (detectedFormat == QStringLiteral("tiny_detector_json") || detectedFormat == QStringLiteral("aitrain")) {
-        QString error;
-        DetectionBaselineCheckpoint checkpoint;
-        const bool loaded = loadDetectionBaselineCheckpoint(normalizedModelPath, &checkpoint, &error);
-        checks.append(checkObjectWithDetails(
-            QStringLiteral("tiny_detector_checkpoint_loads"),
-            loaded ? QStringLiteral("passed") : QStringLiteral("failed"),
-            loaded,
-            loaded ? QStringLiteral("Tiny detector checkpoint/export can be loaded.") : error));
-        if (loaded && !sampleImagePath.isEmpty() && QFileInfo::exists(sampleImagePath)) {
-            DetectionInferenceOptions inferenceOptions;
-            QElapsedTimer timer;
-            timer.start();
-            const QVector<DetectionPrediction> predictions =
-                predictDetectionBaseline(checkpoint, sampleImagePath, inferenceOptions, &error);
-            const int elapsedMs = static_cast<int>(timer.elapsed());
-            QJsonArray predictionArray;
-            for (const DetectionPrediction& prediction : predictions) {
-                predictionArray.append(detectionPredictionToJson(prediction));
-            }
-            QImage overlay;
-            if (error.isEmpty()) {
-                overlay = renderDetectionPredictions(sampleImagePath, predictions, &error);
-            }
-            const QString predictionsPath = outputDir.filePath(QStringLiteral("deployment_predictions.json"));
-            const QString overlayPath = outputDir.filePath(QStringLiteral("deployment_overlay.png"));
-            if (error.isEmpty() && !writeJsonFile(predictionsPath, predictionsDocument(
-                    normalizedModelPath,
-                    sampleImagePath,
-                    QStringLiteral("detection"),
-                    QStringLiteral("tiny_detector"),
-                    elapsedMs,
-                    predictionArray), &error)) {
-                // writeJsonFile sets error.
-            }
-            if (error.isEmpty() && (overlay.isNull() || !overlay.save(overlayPath))) {
-                error = QStringLiteral("Cannot write deployment overlay: %1").arg(overlayPath);
-            }
-            checks.append(checkObjectWithDetails(
-                QStringLiteral("tiny_detector_runtime_inference"),
-                error.isEmpty() ? QStringLiteral("passed") : QStringLiteral("failed"),
-                error.isEmpty(),
-                error.isEmpty() ? QStringLiteral("Tiny detector ran inference successfully.") : error));
-            if (error.isEmpty()) {
-                report.insert(QStringLiteral("predictionsPath"), predictionsPath);
-                report.insert(QStringLiteral("overlayPath"), overlayPath);
-                report.insert(QStringLiteral("predictionCount"), predictionArray.size());
-                report.insert(QStringLiteral("elapsedMs"), elapsedMs);
-            }
-        } else if (loaded) {
-            checks.append(checkObjectWithDetails(
-                QStringLiteral("tiny_detector_sample_image"),
-                QStringLiteral("not_applicable"),
-                true,
-                QStringLiteral("No sample image was provided; tiny detector validation is load-only.")));
-        }
-        report.insert(QStringLiteral("runtime"), QStringLiteral("tiny_detector"));
-        report.insert(QStringLiteral("checks"), checks);
-        setDeploymentStatusFromChecks(&report, checks);
     } else {
         checks.append(checkObjectWithDetails(
             QStringLiteral("deployment_format_supported"),

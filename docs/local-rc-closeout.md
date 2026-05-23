@@ -75,7 +75,7 @@ For manual exploration beyond the automated gate, walk through these screens:
 | Dataset | Import generated YOLO detection, YOLO segmentation, PaddleOCR Rec, and PaddleOCR Det datasets; auto-detection and validation should be visible. |
 | Sample Review | Load problem/error/rework sample JSON when available; filters and X-AnyLabeling review-list export should be visible. |
 | Annotation | X-AnyLabeling remains an external tool; launch/detect actions should not block the GUI or imply embedded annotation. |
-| Training | Official YOLO / OCR backends should be preferred where applicable; tiny/scaffold or mock backends must remain diagnostic/scaffold choices. |
+| Training | Official YOLO / OCR backends should be the only product training choices; removed diagnostic/scaffold backends must not reappear in the GUI. |
 | Task Artifacts | Select recent tasks and preview JSON/TXT/CSV/image/ONNX/model artifacts; unsupported artifacts should show a clear message. |
 | Evaluation / Benchmark | Run evaluation and benchmark from model artifacts when available; reports should be recorded as Worker artifacts. |
 | Model Registry | Registered model versions should show lineage, evaluation, benchmark, artifact, and limitation summaries. |
@@ -86,9 +86,9 @@ For manual exploration beyond the automated gate, walk through these screens:
 
 Before marking the local RC closeout done, check docs and UI text for:
 
-- Tiny detector, segmentation baseline, OCR baseline, and `python_mock` are scaffold/demo/diagnostic only.
+- Tiny detector, segmentation baseline, OCR baseline, small OCR CTC, and shipped `python_mock` trainer implementations are removed from the product training path.
 - Ultralytics YOLO official backends require installed official Python packages and license review before redistribution.
-- PaddleOCR Rec CTC backend is a small PaddlePaddle CTC trainer, not a full PP-OCRv4 official pipeline.
+- `paddleocr_rec` is a dataset format only; PaddleOCR Rec training must use the official PaddleOCR adapter.
 - PaddleOCR System is official `predict_system.py` tool orchestration, not C++ DB ONNX postprocess.
 - TensorRT on GTX 1060 / SM 61 is `hardware-blocked`; RTX / SM 75+ is still required for real TensorRT acceptance. The RTX 4090 D validation lane already passed, while clean Windows package-root reruns remain separate evidence.
 - Customer-domain OCR production readiness requires customer/target-domain data; Total-Text, generated smoke, and `.deps` examples are workflow smoke only.

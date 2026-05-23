@@ -47,9 +47,9 @@ TensorRtBackendStatus tensorRtBackendStatus()
 #ifdef AITRAIN_WITH_TENSORRT_SDK
     status.sdkAvailable = true;
     status.exportAvailable = true;
-    status.inferenceAvailable = true;
-    status.status = QStringLiteral("backend_available");
-    status.message = QStringLiteral("TensorRT backend is compiled. Runtime DLLs are resolved lazily from runtimes/tensorrt, configured roots, or PATH.");
+    status.inferenceAvailable = false;
+    status.status = QStringLiteral("export_available");
+    status.message = QStringLiteral("TensorRT export is compiled for official ONNX artifacts; runtime inference requires the official YOLO TensorRT decoder and is not enabled in this build.");
 #else
     status.sdkAvailable = false;
     status.exportAvailable = false;

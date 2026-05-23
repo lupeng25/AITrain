@@ -5,9 +5,7 @@
 #include "aitrain/core/Deployment.h"
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/JsonProtocol.h"
-#include "aitrain/core/OcrRecTrainer.h"
 #include "aitrain/core/ProductWorkflow.h"
-#include "aitrain/core/SegmentationTrainer.h"
 
 #include <QDateTime>
 #include <QCoreApplication>

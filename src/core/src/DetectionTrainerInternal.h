@@ -24,80 +24,11 @@ namespace aitrain {
 namespace detection_detail {
 
 double clamp01(double value);
-double safeLog(double value);
-double binaryCrossEntropy(double prediction, double target);
-QVector<double> softmax(const QVector<double>& logits);
-DetectionBox averageTargetBox(const QVector<DetectionBox>& boxes);
 double sigmoid(double value);
-double squared(double value);
-double logit(double value);
-QJsonArray doubleArray(const QVector<double>& values);
 QJsonObject boxObject(const DetectionBox& box);
-bool boxFromObject(const QJsonObject& object, DetectionBox* box, QString* error);
-QString tinyDetectorBackendId();
-QString phase8DetectionModelFamily();
-QString yoloStyleLibTorchBackendId();
-QString normalizedDetectionTrainingBackend(const QString& backend);
-QJsonObject tinyDetectorModelArchitecture(int gridSize, int featureCount);
-QJsonObject phase8ScaffoldMetadata(const QString& requestedBackend);
-
-struct TinyDetectorModel {
-    int classCount = 0;
-    int gridSize = 4;
-    int featureCount = 7;
-    QVector<double> objectnessWeights;
-    QVector<double> classWeights;
-    QVector<double> boxWeights;
-};
-
-struct TinyDetectorCellForward {
-    int cellIndex = 0;
-    QVector<double> features;
-    double objectnessLogit = 0.0;
-    double objectness = 0.0;
-    QVector<double> classLogits;
-    QVector<double> classProbabilities;
-    DetectionBox box;
-};
-
-struct TinyDetectorForward {
-    QVector<TinyDetectorCellForward> cells;
-    TinyDetectorCellForward best;
-};
-
-TinyDetectorModel createTinyDetectorModel(int classCount, int gridSize);
-int weightIndex(int row, int column, int featureCount);
-QVector<double> imageFeatures(const QImage& input, int cellIndex, int gridSize);
-QVector<DetectionBox> horizontalFlipBoxes(QVector<DetectionBox> boxes);
-QImage brightnessJitterImage(const QImage& input, double factor);
-TinyDetectorForward forwardTinyDetector(const TinyDetectorModel& model, const QImage& image);
-int bestClass(const QVector<double>& logits);
-int targetCellIndex(const DetectionBox& box, int gridSize);
 double boxIou(const DetectionBox& left, const DetectionBox& right);
 
-struct EvaluationResult {
-    double precision = 0.0;
-    double recall = 0.0;
-    double map50 = 0.0;
-};
-
-EvaluationResult evaluateBaseline(
-    const QString& datasetPath,
-    const TinyDetectorModel& model,
-    const QSize& imageSize,
-    const DetectionDataset& trainDataset);
-
 QStringList stringListFromArray(const QJsonArray& array);
-QVector<double> doubleVectorFromArray(const QJsonArray& array);
-QVector<float> tinyDetectorFeatureInput(const QImage& image, int cellCount, int featureCount, int gridSize, QString* error);
-QVector<DetectionPrediction> tinyDetectorPredictionsFromOutputs(
-    const float* objectness,
-    const float* classProbabilities,
-    const float* boxes,
-    int cellCount,
-    int classCount,
-    const QStringList& classNames,
-    const DetectionInferenceOptions& options);
 QStringList classNamesFromYoloDataYaml(const QString& yamlPath);
 QJsonObject loadUltralyticsTrainingReport(const QString& onnxPath);
 QStringList ultralyticsClassNames(const QString& onnxPath);
@@ -180,14 +111,7 @@ QVector<float> ocrDetProbabilityMapFromOutput(
     QSize* mapSize,
     QString* error);
 
-QByteArray tinyDetectorOnnxModel(const DetectionBaselineCheckpoint& checkpoint, QString* error);
-bool writeTinyDetectorOnnxModel(const DetectionBaselineCheckpoint& checkpoint, const QString& outputPath, QString* error);
 QString onnxExportReportPath(const QString& onnxPath);
-QJsonObject tinyDetectorExportConfig(
-    const DetectionBaselineCheckpoint& checkpoint,
-    const QString& sourceCheckpoint,
-    const QString& exportPath,
-    const QString& format);
 bool writeJsonObject(const QString& path, const QJsonObject& object, QString* error);
 QJsonObject loadOnnxExportConfig(const QString& onnxPath);
 

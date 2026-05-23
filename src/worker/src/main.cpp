@@ -11,7 +11,6 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -104,123 +103,41 @@ int runPluginSmoke(const QString& pluginDirectory)
     return missingIds.isEmpty() ? 0 : 4;
 }
 
-bool writeTextFile(const QString& path, const QString& content, QString* error)
+int runTensorRtSmoke(const QString& onnxPath)
 {
-    if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
-        if (error) {
-            *error = QStringLiteral("Cannot create directory for %1").arg(path);
-        }
-        return false;
-    }
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-        if (error) {
-            *error = QStringLiteral("Cannot write %1").arg(path);
-        }
-        return false;
-    }
-    file.write(content.toUtf8());
-    return true;
-}
-
-bool writeSmokeImage(const QString& path, QString* error)
-{
-    if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
-        if (error) {
-            *error = QStringLiteral("Cannot create image directory for %1").arg(path);
-        }
-        return false;
-    }
-    QImage image(48, 48, QImage::Format_RGB32);
-    image.fill(QColor(24, 36, 48));
-    for (int y = 12; y < 36; ++y) {
-        for (int x = 14; x < 34; ++x) {
-            image.setPixelColor(x, y, QColor(220, 80, 64));
-        }
-    }
-    if (!image.save(path)) {
-        if (error) {
-            *error = QStringLiteral("Cannot write smoke image %1").arg(path);
-        }
-        return false;
-    }
-    return true;
-}
-
-int runTensorRtSmoke(const QString& workDirectory)
-{
-    QString error;
-    const QString root = QFileInfo(workDirectory).absoluteFilePath();
-    const QString datasetPath = QDir(root).filePath(QStringLiteral("dataset"));
-    const QString outputPath = QDir(root).filePath(QStringLiteral("run"));
-    const QString exportPath = QDir(root).filePath(QStringLiteral("export/model.engine"));
-
-    QDir().mkpath(root);
-    writeTextFile(QDir(datasetPath).filePath(QStringLiteral("data.yaml")), QStringLiteral("nc: 1\nnames: [item]\n"), &error);
-    writeSmokeImage(QDir(datasetPath).filePath(QStringLiteral("images/train/a.png")), &error);
-    writeSmokeImage(QDir(datasetPath).filePath(QStringLiteral("images/val/a.png")), &error);
-    writeTextFile(QDir(datasetPath).filePath(QStringLiteral("labels/train/a.txt")), QStringLiteral("0 0.5 0.5 0.40 0.50\n"), &error);
-    writeTextFile(QDir(datasetPath).filePath(QStringLiteral("labels/val/a.txt")), QStringLiteral("0 0.5 0.5 0.40 0.50\n"), &error);
-    if (!error.isEmpty()) {
+    const QString modelPath = QFileInfo(onnxPath).absoluteFilePath();
+    if (!QFileInfo::exists(modelPath) || QFileInfo(modelPath).suffix().compare(QStringLiteral("onnx"), Qt::CaseInsensitive) != 0) {
         writeJsonLine(QJsonObject{
             {QStringLiteral("ok"), false},
-            {QStringLiteral("stage"), QStringLiteral("fixture")},
-            {QStringLiteral("error"), error}
+            {QStringLiteral("stage"), QStringLiteral("input")},
+            {QStringLiteral("status"), QStringLiteral("blocked")},
+            {QStringLiteral("error"), QStringLiteral("TensorRT smoke requires an existing official ONNX model artifact: %1").arg(modelPath)}
         });
         return 5;
     }
 
-    aitrain::DetectionTrainingOptions trainingOptions;
-    trainingOptions.epochs = 1;
-    trainingOptions.batchSize = 1;
-    trainingOptions.outputPath = outputPath;
-    const aitrain::DetectionTrainingResult training =
-        aitrain::trainDetectionBaseline(datasetPath, trainingOptions);
-    if (!training.ok) {
-        writeJsonLine(QJsonObject{
-            {QStringLiteral("ok"), false},
-            {QStringLiteral("stage"), QStringLiteral("train")},
-            {QStringLiteral("error"), training.error}
-        });
-        return 6;
-    }
-
+    const QString outputRoot = QFileInfo(modelPath).absoluteDir().filePath(QStringLiteral("aitrain_tensorrt_smoke"));
+    const QString exportPath = QDir(outputRoot).filePath(QStringLiteral("export/model.engine"));
     const aitrain::DetectionExportResult exported =
-        aitrain::exportDetectionCheckpoint(training.checkpointPath, exportPath, QStringLiteral("tensorrt"));
+        aitrain::exportDetectionCheckpoint(modelPath, exportPath, QStringLiteral("tensorrt"));
     if (!exported.ok) {
         writeJsonLine(QJsonObject{
             {QStringLiteral("ok"), false},
             {QStringLiteral("stage"), QStringLiteral("export")},
-            {QStringLiteral("checkpointPath"), training.checkpointPath},
+            {QStringLiteral("onnxPath"), modelPath},
             {QStringLiteral("error"), exported.error},
             {QStringLiteral("tensorRtBackend"), aitrain::tensorRtBackendStatus().toJson()}
         });
         return 7;
     }
 
-    aitrain::DetectionInferenceOptions inferenceOptions;
-    inferenceOptions.confidenceThreshold = 0.0;
-    const QVector<aitrain::DetectionPrediction> predictions = aitrain::predictDetectionTensorRt(
-        exported.exportPath,
-        QDir(datasetPath).filePath(QStringLiteral("images/val/a.png")),
-        inferenceOptions,
-        &error);
-    if (!error.isEmpty()) {
-        writeJsonLine(QJsonObject{
-            {QStringLiteral("ok"), false},
-            {QStringLiteral("stage"), QStringLiteral("infer")},
-            {QStringLiteral("enginePath"), exported.exportPath},
-            {QStringLiteral("error"), error}
-        });
-        return 8;
-    }
-
     writeJsonLine(QJsonObject{
         {QStringLiteral("ok"), true},
-        {QStringLiteral("stage"), QStringLiteral("completed")},
+        {QStringLiteral("stage"), QStringLiteral("export_completed")},
+        {QStringLiteral("onnxPath"), modelPath},
         {QStringLiteral("enginePath"), exported.exportPath},
         {QStringLiteral("reportPath"), exported.reportPath},
-        {QStringLiteral("predictionCount"), predictions.size()}
+        {QStringLiteral("tensorRtBackend"), aitrain::tensorRtBackendStatus().toJson()}
     });
     return 0;
 }
@@ -503,7 +420,7 @@ int main(int argc, char* argv[])
     QCommandLineOption serverOption(QStringLiteral("server"), QStringLiteral("QLocalServer name."), QStringLiteral("name"));
     QCommandLineOption selfCheckOption(QStringLiteral("self-check"), QStringLiteral("Run package/runtime self-check and print JSON."));
     QCommandLineOption pluginSmokeOption(QStringLiteral("plugin-smoke"), QStringLiteral("Scan model plugin directory and print JSON."), QStringLiteral("directory"));
-    QCommandLineOption tensorRtSmokeOption(QStringLiteral("tensorrt-smoke"), QStringLiteral("Run a tiny TensorRT export/inference smoke check and print JSON."), QStringLiteral("directory"));
+    QCommandLineOption tensorRtSmokeOption(QStringLiteral("tensorrt-smoke"), QStringLiteral("Run TensorRT export smoke for an official ONNX model and print JSON."), QStringLiteral("onnx"));
     QCommandLineOption ncnnSmokeOption(QStringLiteral("ncnn-smoke"), QStringLiteral("Run NCNN export and deployment validation smoke and print JSON."), QStringLiteral("onnx"));
     QCommandLineOption ncnnParamSmokeOption(QStringLiteral("ncnn-param-smoke"), QStringLiteral("Run NCNN deployment validation smoke for an existing .param/.bin artifact and print JSON."), QStringLiteral("param"));
     QCommandLineOption ocrDetOnnxSmokeOption(QStringLiteral("ocr-det-onnx-smoke"), QStringLiteral("Run OCR Det ONNX Runtime DB postprocess smoke and print JSON."), QStringLiteral("onnx"));

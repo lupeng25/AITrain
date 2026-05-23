@@ -876,9 +876,7 @@ void MainWindow::registerPipelineModelVersion(const QJsonObject& payload)
     });
     QJsonArray limitations;
     const QString backendForLimit = options.value(QStringLiteral("trainingBackend")).toString();
-    if (backendForLimit == QStringLiteral("tiny_linear_detector")
-        || backendForLimit == QStringLiteral("python_mock")
-        || backendForLimit == QStringLiteral("paddleocr_rec")) {
+    if (backendForLimit == QStringLiteral("paddleocr_rec")) {
         limitations.append(QStringLiteral("scaffold-or-diagnostic-backend"));
     }
     if (benchmarkSummary.value(QStringLiteral("failureCategory")).toString() == QStringLiteral("hardware-blocked")

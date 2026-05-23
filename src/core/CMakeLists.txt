@@ -7,9 +7,7 @@ add_library(aitrain_core STATIC
     include/aitrain/core/DetectionDataset.h
     include/aitrain/core/DetectionTrainer.h
     include/aitrain/core/OcrRecDataset.h
-    include/aitrain/core/OcrRecTrainer.h
     include/aitrain/core/SegmentationDataset.h
-    include/aitrain/core/SegmentationTrainer.h
     include/aitrain/core/JsonProtocol.h
     include/aitrain/core/LicenseManager.h
     include/aitrain/core/PluginManager.h
@@ -40,13 +38,9 @@ add_library(aitrain_core STATIC
     src/DetectionTrainerPostprocess.cpp
     src/DetectionTrainerRuntimeHelpers.cpp
     src/DetectionTrainerTensorRt.cpp
-    src/DetectionTrainerTiny.cpp
-    src/DetectionTrainerTinyOnnxWriter.cpp
     src/DetectionTrainerYoloPostprocess.cpp
     src/OcrRecDataset.cpp
-    src/OcrRecTrainer.cpp
     src/SegmentationDataset.cpp
-    src/SegmentationTrainer.cpp
     src/PluginManager.cpp
     src/PluginMarketplace.cpp
     src/ProjectRepository.cpp

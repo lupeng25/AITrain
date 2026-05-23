@@ -51,7 +51,6 @@ private:
     void drainPythonTrainerOutput(QByteArray* buffer, bool* terminalMessageSeen);
     void drainPythonTrainerErrors(QByteArray* buffer);
     bool forwardPythonTrainerLine(const QByteArray& line, bool* terminalMessageSeen);
-    void emitDetectionPreviewArtifacts(const QString& checkpointPath);
     void send(const QString& type, const QJsonObject& payload);
     aitrain::CancellationCallback cancellationCallback();
     void shutdownPythonTrainer(const QString& reason, bool notifyClient);

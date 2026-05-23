@@ -379,7 +379,7 @@ QJsonObject ncnnOnnxExportConfig(
     } else if (modelFamily == QStringLiteral("ocr_recognition")) {
         config = QJsonObject{
             {QStringLiteral("format"), QStringLiteral("ncnn")},
-            {QStringLiteral("backend"), QStringLiteral("paddleocr_rec")},
+            {QStringLiteral("backend"), QStringLiteral("paddleocr_rec_official")},
             {QStringLiteral("modelFamily"), QStringLiteral("ocr_recognition")},
             {QStringLiteral("scaffold"), false},
             {QStringLiteral("sourceCheckpoint"), sourceOnnxPath},
@@ -446,7 +446,7 @@ DetectionExportResult exportDetectionCheckpoint(
     const CancellationCallback& shouldCancel)
 {
     DetectionExportResult result;
-    const QString normalizedFormat = format.isEmpty() ? QStringLiteral("tiny_detector_json") : format.toLower();
+    const QString normalizedFormat = format.isEmpty() ? QStringLiteral("onnx") : format.toLower();
     const bool tensorRtFormat = normalizedFormat == QStringLiteral("tensorrt")
         || normalizedFormat == QStringLiteral("tensorrt_fp16");
     const bool ncnnFormat = normalizedFormat == QStringLiteral("ncnn");
@@ -456,8 +456,7 @@ DetectionExportResult exportDetectionCheckpoint(
         result.error = QStringLiteral("Canceled by user");
         return result;
     }
-    if (normalizedFormat != QStringLiteral("tiny_detector_json")
-        && normalizedFormat != QStringLiteral("onnx")
+    if (normalizedFormat != QStringLiteral("onnx")
         && !ncnnFormat
         && !tensorRtFormat) {
         if (normalizedFormat.startsWith(QStringLiteral("tensorrt"))) {
@@ -582,180 +581,7 @@ DetectionExportResult exportDetectionCheckpoint(
         }
     }
 
-    QString error;
-    DetectionBaselineCheckpoint checkpoint;
-    if (!loadDetectionBaselineCheckpoint(checkpointPath, &checkpoint, &error)) {
-        result.error = error;
-        return result;
-    }
-    if (checkpoint.type != QStringLiteral("tiny_linear_detector")) {
-        result.error = QStringLiteral("Only tiny_linear_detector checkpoints can be exported by this scaffold exporter");
-        return result;
-    }
-
-    QString finalOutputPath = outputPath;
-    if (finalOutputPath.isEmpty()) {
-        finalOutputPath = QFileInfo(checkpointPath).absoluteDir().filePath(
-            normalizedFormat == QStringLiteral("onnx")
-                ? QStringLiteral("model.onnx")
-                : (ncnnFormat ? QStringLiteral("model.param") : (tensorRtFormat ? QStringLiteral("model.engine") : QStringLiteral("model.aitrain-export.json"))));
-    }
-    if (QFileInfo(finalOutputPath).isDir()) {
-        finalOutputPath = QDir(finalOutputPath).filePath(
-            normalizedFormat == QStringLiteral("onnx")
-                ? QStringLiteral("model.onnx")
-                : (ncnnFormat ? QStringLiteral("model.param") : (tensorRtFormat ? QStringLiteral("model.engine") : QStringLiteral("model.aitrain-export.json"))));
-    }
-    if (ncnnFormat) {
-        finalOutputPath = ncnnParamPathForOutput(finalOutputPath, checkpointPath);
-    }
-    if (!QDir().mkpath(QFileInfo(finalOutputPath).absolutePath())) {
-        result.error = QStringLiteral("Cannot create export directory: %1").arg(QFileInfo(finalOutputPath).absolutePath());
-        return result;
-    }
-
-    if (normalizedFormat == QStringLiteral("onnx")) {
-        if (isCancellationRequested(shouldCancel)) {
-            result.error = QStringLiteral("Canceled by user");
-            return result;
-        }
-        if (!writeTinyDetectorOnnxModel(checkpoint, finalOutputPath, &result.error)) {
-            return result;
-        }
-        const QString reportPath = onnxExportReportPath(finalOutputPath);
-        const QJsonObject config = tinyDetectorExportConfig(checkpoint, checkpointPath, finalOutputPath, normalizedFormat);
-        if (isCancellationRequested(shouldCancel)) {
-            result.error = QStringLiteral("Canceled by user");
-            return result;
-        }
-        if (!writeJsonObject(reportPath, config, &result.error)) {
-            return result;
-        }
-        result.ok = true;
-        result.exportPath = finalOutputPath;
-        result.reportPath = reportPath;
-        result.config = config;
-        return result;
-    }
-
-    if (ncnnFormat) {
-        QTemporaryDir tempDir;
-        if (!tempDir.isValid()) {
-            result.error = QStringLiteral("Cannot create temporary directory for NCNN export.");
-            return result;
-        }
-        const QString tempOnnxPath = tempDir.filePath(QStringLiteral("tiny_detector.onnx"));
-        if (isCancellationRequested(shouldCancel)) {
-            result.error = QStringLiteral("Canceled by user");
-            return result;
-        }
-        if (!writeTinyDetectorOnnxModel(checkpoint, tempOnnxPath, &result.error)) {
-            return result;
-        }
-
-        const QString binPath = ncnnBinPathForParam(finalOutputPath);
-        QString converterPath;
-        if (!runOnnx2Ncnn(tempOnnxPath, finalOutputPath, binPath, shouldCancel, &converterPath, &result.error)) {
-            return result;
-        }
-
-        const QString reportPath = onnxExportReportPath(finalOutputPath);
-        QJsonObject config = tinyDetectorExportConfig(checkpoint, checkpointPath, finalOutputPath, normalizedFormat);
-        config.insert(QStringLiteral("ncnn"), ncnnMetadata(finalOutputPath, binPath, converterPath, tempOnnxPath));
-        if (isCancellationRequested(shouldCancel)) {
-            result.error = QStringLiteral("Canceled by user");
-            return result;
-        }
-        if (!writeJsonObject(reportPath, config, &result.error)) {
-            return result;
-        }
-        result.ok = true;
-        result.exportPath = finalOutputPath;
-        result.reportPath = reportPath;
-        result.config = config;
-        return result;
-    }
-
-    if (tensorRtFormat) {
-#ifndef AITRAIN_WITH_TENSORRT_SDK
-        result.error = QStringLiteral("TensorRT export is not available: %1").arg(tensorRtBackendStatus().message);
-        return result;
-#else
-        if (isCancellationRequested(shouldCancel)) {
-            result.error = QStringLiteral("Canceled by user");
-            return result;
-        }
-        const QByteArray onnxModel = tinyDetectorOnnxModel(checkpoint, &result.error);
-        if (onnxModel.isEmpty()) {
-            return result;
-        }
-        const bool fp16 = normalizedFormat == QStringLiteral("tensorrt_fp16");
-        if (!writeTensorRtEngineFromOnnx(onnxModel, finalOutputPath, fp16, &result.error)) {
-            return result;
-        }
-
-        const QString reportPath = onnxExportReportPath(finalOutputPath);
-        QJsonObject config = tinyDetectorExportConfig(checkpoint, checkpointPath, finalOutputPath, normalizedFormat);
-        config.insert(QStringLiteral("backend"), QStringLiteral("tensorrt_tiny_detector"));
-        config.insert(QStringLiteral("tensorRt"), QJsonObject{
-            {QStringLiteral("precision"), fp16 ? QStringLiteral("fp16") : QStringLiteral("fp32")},
-            {QStringLiteral("workspaceBytes"), static_cast<double>(size_t{1} << 30)},
-            {QStringLiteral("dynamicShape"), false},
-            {QStringLiteral("engineCache"), true}
-        });
-        if (isCancellationRequested(shouldCancel)) {
-            result.error = QStringLiteral("Canceled by user");
-            return result;
-        }
-        if (!writeJsonObject(reportPath, config, &result.error)) {
-            return result;
-        }
-        result.ok = true;
-        result.exportPath = finalOutputPath;
-        result.reportPath = reportPath;
-        result.config = config;
-        return result;
-#endif
-    }
-
-    QJsonObject exportObject = tinyDetectorExportConfig(checkpoint, checkpointPath, finalOutputPath, normalizedFormat);
-    exportObject.insert(QStringLiteral("sourceCheckpoint"), checkpointPath);
-    exportObject.insert(QStringLiteral("note"), QStringLiteral("Scaffold export for AITrain tiny detector. This is not ONNX."));
-    exportObject.insert(QStringLiteral("type"), checkpoint.type);
-    exportObject.insert(QStringLiteral("datasetPath"), checkpoint.datasetPath);
-    exportObject.insert(QStringLiteral("imageWidth"), checkpoint.imageSize.width());
-    exportObject.insert(QStringLiteral("imageHeight"), checkpoint.imageSize.height());
-    exportObject.insert(QStringLiteral("gridSize"), checkpoint.gridSize);
-    exportObject.insert(QStringLiteral("featureCount"), checkpoint.featureCount);
-    exportObject.insert(QStringLiteral("classNames"), QJsonArray::fromStringList(checkpoint.classNames));
-    exportObject.insert(QStringLiteral("classLogits"), doubleArray(checkpoint.classLogits));
-    exportObject.insert(QStringLiteral("objectnessWeights"), doubleArray(checkpoint.objectnessWeights));
-    exportObject.insert(QStringLiteral("classWeights"), doubleArray(checkpoint.classWeights));
-    exportObject.insert(QStringLiteral("boxWeights"), doubleArray(checkpoint.boxWeights));
-    exportObject.insert(QStringLiteral("priorBox"), boxObject(checkpoint.priorBox));
-    exportObject.insert(QStringLiteral("metrics"), QJsonObject{
-        {QStringLiteral("finalLoss"), checkpoint.finalLoss},
-        {QStringLiteral("precision"), checkpoint.precision},
-        {QStringLiteral("recall"), checkpoint.recall},
-        {QStringLiteral("mAP50"), checkpoint.map50}
-    });
-
-    if (isCancellationRequested(shouldCancel)) {
-        result.error = QStringLiteral("Canceled by user");
-        return result;
-    }
-    QFile file(finalOutputPath);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        result.error = QStringLiteral("Cannot write export artifact: %1").arg(finalOutputPath);
-        return result;
-    }
-    file.write(QJsonDocument(exportObject).toJson(QJsonDocument::Indented));
-    file.close();
-
-    result.ok = true;
-    result.exportPath = finalOutputPath;
-    result.reportPath = finalOutputPath;
-    result.config = exportObject;
+    result.error = QStringLiteral("Unsupported model export source: production export requires an official ONNX model artifact. Legacy AITrain diagnostic checkpoints are no longer supported.");
     return result;
 }
 

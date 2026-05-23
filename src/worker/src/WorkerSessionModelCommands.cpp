@@ -5,9 +5,7 @@
 #include "aitrain/core/Deployment.h"
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/JsonProtocol.h"
-#include "aitrain/core/OcrRecTrainer.h"
 #include "aitrain/core/ProductWorkflow.h"
-#include "aitrain/core/SegmentationTrainer.h"
 
 #include <QDateTime>
 #include <QCoreApplication>
@@ -445,7 +443,7 @@ void WorkerSession::exportModel(const QJsonObject& payload)
     running_ = true;
     const QString checkpointPath = payload.value(QStringLiteral("checkpointPath")).toString();
     const QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
-    const QString format = payload.value(QStringLiteral("format")).toString(QStringLiteral("tiny_detector_json"));
+    const QString format = payload.value(QStringLiteral("format")).toString(QStringLiteral("onnx"));
     activeOutputPath_ = outputPath;
 
     QJsonObject startProgress;
@@ -480,10 +478,8 @@ void WorkerSession::exportModel(const QJsonObject& payload)
     artifact.insert(QStringLiteral("taskId"), taskId);
     artifact.insert(QStringLiteral("kind"), QStringLiteral("export"));
     artifact.insert(QStringLiteral("path"), result.exportPath);
-    QString artifactMessage = QStringLiteral("Tiny detector JSON scaffold export");
-    if (result.format == QStringLiteral("onnx")) {
-        artifactMessage = QStringLiteral("ONNX model export");
-    } else if (result.format == QStringLiteral("ncnn")) {
+    QString artifactMessage = QStringLiteral("ONNX model export");
+    if (result.format == QStringLiteral("ncnn")) {
         artifactMessage = QStringLiteral("NCNN param export");
     } else if (result.format.startsWith(QStringLiteral("tensorrt"))) {
         artifactMessage = QStringLiteral("TensorRT engine export");
@@ -624,21 +620,8 @@ void WorkerSession::runInference(const QJsonObject& payload)
         overlay = aitrain::renderDetectionPredictions(imagePath, predictions, &error);
         predictionCount = predictions.size();
     } else {
-        aitrain::DetectionBaselineCheckpoint checkpoint;
-        if (!aitrain::loadDetectionBaselineCheckpoint(checkpointPath, &checkpoint, &error)) {
-            fail(error);
-            return;
-        }
-        const QVector<aitrain::DetectionPrediction> predictions = aitrain::predictDetectionBaseline(checkpoint, imagePath, options, &error);
-        if (!error.isEmpty()) {
-            fail(error);
-            return;
-        }
-        for (const aitrain::DetectionPrediction& prediction : predictions) {
-            predictionArray.append(aitrain::detectionPredictionToJson(prediction));
-        }
-        overlay = aitrain::renderDetectionPredictions(imagePath, predictions, &error);
-        predictionCount = predictions.size();
+        fail(QStringLiteral("Unsupported inference model format: %1. Production inference requires official ONNX or TensorRT artifacts.").arg(checkpointPath));
+        return;
     }
     if (overlay.isNull()) {
         fail(error);
@@ -658,7 +641,7 @@ void WorkerSession::runInference(const QJsonObject& payload)
     predictionsDocument.insert(QStringLiteral("taskType"), taskType);
     predictionsDocument.insert(QStringLiteral("runtime"), onnxModel
         ? QStringLiteral("onnxruntime")
-        : (tensorRtModel ? QStringLiteral("tensorrt") : QStringLiteral("tiny_detector")));
+        : (tensorRtModel ? QStringLiteral("tensorrt") : QStringLiteral("unsupported")));
     predictionsDocument.insert(QStringLiteral("elapsedMs"), static_cast<int>(elapsed.elapsed()));
     predictionsDocument.insert(QStringLiteral("postprocess"), QJsonObject{
         {QStringLiteral("confidenceThreshold"), options.confidenceThreshold},

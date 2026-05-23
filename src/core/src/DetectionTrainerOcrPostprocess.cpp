@@ -59,7 +59,7 @@ QJsonObject loadOcrRecReport(const QString& onnxPath)
 {
     const QFileInfo onnxInfo(onnxPath);
     const QStringList candidates = {
-        onnxInfo.absoluteDir().filePath(QStringLiteral("paddleocr_rec_training_report.json")),
+        onnxInfo.absoluteDir().filePath(QStringLiteral("paddleocr_official_rec_report.json")),
         onnxExportReportPath(onnxPath),
         QStringLiteral("%1.aitrain-export.json").arg(onnxPath)
     };
@@ -71,7 +71,8 @@ QJsonObject loadOcrRecReport(const QString& onnxPath)
         const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
         if (document.isObject()) {
             const QJsonObject object = document.object();
-            if (object.value(QStringLiteral("backend")).toString() == QStringLiteral("paddleocr_rec")
+            if (object.value(QStringLiteral("backend")).toString() == QStringLiteral("paddleocr_rec_official")
+                || object.value(QStringLiteral("backend")).toString() == QStringLiteral("paddleocr_ppocrv4_rec")
                 || object.value(QStringLiteral("modelFamily")).toString() == QStringLiteral("ocr_recognition")) {
                 return object;
             }

@@ -65,7 +65,7 @@ void MainWindow::startModelExport()
     }
     const QString format = conversionFormatCombo_
         ? conversionFormatCombo_->currentData().toString()
-        : QStringLiteral("tiny_detector_json");
+        : QStringLiteral("onnx");
     QString outputPath = QDir::fromNativeSeparators(conversionOutputEdit_ ? conversionOutputEdit_->text().trimmed() : QString());
     if (outputPath.isEmpty()) {
         const QString outputDir = !currentProjectPath_.isEmpty()

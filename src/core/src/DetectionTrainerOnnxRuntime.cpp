@@ -56,7 +56,8 @@ QString inferOnnxModelFamily(const QString& onnxPath, QString* warning)
         return QStringLiteral("yolo_segmentation");
     }
     if (configuredFamily == QStringLiteral("ocr_recognition")
-        || configuredBackend == QStringLiteral("paddleocr_rec")) {
+        || configuredBackend == QStringLiteral("paddleocr_rec_official")
+        || configuredBackend == QStringLiteral("paddleocr_ppocrv4_rec")) {
         return QStringLiteral("ocr_recognition");
     }
     if (configuredFamily == QStringLiteral("ocr_detection")
@@ -253,99 +254,10 @@ QVector<DetectionPrediction> predictDetectionOnnxRuntime(
                 error);
         }
 
-        if (session.GetOutputCount() < 3) {
-            if (error) {
-                *error = QStringLiteral("ONNX tiny detector expects at least three outputs; YOLO detection expects a 4D image input.");
-            }
-            return {};
+        if (error) {
+            *error = QStringLiteral("Unsupported detection ONNX input shape. Production detection inference expects an official YOLO ONNX model with [1, 3, height, width] input.");
         }
-        if (inputShape.size() != 2 || inputShape.at(0) <= 0 || inputShape.at(1) <= 0) {
-            if (error) {
-                *error = QStringLiteral("ONNX tiny detector input shape must be [cells, features]");
-            }
-            return {};
-        }
-        const int cellCount = static_cast<int>(inputShape.at(0));
-        const int featureCount = static_cast<int>(inputShape.at(1));
-        const int gridSize = qMax(1, qRound(qSqrt(static_cast<double>(cellCount))));
-        QVector<float> input = tinyDetectorFeatureInput(image, cellCount, featureCount, gridSize, error);
-        if (input.isEmpty()) {
-            return {};
-        }
-
-        std::vector<int64_t> tensorShape = inputShape;
-        Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-        Ort::Value inputTensor = Ort::Value::CreateTensor<float>(
-            memoryInfo,
-            input.data(),
-            static_cast<size_t>(input.size()),
-            tensorShape.data(),
-            tensorShape.size());
-
-        auto inputName = session.GetInputNameAllocated(0, allocator);
-        std::vector<Ort::AllocatedStringPtr> outputNameHolders;
-        std::vector<const char*> outputNames;
-        const size_t outputCount = session.GetOutputCount();
-        outputNameHolders.reserve(outputCount);
-        outputNames.reserve(outputCount);
-        for (size_t outputIndex = 0; outputIndex < outputCount; ++outputIndex) {
-            outputNameHolders.emplace_back(session.GetOutputNameAllocated(outputIndex, allocator));
-            outputNames.push_back(outputNameHolders.back().get());
-        }
-
-        const char* inputNames[] = { inputName.get() };
-        std::vector<Ort::Value> outputs = session.Run(
-            Ort::RunOptions{nullptr},
-            inputNames,
-            &inputTensor,
-            1,
-            outputNames.data(),
-            outputNames.size());
-
-        int objectnessIndex = -1;
-        int classIndex = -1;
-        int boxIndex = -1;
-        for (int index = 0; index < static_cast<int>(outputNames.size()); ++index) {
-            const QString name = QString::fromUtf8(outputNames.at(index));
-            if (name == QStringLiteral("objectness")) objectnessIndex = index;
-            if (name == QStringLiteral("class_probabilities")) classIndex = index;
-            if (name == QStringLiteral("boxes")) boxIndex = index;
-        }
-        if (objectnessIndex < 0 || classIndex < 0 || boxIndex < 0) {
-            if (error) {
-                *error = QStringLiteral("ONNX tiny detector outputs must include objectness, class_probabilities, and boxes");
-            }
-            return {};
-        }
-
-        auto tensorShapeInfo = [](const Ort::Value& value) {
-            return value.GetTensorTypeAndShapeInfo().GetShape();
-        };
-        const std::vector<int64_t> objectnessShape = tensorShapeInfo(outputs.at(objectnessIndex));
-        const std::vector<int64_t> classShape = tensorShapeInfo(outputs.at(classIndex));
-        const std::vector<int64_t> boxShape = tensorShapeInfo(outputs.at(boxIndex));
-        if (objectnessShape.size() != 2 || classShape.size() != 2 || boxShape.size() != 2
-            || objectnessShape.at(0) != cellCount || objectnessShape.at(1) != 1
-            || classShape.at(0) != cellCount || classShape.at(1) <= 0
-            || boxShape.at(0) != cellCount || boxShape.at(1) != 4) {
-            if (error) {
-                *error = QStringLiteral("ONNX tiny detector output shapes are invalid");
-            }
-            return {};
-        }
-
-        const float* objectness = outputs.at(objectnessIndex).GetTensorData<float>();
-        const float* classProbabilities = outputs.at(classIndex).GetTensorData<float>();
-        const float* boxes = outputs.at(boxIndex).GetTensorData<float>();
-        const int classCount = static_cast<int>(classShape.at(1));
-        return tinyDetectorPredictionsFromOutputs(
-            objectness,
-            classProbabilities,
-            boxes,
-            cellCount,
-            classCount,
-            classNames,
-            options);
+        return {};
     } catch (const Ort::Exception& exception) {
         if (error) {
             *error = QStringLiteral("ONNX Runtime inference failed: %1").arg(QString::fromUtf8(exception.what()));

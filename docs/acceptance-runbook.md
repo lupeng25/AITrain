@@ -131,8 +131,9 @@ To reproduce or refresh the evidence on an RTX / SM 75+ Windows machine or match
 
 Acceptance requires:
 
-- Worker self-check resolves CUDA, cuDNN, TensorRT, TensorRT Plugin, TensorRT ONNX Parser, and ONNX Runtime.
-- `aitrain_worker.exe --tensorrt-smoke <work-dir>` builds an engine and runs inference.
+- Worker self-check resolves CUDA, cuDNN, TensorRT, TensorRT Plugin, TensorRT ONNX Parser, and ONNX Runtime components needed for ONNX-to-engine export.
+- `acceptance-smoke.ps1 -TensorRT` generates a small official Ultralytics YOLO ONNX artifact, or uses `-TensorRtOnnxPath <official.onnx>` when supplied.
+- `aitrain_worker.exe --tensorrt-smoke <official.onnx>` builds a TensorRT engine. The current official-only smoke does not use the removed tiny-detector TensorRT inference fixture.
 - The result is recorded back in `docs\harness\current-status.md`; the current RTX 4090 D pass is already recorded.
 
 ## Phase 43 Lite: External Acceptance Handoff
@@ -357,5 +358,5 @@ Then check:
 - `docs\yolo-model-support-matrix.md` remains the source of truth for productized YOLO model-family status.
 - Phase 7 / Phase 10 TensorRT RTX 4090 D acceptance passed unless RTX / SM 75+ smoke passed.
 - Third-party backend license notes remain visible, especially Ultralytics AGPL / Enterprise constraints.
-- C++ tiny detector, segmentation baseline, and OCR baseline are still marked as scaffold/demo/test backends.
+- Legacy C++ tiny detector, segmentation baseline, OCR baseline, small OCR CTC, and shipped Python mock trainer implementations remain removed from the product training path.
 - C++ PaddleOCR Det DB-style ONNX postprocess has a Phase 46 v1 path for probability-map outputs. Phase 47 has real exported Det ONNX wiring evidence under `.deps\rtx4090-validation\phase47-paddleocr-det-onnx`; full OCR system acceptance remains official `predict_system.py`. Per current RTX 4090 validation scope, Rec accuracy is not considered for this pass and remains a future production-quality gate if reinstated.

@@ -223,14 +223,10 @@ QVector<DetectionPrediction> runDetectionPredictions(
         return predictDetectionTensorRt(modelPath, imagePath, options, error);
     }
 
-    DetectionBaselineCheckpoint checkpoint;
-    if (!loadDetectionBaselineCheckpoint(modelPath, &checkpoint, error)) {
-        return {};
+    if (error) {
+        *error = QStringLiteral("Unsupported detection model format: %1. Production evaluation requires official ONNX, NCNN, or TensorRT artifacts.").arg(modelPath);
     }
-    if (runtime) {
-        *runtime = QStringLiteral("tiny_detector");
-    }
-    return predictDetectionBaseline(checkpoint, imagePath, options, error);
+    return {};
 }
 
 struct DetectionEvaluationItem {

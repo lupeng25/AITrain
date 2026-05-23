@@ -15,13 +15,7 @@ Production training is official-backend only. The GUI training page and Worker p
 
 `paddleocr_system_official` remains the official OCR System inference/validation adapter. It is not shown as a "train model" backend because it runs official `predict_system.py` against exported Det and Rec inference model directories.
 
-Diagnostic/test-only backends are retained for protocol coverage and local troubleshooting, but they are not production training capabilities and are not allowed unless `AITRAIN_ENABLE_DIAGNOSTIC_BACKENDS=1` is set:
-
-| Backend | Scope | Notes |
-|---|---|---|
-| `tiny_linear_detector` | Diagnostic C++ detection scaffold | C++ baseline for protocol, tests, and demos. Not real YOLO. |
-| `paddleocr_rec` | Diagnostic OCR recognition fixture | Small PaddlePaddle CTC trainer for PaddleOCR-style Rec data. `paddleocr_rec` remains a dataset format, but not a production training backend. |
-| `python_mock` | Protocol fixture | Verifies Worker subprocess handling. Not real training. |
+Legacy diagnostic training implementations have been physically removed from production packages and training routing. `paddleocr_rec` remains a dataset format, not a training backend. Protocol tests that need a Python trainer now create an explicit temporary fixture through `pythonTrainerScript` and require `AITRAIN_ENABLE_DIAGNOSTIC_BACKENDS=1`; no shipped `python_mock` trainer is provided.
 
 ## Environment Setup
 
@@ -131,7 +125,7 @@ Dataset validation and split are Worker-backed flows. The GUI can now auto-detec
 The GUI model export page routes conversion through `aitrain_worker`; conversion logic must not run in `MainWindow`.
 
 - `onnx`: copies or creates an ONNX model and writes an AITrain sidecar report.
-- `ncnn`: converts an ONNX source or generated tiny-detector ONNX into NCNN `.param` and `.bin` files through the external `onnx2ncnn` tool. Configure it with `AITRAIN_NCNN_ONNX2NCNN` or an NCNN install root in `AITRAIN_NCNN_ROOT`.
+- `ncnn`: converts an official ONNX source into NCNN `.param` and `.bin` files through the external `onnx2ncnn` tool. Configure it with `AITRAIN_NCNN_ONNX2NCNN` or an NCNN install root in `AITRAIN_NCNN_ROOT`.
 - `tensorrt`: RTX 4090 D acceptance has passed for the current validation lane; unsupported GPUs such as GTX 1060 / SM 61 still report `hardware-blocked`.
 
 NCNN export creates `.param/.bin` deployment artifacts and writes an AITrain sidecar. Deployment validation can run NCNN CPU inference for supported YOLO detection and segmentation models when the build is configured with an NCNN SDK/runtime and a sample image is supplied. External NCNN models are not guessed blindly: provide the sidecar or explicit `modelFamily`, `classNames`, `inputBlob`, `outputBlobs`, and `decoder` settings.

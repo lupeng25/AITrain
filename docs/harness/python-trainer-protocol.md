@@ -30,11 +30,7 @@ python python_trainers/ocr_rec/paddleocr_official_adapter.py --request <request-
 
 Use `prepareOnly=true` to generate and validate the PP-OCRv4 config, label lists, dictionary copy, report, and reproducible command files without running official training. Use `runOfficial=true` or `prepareOnly=false` with `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` pointing at a PaddleOCR source checkout to execute official `tools/train.py` and `tools/export_model.py`. Set `runInferenceAfterExport=true` with `inferenceImage` to run official `tools/infer/predict_rec.py` after export and write `official_prediction.json`.
 
-The diagnostic small CTC route `trainingBackend=paddleocr_rec` is disabled unless `AITRAIN_ENABLE_DIAGNOSTIC_BACKENDS=1` is set:
-
-```powershell
-python python_trainers/ocr_rec/paddleocr_trainer.py --request <request-json>
-```
+The former small CTC route for `trainingBackend=paddleocr_rec` has been removed. `paddleocr_rec` remains a dataset format only; use `paddleocr_rec_official` or `paddleocr_ppocrv4_rec` for production OCR Rec training.
 
 For the official PaddleOCR PP-OCRv4 Det adapter, Worker routes `trainingBackend=paddleocr_det_official` to:
 
@@ -44,13 +40,13 @@ python python_trainers/ocr_det/paddleocr_det_official_adapter.py --request <requ
 
 Use `prepareOnly=true` to generate and validate the PP-OCRv4 detection config, label lists, report, and reproducible command files without running official training. Use `runOfficial=true` or `prepareOnly=false` with `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` pointing at a PaddleOCR source checkout to execute official `tools/train.py` and `tools/export_model.py`.
 
-For official PaddleOCR end-to-end System inference, Worker routes `trainingBackend=paddleocr_system_official` to:
+For official PaddleOCR end-to-end System inference, the Phase 31 smoke and official OCR toolchain call the inference adapter directly:
 
 ```powershell
 python python_trainers/ocr_system/paddleocr_system_official_adapter.py --request <request-json>
 ```
 
-This adapter does not train. It calls official `tools/infer/predict_system.py` with exported Det and Rec inference model directories, a recognition dictionary, and an image or image directory. The first version fixes `use_angle_cls=false` and defaults to CPU.
+This adapter does not train and is not exposed as a production training backend. It calls official `tools/infer/predict_system.py` with exported Det and Rec inference model directories, a recognition dictionary, and an image or image directory. The first version fixes `use_angle_cls=false` and defaults to CPU.
 
 The local isolated official smoke is:
 
@@ -73,7 +69,7 @@ Request shape:
   "taskType": "detection",
   "datasetPath": "dataset-root",
   "outputPath": "run-root",
-  "backend": "python_mock",
+  "backend": "ultralytics_yolo_detect",
   "parameters": {},
   "request": {}
 }
@@ -112,12 +108,9 @@ Official Python packages are adapted behind this protocol:
   When official training runs, the adapter parses stdout metrics such as `loss`, `ctcLoss`, `nrtrLoss`, `accuracy`, and `normalizedEditDistance` into Worker `metric` events and the final report.
 - `paddleocr_det_official`: PaddleOCR official-detection adapter. It prepares a PP-OCRv4 Det config and can run official PaddleOCR training/export from a source checkout. `prepareOnly` artifacts are configuration validation, not trained model artifacts.
   When official training runs, the adapter parses stdout metrics such as `loss`, `hmean`, `precision`, and `recall` into Worker `metric` events and the final report.
-- `paddleocr_system_official`: PaddleOCR official-system inference adapter. It calls official `predict_system.py` with exported Det and Rec inference model directories and emits `official_system_prediction.json`, `system_results.txt`, and visualization-image artifacts. It is the current full OCR acceptance path; it is not C++ DB detection ONNX postprocess.
+- `paddleocr_system_official`: PaddleOCR official-system inference adapter for the official OCR toolchain, not a production training backend. It calls official `predict_system.py` with exported Det and Rec inference model directories and emits `official_system_prediction.json`, `system_results.txt`, and visualization-image artifacts. It is the current full OCR acceptance path; it is not C++ DB detection ONNX postprocess.
 
-Diagnostic/test-only Python backends are disabled unless `AITRAIN_ENABLE_DIAGNOSTIC_BACKENDS=1` is set:
-
-- `python_mock`: Worker/Python subprocess protocol fixture. It is not real training.
-- `paddleocr_rec`: Small PaddlePaddle CTC OCR recognition trainer for PaddleOCR-style Rec data. It produces `paddleocr_rec_ctc.pdparams`, `dict.txt`, and `paddleocr_rec_training_report.json` for regression coverage only. `paddleocr_rec` remains a dataset format, but production training uses `paddleocr_rec_official`.
+Diagnostic/test-only protocol coverage no longer uses shipped backend ids. Tests that need to exercise the subprocess protocol create a temporary trainer script, pass it through `parameters.pythonTrainerScript`, set a production backend id such as `ultralytics_yolo_detect`, and require `AITRAIN_ENABLE_DIAGNOSTIC_BACKENDS=1`. Production requests should not set `pythonTrainerScript`.
 
 Common Phase 9 detection parameters:
 
@@ -132,15 +125,6 @@ Common Phase 9 detection parameters:
 - `pythonPathPrepend`: optional test/dev-only module path injection
 
 Common Phase 11 segmentation parameters are the same as detection, with default `model=yolov8n-seg.yaml`.
-
-Common Phase 12 OCR Rec parameters:
-
-- `epochs`: default `1`
-- `batchSize`: default `2`
-- `imageWidth`: default `96`
-- `imageHeight`: default `32`
-- `maxTextLength`: default `32`
-- `learningRate`: default `0.001`
 
 Common official PaddleOCR Rec parameters:
 

@@ -7,13 +7,11 @@
 #include "aitrain/core/JsonProtocol.h"
 #include "aitrain/core/LicenseManager.h"
 #include "aitrain/core/OcrRecDataset.h"
-#include "aitrain/core/OcrRecTrainer.h"
 #include "aitrain/core/PluginManager.h"
 #include "aitrain/core/PluginMarketplace.h"
 #include "aitrain/core/ProjectRepository.h"
 #include "aitrain/core/ProductWorkflow.h"
 #include "aitrain/core/SegmentationDataset.h"
-#include "aitrain/core/SegmentationTrainer.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -332,23 +330,6 @@ QString pythonExecutablePath()
     return {};
 }
 
-QString mockPythonTrainerScriptPath()
-{
-    const QString applicationDir = QCoreApplication::applicationDirPath();
-    const QStringList candidates = {
-        QDir(applicationDir).absoluteFilePath(QStringLiteral("../bin/python_trainers/mock_trainer.py")),
-        QDir(applicationDir).absoluteFilePath(QStringLiteral("python_trainers/mock_trainer.py")),
-        QDir(applicationDir).absoluteFilePath(QStringLiteral("../../python_trainers/mock_trainer.py")),
-        QDir::current().absoluteFilePath(QStringLiteral("python_trainers/mock_trainer.py"))
-    };
-    for (const QString& candidate : candidates) {
-        if (QFileInfo::exists(candidate)) {
-            return QFileInfo(candidate).absoluteFilePath();
-        }
-    }
-    return {};
-}
-
 QString phase9RealSmokeRoot()
 {
     const QString applicationDir = QCoreApplication::applicationDirPath();
@@ -446,7 +427,7 @@ QString phase14OcrSmokeRoot()
         QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/phase13-examples"))
     });
     for (const QString& candidate : candidates) {
-        if (QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("runs/paddleocr_rec/paddleocr_rec_ctc.onnx")))) {
+        if (QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("runs/paddleocr_rec_official/paddleocr_official_rec_report.json")))) {
             return QDir::cleanPath(candidate);
         }
     }

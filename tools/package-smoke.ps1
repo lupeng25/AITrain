@@ -107,12 +107,17 @@ Assert-PathExists "docs\product-roadmap-local-training-platform.md" "local train
 Assert-PathExists "docs\plugin-marketplace.md" "plugin marketplace docs"
 Assert-PathExists "docs\plugin-package-format.md" "plugin package format docs"
 Assert-PathExists "examples\plugin-package-template\plugin.json" "plugin package template manifest"
-Assert-PathExists "python_trainers\mock_trainer.py" "Python trainer adapter mock"
 Assert-PathExists "python_trainers\requirements-yolo.txt" "YOLO Python requirements"
 Assert-PathExists "python_trainers\requirements-ocr.txt" "OCR Python requirements"
 Assert-PathExists "python_trainers\ocr_rec\paddleocr_official_adapter.py" "Official PaddleOCR adapter"
 Assert-PathExists "python_trainers\ocr_det\paddleocr_det_official_adapter.py" "Official PaddleOCR Det adapter"
 Assert-PathExists "python_trainers\ocr_system\paddleocr_system_official_adapter.py" "Official PaddleOCR System adapter"
+if (Test-Path (Join-Path $prefixFull "python_trainers\mock_trainer.py")) {
+    throw "Diagnostic Python mock trainer must not be packaged"
+}
+if (Test-Path (Join-Path $prefixFull "python_trainers\ocr_rec\paddleocr_trainer.py")) {
+    throw "Removed small PaddleOCR CTC trainer must not be packaged"
+}
 Assert-PathExists "installer\AITrainStudio.iss" "Inno Setup installer script"
 Assert-PathExists "tools\acceptance-smoke.ps1" "acceptance smoke script"
 Assert-PathExists "tools\build-inno-installer.ps1" "Inno Setup installer build script"
