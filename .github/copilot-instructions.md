@@ -22,6 +22,8 @@ For UI work, follow:
 - Model, dataset, validation, export, and inference behavior should be plugin-based.
 - Preserve the left-sidebar workbench UI.
 - Use UTF-8 and `QStringLiteral` for Chinese UI text.
+- When reading project text in Windows PowerShell, specify UTF-8 explicitly, for example `Get-Content -Encoding UTF8`; mojibake in terminal output is not proof that the file is corrupt.
+- When listing Git paths with possible Chinese filenames, use `git -c core.quotepath=false ...` or set `core.quotepath=false`.
 - Do not claim real LibTorch/CUDA YOLO/OCR training exists while it is still scaffolded.
 
 ## Verification

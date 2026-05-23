@@ -4,6 +4,8 @@
 
 - 明确任务类型：UI、Core、Worker、Plugin、Dataset、Training、Docs。
 - 读取 `docs/harness/project-context.md`。
+- 在 Windows PowerShell 中读取项目文本时使用 `-Encoding UTF8`；不要用默认编码读取中文文档后根据乱码输出做判断。
+- 枚举 Git 路径时如涉及中文文件名，使用 `git -c core.quotepath=false ...`。
 - 如果是 UI 任务，读取 `docs/harness/ui-guidelines.md`。
 - 确认是否会修改公共接口：
   - `PluginInterfaces.h`
@@ -15,6 +17,7 @@
 ## 开发中
 
 - 保持变更范围小。
+- 新增或修改文本文件保持 UTF-8，除非明确做编码迁移，否则保留原文件 BOM / no BOM 风格。
 - 不把训练逻辑塞进 GUI。
 - 不在 Worker 中直接依赖 GUI 类型。
 - 不让插件绕过公共接口访问主窗口。
@@ -37,6 +40,13 @@
 ```powershell
 git diff --check
 .\tools\harness-context.ps1
+```
+
+如果本次任务涉及编码、中文乱码、文件名或文档读取问题，还需要用显式 UTF-8 读取至少一个相关中文文件确认显示正常，例如：
+
+```powershell
+Get-Content -LiteralPath HARNESS.md -Encoding UTF8 -TotalCount 5
+git -c core.quotepath=false ls-files | Select-String -Pattern 'AITrainStudio'
 ```
 
 如果改动涉及当前项目状态、交付验收、客户域 OCR、部署验证或样本复核，需要同步检查 `docs/harness/current-status.md`、`docs/harness/project-context.md`、`docs/acceptance-runbook.md`、`docs/product-roadmap-local-training-platform.md` 和 `docs/user-guide.md` 是否一致。

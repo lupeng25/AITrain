@@ -28,6 +28,8 @@ Rules:
 - Keep Qt 5.12+ compatibility unless explicitly changed.
 - Use QStringLiteral for UI text.
 - Avoid Chinese mojibake.
+- Treat repository text as UTF-8; in Windows PowerShell use explicit UTF-8 reads such as `Get-Content -Encoding UTF8`.
+- Use `git -c core.quotepath=false ...` when listing paths that may contain Chinese filenames.
 - Do not represent scaffold behavior as complete YOLO/OCR training.
 
 Before finalizing code changes, run:

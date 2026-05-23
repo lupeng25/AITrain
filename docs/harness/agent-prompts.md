@@ -14,6 +14,7 @@
 
 - 保持变更范围小。
 - 不破坏现有 VSCode 构建。
+- 在 Windows PowerShell 中读取中文文档时使用 `-Encoding UTF8`；Git 枚举中文路径时使用 `git -c core.quotepath=false ...`。
 - 长任务不要放进 GUI 线程。
 - 如果能力只是 scaffold，必须明确标注。
 - 完成后运行 `.\tools\harness-check.ps1`。
@@ -38,6 +39,7 @@
 - 复用 AppStyle、InfoPanel、Sidebar、StatusPill。
 - 不回退到 QTabWidget。
 - 中文文本不能乱码。
+- 检查中文文本时显式按 UTF-8 读取，不要根据 PowerShell 默认编码输出判断文件损坏。
 - 完成后运行 `.\tools\harness-check.ps1`。
 
 任务：
@@ -65,4 +67,3 @@
 
 <在这里填写 Core/Worker 任务>
 ```
-

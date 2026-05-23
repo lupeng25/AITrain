@@ -7,6 +7,8 @@
 - 编译通过。
 - 测试通过。
 - 不引入乱码。
+- 中文文档、源文案和翻译文件必须能按 UTF-8 正确读取；Windows PowerShell 检查时使用 `-Encoding UTF8`。
+- Git 输出中文路径时不能依赖默认转义显示；涉及路径核查时使用 `git -c core.quotepath=false ...`。
 - 不破坏现有 VSCode 工作流。
 - 不把 build 产物加入源码管理。
 
@@ -73,4 +75,3 @@ UI 改动必须满足：
 - checkpoint 可保存。
 - 失败原因可见。
 - 不把模拟训练说成真实训练。
-

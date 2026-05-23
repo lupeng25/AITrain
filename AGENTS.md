@@ -33,6 +33,8 @@ If the task is broad or implementation-heavy, also inspect:
 - Keep Qt 5.12+ compatibility unless explicitly asked to upgrade.
 - Use `QStringLiteral` for UI text.
 - Avoid Chinese mojibake. Source files must compile with UTF-8.
+- Treat project text files as UTF-8. In Windows PowerShell, read Chinese or mixed-language files with an explicit encoding, for example `Get-Content -Encoding UTF8`; do not judge file corruption from mojibake console output alone.
+- When listing Git paths that may contain Chinese, use `git -c core.quotepath=false ...` or configure `core.quotepath=false`, so filenames are not shown as octal escape sequences.
 - If a feature is a scaffold, label it as scaffold. Do not claim real YOLO/OCR training exists until it does.
 
 ## Verification
