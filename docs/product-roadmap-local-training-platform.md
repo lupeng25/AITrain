@@ -206,7 +206,7 @@ git diff --check
 建议 smoke：
 
 ```powershell
-.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr
+.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke
 .\tools\acceptance-smoke.ps1 -LocalBaseline -Package -SkipBuild
 ```
 

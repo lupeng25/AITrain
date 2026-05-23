@@ -257,6 +257,7 @@ QJsonArray deliveryLimitations(const QJsonObject& context, const QJsonObject& ev
     const QString backend = context.value(QStringLiteral("trainingBackend")).toString();
     if (backend == QStringLiteral("tiny_linear_detector")
         || backend == QStringLiteral("python_mock")
+        || backend == QStringLiteral("paddleocr_rec")
         || context.value(QStringLiteral("scaffold")).toBool()) {
         limitations.append(QStringLiteral("Scaffold or diagnostic backends are not production YOLO/OCR training capabilities."));
     }

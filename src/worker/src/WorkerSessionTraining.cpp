@@ -94,6 +94,21 @@ void WorkerSession::startTraining(const aitrain::TrainingRequest& request)
     payload.insert(QStringLiteral("message"), QStringLiteral("Worker accepted task %1 for plugin %2").arg(request_.taskId, request_.pluginId));
     send(QStringLiteral("log"), payload);
 
+    const QString backend = requestedTrainingBackend(request_);
+    if (!isSupportedTrainingBackendId(backend, request_.parameters)) {
+        failWithDetails(
+            backend.isEmpty()
+                ? QStringLiteral("Training task type '%1' does not have an official production backend. Select an official backend explicitly.").arg(request_.taskType)
+                : QStringLiteral("Training backend '%1' is not enabled for production training. Official training uses Ultralytics YOLO or PaddleOCR official adapters; diagnostic backends require AITRAIN_ENABLE_DIAGNOSTIC_BACKENDS=1.").arg(backend),
+            QStringLiteral("unsupported_training_backend"),
+            QJsonObject{
+                {QStringLiteral("backend"), backend},
+                {QStringLiteral("taskType"), request_.taskType},
+                {QStringLiteral("diagnosticBackendsEnabled"), diagnosticTrainingBackendsEnabled()},
+                {QStringLiteral("outputPath"), request_.outputPath}});
+        return;
+    }
+
     if (request_.taskType.compare(QStringLiteral("detection"), Qt::CaseInsensitive) == 0) {
         runDetectionTraining();
         return;

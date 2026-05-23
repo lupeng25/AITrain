@@ -135,7 +135,7 @@ QString pythonTrainerScriptFileForBackend(const QString& backend)
     if (normalized == QStringLiteral("ultralytics_yolo_segment")) {
         return QStringLiteral("python_trainers/segmentation/ultralytics_trainer.py");
     }
-    if (normalized == QStringLiteral("paddleocr_rec")) {
+    if (normalized == QStringLiteral("paddleocr_rec") && diagnosticTrainingBackendsEnabled()) {
         return QStringLiteral("python_trainers/ocr_rec/paddleocr_trainer.py");
     }
     if (normalized == QStringLiteral("paddleocr_rec_official") || normalized == QStringLiteral("paddleocr_ppocrv4_rec")) {
@@ -147,21 +147,30 @@ QString pythonTrainerScriptFileForBackend(const QString& backend)
     if (normalized == QStringLiteral("paddleocr_system_official")) {
         return QStringLiteral("python_trainers/ocr_system/paddleocr_system_official_adapter.py");
     }
-    return QStringLiteral("python_trainers/mock_trainer.py");
+    if (diagnosticTrainingBackendsEnabled()
+        && (normalized == QStringLiteral("python_mock") || normalized == QStringLiteral("python_trainer_mock"))) {
+        return QStringLiteral("python_trainers/mock_trainer.py");
+    }
+    return {};
 }
 
 QString pythonTrainerScriptPath(const QJsonObject& parameters, const QString& backend)
 {
-    const QString requested = parameters.value(QStringLiteral("pythonTrainerScript")).toString().trimmed();
-    if (!requested.isEmpty()) {
-        return QFileInfo(requested).absoluteFilePath();
-    }
-    const QString envRequested = QString::fromLocal8Bit(qgetenv("AITRAIN_PYTHON_TRAINER_SCRIPT")).trimmed();
-    if (!envRequested.isEmpty()) {
-        return QFileInfo(envRequested).absoluteFilePath();
+    if (diagnosticTrainingBackendsEnabled()) {
+        const QString requested = parameters.value(QStringLiteral("pythonTrainerScript")).toString().trimmed();
+        if (!requested.isEmpty()) {
+            return QFileInfo(requested).absoluteFilePath();
+        }
+        const QString envRequested = QString::fromLocal8Bit(qgetenv("AITRAIN_PYTHON_TRAINER_SCRIPT")).trimmed();
+        if (!envRequested.isEmpty()) {
+            return QFileInfo(envRequested).absoluteFilePath();
+        }
     }
 
     const QString trainerFile = pythonTrainerScriptFileForBackend(backend);
+    if (trainerFile.isEmpty()) {
+        return {};
+    }
     const QString applicationDir = QCoreApplication::applicationDirPath();
     const QStringList candidates = {
         QDir(applicationDir).absoluteFilePath(trainerFile),
@@ -180,23 +189,88 @@ QString pythonTrainerScriptPath(const QJsonObject& parameters, const QString& ba
 QString requestedTrainingBackend(const aitrain::TrainingRequest& request)
 {
     const QString backend = request.parameters.value(QStringLiteral("trainingBackend")).toString().trimmed();
-    return backend.isEmpty() ? QStringLiteral("tiny_linear_detector") : backend;
+    return backend.isEmpty() ? officialTrainingBackendForTask(request.taskType) : backend;
+}
+
+bool diagnosticTrainingBackendsEnabled()
+{
+    return QString::fromLocal8Bit(qgetenv("AITRAIN_ENABLE_DIAGNOSTIC_BACKENDS")).trimmed() == QStringLiteral("1");
+}
+
+QString officialTrainingBackendForTask(const QString& taskType)
+{
+    const QString normalized = taskType.trimmed().toLower();
+    if (normalized == QStringLiteral("detection")) {
+        return QStringLiteral("ultralytics_yolo_detect");
+    }
+    if (normalized == QStringLiteral("segmentation")) {
+        return QStringLiteral("ultralytics_yolo_segment");
+    }
+    if (normalized == QStringLiteral("ocr_detection")) {
+        return QStringLiteral("paddleocr_det_official");
+    }
+    if (normalized == QStringLiteral("ocr_recognition")) {
+        return QStringLiteral("paddleocr_rec_official");
+    }
+    return {};
+}
+
+namespace {
+bool isOfficialWorkerBackendId(const QString& normalized)
+{
+    return normalized == QStringLiteral("ultralytics_yolo")
+        || normalized == QStringLiteral("ultralytics_yolo_detect")
+        || normalized == QStringLiteral("ultralytics_yolo_segment")
+        || normalized == QStringLiteral("paddleocr_det_official")
+        || normalized == QStringLiteral("paddleocr_rec_official")
+        || normalized == QStringLiteral("paddleocr_ppocrv4_rec")
+        || normalized == QStringLiteral("paddleocr_system_official");
+}
+
+bool isDiagnosticBackendId(const QString& normalized, const QJsonObject& parameters)
+{
+    return normalized == QStringLiteral("python_mock")
+        || normalized == QStringLiteral("python_trainer_mock")
+        || normalized == QStringLiteral("tiny_linear_detector")
+        || normalized == QStringLiteral("tiny_detector")
+        || normalized == QStringLiteral("tiny_linear")
+        || normalized == QStringLiteral("paddleocr_rec")
+        || parameters.contains(QStringLiteral("pythonTrainerScript"));
+}
+} // namespace
+
+bool isSupportedTrainingBackendId(const QString& backend, const QJsonObject& parameters)
+{
+    const QString normalized = backend.trimmed().toLower();
+    const bool hasTrainerScriptOverride =
+        parameters.contains(QStringLiteral("pythonTrainerScript"))
+        || !QString::fromLocal8Bit(qgetenv("AITRAIN_PYTHON_TRAINER_SCRIPT")).trimmed().isEmpty();
+    if (hasTrainerScriptOverride && !diagnosticTrainingBackendsEnabled()) {
+        return false;
+    }
+    if (normalized.isEmpty()) {
+        return false;
+    }
+    if (isOfficialWorkerBackendId(normalized)) {
+        return true;
+    }
+    return diagnosticTrainingBackendsEnabled() && isDiagnosticBackendId(normalized, parameters);
 }
 
 bool isPythonTrainingBackendId(const QString& backend, const QJsonObject& parameters)
 {
     const QString normalized = backend.trimmed().toLower();
-    return parameters.contains(QStringLiteral("pythonTrainerScript"))
-        || normalized == QStringLiteral("python_mock")
-        || normalized == QStringLiteral("python_trainer_mock")
-        || normalized == QStringLiteral("ultralytics_yolo")
-        || normalized == QStringLiteral("ultralytics_yolo_detect")
-        || normalized == QStringLiteral("ultralytics_yolo_segment")
-        || normalized == QStringLiteral("paddleocr_rec")
-        || normalized == QStringLiteral("paddleocr_rec_official")
-        || normalized == QStringLiteral("paddleocr_ppocrv4_rec")
-        || normalized == QStringLiteral("paddleocr_det_official")
-        || normalized == QStringLiteral("paddleocr_system_official");
+    if (!isSupportedTrainingBackendId(backend, parameters)) {
+        return false;
+    }
+    if (isOfficialWorkerBackendId(normalized)) {
+        return true;
+    }
+    return diagnosticTrainingBackendsEnabled()
+        && (parameters.contains(QStringLiteral("pythonTrainerScript"))
+            || normalized == QStringLiteral("python_mock")
+            || normalized == QStringLiteral("python_trainer_mock")
+            || normalized == QStringLiteral("paddleocr_rec"));
 }
 
 QJsonObject runPythonCommandCheck(
@@ -396,12 +470,15 @@ QJsonObject ocrEnvironmentProfile(const QString& pythonExecutable)
         QStringLiteral("paddleocr"),
         QStringLiteral("PaddleOCR is missing; official OCR adapters will be unavailable.")));
 
-    const QString sourceRoot = QString::fromLocal8Bit(qgetenv("AITRAIN_PADDLEOCR_SOURCE_ROOT")).trimmed();
+    const QString repoRoot = QString::fromLocal8Bit(qgetenv("AITRAIN_PADDLEOCR_REPO")).trimmed();
+    const QString sourceRoot = !repoRoot.isEmpty()
+        ? repoRoot
+        : QString::fromLocal8Bit(qgetenv("AITRAIN_PADDLEOCR_SOURCE_ROOT")).trimmed();
     if (sourceRoot.isEmpty()) {
         checks.append(profileCheck(
             QStringLiteral("paddleOcrSourceCheckout"),
             QStringLiteral("warning"),
-            QStringLiteral("PaddleOCR source checkout path is not configured (AITRAIN_PADDLEOCR_SOURCE_ROOT).")));
+            QStringLiteral("PaddleOCR source checkout path is not configured (AITRAIN_PADDLEOCR_REPO).")));
     } else {
         const bool trainScriptExists = QFileInfo::exists(QDir(sourceRoot).filePath(QStringLiteral("tools/train.py")));
         checks.append(profileCheck(

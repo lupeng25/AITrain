@@ -4,6 +4,11 @@ class OcrSegmentationWorkerTests : public QObject {
     Q_OBJECT
 
 private slots:
+    void initTestCase()
+    {
+        qputenv("AITRAIN_ENABLE_DIAGNOSTIC_BACKENDS", "1");
+    }
+
     void workerRunsOnnxInferenceEndToEnd()
     {
         if (!aitrain::isOnnxRuntimeInferenceAvailable()) {
@@ -270,6 +275,7 @@ private slots:
         request.taskType = QStringLiteral("segmentation");
         request.datasetPath = root;
         request.outputPath = outputPath;
+        request.parameters.insert(QStringLiteral("trainingBackend"), QStringLiteral("tiny_linear_detector"));
         request.parameters.insert(QStringLiteral("epochs"), 2);
         request.parameters.insert(QStringLiteral("batchSize"), 1);
         request.parameters.insert(QStringLiteral("imageSize"), 16);
@@ -1263,6 +1269,7 @@ private slots:
         request.taskType = QStringLiteral("ocr_recognition");
         request.datasetPath = root;
         request.outputPath = outputPath;
+        request.parameters.insert(QStringLiteral("trainingBackend"), QStringLiteral("tiny_linear_detector"));
         request.parameters.insert(QStringLiteral("epochs"), 2);
         request.parameters.insert(QStringLiteral("batchSize"), 1);
         request.parameters.insert(QStringLiteral("imageWidth"), 32);

@@ -51,15 +51,44 @@ void WorkerSession::runLocalPipeline(const QJsonObject& payload)
         : templateId.trimmed().toLower();
 
     const QString pipelineTaskType = pipelineOptions.value(QStringLiteral("taskType")).toString(QStringLiteral("detection"));
-    const QString pipelineBackend = pipelineOptions.value(QStringLiteral("trainingBackend")).toString().trimmed().toLower();
+    QString pipelineBackend = pipelineOptions.value(QStringLiteral("trainingBackend")).toString().trimmed().toLower();
+    if (pipelineBackend.isEmpty()) {
+        pipelineBackend = officialTrainingBackendForTask(pipelineTaskType);
+        if (!pipelineBackend.isEmpty()) {
+            pipelineOptions.insert(QStringLiteral("trainingBackend"), pipelineBackend);
+        }
+    }
+    if (resolvedTemplate == QStringLiteral("train-evaluate-export-register") && pipelineBackend.isEmpty()) {
+        failWithDetails(
+            QStringLiteral("Pipeline task type '%1' does not have an official production training backend.").arg(pipelineTaskType),
+            QStringLiteral("unsupported_training_backend"),
+            QJsonObject{
+                {QStringLiteral("taskType"), pipelineTaskType},
+                {QStringLiteral("outputPath"), outputPath}});
+        return;
+    }
+    const bool pipelineTinyDiagnostic =
+        diagnosticTrainingBackendsEnabled()
+        && (pipelineBackend == QStringLiteral("tiny_linear_detector")
+            || pipelineBackend == QStringLiteral("tiny_detector")
+            || pipelineBackend == QStringLiteral("tiny_linear"));
     const bool needsOfficialPipelineTraining =
         resolvedTemplate == QStringLiteral("train-evaluate-export-register")
         && !pipelineBackend.isEmpty()
-        && pipelineBackend != QStringLiteral("tiny_linear_detector")
-        && pipelineBackend != QStringLiteral("tiny_detector")
-        && pipelineBackend != QStringLiteral("tiny_linear");
+        && !pipelineTinyDiagnostic;
 
     if (needsOfficialPipelineTraining) {
+        if (!isSupportedTrainingBackendId(pipelineBackend, pipelineOptions)) {
+            failWithDetails(
+                QStringLiteral("Pipeline training backend '%1' is not enabled for production training.").arg(pipelineBackend),
+                QStringLiteral("unsupported_training_backend"),
+                QJsonObject{
+                    {QStringLiteral("backend"), pipelineBackend},
+                    {QStringLiteral("taskType"), pipelineTaskType},
+                    {QStringLiteral("diagnosticBackendsEnabled"), diagnosticTrainingBackendsEnabled()},
+                    {QStringLiteral("outputPath"), outputPath}});
+            return;
+        }
         const QString datasetPath = pipelineOptions.value(QStringLiteral("datasetPath")).toString();
         const QString trainOutputPath = QDir(outputPath).filePath(QStringLiteral("training"));
         const PipelineTrainResult trainingResult = runPipelineTrainingStep(
@@ -175,6 +204,11 @@ WorkerSession::PipelineTrainResult WorkerSession::runPipelineTrainingStep(
     const QString backend = requestedTrainingBackend(request_);
     if (!QDir().mkpath(request_.outputPath)) {
         result.error = QStringLiteral("Cannot create pipeline training output directory: %1").arg(request_.outputPath);
+        return result;
+    }
+
+    if (!isSupportedTrainingBackendId(backend, request_.parameters)) {
+        result.error = QStringLiteral("Pipeline training backend '%1' is not enabled for production training.").arg(backend);
         return result;
     }
 

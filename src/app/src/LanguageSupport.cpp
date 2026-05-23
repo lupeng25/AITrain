@@ -96,6 +96,7 @@ QString fallbackEnglishTranslation(const QString& source)
         {QStringLiteral("PaddleOCR System 推理（官方）"), QStringLiteral("PaddleOCR System Inference (Official)")},
         {QStringLiteral("Tiny detector（高级/占位）"), QStringLiteral("Tiny detector (Advanced / Placeholder)")},
         {QStringLiteral("Python mock（高级/协议测试）"), QStringLiteral("Python mock (Advanced / Protocol Test)")},
+        {QStringLiteral("生产训练仅使用官方后端：Ultralytics YOLO 或 PaddleOCR official adapter。"), QStringLiteral("Production training uses only official backends: Ultralytics YOLO or PaddleOCR official adapters.")},
         {QStringLiteral("ONNX 模型"), QStringLiteral("ONNX Model")},
         {QStringLiteral("NCNN param/bin（onnx2ncnn）"), QStringLiteral("NCNN param/bin (onnx2ncnn)")},
         {QStringLiteral("AITrain JSON（诊断）"), QStringLiteral("AITrain JSON (Diagnostic)")},

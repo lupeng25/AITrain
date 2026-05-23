@@ -233,11 +233,17 @@ void MainWindow::startTraining()
         }
         QMessageBox::warning(
             this,
-            uiText("璁粌"),
+            uiText("训练"),
             QStringLiteral("Training preflight blocked:\n%1").arg(blockers.join(QStringLiteral("\n"))));
         return;
     }
     parameters.insert(QStringLiteral("trainingBackend"), backendForRequest);
+    if (backendForRequest == QStringLiteral("paddleocr_det_official")
+        || backendForRequest == QStringLiteral("paddleocr_rec_official")
+        || backendForRequest == QStringLiteral("paddleocr_ppocrv4_rec")) {
+        parameters.insert(QStringLiteral("runOfficial"), true);
+        parameters.insert(QStringLiteral("prepareOnly"), false);
+    }
     parameters.insert(QStringLiteral("trainingPreflight"), preflight);
     parameters.insert(QStringLiteral("trainingTemplate"), QStringLiteral("manual_worker_training_v1"));
     if (!modelPreset.isEmpty()) {

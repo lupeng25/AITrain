@@ -617,7 +617,7 @@ void MainWindow::refreshTrainingDefaults()
     } else if (datasetFormat == QStringLiteral("paddleocr_rec")) {
         preferredPlugin = QStringLiteral("com.aitrain.plugins.ocr_rec_native");
         preferredTask = QStringLiteral("ocr_recognition");
-        preferredBackend = QStringLiteral("paddleocr_rec");
+        preferredBackend = QStringLiteral("paddleocr_rec_official");
     }
 
     if (!preferredPlugin.isEmpty() && pluginCombo_) {

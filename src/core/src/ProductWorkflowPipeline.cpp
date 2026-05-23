@@ -26,6 +26,39 @@
 #include <algorithm>
 namespace aitrain {
 using namespace workflow_detail;
+
+namespace {
+bool diagnosticTrainingBackendsEnabledForPipeline()
+{
+    return QString::fromLocal8Bit(qgetenv("AITRAIN_ENABLE_DIAGNOSTIC_BACKENDS")).trimmed() == QStringLiteral("1");
+}
+
+QString officialTrainingBackendForPipelineTask(const QString& taskType)
+{
+    const QString normalized = taskType.trimmed().toLower();
+    if (normalized == QStringLiteral("detection")) {
+        return QStringLiteral("ultralytics_yolo_detect");
+    }
+    if (normalized == QStringLiteral("segmentation")) {
+        return QStringLiteral("ultralytics_yolo_segment");
+    }
+    if (normalized == QStringLiteral("ocr_detection")) {
+        return QStringLiteral("paddleocr_det_official");
+    }
+    if (normalized == QStringLiteral("ocr_recognition")) {
+        return QStringLiteral("paddleocr_rec_official");
+    }
+    return {};
+}
+
+bool isTinyDiagnosticBackend(const QString& backend)
+{
+    return backend == QStringLiteral("tiny_linear_detector")
+        || backend == QStringLiteral("tiny_detector")
+        || backend == QStringLiteral("tiny_linear");
+}
+} // namespace
+
 WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& templateId, const QJsonObject& options)
 {
     const QString resolvedTemplate = templateId.isEmpty()
@@ -175,18 +208,23 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
 
     auto runTrainStep = [&]() -> bool {
         const QString backend = trainingBackend.trimmed().toLower();
+        const QString resolvedTrainingBackend = backend.isEmpty()
+            ? officialTrainingBackendForPipelineTask(taskType)
+            : backend;
         if (taskType == QStringLiteral("detection")
-            && (backend.isEmpty()
-                || backend == QStringLiteral("tiny_linear_detector")
-                || backend == QStringLiteral("tiny_detector")
-                || backend == QStringLiteral("tiny_linear"))) {
+            && isTinyDiagnosticBackend(resolvedTrainingBackend)) {
+            if (!diagnosticTrainingBackendsEnabledForPipeline()) {
+                failureReason = QStringLiteral("Training backend '%1' is diagnostic-only. Set AITRAIN_ENABLE_DIAGNOSTIC_BACKENDS=1 for test fixtures; production training must use official backends.")
+                                    .arg(resolvedTrainingBackend);
+                return false;
+            }
             DetectionTrainingOptions trainOptions;
             trainOptions.epochs = epochs;
             trainOptions.batchSize = qMax(1, options.value(QStringLiteral("batchSize")).toInt(1));
             const int imageSize = qMax(32, options.value(QStringLiteral("imageSize")).toInt(320));
             trainOptions.imageSize = QSize(imageSize, imageSize);
             trainOptions.outputPath = QDir(outputPath).filePath(QStringLiteral("training"));
-            trainOptions.trainingBackend = backend.isEmpty() ? QStringLiteral("tiny_linear_detector") : backend;
+            trainOptions.trainingBackend = resolvedTrainingBackend;
             const DetectionTrainingResult trainingResult = trainDetectionBaseline(datasetPath, trainOptions);
             if (!trainingResult.ok) {
                 failureReason = trainingResult.error;
@@ -256,11 +294,16 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
             return true;
         }
 
+        if (resolvedTrainingBackend.isEmpty()) {
+            failureReason = QStringLiteral("Pipeline task type '%1' does not have an official production training backend.").arg(taskType);
+            return false;
+        }
+
         const QString requestPath = QDir(outputPath).filePath(QStringLiteral("training_request.json"));
         QJsonObject request;
         request.insert(QStringLiteral("taskType"), taskType);
         request.insert(QStringLiteral("datasetPath"), datasetPath);
-        request.insert(QStringLiteral("trainingBackend"), trainingBackend);
+        request.insert(QStringLiteral("trainingBackend"), resolvedTrainingBackend);
         request.insert(QStringLiteral("modelPreset"), modelPreset);
         request.insert(QStringLiteral("epochs"), epochs);
         request.insert(QStringLiteral("note"), QStringLiteral("Pipeline recorded a reproducible training request. Execute through Worker for official backend training."));

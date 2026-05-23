@@ -17,6 +17,9 @@ QString firstUsablePythonExecutable(const QJsonObject& parameters = {});
 QString pythonTrainerScriptFileForBackend(const QString& backend);
 QString pythonTrainerScriptPath(const QJsonObject& parameters, const QString& backend);
 QString requestedTrainingBackend(const aitrain::TrainingRequest& request);
+bool diagnosticTrainingBackendsEnabled();
+QString officialTrainingBackendForTask(const QString& taskType);
+bool isSupportedTrainingBackendId(const QString& backend, const QJsonObject& parameters);
 bool isPythonTrainingBackendId(const QString& backend, const QJsonObject& parameters);
 QJsonObject runPythonCommandCheck(
     const QString& name,

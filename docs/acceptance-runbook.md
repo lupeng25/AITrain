@@ -11,7 +11,7 @@ Run the unified smoke script from the repository root:
 .\tools\acceptance-smoke.ps1 -LocalBaseline
 .\tools\acceptance-smoke.ps1 -Package -SkipBuild
 .\tools\acceptance-smoke.ps1 -PublicDatasets
-.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr
+.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke
 .\tools\phase45-yolo-model-matrix-smoke.ps1
 .\tools\acceptance-smoke.ps1 -TensorRT
 .\tools\customer-ocr-validation.ps1
@@ -275,7 +275,7 @@ The script tries to materialize Ultralytics official COCO8 / COCO8-seg datasets 
 To require real public materialization instead of fallback, run:
 
 ```powershell
-.\tools\acceptance-smoke.ps1 -PublicDatasets -RequirePublicDatasets -SkipOfficialOcr
+.\tools\acceptance-smoke.ps1 -PublicDatasets -RequirePublicDatasets
 ```
 
 Materialization details are written as JSON reports next to the generated datasets. The reports include the source yaml, download URL, Ultralytics version, output `data.yaml`, and fallback state.
@@ -286,9 +286,8 @@ Expected artifacts:
 
 - YOLO detection: `best.pt`, ONNX export, and `ultralytics_training_report.json`.
 - YOLO segmentation: `best.pt`, ONNX export, and `ultralytics_training_report.json` with mask metrics when exposed.
-- OCR Rec small CTC: `paddleocr_rec_ctc.pdparams`, `paddleocr_rec_ctc.onnx`, `dict.txt`, and `paddleocr_rec_training_report.json`.
-- Official PaddleOCR Rec: `official_model\best_accuracy.pdparams`, `official_inference\inference.yml`, `official_prediction.json`, and `paddleocr_official_rec_report.json` when `phase16-ocr-official-smoke.ps1` is available.
-- Official PaddleOCR full chain: Det `official_model\best_accuracy.pdparams`, Det `official_inference\inference.yml`, Rec `official_inference\inference.yml`, `official_system_prediction.json`, `system_results.txt`, visualization images, `paddleocr_official_det_report.json`, `paddleocr_official_rec_report.json`, and `paddleocr_official_system_report.json` when `phase31-paddleocr-full-official-smoke.ps1` is run.
+- Official PaddleOCR Rec: `official_model\best_accuracy.pdparams`, `official_inference\inference.yml`, `official_prediction.json`, and `paddleocr_official_rec_report.json`.
+- Official PaddleOCR full chain: Det `official_model\best_accuracy.pdparams`, Det `official_inference\inference.yml`, Rec `official_inference\inference.yml`, `official_system_prediction.json`, `system_results.txt`, visualization images, `paddleocr_official_det_report.json`, `paddleocr_official_rec_report.json`, and `paddleocr_official_system_report.json`.
 
 If a public dataset requires interactive registration, record it as an external dataset blocker. Do not block the required smoke path as long as the generated minimal dataset path passes.
 
@@ -297,16 +296,16 @@ If a public dataset requires interactive registration, record it as an external 
 Run:
 
 ```powershell
-.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr
+.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke
 ```
 
-This mode does not download public datasets and does not run TensorRT. It generates deterministic `--profile cpu-smoke` data under `<WorkDir>\cpu-training-smoke\generated`, trains YOLO detection and YOLO segmentation for 3 CPU epochs at image size 128, trains the small PaddlePaddle OCR Rec CTC backend for 8 CPU epochs, exports ONNX artifacts, and runs CTest against those artifacts.
+This mode does not download public datasets and does not run TensorRT. It generates deterministic `--profile cpu-smoke` data under `<WorkDir>\cpu-training-smoke\generated`, trains YOLO detection and YOLO segmentation for 3 CPU epochs at image size 128, runs official PaddleOCR Rec train/export/inference through `phase16-ocr-official-smoke.ps1`, and runs CTest against those artifacts. If the official OCR environment is not configured, the mode reports a clear blocked/failed environment error instead of falling back to diagnostic CTC training.
 
 Expected artifacts:
 
 - `cpu_training_smoke_summary.json` with dataset counts, parameters, report paths, artifact paths, metrics, and elapsed time.
 - YOLO detection and segmentation: `best.pt`, `best.onnx`, and `ultralytics_training_report.json`.
-- OCR Rec small CTC: `paddleocr_rec_ctc.pdparams`, `paddleocr_rec_ctc.onnx`, `dict.txt`, and `paddleocr_rec_training_report.json`.
+- Official PaddleOCR Rec: `official_model\best_accuracy.pdparams`, `official_inference\inference.yml`, `official_prediction.json`, `dict.txt`, and `paddleocr_official_rec_report.json`.
 
 This is a stronger local integration smoke than `-PublicDatasets`, but it is still not a model accuracy benchmark.
 

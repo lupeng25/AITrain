@@ -49,10 +49,10 @@ This additionally runs:
 
 ```powershell
 .\tools\acceptance-smoke.ps1 -LocalBaseline -Package -SkipBuild
-.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr
+.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke
 ```
 
-The CPU training smoke is intentionally heavier. It validates integration and artifacts, not production model accuracy.
+The CPU training smoke is intentionally heavier. It validates integration and artifacts through official production backends, not production model accuracy.
 
 ## GUI Walkthrough
 

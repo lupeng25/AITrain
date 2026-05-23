@@ -11,6 +11,9 @@ param(
 $ErrorActionPreference = "Stop"
 
 function Resolve-RepoPath([string]$Path) {
+    if ([System.IO.Path]::IsPathRooted($Path)) {
+        return [System.IO.Path]::GetFullPath($Path)
+    }
     return [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $Path))
 }
 
@@ -123,17 +126,24 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $reportPath = Join-Path $outputPath "paddleocr_official_rec_report.json"
-$checkpointPath = Join-Path $outputPath "official_model\best_accuracy.pdparams"
 $inferenceYml = Join-Path $outputPath "official_inference\inference.yml"
 $predictionPath = Join-Path $outputPath "official_prediction.json"
 if (!(Test-Path $reportPath)) { throw "Missing report: $reportPath" }
-if (!(Test-Path $checkpointPath)) { throw "Missing official checkpoint: $checkpointPath" }
-if (!(Test-Path $inferenceYml)) { throw "Missing official inference model config: $inferenceYml" }
-if (!(Test-Path $predictionPath)) { throw "Missing official prediction report: $predictionPath" }
 $report = Get-Content -Raw -Encoding UTF8 -LiteralPath $reportPath | ConvertFrom-Json
 if ($report.PSObject.Properties.Name -contains "ok" -and -not $report.ok) {
     throw "Official PaddleOCR report has ok=false: $reportPath"
 }
+$checkpointPath = Join-Path $outputPath "official_model\best_accuracy.pdparams"
+if ($report.PSObject.Properties.Name -contains "checkpointPath" -and $report.checkpointPath) {
+    if ([System.IO.Path]::IsPathRooted([string]$report.checkpointPath)) {
+        $checkpointPath = [string]$report.checkpointPath
+    } else {
+        $checkpointPath = Join-Path $outputPath ([string]$report.checkpointPath)
+    }
+}
+if (!(Test-Path $checkpointPath)) { throw "Missing official checkpoint: $checkpointPath" }
+if (!(Test-Path $inferenceYml)) { throw "Missing official inference model config: $inferenceYml" }
+if (!(Test-Path $predictionPath)) { throw "Missing official prediction report: $predictionPath" }
 $prediction = Get-Content -Raw -Encoding UTF8 -LiteralPath $predictionPath | ConvertFrom-Json
 if ($prediction.PSObject.Properties.Name -contains "ok" -and -not $prediction.ok) {
     throw "Official PaddleOCR prediction has ok=false: $predictionPath"

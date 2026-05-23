@@ -213,13 +213,11 @@ images/sample.png<TAB>[{"transcription":"text","points":[[1,1],[30,1],[30,20],[1
 | YOLO 检测 | `ultralytics_yolo_detect` | `yolov8n.yaml`、`yolo11n.yaml`、`yolo12n.yaml` | 官方 Ultralytics 检测训练和 ONNX 导出 |
 | YOLO 分割 | `ultralytics_yolo_segment` | `yolov8n-seg.yaml`、`yolo11n-seg.yaml`、`yolo12n-seg.yaml` | 官方 Ultralytics 分割训练和 mask ONNX 后处理 |
 | PaddleOCR Det | `paddleocr_det_official` | `PP-OCRv4_mobile_det` | 官方 PaddleOCR 检测工具链，建议使用隔离 OCR 环境 |
-| PaddleOCR Rec | `paddleocr_rec` | `paddle_ctc_smoke` | 小型 PaddlePaddle CTC 识别训练，可导出 ONNX；不是完整 PP-OCRv4 官方链路 |
-| PaddleOCR Rec 官方 | `paddleocr_rec_official` | `PP-OCRv4_mobile_rec` | 官方 PaddleOCR Rec adapter，可运行 train/export/predict |
-| PaddleOCR System | `paddleocr_system_official` | `PP-OCRv4_det_rec_system` | 官方 `predict_system.py` 端到端推理链路 |
-| 诊断 | `tiny_linear_detector` | `diagnostic` | C++ scaffold，只用于诊断或演示 |
-| 协议测试 | `python_mock` | `diagnostic` | Worker/Python 协议 fixture，不是真训练 |
+| PaddleOCR Rec | `paddleocr_rec_official` | `PP-OCRv4_mobile_rec` | 官方 PaddleOCR Rec adapter，可运行 train/export/predict；`paddleocr_rec` 仅作为数据集格式保留 |
 
 官方后端依赖第三方包和许可条款。商业分发前需要单独审查 Ultralytics、PaddleOCR、PaddlePaddle、Torch 等依赖的许可证。
+
+`tiny_linear_detector`、小型 `paddleocr_rec` CTC trainer 和 `python_mock` 只保留为内部诊断/test fixture。它们不会出现在用户训练后端列表中，也不会作为主验收 passed 依据；需要显式设置 `AITRAIN_ENABLE_DIAGNOSTIC_BACKENDS=1` 才能走诊断入口。
 
 ## 7. 任务与产物
 

@@ -65,7 +65,7 @@ For a fuller local preflight that also exercises the local baseline and package 
 For the local CPU wiring smoke:
 
 ```powershell
-.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr
+.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke
 ```
 
 These checks do not replace clean Windows acceptance. RTX 4090 D TensorRT acceptance is already recorded but can be rerun with the TensorRT section below.

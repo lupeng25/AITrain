@@ -4,16 +4,24 @@ AITrain Studio keeps training out of the GUI process. Real training is launched 
 
 ## Backend Summary
 
+Production training is official-backend only. The GUI training page and Worker production whitelist expose these training backends:
+
 | Backend | Task | Status | Notes |
 |---|---|---|---|
-| `tiny_linear_detector` | Detection | Scaffold | C++ baseline for protocol, tests, and demos. Not real YOLO. |
-| `ultralytics_yolo_detect` | Detection | Real Python backend | Uses Ultralytics YOLO detection training and ONNX export. Review AGPL-3.0 / Enterprise license before redistribution. |
-| `ultralytics_yolo_segment` | Segmentation | Real Python backend | Uses Ultralytics YOLO segmentation training and ONNX export. C++ ONNX Runtime can decode boxes, mask coefficients, prototypes, and render mask overlays. |
-| `paddleocr_rec` | OCR recognition | Real PaddlePaddle CTC smoke backend | Trains a small PaddlePaddle CTC recognizer on PaddleOCR-style Rec data, exports ONNX, and supports C++ ONNX Runtime CTC greedy decode. Not a full PP-OCRv4 official config/export pipeline yet. |
-| `paddleocr_rec_official` / `paddleocr_ppocrv4_rec` | OCR recognition | Official PaddleOCR adapter | Generates a PP-OCRv4 recognition config from AITrain PaddleOCR-style Rec data and can run official PaddleOCR `tools/train.py`, `tools/export_model.py`, and optional `tools/infer/predict_rec.py` when `runOfficial=true` and `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` points to a checkout. `prepareOnly=true` validates config generation only. |
+| `ultralytics_yolo_detect` | Detection | Official Ultralytics adapter | Uses Ultralytics YOLO detection training and ONNX export. Review AGPL-3.0 / Enterprise license before redistribution. |
+| `ultralytics_yolo_segment` | Segmentation | Official Ultralytics adapter | Uses Ultralytics YOLO segmentation training and ONNX export. C++ ONNX Runtime can decode boxes, mask coefficients, prototypes, and render mask overlays. |
 | `paddleocr_det_official` | OCR detection | Official PaddleOCR adapter | Generates a PP-OCRv4 detection config from PaddleOCR Det data and can run official PaddleOCR `tools/train.py` and `tools/export_model.py`. Artifacts include `aitrain_ppocrv4_det.yml`, `official_model/best_accuracy.pdparams`, `official_inference/inference.yml`, and `paddleocr_official_det_report.json`. |
-| `paddleocr_system_official` | OCR system inference | Official PaddleOCR adapter | Runs official `tools/infer/predict_system.py` from a PaddleOCR source checkout using exported Det and Rec inference model directories. This remains the full official end-to-end OCR validation path. |
-| `python_mock` | Any | Protocol fixture | Used only to verify Worker subprocess handling. Not real training. |
+| `paddleocr_rec_official` / `paddleocr_ppocrv4_rec` | OCR recognition | Official PaddleOCR adapter | Generates a PP-OCRv4 recognition config from AITrain PaddleOCR-style Rec data and runs official PaddleOCR `tools/train.py`, `tools/export_model.py`, and optional `tools/infer/predict_rec.py` when `runOfficial=true` and `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` points to a checkout. Production GUI requests set `runOfficial=true` and `prepareOnly=false`. |
+
+`paddleocr_system_official` remains the official OCR System inference/validation adapter. It is not shown as a "train model" backend because it runs official `predict_system.py` against exported Det and Rec inference model directories.
+
+Diagnostic/test-only backends are retained for protocol coverage and local troubleshooting, but they are not production training capabilities and are not allowed unless `AITRAIN_ENABLE_DIAGNOSTIC_BACKENDS=1` is set:
+
+| Backend | Scope | Notes |
+|---|---|---|
+| `tiny_linear_detector` | Diagnostic C++ detection scaffold | C++ baseline for protocol, tests, and demos. Not real YOLO. |
+| `paddleocr_rec` | Diagnostic OCR recognition fixture | Small PaddlePaddle CTC trainer for PaddleOCR-style Rec data. `paddleocr_rec` remains a dataset format, but not a production training backend. |
+| `python_mock` | Protocol fixture | Verifies Worker subprocess handling. Not real training. |
 
 ## Environment Setup
 
@@ -154,12 +162,12 @@ The unified Phase 17-21 acceptance entry point is:
 .\tools\acceptance-smoke.ps1 -PublicDatasets
 ```
 
-This mode checks required Python modules, generates tiny local datasets under `.deps\acceptance-smoke` by default, tries to materialize Ultralytics COCO8 / COCO8-seg through the installed official package, then runs 1-epoch smoke training for YOLO detection, YOLO segmentation, PaddlePaddle OCR Rec CTC, and the isolated official PaddleOCR Rec path when available. During the CTest step, it sets `AITRAIN_ACCEPTANCE_SMOKE_ROOT` so ONNX inference tests consume the artifacts generated in the current WorkDir rather than relying on older local smoke outputs.
+This mode checks required Python modules, generates tiny local datasets under `.deps\acceptance-smoke` by default, tries to materialize Ultralytics COCO8 / COCO8-seg through the installed official package, then runs official-adapter smoke training for YOLO detection, YOLO segmentation, and PaddleOCR Rec. During the CTest step, it sets `AITRAIN_ACCEPTANCE_SMOKE_ROOT` so inference tests consume artifacts generated in the current WorkDir rather than relying on older local smoke outputs.
 
 Public dataset materialization is handled by `tools\materialize-ultralytics-dataset.py`. It reads the installed Ultralytics dataset yaml, resolves the official download URL, downloads into `.deps\datasets\downloads`, extracts into `.deps\datasets\materialized`, rewrites a local absolute-path `data.yaml`, and writes a machine-readable materialization report. Use `-RequirePublicDatasets` to fail if COCO8 / COCO8-seg cannot be materialized:
 
 ```powershell
-.\tools\acceptance-smoke.ps1 -PublicDatasets -RequirePublicDatasets -SkipOfficialOcr
+.\tools\acceptance-smoke.ps1 -PublicDatasets -RequirePublicDatasets
 ```
 
 Every `acceptance-smoke.ps1` run writes `acceptance_summary.json` into its work directory with modes, status, timing, failure reason, and hardware-blocked reason when applicable.
@@ -167,10 +175,10 @@ Every `acceptance-smoke.ps1` run writes `acceptance_summary.json` into its work 
 For a longer local-only CPU exercise that avoids public downloads and TensorRT, run:
 
 ```powershell
-.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr
+.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke
 ```
 
-This mode generates deterministic small/medium datasets with `examples\create-minimal-datasets.py --profile cpu-smoke`, trains YOLO detection and segmentation for 3 epochs at image size 128 on CPU, trains the small PaddlePaddle OCR Rec CTC backend for 8 epochs, exports ONNX artifacts, runs CTest with `AITRAIN_ACCEPTANCE_SMOKE_ROOT` pointed at the new artifacts, and writes `cpu_training_smoke_summary.json`. It validates wiring, artifacts, and C++ ONNX Runtime compatibility; it is not an accuracy benchmark.
+This mode generates deterministic small/medium datasets with `examples\create-minimal-datasets.py --profile cpu-smoke`, trains YOLO detection and segmentation for 3 epochs at image size 128 on CPU, runs official PaddleOCR Rec train/export/inference through `phase16-ocr-official-smoke.ps1`, runs CTest with `AITRAIN_ACCEPTANCE_SMOKE_ROOT` pointed at the new artifacts, and writes `cpu_training_smoke_summary.json`. If the official OCR source checkout or isolated OCR environment is unavailable, the mode must fail or block with an explicit environment error instead of falling back to diagnostic CTC training. It validates wiring and artifacts; it is not an accuracy benchmark.
 
 For the Phase 45 newer-YOLO-family matrix, run:
 

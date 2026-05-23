@@ -414,7 +414,9 @@ function Invoke-CtestForAcceptanceWorkDir {
 function Invoke-CpuTrainingSmoke {
     $python = Resolve-PythonExe
     Ensure-PythonModules -Python $python -Modules @("ultralytics") -RequirementsFile "python_trainers\requirements-yolo.txt" -CapabilityName "Ultralytics YOLO"
-    Ensure-PythonModules -Python $python -Modules @("paddle", "onnx", "PIL", "numpy") -RequirementsFile "python_trainers\requirements-ocr.txt" -CapabilityName "PaddlePaddle OCR Rec"
+    if ($SkipOfficialOcr) {
+        throw "-SkipOfficialOcr is not allowed for CpuTrainingSmoke because production OCR training evidence must come from the official PaddleOCR adapter."
+    }
 
     $baseWork = Resolve-AcceptancePath $WorkDir
     $work = Join-Path $baseWork "cpu-training-smoke"
@@ -440,7 +442,6 @@ function Invoke-CpuTrainingSmoke {
 
     $detectRequestPath = Join-Path $generated "yolo_detect_request.json"
     $segmentRequestPath = Join-Path $generated "yolo_segment_request.json"
-    $ocrRequestPath = Join-Path $generated "paddleocr_rec_request.json"
 
     Invoke-Checked -FilePath $python -Arguments @((Join-Path $script:Root "python_trainers\detection\ultralytics_trainer.py"), "--request", $detectRequestPath)
     $detectReportPath = Join-Path $generated "runs\yolo_detect\ultralytics_training_report.json"
@@ -450,9 +451,10 @@ function Invoke-CpuTrainingSmoke {
     $segmentReportPath = Join-Path $generated "runs\yolo_segment\ultralytics_training_report.json"
     Assert-TrainingReport -ReportPath $segmentReportPath -ArtifactProperties @("checkpointPath", "onnxPath")
 
-    Invoke-Checked -FilePath $python -Arguments @((Join-Path $script:Root "python_trainers\ocr_rec\paddleocr_trainer.py"), "--request", $ocrRequestPath)
-    $ocrReportPath = Join-Path $generated "runs\paddleocr_rec\paddleocr_rec_training_report.json"
-    Assert-TrainingReport -ReportPath $ocrReportPath -ArtifactProperties @("checkpointPath", "onnxPath", "dictPath")
+    $officialOcrWork = Join-Path $work "official-ocr-rec"
+    Invoke-Checked -FilePath (Join-Path $script:Root "tools\phase16-ocr-official-smoke.ps1") -Arguments @("-WorkDir", $officialOcrWork)
+    $ocrReportPath = Join-Path $officialOcrWork "runs\paddleocr_rec_official\paddleocr_official_rec_report.json"
+    Assert-TrainingReport -ReportPath $ocrReportPath -ArtifactProperties @("checkpointPath", "inferenceModelDir", "dictPath")
 
     Invoke-CtestForAcceptanceWorkDir -WorkRoot $work -TimeoutSeconds 360
 
@@ -468,7 +470,7 @@ function Invoke-CpuTrainingSmoke {
         datasets = $datasetSummary
         parameters = [ordered]@{
             yolo = [ordered]@{ epochs = 3; batchSize = 2; imageSize = 128; device = "cpu"; workers = 0 }
-            ocrRec = [ordered]@{ epochs = 8; batchSize = 8; imageWidth = 128; imageHeight = 32; maxTextLength = 10 }
+            ocrRecOfficial = [ordered]@{ epochs = 1; batchSize = 1; recImageShape = "3,48,320"; backend = "paddleocr_rec_official" }
         }
         reports = [ordered]@{
             detection = Get-TrainingReportSummary -ReportPath $detectReportPath
@@ -484,7 +486,9 @@ function Invoke-CpuTrainingSmoke {
 function Invoke-PublicDatasetSmoke {
     $python = Resolve-PythonExe
     Ensure-PythonModules -Python $python -Modules @("ultralytics") -RequirementsFile "python_trainers\requirements-yolo.txt" -CapabilityName "Ultralytics YOLO"
-    Ensure-PythonModules -Python $python -Modules @("paddle", "onnx", "PIL", "numpy") -RequirementsFile "python_trainers\requirements-ocr.txt" -CapabilityName "PaddlePaddle OCR Rec"
+    if ($SkipOfficialOcr) {
+        throw "-SkipOfficialOcr is not allowed for PublicDatasets because OCR acceptance must come from the official PaddleOCR adapter."
+    }
 
     $work = Resolve-AcceptancePath $WorkDir
     New-Item -ItemType Directory -Force $work | Out-Null
@@ -544,19 +548,15 @@ function Invoke-PublicDatasetSmoke {
     Invoke-Checked -FilePath $python -Arguments @((Join-Path $script:Root "python_trainers\segmentation\ultralytics_trainer.py"), "--request", $segmentRequestPath)
     Assert-TrainingReport -ReportPath (Join-Path $segmentOutput "ultralytics_training_report.json") -ArtifactProperties @("checkpointPath", "onnxPath")
 
-    $ocrRequestPath = Join-Path $work "generated\paddleocr_rec_request.json"
-    Invoke-Checked -FilePath $python -Arguments @((Join-Path $script:Root "python_trainers\ocr_rec\paddleocr_trainer.py"), "--request", $ocrRequestPath)
-    Assert-TrainingReport -ReportPath (Join-Path $work "generated\runs\paddleocr_rec\paddleocr_rec_training_report.json") -ArtifactProperties @("checkpointPath", "onnxPath", "dictPath")
+    $officialOcrWork = Join-Path $work "official-ocr-rec"
+    Invoke-Checked -FilePath (Join-Path $script:Root "tools\phase16-ocr-official-smoke.ps1") -Arguments @("-WorkDir", $officialOcrWork)
+    Assert-TrainingReport -ReportPath (Join-Path $officialOcrWork "runs\paddleocr_rec_official\paddleocr_official_rec_report.json") -ArtifactProperties @("checkpointPath", "inferenceModelDir", "dictPath")
 
     Invoke-CtestForAcceptanceWorkDir -WorkRoot $work -TimeoutSeconds 240
 
-    if (!$SkipOfficialOcr) {
-        $phase16 = Join-Path $script:Root "tools\phase16-ocr-official-smoke.ps1"
-        if (Test-Path $phase16) {
-            Invoke-Checked -FilePath $phase16
-        } else {
-            Write-Host "  [warn] phase16-ocr-official-smoke.ps1 not found; skipping official PaddleOCR train/export smoke." -ForegroundColor Yellow
-        }
+    $phase31 = Join-Path $script:Root "tools\phase31-paddleocr-full-official-smoke.ps1"
+    if (Test-Path $phase31) {
+        Invoke-Checked -FilePath $phase31 -Arguments @("-WorkDir", (Join-Path $work "official-ocr-full-chain"))
     }
 }
 

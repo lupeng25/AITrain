@@ -4,6 +4,11 @@ class RepositoryWorkflowTests : public QObject {
     Q_OBJECT
 
 private slots:
+    void initTestCase()
+    {
+        qputenv("AITRAIN_ENABLE_DIAGNOSTIC_BACKENDS", "1");
+    }
+
     void repositoryStoresTasksAndMetrics()
     {
         QTemporaryDir dir;

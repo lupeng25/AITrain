@@ -82,7 +82,7 @@ if ($RunLocalBaseline) {
 
 if ($RunCpuTrainingSmoke) {
     Invoke-Step "CPU training smoke" {
-        Invoke-PowerShellScript -ScriptPath (Join-Path $root "tools\acceptance-smoke.ps1") -Arguments @("-CpuTrainingSmoke", "-SkipOfficialOcr", "-BuildDir", $BuildDir)
+        Invoke-PowerShellScript -ScriptPath (Join-Path $root "tools\acceptance-smoke.ps1") -Arguments @("-CpuTrainingSmoke", "-BuildDir", $BuildDir)
     }
 }
 
