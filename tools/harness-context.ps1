@@ -43,3 +43,7 @@ Get-ChildItem src -Recurse -File -Include *.cpp,*.h,*.json,*.txt,*.cmake,CMakeLi
 Write-Host ""
 Write-Host "Recommended check:" -ForegroundColor Cyan
 Write-Host "  .\tools\harness-check.ps1"
+
+Write-Host ""
+Write-Host "Encoding note:" -ForegroundColor Cyan
+Write-Host "  Read project text as UTF-8. For encoding-only validation, run .\tools\encoding-check.ps1"

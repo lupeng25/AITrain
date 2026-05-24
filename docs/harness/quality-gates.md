@@ -9,6 +9,7 @@
 - 不引入乱码。
 - 中文文档、源文案和翻译文件必须能按 UTF-8 正确读取；Windows PowerShell 检查时使用 `-Encoding UTF8`。
 - Git 输出中文路径时不能依赖默认转义显示；涉及路径核查时使用 `git -c core.quotepath=false ...`。
+- MSVC/CMake 构建日志应通过 `VSLANG=1033` 固定英文输出，避免本地化工具提示污染 AI 读取的日志。
 - 不破坏现有 VSCode 工作流。
 - 不把 build 产物加入源码管理。
 
@@ -16,6 +17,12 @@
 
 ```powershell
 .\tools\harness-check.ps1
+```
+
+编码专项检查：
+
+```powershell
+.\tools\encoding-check.ps1
 ```
 
 ## UI Gate

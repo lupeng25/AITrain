@@ -7,7 +7,7 @@
       "command": "cmd",
       "args": [
         "/c",
-        "call \"C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && cmake -S . -B build-vscode -G \"NMake Makefiles\" -DCMAKE_PREFIX_PATH=C:\\Qt\\Qt5.12.9\\5.12.9\\msvc2017_64 -DAITRAIN_BUILD_TESTS=ON"
+        "set VSLANG=1033 && call \"C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && cmake -S . -B build-vscode -G \"NMake Makefiles\" -DCMAKE_PREFIX_PATH=C:\\Qt\\Qt5.12.9\\5.12.9\\msvc2017_64 -DAITRAIN_BUILD_TESTS=ON"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -20,7 +20,7 @@
       "command": "cmd",
       "args": [
         "/c",
-        "call \"C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && cmake --build build-vscode"
+        "set VSLANG=1033 && call \"C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && cmake --build build-vscode"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -38,7 +38,7 @@
       "command": "cmd",
       "args": [
         "/c",
-        "call \"C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && ctest --test-dir build-vscode --output-on-failure"
+        "set VSLANG=1033 && call \"C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && ctest --test-dir build-vscode --output-on-failure"
       ],
       "options": {
         "cwd": "${workspaceFolder}",
@@ -72,6 +72,22 @@
         "Bypass",
         "-File",
         "${workspaceFolder}\\tools\\harness-context.ps1"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Encoding Check",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\tools\\encoding-check.ps1",
+        "-IncludeUntracked"
       ],
       "options": {
         "cwd": "${workspaceFolder}"

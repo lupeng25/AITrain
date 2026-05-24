@@ -18,6 +18,7 @@
 - 长任务不要放进 GUI 线程。
 - 如果能力只是 scaffold，必须明确标注。
 - 完成后运行 `.\tools\harness-check.ps1`。
+- 如果涉及乱码或编码，额外运行 `.\tools\encoding-check.ps1`。
 
 任务：
 
@@ -41,6 +42,7 @@
 - 中文文本不能乱码。
 - 检查中文文本时显式按 UTF-8 读取，不要根据 PowerShell 默认编码输出判断文件损坏。
 - 完成后运行 `.\tools\harness-check.ps1`。
+- 如果涉及乱码或编码，额外运行 `.\tools\encoding-check.ps1`。
 
 任务：
 

@@ -51,6 +51,12 @@ For context inspection, run:
 .\tools\harness-context.ps1
 ```
 
+For encoding validation, run:
+
+```powershell
+.\tools\encoding-check.ps1
+```
+
 Final responses should include:
 
 - What changed.

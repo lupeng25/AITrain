@@ -35,3 +35,7 @@ Rules:
 Before finalizing code changes, run:
 
 .\tools\harness-check.ps1
+
+For encoding-only checks, run:
+
+.\tools\encoding-check.ps1

@@ -45,6 +45,7 @@ git diff --check
 如果本次任务涉及编码、中文乱码、文件名或文档读取问题，还需要用显式 UTF-8 读取至少一个相关中文文件确认显示正常，例如：
 
 ```powershell
+.\tools\encoding-check.ps1
 Get-Content -LiteralPath HARNESS.md -Encoding UTF8 -TotalCount 5
 git -c core.quotepath=false ls-files | Select-String -Pattern 'AITrainStudio'
 ```

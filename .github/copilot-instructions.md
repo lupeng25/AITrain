@@ -34,6 +34,12 @@ Use:
 .\tools\harness-check.ps1
 ```
 
+For encoding-only checks, use:
+
+```powershell
+.\tools\encoding-check.ps1
+```
+
 Expected successful result:
 
 ```text

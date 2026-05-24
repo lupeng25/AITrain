@@ -18,7 +18,7 @@ $outputFullPath = if ([System.IO.Path]::IsPathRooted($OutputPath)) {
 }
 
 if ((Test-Path -LiteralPath $outputFullPath) -and -not $Force) {
-    $existing = Get-Content -LiteralPath $outputFullPath -Raw | ConvertFrom-Json
+    $existing = Get-Content -LiteralPath $outputFullPath -Encoding UTF8 -Raw | ConvertFrom-Json
     if (-not $existing.publicKey -or -not $existing.privateKey) {
         throw "Existing key file is missing publicKey/privateKey: $outputFullPath"
     }

@@ -1,0 +1,12 @@
+root = true
+
+[*]
+charset = utf-8
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{bat,cmd,ps1}]
+end_of_line = crlf
+
+[*.{cpp,h,hpp,c,cmake,txt,md,json,xml,ts,py,yml,yaml,iss,in}]
+charset = utf-8

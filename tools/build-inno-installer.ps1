@@ -54,7 +54,7 @@ function Find-InnoCompiler {
 
 function Read-CMakeProjectVersion {
     $cmakePath = Join-Path $root "CMakeLists.txt"
-    $cmakeText = Get-Content -LiteralPath $cmakePath -Raw
+    $cmakeText = Get-Content -LiteralPath $cmakePath -Encoding UTF8 -Raw
     $match = [regex]::Match($cmakeText, 'project\s*\(\s*AITrainStudio\s+VERSION\s+([0-9]+(?:\.[0-9]+){1,3})', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
     if (-not $match.Success) {
         throw "Unable to read AITrainStudio project version from CMakeLists.txt"

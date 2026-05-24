@@ -57,6 +57,10 @@ if (-not (Test-Path $qt)) {
 }
 
 Set-Location $root
+
+Write-Host "Harness check: encoding" -ForegroundColor Cyan
+& (Join-Path $PSScriptRoot "encoding-check.ps1") -IncludeUntracked
+
 Write-AITrainToolchainSelection -VcVars $vcvars -QtRoot $qt
 
 $cachedCompiler = Get-CachedCxxCompiler -CachePath (Join-Path $buildPath "CMakeCache.txt")
@@ -92,7 +96,7 @@ if ($LASTEXITCODE -ne 0) {
         $testLogs = Get-ChildItem -LiteralPath (Join-Path $root "$buildDir\tests") -Filter "*_ctest.txt" -ErrorAction SilentlyContinue
         foreach ($testLog in $testLogs) {
             Write-Host ("Harness check: {0} log tail" -f $testLog.Name) -ForegroundColor Yellow
-            Get-Content -LiteralPath $testLog.FullName -Tail 120
+            Get-Content -LiteralPath $testLog.FullName -Encoding UTF8 -Tail 120
         }
         throw "Tests failed with exit code $LASTEXITCODE"
     }

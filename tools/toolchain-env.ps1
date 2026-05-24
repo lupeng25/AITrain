@@ -95,7 +95,7 @@ function Get-AITrainBuildCommandPrefix {
     $qtBin = Join-Path $QtRoot "bin"
     $qtPlugins = Join-Path $QtRoot "plugins"
     $qtPlatforms = Join-Path $qtPlugins "platforms"
-    return "set `"PATH=$qtBin;%PATH%`" && set `"QT_PLUGIN_PATH=$qtPlugins`" && set `"QT_QPA_PLATFORM_PLUGIN_PATH=$qtPlatforms`" && call `"$VcVars`" >nul"
+    return "set `"VSLANG=1033`" && set `"PATH=$qtBin;%PATH%`" && set `"QT_PLUGIN_PATH=$qtPlugins`" && set `"QT_QPA_PLATFORM_PLUGIN_PATH=$qtPlatforms`" && call `"$VcVars`" >nul"
 }
 
 function Set-AITrainQtRuntimeEnvironment {
