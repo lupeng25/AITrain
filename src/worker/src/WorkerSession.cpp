@@ -6,6 +6,7 @@
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/JsonProtocol.h"
 #include "aitrain/core/ProductWorkflow.h"
+#include "aitrain/core/WorkerProtocol.h"
 
 #include <QDateTime>
 #include <QCoreApplication>
@@ -24,6 +25,8 @@
 #include <QThread>
 
 using namespace worker_support;
+namespace wp = aitrain::worker_protocol;
+
 WorkerSession::WorkerSession(QObject* parent)
     : QObject(parent)
 {
@@ -40,8 +43,8 @@ bool WorkerSession::connectToServer(const QString& serverName)
     if (connected) {
         QTimer::singleShot(0, this, [this]() {
             QJsonObject payload;
-            payload.insert(QStringLiteral("message"), QStringLiteral("Worker ready"));
-            send(QStringLiteral("ready"), payload);
+            payload.insert(wp::field::message(), QStringLiteral("Worker ready"));
+            send(wp::event::ready(), payload);
         });
     }
     return connected;
@@ -71,54 +74,51 @@ void WorkerSession::readLines()
 
 void WorkerSession::handleMessage(const QString& type, const QJsonObject& payload)
 {
-    if (type != QStringLiteral("heartbeat")
-        && type != QStringLiteral("cancel")
-        && type != QStringLiteral("pause")
-        && type != QStringLiteral("resume")) {
+    if (!wp::isControlCommand(type)) {
         activeCommand_ = type;
-        activeTaskId_ = payload.value(QStringLiteral("taskId")).toString(activeTaskId_);
-        activeOutputPath_ = payload.value(QStringLiteral("outputPath")).toString();
+        activeTaskId_ = payload.value(wp::field::taskId()).toString(activeTaskId_);
+        activeOutputPath_ = payload.value(wp::field::outputPath()).toString();
         activeReportPath_.clear();
     }
-    if (type == QStringLiteral("startTrain")) {
+    if (type == wp::command::startTrain()) {
         startTraining(aitrain::TrainingRequest::fromJson(payload));
-    } else if (type == QStringLiteral("pause")) {
+    } else if (type == wp::command::pause()) {
         pauseTraining();
-    } else if (type == QStringLiteral("resume")) {
+    } else if (type == wp::command::resume()) {
         resumeTraining();
-    } else if (type == QStringLiteral("heartbeat")) {
+    } else if (type == wp::command::heartbeat()) {
         sendHeartbeat();
-    } else if (type == QStringLiteral("environmentCheck")) {
+    } else if (type == wp::command::environmentCheck()) {
         runEnvironmentCheck(payload);
-    } else if (type == QStringLiteral("validateDataset")) {
+    } else if (type == wp::command::validateDataset()) {
         validateDataset(payload);
-    } else if (type == QStringLiteral("splitDataset")) {
+    } else if (type == wp::command::splitDataset()) {
         splitDataset(payload);
-    } else if (type == QStringLiteral("convertDataset")) {
+    } else if (type == wp::command::convertDataset()) {
         convertDataset(payload);
-    } else if (type == QStringLiteral("curateDataset")) {
+    } else if (type == wp::command::curateDataset()) {
         curateDataset(payload);
-    } else if (type == QStringLiteral("createDatasetSnapshot")) {
+    } else if (type == wp::command::createDatasetSnapshot()) {
         createDatasetSnapshot(payload);
-    } else if (type == QStringLiteral("evaluateModel")) {
+    } else if (type == wp::command::evaluateModel()) {
         evaluateModel(payload);
-    } else if (type == QStringLiteral("benchmarkModel")) {
+    } else if (type == wp::command::benchmarkModel()) {
         benchmarkModel(payload);
-    } else if (type == QStringLiteral("runLocalPipeline")) {
+    } else if (type == wp::command::runLocalPipeline()) {
         runLocalPipeline(payload);
-    } else if (type == QStringLiteral("generateDeliveryReport")) {
+    } else if (type == wp::command::generateDeliveryReport()) {
         generateDeliveryReport(payload);
-    } else if (type == QStringLiteral("runCustomerOcrAcceptance")) {
+    } else if (type == wp::command::runCustomerOcrAcceptance()) {
         runCustomerOcrAcceptance(payload);
-    } else if (type == QStringLiteral("collectDiagnostics")) {
+    } else if (type == wp::command::collectDiagnostics()) {
         collectDiagnostics(payload);
-    } else if (type == QStringLiteral("validateDeploymentArtifact")) {
+    } else if (type == wp::command::validateDeploymentArtifact()) {
         validateDeploymentArtifact(payload);
-    } else if (type == QStringLiteral("exportModel")) {
+    } else if (type == wp::command::exportModel()) {
         exportModel(payload);
-    } else if (type == QStringLiteral("infer")) {
+    } else if (type == wp::command::infer()) {
         runInference(payload);
-    } else if (type == QStringLiteral("cancel")) {
+    } else if (type == wp::command::cancel()) {
         running_ = false;
         paused_ = false;
         canceled_ = true;
@@ -147,12 +147,12 @@ void WorkerSession::handleSocketDisconnected()
 void WorkerSession::sendHeartbeat()
 {
     QJsonObject payload;
-    payload.insert(QStringLiteral("taskId"), request_.taskId);
+    payload.insert(wp::field::taskId(), request_.taskId);
     payload.insert(QStringLiteral("running"), running_);
     payload.insert(QStringLiteral("paused"), paused_);
     payload.insert(QStringLiteral("step"), step_);
     payload.insert(QStringLiteral("timestamp"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
-    send(QStringLiteral("heartbeat"), payload);
+    send(wp::event::heartbeat(), payload);
 }
 
 void WorkerSession::send(const QString& type, const QJsonObject& payload)
@@ -192,7 +192,7 @@ bool WorkerSession::pollPendingCancel(int timeoutMs)
             if (!aitrain::protocol::decodeMessage(line, &type, &payload, &requestId, &error)) {
                 continue;
             }
-            if (type == QStringLiteral("cancel")) {
+            if (type == wp::command::cancel()) {
                 running_ = false;
                 paused_ = false;
                 canceled_ = true;
@@ -200,7 +200,7 @@ bool WorkerSession::pollPendingCancel(int timeoutMs)
                 shutdownPythonTrainer(QStringLiteral("Canceled by user"), true);
                 return true;
             }
-            if (type == QStringLiteral("heartbeat")) {
+            if (type == wp::command::heartbeat()) {
                 sendHeartbeat();
             }
         }
@@ -219,10 +219,10 @@ void WorkerSession::shutdownPythonTrainer(const QString& reason, bool notifyClie
     const auto emitShutdownLog = [this, notifyClient, &taskId](const QString& message) {
         if (notifyClient && socket_.state() == QLocalSocket::ConnectedState) {
             QJsonObject payload;
-            payload.insert(QStringLiteral("taskId"), taskId);
-            payload.insert(QStringLiteral("command"), activeCommand_);
-            payload.insert(QStringLiteral("message"), message);
-            send(QStringLiteral("log"), payload);
+            payload.insert(wp::field::taskId(), taskId);
+            payload.insert(wp::field::command(), activeCommand_);
+            payload.insert(wp::field::message(), message);
+            send(wp::event::log(), payload);
         } else {
             qWarning().noquote() << message;
         }
@@ -245,19 +245,19 @@ void WorkerSession::sendCanceledAndFinish(const QString& taskId, const QString& 
     timer_.stop();
 
     QJsonObject payload;
-    payload.insert(QStringLiteral("taskId"), taskId.isEmpty() ? request_.taskId : taskId);
-    payload.insert(QStringLiteral("command"), activeCommand_);
-    payload.insert(QStringLiteral("status"), QStringLiteral("canceled"));
-    payload.insert(QStringLiteral("errorCode"), QStringLiteral("canceled"));
-    payload.insert(QStringLiteral("message"), message.isEmpty() ? QStringLiteral("Canceled by user") : message);
+    payload.insert(wp::field::taskId(), taskId.isEmpty() ? request_.taskId : taskId);
+    payload.insert(wp::field::command(), activeCommand_);
+    payload.insert(wp::field::status(), QStringLiteral("canceled"));
+    payload.insert(wp::field::errorCode(), QStringLiteral("canceled"));
+    payload.insert(wp::field::message(), message.isEmpty() ? QStringLiteral("Canceled by user") : message);
     if (!activeReportPath_.isEmpty()) {
-        payload.insert(QStringLiteral("reportPath"), activeReportPath_);
+        payload.insert(wp::field::reportPath(), activeReportPath_);
     } else if (!activeOutputPath_.isEmpty()) {
-        payload.insert(QStringLiteral("outputPath"), activeOutputPath_);
+        payload.insert(wp::field::outputPath(), activeOutputPath_);
     } else if (!request_.outputPath.isEmpty()) {
-        payload.insert(QStringLiteral("outputPath"), request_.outputPath);
+        payload.insert(wp::field::outputPath(), request_.outputPath);
     }
-    send(QStringLiteral("canceled"), payload);
+    send(wp::event::canceled(), payload);
     finishSession();
 }
 
@@ -293,31 +293,31 @@ void WorkerSession::failWithDetails(const QString& message, const QString& error
     paused_ = false;
     timer_.stop();
     QJsonObject payload;
-    payload.insert(QStringLiteral("taskId"), activeTaskId_.isEmpty() ? request_.taskId : activeTaskId_);
-    payload.insert(QStringLiteral("command"), activeCommand_);
-    payload.insert(QStringLiteral("status"), QStringLiteral("failed"));
-    payload.insert(QStringLiteral("errorCode"), errorCode.isEmpty() ? QStringLiteral("worker_failed") : errorCode);
-    payload.insert(QStringLiteral("message"), message);
+    payload.insert(wp::field::taskId(), activeTaskId_.isEmpty() ? request_.taskId : activeTaskId_);
+    payload.insert(wp::field::command(), activeCommand_);
+    payload.insert(wp::field::status(), QStringLiteral("failed"));
+    payload.insert(wp::field::errorCode(), errorCode.isEmpty() ? QStringLiteral("worker_failed") : errorCode);
+    payload.insert(wp::field::message(), message);
     if (!details.isEmpty()) {
         payload.insert(QStringLiteral("details"), details);
-        if (details.contains(QStringLiteral("reportPath"))) {
-            payload.insert(QStringLiteral("reportPath"), details.value(QStringLiteral("reportPath")).toString());
+        if (details.contains(wp::field::reportPath())) {
+            payload.insert(wp::field::reportPath(), details.value(wp::field::reportPath()).toString());
         }
-        if (details.contains(QStringLiteral("outputPath"))) {
-            payload.insert(QStringLiteral("outputPath"), details.value(QStringLiteral("outputPath")).toString());
+        if (details.contains(wp::field::outputPath())) {
+            payload.insert(wp::field::outputPath(), details.value(wp::field::outputPath()).toString());
         }
     }
-    if (!payload.contains(QStringLiteral("reportPath")) && !activeReportPath_.isEmpty()) {
-        payload.insert(QStringLiteral("reportPath"), activeReportPath_);
+    if (!payload.contains(wp::field::reportPath()) && !activeReportPath_.isEmpty()) {
+        payload.insert(wp::field::reportPath(), activeReportPath_);
     }
-    if (!payload.contains(QStringLiteral("outputPath"))) {
+    if (!payload.contains(wp::field::outputPath())) {
         if (!activeOutputPath_.isEmpty()) {
-            payload.insert(QStringLiteral("outputPath"), activeOutputPath_);
+            payload.insert(wp::field::outputPath(), activeOutputPath_);
         } else if (!request_.outputPath.isEmpty()) {
-            payload.insert(QStringLiteral("outputPath"), request_.outputPath);
+            payload.insert(wp::field::outputPath(), request_.outputPath);
         }
     }
-    send(QStringLiteral("failed"), payload);
+    send(wp::event::failed(), payload);
     finishSession();
 }
 
@@ -340,13 +340,13 @@ void WorkerSession::complete()
     }
 
     QJsonObject artifact;
-    artifact.insert(QStringLiteral("taskId"), request_.taskId);
+    artifact.insert(wp::field::taskId(), request_.taskId);
     artifact.insert(QStringLiteral("kind"), QStringLiteral("checkpoint"));
     artifact.insert(QStringLiteral("path"), checkpointPath);
-    send(QStringLiteral("artifact"), artifact);
+    send(wp::event::artifact(), artifact);
 
     QJsonObject payload;
-    payload.insert(QStringLiteral("message"), QStringLiteral("Training workflow completed"));
-    send(QStringLiteral("completed"), payload);
+    payload.insert(wp::field::message(), QStringLiteral("Training workflow completed"));
+    send(wp::event::completed(), payload);
     finishSession();
 }

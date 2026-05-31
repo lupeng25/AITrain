@@ -509,13 +509,13 @@ void MainWindow::updateDashboardSummary()
 
 void MainWindow::updateTrainingSelectionSummary()
 {
-    const QString datasetPath = !currentDatasetPath_.isEmpty()
-        ? currentDatasetPath_
+    const QString datasetPath = !state_.dataset.currentPath.isEmpty()
+        ? state_.dataset.currentPath
         : QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
-    const QString datasetFormat = !currentDatasetFormat_.isEmpty()
-        ? currentDatasetFormat_
+    const QString datasetFormat = !state_.dataset.currentFormat.isEmpty()
+        ? state_.dataset.currentFormat
         : currentDatasetFormat();
-    const QString state = currentDatasetValid_ ? uiText("已校验") : uiText("待校验");
+    const QString state = state_.dataset.currentValid ? uiText("已校验") : uiText("待校验");
     const QString fullPathText = datasetPath.isEmpty() ? QString() : QDir::toNativeSeparators(datasetPath);
     const QString datasetName = datasetPath.isEmpty() ? QString() : QFileInfo(datasetPath).fileName();
     const QString headerPathText = datasetPath.isEmpty()
@@ -524,7 +524,7 @@ void MainWindow::updateTrainingSelectionSummary()
     const QString detailPathText = datasetPath.isEmpty() ? uiText("未选择") : compactPathForStatus(datasetPath, 92);
     QString snapshotText = uiText("快照：未选择数据集");
     QString snapshotManifestPath;
-    bool datasetReady = currentDatasetValid_ && currentDatasetPath_ == datasetPath && currentDatasetFormat_ == datasetFormat;
+    bool datasetReady = state_.dataset.currentValid && state_.dataset.currentPath == datasetPath && state_.dataset.currentFormat == datasetFormat;
     if (!datasetPath.isEmpty() && repository_.isOpen()) {
         QString error;
         const aitrain::DatasetRecord dataset = repository_.datasetByRootPath(datasetPath, &error);
@@ -595,8 +595,8 @@ void MainWindow::refreshTrainingDefaults()
         return;
     }
 
-    const QString datasetFormat = !currentDatasetFormat_.isEmpty()
-        ? currentDatasetFormat_
+    const QString datasetFormat = !state_.dataset.currentFormat.isEmpty()
+        ? state_.dataset.currentFormat
         : currentDatasetFormat();
     QString preferredPlugin;
     QString preferredTask;

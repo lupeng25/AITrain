@@ -374,13 +374,13 @@ void MainWindow::refreshAfterAnnotation()
             datasetFormatCombo_->setCurrentIndex(index);
         }
     }
-    currentDatasetPath_ = datasetPath;
+    state_.dataset.currentPath = datasetPath;
     const QString selectedFormat = currentDatasetFormat();
-    currentDatasetFormat_ = selectedFormat.isEmpty() ? detectedFormat : selectedFormat;
-    currentDatasetValid_ = false;
+    state_.dataset.currentFormat = selectedFormat.isEmpty() ? detectedFormat : selectedFormat;
+    state_.dataset.currentValid = false;
     updateTrainingSelectionSummary();
     refreshTrainingDefaults();
-    if (!latestQualityFixListPath_.isEmpty() || !latestQualityReportPath_.isEmpty()) {
+    if (!state_.dataset.latestQualityFixListPath.isEmpty() || !state_.dataset.latestQualityReportPath.isEmpty()) {
         curateDataset();
         return;
     }
@@ -427,7 +427,7 @@ void MainWindow::updateDatasetRepairLoopFromQuality(const QJsonObject& payload)
     const int warningCount = severityCounts.value(QStringLiteral("warning")).toInt();
     const int problemCount = summary.value(QStringLiteral("problemSampleCount")).toInt();
     const int duplicateCount = summary.value(QStringLiteral("duplicateImageCount")).toInt();
-    const QString fixList = payload.value(QStringLiteral("xAnyLabelingFixListPath")).toString(latestQualityFixListPath_);
+    const QString fixList = payload.value(QStringLiteral("xAnyLabelingFixListPath")).toString(state_.dataset.latestQualityFixListPath);
     const QString readinessStatus = readiness.value(QStringLiteral("status")).toString(canTrain ? QStringLiteral("ready") : QStringLiteral("blocked"));
 
     QVector<QStringList> rows;
@@ -474,7 +474,7 @@ void MainWindow::updateDatasetRepairLoopFromValidation(const QJsonObject& payloa
                : uiText("仍有 %1 个校验问题需要修复。").arg(issueCount)));
     rows.append(QStringList()
         << uiText("质量报告")
-        << (!latestQualityReportPath_.isEmpty() ? uiText("建议刷新") : uiText("未生成"))
+        << (!state_.dataset.latestQualityReportPath.isEmpty() ? uiText("建议刷新") : uiText("未生成"))
         << (ok ? uiText("运行质量报告可更新训练 readiness 和修复清单。")
                : uiText("先修复校验错误，再重新生成质量报告。")));
     rows.append(QStringList()
@@ -710,7 +710,7 @@ QString MainWindow::createRepositoryTask(aitrain::TaskKind kind,
         QMessageBox::critical(this, uiText("任务"), error);
         return QString();
     }
-    currentTaskId_ = taskId;
+    state_.training.currentTaskId = taskId;
     updateRecentTasks();
     return taskId;
 }
@@ -835,7 +835,7 @@ void MainWindow::registerPipelineModelVersion(const QJsonObject& payload)
         return;
     }
 
-    const QString sourceTaskId = payload.value(QStringLiteral("taskId")).toString(currentTaskId_);
+    const QString sourceTaskId = payload.value(QStringLiteral("taskId")).toString(state_.training.currentTaskId);
     const QString exportPath = payload.value(QStringLiteral("exportPath")).toString();
     const QString modelPath = exportPath.isEmpty()
         ? payload.value(QStringLiteral("modelPath")).toString()
@@ -1163,9 +1163,9 @@ void MainWindow::updateDatasetValidationResult(const QJsonObject& payload)
     const QString format = payload.value(QStringLiteral("format")).toString();
     const QJsonArray issues = payload.value(QStringLiteral("issues")).toArray();
 
-    currentDatasetPath_ = datasetPath;
-    currentDatasetFormat_ = format;
-    currentDatasetValid_ = ok;
+    state_.dataset.currentPath = datasetPath;
+    state_.dataset.currentFormat = format;
+    state_.dataset.currentValid = ok;
 
     if (validationSummaryLabel_) {
         validationSummaryLabel_->setText(ok
@@ -1242,9 +1242,9 @@ void MainWindow::updateDatasetValidationResult(const QJsonObject& payload)
 void MainWindow::updateDatasetConversionResult(const QJsonObject& payload)
 {
     const QString taskId = payload.value(QStringLiteral("taskId")).toString();
-    if (!currentDatasetConversionTaskId_.isEmpty()
+    if (!state_.dataset.currentConversionTaskId.isEmpty()
         && !taskId.isEmpty()
-        && taskId != currentDatasetConversionTaskId_) {
+        && taskId != state_.dataset.currentConversionTaskId) {
         return;
     }
 
@@ -1300,7 +1300,7 @@ void MainWindow::updateDatasetConversionResult(const QJsonObject& payload)
 
     appendDatasetConversionLog(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Indented)));
     setDatasetConversionFormRunning(false);
-    currentDatasetConversionTaskId_.clear();
+    state_.dataset.currentConversionTaskId.clear();
 }
 
 void MainWindow::updateDatasetSplitResult(const QJsonObject& payload)
@@ -1357,9 +1357,9 @@ void MainWindow::updateDatasetSplitResult(const QJsonObject& payload)
         updateDatasetList();
         datasetPathEdit_->setText(QDir::toNativeSeparators(outputPath));
         setComboCurrentData(datasetFormatCombo_, format);
-        currentDatasetPath_ = outputPath;
-        currentDatasetFormat_ = format;
-        currentDatasetValid_ = true;
+        state_.dataset.currentPath = outputPath;
+        state_.dataset.currentFormat = format;
+        state_.dataset.currentValid = true;
     }
 
     updateTrainingSelectionSummary();

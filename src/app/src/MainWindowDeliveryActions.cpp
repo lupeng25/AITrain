@@ -277,7 +277,7 @@ void MainWindow::validateDeploymentArtifact()
         if (!taskId.isEmpty() && repository_.isOpen()) {
             QString taskError;
             repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
-            currentTaskId_.clear();
+            state_.training.currentTaskId.clear();
             updateRecentTasks();
         }
         QMessageBox::critical(this, uiText("部署验证"), error);
@@ -336,7 +336,7 @@ void MainWindow::runCustomerOcrAcceptance()
         if (!taskId.isEmpty() && repository_.isOpen()) {
             QString taskError;
             repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
-            currentTaskId_.clear();
+            state_.training.currentTaskId.clear();
             updateRecentTasks();
         }
         QMessageBox::critical(this, uiText("OCR 验收"), error);
@@ -427,7 +427,7 @@ void MainWindow::collectDiagnosticsBundle()
         if (!taskId.isEmpty() && repository_.isOpen()) {
             QString taskError;
             repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
-            currentTaskId_.clear();
+            state_.training.currentTaskId.clear();
             updateRecentTasks();
         }
         QMessageBox::critical(this, uiText("诊断包"), error);
@@ -511,15 +511,15 @@ void MainWindow::generateDeliveryReportFromSelectedArtifact()
     context.insert(QStringLiteral("projectName"), currentProjectName_);
     context.insert(QStringLiteral("projectPath"), currentProjectPath_);
     context.insert(QStringLiteral("modelPath"), modelPath);
-    context.insert(QStringLiteral("datasetPath"), currentDatasetPath_);
-    context.insert(QStringLiteral("datasetFormat"), currentDatasetFormat_);
+    context.insert(QStringLiteral("datasetPath"), state_.dataset.currentPath);
+    context.insert(QStringLiteral("datasetFormat"), state_.dataset.currentFormat);
     context.insert(QStringLiteral("taskType"), currentTaskType());
     context.insert(QStringLiteral("trainingBackend"), trainingBackendCombo_ ? trainingBackendCombo_->currentData().toString() : QString());
     context.insert(QStringLiteral("modelPreset"), modelPresetCombo_ ? modelPresetCombo_->currentText().trimmed() : QString());
     context.insert(QStringLiteral("sourceTaskId"), selectedTaskId());
-    if (repository_.isOpen() && !currentDatasetPath_.isEmpty()) {
+    if (repository_.isOpen() && !state_.dataset.currentPath.isEmpty()) {
         QString snapshotError;
-        const aitrain::DatasetRecord dataset = repository_.datasetByRootPath(currentDatasetPath_, &snapshotError);
+        const aitrain::DatasetRecord dataset = repository_.datasetByRootPath(state_.dataset.currentPath, &snapshotError);
         const aitrain::DatasetSnapshotRecord snapshot = repository_.latestDatasetSnapshot(dataset.id, &snapshotError);
         if (snapshot.id > 0) {
             context.insert(QStringLiteral("datasetSnapshotId"), snapshot.id);
@@ -532,7 +532,7 @@ void MainWindow::generateDeliveryReportFromSelectedArtifact()
         if (!taskId.isEmpty() && repository_.isOpen()) {
             QString taskError;
             repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
-            currentTaskId_.clear();
+            state_.training.currentTaskId.clear();
             updateRecentTasks();
         }
         QMessageBox::critical(this, uiText("交付报告"), error);

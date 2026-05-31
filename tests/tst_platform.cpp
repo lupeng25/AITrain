@@ -38,6 +38,179 @@ private slots:
         QVERIFY(error.isEmpty());
     }
 
+    void workerProtocolConstantsAndBuildersStayWireCompatible()
+    {
+        namespace wp = aitrain::worker_protocol;
+
+        const QVector<QPair<QString, QString>> commands = {
+            qMakePair(wp::command::startTrain(), QStringLiteral("startTrain")),
+            qMakePair(wp::command::pause(), QStringLiteral("pause")),
+            qMakePair(wp::command::resume(), QStringLiteral("resume")),
+            qMakePair(wp::command::heartbeat(), QStringLiteral("heartbeat")),
+            qMakePair(wp::command::environmentCheck(), QStringLiteral("environmentCheck")),
+            qMakePair(wp::command::validateDataset(), QStringLiteral("validateDataset")),
+            qMakePair(wp::command::splitDataset(), QStringLiteral("splitDataset")),
+            qMakePair(wp::command::convertDataset(), QStringLiteral("convertDataset")),
+            qMakePair(wp::command::curateDataset(), QStringLiteral("curateDataset")),
+            qMakePair(wp::command::createDatasetSnapshot(), QStringLiteral("createDatasetSnapshot")),
+            qMakePair(wp::command::evaluateModel(), QStringLiteral("evaluateModel")),
+            qMakePair(wp::command::benchmarkModel(), QStringLiteral("benchmarkModel")),
+            qMakePair(wp::command::runLocalPipeline(), QStringLiteral("runLocalPipeline")),
+            qMakePair(wp::command::generateDeliveryReport(), QStringLiteral("generateDeliveryReport")),
+            qMakePair(wp::command::runCustomerOcrAcceptance(), QStringLiteral("runCustomerOcrAcceptance")),
+            qMakePair(wp::command::collectDiagnostics(), QStringLiteral("collectDiagnostics")),
+            qMakePair(wp::command::validateDeploymentArtifact(), QStringLiteral("validateDeploymentArtifact")),
+            qMakePair(wp::command::exportModel(), QStringLiteral("exportModel")),
+            qMakePair(wp::command::infer(), QStringLiteral("infer")),
+            qMakePair(wp::command::cancel(), QStringLiteral("cancel"))
+        };
+        for (const auto& command : commands) {
+            QCOMPARE(command.first, command.second);
+        }
+
+        const QVector<QPair<QString, QString>> events = {
+            qMakePair(wp::event::ready(), QStringLiteral("ready")),
+            qMakePair(wp::event::log(), QStringLiteral("log")),
+            qMakePair(wp::event::heartbeat(), QStringLiteral("heartbeat")),
+            qMakePair(wp::event::progress(), QStringLiteral("progress")),
+            qMakePair(wp::event::metric(), QStringLiteral("metric")),
+            qMakePair(wp::event::artifact(), QStringLiteral("artifact")),
+            qMakePair(wp::event::completed(), QStringLiteral("completed")),
+            qMakePair(wp::event::paused(), QStringLiteral("paused")),
+            qMakePair(wp::event::resumed(), QStringLiteral("resumed")),
+            qMakePair(wp::event::canceled(), QStringLiteral("canceled")),
+            qMakePair(wp::event::failed(), QStringLiteral("failed")),
+            qMakePair(wp::event::environmentCheck(), QStringLiteral("environmentCheck")),
+            qMakePair(wp::event::datasetValidation(), QStringLiteral("datasetValidation")),
+            qMakePair(wp::event::datasetSplit(), QStringLiteral("datasetSplit")),
+            qMakePair(wp::event::datasetConversion(), QStringLiteral("datasetConversion")),
+            qMakePair(wp::event::datasetQuality(), QStringLiteral("datasetQuality")),
+            qMakePair(wp::event::datasetSnapshot(), QStringLiteral("datasetSnapshot")),
+            qMakePair(wp::event::evaluationReport(), QStringLiteral("evaluationReport")),
+            qMakePair(wp::event::benchmarkReport(), QStringLiteral("benchmarkReport")),
+            qMakePair(wp::event::pipelinePlan(), QStringLiteral("pipelinePlan")),
+            qMakePair(wp::event::deliveryReport(), QStringLiteral("deliveryReport")),
+            qMakePair(wp::event::modelExport(), QStringLiteral("modelExport")),
+            qMakePair(wp::event::deploymentValidation(), QStringLiteral("deploymentValidation")),
+            qMakePair(wp::event::inferenceResult(), QStringLiteral("inferenceResult")),
+            qMakePair(wp::event::customerOcrAcceptance(), QStringLiteral("customerOcrAcceptance")),
+            qMakePair(wp::event::diagnosticBundle(), QStringLiteral("diagnosticBundle"))
+        };
+        for (const auto& event : events) {
+            QCOMPARE(event.first, event.second);
+        }
+
+        QVERIFY(wp::isControlCommand(wp::command::cancel()));
+        QVERIFY(wp::isControlCommand(wp::command::heartbeat()));
+        QVERIFY(wp::isControlCommand(wp::command::pause()));
+        QVERIFY(wp::isControlCommand(wp::command::resume()));
+        QVERIFY(!wp::isControlCommand(wp::command::exportModel()));
+        QVERIFY(wp::isTerminalEvent(wp::event::completed()));
+        QVERIFY(wp::isTerminalEvent(wp::event::failed()));
+        QVERIFY(wp::isTerminalEvent(wp::event::canceled()));
+        QVERIFY(!wp::isTerminalEvent(wp::event::resumed()));
+        QVERIFY(wp::isTaskStateEvent(wp::event::paused()));
+        QVERIFY(wp::isTaskStateEvent(wp::event::resumed()));
+        QCOMPARE(wp::taskStateForEvent(wp::event::completed()), aitrain::TaskState::Completed);
+        QCOMPARE(wp::taskStateForEvent(wp::event::failed()), aitrain::TaskState::Failed);
+        QCOMPARE(wp::taskStateForEvent(wp::event::canceled()), aitrain::TaskState::Canceled);
+        QCOMPARE(wp::taskStateForEvent(wp::event::paused()), aitrain::TaskState::Paused);
+        QCOMPARE(wp::taskStateForEvent(wp::event::resumed()), aitrain::TaskState::Running);
+        QCOMPARE(wp::taskStateForEvent(wp::event::log(), aitrain::TaskState::Queued), aitrain::TaskState::Queued);
+
+        QJsonObject options;
+        options.insert(QStringLiteral("dryRun"), true);
+        QJsonObject context;
+        context.insert(QStringLiteral("customer"), QStringLiteral("fixture"));
+
+        const QString taskId = QStringLiteral("task-1");
+        const QString datasetPath = QStringLiteral("dataset");
+        const QString sourcePath = QStringLiteral("input.json");
+        const QString outputPath = QStringLiteral("out");
+        const QString modelPath = QStringLiteral("model.onnx");
+        const QString checkpointPath = QStringLiteral("best.pt");
+        const QString imagePath = QStringLiteral("sample.png");
+        const QString format = QStringLiteral("onnx");
+        const QString sourceFormat = QStringLiteral("coco_json");
+        const QString targetFormat = QStringLiteral("yolo_detection");
+        const QString taskType = QStringLiteral("detection");
+        const QString templateId = QStringLiteral("train-evaluate-export-register");
+
+        const auto expectCommonDatasetPayload = [&options, &taskId, &datasetPath, &outputPath, &format](const QJsonObject& payload) {
+            QCOMPARE(payload.value(QStringLiteral("taskId")).toString(), taskId);
+            QCOMPARE(payload.value(QStringLiteral("datasetPath")).toString(), datasetPath);
+            QCOMPARE(payload.value(QStringLiteral("outputPath")).toString(), outputPath);
+            QCOMPARE(payload.value(QStringLiteral("format")).toString(), format);
+            QCOMPARE(payload.value(QStringLiteral("options")).toObject().value(QStringLiteral("dryRun")).toBool(), true);
+        };
+
+        expectCommonDatasetPayload(wp::datasetValidationRequest(taskId, datasetPath, format, options, outputPath));
+        expectCommonDatasetPayload(wp::datasetSplitRequest(taskId, datasetPath, outputPath, format, options));
+        expectCommonDatasetPayload(wp::datasetCurationRequest(taskId, datasetPath, outputPath, format, options));
+        expectCommonDatasetPayload(wp::datasetSnapshotRequest(taskId, datasetPath, outputPath, format, options));
+
+        const QJsonObject conversion = wp::datasetConversionRequest(taskId, sourcePath, outputPath, sourceFormat, targetFormat, options);
+        QCOMPARE(conversion.value(QStringLiteral("taskId")).toString(), QStringLiteral("task-1"));
+        QCOMPARE(conversion.value(QStringLiteral("sourcePath")).toString(), sourcePath);
+        QCOMPARE(conversion.value(QStringLiteral("outputPath")).toString(), outputPath);
+        QCOMPARE(conversion.value(QStringLiteral("sourceFormat")).toString(), sourceFormat);
+        QCOMPARE(conversion.value(QStringLiteral("targetFormat")).toString(), targetFormat);
+        QCOMPARE(conversion.value(QStringLiteral("options")).toObject().value(QStringLiteral("dryRun")).toBool(), true);
+
+        const QJsonObject evaluation = wp::modelEvaluationRequest(taskId, modelPath, datasetPath, outputPath, taskType, options);
+        QCOMPARE(evaluation.value(QStringLiteral("taskId")).toString(), taskId);
+        QCOMPARE(evaluation.value(QStringLiteral("modelPath")).toString(), modelPath);
+        QCOMPARE(evaluation.value(QStringLiteral("datasetPath")).toString(), datasetPath);
+        QCOMPARE(evaluation.value(QStringLiteral("outputPath")).toString(), outputPath);
+        QCOMPARE(evaluation.value(QStringLiteral("taskType")).toString(), taskType);
+        QCOMPARE(evaluation.value(QStringLiteral("options")).toObject().value(QStringLiteral("dryRun")).toBool(), true);
+
+        const QJsonObject benchmark = wp::modelBenchmarkRequest(taskId, modelPath, outputPath, options);
+        QCOMPARE(benchmark.value(QStringLiteral("taskId")).toString(), taskId);
+        QCOMPARE(benchmark.value(QStringLiteral("modelPath")).toString(), modelPath);
+        QCOMPARE(benchmark.value(QStringLiteral("outputPath")).toString(), outputPath);
+        QCOMPARE(benchmark.value(QStringLiteral("options")).toObject().value(QStringLiteral("dryRun")).toBool(), true);
+
+        const QJsonObject pipeline = wp::localPipelineRequest(taskId, outputPath, templateId, options);
+        QCOMPARE(pipeline.value(QStringLiteral("taskId")).toString(), taskId);
+        QCOMPARE(pipeline.value(QStringLiteral("outputPath")).toString(), outputPath);
+        QCOMPARE(pipeline.value(QStringLiteral("templateId")).toString(), templateId);
+        QCOMPARE(pipeline.value(QStringLiteral("options")).toObject().value(QStringLiteral("dryRun")).toBool(), true);
+
+        const auto expectContextPayload = [&context, &taskId, &outputPath](const QJsonObject& payload) {
+            QCOMPARE(payload.value(QStringLiteral("taskId")).toString(), taskId);
+            QCOMPARE(payload.value(QStringLiteral("outputPath")).toString(), outputPath);
+            QCOMPARE(payload.value(QStringLiteral("context")).toObject().value(QStringLiteral("customer")).toString(), QStringLiteral("fixture"));
+        };
+        expectContextPayload(wp::deliveryReportRequest(taskId, outputPath, context));
+        expectContextPayload(wp::diagnosticsBundleRequest(taskId, outputPath, context));
+
+        const QJsonObject acceptance = wp::customerOcrAcceptanceRequest(taskId, outputPath, options);
+        QCOMPARE(acceptance.value(QStringLiteral("taskId")).toString(), taskId);
+        QCOMPARE(acceptance.value(QStringLiteral("outputPath")).toString(), outputPath);
+        QCOMPARE(acceptance.value(QStringLiteral("options")).toObject().value(QStringLiteral("dryRun")).toBool(), true);
+
+        const QJsonObject deployment = wp::deploymentValidationRequest(taskId, modelPath, outputPath, format, imagePath, options);
+        QCOMPARE(deployment.value(QStringLiteral("taskId")).toString(), taskId);
+        QCOMPARE(deployment.value(QStringLiteral("modelPath")).toString(), modelPath);
+        QCOMPARE(deployment.value(QStringLiteral("outputPath")).toString(), outputPath);
+        QCOMPARE(deployment.value(QStringLiteral("format")).toString(), format);
+        QCOMPARE(deployment.value(QStringLiteral("sampleImagePath")).toString(), imagePath);
+        QCOMPARE(deployment.value(QStringLiteral("options")).toObject().value(QStringLiteral("dryRun")).toBool(), true);
+
+        const QJsonObject exportRequest = wp::modelExportRequest(taskId, checkpointPath, outputPath, format);
+        QCOMPARE(exportRequest.value(QStringLiteral("taskId")).toString(), taskId);
+        QCOMPARE(exportRequest.value(QStringLiteral("checkpointPath")).toString(), checkpointPath);
+        QCOMPARE(exportRequest.value(QStringLiteral("outputPath")).toString(), outputPath);
+        QCOMPARE(exportRequest.value(QStringLiteral("format")).toString(), format);
+
+        const QJsonObject inference = wp::inferenceRequest(taskId, checkpointPath, imagePath, outputPath);
+        QCOMPARE(inference.value(QStringLiteral("taskId")).toString(), taskId);
+        QCOMPARE(inference.value(QStringLiteral("checkpointPath")).toString(), checkpointPath);
+        QCOMPARE(inference.value(QStringLiteral("imagePath")).toString(), imagePath);
+        QCOMPARE(inference.value(QStringLiteral("outputPath")).toString(), outputPath);
+    }
+
     void pluginManagerReleasesLoadedPluginFiles()
     {
         const QString pluginDll = builtPluginPath(QStringLiteral("DatasetInteropPlugin.dll"));

@@ -9,6 +9,8 @@ namespace aitrain {
 
 namespace {
 
+constexpr int kCurrentSchemaVersion = 1;
+
 QString sqlError(const QSqlQuery& query)
 {
     return query.lastError().text();
@@ -64,6 +66,45 @@ bool ensureColumn(QSqlDatabase& db, const QString& tableName, const QString& col
     return true;
 }
 
+bool execStatement(QSqlDatabase& db, const QString& statement, QString* error)
+{
+    QSqlQuery query(db);
+    if (!query.exec(statement)) {
+        if (error) {
+            *error = sqlError(query);
+        }
+        return false;
+    }
+    return true;
+}
+
+bool ensureSchemaMigrationTable(QSqlDatabase& db, QString* error)
+{
+    return execStatement(
+        db,
+        QStringLiteral("create table if not exists schema_migrations ("
+                       "version integer primary key,"
+                       "name text not null,"
+                       "applied_at text not null)"),
+        error);
+}
+
+bool recordBaselineMigration(QSqlDatabase& db, QString* error)
+{
+    QSqlQuery query(db);
+    query.prepare(QStringLiteral("insert or ignore into schema_migrations(version, name, applied_at) values(?, ?, ?)"));
+    query.addBindValue(kCurrentSchemaVersion);
+    query.addBindValue(QStringLiteral("baseline_current_schema"));
+    query.addBindValue(nowIso());
+    if (!query.exec()) {
+        if (error) {
+            *error = sqlError(query);
+        }
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 ProjectRepository::ProjectRepository()
@@ -108,7 +149,6 @@ bool ProjectRepository::isOpen() const
 
 bool ProjectRepository::initialize(QString* error)
 {
-    QSqlQuery query(db_);
     const QStringList statements = {
         QStringLiteral("create table if not exists projects ("
                        "id integer primary key autoincrement,"
@@ -258,11 +298,21 @@ bool ProjectRepository::initialize(QString* error)
                        "updated_at text not null)")
     };
 
+    if (!db_.transaction()) {
+        if (error) {
+            *error = db_.lastError().text();
+        }
+        return false;
+    }
+
+    if (!ensureSchemaMigrationTable(db_, error)) {
+        db_.rollback();
+        return false;
+    }
+
     for (const QString& statement : statements) {
-        if (!query.exec(statement)) {
-            if (error) {
-                *error = sqlError(query);
-            }
+        if (!execStatement(db_, statement, error)) {
+            db_.rollback();
             return false;
         }
     }
@@ -277,9 +327,59 @@ bool ProjectRepository::initialize(QString* error)
         || !ensureColumn(db_, QStringLiteral("exports"), QStringLiteral("source_checkpoint_path text"), error)
         || !ensureColumn(db_, QStringLiteral("exports"), QStringLiteral("input_shape_json text"), error)
         || !ensureColumn(db_, QStringLiteral("exports"), QStringLiteral("output_shape_json text"), error)) {
+        db_.rollback();
+        return false;
+    }
+
+    if (!recordBaselineMigration(db_, error)) {
+        db_.rollback();
+        return false;
+    }
+
+    if (!db_.commit()) {
+        if (error) {
+            *error = db_.lastError().text();
+        }
+        db_.rollback();
         return false;
     }
     return true;
+}
+
+int ProjectRepository::currentSchemaVersion()
+{
+    return kCurrentSchemaVersion;
+}
+
+int ProjectRepository::schemaVersion(QString* error) const
+{
+    QSqlQuery query(db_);
+    if (!query.exec(QStringLiteral("select coalesce(max(version), 0) from schema_migrations"))) {
+        if (error) {
+            *error = sqlError(query);
+        }
+        return 0;
+    }
+    if (!query.next()) {
+        return 0;
+    }
+    return query.value(0).toInt();
+}
+
+QVector<int> ProjectRepository::appliedSchemaMigrations(QString* error) const
+{
+    QVector<int> versions;
+    QSqlQuery query(db_);
+    if (!query.exec(QStringLiteral("select version from schema_migrations order by version asc"))) {
+        if (error) {
+            *error = sqlError(query);
+        }
+        return versions;
+    }
+    while (query.next()) {
+        versions.append(query.value(0).toInt());
+    }
+    return versions;
 }
 
 bool ProjectRepository::upsertProject(const QString& name, const QString& rootPath, QString* error)

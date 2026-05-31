@@ -6,6 +6,7 @@
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/JsonProtocol.h"
 #include "aitrain/core/ProductWorkflow.h"
+#include "aitrain/core/WorkerProtocol.h"
 
 #include <QDateTime>
 #include <QCoreApplication>
@@ -23,6 +24,8 @@
 #include <QThread>
 
 using namespace worker_support;
+namespace wp = aitrain::worker_protocol;
+
 void WorkerSession::tickTraining()
 {
     if (!running_) {
@@ -40,7 +43,7 @@ void WorkerSession::tickTraining()
     progressPayload.insert(QStringLiteral("percent"), qRound(progress * 100.0));
     progressPayload.insert(QStringLiteral("step"), step_);
     progressPayload.insert(QStringLiteral("epoch"), epoch);
-    send(QStringLiteral("progress"), progressPayload);
+    send(wp::event::progress(), progressPayload);
 
     QJsonObject lossPayload;
     lossPayload.insert(QStringLiteral("taskId"), request_.taskId);
@@ -48,7 +51,7 @@ void WorkerSession::tickTraining()
     lossPayload.insert(QStringLiteral("value"), loss);
     lossPayload.insert(QStringLiteral("step"), step_);
     lossPayload.insert(QStringLiteral("epoch"), epoch);
-    send(QStringLiteral("metric"), lossPayload);
+    send(wp::event::metric(), lossPayload);
 
     QJsonObject mapPayload;
     mapPayload.insert(QStringLiteral("taskId"), request_.taskId);
@@ -56,7 +59,7 @@ void WorkerSession::tickTraining()
     mapPayload.insert(QStringLiteral("value"), quality);
     mapPayload.insert(QStringLiteral("step"), step_);
     mapPayload.insert(QStringLiteral("epoch"), epoch);
-    send(QStringLiteral("metric"), mapPayload);
+    send(wp::event::metric(), mapPayload);
 
     QJsonObject logPayload;
     logPayload.insert(QStringLiteral("message"), QStringLiteral("epoch=%1 step=%2 loss=%3 score=%4")
@@ -64,7 +67,7 @@ void WorkerSession::tickTraining()
         .arg(step_)
         .arg(loss, 0, 'f', 4)
         .arg(quality, 0, 'f', 4));
-    send(QStringLiteral("log"), logPayload);
+    send(wp::event::log(), logPayload);
 
     if (step_ >= maxSteps_) {
         complete();
@@ -90,7 +93,7 @@ void WorkerSession::startTraining(const aitrain::TrainingRequest& request)
 
     QJsonObject payload;
     payload.insert(QStringLiteral("message"), QStringLiteral("Worker accepted task %1 for plugin %2").arg(request_.taskId, request_.pluginId));
-    send(QStringLiteral("log"), payload);
+    send(wp::event::log(), payload);
 
     const QString backend = requestedTrainingBackend(request_);
     if (!isSupportedTrainingBackendId(backend, request_.parameters)) {
@@ -138,7 +141,7 @@ void WorkerSession::pauseTraining()
     QJsonObject payload;
     payload.insert(QStringLiteral("taskId"), request_.taskId);
     payload.insert(QStringLiteral("message"), QStringLiteral("Training task paused"));
-    send(QStringLiteral("paused"), payload);
+    send(wp::event::paused(), payload);
 }
 
 void WorkerSession::resumeTraining()
@@ -155,7 +158,7 @@ void WorkerSession::resumeTraining()
     QJsonObject payload;
     payload.insert(QStringLiteral("taskId"), request_.taskId);
     payload.insert(QStringLiteral("message"), QStringLiteral("Training task resumed"));
-    send(QStringLiteral("resumed"), payload);
+    send(wp::event::resumed(), payload);
 }
 
 void WorkerSession::runDetectionTraining()

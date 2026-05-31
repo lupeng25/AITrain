@@ -251,10 +251,10 @@ void MainWindow::browseDataset()
         if (splitOutputEdit_ && currentProjectPath_.isEmpty()) {
             splitOutputEdit_->setText(QDir::toNativeSeparators(QDir(directory).absoluteFilePath(QStringLiteral("../normalized"))));
         }
-        currentDatasetPath_ = directory;
+        state_.dataset.currentPath = directory;
         const QString selectedFormat = currentDatasetFormat();
-        currentDatasetFormat_ = selectedFormat.isEmpty() ? detectedFormat : selectedFormat;
-        currentDatasetValid_ = false;
+        state_.dataset.currentFormat = selectedFormat.isEmpty() ? detectedFormat : selectedFormat;
+        state_.dataset.currentValid = false;
         updateTrainingSelectionSummary();
         refreshTrainingDefaults();
         refreshDatasetConversionDefaultsFromCurrentDataset();
@@ -301,13 +301,13 @@ void MainWindow::refreshDatasetConversionDefaultsFromCurrentDataset()
 
     QString inputPath = datasetPathEdit_ ? QDir::fromNativeSeparators(datasetPathEdit_->text().trimmed()) : QString();
     if (inputPath.isEmpty()) {
-        inputPath = currentDatasetPath_;
+        inputPath = state_.dataset.currentPath;
     }
     if (!inputPath.isEmpty()) {
         datasetConversionInputEdit_->setText(QDir::toNativeSeparators(inputPath));
     }
 
-    QString sourceFormat = currentDatasetFormat_;
+    QString sourceFormat = state_.dataset.currentFormat;
     if (sourceFormat.isEmpty()) {
         sourceFormat = currentDatasetFormat();
     }
@@ -477,7 +477,7 @@ void MainWindow::startDatasetConversion()
             return;
         }
     } else {
-        currentTaskId_ = taskId;
+        state_.training.currentTaskId = taskId;
     }
 
     QJsonObject options;
@@ -497,7 +497,7 @@ void MainWindow::startDatasetConversion()
         datasetConversionStatusLabel_->setText(QStringLiteral("正在通过 Worker 转换数据集。"));
     }
     appendDatasetConversionLog(QStringLiteral("开始转换数据集。"));
-    currentDatasetConversionTaskId_ = taskId;
+    state_.dataset.currentConversionTaskId = taskId;
     setDatasetConversionFormRunning(true);
 
     QString error;
@@ -515,8 +515,8 @@ void MainWindow::startDatasetConversion()
             repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
             updateRecentTasks();
         }
-        currentTaskId_.clear();
-        currentDatasetConversionTaskId_.clear();
+        state_.training.currentTaskId.clear();
+        state_.dataset.currentConversionTaskId.clear();
         setDatasetConversionFormRunning(false);
         const QString message = QStringLiteral("无法启动数据集转换：%1").arg(error);
         if (datasetConversionStatusLabel_) {
@@ -545,9 +545,9 @@ void MainWindow::validateDataset()
         return;
     }
 
-    currentDatasetValid_ = false;
-    currentDatasetPath_ = path;
-    currentDatasetFormat_ = format;
+    state_.dataset.currentValid = false;
+    state_.dataset.currentPath = path;
+    state_.dataset.currentFormat = format;
     if (validationIssuesTable_) {
         validationIssuesTable_->setRowCount(0);
     }
@@ -582,7 +582,7 @@ void MainWindow::validateDataset()
         if (!taskId.isEmpty() && repository_.isOpen()) {
             QString taskError;
             repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
-            currentTaskId_.clear();
+            state_.training.currentTaskId.clear();
             updateRecentTasks();
         }
         validationSummaryLabel_->setText(uiText("无法启动数据集校验：%1").arg(error));
@@ -613,7 +613,7 @@ void MainWindow::splitDataset()
         return;
     }
 
-    bool datasetReady = currentDatasetValid_ && currentDatasetPath_ == path && currentDatasetFormat_ == format;
+    bool datasetReady = state_.dataset.currentValid && state_.dataset.currentPath == path && state_.dataset.currentFormat == format;
     if (!datasetReady && repository_.isOpen()) {
         QString error;
         const aitrain::DatasetRecord dataset = repository_.datasetByRootPath(path, &error);
@@ -662,7 +662,7 @@ void MainWindow::splitDataset()
         if (!taskId.isEmpty() && repository_.isOpen()) {
             QString taskError;
             repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
-            currentTaskId_.clear();
+            state_.training.currentTaskId.clear();
             updateRecentTasks();
         }
         QMessageBox::critical(this, uiText("数据集划分"), error);
@@ -715,7 +715,7 @@ void MainWindow::curateDataset()
         if (!taskId.isEmpty() && repository_.isOpen()) {
             QString taskError;
             repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
-            currentTaskId_.clear();
+            state_.training.currentTaskId.clear();
             updateRecentTasks();
         }
         QMessageBox::critical(this, uiText("数据质量报告"), error);
@@ -733,20 +733,20 @@ void MainWindow::curateDataset()
 
 void MainWindow::openDatasetQualityFixList()
 {
-    if (latestQualityFixListPath_.isEmpty() || !QFileInfo::exists(latestQualityFixListPath_)) {
+    if (state_.dataset.latestQualityFixListPath.isEmpty() || !QFileInfo::exists(state_.dataset.latestQualityFixListPath)) {
         QMessageBox::information(this, uiText("问题清单"), uiText("请先生成数据质量报告。"));
         return;
     }
-    QDesktopServices::openUrl(QUrl::fromLocalFile(latestQualityFixListPath_));
+    QDesktopServices::openUrl(QUrl::fromLocalFile(state_.dataset.latestQualityFixListPath));
 }
 
 void MainWindow::openDatasetQualityReport()
 {
-    if (latestQualityReportPath_.isEmpty() || !QFileInfo::exists(latestQualityReportPath_)) {
+    if (state_.dataset.latestQualityReportPath.isEmpty() || !QFileInfo::exists(state_.dataset.latestQualityReportPath)) {
         QMessageBox::information(this, uiText("质量报告"), uiText("请先生成数据质量报告。"));
         return;
     }
-    QDesktopServices::openUrl(QUrl::fromLocalFile(latestQualityReportPath_));
+    QDesktopServices::openUrl(QUrl::fromLocalFile(state_.dataset.latestQualityReportPath));
 }
 
 void MainWindow::launchXAnyLabelingForQualityFix()
@@ -756,8 +756,8 @@ void MainWindow::launchXAnyLabelingForQualityFix()
         QMessageBox::information(this, uiText("X-AnyLabeling 修复"), uiText("请先选择数据集目录。"));
         return;
     }
-    if (!latestQualityFixListPath_.isEmpty()) {
-        statusBar()->showMessage(uiText("问题清单：%1").arg(QDir::toNativeSeparators(latestQualityFixListPath_)), 6000);
+    if (!state_.dataset.latestQualityFixListPath.isEmpty()) {
+        statusBar()->showMessage(uiText("问题清单：%1").arg(QDir::toNativeSeparators(state_.dataset.latestQualityFixListPath)), 6000);
     }
     const QString program = resolvedXAnyLabelingProgram();
     if (program.isEmpty()) {
@@ -809,7 +809,7 @@ void MainWindow::loadSampleReviewFile()
         return;
     }
 
-    sampleReviewSamples_ = extractReviewSamples(document);
+    state_.dataset.sampleReviewSamples = extractReviewSamples(document);
     if (reviewSourceFilterCombo_) {
         reviewSourceFilterCombo_->clear();
         reviewSourceFilterCombo_->addItem(uiText("全部来源"), QString());
@@ -820,7 +820,7 @@ void MainWindow::loadSampleReviewFile()
     }
     QStringList sources;
     QStringList reasons;
-    for (const QJsonValue& value : sampleReviewSamples_) {
+    for (const QJsonValue& value : state_.dataset.sampleReviewSamples) {
         const QJsonObject sample = value.toObject();
         const QString source = sample.value(QStringLiteral("source")).toString();
         const QString reason = sample.value(QStringLiteral("reason")).toString();
@@ -839,9 +839,9 @@ void MainWindow::loadSampleReviewFile()
     for (const QString& reason : reasons) {
         reviewReasonFilterCombo_->addItem(reason, reason);
     }
-    latestReviewListPath_.clear();
+    state_.dataset.latestReviewListPath.clear();
     refreshSampleReviewTable();
-    statusBar()->showMessage(uiText("已加载复核样本：%1 条").arg(sampleReviewSamples_.size()), 4000);
+    statusBar()->showMessage(uiText("已加载复核样本：%1 条").arg(state_.dataset.sampleReviewSamples.size()), 4000);
 }
 
 QJsonArray MainWindow::filteredSampleReviewRows() const
@@ -850,7 +850,7 @@ QJsonArray MainWindow::filteredSampleReviewRows() const
     const QString sourceFilter = reviewSourceFilterCombo_ ? reviewSourceFilterCombo_->currentData().toString() : QString();
     const QString reasonFilter = reviewReasonFilterCombo_ ? reviewReasonFilterCombo_->currentData().toString() : QString();
     const QString query = reviewSearchEdit_ ? reviewSearchEdit_->text().trimmed().toLower() : QString();
-    for (const QJsonValue& value : sampleReviewSamples_) {
+    for (const QJsonValue& value : state_.dataset.sampleReviewSamples) {
         const QJsonObject sample = value.toObject();
         const QString source = sample.value(QStringLiteral("source")).toString();
         const QString reason = sample.value(QStringLiteral("reason")).toString();
@@ -912,8 +912,8 @@ void MainWindow::refreshSampleReviewTable()
     if (sampleReviewSummaryLabel_) {
         sampleReviewSummaryLabel_->setText(uiText("复核样本：显示 %1 / 总计 %2；清单 %3")
             .arg(rows.size())
-            .arg(sampleReviewSamples_.size())
-            .arg(latestReviewListPath_.isEmpty() ? uiText("尚未生成") : QDir::toNativeSeparators(latestReviewListPath_)));
+            .arg(state_.dataset.sampleReviewSamples.size())
+            .arg(state_.dataset.latestReviewListPath.isEmpty() ? uiText("尚未生成") : QDir::toNativeSeparators(state_.dataset.latestReviewListPath)));
     }
 }
 
@@ -968,7 +968,7 @@ void MainWindow::generateFilteredReviewList()
     manifestFile.write(QJsonDocument(manifest).toJson(QJsonDocument::Indented));
     manifestFile.close();
 
-    latestReviewListPath_ = listPath;
+    state_.dataset.latestReviewListPath = listPath;
     refreshSampleReviewTable();
     statusBar()->showMessage(uiText("复核清单已生成：%1").arg(QDir::toNativeSeparators(listPath)), 5000);
 }
@@ -990,7 +990,7 @@ void MainWindow::openSelectedReviewSample()
 
 void MainWindow::launchXAnyLabelingForReview()
 {
-    if (latestReviewListPath_.isEmpty()) {
+    if (state_.dataset.latestReviewListPath.isEmpty()) {
         generateFilteredReviewList();
     }
     const QString program = resolvedXAnyLabelingProgram();
@@ -999,15 +999,15 @@ void MainWindow::launchXAnyLabelingForReview()
         QMessageBox::warning(this, QStringLiteral("X-AnyLabeling"), uiText("未找到 X-AnyLabeling。请确保 xanylabeling 在 PATH 中，或放到程序目录 / tools/x-anylabeling / .deps/annotation-tools/X-AnyLabeling。"));
         return;
     }
-    QString targetDir = currentDatasetPath_;
-    if (targetDir.isEmpty() && !latestReviewListPath_.isEmpty()) {
-        targetDir = QFileInfo(latestReviewListPath_).absolutePath();
+    QString targetDir = state_.dataset.currentPath;
+    if (targetDir.isEmpty() && !state_.dataset.latestReviewListPath.isEmpty()) {
+        targetDir = QFileInfo(state_.dataset.latestReviewListPath).absolutePath();
     }
     if (targetDir.isEmpty()) {
         targetDir = currentProjectPath_;
     }
     if (QProcess::startDetached(program, QStringList() << targetDir)) {
-        statusBar()->showMessage(uiText("已启动 X-AnyLabeling；复核清单：%1").arg(QDir::toNativeSeparators(latestReviewListPath_)), 6000);
+        statusBar()->showMessage(uiText("已启动 X-AnyLabeling；复核清单：%1").arg(QDir::toNativeSeparators(state_.dataset.latestReviewListPath)), 6000);
     } else {
         QMessageBox::warning(this, QStringLiteral("X-AnyLabeling"), uiText("X-AnyLabeling 启动失败：%1").arg(QDir::toNativeSeparators(program)));
     }
@@ -1051,7 +1051,7 @@ void MainWindow::createDatasetSnapshot()
         if (!taskId.isEmpty() && repository_.isOpen()) {
             QString taskError;
             repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
-            currentTaskId_.clear();
+            state_.training.currentTaskId.clear();
             updateRecentTasks();
         }
         QMessageBox::critical(this, uiText("数据集快照"), error);

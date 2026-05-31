@@ -15,6 +15,10 @@ add_library(aitrain_core STATIC
     include/aitrain/core/ProjectRepository.h
     include/aitrain/core/ProductWorkflow.h
     include/aitrain/core/TaskModels.h
+    include/aitrain/core/VisionModelExport.h
+    include/aitrain/core/VisionModelRuntime.h
+    include/aitrain/core/VisionPostprocess.h
+    include/aitrain/core/WorkerProtocol.h
     src/JsonProtocol.cpp
     src/LicenseManager.cpp
     src/Deployment.cpp
@@ -29,16 +33,16 @@ add_library(aitrain_core STATIC
     src/YoloDatasetLayout.cpp
     src/DetectionDataset.cpp
     src/DetectionTrainer.cpp
-    src/DetectionTrainerExport.cpp
     src/DetectionTrainerInternal.h
-    src/DetectionTrainerNcnn.cpp
-    src/DetectionTrainerOcrPostprocess.cpp
-    src/DetectionTrainerOnnxRuntime.cpp
-    src/DetectionTrainerOutput.cpp
-    src/DetectionTrainerPostprocess.cpp
-    src/DetectionTrainerRuntimeHelpers.cpp
-    src/DetectionTrainerTensorRt.cpp
-    src/DetectionTrainerYoloPostprocess.cpp
+    src/VisionModelExport.cpp
+    src/VisionModelRuntimeHelpers.cpp
+    src/VisionModelRuntimeNcnn.cpp
+    src/VisionModelRuntimeOnnx.cpp
+    src/VisionModelRuntimeTensorRt.cpp
+    src/VisionPostprocessCommon.cpp
+    src/VisionPostprocessOcr.cpp
+    src/VisionPostprocessOutput.cpp
+    src/VisionPostprocessYolo.cpp
     src/OcrRecDataset.cpp
     src/SegmentationDataset.cpp
     src/PluginManager.cpp
@@ -55,6 +59,7 @@ add_library(aitrain_core STATIC
     src/ProductWorkflowSupport.h
     src/ProductWorkflowSupport.cpp
     src/TaskModels.cpp
+    src/WorkerProtocol.cpp
 )
 
 target_include_directories(aitrain_core

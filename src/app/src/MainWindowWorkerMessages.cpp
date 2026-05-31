@@ -7,6 +7,7 @@
 #include "PluginMarketplaceWidget.h"
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/PluginInterfaces.h"
+#include "aitrain/core/WorkerProtocol.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -49,6 +50,7 @@
 #include <QUuid>
 
 using namespace aitrain_app;
+namespace wp = aitrain::worker_protocol;
 
 namespace {
 void setAcceptanceTableRow(QTableWidget* table, const QString& stage, const QString& status, const QString& evidence, const QString& message)
@@ -76,46 +78,43 @@ void setAcceptanceTableRow(QTableWidget* table, const QString& stage, const QStr
 
 void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& payload)
 {
-    if (type == QStringLiteral("progress")) {
+    if (type == wp::event::progress()) {
         handleProgressMessage(payload);
-    } else if (type == QStringLiteral("metric")) {
+    } else if (type == wp::event::metric()) {
         handleMetricMessage(payload);
-    } else if (type == QStringLiteral("artifact")) {
+    } else if (type == wp::event::artifact()) {
         handleArtifactMessage(payload);
-    } else if (type == QStringLiteral("paused")
-        || type == QStringLiteral("resumed")
-        || type == QStringLiteral("canceled")
-        || type == QStringLiteral("failed")) {
+    } else if (wp::isTaskStateEvent(type) && type != wp::event::completed()) {
         handleTaskStateMessage(type, payload);
-    } else if (type == QStringLiteral("environmentCheck")) {
+    } else if (type == wp::event::environmentCheck()) {
         updateEnvironmentTable(payload);
-    } else if (type == QStringLiteral("datasetValidation")) {
+    } else if (type == wp::event::datasetValidation()) {
         updateDatasetValidationResult(payload);
-    } else if (type == QStringLiteral("datasetSplit")) {
+    } else if (type == wp::event::datasetSplit()) {
         updateDatasetSplitResult(payload);
-    } else if (type == QStringLiteral("datasetConversion")) {
+    } else if (type == wp::event::datasetConversion()) {
         updateDatasetConversionResult(payload);
-    } else if (type == QStringLiteral("datasetQuality")) {
+    } else if (type == wp::event::datasetQuality()) {
         handleDatasetQualityMessage(payload);
-    } else if (type == QStringLiteral("datasetSnapshot")) {
+    } else if (type == wp::event::datasetSnapshot()) {
         handleDatasetSnapshotMessage(payload);
-    } else if (type == QStringLiteral("evaluationReport")) {
+    } else if (type == wp::event::evaluationReport()) {
         handleEvaluationReportMessage(payload);
-    } else if (type == QStringLiteral("benchmarkReport")) {
+    } else if (type == wp::event::benchmarkReport()) {
         updateModelRegistry();
-    } else if (type == QStringLiteral("pipelinePlan")) {
+    } else if (type == wp::event::pipelinePlan()) {
         handlePipelinePlanMessage(payload);
-    } else if (type == QStringLiteral("deliveryReport")) {
+    } else if (type == wp::event::deliveryReport()) {
         updateModelRegistry();
-    } else if (type == QStringLiteral("modelExport")) {
+    } else if (type == wp::event::modelExport()) {
         handleModelExportMessage(payload);
-    } else if (type == QStringLiteral("deploymentValidation")) {
+    } else if (type == wp::event::deploymentValidation()) {
         handleDeploymentValidationMessage(payload);
-    } else if (type == QStringLiteral("inferenceResult")) {
+    } else if (type == wp::event::inferenceResult()) {
         handleInferenceResultMessage(payload);
-    } else if (type == QStringLiteral("customerOcrAcceptance")) {
+    } else if (type == wp::event::customerOcrAcceptance()) {
         handleCustomerOcrAcceptanceMessage(payload);
-    } else if (type == QStringLiteral("diagnosticBundle")) {
+    } else if (type == wp::event::diagnosticBundle()) {
         handleDiagnosticBundleMessage(payload);
     }
 }
@@ -125,7 +124,7 @@ void MainWindow::handleProgressMessage(const QJsonObject& payload)
     const QString taskId = payload.value(QStringLiteral("taskId")).toString();
     const int percent = payload.value(QStringLiteral("percent")).toInt();
     const QString message = payload.value(QStringLiteral("message")).toString();
-    if (!currentDatasetConversionTaskId_.isEmpty() && taskId == currentDatasetConversionTaskId_) {
+    if (!state_.dataset.currentConversionTaskId.isEmpty() && taskId == state_.dataset.currentConversionTaskId) {
         if (datasetConversionProgressBar_) {
             datasetConversionProgressBar_->setValue(percent);
         }
@@ -133,7 +132,7 @@ void MainWindow::handleProgressMessage(const QJsonObject& payload)
             appendDatasetConversionLog(message);
         }
     }
-    if (!currentTaskId_.isEmpty()) {
+    if (!state_.training.currentTaskId.isEmpty()) {
         progressBar_->setValue(percent);
     }
     if (!message.isEmpty()) {
@@ -148,7 +147,7 @@ void MainWindow::handleMetricMessage(const QJsonObject& payload)
     metricsWidget_->addMetric(name, value);
 
     aitrain::MetricPoint point;
-    point.taskId = currentTaskId_;
+    point.taskId = state_.training.currentTaskId;
     point.name = name;
     point.value = value;
     point.step = payload.value(QStringLiteral("step")).toInt();
@@ -194,7 +193,7 @@ void MainWindow::handleArtifactMessage(const QJsonObject& payload)
     }
     if (repository_.isOpen()) {
         aitrain::ArtifactRecord artifact;
-        artifact.taskId = payload.value(QStringLiteral("taskId")).toString(currentTaskId_);
+        artifact.taskId = payload.value(QStringLiteral("taskId")).toString(state_.training.currentTaskId);
         artifact.kind = kind;
         artifact.path = path;
         artifact.message = uiText("Worker 上报产物");
@@ -206,75 +205,75 @@ void MainWindow::handleArtifactMessage(const QJsonObject& payload)
 
 void MainWindow::handleTaskStateMessage(const QString& type, const QJsonObject& payload)
 {
-    if (type == QStringLiteral("paused")) {
+    if (type == wp::event::paused()) {
         QString error;
-        repository_.updateTaskState(currentTaskId_, aitrain::TaskState::Paused, payload.value(QStringLiteral("message")).toString(), &error);
+        repository_.updateTaskState(state_.training.currentTaskId, wp::taskStateForEvent(type), payload.value(wp::field::message()).toString(), &error);
         workerPill_->setStatus(uiText("任务已暂停"), StatusPill::Tone::Warning);
         updateRecentTasks();
         return;
     }
 
-    if (type == QStringLiteral("resumed")) {
+    if (type == wp::event::resumed()) {
         QString error;
-        repository_.updateTaskState(currentTaskId_, aitrain::TaskState::Running, payload.value(QStringLiteral("message")).toString(), &error);
+        repository_.updateTaskState(state_.training.currentTaskId, wp::taskStateForEvent(type), payload.value(wp::field::message()).toString(), &error);
         workerPill_->setStatus(uiText("训练运行中"), StatusPill::Tone::Info);
         updateRecentTasks();
         return;
     }
 
-    if (type == QStringLiteral("canceled")) {
+    if (type == wp::event::canceled()) {
         QString error;
-        const QString canceledTaskId = payload.value(QStringLiteral("taskId")).toString(currentTaskId_);
-        const QString canceledMessage = payload.value(QStringLiteral("message")).toString();
-        if (!currentDatasetConversionTaskId_.isEmpty() && canceledTaskId == currentDatasetConversionTaskId_) {
+        const QString canceledTaskId = payload.value(wp::field::taskId()).toString(state_.training.currentTaskId);
+        const QString canceledMessage = payload.value(wp::field::message()).toString();
+        if (!state_.dataset.currentConversionTaskId.isEmpty() && canceledTaskId == state_.dataset.currentConversionTaskId) {
             setDatasetConversionFormRunning(false);
             if (datasetConversionStatusLabel_) {
                 datasetConversionStatusLabel_->setText(uiText("数据集转换已取消。"));
             }
-            currentDatasetConversionTaskId_.clear();
+            state_.dataset.currentConversionTaskId.clear();
         }
-        repository_.updateTaskState(canceledTaskId, aitrain::TaskState::Canceled, canceledMessage, &error);
-        if (hasActiveSnapshotTrainingTask_ && canceledTaskId == currentTaskId_) {
+        repository_.updateTaskState(canceledTaskId, wp::taskStateForEvent(type), canceledMessage, &error);
+        if (state_.training.hasActiveSnapshotTrainingTask && canceledTaskId == state_.training.currentTaskId) {
             repository_.updateTaskState(
-                activeSnapshotTrainingTask_.taskId,
+                state_.training.activeSnapshotTrainingTask.taskId,
                 aitrain::TaskState::Canceled,
                 uiText("自动数据快照已取消，训练未启动。"),
                 &error);
-            hasActiveSnapshotTrainingTask_ = false;
-            activeSnapshotTrainingTask_ = PendingTrainingTask();
+            state_.training.hasActiveSnapshotTrainingTask = false;
+            state_.training.activeSnapshotTrainingTask = PendingTrainingTask();
         }
         workerPill_->setStatus(uiText("任务已取消"), StatusPill::Tone::Warning);
         appendLog(uiText("任务已取消：%1").arg(canceledMessage));
-        currentTaskId_.clear();
+        state_.training.currentTaskId.clear();
         updateRecentTasks();
         startNextQueuedTask();
         return;
     }
 
-    if (type == QStringLiteral("failed")) {
-        const QString failedTaskId = payload.value(QStringLiteral("taskId")).toString(currentTaskId_);
-        const QString failedMessage = payload.value(QStringLiteral("message")).toString();
-        if (!currentDatasetConversionTaskId_.isEmpty() && failedTaskId == currentDatasetConversionTaskId_) {
+    if (type == wp::event::failed()) {
+        const QString failedTaskId = payload.value(wp::field::taskId()).toString(state_.training.currentTaskId);
+        const QString failedMessage = payload.value(wp::field::message()).toString();
+        if (!state_.dataset.currentConversionTaskId.isEmpty() && failedTaskId == state_.dataset.currentConversionTaskId) {
             setDatasetConversionFormRunning(false);
             if (datasetConversionStatusLabel_) {
                 datasetConversionStatusLabel_->setText(uiText("数据集转换失败：%1").arg(failedMessage));
             }
-            currentDatasetConversionTaskId_.clear();
+            state_.dataset.currentConversionTaskId.clear();
         }
         QString error;
         repository_.updateTaskState(
             failedTaskId,
-            aitrain::TaskState::Failed,
+            wp::taskStateForEvent(type),
             failedMessage,
             &error);
-        if (hasActiveSnapshotTrainingTask_ && failedTaskId == currentTaskId_) {
+        if (state_.training.hasActiveSnapshotTrainingTask && failedTaskId == state_.training.currentTaskId) {
             repository_.updateTaskState(
-                activeSnapshotTrainingTask_.taskId,
+                state_.training.activeSnapshotTrainingTask.taskId,
                 aitrain::TaskState::Failed,
                 uiText("自动数据快照失败：%1").arg(failedMessage),
                 &error);
-            hasActiveSnapshotTrainingTask_ = false;
-            activeSnapshotTrainingTask_ = PendingTrainingTask();
+            state_.training.hasActiveSnapshotTrainingTask = false;
+            state_.training.activeSnapshotTrainingTask = PendingTrainingTask();
         }
         updateRecentTasks();
         updateModelRegistry();
@@ -283,9 +282,9 @@ void MainWindow::handleTaskStateMessage(const QString& type, const QJsonObject& 
 
 void MainWindow::handleDatasetQualityMessage(const QJsonObject& payload)
 {
-    latestQualityFixListPath_ = payload.value(QStringLiteral("xAnyLabelingFixListPath")).toString();
-    latestQualityFixManifestPath_ = payload.value(QStringLiteral("xAnyLabelingFixManifestPath")).toString();
-    latestQualityReportPath_ = payload.value(QStringLiteral("reportPath")).toString();
+    state_.dataset.latestQualityFixListPath = payload.value(QStringLiteral("xAnyLabelingFixListPath")).toString();
+    state_.dataset.latestQualityFixManifestPath = payload.value(QStringLiteral("xAnyLabelingFixManifestPath")).toString();
+    state_.dataset.latestQualityReportPath = payload.value(QStringLiteral("reportPath")).toString();
     if (validationSummaryLabel_) {
         const QJsonObject severityCounts = payload.value(QStringLiteral("severityCounts")).toObject();
         const QJsonObject summary = payload.value(QStringLiteral("summary")).toObject();
@@ -337,15 +336,15 @@ void MainWindow::handleDatasetQualityMessage(const QJsonObject& payload)
     }
     if (datasetDetailLabel_) {
         datasetDetailLabel_->setText(uiText("修复清单：%1")
-            .arg(latestQualityFixListPath_.isEmpty() ? uiText("暂无") : QDir::toNativeSeparators(latestQualityFixListPath_)));
+            .arg(state_.dataset.latestQualityFixListPath.isEmpty() ? uiText("暂无") : QDir::toNativeSeparators(state_.dataset.latestQualityFixListPath)));
     }
     updateDatasetRepairLoopFromQuality(payload);
     const QString datasetPath = payload.value(QStringLiteral("datasetPath")).toString();
     const QString format = payload.value(QStringLiteral("format")).toString();
     if (!datasetPath.isEmpty()) {
-        currentDatasetPath_ = datasetPath;
-        currentDatasetFormat_ = format;
-        currentDatasetValid_ = payload.value(QStringLiteral("ok")).toBool();
+        state_.dataset.currentPath = datasetPath;
+        state_.dataset.currentFormat = format;
+        state_.dataset.currentValid = payload.value(QStringLiteral("ok")).toBool();
     }
     if (repository_.isOpen() && !datasetPath.isEmpty()) {
         const QJsonObject summary = payload.value(QStringLiteral("summary")).toObject();
@@ -380,9 +379,9 @@ void MainWindow::handleDatasetSnapshotMessage(const QJsonObject& payload)
         if (dataset.id <= 0 && !datasetPath.isEmpty()) {
             aitrain::DatasetRecord seed;
             seed.name = QFileInfo(datasetPath).fileName();
-            seed.format = payload.value(QStringLiteral("format")).toString(currentDatasetFormat_);
+            seed.format = payload.value(QStringLiteral("format")).toString(state_.dataset.currentFormat);
             seed.rootPath = datasetPath;
-            seed.validationStatus = currentDatasetValid_ ? QStringLiteral("valid") : QStringLiteral("snapshot");
+            seed.validationStatus = state_.dataset.currentValid ? QStringLiteral("valid") : QStringLiteral("snapshot");
             seed.sampleCount = payload.value(QStringLiteral("fileCount")).toInt();
             seed.lastReportJson = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
             seed.lastValidatedAt = QDateTime::currentDateTimeUtc();
@@ -401,18 +400,18 @@ void MainWindow::handleDatasetSnapshotMessage(const QJsonObject& payload)
             snapshot.metadataJson = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
             snapshot.createdAt = QDateTime::currentDateTimeUtc();
             const int snapshotId = repository_.insertDatasetSnapshot(snapshot, &error);
-            if (hasActiveSnapshotTrainingTask_
-                && activeSnapshotTrainingTask_.request.datasetPath == datasetPath
+            if (state_.training.hasActiveSnapshotTrainingTask
+                && state_.training.activeSnapshotTrainingTask.request.datasetPath == datasetPath
                 && snapshotId > 0) {
                 snapshot.id = snapshotId;
-                activeSnapshotTrainingTask_.request.parameters.insert(QStringLiteral("datasetSnapshotId"), snapshot.id);
-                activeSnapshotTrainingTask_.request.parameters.insert(QStringLiteral("datasetSnapshotHash"), snapshot.contentHash);
-                activeSnapshotTrainingTask_.request.parameters.insert(QStringLiteral("datasetSnapshotManifest"), snapshot.manifestPath);
-                activeSnapshotTrainingTask_.needsSnapshot = false;
-                recordExperimentRunForRequest(activeSnapshotTrainingTask_.request, activeSnapshotTrainingTask_.datasetId, &error);
-                pendingTrainingTasks_.prepend(activeSnapshotTrainingTask_);
-                hasActiveSnapshotTrainingTask_ = false;
-                activeSnapshotTrainingTask_ = PendingTrainingTask();
+                state_.training.activeSnapshotTrainingTask.request.parameters.insert(QStringLiteral("datasetSnapshotId"), snapshot.id);
+                state_.training.activeSnapshotTrainingTask.request.parameters.insert(QStringLiteral("datasetSnapshotHash"), snapshot.contentHash);
+                state_.training.activeSnapshotTrainingTask.request.parameters.insert(QStringLiteral("datasetSnapshotManifest"), snapshot.manifestPath);
+                state_.training.activeSnapshotTrainingTask.needsSnapshot = false;
+                recordExperimentRunForRequest(state_.training.activeSnapshotTrainingTask.request, state_.training.activeSnapshotTrainingTask.datasetId, &error);
+                state_.training.pendingTrainingTasks.prepend(state_.training.activeSnapshotTrainingTask);
+                state_.training.hasActiveSnapshotTrainingTask = false;
+                state_.training.activeSnapshotTrainingTask = PendingTrainingTask();
             }
         }
     }
@@ -424,7 +423,7 @@ void MainWindow::handleEvaluationReportMessage(const QJsonObject& payload)
 {
     if (repository_.isOpen()) {
         aitrain::EvaluationReportRecord report;
-        report.taskId = payload.value(QStringLiteral("taskId")).toString(currentTaskId_);
+        report.taskId = payload.value(QStringLiteral("taskId")).toString(state_.training.currentTaskId);
         report.modelPath = payload.value(QStringLiteral("modelPath")).toString();
         report.taskType = payload.value(QStringLiteral("taskType")).toString();
         report.datasetSnapshotId = payload.value(QStringLiteral("datasetSnapshotId")).toInt();
@@ -445,7 +444,7 @@ void MainWindow::handlePipelinePlanMessage(const QJsonObject& payload)
         pipeline.templateId = payload.value(QStringLiteral("templateId")).toString();
         QJsonArray taskIds = payload.value(QStringLiteral("taskIds")).toArray();
         if (taskIds.isEmpty()) {
-            const QString fallbackTaskId = payload.value(QStringLiteral("taskId")).toString(currentTaskId_);
+            const QString fallbackTaskId = payload.value(QStringLiteral("taskId")).toString(state_.training.currentTaskId);
             if (!fallbackTaskId.isEmpty()) {
                 taskIds.append(fallbackTaskId);
             }
@@ -474,7 +473,7 @@ void MainWindow::handleModelExportMessage(const QJsonObject& payload)
     if (repository_.isOpen()) {
         const QJsonObject config = payload.value(QStringLiteral("config")).toObject();
         aitrain::ExportRecord exportRecord;
-        exportRecord.taskId = payload.value(QStringLiteral("taskId")).toString(currentTaskId_);
+        exportRecord.taskId = payload.value(QStringLiteral("taskId")).toString(state_.training.currentTaskId);
         exportRecord.sourceCheckpointPath = payload.value(QStringLiteral("checkpointPath")).toString();
         exportRecord.format = payload.value(QStringLiteral("format")).toString();
         exportRecord.path = payload.value(QStringLiteral("exportPath")).toString();
@@ -490,19 +489,19 @@ void MainWindow::handleModelExportMessage(const QJsonObject& payload)
 
 void MainWindow::handleDeploymentValidationMessage(const QJsonObject& payload)
 {
-    latestDeploymentValidationReportPath_ = payload.value(QStringLiteral("reportPath")).toString();
+    state_.delivery.latestDeploymentValidationReportPath = payload.value(QStringLiteral("reportPath")).toString();
     const QString status = payload.value(QStringLiteral("status")).toString();
     const QString runtime = payload.value(QStringLiteral("runtime")).toString();
     const QString modelPath = payload.value(QStringLiteral("modelPath")).toString();
     if (deploymentValidationResultLabel_) {
         deploymentValidationResultLabel_->setText(uiText("部署验证：%1 | runtime %2 | %3")
-            .arg(status, runtime, QDir::toNativeSeparators(latestDeploymentValidationReportPath_)));
+            .arg(status, runtime, QDir::toNativeSeparators(state_.delivery.latestDeploymentValidationReportPath)));
     }
     setAcceptanceTableRow(
         deliveryAcceptanceTable_,
         uiText("部署验证"),
         status,
-        latestDeploymentValidationReportPath_,
+        state_.delivery.latestDeploymentValidationReportPath,
         uiText("模型：%1").arg(QDir::toNativeSeparators(modelPath)));
     updateDeliveryAcceptanceSummary();
     updateModelRegistry();
@@ -520,7 +519,7 @@ void MainWindow::handleInferenceResultMessage(const QJsonObject& payload)
 
 void MainWindow::handleCustomerOcrAcceptanceMessage(const QJsonObject& payload)
 {
-    latestCustomerOcrAcceptanceReportPath_ = payload.value(QStringLiteral("reportPath")).toString();
+    state_.delivery.latestCustomerOcrAcceptanceReportPath = payload.value(QStringLiteral("reportPath")).toString();
     const QString status = payload.value(QStringLiteral("status")).toString();
     const QJsonObject metrics = payload.value(QStringLiteral("metrics")).toObject();
     if (customerOcrStatusLabel_) {
@@ -528,23 +527,23 @@ void MainWindow::handleCustomerOcrAcceptanceMessage(const QJsonObject& payload)
             .arg(status)
             .arg(metrics.value(QStringLiteral("recAccuracy")).toDouble(), 0, 'f', 4)
             .arg(metrics.value(QStringLiteral("recCer")).toDouble(), 0, 'f', 4)
-            .arg(QDir::toNativeSeparators(latestCustomerOcrAcceptanceReportPath_)));
+            .arg(QDir::toNativeSeparators(state_.delivery.latestCustomerOcrAcceptanceReportPath)));
     }
     setAcceptanceTableRow(
         deliveryAcceptanceTable_,
         uiText("客户域 OCR"),
         status,
-        latestCustomerOcrAcceptanceReportPath_,
+        state_.delivery.latestCustomerOcrAcceptanceReportPath,
         payload.value(QStringLiteral("publicDataBoundary")).toString());
     updateDeliveryAcceptanceSummary();
 }
 
 void MainWindow::handleDiagnosticBundleMessage(const QJsonObject& payload)
 {
-    latestDiagnosticBundlePath_ = payload.value(QStringLiteral("bundlePath")).toString();
+    state_.delivery.latestDiagnosticBundlePath = payload.value(QStringLiteral("bundlePath")).toString();
     const QString manifestPath = payload.value(QStringLiteral("manifestPath")).toString(payload.value(QStringLiteral("reportPath")).toString());
     if (diagnosticsStatusLabel_) {
-        diagnosticsStatusLabel_->setText(uiText("诊断包已生成：%1").arg(QDir::toNativeSeparators(latestDiagnosticBundlePath_)));
+        diagnosticsStatusLabel_->setText(uiText("诊断包已生成：%1").arg(QDir::toNativeSeparators(state_.delivery.latestDiagnosticBundlePath)));
     }
     setAcceptanceTableRow(
         deliveryAcceptanceTable_,

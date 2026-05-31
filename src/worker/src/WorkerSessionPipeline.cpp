@@ -6,6 +6,7 @@
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/JsonProtocol.h"
 #include "aitrain/core/ProductWorkflow.h"
+#include "aitrain/core/WorkerProtocol.h"
 
 #include <QDateTime>
 #include <QCoreApplication>
@@ -23,6 +24,8 @@
 #include <QThread>
 
 using namespace worker_support;
+namespace wp = aitrain::worker_protocol;
+
 void WorkerSession::runLocalPipeline(const QJsonObject& payload)
 {
     const QString taskId = payload.value(QStringLiteral("taskId")).toString();
@@ -37,7 +40,7 @@ void WorkerSession::runLocalPipeline(const QJsonObject& payload)
     progress.insert(QStringLiteral("taskId"), taskId);
     progress.insert(QStringLiteral("percent"), 0);
     progress.insert(QStringLiteral("message"), QStringLiteral("开始执行本地流水线。"));
-    send(QStringLiteral("progress"), progress);
+    send(wp::event::progress(), progress);
     if (pollPendingCancel()) {
         sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
         return;
@@ -121,7 +124,7 @@ void WorkerSession::runLocalPipeline(const QJsonObject& payload)
     artifact.insert(QStringLiteral("kind"), QStringLiteral("local_pipeline_execution"));
     artifact.insert(QStringLiteral("path"), result.reportPath);
     artifact.insert(QStringLiteral("message"), QStringLiteral("Local pipeline execution report"));
-    send(QStringLiteral("artifact"), artifact);
+    send(wp::event::artifact(), artifact);
 
     const QJsonArray artifacts = result.payload.value(QStringLiteral("artifacts")).toArray();
     for (const QJsonValue& value : artifacts) {
@@ -135,7 +138,7 @@ void WorkerSession::runLocalPipeline(const QJsonObject& payload)
         extraArtifact.insert(QStringLiteral("kind"), object.value(QStringLiteral("kind")).toString(QStringLiteral("pipeline_artifact")));
         extraArtifact.insert(QStringLiteral("path"), path);
         extraArtifact.insert(QStringLiteral("message"), object.value(QStringLiteral("message")).toString(QStringLiteral("Pipeline artifact")));
-        send(QStringLiteral("artifact"), extraArtifact);
+        send(wp::event::artifact(), extraArtifact);
     }
 
     QJsonObject pipelinePayload = result.payload;
@@ -148,7 +151,7 @@ void WorkerSession::runLocalPipeline(const QJsonObject& payload)
         deliveryArtifact.insert(QStringLiteral("kind"), QStringLiteral("training_delivery_report"));
         deliveryArtifact.insert(QStringLiteral("path"), deliveryReportPath);
         deliveryArtifact.insert(QStringLiteral("message"), QStringLiteral("Pipeline delivery report"));
-        send(QStringLiteral("artifact"), deliveryArtifact);
+        send(wp::event::artifact(), deliveryArtifact);
     }
 
     QJsonObject doneProgress;
@@ -158,18 +161,18 @@ void WorkerSession::runLocalPipeline(const QJsonObject& payload)
     doneProgress.insert(QStringLiteral("message"), pipelineState == QStringLiteral("failed")
         ? QStringLiteral("本地流水线执行失败。")
         : QStringLiteral("本地流水线执行完成。"));
-    send(QStringLiteral("progress"), doneProgress);
-    send(QStringLiteral("pipelinePlan"), pipelinePayload);
+    send(wp::event::progress(), doneProgress);
+    send(wp::event::pipelinePlan(), pipelinePayload);
     socket_.waitForBytesWritten(1000);
     QJsonObject terminal;
     terminal.insert(QStringLiteral("taskId"), taskId);
     if (pipelineState == QStringLiteral("failed")) {
         terminal.insert(QStringLiteral("message"),
             pipelinePayload.value(QStringLiteral("failureReason")).toString(QStringLiteral("Local pipeline execution failed")));
-        send(QStringLiteral("failed"), terminal);
+        send(wp::event::failed(), terminal);
     } else {
         terminal.insert(QStringLiteral("message"), QStringLiteral("Local pipeline execution completed"));
-        send(QStringLiteral("completed"), terminal);
+        send(wp::event::completed(), terminal);
     }
     finishSession();
 }
@@ -241,7 +244,7 @@ WorkerSession::PipelineTrainResult WorkerSession::runPipelineTrainingStep(
     adapterLog.insert(QStringLiteral("taskId"), request_.taskId);
     adapterLog.insert(QStringLiteral("message"), QStringLiteral("Launching pipeline Python trainer backend=%1").arg(backend));
     adapterLog.insert(QStringLiteral("backend"), backend);
-    send(QStringLiteral("log"), adapterLog);
+    send(wp::event::log(), adapterLog);
 
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
@@ -289,7 +292,7 @@ WorkerSession::PipelineTrainResult WorkerSession::runPipelineTrainingStep(
         logObject.insert(QStringLiteral("backend"), backend);
         logObject.insert(QStringLiteral("message"), QString::fromUtf8(stderrBuffer.trimmed()));
         result.logs.append(logObject);
-        send(QStringLiteral("log"), logObject);
+        send(wp::event::log(), logObject);
     }
 
     if (!terminalMessageSeen) {
@@ -331,7 +334,7 @@ void WorkerSession::drainPipelinePythonTrainerErrors(QByteArray* buffer, Pipelin
             logObject.insert(QStringLiteral("backend"), requestedTrainingBackend(request_));
             logObject.insert(QStringLiteral("message"), QString::fromUtf8(line));
             result->logs.append(logObject);
-            send(QStringLiteral("log"), logObject);
+            send(wp::event::log(), logObject);
         }
         newline = buffer->indexOf('\n');
     }
@@ -347,7 +350,7 @@ bool WorkerSession::forwardPipelinePythonTrainerLine(const QByteArray& line, Pip
         payload.insert(QStringLiteral("backend"), requestedTrainingBackend(request_));
         payload.insert(QStringLiteral("message"), QString::fromUtf8(line));
         result->logs.append(payload);
-        send(QStringLiteral("log"), payload);
+        send(wp::event::log(), payload);
         return true;
     }
 
@@ -359,7 +362,7 @@ bool WorkerSession::forwardPipelinePythonTrainerLine(const QByteArray& line, Pip
         payload.insert(QStringLiteral("backend"), requestedTrainingBackend(request_));
         payload.insert(QStringLiteral("message"), QString::fromUtf8(line));
         result->logs.append(payload);
-        send(QStringLiteral("log"), payload);
+        send(wp::event::log(), payload);
         return true;
     }
 

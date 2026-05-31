@@ -28,6 +28,7 @@ add_executable(AITrainStudio WIN32
     src/MainWindowSummaries.cpp
     src/MainWindowSupport.h
     src/MainWindowSupport.cpp
+    src/MainWindowState.h
     src/MainWindowSystemPages.cpp
     src/MainWindowTaskPage.cpp
     src/MainWindowTrainingPage.cpp

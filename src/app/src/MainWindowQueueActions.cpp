@@ -77,9 +77,9 @@ void MainWindow::cancelSelectedTask()
         }
 
         if (task.state == aitrain::TaskState::Queued) {
-            for (int index = 0; index < pendingTrainingTasks_.size(); ++index) {
-                if (pendingTrainingTasks_.at(index).taskId == taskId) {
-                    pendingTrainingTasks_.remove(index);
+            for (int index = 0; index < state_.training.pendingTrainingTasks.size(); ++index) {
+                if (state_.training.pendingTrainingTasks.at(index).taskId == taskId) {
+                    state_.training.pendingTrainingTasks.remove(index);
                     break;
                 }
             }
@@ -90,7 +90,7 @@ void MainWindow::cancelSelectedTask()
             return;
         }
 
-        if ((task.state == aitrain::TaskState::Running || task.state == aitrain::TaskState::Paused) && taskId == currentTaskId_) {
+        if ((task.state == aitrain::TaskState::Running || task.state == aitrain::TaskState::Paused) && taskId == state_.training.currentTaskId) {
             worker_.cancel();
             return;
         }
@@ -196,7 +196,7 @@ void MainWindow::reproduceSelectedTrainingTask()
 
     PendingTrainingTask pending{newTaskId, request, false, snapshot.datasetId, QString()};
     if (worker_.isRunning()) {
-        pendingTrainingTasks_.append(pending);
+        state_.training.pendingTrainingTasks.append(pending);
         workerPill_->setStatus(uiText("复现实验已排队"), StatusPill::Tone::Info);
         updateRecentTasks();
         return;
@@ -211,12 +211,12 @@ void MainWindow::startQueuedTraining(const QString& taskId, const aitrain::Train
     metricsWidget_->clear();
     logEdit_->clear();
     progressBar_->setValue(0);
-    currentTaskId_ = taskId;
+    state_.training.currentTaskId = taskId;
 
     QString error;
     if (!worker_.startTraining(workerExecutablePath(), request, &error)) {
         repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, nullptr);
-        currentTaskId_.clear();
+        state_.training.currentTaskId.clear();
         updateRecentTasks();
         QMessageBox::critical(this, QStringLiteral("Worker"), error);
         startNextQueuedTask();
@@ -231,11 +231,11 @@ void MainWindow::startQueuedTraining(const QString& taskId, const aitrain::Train
 
 void MainWindow::startNextQueuedTask()
 {
-    if (worker_.isRunning() || pendingTrainingTasks_.isEmpty()) {
+    if (worker_.isRunning() || state_.training.pendingTrainingTasks.isEmpty()) {
         return;
     }
 
-    const PendingTrainingTask next = pendingTrainingTasks_.takeFirst();
+    const PendingTrainingTask next = state_.training.pendingTrainingTasks.takeFirst();
     if (next.needsSnapshot) {
         startSnapshotForQueuedTraining(next);
         return;
@@ -272,8 +272,8 @@ void MainWindow::startSnapshotForQueuedTraining(const PendingTrainingTask& pendi
         return;
     }
 
-    hasActiveSnapshotTrainingTask_ = true;
-    activeSnapshotTrainingTask_ = pending;
+    state_.training.hasActiveSnapshotTrainingTask = true;
+    state_.training.activeSnapshotTrainingTask = pending;
 
     QJsonObject options;
     options.insert(QStringLiteral("maxFiles"), 20000);
@@ -282,9 +282,9 @@ void MainWindow::startSnapshotForQueuedTraining(const PendingTrainingTask& pendi
     if (!worker_.requestDatasetSnapshot(workerExecutablePath(), pending.request.datasetPath, outputPath, pending.datasetFormat, options, &error, createdTaskId)) {
         repository_.updateTaskState(createdTaskId, aitrain::TaskState::Failed, error, nullptr);
         repository_.updateTaskState(pending.taskId, aitrain::TaskState::Failed, uiText("自动数据快照失败：%1").arg(error), nullptr);
-        hasActiveSnapshotTrainingTask_ = false;
-        activeSnapshotTrainingTask_ = PendingTrainingTask();
-        currentTaskId_.clear();
+        state_.training.hasActiveSnapshotTrainingTask = false;
+        state_.training.activeSnapshotTrainingTask = PendingTrainingTask();
+        state_.training.currentTaskId.clear();
         updateRecentTasks();
         QMessageBox::critical(this, uiText("数据快照"), error);
         return;
@@ -368,7 +368,7 @@ void MainWindow::runLocalPipelinePlanFromCurrentDataset()
         if (!taskId.isEmpty() && repository_.isOpen()) {
             QString taskError;
             repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
-            currentTaskId_.clear();
+            state_.training.currentTaskId.clear();
             updateRecentTasks();
         }
         QMessageBox::critical(this, uiText("本地流水线"), error);

@@ -6,6 +6,7 @@
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/JsonProtocol.h"
 #include "aitrain/core/ProductWorkflow.h"
+#include "aitrain/core/WorkerProtocol.h"
 
 #include <QDateTime>
 #include <QCoreApplication>
@@ -23,6 +24,8 @@
 #include <QThread>
 
 using namespace worker_support;
+namespace wp = aitrain::worker_protocol;
+
 void WorkerSession::evaluateModel(const QJsonObject& payload)
 {
     const QString taskId = payload.value(QStringLiteral("taskId")).toString();
@@ -43,7 +46,7 @@ void WorkerSession::evaluateModel(const QJsonObject& payload)
     progress.insert(QStringLiteral("taskId"), taskId);
     progress.insert(QStringLiteral("percent"), 0);
     progress.insert(QStringLiteral("message"), QStringLiteral("开始评估模型。"));
-    send(QStringLiteral("progress"), progress);
+    send(wp::event::progress(), progress);
     if (pollPendingCancel()) {
         sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
         return;
@@ -68,7 +71,7 @@ void WorkerSession::evaluateModel(const QJsonObject& payload)
     artifact.insert(QStringLiteral("kind"), QStringLiteral("evaluation_report"));
     artifact.insert(QStringLiteral("path"), result.reportPath);
     artifact.insert(QStringLiteral("message"), QStringLiteral("Model evaluation report"));
-    send(QStringLiteral("artifact"), artifact);
+    send(wp::event::artifact(), artifact);
     for (const auto& item : {
              qMakePair(QStringLiteral("per_class_metrics"), QStringLiteral("perClassMetricsPath")),
              qMakePair(QStringLiteral("error_samples"), QStringLiteral("errorSamplesPath")),
@@ -82,7 +85,7 @@ void WorkerSession::evaluateModel(const QJsonObject& payload)
             extraArtifact.insert(QStringLiteral("kind"), item.first);
             extraArtifact.insert(QStringLiteral("path"), path);
             extraArtifact.insert(QStringLiteral("message"), QStringLiteral("Model evaluation artifact"));
-            send(QStringLiteral("artifact"), extraArtifact);
+            send(wp::event::artifact(), extraArtifact);
         }
     }
     const QString legacyOverlaysPath = result.payload.value(QStringLiteral("overlaysPath")).toString();
@@ -92,20 +95,20 @@ void WorkerSession::evaluateModel(const QJsonObject& payload)
         extraArtifact.insert(QStringLiteral("kind"), QStringLiteral("evaluation_overlays"));
         extraArtifact.insert(QStringLiteral("path"), legacyOverlaysPath);
         extraArtifact.insert(QStringLiteral("message"), QStringLiteral("Model evaluation artifact"));
-        send(QStringLiteral("artifact"), extraArtifact);
+        send(wp::event::artifact(), extraArtifact);
     }
     QJsonObject progressDone;
     progressDone.insert(QStringLiteral("taskId"), taskId);
     progressDone.insert(QStringLiteral("percent"), 100);
     progressDone.insert(QStringLiteral("message"), QStringLiteral("模型评估完成。"));
-    send(QStringLiteral("progress"), progressDone);
-    send(QStringLiteral("evaluationReport"), result.payload);
+    send(wp::event::progress(), progressDone);
+    send(wp::event::evaluationReport(), result.payload);
     socket_.waitForBytesWritten(1000);
 
     QJsonObject completed;
     completed.insert(QStringLiteral("taskId"), taskId);
     completed.insert(QStringLiteral("message"), QStringLiteral("Model evaluation completed"));
-    send(QStringLiteral("completed"), completed);
+    send(wp::event::completed(), completed);
     finishSession();
 }
 
@@ -127,7 +130,7 @@ void WorkerSession::benchmarkModel(const QJsonObject& payload)
     progress.insert(QStringLiteral("taskId"), taskId);
     progress.insert(QStringLiteral("percent"), 0);
     progress.insert(QStringLiteral("message"), QStringLiteral("开始部署基准测试。"));
-    send(QStringLiteral("progress"), progress);
+    send(wp::event::progress(), progress);
     if (pollPendingCancel()) {
         sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
         return;
@@ -152,19 +155,19 @@ void WorkerSession::benchmarkModel(const QJsonObject& payload)
     artifact.insert(QStringLiteral("kind"), QStringLiteral("benchmark_report"));
     artifact.insert(QStringLiteral("path"), result.reportPath);
     artifact.insert(QStringLiteral("message"), QStringLiteral("Model benchmark report"));
-    send(QStringLiteral("artifact"), artifact);
+    send(wp::event::artifact(), artifact);
     QJsonObject progressDone;
     progressDone.insert(QStringLiteral("taskId"), taskId);
     progressDone.insert(QStringLiteral("percent"), 100);
     progressDone.insert(QStringLiteral("message"), QStringLiteral("部署基准测试完成。"));
-    send(QStringLiteral("progress"), progressDone);
-    send(QStringLiteral("benchmarkReport"), result.payload);
+    send(wp::event::progress(), progressDone);
+    send(wp::event::benchmarkReport(), result.payload);
     socket_.waitForBytesWritten(1000);
 
     QJsonObject completed;
     completed.insert(QStringLiteral("taskId"), taskId);
     completed.insert(QStringLiteral("message"), QStringLiteral("Model benchmark completed"));
-    send(QStringLiteral("completed"), completed);
+    send(wp::event::completed(), completed);
     finishSession();
 }
 
@@ -190,7 +193,7 @@ void WorkerSession::generateDeliveryReport(const QJsonObject& payload)
     artifact.insert(QStringLiteral("kind"), QStringLiteral("training_delivery_report"));
     artifact.insert(QStringLiteral("path"), result.reportPath);
     artifact.insert(QStringLiteral("message"), QStringLiteral("Training delivery HTML report"));
-    send(QStringLiteral("artifact"), artifact);
+    send(wp::event::artifact(), artifact);
     const QString jsonPath = result.payload.value(QStringLiteral("jsonPath")).toString();
     if (!jsonPath.isEmpty()) {
         QJsonObject jsonArtifact;
@@ -198,7 +201,7 @@ void WorkerSession::generateDeliveryReport(const QJsonObject& payload)
         jsonArtifact.insert(QStringLiteral("kind"), QStringLiteral("training_delivery_report_json"));
         jsonArtifact.insert(QStringLiteral("path"), jsonPath);
         jsonArtifact.insert(QStringLiteral("message"), QStringLiteral("Training delivery report JSON context"));
-        send(QStringLiteral("artifact"), jsonArtifact);
+        send(wp::event::artifact(), jsonArtifact);
     }
     const QString modelCardPath = result.payload.value(QStringLiteral("modelCardPath")).toString();
     if (!modelCardPath.isEmpty()) {
@@ -207,7 +210,7 @@ void WorkerSession::generateDeliveryReport(const QJsonObject& payload)
         modelCardArtifact.insert(QStringLiteral("kind"), QStringLiteral("model_card"));
         modelCardArtifact.insert(QStringLiteral("path"), modelCardPath);
         modelCardArtifact.insert(QStringLiteral("message"), QStringLiteral("Model card JSON"));
-        send(QStringLiteral("artifact"), modelCardArtifact);
+        send(wp::event::artifact(), modelCardArtifact);
     }
     const QString inventoryPath = result.payload.value(QStringLiteral("artifactInventoryPath")).toString();
     if (!inventoryPath.isEmpty()) {
@@ -216,7 +219,7 @@ void WorkerSession::generateDeliveryReport(const QJsonObject& payload)
         inventoryArtifact.insert(QStringLiteral("kind"), QStringLiteral("delivery_artifact_inventory"));
         inventoryArtifact.insert(QStringLiteral("path"), inventoryPath);
         inventoryArtifact.insert(QStringLiteral("message"), QStringLiteral("Delivery artifact inventory"));
-        send(QStringLiteral("artifact"), inventoryArtifact);
+        send(wp::event::artifact(), inventoryArtifact);
     }
     const QString manifestPath = result.payload.value(QStringLiteral("deliveryManifestPath")).toString();
     if (!manifestPath.isEmpty()) {
@@ -225,14 +228,14 @@ void WorkerSession::generateDeliveryReport(const QJsonObject& payload)
         manifestArtifact.insert(QStringLiteral("kind"), QStringLiteral("delivery_manifest"));
         manifestArtifact.insert(QStringLiteral("path"), manifestPath);
         manifestArtifact.insert(QStringLiteral("message"), QStringLiteral("Delivery manifest"));
-        send(QStringLiteral("artifact"), manifestArtifact);
+        send(wp::event::artifact(), manifestArtifact);
     }
-    send(QStringLiteral("deliveryReport"), result.payload);
+    send(wp::event::deliveryReport(), result.payload);
     socket_.waitForBytesWritten(1000);
     QJsonObject completed;
     completed.insert(QStringLiteral("taskId"), taskId);
     completed.insert(QStringLiteral("message"), QStringLiteral("Training delivery report generated"));
-    send(QStringLiteral("completed"), completed);
+    send(wp::event::completed(), completed);
     finishSession();
 }
 
@@ -252,7 +255,7 @@ void WorkerSession::runCustomerOcrAcceptance(const QJsonObject& payload)
     progress.insert(QStringLiteral("taskId"), taskId);
     progress.insert(QStringLiteral("percent"), 0);
     progress.insert(QStringLiteral("message"), QStringLiteral("开始客户域 OCR 验收。"));
-    send(QStringLiteral("progress"), progress);
+    send(wp::event::progress(), progress);
     if (pollPendingCancel()) {
         sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
         return;
@@ -269,7 +272,7 @@ void WorkerSession::runCustomerOcrAcceptance(const QJsonObject& payload)
     artifact.insert(QStringLiteral("kind"), QStringLiteral("customer_ocr_acceptance"));
     artifact.insert(QStringLiteral("path"), result.reportPath);
     artifact.insert(QStringLiteral("message"), QStringLiteral("Customer OCR acceptance report"));
-    send(QStringLiteral("artifact"), artifact);
+    send(wp::event::artifact(), artifact);
     const QString summaryPath = result.payload.value(QStringLiteral("summaryPath")).toString();
     if (!summaryPath.isEmpty()) {
         QJsonObject summaryArtifact;
@@ -277,21 +280,21 @@ void WorkerSession::runCustomerOcrAcceptance(const QJsonObject& payload)
         summaryArtifact.insert(QStringLiteral("kind"), QStringLiteral("customer_ocr_acceptance_summary"));
         summaryArtifact.insert(QStringLiteral("path"), summaryPath);
         summaryArtifact.insert(QStringLiteral("message"), QStringLiteral("Customer OCR acceptance summary"));
-        send(QStringLiteral("artifact"), summaryArtifact);
+        send(wp::event::artifact(), summaryArtifact);
     }
 
     QJsonObject doneProgress;
     doneProgress.insert(QStringLiteral("taskId"), taskId);
     doneProgress.insert(QStringLiteral("percent"), 100);
     doneProgress.insert(QStringLiteral("message"), QStringLiteral("客户域 OCR 验收报告已生成。"));
-    send(QStringLiteral("progress"), doneProgress);
-    send(QStringLiteral("customerOcrAcceptance"), result.payload);
+    send(wp::event::progress(), doneProgress);
+    send(wp::event::customerOcrAcceptance(), result.payload);
     socket_.waitForBytesWritten(1000);
 
     QJsonObject completed;
     completed.insert(QStringLiteral("taskId"), taskId);
     completed.insert(QStringLiteral("message"), QStringLiteral("Customer OCR acceptance completed"));
-    send(QStringLiteral("completed"), completed);
+    send(wp::event::completed(), completed);
     finishSession();
 }
 
@@ -314,7 +317,7 @@ void WorkerSession::collectDiagnostics(const QJsonObject& payload)
     progress.insert(QStringLiteral("taskId"), taskId);
     progress.insert(QStringLiteral("percent"), 0);
     progress.insert(QStringLiteral("message"), QStringLiteral("开始收集诊断包。"));
-    send(QStringLiteral("progress"), progress);
+    send(wp::event::progress(), progress);
     if (pollPendingCancel()) {
         sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
         return;
@@ -339,21 +342,21 @@ void WorkerSession::collectDiagnostics(const QJsonObject& payload)
         artifact.insert(QStringLiteral("kind"), item.first);
         artifact.insert(QStringLiteral("path"), path);
         artifact.insert(QStringLiteral("message"), QStringLiteral("Diagnostic bundle artifact"));
-        send(QStringLiteral("artifact"), artifact);
+        send(wp::event::artifact(), artifact);
     }
 
     QJsonObject doneProgress;
     doneProgress.insert(QStringLiteral("taskId"), taskId);
     doneProgress.insert(QStringLiteral("percent"), 100);
     doneProgress.insert(QStringLiteral("message"), QStringLiteral("诊断包已生成。"));
-    send(QStringLiteral("progress"), doneProgress);
-    send(QStringLiteral("diagnosticBundle"), result.payload);
+    send(wp::event::progress(), doneProgress);
+    send(wp::event::diagnosticBundle(), result.payload);
     socket_.waitForBytesWritten(1000);
 
     QJsonObject completed;
     completed.insert(QStringLiteral("taskId"), taskId);
     completed.insert(QStringLiteral("message"), QStringLiteral("Diagnostics collected"));
-    send(QStringLiteral("completed"), completed);
+    send(wp::event::completed(), completed);
     finishSession();
 }
 
@@ -378,7 +381,7 @@ void WorkerSession::validateDeploymentArtifact(const QJsonObject& payload)
     progress.insert(QStringLiteral("taskId"), taskId);
     progress.insert(QStringLiteral("percent"), 0);
     progress.insert(QStringLiteral("message"), QStringLiteral("开始验证部署产物。"));
-    send(QStringLiteral("progress"), progress);
+    send(wp::event::progress(), progress);
     if (pollPendingCancel()) {
         sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
         return;
@@ -408,15 +411,15 @@ void WorkerSession::validateDeploymentArtifact(const QJsonObject& payload)
         artifact.insert(QStringLiteral("kind"), item.first);
         artifact.insert(QStringLiteral("path"), path);
         artifact.insert(QStringLiteral("message"), QStringLiteral("Deployment validation artifact"));
-        send(QStringLiteral("artifact"), artifact);
+        send(wp::event::artifact(), artifact);
     }
 
     QJsonObject doneProgress;
     doneProgress.insert(QStringLiteral("taskId"), taskId);
     doneProgress.insert(QStringLiteral("percent"), 100);
     doneProgress.insert(QStringLiteral("message"), QStringLiteral("部署产物验证已完成。"));
-    send(QStringLiteral("progress"), doneProgress);
-    send(QStringLiteral("deploymentValidation"), result.payload);
+    send(wp::event::progress(), doneProgress);
+    send(wp::event::deploymentValidation(), result.payload);
     socket_.waitForBytesWritten(1000);
 
     QJsonObject completed;
@@ -431,7 +434,7 @@ void WorkerSession::validateDeploymentArtifact(const QJsonObject& payload)
         completed.insert(QStringLiteral("nextAction"), result.payload.value(QStringLiteral("nextAction")).toString());
     }
     completed.insert(QStringLiteral("message"), QStringLiteral("Deployment validation completed"));
-    send(QStringLiteral("completed"), completed);
+    send(wp::event::completed(), completed);
     finishSession();
 }
 
@@ -449,7 +452,7 @@ void WorkerSession::exportModel(const QJsonObject& payload)
     QJsonObject startProgress;
     startProgress.insert(QStringLiteral("percent"), 0);
     startProgress.insert(QStringLiteral("message"), QStringLiteral("开始导出模型。"));
-    send(QStringLiteral("progress"), startProgress);
+    send(wp::event::progress(), startProgress);
     if (pollPendingCancel()) {
         sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
         return;
@@ -472,7 +475,7 @@ void WorkerSession::exportModel(const QJsonObject& payload)
     QJsonObject progressPayload;
     progressPayload.insert(QStringLiteral("percent"), 100);
     progressPayload.insert(QStringLiteral("message"), QStringLiteral("模型导出完成。"));
-    send(QStringLiteral("progress"), progressPayload);
+    send(wp::event::progress(), progressPayload);
 
     QJsonObject artifact;
     artifact.insert(QStringLiteral("taskId"), taskId);
@@ -485,7 +488,7 @@ void WorkerSession::exportModel(const QJsonObject& payload)
         artifactMessage = QStringLiteral("TensorRT engine export");
     }
     artifact.insert(QStringLiteral("message"), artifactMessage);
-    send(QStringLiteral("artifact"), artifact);
+    send(wp::event::artifact(), artifact);
 
     const QJsonObject ncnnConfig = result.config.value(QStringLiteral("ncnn")).toObject();
     const QString ncnnBinPath = ncnnConfig.value(QStringLiteral("binPath")).toString();
@@ -495,7 +498,7 @@ void WorkerSession::exportModel(const QJsonObject& payload)
         binArtifact.insert(QStringLiteral("kind"), QStringLiteral("export_sidecar"));
         binArtifact.insert(QStringLiteral("path"), ncnnBinPath);
         binArtifact.insert(QStringLiteral("message"), QStringLiteral("NCNN binary weights"));
-        send(QStringLiteral("artifact"), binArtifact);
+        send(wp::event::artifact(), binArtifact);
     }
 
     QJsonObject response;
@@ -507,11 +510,11 @@ void WorkerSession::exportModel(const QJsonObject& payload)
     response.insert(QStringLiteral("reportPath"), result.reportPath);
     response.insert(QStringLiteral("config"), result.config);
     response.insert(QStringLiteral("exportedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
-    send(QStringLiteral("modelExport"), response);
+    send(wp::event::modelExport(), response);
 
     QJsonObject completed;
     completed.insert(QStringLiteral("message"), QStringLiteral("Model export completed"));
-    send(QStringLiteral("completed"), completed);
+    send(wp::event::completed(), completed);
     finishSession();
 }
 
@@ -539,7 +542,7 @@ void WorkerSession::runInference(const QJsonObject& payload)
     startProgress.insert(QStringLiteral("taskId"), taskId);
     startProgress.insert(QStringLiteral("percent"), 0);
     startProgress.insert(QStringLiteral("message"), QStringLiteral("开始推理。"));
-    send(QStringLiteral("progress"), startProgress);
+    send(wp::event::progress(), startProgress);
     if (pollPendingCancel()) {
         sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
         return;
@@ -654,10 +657,10 @@ void WorkerSession::runInference(const QJsonObject& payload)
 
     QJsonObject renderLog;
     renderLog.insert(QStringLiteral("message"), QStringLiteral("Rendering inference overlay."));
-    send(QStringLiteral("log"), renderLog);
+    send(wp::event::log(), renderLog);
     QJsonObject saveLog;
     saveLog.insert(QStringLiteral("message"), QStringLiteral("Saving inference overlay."));
-    send(QStringLiteral("log"), saveLog);
+    send(wp::event::log(), saveLog);
     const QString overlayPath = QDir(outputPath).filePath(QStringLiteral("inference_overlay.png"));
     if (!overlay.save(overlayPath)) {
         fail(QStringLiteral("Cannot write inference overlay: %1").arg(overlayPath));
@@ -669,21 +672,21 @@ void WorkerSession::runInference(const QJsonObject& payload)
     progressPayload.insert(QStringLiteral("taskId"), taskId);
     progressPayload.insert(QStringLiteral("percent"), 100);
     progressPayload.insert(QStringLiteral("message"), QStringLiteral("推理完成。"));
-    send(QStringLiteral("progress"), progressPayload);
+    send(wp::event::progress(), progressPayload);
 
     QJsonObject predictionsArtifact;
     predictionsArtifact.insert(QStringLiteral("taskId"), taskId);
     predictionsArtifact.insert(QStringLiteral("kind"), QStringLiteral("inference_predictions"));
     predictionsArtifact.insert(QStringLiteral("path"), predictionsPath);
     predictionsArtifact.insert(QStringLiteral("message"), QStringLiteral("Inference predictions"));
-    send(QStringLiteral("artifact"), predictionsArtifact);
+    send(wp::event::artifact(), predictionsArtifact);
 
     QJsonObject overlayArtifact;
     overlayArtifact.insert(QStringLiteral("taskId"), taskId);
     overlayArtifact.insert(QStringLiteral("kind"), QStringLiteral("inference_overlay"));
     overlayArtifact.insert(QStringLiteral("path"), overlayPath);
     overlayArtifact.insert(QStringLiteral("message"), QStringLiteral("Inference overlay"));
-    send(QStringLiteral("artifact"), overlayArtifact);
+    send(wp::event::artifact(), overlayArtifact);
 
     QJsonObject response;
     response.insert(QStringLiteral("ok"), true);
@@ -696,11 +699,11 @@ void WorkerSession::runInference(const QJsonObject& payload)
     response.insert(QStringLiteral("elapsedMs"), elapsedMs);
     response.insert(QStringLiteral("predictionCount"), predictionCount);
     response.insert(QStringLiteral("finishedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
-    send(QStringLiteral("inferenceResult"), response);
+    send(wp::event::inferenceResult(), response);
 
     QJsonObject completed;
     completed.insert(QStringLiteral("taskId"), taskId);
     completed.insert(QStringLiteral("message"), QStringLiteral("Inference completed"));
-    send(QStringLiteral("completed"), completed);
+    send(wp::event::completed(), completed);
     finishSession();
 }

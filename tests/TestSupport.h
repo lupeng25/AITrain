@@ -12,6 +12,7 @@
 #include "aitrain/core/ProjectRepository.h"
 #include "aitrain/core/ProductWorkflow.h"
 #include "aitrain/core/SegmentationDataset.h"
+#include "aitrain/core/WorkerProtocol.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>

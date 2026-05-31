@@ -6,6 +6,7 @@
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/JsonProtocol.h"
 #include "aitrain/core/ProductWorkflow.h"
+#include "aitrain/core/WorkerProtocol.h"
 
 #include <QDateTime>
 #include <QCoreApplication>
@@ -23,6 +24,8 @@
 #include <QThread>
 
 using namespace worker_support;
+namespace wp = aitrain::worker_protocol;
+
 bool WorkerSession::shouldUsePythonTrainer() const
 {
     return isPythonTrainingBackendId(requestedTrainingBackend(request_), request_.parameters);
@@ -91,7 +94,7 @@ void WorkerSession::runPythonTrainer()
     adapterLog.insert(QStringLiteral("taskId"), request_.taskId);
     adapterLog.insert(QStringLiteral("message"), QStringLiteral("Launching Python trainer backend=%1").arg(backend));
     adapterLog.insert(QStringLiteral("backend"), backend);
-    send(QStringLiteral("log"), adapterLog);
+    send(wp::event::log(), adapterLog);
 
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
@@ -140,7 +143,7 @@ void WorkerSession::runPythonTrainer()
         payload.insert(QStringLiteral("taskId"), request_.taskId);
         payload.insert(QStringLiteral("message"), QString::fromUtf8(stderrBuffer.trimmed()));
         payload.insert(QStringLiteral("backend"), backend);
-        send(QStringLiteral("log"), payload);
+        send(wp::event::log(), payload);
     }
 
     if (canceled_) {
@@ -200,7 +203,7 @@ void WorkerSession::drainPythonTrainerErrors(QByteArray* buffer)
             payload.insert(QStringLiteral("taskId"), request_.taskId);
             payload.insert(QStringLiteral("message"), QString::fromUtf8(line));
             payload.insert(QStringLiteral("backend"), requestedTrainingBackend(request_));
-            send(QStringLiteral("log"), payload);
+            send(wp::event::log(), payload);
         }
         newline = buffer->indexOf('\n');
     }
@@ -219,7 +222,7 @@ bool WorkerSession::forwardPythonTrainerLine(const QByteArray& line, bool* termi
         payload.insert(QStringLiteral("taskId"), request_.taskId);
         payload.insert(QStringLiteral("message"), QString::fromUtf8(line));
         payload.insert(QStringLiteral("backend"), requestedTrainingBackend(request_));
-        send(QStringLiteral("log"), payload);
+        send(wp::event::log(), payload);
         return true;
     }
 
@@ -230,7 +233,7 @@ bool WorkerSession::forwardPythonTrainerLine(const QByteArray& line, bool* termi
         payload.insert(QStringLiteral("taskId"), request_.taskId);
         payload.insert(QStringLiteral("message"), QString::fromUtf8(line));
         payload.insert(QStringLiteral("backend"), requestedTrainingBackend(request_));
-        send(QStringLiteral("log"), payload);
+        send(wp::event::log(), payload);
         return true;
     }
 

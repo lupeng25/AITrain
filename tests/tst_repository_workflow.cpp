@@ -1,9 +1,88 @@
 #include "TestSupport.h"
 
+#include <QSqlDatabase>
+#include <QSqlQuery>
+
 class RepositoryWorkflowTests : public QObject {
     Q_OBJECT
 
 private slots:
+    void repositoryRecordsSchemaBaseline()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        aitrain::ProjectRepository repository;
+        QString error;
+        QVERIFY2(repository.open(dir.filePath(QStringLiteral("project.sqlite")), &error), qPrintable(error));
+        QCOMPARE(aitrain::ProjectRepository::currentSchemaVersion(), 1);
+        QCOMPARE(repository.schemaVersion(&error), 1);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        const QVector<int> migrations = repository.appliedSchemaMigrations(&error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(migrations, QVector<int>{1});
+        repository.close();
+
+        QVERIFY2(repository.open(dir.filePath(QStringLiteral("project.sqlite")), &error), qPrintable(error));
+        QCOMPARE(repository.appliedSchemaMigrations(&error), QVector<int>{1});
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+    }
+
+    void repositoryBaselinesLegacyDatabaseWithoutMigrationTable()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString dbPath = dir.filePath(QStringLiteral("legacy.sqlite"));
+        const QString taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        const QString connectionName = QStringLiteral("legacy_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+
+        QSqlDatabase legacyDb = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+        legacyDb.setDatabaseName(dbPath);
+        QVERIFY(legacyDb.open());
+        QSqlQuery query(legacyDb);
+        QVERIFY(query.exec(QStringLiteral("create table tasks ("
+                                          "id text primary key,"
+                                          "project_name text not null,"
+                                          "plugin_id text not null,"
+                                          "task_type text not null,"
+                                          "kind text not null,"
+                                          "state text not null,"
+                                          "work_dir text not null,"
+                                          "message text,"
+                                          "created_at text not null,"
+                                          "updated_at text not null)")));
+        query.prepare(QStringLiteral("insert into tasks(id, project_name, plugin_id, task_type, kind, state, work_dir, message, created_at, updated_at) "
+                                     "values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+        query.addBindValue(taskId);
+        query.addBindValue(QStringLiteral("legacy"));
+        query.addBindValue(QStringLiteral("com.aitrain.plugins.yolo_native"));
+        query.addBindValue(QStringLiteral("detection"));
+        query.addBindValue(QStringLiteral("train"));
+        query.addBindValue(QStringLiteral("queued"));
+        query.addBindValue(dir.filePath(QStringLiteral("runs/legacy")));
+        query.addBindValue(QStringLiteral("legacy queued task"));
+        query.addBindValue(QStringLiteral("2026-05-01T00:00:00.000Z"));
+        query.addBindValue(QStringLiteral("2026-05-01T00:00:00.000Z"));
+        QVERIFY(query.exec());
+        legacyDb.close();
+        legacyDb = QSqlDatabase();
+        QSqlDatabase::removeDatabase(connectionName);
+
+        aitrain::ProjectRepository repository;
+        QString error;
+        QVERIFY2(repository.open(dbPath, &error), qPrintable(error));
+        QCOMPARE(repository.schemaVersion(&error), 1);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(repository.appliedSchemaMigrations(&error), QVector<int>{1});
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+
+        const QVector<aitrain::TaskRecord> tasks = repository.recentTasks(10, &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(tasks.size(), 1);
+        QCOMPARE(tasks.first().id, taskId);
+        QCOMPARE(tasks.first().message, QStringLiteral("legacy queued task"));
+    }
+
     void repositoryStoresOfficialTrainingArtifacts()
     {
         QTemporaryDir dir;

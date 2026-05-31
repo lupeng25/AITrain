@@ -67,8 +67,8 @@ QWidget* MainWindow::buildDatasetPage()
 
     datasetFormatCombo_ = new QComboBox;
     connect(datasetFormatCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
-        currentDatasetFormat_ = currentDatasetFormat();
-        currentDatasetValid_ = false;
+        state_.dataset.currentFormat = currentDatasetFormat();
+        state_.dataset.currentValid = false;
         updateTrainingSelectionSummary();
         refreshTrainingDefaults();
         refreshDatasetConversionDefaultsFromCurrentDataset();
@@ -294,9 +294,9 @@ QWidget* MainWindow::buildDatasetPage()
             if (formatIndex >= 0) {
                 datasetFormatCombo_->setCurrentIndex(formatIndex);
             }
-            currentDatasetPath_ = path;
-            currentDatasetFormat_ = format;
-            currentDatasetValid_ = datasetListTable_->item(row, 2)
+            state_.dataset.currentPath = path;
+            state_.dataset.currentFormat = format;
+            state_.dataset.currentValid = datasetListTable_->item(row, 2)
                 && datasetListTable_->item(row, 2)->data(Qt::UserRole).toString() == QStringLiteral("valid");
             updateTrainingSelectionSummary();
             refreshTrainingDefaults();

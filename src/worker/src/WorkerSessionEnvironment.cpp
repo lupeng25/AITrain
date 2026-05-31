@@ -6,6 +6,7 @@
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/JsonProtocol.h"
 #include "aitrain/core/ProductWorkflow.h"
+#include "aitrain/core/WorkerProtocol.h"
 
 #include <QDateTime>
 #include <QCoreApplication>
@@ -23,6 +24,8 @@
 #include <QThread>
 
 using namespace worker_support;
+namespace wp = aitrain::worker_protocol;
+
 void WorkerSession::runEnvironmentCheck(const QJsonObject& payload)
 {
     Q_UNUSED(payload)
@@ -78,18 +81,18 @@ void WorkerSession::runEnvironmentCheck(const QJsonObject& payload)
         artifact.insert(QStringLiteral("kind"), QStringLiteral("environment_profiles_report"));
         artifact.insert(QStringLiteral("path"), reportPath);
         artifact.insert(QStringLiteral("message"), QStringLiteral("Environment profile report"));
-        send(QStringLiteral("artifact"), artifact);
+        send(wp::event::artifact(), artifact);
         result.insert(QStringLiteral("reportPath"), reportPath);
     } else {
         QJsonObject logPayload;
         logPayload.insert(QStringLiteral("message"), QStringLiteral("Failed to write environment profile report: %1").arg(reportError));
-        send(QStringLiteral("log"), logPayload);
+        send(wp::event::log(), logPayload);
     }
 
-    send(QStringLiteral("environmentCheck"), result);
+    send(wp::event::environmentCheck(), result);
     QJsonObject completed;
     completed.insert(QStringLiteral("taskId"), QStringLiteral("environment-check"));
     completed.insert(QStringLiteral("message"), QStringLiteral("Environment check completed"));
-    send(QStringLiteral("completed"), completed);
+    send(wp::event::completed(), completed);
     finishSession();
 }

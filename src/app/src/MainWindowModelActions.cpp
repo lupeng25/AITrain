@@ -93,7 +93,7 @@ void MainWindow::startModelExport()
         if (!taskId.isEmpty() && repository_.isOpen()) {
             QString taskError;
             repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
-            currentTaskId_.clear();
+            state_.training.currentTaskId.clear();
             updateRecentTasks();
         }
         QMessageBox::critical(this, uiText("模型导出"), error);
@@ -140,7 +140,7 @@ void MainWindow::startInference()
         if (!taskId.isEmpty() && repository_.isOpen()) {
             QString taskError;
             repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
-            currentTaskId_.clear();
+            state_.training.currentTaskId.clear();
             updateRecentTasks();
         }
         QMessageBox::critical(this, uiText("推理"), error);
@@ -176,7 +176,7 @@ void MainWindow::startTraining()
         QMessageBox::warning(this, uiText("训练"), uiText("当前训练插件不支持所选数据集格式。"));
         return;
     }
-    bool datasetReady = currentDatasetValid_ && currentDatasetPath_ == datasetPath && currentDatasetFormat_ == datasetFormat;
+    bool datasetReady = state_.dataset.currentValid && state_.dataset.currentPath == datasetPath && state_.dataset.currentFormat == datasetFormat;
     if (!datasetReady && repository_.isOpen()) {
         QString error;
         const aitrain::DatasetRecord dataset = repository_.datasetByRootPath(datasetPath, &error);
@@ -295,7 +295,7 @@ void MainWindow::startTraining()
 
     PendingTrainingTask pending{taskId, request, needsSnapshot, datasetId, datasetFormat};
     if (worker_.isRunning() || needsSnapshot) {
-        pendingTrainingTasks_.append(pending);
+        state_.training.pendingTrainingTasks.append(pending);
         workerPill_->setStatus(uiText("任务已排队"), StatusPill::Tone::Info);
         appendLog(uiText("任务已加入队列：%1").arg(taskId));
         updateRecentTasks();
@@ -354,7 +354,7 @@ void MainWindow::evaluateSelectedArtifact()
         if (!taskId.isEmpty() && repository_.isOpen()) {
             QString taskError;
             repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
-            currentTaskId_.clear();
+            state_.training.currentTaskId.clear();
             updateRecentTasks();
         }
         QMessageBox::critical(this, uiText("模型评估"), error);
@@ -400,7 +400,7 @@ void MainWindow::benchmarkSelectedArtifact()
         if (!taskId.isEmpty() && repository_.isOpen()) {
             QString taskError;
             repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
-            currentTaskId_.clear();
+            state_.training.currentTaskId.clear();
             updateRecentTasks();
         }
         QMessageBox::critical(this, uiText("部署基准"), error);

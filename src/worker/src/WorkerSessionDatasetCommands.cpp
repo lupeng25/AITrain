@@ -7,6 +7,7 @@
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/JsonProtocol.h"
 #include "aitrain/core/ProductWorkflow.h"
+#include "aitrain/core/WorkerProtocol.h"
 
 #include <QDateTime>
 #include <QCoreApplication>
@@ -24,6 +25,8 @@
 #include <QThread>
 
 using namespace worker_support;
+namespace wp = aitrain::worker_protocol;
+
 void WorkerSession::validateDataset(const QJsonObject& payload)
 {
     const QString taskId = payload.value(QStringLiteral("taskId")).toString();
@@ -41,7 +44,7 @@ void WorkerSession::validateDataset(const QJsonObject& payload)
     startProgress.insert(QStringLiteral("taskId"), taskId);
     startProgress.insert(QStringLiteral("percent"), 0);
     startProgress.insert(QStringLiteral("message"), QStringLiteral("开始校验数据集。"));
-    send(QStringLiteral("progress"), startProgress);
+    send(wp::event::progress(), startProgress);
     if (pollPendingCancel()) {
         sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
         return;
@@ -71,7 +74,7 @@ void WorkerSession::validateDataset(const QJsonObject& payload)
     progressPayload.insert(QStringLiteral("taskId"), taskId);
     progressPayload.insert(QStringLiteral("percent"), 100);
     progressPayload.insert(QStringLiteral("message"), QStringLiteral("数据集校验完成。"));
-    send(QStringLiteral("progress"), progressPayload);
+    send(wp::event::progress(), progressPayload);
 
     QJsonObject response = result.toJson();
     response.insert(QStringLiteral("taskId"), taskId);
@@ -92,8 +95,8 @@ void WorkerSession::validateDataset(const QJsonObject& payload)
     artifact.insert(QStringLiteral("kind"), QStringLiteral("dataset_validation_report"));
     artifact.insert(QStringLiteral("path"), reportPath);
     artifact.insert(QStringLiteral("message"), QStringLiteral("Dataset validation report"));
-    send(QStringLiteral("artifact"), artifact);
-    send(QStringLiteral("datasetValidation"), response);
+    send(wp::event::artifact(), artifact);
+    send(wp::event::datasetValidation(), response);
     QJsonObject terminal;
     terminal.insert(QStringLiteral("taskId"), taskId);
     terminal.insert(QStringLiteral("command"), activeCommand_);
@@ -124,7 +127,7 @@ void WorkerSession::splitDataset(const QJsonObject& payload)
     startProgress.insert(QStringLiteral("taskId"), taskId);
     startProgress.insert(QStringLiteral("percent"), 0);
     startProgress.insert(QStringLiteral("message"), QStringLiteral("开始划分数据集。"));
-    send(QStringLiteral("progress"), startProgress);
+    send(wp::event::progress(), startProgress);
     if (pollPendingCancel()) {
         sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
         return;
@@ -149,7 +152,7 @@ void WorkerSession::splitDataset(const QJsonObject& payload)
     progressPayload.insert(QStringLiteral("taskId"), taskId);
     progressPayload.insert(QStringLiteral("percent"), 100);
     progressPayload.insert(QStringLiteral("message"), QStringLiteral("数据集划分完成。"));
-    send(QStringLiteral("progress"), progressPayload);
+    send(wp::event::progress(), progressPayload);
 
     QJsonObject response = result.toJson();
     response.insert(QStringLiteral("taskId"), taskId);
@@ -171,8 +174,8 @@ void WorkerSession::splitDataset(const QJsonObject& payload)
     artifact.insert(QStringLiteral("kind"), QStringLiteral("dataset_split_report"));
     artifact.insert(QStringLiteral("path"), reportPath);
     artifact.insert(QStringLiteral("message"), QStringLiteral("Dataset split report"));
-    send(QStringLiteral("artifact"), artifact);
-    send(QStringLiteral("datasetSplit"), response);
+    send(wp::event::artifact(), artifact);
+    send(wp::event::datasetSplit(), response);
     QJsonObject terminal;
     terminal.insert(QStringLiteral("taskId"), taskId);
     terminal.insert(QStringLiteral("command"), activeCommand_);
@@ -208,7 +211,7 @@ void WorkerSession::convertDataset(const QJsonObject& payload)
     startProgress.insert(QStringLiteral("taskId"), taskId);
     startProgress.insert(QStringLiteral("percent"), 0);
     startProgress.insert(QStringLiteral("message"), QStringLiteral("开始转换数据集。"));
-    send(QStringLiteral("progress"), startProgress);
+    send(wp::event::progress(), startProgress);
     if (pollPendingCancel()) {
         sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
         return;
@@ -228,11 +231,11 @@ void WorkerSession::convertDataset(const QJsonObject& payload)
     doneProgress.insert(QStringLiteral("taskId"), taskId);
     doneProgress.insert(QStringLiteral("percent"), 100);
     doneProgress.insert(QStringLiteral("message"), QStringLiteral("数据集转换完成。"));
-    send(QStringLiteral("progress"), doneProgress);
+    send(wp::event::progress(), doneProgress);
 
     QJsonObject response = result.toJson();
     response.insert(QStringLiteral("taskId"), taskId);
-    send(QStringLiteral("datasetConversion"), response);
+    send(wp::event::datasetConversion(), response);
 
     if (!result.reportPath.isEmpty() && QFileInfo::exists(result.reportPath)) {
         QJsonObject artifact;
@@ -240,7 +243,7 @@ void WorkerSession::convertDataset(const QJsonObject& payload)
         artifact.insert(QStringLiteral("kind"), QStringLiteral("dataset_conversion_report"));
         artifact.insert(QStringLiteral("path"), result.reportPath);
         artifact.insert(QStringLiteral("message"), QStringLiteral("Dataset conversion report"));
-        send(QStringLiteral("artifact"), artifact);
+        send(wp::event::artifact(), artifact);
     }
 
     QJsonObject terminal;
@@ -284,7 +287,7 @@ void WorkerSession::curateDataset(const QJsonObject& payload)
     progress.insert(QStringLiteral("taskId"), taskId);
     progress.insert(QStringLiteral("percent"), 0);
     progress.insert(QStringLiteral("message"), QStringLiteral("开始生成数据质量报告。"));
-    send(QStringLiteral("progress"), progress);
+    send(wp::event::progress(), progress);
     if (pollPendingCancel()) {
         sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
         return;
@@ -309,7 +312,7 @@ void WorkerSession::curateDataset(const QJsonObject& payload)
     artifact.insert(QStringLiteral("kind"), QStringLiteral("dataset_quality_report"));
     artifact.insert(QStringLiteral("path"), result.reportPath);
     artifact.insert(QStringLiteral("message"), QStringLiteral("Dataset quality report"));
-    send(QStringLiteral("artifact"), artifact);
+    send(wp::event::artifact(), artifact);
 
     const QString csvPath = result.payload.value(QStringLiteral("classDistributionPath")).toString();
     if (!csvPath.isEmpty()) {
@@ -318,7 +321,7 @@ void WorkerSession::curateDataset(const QJsonObject& payload)
         csvArtifact.insert(QStringLiteral("kind"), QStringLiteral("class_distribution"));
         csvArtifact.insert(QStringLiteral("path"), csvPath);
         csvArtifact.insert(QStringLiteral("message"), QStringLiteral("Class distribution CSV"));
-        send(QStringLiteral("artifact"), csvArtifact);
+        send(wp::event::artifact(), csvArtifact);
     }
     const QString problemPath = result.payload.value(QStringLiteral("problemSamplesPath")).toString();
     if (!problemPath.isEmpty()) {
@@ -327,7 +330,7 @@ void WorkerSession::curateDataset(const QJsonObject& payload)
         problemArtifact.insert(QStringLiteral("kind"), QStringLiteral("problem_samples"));
         problemArtifact.insert(QStringLiteral("path"), problemPath);
         problemArtifact.insert(QStringLiteral("message"), QStringLiteral("Problem sample list"));
-        send(QStringLiteral("artifact"), problemArtifact);
+        send(wp::event::artifact(), problemArtifact);
     }
     for (const auto& item : {
              qMakePair(QStringLiteral("image_statistics"), QStringLiteral("imageStatisticsPath")),
@@ -344,7 +347,7 @@ void WorkerSession::curateDataset(const QJsonObject& payload)
             extraArtifact.insert(QStringLiteral("kind"), item.first);
             extraArtifact.insert(QStringLiteral("path"), path);
             extraArtifact.insert(QStringLiteral("message"), QStringLiteral("Dataset quality artifact"));
-            send(QStringLiteral("artifact"), extraArtifact);
+            send(wp::event::artifact(), extraArtifact);
         }
     }
 
@@ -352,14 +355,14 @@ void WorkerSession::curateDataset(const QJsonObject& payload)
     doneProgress.insert(QStringLiteral("taskId"), taskId);
     doneProgress.insert(QStringLiteral("percent"), 100);
     doneProgress.insert(QStringLiteral("message"), QStringLiteral("数据质量报告完成。"));
-    send(QStringLiteral("progress"), doneProgress);
-    send(QStringLiteral("datasetQuality"), result.payload);
+    send(wp::event::progress(), doneProgress);
+    send(wp::event::datasetQuality(), result.payload);
     socket_.waitForBytesWritten(1000);
 
     QJsonObject completed;
     completed.insert(QStringLiteral("taskId"), taskId);
     completed.insert(QStringLiteral("message"), QStringLiteral("Dataset quality report completed"));
-    send(QStringLiteral("completed"), completed);
+    send(wp::event::completed(), completed);
     finishSession();
 }
 
@@ -382,7 +385,7 @@ void WorkerSession::createDatasetSnapshot(const QJsonObject& payload)
     progress.insert(QStringLiteral("taskId"), taskId);
     progress.insert(QStringLiteral("percent"), 0);
     progress.insert(QStringLiteral("message"), QStringLiteral("开始生成数据集快照。"));
-    send(QStringLiteral("progress"), progress);
+    send(wp::event::progress(), progress);
     if (pollPendingCancel()) {
         sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
         return;
@@ -407,19 +410,19 @@ void WorkerSession::createDatasetSnapshot(const QJsonObject& payload)
     artifact.insert(QStringLiteral("kind"), QStringLiteral("dataset_snapshot_manifest"));
     artifact.insert(QStringLiteral("path"), result.reportPath);
     artifact.insert(QStringLiteral("message"), QStringLiteral("Dataset snapshot manifest"));
-    send(QStringLiteral("artifact"), artifact);
+    send(wp::event::artifact(), artifact);
 
     QJsonObject doneProgress;
     doneProgress.insert(QStringLiteral("taskId"), taskId);
     doneProgress.insert(QStringLiteral("percent"), 100);
     doneProgress.insert(QStringLiteral("message"), QStringLiteral("数据集快照完成。"));
-    send(QStringLiteral("progress"), doneProgress);
-    send(QStringLiteral("datasetSnapshot"), result.payload);
+    send(wp::event::progress(), doneProgress);
+    send(wp::event::datasetSnapshot(), result.payload);
     socket_.waitForBytesWritten(1000);
 
     QJsonObject completed;
     completed.insert(QStringLiteral("taskId"), taskId);
     completed.insert(QStringLiteral("message"), QStringLiteral("Dataset snapshot completed"));
-    send(QStringLiteral("completed"), completed);
+    send(wp::event::completed(), completed);
     finishSession();
 }

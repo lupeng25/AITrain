@@ -1,12 +1,15 @@
 #include "WorkerClient.h"
 
 #include "aitrain/core/JsonProtocol.h"
+#include "aitrain/core/WorkerProtocol.h"
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFileInfo>
 #include <QUuid>
+
+namespace wp = aitrain::worker_protocol;
 
 WorkerClient::WorkerClient(QObject* parent)
     : QObject(parent)
@@ -48,127 +51,111 @@ WorkerClient::~WorkerClient()
 
 bool WorkerClient::startTraining(const QString& workerProgram, const aitrain::TrainingRequest& request, QString* error)
 {
-    return startWorkerCommand(workerProgram, QStringLiteral("startTrain"), request.toJson(), error);
+    return startWorkerCommand(workerProgram, wp::command::startTrain(), request.toJson(), error);
 }
 
 bool WorkerClient::requestEnvironmentCheck(const QString& workerProgram, QString* error)
 {
-    return startWorkerCommand(workerProgram, QStringLiteral("environmentCheck"), {}, error);
+    return startWorkerCommand(workerProgram, wp::command::environmentCheck(), {}, error);
 }
 
 bool WorkerClient::requestDatasetValidation(const QString& workerProgram, const QString& datasetPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId, const QString& outputPath)
 {
-    QJsonObject payload;
-    payload.insert(QStringLiteral("taskId"), taskId);
-    payload.insert(QStringLiteral("datasetPath"), datasetPath);
-    payload.insert(QStringLiteral("outputPath"), outputPath);
-    payload.insert(QStringLiteral("format"), format);
-    payload.insert(QStringLiteral("options"), options);
-    return startWorkerCommand(workerProgram, QStringLiteral("validateDataset"), payload, error);
+    return startWorkerCommand(
+        workerProgram,
+        wp::command::validateDataset(),
+        wp::datasetValidationRequest(taskId, datasetPath, format, options, outputPath),
+        error);
 }
 
 bool WorkerClient::requestDatasetSplit(const QString& workerProgram, const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId)
 {
-    QJsonObject payload;
-    payload.insert(QStringLiteral("taskId"), taskId);
-    payload.insert(QStringLiteral("datasetPath"), datasetPath);
-    payload.insert(QStringLiteral("outputPath"), outputPath);
-    payload.insert(QStringLiteral("format"), format);
-    payload.insert(QStringLiteral("options"), options);
-    return startWorkerCommand(workerProgram, QStringLiteral("splitDataset"), payload, error);
+    return startWorkerCommand(
+        workerProgram,
+        wp::command::splitDataset(),
+        wp::datasetSplitRequest(taskId, datasetPath, outputPath, format, options),
+        error);
 }
 
 bool WorkerClient::requestDatasetConversion(const QString& workerProgram, const QString& sourcePath, const QString& outputPath, const QString& sourceFormat, const QString& targetFormat, const QJsonObject& options, QString* error, const QString& taskId)
 {
-    QJsonObject payload;
-    payload.insert(QStringLiteral("taskId"), taskId);
-    payload.insert(QStringLiteral("sourcePath"), sourcePath);
-    payload.insert(QStringLiteral("outputPath"), outputPath);
-    payload.insert(QStringLiteral("sourceFormat"), sourceFormat);
-    payload.insert(QStringLiteral("targetFormat"), targetFormat);
-    payload.insert(QStringLiteral("options"), options);
-    return startWorkerCommand(workerProgram, QStringLiteral("convertDataset"), payload, error);
+    return startWorkerCommand(
+        workerProgram,
+        wp::command::convertDataset(),
+        wp::datasetConversionRequest(taskId, sourcePath, outputPath, sourceFormat, targetFormat, options),
+        error);
 }
 
 bool WorkerClient::requestDatasetCuration(const QString& workerProgram, const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId)
 {
-    QJsonObject payload;
-    payload.insert(QStringLiteral("taskId"), taskId);
-    payload.insert(QStringLiteral("datasetPath"), datasetPath);
-    payload.insert(QStringLiteral("outputPath"), outputPath);
-    payload.insert(QStringLiteral("format"), format);
-    payload.insert(QStringLiteral("options"), options);
-    return startWorkerCommand(workerProgram, QStringLiteral("curateDataset"), payload, error);
+    return startWorkerCommand(
+        workerProgram,
+        wp::command::curateDataset(),
+        wp::datasetCurationRequest(taskId, datasetPath, outputPath, format, options),
+        error);
 }
 
 bool WorkerClient::requestDatasetSnapshot(const QString& workerProgram, const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId)
 {
-    QJsonObject payload;
-    payload.insert(QStringLiteral("taskId"), taskId);
-    payload.insert(QStringLiteral("datasetPath"), datasetPath);
-    payload.insert(QStringLiteral("outputPath"), outputPath);
-    payload.insert(QStringLiteral("format"), format);
-    payload.insert(QStringLiteral("options"), options);
-    return startWorkerCommand(workerProgram, QStringLiteral("createDatasetSnapshot"), payload, error);
+    return startWorkerCommand(
+        workerProgram,
+        wp::command::createDatasetSnapshot(),
+        wp::datasetSnapshotRequest(taskId, datasetPath, outputPath, format, options),
+        error);
 }
 
 bool WorkerClient::requestModelEvaluation(const QString& workerProgram, const QString& modelPath, const QString& datasetPath, const QString& outputPath, const QString& taskType, const QJsonObject& options, QString* error, const QString& taskId)
 {
-    QJsonObject payload;
-    payload.insert(QStringLiteral("taskId"), taskId);
-    payload.insert(QStringLiteral("modelPath"), modelPath);
-    payload.insert(QStringLiteral("datasetPath"), datasetPath);
-    payload.insert(QStringLiteral("outputPath"), outputPath);
-    payload.insert(QStringLiteral("taskType"), taskType);
-    payload.insert(QStringLiteral("options"), options);
-    return startWorkerCommand(workerProgram, QStringLiteral("evaluateModel"), payload, error);
+    return startWorkerCommand(
+        workerProgram,
+        wp::command::evaluateModel(),
+        wp::modelEvaluationRequest(taskId, modelPath, datasetPath, outputPath, taskType, options),
+        error);
 }
 
 bool WorkerClient::requestModelBenchmark(const QString& workerProgram, const QString& modelPath, const QString& outputPath, const QJsonObject& options, QString* error, const QString& taskId)
 {
-    QJsonObject payload;
-    payload.insert(QStringLiteral("taskId"), taskId);
-    payload.insert(QStringLiteral("modelPath"), modelPath);
-    payload.insert(QStringLiteral("outputPath"), outputPath);
-    payload.insert(QStringLiteral("options"), options);
-    return startWorkerCommand(workerProgram, QStringLiteral("benchmarkModel"), payload, error);
+    return startWorkerCommand(
+        workerProgram,
+        wp::command::benchmarkModel(),
+        wp::modelBenchmarkRequest(taskId, modelPath, outputPath, options),
+        error);
 }
 
 bool WorkerClient::requestLocalPipeline(const QString& workerProgram, const QString& outputPath, const QString& templateId, const QJsonObject& options, QString* error, const QString& taskId)
 {
-    QJsonObject payload;
-    payload.insert(QStringLiteral("taskId"), taskId);
-    payload.insert(QStringLiteral("outputPath"), outputPath);
-    payload.insert(QStringLiteral("templateId"), templateId);
-    payload.insert(QStringLiteral("options"), options);
-    return startWorkerCommand(workerProgram, QStringLiteral("runLocalPipeline"), payload, error);
+    return startWorkerCommand(
+        workerProgram,
+        wp::command::runLocalPipeline(),
+        wp::localPipelineRequest(taskId, outputPath, templateId, options),
+        error);
 }
 
 bool WorkerClient::requestDeliveryReport(const QString& workerProgram, const QString& outputPath, const QJsonObject& context, QString* error, const QString& taskId)
 {
-    QJsonObject payload;
-    payload.insert(QStringLiteral("taskId"), taskId);
-    payload.insert(QStringLiteral("outputPath"), outputPath);
-    payload.insert(QStringLiteral("context"), context);
-    return startWorkerCommand(workerProgram, QStringLiteral("generateDeliveryReport"), payload, error);
+    return startWorkerCommand(
+        workerProgram,
+        wp::command::generateDeliveryReport(),
+        wp::deliveryReportRequest(taskId, outputPath, context),
+        error);
 }
 
 bool WorkerClient::requestCustomerOcrAcceptance(const QString& workerProgram, const QString& outputPath, const QJsonObject& options, QString* error, const QString& taskId)
 {
-    QJsonObject payload;
-    payload.insert(QStringLiteral("taskId"), taskId);
-    payload.insert(QStringLiteral("outputPath"), outputPath);
-    payload.insert(QStringLiteral("options"), options);
-    return startWorkerCommand(workerProgram, QStringLiteral("runCustomerOcrAcceptance"), payload, error);
+    return startWorkerCommand(
+        workerProgram,
+        wp::command::runCustomerOcrAcceptance(),
+        wp::customerOcrAcceptanceRequest(taskId, outputPath, options),
+        error);
 }
 
 bool WorkerClient::requestDiagnosticsBundle(const QString& workerProgram, const QString& outputPath, const QJsonObject& context, QString* error, const QString& taskId)
 {
-    QJsonObject payload;
-    payload.insert(QStringLiteral("taskId"), taskId);
-    payload.insert(QStringLiteral("outputPath"), outputPath);
-    payload.insert(QStringLiteral("context"), context);
-    return startWorkerCommand(workerProgram, QStringLiteral("collectDiagnostics"), payload, error);
+    return startWorkerCommand(
+        workerProgram,
+        wp::command::collectDiagnostics(),
+        wp::diagnosticsBundleRequest(taskId, outputPath, context),
+        error);
 }
 
 bool WorkerClient::requestDeploymentValidation(
@@ -181,40 +168,35 @@ bool WorkerClient::requestDeploymentValidation(
     QString* error,
     const QString& taskId)
 {
-    QJsonObject payload;
-    payload.insert(QStringLiteral("taskId"), taskId);
-    payload.insert(QStringLiteral("modelPath"), modelPath);
-    payload.insert(QStringLiteral("outputPath"), outputPath);
-    payload.insert(QStringLiteral("format"), format);
-    payload.insert(QStringLiteral("sampleImagePath"), sampleImagePath);
-    payload.insert(QStringLiteral("options"), options);
-    return startWorkerCommand(workerProgram, QStringLiteral("validateDeploymentArtifact"), payload, error);
+    return startWorkerCommand(
+        workerProgram,
+        wp::command::validateDeploymentArtifact(),
+        wp::deploymentValidationRequest(taskId, modelPath, outputPath, format, sampleImagePath, options),
+        error);
 }
 
 bool WorkerClient::requestModelExport(const QString& workerProgram, const QString& checkpointPath, const QString& outputPath, const QString& format, QString* error, const QString& taskId)
 {
-    QJsonObject payload;
-    payload.insert(QStringLiteral("taskId"), taskId);
-    payload.insert(QStringLiteral("checkpointPath"), checkpointPath);
-    payload.insert(QStringLiteral("outputPath"), outputPath);
-    payload.insert(QStringLiteral("format"), format);
-    return startWorkerCommand(workerProgram, QStringLiteral("exportModel"), payload, error);
+    return startWorkerCommand(
+        workerProgram,
+        wp::command::exportModel(),
+        wp::modelExportRequest(taskId, checkpointPath, outputPath, format),
+        error);
 }
 
 bool WorkerClient::requestInference(const QString& workerProgram, const QString& checkpointPath, const QString& imagePath, const QString& outputPath, QString* error, const QString& taskId)
 {
-    QJsonObject payload;
-    payload.insert(QStringLiteral("taskId"), taskId);
-    payload.insert(QStringLiteral("checkpointPath"), checkpointPath);
-    payload.insert(QStringLiteral("imagePath"), imagePath);
-    payload.insert(QStringLiteral("outputPath"), outputPath);
-    return startWorkerCommand(workerProgram, QStringLiteral("infer"), payload, error);
+    return startWorkerCommand(
+        workerProgram,
+        wp::command::infer(),
+        wp::inferenceRequest(taskId, checkpointPath, imagePath, outputPath),
+        error);
 }
 
 void WorkerClient::cancel()
 {
     cancelRequested_ = true;
-    send(QStringLiteral("cancel"), {});
+    send(wp::command::cancel(), {});
     if (process_.state() != QProcess::NotRunning) {
         cancelTimer_.start(2000);
     }
@@ -222,17 +204,17 @@ void WorkerClient::cancel()
 
 void WorkerClient::pause()
 {
-    send(QStringLiteral("pause"), {});
+    send(wp::command::pause(), {});
 }
 
 void WorkerClient::resume()
 {
-    send(QStringLiteral("resume"), {});
+    send(wp::command::resume(), {});
 }
 
 void WorkerClient::requestHeartbeat()
 {
-    send(QStringLiteral("heartbeat"), {});
+    send(wp::command::heartbeat(), {});
 }
 
 bool WorkerClient::isRunning() const
@@ -320,31 +302,31 @@ void WorkerClient::readLines()
         QString error;
         if (aitrain::protocol::decodeMessage(line, &type, &payload, &requestId, &error)) {
             emit messageReceived(type, payload);
-            if (type == QStringLiteral("ready")) {
+            if (type == wp::event::ready()) {
                 if (!pendingCommandType_.isEmpty()) {
                     send(pendingCommandType_, pendingRequest_);
                 }
-            } else if (type == QStringLiteral("log")) {
-                emit logLine(payload.value(QStringLiteral("message")).toString());
-            } else if (type == QStringLiteral("completed")) {
+            } else if (type == wp::event::log()) {
+                emit logLine(payload.value(wp::field::message()).toString());
+            } else if (type == wp::event::completed()) {
                 cancelRequested_ = false;
                 cancelTimer_.stop();
                 finishedEmitted_ = true;
-                emit finished(true, payload.value(QStringLiteral("message")).toString());
-            } else if (type == QStringLiteral("failed")) {
+                emit finished(true, payload.value(wp::field::message()).toString());
+            } else if (type == wp::event::failed()) {
                 cancelRequested_ = false;
                 cancelTimer_.stop();
                 finishedEmitted_ = true;
-                emit finished(false, payload.value(QStringLiteral("message")).toString());
-            } else if (type == QStringLiteral("paused")
-                || type == QStringLiteral("resumed")) {
-                emit logLine(payload.value(QStringLiteral("message")).toString());
-            } else if (type == QStringLiteral("canceled")) {
+                emit finished(false, payload.value(wp::field::message()).toString());
+            } else if (type == wp::event::paused()
+                || type == wp::event::resumed()) {
+                emit logLine(payload.value(wp::field::message()).toString());
+            } else if (type == wp::event::canceled()) {
                 cancelRequested_ = false;
                 cancelTimer_.stop();
                 finishedEmitted_ = true;
-                emit finished(false, payload.value(QStringLiteral("message")).toString(QStringLiteral("Canceled by user")));
-                emit logLine(payload.value(QStringLiteral("message")).toString());
+                emit finished(false, payload.value(wp::field::message()).toString(QStringLiteral("Canceled by user")));
+                emit logLine(payload.value(wp::field::message()).toString());
             }
         } else {
             emit logLine(QStringLiteral("Protocol decode error: %1").arg(error));
@@ -386,16 +368,16 @@ void WorkerClient::workerFinished(int exitCode, QProcess::ExitStatus status)
         if (cancelRequested_) {
             const QString message = QStringLiteral("Canceled by user");
             QJsonObject payload;
-            payload.insert(QStringLiteral("taskId"), pendingRequest_.value(QStringLiteral("taskId")).toString());
-            payload.insert(QStringLiteral("command"), pendingCommandType_);
-            payload.insert(QStringLiteral("status"), QStringLiteral("canceled"));
-            payload.insert(QStringLiteral("errorCode"), QStringLiteral("canceled"));
-            payload.insert(QStringLiteral("message"), message);
-            const QString outputPath = pendingRequest_.value(QStringLiteral("outputPath")).toString();
+            payload.insert(wp::field::taskId(), pendingRequest_.value(wp::field::taskId()).toString());
+            payload.insert(wp::field::command(), pendingCommandType_);
+            payload.insert(wp::field::status(), QStringLiteral("canceled"));
+            payload.insert(wp::field::errorCode(), QStringLiteral("canceled"));
+            payload.insert(wp::field::message(), message);
+            const QString outputPath = pendingRequest_.value(wp::field::outputPath()).toString();
             if (!outputPath.isEmpty()) {
-                payload.insert(QStringLiteral("outputPath"), outputPath);
+                payload.insert(wp::field::outputPath(), outputPath);
             }
-            emit messageReceived(QStringLiteral("canceled"), payload);
+            emit messageReceived(wp::event::canceled(), payload);
             emit finished(false, message);
         } else {
             const QString message = (status != QProcess::NormalExit || exitCode != 0)

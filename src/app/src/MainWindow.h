@@ -1,6 +1,7 @@
 #pragma once
 
 #include "MetricsWidget.h"
+#include "MainWindowState.h"
 #include "Sidebar.h"
 #include "StatusPill.h"
 #include "WorkerClient.h"
@@ -159,13 +160,6 @@ private:
     void updateDatasetRepairLoopFromQuality(const QJsonObject& payload);
     void updateDatasetRepairLoopFromValidation(const QJsonObject& payload);
     void setDatasetRepairLoopRows(const QString& summary, const QVector<QStringList>& rows);
-    struct PendingTrainingTask {
-        QString taskId;
-        aitrain::TrainingRequest request;
-        bool needsSnapshot = false;
-        int datasetId = 0;
-        QString datasetFormat;
-    };
     void startQueuedTraining(const QString& taskId, const aitrain::TrainingRequest& request);
     void startNextQueuedTask();
     void startSnapshotForQueuedTraining(const PendingTrainingTask& pending);
@@ -208,26 +202,10 @@ private:
     aitrain::PluginManager pluginManager_;
     aitrain::ProjectRepository repository_;
     WorkerClient worker_;
+    MainWindowState state_;
 
     QString currentProjectPath_;
     QString currentProjectName_;
-    QString currentTaskId_;
-    QString currentDatasetConversionTaskId_;
-    QString currentDatasetPath_;
-    QString currentDatasetFormat_;
-    QString latestQualityFixListPath_;
-    QString latestQualityFixManifestPath_;
-    QString latestQualityReportPath_;
-    QString latestReviewListPath_;
-    QString latestDeploymentValidationReportPath_;
-    QString latestCustomerOcrAcceptanceReportPath_;
-    QString latestDiagnosticBundlePath_;
-    bool currentDatasetValid_ = false;
-    QJsonArray sampleReviewSamples_;
-
-    QVector<PendingTrainingTask> pendingTrainingTasks_;
-    PendingTrainingTask activeSnapshotTrainingTask_;
-    bool hasActiveSnapshotTrainingTask_ = false;
 
     Sidebar* sidebar_ = nullptr;
     QStackedWidget* stack_ = nullptr;

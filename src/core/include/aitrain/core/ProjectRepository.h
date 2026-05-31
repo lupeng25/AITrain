@@ -18,6 +18,9 @@ public:
     bool isOpen() const;
 
     bool initialize(QString* error = nullptr);
+    static int currentSchemaVersion();
+    int schemaVersion(QString* error = nullptr) const;
+    QVector<int> appliedSchemaMigrations(QString* error = nullptr) const;
     bool upsertProject(const QString& name, const QString& rootPath, QString* error = nullptr);
     bool insertTask(const TaskRecord& task, QString* error = nullptr);
     bool updateTaskState(const QString& taskId, TaskState state, const QString& message, QString* error = nullptr);
