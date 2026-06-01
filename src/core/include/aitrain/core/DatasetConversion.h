@@ -1,5 +1,6 @@
 #pragma once
 
+#include "aitrain/core/Cancellation.h"
 #include "aitrain/core/PluginInterfaces.h"
 
 #include <QJsonObject>
@@ -57,5 +58,8 @@ struct DatasetConversionResult {
 };
 
 DatasetConversionResult convertDataset(const DatasetConversionRequest& request);
+DatasetConversionResult convertDataset(
+    const DatasetConversionRequest& request,
+    const CancellationCallback& shouldCancel);
 
 } // namespace aitrain

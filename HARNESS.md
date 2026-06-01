@@ -61,6 +61,22 @@ Harness 的目标是让 AITrain Studio 更适合 vibe coding：每次改动都�
 .\tools\harness-context.ps1
 ```
 
+只检查仓库文本编码：
+
+```powershell
+.\tools\encoding-check.ps1
+```
+
+## 编码与终端规则
+
+- 仓库文本统一按 UTF-8 处理；中文或中英混排文件不能按系统 ANSI/GBK 猜测读取。
+- 在 Windows PowerShell 中读取项目文本时，必须显式指定 UTF-8，例如 `Get-Content -Encoding UTF8`。
+- 终端输出出现 `鐨勭洰鏍` 这类乱码时，先用 UTF-8 重新读取或做字节级检测，不要直接判断文件已损坏。
+- 列出可能包含中文文件名的 Git 路径时，使用 `git -c core.quotepath=false ...`，或配置 `git config --global core.quotepath false`，避免文件名显示为 `\345\220...` 转义。
+- 新增或修改源文件、文档、翻译文件时保持 UTF-8；除非是有意编码迁移，否则保留原文件的 BOM / no BOM 风格。
+- `.\tools\harness-check.ps1` 会先运行 `.\tools\encoding-check.ps1`，发现非 UTF-8 文本或未知 NUL 文本时直接失败。
+- Harness 和 VSCode 构建任务会设置 `VSLANG=1033`，让 MSVC/CMake 日志优先输出英文，避免本地化编译器提示在终端里变成乱码。
+
 ## 当前架构硬边界
 
 - GUI 只做交互、状态展示和任务编排。

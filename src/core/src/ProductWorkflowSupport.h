@@ -35,5 +35,6 @@ QString csvEscape(QString value);
 QString htmlEscape(QString value);
 WorkflowResult resultFromReport(const QString& reportPath, const QJsonObject& payload);
 WorkflowResult failedResult(const QString& error);
+WorkflowResult canceledResult();
 
 } // namespace aitrain::workflow_detail

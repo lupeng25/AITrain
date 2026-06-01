@@ -21,14 +21,17 @@ import time
 from pathlib import Path
 from typing import Any
 
+TRAINER_ROOT = Path(__file__).resolve().parents[1]
+if str(TRAINER_ROOT) not in sys.path:
+    sys.path.insert(0, str(TRAINER_ROOT))
+
+from trainer_protocol import configure_stdio, emit_failed, exception_details, unhandled_failure  # noqa: E402
+
 
 DEFAULT_BACKEND_ID = "paddleocr_rec_official"
 DEFAULT_CONFIG_RELATIVE = "configs/rec/PP-OCRv4/PP-OCRv4_mobile_rec.yml"
 
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
+configure_stdio()
 
 
 def emit(backend: str, event_type: str, **payload: Any) -> None:
@@ -38,8 +41,12 @@ def emit(backend: str, event_type: str, **payload: Any) -> None:
 
 
 def fail(backend: str, message: str, code: str, details: dict[str, Any] | None = None) -> int:
-    emit(backend, "failed", code=code, message=message, details=details or {})
-    return 1
+    return emit_failed(backend, message, code, details)
+
+
+def backend_from_request(request: dict[str, Any]) -> str:
+    parameters = request.get("parameters") if isinstance(request.get("parameters"), dict) else {}
+    return str(request.get("backend") or parameters.get("trainingBackend") or DEFAULT_BACKEND_ID)
 
 
 def read_request(path: Path) -> dict[str, Any]:
@@ -594,8 +601,12 @@ def main() -> int:
     try:
         request = read_request(args.request)
     except Exception as exc:
-        return fail(DEFAULT_BACKEND_ID, f"failed to read trainer request: {exc}", "bad_request")
-    return run(request)
+        return fail(DEFAULT_BACKEND_ID, f"failed to read trainer request: {exc}", "bad_request", exception_details(exc))
+    backend = backend_from_request(request)
+    try:
+        return run(request)
+    except Exception as exc:
+        return unhandled_failure(backend, exc)
 
 
 if __name__ == "__main__":

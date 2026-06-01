@@ -12,7 +12,7 @@
       "environment": [
         {
           "name": "PATH",
-          "value": "C:/Qt/Qt5.12.9/5.12.9/msvc2015_64/bin;${env:PATH}"
+          "value": "C:/Qt/Qt5.12.9/5.12.9/msvc2017_64/bin;${env:PATH}"
         }
       ],
       "console": "integratedTerminal",
@@ -32,7 +32,7 @@
       "environment": [
         {
           "name": "PATH",
-          "value": "C:/Qt/Qt5.12.9/5.12.9/msvc2015_64/bin;${env:PATH}"
+          "value": "C:/Qt/Qt5.12.9/5.12.9/msvc2017_64/bin;${env:PATH}"
         }
       ],
       "console": "integratedTerminal",
@@ -40,4 +40,3 @@
     }
   ]
 }
-

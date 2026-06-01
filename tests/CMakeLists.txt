@@ -24,6 +24,21 @@ function(add_aitrain_qt_test target source)
             Qt${QT_VERSION_MAJOR}::Sql
     )
 
+    if(AITRAIN_WITH_TENSORRT_SDK)
+        target_include_directories(${target}
+            PRIVATE
+                ${AITRAIN_TENSORRT_INCLUDE_DIR}
+                ${AITRAIN_CUDA_INCLUDE_DIR}
+                ${AITRAIN_CUDA_CRT_INCLUDE_DIR}
+        )
+    endif()
+    if(AITRAIN_WITH_NCNN)
+        target_include_directories(${target}
+            PRIVATE
+                ${AITRAIN_NCNN_INCLUDE_DIR}
+        )
+    endif()
+
     set(test_output "${CMAKE_BINARY_DIR}/tests/${target}_ctest.txt")
     add_test(NAME ${target}
         COMMAND ${target} -o "${test_output},txt"
@@ -34,6 +49,7 @@ function(add_aitrain_qt_test target source)
     )
 
     aitrain_copy_onnxruntime_runtime(${target})
+    aitrain_copy_ncnn_runtime(${target})
     aitrain_copy_tensorrt_runtime(${target})
 endfunction()
 

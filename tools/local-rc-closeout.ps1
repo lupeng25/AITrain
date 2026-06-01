@@ -3,6 +3,7 @@ param(
     [switch]$RunCpuTrainingSmoke,
     [switch]$SkipHarness,
     [switch]$SkipPackageSmoke,
+    [switch]$SkipGuiWalkthrough,
     [string]$BuildDir = "build-vscode"
 )
 
@@ -63,6 +64,16 @@ if (-not $SkipPackageSmoke) {
     }
 }
 
+if (-not $SkipGuiWalkthrough) {
+    Invoke-Step "GUI 1280x820 walkthrough" {
+        $binDir = Join-Path $root (Join-Path $BuildDir "bin")
+        Invoke-PowerShellScript -ScriptPath (Join-Path $root "tools\ui-workbench-walkthrough.ps1") -Arguments @(
+            "-AppPath", (Join-Path $binDir "AITrainStudio.exe"),
+            "-WorkingDirectory", $binDir,
+            "-OutDir", (Join-Path $root ".deps\ui-walkthrough-rc"))
+    }
+}
+
 if ($RunLocalBaseline) {
     Invoke-Step "local baseline acceptance" {
         Invoke-PowerShellScript -ScriptPath (Join-Path $root "tools\acceptance-smoke.ps1") -Arguments @("-LocalBaseline", "-Package", "-SkipBuild", "-BuildDir", $BuildDir)
@@ -71,7 +82,7 @@ if ($RunLocalBaseline) {
 
 if ($RunCpuTrainingSmoke) {
     Invoke-Step "CPU training smoke" {
-        Invoke-PowerShellScript -ScriptPath (Join-Path $root "tools\acceptance-smoke.ps1") -Arguments @("-CpuTrainingSmoke", "-SkipOfficialOcr", "-BuildDir", $BuildDir)
+        Invoke-PowerShellScript -ScriptPath (Join-Path $root "tools\acceptance-smoke.ps1") -Arguments @("-CpuTrainingSmoke", "-BuildDir", $BuildDir)
     }
 }
 

@@ -38,7 +38,7 @@ Phase 40 的分类、姿态、OBB、异常检测等训练后端扩展后置；�
 - 元数据通过 `ProjectRepository` 写入 SQLite。
 - 训练、推理、评估、导出逻辑不进入 `MainWindow`。
 - 官方训练优先通过 Worker 管理的 Python trainer subprocess。
-- C++ tiny detector、segmentation baseline、OCR baseline 只能作为 scaffold / diagnostic backend。
+- 旧的 C++ tiny detector、segmentation baseline、OCR baseline、small OCR CTC 和 shipped Python mock 已物理删除，不能作为产品训练 backend。
 - TensorRT 真机验收已有 RTX 4090 D 证据；当前/旧 GTX 1060 / SM 61 仍只记录为 `hardware-blocked`。
 - PaddleOCR System 当前是官方 `predict_system.py` 工具链路径；C++ DB-style Det ONNX probability-map 后处理已有 v1 wiring，但不代表 PP-OCRv5 精度 parity。
 
@@ -50,7 +50,7 @@ Phase 40 的分类、姿态、OBB、异常检测等训练后端扩展后置；�
 
 保持现有 AP50 评估路径，并补充本地 COCO-style mAP50-95：
 
-- 继续支持 tiny detector、detection ONNX Runtime 和可用 TensorRT detection model。
+- 继续支持 official detection ONNX Runtime 和可用 TensorRT detection model。
 - 输出 precision、recall、AP50、mAP50、`mAP50_95`、per-class metrics、confusion matrix、error samples、overlay artifacts。
 - 后续只做报告结构统一，不重写已通过的核心逻辑。
 
@@ -108,7 +108,7 @@ Phase 40 的分类、姿态、OBB、异常检测等训练后端扩展后置；�
 
 - TensorRT step 根据硬件记录 `passed` / `failed` / `hardware-blocked`；RTX 4090 D 已有通过证据，旧 GPU 仍应为 `hardware-blocked`。
 - PaddleOCR System 继续作为 official tool inference，不声明为 C++ DB ONNX postprocess。
-- C++ tiny/scaffold backend 只用于 diagnostic pipeline。
+- official backend pipeline 不允许回退到 C++ tiny/scaffold backend。
 
 ## 5. Phase 39C：benchmark、模型库与交付报告
 
@@ -168,7 +168,7 @@ Phase 40 的分类、姿态、OBB、异常检测等训练后端扩展后置；�
 - `交付验收`：汇总本机 RC、clean Windows、TensorRT、客户域 OCR、包体完整性、诊断包和部署验证状态，显示 `passed` / `blocked` / `failed` / `hardware-blocked`。
 - 客户域 OCR 验收：通过 Worker/core 生成客户 OCR manifest 和 summary；public/generated/smoke 数据只能作为流程 evidence，不能作为生产 OCR 精度证明。
 - 诊断包：收集 Worker self-check、环境 profile、GPU/runtime、最近任务日志、失败 request、artifact index、插件状态和授权摘要。
-- 导出后验证：ONNX 要可推理；TensorRT 区分 `passed` / `failed` / `hardware-blocked`；NCNN v1 仅校验产物存在。
+- 导出后验证：ONNX 要可推理；TensorRT 区分 `passed` / `failed` / `hardware-blocked`；NCNN 在配置 SDK/runtime 和样本图时执行 YOLO 检测/分割 runtime inference。2026-05-16 本机证据已覆盖 Hyuto YOLOv8 detection ONNX -> NCNN 和 nihui 预转换 YOLOv8n-seg pnnx/DFL NCNN；YOLOv8-seg ONNX 若残留 unsupported `Shape` layer，则记录 failed report。
 
 保留限制：
 
@@ -181,10 +181,10 @@ Phase 40 的分类、姿态、OBB、异常检测等训练后端扩展后置；�
 
 - 暂不优先新增图像分类、姿态、OBB、异常检测训练后端。
 - 暂不把 clean Windows package acceptance 或 package-root TensorRT rerun 标记为通过，除非收到外部证据。
-- 暂不实现 NCNN runtime validation。
+- NCNN runtime validation 覆盖 YOLO 检测/分割；外部 NCNN 模型需要 sidecar 或显式 blob/decoder 配置。当前不要把失败的 YOLOv8-seg ONNX -> `onnx2ncnn` `Shape` layer case 说成通过证据。
 - 暂不把 X-AnyLabeling 嵌入 GUI。
 - 暂不把 Python 训练嵌入 GUI 主进程。
-- 暂不把 C++ scaffold 宣称为真实 YOLO/OCR 训练能力。
+- 暂不重新引入 C++ scaffold 训练能力；真实 YOLO/OCR 训练只走官方后端。
 - 暂不优先做云平台、Kubernetes 调度、多人权限和 Web 控制台。
 
 ## 9. 验收与测试计划
@@ -206,7 +206,7 @@ git diff --check
 建议 smoke：
 
 ```powershell
-.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr
+.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke
 .\tools\acceptance-smoke.ps1 -LocalBaseline -Package -SkipBuild
 ```
 
@@ -216,7 +216,7 @@ git diff --check
 - 运行质检、snapshot、训练、评估、benchmark、报告、样本复核、部署验证和诊断包。
 - 在任务与产物页检查 JSON / CSV / image / HTML artifact。
 - 在模型库检查 evaluation / benchmark / pipeline 记录。
-- 在交付验收页确认客户 OCR gate、TensorRT `hardware-blocked` 和 NCNN artifact-only 限制文案。
+- 在交付验收页确认客户 OCR gate、TensorRT `hardware-blocked` 和 NCNN SDK/runtime/sample-image 要求文案。
 - 确认 scaffold 和 TensorRT hardware-blocked 文案清晰。
 
 ## 10. 参考平台

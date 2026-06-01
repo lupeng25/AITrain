@@ -1,0 +1,7 @@
+{
+  "type": "aitrain-license-key",
+  "curve": "P-256",
+  "createdAt": "<ISO-8601 UTC timestamp>",
+  "publicKey": "<base64 ECDSA P-256 public key for AITRAIN_LICENSE_PUBLIC_KEY>",
+  "privateKey": "<base64 ECDSA P-256 private key kept outside this repository>"
+}

@@ -18,8 +18,15 @@ import time
 from pathlib import Path
 from typing import Any
 
+TRAINER_ROOT = Path(__file__).resolve().parents[1]
+if str(TRAINER_ROOT) not in sys.path:
+    sys.path.insert(0, str(TRAINER_ROOT))
+
+from trainer_protocol import configure_stdio, emit_failed, exception_details, unhandled_failure  # noqa: E402
+
 
 BACKEND_ID = "ultralytics_yolo_detect"
+configure_stdio()
 
 
 def emit(event_type: str, **payload: Any) -> None:
@@ -29,8 +36,7 @@ def emit(event_type: str, **payload: Any) -> None:
 
 
 def fail(message: str, code: str = "ultralytics_trainer_failed", details: dict[str, Any] | None = None) -> int:
-    emit("failed", backend=BACKEND_ID, code=code, message=message, details=details or {})
-    return 1
+    return emit_failed(BACKEND_ID, message, code, details)
 
 
 def read_request(path: Path) -> dict[str, Any]:
@@ -471,8 +477,11 @@ def main() -> int:
     try:
         request = read_request(args.request)
     except Exception as exc:
-        return fail(f"failed to read trainer request: {exc}", "bad_request")
-    return run(request)
+        return fail(f"failed to read trainer request: {exc}", "bad_request", exception_details(exc))
+    try:
+        return run(request)
+    except Exception as exc:
+        return unhandled_failure(BACKEND_ID, exc)
 
 
 if __name__ == "__main__":

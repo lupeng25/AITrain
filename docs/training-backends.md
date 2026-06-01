@@ -4,16 +4,18 @@ AITrain Studio keeps training out of the GUI process. Real training is launched 
 
 ## Backend Summary
 
+Production training is official-backend only. The GUI training page and Worker production whitelist expose these training backends:
+
 | Backend | Task | Status | Notes |
 |---|---|---|---|
-| `tiny_linear_detector` | Detection | Scaffold | C++ baseline for protocol, tests, and demos. Not real YOLO. |
-| `ultralytics_yolo_detect` | Detection | Real Python backend | Uses Ultralytics YOLO detection training and ONNX export. Review AGPL-3.0 / Enterprise license before redistribution. |
-| `ultralytics_yolo_segment` | Segmentation | Real Python backend | Uses Ultralytics YOLO segmentation training and ONNX export. C++ ONNX Runtime can decode boxes, mask coefficients, prototypes, and render mask overlays. |
-| `paddleocr_rec` | OCR recognition | Real PaddlePaddle CTC smoke backend | Trains a small PaddlePaddle CTC recognizer on PaddleOCR-style Rec data, exports ONNX, and supports C++ ONNX Runtime CTC greedy decode. Not a full PP-OCRv4 official config/export pipeline yet. |
-| `paddleocr_rec_official` / `paddleocr_ppocrv4_rec` | OCR recognition | Official PaddleOCR adapter | Generates a PP-OCRv4 recognition config from AITrain PaddleOCR-style Rec data and can run official PaddleOCR `tools/train.py`, `tools/export_model.py`, and optional `tools/infer/predict_rec.py` when `runOfficial=true` and `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` points to a checkout. `prepareOnly=true` validates config generation only. |
+| `ultralytics_yolo_detect` | Detection | Official Ultralytics adapter | Uses Ultralytics YOLO detection training and ONNX export. Review AGPL-3.0 / Enterprise license before redistribution. |
+| `ultralytics_yolo_segment` | Segmentation | Official Ultralytics adapter | Uses Ultralytics YOLO segmentation training and ONNX export. C++ ONNX Runtime can decode boxes, mask coefficients, prototypes, and render mask overlays. |
 | `paddleocr_det_official` | OCR detection | Official PaddleOCR adapter | Generates a PP-OCRv4 detection config from PaddleOCR Det data and can run official PaddleOCR `tools/train.py` and `tools/export_model.py`. Artifacts include `aitrain_ppocrv4_det.yml`, `official_model/best_accuracy.pdparams`, `official_inference/inference.yml`, and `paddleocr_official_det_report.json`. |
-| `paddleocr_system_official` | OCR system inference | Official PaddleOCR adapter | Runs official `tools/infer/predict_system.py` from a PaddleOCR source checkout using exported Det and Rec inference model directories. This remains the full official end-to-end OCR validation path. |
-| `python_mock` | Any | Protocol fixture | Used only to verify Worker subprocess handling. Not real training. |
+| `paddleocr_rec_official` / `paddleocr_ppocrv4_rec` | OCR recognition | Official PaddleOCR adapter | Generates a PP-OCRv4 recognition config from AITrain PaddleOCR-style Rec data and runs official PaddleOCR `tools/train.py`, `tools/export_model.py`, and optional `tools/infer/predict_rec.py` when `runOfficial=true` and `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` points to a checkout. Production GUI requests set `runOfficial=true` and `prepareOnly=false`. |
+
+`paddleocr_system_official` remains the official OCR System inference/validation adapter. It is not shown as a "train model" backend because it runs official `predict_system.py` against exported Det and Rec inference model directories.
+
+Legacy diagnostic training implementations have been physically removed from production packages and training routing. `paddleocr_rec` remains a dataset format, not a training backend. Protocol tests that need a Python trainer now create an explicit temporary fixture through `pythonTrainerScript` and require `AITRAIN_ENABLE_DIAGNOSTIC_BACKENDS=1`; no shipped `python_mock` trainer is provided.
 
 ## Environment Setup
 
@@ -123,10 +125,28 @@ Dataset validation and split are Worker-backed flows. The GUI can now auto-detec
 The GUI model export page routes conversion through `aitrain_worker`; conversion logic must not run in `MainWindow`.
 
 - `onnx`: copies or creates an ONNX model and writes an AITrain sidecar report.
-- `ncnn`: converts an ONNX source or generated tiny-detector ONNX into NCNN `.param` and `.bin` files through the external `onnx2ncnn` tool. Configure it with `AITRAIN_NCNN_ONNX2NCNN` or an NCNN install root in `AITRAIN_NCNN_ROOT`.
+- `ncnn`: converts an official ONNX source into NCNN `.param` and `.bin` files through the external `onnx2ncnn` tool. Configure it with `AITRAIN_NCNN_ONNX2NCNN` or an NCNN install root in `AITRAIN_NCNN_ROOT`.
 - `tensorrt`: RTX 4090 D acceptance has passed for the current validation lane; unsupported GPUs such as GTX 1060 / SM 61 still report `hardware-blocked`.
 
-NCNN export creates deployment artifacts only. AITrain Studio does not yet run NCNN inference in the C++ inference page.
+NCNN export creates `.param/.bin` deployment artifacts and writes an AITrain sidecar. Deployment validation can run NCNN CPU inference for supported YOLO detection and segmentation models when the build is configured with an NCNN SDK/runtime and a sample image is supplied. External NCNN models are not guessed blindly: provide the sidecar or explicit `modelFamily`, `classNames`, `inputBlob`, `outputBlobs`, and `decoder` settings.
+
+NCNN runtime smoke:
+
+```powershell
+.\tools\phase-ncnn-runtime-smoke.ps1 -NcnnRoot <ncnn-sdk-root> -OnnxPath <best.onnx> -SampleImagePath <sample.png> -OutputDir <smoke-output> -TaskType detection
+```
+
+For existing external NCNN `.param/.bin` artifacts, provide an AITrain sidecar or explicit blob/decoder settings, then use the Worker helper without forcing an ONNX conversion:
+
+```powershell
+.\build-vscode\bin\aitrain_worker.exe --ncnn-param-smoke <model.param> --image <sample.png> --output <smoke-output> --task-type segmentation
+```
+
+Current local NCNN evidence on 2026-05-16:
+
+- Detection passed with Hyuto YOLOv8 ONNX converted through `onnx2ncnn`; output is under `.deps\github-ncnn-smoke\hyuto-yolov8\runtime-output` and reported `predictionCount=14`.
+- Segmentation passed with nihui `ncnn-android-yolov8` preconverted `yolov8n_seg.ncnn.param/.bin` plus an explicit AITrain sidecar using `decoder=dfl`; output is under `.deps\github-ncnn-smoke\nihui-yolov8n-seg-ncnn\runtime-output\deployment-validation` and reported `predictionCount=100`.
+- Hyuto and X-AnyLabeling YOLOv8-seg ONNX conversion attempts currently leave unsupported NCNN `Shape` layers. AITrain records these as failed deployment validation reports instead of crashing Worker; they are not passing segmentation ONNX-conversion evidence.
 
 ## Acceptance Smoke
 
@@ -136,12 +156,12 @@ The unified Phase 17-21 acceptance entry point is:
 .\tools\acceptance-smoke.ps1 -PublicDatasets
 ```
 
-This mode checks required Python modules, generates tiny local datasets under `.deps\acceptance-smoke` by default, tries to materialize Ultralytics COCO8 / COCO8-seg through the installed official package, then runs 1-epoch smoke training for YOLO detection, YOLO segmentation, PaddlePaddle OCR Rec CTC, and the isolated official PaddleOCR Rec path when available. During the CTest step, it sets `AITRAIN_ACCEPTANCE_SMOKE_ROOT` so ONNX inference tests consume the artifacts generated in the current WorkDir rather than relying on older local smoke outputs.
+This mode checks required Python modules, generates tiny local datasets under `.deps\acceptance-smoke` by default, tries to materialize Ultralytics COCO8 / COCO8-seg through the installed official package, then runs official-adapter smoke training for YOLO detection, YOLO segmentation, and PaddleOCR Rec. During the CTest step, it sets `AITRAIN_ACCEPTANCE_SMOKE_ROOT` so inference tests consume artifacts generated in the current WorkDir rather than relying on older local smoke outputs.
 
 Public dataset materialization is handled by `tools\materialize-ultralytics-dataset.py`. It reads the installed Ultralytics dataset yaml, resolves the official download URL, downloads into `.deps\datasets\downloads`, extracts into `.deps\datasets\materialized`, rewrites a local absolute-path `data.yaml`, and writes a machine-readable materialization report. Use `-RequirePublicDatasets` to fail if COCO8 / COCO8-seg cannot be materialized:
 
 ```powershell
-.\tools\acceptance-smoke.ps1 -PublicDatasets -RequirePublicDatasets -SkipOfficialOcr
+.\tools\acceptance-smoke.ps1 -PublicDatasets -RequirePublicDatasets
 ```
 
 Every `acceptance-smoke.ps1` run writes `acceptance_summary.json` into its work directory with modes, status, timing, failure reason, and hardware-blocked reason when applicable.
@@ -149,10 +169,10 @@ Every `acceptance-smoke.ps1` run writes `acceptance_summary.json` into its work 
 For a longer local-only CPU exercise that avoids public downloads and TensorRT, run:
 
 ```powershell
-.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr
+.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke
 ```
 
-This mode generates deterministic small/medium datasets with `examples\create-minimal-datasets.py --profile cpu-smoke`, trains YOLO detection and segmentation for 3 epochs at image size 128 on CPU, trains the small PaddlePaddle OCR Rec CTC backend for 8 epochs, exports ONNX artifacts, runs CTest with `AITRAIN_ACCEPTANCE_SMOKE_ROOT` pointed at the new artifacts, and writes `cpu_training_smoke_summary.json`. It validates wiring, artifacts, and C++ ONNX Runtime compatibility; it is not an accuracy benchmark.
+This mode generates deterministic small/medium datasets with `examples\create-minimal-datasets.py --profile cpu-smoke`, trains YOLO detection and segmentation for 3 epochs at image size 128 on CPU, runs official PaddleOCR Rec train/export/inference through `phase16-ocr-official-smoke.ps1`, runs CTest with `AITRAIN_ACCEPTANCE_SMOKE_ROOT` pointed at the new artifacts, and writes `cpu_training_smoke_summary.json`. If the official OCR source checkout or isolated OCR environment is unavailable, the mode must fail or block with an explicit environment error instead of falling back to diagnostic CTC training. It validates wiring and artifacts; it is not an accuracy benchmark.
 
 For the Phase 45 newer-YOLO-family matrix, run:
 

@@ -1532,7 +1532,7 @@ Expected: configure, build, and all CTest executables pass.
 Run:
 
 ```powershell
-Get-Content .\build-vscode\tests\aitrain_dataset_conversion_tests_ctest.txt -Tail 40
+Get-Content .\build-vscode\tests\aitrain_dataset_conversion_tests_ctest.txt -Encoding UTF8 -Tail 40
 ```
 
 Expected: `aitrain_dataset_conversion_tests` reports all dataset conversion tests passed.

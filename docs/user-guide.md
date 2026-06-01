@@ -27,7 +27,7 @@
 重要边界：
 
 - 主流程优先使用官方 YOLO / PaddleOCR 后端，训练由 Worker 启动独立 Python 进程执行。
-- `tiny_linear_detector` 和 `python_mock` 只用于诊断、演示或协议测试，不是真实 YOLO/OCR 训练能力。
+- 生产训练只使用官方后端；旧的 tiny detector、Python mock、小型 OCR CTC 和 C++ 分割/OCR 训练 scaffold 已从产品训练路径中物理删除。
 - TensorRT 需要兼容的 NVIDIA RTX / SM 75+ 环境；不支持的 GPU 会显示为 `hardware-blocked`。
 - OCR 的公开数据或生成数据 smoke 只能证明流程和产物可用，不能替代客户业务数据上的精度验收。
 
@@ -213,13 +213,11 @@ images/sample.png<TAB>[{"transcription":"text","points":[[1,1],[30,1],[30,20],[1
 | YOLO 检测 | `ultralytics_yolo_detect` | `yolov8n.yaml`、`yolo11n.yaml`、`yolo12n.yaml` | 官方 Ultralytics 检测训练和 ONNX 导出 |
 | YOLO 分割 | `ultralytics_yolo_segment` | `yolov8n-seg.yaml`、`yolo11n-seg.yaml`、`yolo12n-seg.yaml` | 官方 Ultralytics 分割训练和 mask ONNX 后处理 |
 | PaddleOCR Det | `paddleocr_det_official` | `PP-OCRv4_mobile_det` | 官方 PaddleOCR 检测工具链，建议使用隔离 OCR 环境 |
-| PaddleOCR Rec | `paddleocr_rec` | `paddle_ctc_smoke` | 小型 PaddlePaddle CTC 识别训练，可导出 ONNX；不是完整 PP-OCRv4 官方链路 |
-| PaddleOCR Rec 官方 | `paddleocr_rec_official` | `PP-OCRv4_mobile_rec` | 官方 PaddleOCR Rec adapter，可运行 train/export/predict |
-| PaddleOCR System | `paddleocr_system_official` | `PP-OCRv4_det_rec_system` | 官方 `predict_system.py` 端到端推理链路 |
-| 诊断 | `tiny_linear_detector` | `diagnostic` | C++ scaffold，只用于诊断或演示 |
-| 协议测试 | `python_mock` | `diagnostic` | Worker/Python 协议 fixture，不是真训练 |
+| PaddleOCR Rec | `paddleocr_rec_official` | `PP-OCRv4_mobile_rec` | 官方 PaddleOCR Rec adapter，可运行 train/export/predict；`paddleocr_rec` 仅作为数据集格式保留 |
 
 官方后端依赖第三方包和许可条款。商业分发前需要单独审查 Ultralytics、PaddleOCR、PaddlePaddle、Torch 等依赖的许可证。
+
+旧的 `tiny_linear_detector`、小型 `paddleocr_rec` CTC trainer、`python_mock` 和 C++ 分割/OCR 训练 scaffold 已物理删除，不会出现在用户训练后端列表中，也不会作为主验收 passed 依据。`paddleocr_rec` 仅作为数据集格式保留。
 
 ## 7. 任务与产物
 
@@ -268,9 +266,8 @@ images/sample.png<TAB>[{"transcription":"text","points":[[1,1],[30,1],[30,20],[1
 | 格式 | 输入 | 输出 | 说明 |
 |---|---|---|---|
 | ONNX | checkpoint、已有 ONNX、AITrain export | `.onnx` 和 sidecar report | 主交付格式，可继续推理验证 |
-| NCNN | ONNX 或可生成 ONNX 的输入 | `.param` 和 `.bin` | 依赖本机 `onnx2ncnn`；当前 GUI 不运行 NCNN 推理 |
+| NCNN | ONNX 或可生成 ONNX 的输入 | `.param` 和 `.bin` | 导出依赖本机 `onnx2ncnn`；部署验证在配置 NCNN SDK/runtime 且提供样本图时运行 YOLO 检测/分割推理 |
 | TensorRT | ONNX | `.engine` / `.plan` | 需要 RTX / SM 75+ 和 TensorRT runtime；旧 GPU 会 `hardware-blocked` |
-| tiny detector JSON | tiny detector checkpoint | 诊断 JSON | 仅用于 scaffold 诊断，不是主交付格式 |
 
 输出路径留空时，已打开项目会默认写入项目的 `models/exported`；未打开项目时通常写入输入模型同目录。
 
@@ -278,8 +275,9 @@ images/sample.png<TAB>[{"transcription":"text","points":[[1,1],[30,1],[30,20],[1
 
 - ONNX：必须能通过 ONNX Runtime 对样本图完成推理，才视为 `passed`。
 - TensorRT：兼容硬件和 runtime 上可推理为 `passed`；旧 GPU 或 runtime 不满足时显示 `hardware-blocked`。
-- NCNN：v1 只检查 `.param` / `.bin` 产物存在，不运行 NCNN runtime。
-- tiny detector JSON：仅用于诊断，不能作为正式部署验收结论。
+- NCNN：已支持 YOLO 检测/分割的 runtime 部署验证；无 NCNN SDK/runtime 时会明确失败，缺少样本图时会返回 `blocked`。
+
+NCNN 当前本机验证边界：检测模型已经通过 Hyuto YOLOv8 ONNX -> NCNN runtime smoke；分割模型已经通过 nihui 预转换 YOLOv8n-seg pnnx/DFL NCNN artifact + AITrain sidecar 的 runtime smoke。部分 YOLOv8-seg ONNX 经 `onnx2ncnn` 后仍可能包含 NCNN 不支持的 `Shape` layer，此时会生成失败报告，不应标记为通过。
 
 ## 10. 推理验证
 
@@ -385,7 +383,11 @@ smoke 只证明流程、依赖和产物可用。OCR 业务可用性必须使用�
 
 ### NCNN 导出失败
 
-确认已安装 NCNN 工具，并配置 `AITRAIN_NCNN_ONNX2NCNN` 或 `AITRAIN_NCNN_ROOT`。NCNN 导出只生成部署产物，当前 AITrain Studio 推理页不运行 NCNN 模型。
+确认已安装 NCNN 工具，并配置 `AITRAIN_NCNN_ONNX2NCNN` 或 `AITRAIN_NCNN_ROOT`。若要执行部署验证，还需要用 `AITRAIN_NCNN_ROOT` 配置 NCNN SDK/runtime 并提供样本图；外部 `.param/.bin` 模型必须提供 AITrain sidecar，或显式传入 `modelFamily`、`classNames`、`inputBlob`、`outputBlobs` 和 `decoder`。
+
+如果 YOLOv8-seg ONNX 转出的 NCNN `.param` 包含 `Shape` 等 unsupported layer，当前属于转换兼容性问题。处理方式是使用静态/兼容导出的 ONNX、pnnx/nihui 风格的预转换 NCNN artifact，或提供已验证的 sidecar/config 后走 `--ncnn-param-smoke` 验证现有 `.param/.bin`；不要把该失败当作 runtime 通过。
+
+部署验证失败报告会给出 `failureCategory` 和下一步建议：`sdk_missing` 表示未启用 NCNN SDK/runtime，`sample_missing` 表示缺少样本图，`sidecar_missing` 表示外部模型缺 AITrain sidecar 或显式 blob/decoder 配置，`unsupported_layer` 表示 `.param` 中存在当前 NCNN runtime 无法加载的层，`runtime_failed` 表示加载、输出提取或后处理失败。
 
 ## 14. 建议的最小试用流程
 
@@ -405,3 +407,7 @@ python examples\create-minimal-datasets.py --output .deps\examples-smoke
 7. 将 `best.onnx` 用作推理模型，进入“推理验证”页选择一张图片运行验证。
 
 该流程用于确认安装、环境和闭环是否正常，不代表训练精度。
+
+## 授权私钥安全说明
+
+正式私钥文件必须保存在授权方本机或受控密钥目录，不能放进项目仓库、客户交付包、日志、诊断包或证据目录。仓库内只允许保留 `tools/aitrain-license-private-key.example.json` 这类无敏感内容模板。如果旧私钥曾进入源码或对外分发，应视为已泄漏：生成新的 key pair，用新公钥重新构建 `AITRAIN_LICENSE_PUBLIC_KEY`，旧私钥不再用于任何客户注册码。

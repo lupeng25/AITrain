@@ -14,12 +14,12 @@ This repository implements the first usable platform layer from the requested pl
 - Dataset validation and split helpers for YOLO detection, YOLO segmentation, PaddleOCR Det, and PaddleOCR Rec label files.
 - Worker-backed dataset conversion GUI for the implemented COCO / Pascal VOC / YOLO detection / YOLO segmentation conversion matrix.
 - External annotation workflow entrypoint for X-AnyLabeling, with local tool detection and a post-labeling refresh/revalidation path.
-- Segmentation admission scaffold with dataset loading, polygon-to-mask conversion, overlay preview, Worker metrics, and scaffold checkpoints.
-- Worker-managed Python trainer adapters for Ultralytics YOLO detection, Ultralytics YOLO segmentation, PaddlePaddle OCR Rec CPU smoke training, and official PaddleOCR PP-OCRv4 Rec train/export/inference orchestration.
+- Segmentation dataset admission with dataset loading, polygon-to-mask conversion, overlay preview, and Worker metrics; model training is routed through the official Ultralytics segmentation backend.
+- Worker-managed Python trainer adapters for official Ultralytics YOLO detection, official Ultralytics YOLO segmentation, and official PaddleOCR Det/Rec train/export/inference orchestration.
 - Delivery-closeout workbench surfaces for sample review, delivery acceptance, customer OCR validation, diagnostics, deployment validation, and model-card/report generation.
 - QtTest coverage for JSONL protocol, project repository behavior, detection workflow, and segmentation admission behavior.
 
-The native C++ training implementation remains an executable workflow scaffold: the worker can run a tiny detector placeholder, produce checkpoints, export a tiny detector ONNX model, validate it through ONNX Runtime, and run tiny segmentation/OCR admission scaffolds. Real model training is now routed through Worker-managed Python trainer subprocesses. Ultralytics YOLO detection and segmentation have CPU smoke coverage, and PaddlePaddle OCR Rec has a small CTC smoke trainer. C++ ONNX Runtime now supports YOLO segmentation mask postprocess and OCR CTC greedy decode for those smoke models. The official PaddleOCR adapter can prepare PP-OCRv4 Rec configs and command files, and can run official PaddleOCR training/export in an isolated OCR Python environment. RTX 4090 D TensorRT acceptance has passing evidence for the current validation lane; clean Windows package acceptance and any package-root TensorRT rerun still require returned external evidence before they can be marked passed.
+Production training is routed through Worker-managed official Python trainer subprocesses: Ultralytics for YOLO detection/segmentation and PaddleOCR official adapters for Det/Rec. The legacy tiny detector, small PaddleOCR CTC trainer, C++ segmentation/OCR training scaffolds, and shipped `python_mock` trainer have been physically removed from the product path. RTX 4090 D TensorRT acceptance has passing evidence for the current validation lane; clean Windows package acceptance and any package-root TensorRT rerun still require returned external evidence before they can be marked passed.
 
 ## Build
 
@@ -74,7 +74,7 @@ Build-time licensing knobs:
 - `AITRAIN_BUILD_LICENSE_GENERATOR`: builds `AITrainLicenseGenerator.exe` when enabled.
 - `AITRAIN_INSTALL_LICENSE_GENERATOR`: installs the generator only when explicitly enabled; it defaults off so customer packages do not accidentally include it.
 
-The generator uses a private key file to issue customer license codes. Keep private keys local and out of customer packages and source control.
+The generator uses a private key file to issue customer license codes. Keep private keys local and out of customer packages and source control. The tracked repository must contain only `tools/aitrain-license-private-key.example.json`; any real `aitrain-license-private-key.json` must live in a secured operator path outside the repo. If a private key has ever been committed, treat it as leaked: rotate to a newly generated key pair, rebuild with the new `AITRAIN_LICENSE_PUBLIC_KEY`, and handle history purging through a separate security procedure if the repository was pushed or distributed.
 
 ## Project Layout
 
@@ -128,13 +128,13 @@ Small generated-data training smoke can be run with:
 For a longer local CPU smoke on deterministic small/medium generated data:
 
 ```powershell
-.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr
+.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke
 ```
 
 To require real Ultralytics COCO8 / COCO8-seg materialization instead of generated fallback:
 
 ```powershell
-.\tools\acceptance-smoke.ps1 -PublicDatasets -RequirePublicDatasets -SkipOfficialOcr
+.\tools\acceptance-smoke.ps1 -PublicDatasets -RequirePublicDatasets
 ```
 
 TensorRT acceptance must be run on an RTX / SM 75+ machine. The RTX 4090 D validation lane already has passing evidence; rerun this only when validating a new package root, machine, driver/runtime set, or reopened external acceptance lane:
@@ -146,6 +146,8 @@ TensorRT acceptance must be run on an RTX / SM 75+ machine. The RTX 4090 D valid
 ## Python Training Backends
 
 Environment and backend notes are documented in `docs/training-backends.md`.
+
+Production training entry points expose only official backends: Ultralytics for YOLO detection/segmentation and PaddleOCR official adapters for Det/Rec. Legacy diagnostic training implementations have been removed instead of hidden behind user-facing switches. `paddleocr_rec` remains only a dataset format; production OCR Rec training uses `paddleocr_rec_official` or `paddleocr_ppocrv4_rec`.
 
 Minimal sample datasets can be generated with:
 

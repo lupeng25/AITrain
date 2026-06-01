@@ -136,12 +136,28 @@ QString classDistributionCsv(const QJsonObject& counts)
 } // namespace
 WorkflowResult createDatasetSnapshotReport(const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options)
 {
+    return createDatasetSnapshotReport(datasetPath, outputPath, format, options, CancellationCallback());
+}
+
+WorkflowResult createDatasetSnapshotReport(
+    const QString& datasetPath,
+    const QString& outputPath,
+    const QString& format,
+    const QJsonObject& options,
+    const CancellationCallback& shouldCancel)
+{
+    if (isCancellationRequested(shouldCancel)) {
+        return canceledResult();
+    }
     const QDir root(datasetPath);
     if (!root.exists()) {
         return failedResult(QStringLiteral("Dataset directory does not exist: %1").arg(datasetPath));
     }
     const int maxFiles = options.value(QStringLiteral("maxFiles")).toInt(20000);
     const QFileInfoList files = collectFilesRecursive(datasetPath, maxFiles);
+    if (isCancellationRequested(shouldCancel)) {
+        return canceledResult();
+    }
     QJsonArray fileArray;
     QJsonArray keyFileArray;
     QJsonObject roleCounts;
@@ -149,6 +165,9 @@ WorkflowResult createDatasetSnapshotReport(const QString& datasetPath, const QSt
     qint64 totalBytes = 0;
     QString error;
     for (const QFileInfo& fileInfo : files) {
+        if (isCancellationRequested(shouldCancel)) {
+            return canceledResult();
+        }
         qint64 fileSize = 0;
         const QByteArray hash = fileSha256(fileInfo.absoluteFilePath(), &fileSize, &error);
         if (!error.isEmpty()) {
@@ -198,6 +217,9 @@ WorkflowResult createDatasetSnapshotReport(const QString& datasetPath, const QSt
     manifest.insert(QStringLiteral("files"), fileArray);
 
     const QString reportPath = QDir(outputPath).filePath(QStringLiteral("dataset_snapshot_manifest.json"));
+    if (isCancellationRequested(shouldCancel)) {
+        return canceledResult();
+    }
     if (!writeJsonFile(reportPath, manifest, &error)) {
         return failedResult(error);
     }

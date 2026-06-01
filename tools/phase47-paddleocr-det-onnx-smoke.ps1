@@ -153,7 +153,7 @@ function Ensure-EmbeddedPython {
     $null = Expand-Archive -Path $ZipPath -DestinationPath $PythonDirPath -Force
     $pth = Get-ChildItem -LiteralPath $PythonDirPath -Filter "python*._pth" | Select-Object -First 1
     if ($null -ne $pth) {
-        (Get-Content -LiteralPath $pth.FullName) -replace "#import site", "import site" |
+        (Get-Content -LiteralPath $pth.FullName -Encoding ASCII) -replace "#import site", "import site" |
             Set-Content -LiteralPath $pth.FullName -Encoding ASCII
     }
     return $python

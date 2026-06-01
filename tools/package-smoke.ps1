@@ -107,16 +107,23 @@ Assert-PathExists "docs\product-roadmap-local-training-platform.md" "local train
 Assert-PathExists "docs\plugin-marketplace.md" "plugin marketplace docs"
 Assert-PathExists "docs\plugin-package-format.md" "plugin package format docs"
 Assert-PathExists "examples\plugin-package-template\plugin.json" "plugin package template manifest"
-Assert-PathExists "python_trainers\mock_trainer.py" "Python trainer adapter mock"
 Assert-PathExists "python_trainers\requirements-yolo.txt" "YOLO Python requirements"
 Assert-PathExists "python_trainers\requirements-ocr.txt" "OCR Python requirements"
 Assert-PathExists "python_trainers\ocr_rec\paddleocr_official_adapter.py" "Official PaddleOCR adapter"
 Assert-PathExists "python_trainers\ocr_det\paddleocr_det_official_adapter.py" "Official PaddleOCR Det adapter"
 Assert-PathExists "python_trainers\ocr_system\paddleocr_system_official_adapter.py" "Official PaddleOCR System adapter"
+if (Test-Path (Join-Path $prefixFull "python_trainers\mock_trainer.py")) {
+    throw "Diagnostic Python mock trainer must not be packaged"
+}
+if (Test-Path (Join-Path $prefixFull "python_trainers\ocr_rec\paddleocr_trainer.py")) {
+    throw "Removed small PaddleOCR CTC trainer must not be packaged"
+}
 Assert-PathExists "installer\AITrainStudio.iss" "Inno Setup installer script"
 Assert-PathExists "tools\acceptance-smoke.ps1" "acceptance smoke script"
 Assert-PathExists "tools\build-inno-installer.ps1" "Inno Setup installer build script"
+Assert-PathExists "tools\ui-workbench-walkthrough.ps1" "UI workbench walkthrough RC script"
 Assert-PathExists "tools\phase45-yolo-model-matrix-smoke.ps1" "Phase 45 YOLO model matrix smoke script"
+Assert-PathExists "tools\phase-ncnn-runtime-smoke.ps1" "NCNN runtime smoke script"
 Assert-PathExists "tools\local-rc-closeout.ps1" "local RC closeout script"
 Assert-PathExists "tools\release-freeze-handoff.ps1" "release freeze handoff script"
 Assert-PathExists "tools\create-plugin-package.ps1" "plugin package creation script"
@@ -130,6 +137,41 @@ Assert-PathExists "tools\run-production-ocr-rec-experiment.ps1" "production OCR 
 Assert-PathExists "tools\run-production-ocr-official-chain.ps1" "production OCR official chain script"
 Assert-PathExists "tools\production-ocr-acceptance.ps1" "production OCR acceptance script"
 Assert-PathExists "tools\customer-ocr-validation.ps1" "customer OCR validation script"
+
+$pythonCacheDirs = @(Get-ChildItem -LiteralPath $prefixFull -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue)
+$pythonCacheFiles = @(Get-ChildItem -LiteralPath $prefixFull -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Extension -eq ".pyc" -or $_.Extension -eq ".pyo" })
+if ($pythonCacheDirs.Count -gt 0 -or $pythonCacheFiles.Count -gt 0) {
+    $cacheItems = @()
+    $cacheItems += $pythonCacheDirs | Select-Object -First 10 | ForEach-Object { $_.FullName }
+    $cacheItems += $pythonCacheFiles | Select-Object -First 10 | ForEach-Object { $_.FullName }
+    throw ("Package contains Python cache artifacts: {0}" -f ($cacheItems -join "; "))
+}
+Write-Host "  [ok] no Python cache artifacts"
+
+$privateKeyFiles = @(Get-ChildItem -LiteralPath $prefixFull -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.Name -like "*aitrain-license-private-key*.json" -or
+        $_.Name -like "*license-private-key*.json" -or
+        $_.Name -like "*private-key*.json"
+    })
+if ($privateKeyFiles.Count -gt 0) {
+    $privateKeyItems = $privateKeyFiles | Select-Object -First 10 | ForEach-Object { $_.FullName }
+    throw ("Package contains license private-key material: {0}" -f ($privateKeyItems -join "; "))
+}
+Write-Host "  [ok] no license private-key artifacts"
+
+$cmakeCachePath = Join-Path $buildPathFull "CMakeCache.txt"
+$publicKeyLine = if (Test-Path -LiteralPath $cmakeCachePath) {
+    Select-String -LiteralPath $cmakeCachePath -Pattern '^AITRAIN_LICENSE_PUBLIC_KEY:[^=]*=(.*)$' -ErrorAction SilentlyContinue | Select-Object -First 1
+} else {
+    $null
+}
+$configuredPublicKey = if ($publicKeyLine) { [string]$publicKeyLine.Matches[0].Groups[1].Value } else { "" }
+if ([string]::IsNullOrWhiteSpace($configuredPublicKey)) {
+    throw "Package build has no AITRAIN_LICENSE_PUBLIC_KEY configured. Set AITRAIN_LICENSE_PUBLIC_KEY or create .deps\local-license\aitrain-license-private-key.json before packaging."
+}
+Write-Host "  [ok] license public key configured"
 
 $onnxRuntimeRootDll = Join-Path $prefixFull "onnxruntime.dll"
 $onnxRuntimeFolderDll = Join-Path $prefixFull "runtimes\onnxruntime\onnxruntime.dll"

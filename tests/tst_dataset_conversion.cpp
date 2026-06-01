@@ -36,6 +36,8 @@ private slots:
     void yoloBlockListNamesPreserveCategoryNames();
     void customSplitPathsCopyToControlledImageLayout();
     void unsafeSplitPathsCannotWriteOutsideOutputRoot();
+    void immediateCancellationReturnsCanceled();
+    void sampleLoopCancellationDoesNotWriteCompletionReport();
 };
 
 void DatasetConversionTests::unsupportedFormatFails()
@@ -767,6 +769,62 @@ void DatasetConversionTests::unsafeSplitPathsCannotWriteOutsideOutputRoot()
     const QJsonObject train = readJsonObjectForConversionTest(root.filePath(QStringLiteral("converted_unsafe/annotations/train.json")));
     const QString fileName = train.value(QStringLiteral("images")).toArray().at(0).toObject().value(QStringLiteral("file_name")).toString();
     QCOMPARE(fileName, QStringLiteral("images/train/escape.png"));
+}
+
+void DatasetConversionTests::immediateCancellationReturnsCanceled()
+{
+    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
+    QVERIFY(temp.isValid());
+    const QDir root(temp.path());
+
+    aitrain::DatasetConversionRequest request;
+    request.sourcePath = root.filePath(QStringLiteral("missing.json"));
+    request.sourceFormat = QStringLiteral("coco_json");
+    request.targetFormat = QStringLiteral("yolo_detection");
+    request.outputPath = root.filePath(QStringLiteral("converted"));
+
+    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request, []() {
+        return true;
+    });
+    QVERIFY(!result.ok);
+    QCOMPARE(result.errorCode, QStringLiteral("canceled"));
+    QCOMPARE(result.errorMessage, QStringLiteral("Canceled by user"));
+    QVERIFY(result.reportPath.isEmpty());
+    QVERIFY(!QFileInfo::exists(root.filePath(QStringLiteral("converted/dataset_conversion_report.json"))));
+}
+
+void DatasetConversionTests::sampleLoopCancellationDoesNotWriteCompletionReport()
+{
+    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
+    QVERIFY(temp.isValid());
+    const QDir root(temp.path());
+    const QDir source(root.filePath(QStringLiteral("source_many")));
+    QDir().mkpath(source.filePath(QStringLiteral("images/train")));
+    QDir().mkpath(source.filePath(QStringLiteral("labels/train")));
+    for (int index = 0; index < 12; ++index) {
+        const QString name = QStringLiteral("sample_%1").arg(index, 2, 10, QLatin1Char('0'));
+        writeTinyPngWithSize(source.filePath(QStringLiteral("images/train/%1.png").arg(name)), 64, 64);
+        writeTextFile(source.filePath(QStringLiteral("labels/train/%1.txt").arg(name)), QStringLiteral("0 0.5 0.5 0.25 0.25\n"));
+    }
+    writeTextFile(source.filePath(QStringLiteral("data.yaml")),
+        QStringLiteral("path: .\ntrain: images/train\nval: images/train\nnc: 1\nnames: [item]\n"));
+
+    aitrain::DatasetConversionRequest request;
+    request.sourcePath = source.absolutePath();
+    request.sourceFormat = QStringLiteral("yolo_detection");
+    request.targetFormat = QStringLiteral("coco_json");
+    request.outputPath = root.filePath(QStringLiteral("converted_many"));
+    request.options.insert(QStringLiteral("copyImages"), true);
+
+    int checks = 0;
+    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request, [&checks]() {
+        ++checks;
+        return checks > 4;
+    });
+    QVERIFY(!result.ok);
+    QCOMPARE(result.errorCode, QStringLiteral("canceled"));
+    QVERIFY(result.reportPath.isEmpty());
+    QVERIFY(!QFileInfo::exists(root.filePath(QStringLiteral("converted_many/dataset_conversion_report.json"))));
 }
 
 QTEST_MAIN(DatasetConversionTests)

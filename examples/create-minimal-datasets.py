@@ -213,14 +213,19 @@ def make_requests(root: Path, profile: str = "minimal") -> None:
             "backend": "ultralytics_yolo_segment",
             "parameters": segment_parameters,
         },
-        "paddleocr_rec_request.json": {
+        "paddleocr_rec_official_request.json": {
             "protocolVersion": 1,
-            "taskId": "example-paddleocr-rec",
+            "taskId": "example-paddleocr-rec-official",
             "taskType": "ocr_recognition",
             "datasetPath": str(root / "paddleocr_rec"),
-            "outputPath": str(root / "runs/paddleocr_rec"),
-            "backend": "paddleocr_rec",
-            "parameters": ocr_parameters,
+            "outputPath": str(root / "runs/paddleocr_rec_official"),
+            "backend": "paddleocr_rec_official",
+            "parameters": {
+                **ocr_parameters,
+                "trainingBackend": "paddleocr_rec_official",
+                "prepareOnly": True,
+                "useGpu": False,
+            },
         },
         "paddleocr_det_official_request.json": {
             "protocolVersion": 1,

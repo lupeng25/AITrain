@@ -124,7 +124,7 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
         workerPill_->setStatus(ok ? tr("任务完成") : tr("任务失败"),
             ok ? StatusPill::Tone::Success : StatusPill::Tone::Error);
         appendLog(ok ? tr("任务完成：%1").arg(message) : tr("任务失败：%1").arg(message));
-        if (!currentDatasetConversionTaskId_.isEmpty()) {
+        if (!state_.dataset.currentConversionTaskId.isEmpty()) {
             if (datasetConversionProgressBar_ && ok) {
                 datasetConversionProgressBar_->setValue(100);
             }
@@ -137,17 +137,17 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
             if (!ok) {
                 appendDatasetConversionLog(uiText("数据集转换失败：%1").arg(message));
             }
-            currentDatasetConversionTaskId_.clear();
+            state_.dataset.currentConversionTaskId.clear();
         }
         const QString kind;
         const QString path;
-        if (!currentTaskId_.isEmpty()) {
+        if (!state_.training.currentTaskId.isEmpty()) {
             QString error;
-            repository_.updateTaskState(currentTaskId_, ok ? aitrain::TaskState::Completed : aitrain::TaskState::Failed, message, &error);
+            repository_.updateTaskState(state_.training.currentTaskId, ok ? aitrain::TaskState::Completed : aitrain::TaskState::Failed, message, &error);
             if (ok) {
-                updateExperimentRunSummary(currentTaskId_);
+                updateExperimentRunSummary(state_.training.currentTaskId);
             }
-            currentTaskId_.clear();
+            state_.training.currentTaskId.clear();
             updateRecentTasks();
             updateSelectedTaskDetails();
             updateModelRegistry();

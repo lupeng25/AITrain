@@ -12,8 +12,8 @@ Local closeout covers:
 - Packaged layout smoke from the source tree.
 - Worker self-check, plugin smoke, and package documentation/script presence.
 - Optional local baseline acceptance and CPU training smoke.
-- Manual GUI walkthrough for the current workbench.
-- Documentation language check for scaffold, official backend, TensorRT hardware-blocked, NCNN artifact-only, and customer-domain OCR boundaries.
+- Automated 1280x820 GUI walkthrough for the current workbench; use `-SkipGuiWalkthrough` only in intentionally headless environments.
+- Documentation language check for scaffold, official backend, TensorRT hardware-blocked, NCNN runtime/SDK requirements, and customer-domain OCR boundaries.
 
 Out of scope:
 
@@ -36,6 +36,7 @@ This runs:
 git diff --check
 .\tools\harness-check.ps1
 .\tools\package-smoke.ps1 -SkipBuild
+.\tools\ui-workbench-walkthrough.ps1
 ```
 
 Fuller local closeout, still without external hardware:
@@ -48,21 +49,24 @@ This additionally runs:
 
 ```powershell
 .\tools\acceptance-smoke.ps1 -LocalBaseline -Package -SkipBuild
-.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke -SkipOfficialOcr
+.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke
 ```
 
-The CPU training smoke is intentionally heavier. It validates integration and artifacts, not production model accuracy.
+The CPU training smoke is intentionally heavier. It validates integration and artifacts through official production backends, not production model accuracy.
 
-## Manual GUI Walkthrough
+## GUI Walkthrough
 
-Start with generated sample data:
+The default RC command runs the fixed 1280x820 walkthrough wrapper:
 
 ```powershell
-python examples\create-minimal-datasets.py --output .deps\next-smoke
-.\build-vscode\bin\AITrainStudio.exe
+.\tools\ui-workbench-walkthrough.ps1
 ```
 
-Walk through these screens:
+It covers `总览`, `项目`, `数据集`, `样本复核`, `训练实验`, `任务与产物`, `模型库`, `评估报告`, `模型导出`, `推理验证`, `交付验收`, `插件`, `环境`, and `设置`, and writes `.deps\ui-walkthrough-rc\ui_walkthrough_rc_summary.json`.
+
+If the app opens the offline registration dialog before the workbench, the wrapper writes a blocked summary with `errorCode=license_required`. Treat that as environment/configuration blocked evidence: configure a valid offline license token and build-time `AITRAIN_LICENSE_PUBLIC_KEY`, then rerun the walkthrough instead of marking the GUI gate passed.
+
+For manual exploration beyond the automated gate, walk through these screens:
 
 | Area | Check |
 |---|---|
@@ -71,7 +75,7 @@ Walk through these screens:
 | Dataset | Import generated YOLO detection, YOLO segmentation, PaddleOCR Rec, and PaddleOCR Det datasets; auto-detection and validation should be visible. |
 | Sample Review | Load problem/error/rework sample JSON when available; filters and X-AnyLabeling review-list export should be visible. |
 | Annotation | X-AnyLabeling remains an external tool; launch/detect actions should not block the GUI or imply embedded annotation. |
-| Training | Official YOLO / OCR backends should be preferred where applicable; tiny/scaffold or mock backends must remain diagnostic/scaffold choices. |
+| Training | Official YOLO / OCR backends should be the only product training choices; removed diagnostic/scaffold backends must not reappear in the GUI. |
 | Task Artifacts | Select recent tasks and preview JSON/TXT/CSV/image/ONNX/model artifacts; unsupported artifacts should show a clear message. |
 | Evaluation / Benchmark | Run evaluation and benchmark from model artifacts when available; reports should be recorded as Worker artifacts. |
 | Model Registry | Registered model versions should show lineage, evaluation, benchmark, artifact, and limitation summaries. |
@@ -82,13 +86,13 @@ Walk through these screens:
 
 Before marking the local RC closeout done, check docs and UI text for:
 
-- Tiny detector, segmentation baseline, OCR baseline, and `python_mock` are scaffold/demo/diagnostic only.
+- Tiny detector, segmentation baseline, OCR baseline, small OCR CTC, and shipped `python_mock` trainer implementations are removed from the product training path.
 - Ultralytics YOLO official backends require installed official Python packages and license review before redistribution.
-- PaddleOCR Rec CTC backend is a small PaddlePaddle CTC trainer, not a full PP-OCRv4 official pipeline.
+- `paddleocr_rec` is a dataset format only; PaddleOCR Rec training must use the official PaddleOCR adapter.
 - PaddleOCR System is official `predict_system.py` tool orchestration, not C++ DB ONNX postprocess.
 - TensorRT on GTX 1060 / SM 61 is `hardware-blocked`; RTX / SM 75+ is still required for real TensorRT acceptance. The RTX 4090 D validation lane already passed, while clean Windows package-root reruns remain separate evidence.
 - Customer-domain OCR production readiness requires customer/target-domain data; Total-Text, generated smoke, and `.deps` examples are workflow smoke only.
-- NCNN v1 deployment validation checks artifact presence only; it is not runtime inference validation.
+- NCNN deployment validation runs runtime inference for supported YOLO detection/segmentation artifacts when NCNN SDK/runtime and a sample image are available; otherwise it reports failed/blocked instead of artifact-only passed. Current local evidence covers Hyuto YOLOv8 detection ONNX -> NCNN and nihui preconverted YOLOv8n-seg pnnx/DFL NCNN; YOLOv8-seg ONNX conversion with unsupported `Shape` layers is failed conversion evidence.
 - Phase 40 classification / pose / OBB / anomaly backends remain deferred until priorities are reset.
 
 ## Completion Record

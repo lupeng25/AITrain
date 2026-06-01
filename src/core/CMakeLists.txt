@@ -1,14 +1,13 @@
 add_library(aitrain_core STATIC
     include/aitrain/core/PluginInterfaces.h
+    include/aitrain/core/Cancellation.h
     include/aitrain/core/Deployment.h
     include/aitrain/core/DatasetConversion.h
     include/aitrain/core/DatasetValidators.h
     include/aitrain/core/DetectionDataset.h
     include/aitrain/core/DetectionTrainer.h
     include/aitrain/core/OcrRecDataset.h
-    include/aitrain/core/OcrRecTrainer.h
     include/aitrain/core/SegmentationDataset.h
-    include/aitrain/core/SegmentationTrainer.h
     include/aitrain/core/JsonProtocol.h
     include/aitrain/core/LicenseManager.h
     include/aitrain/core/PluginManager.h
@@ -16,26 +15,36 @@ add_library(aitrain_core STATIC
     include/aitrain/core/ProjectRepository.h
     include/aitrain/core/ProductWorkflow.h
     include/aitrain/core/TaskModels.h
+    include/aitrain/core/VisionModelExport.h
+    include/aitrain/core/VisionModelRuntime.h
+    include/aitrain/core/VisionPostprocess.h
+    include/aitrain/core/WorkerProtocol.h
     src/JsonProtocol.cpp
     src/LicenseManager.cpp
     src/Deployment.cpp
     src/DatasetConversion.cpp
+    src/DatasetConversionCoco.cpp
+    src/DatasetConversionCommon.cpp
+    src/DatasetConversionInternal.h
+    src/DatasetConversionVoc.cpp
+    src/DatasetConversionYolo.cpp
     src/DatasetValidators.cpp
     src/YoloDatasetLayout.h
     src/YoloDatasetLayout.cpp
     src/DetectionDataset.cpp
     src/DetectionTrainer.cpp
-    src/DetectionTrainerExport.cpp
     src/DetectionTrainerInternal.h
-    src/DetectionTrainerOnnxRuntime.cpp
-    src/DetectionTrainerOutput.cpp
-    src/DetectionTrainerPostprocess.cpp
-    src/DetectionTrainerTensorRt.cpp
-    src/DetectionTrainerTiny.cpp
+    src/VisionModelExport.cpp
+    src/VisionModelRuntimeHelpers.cpp
+    src/VisionModelRuntimeNcnn.cpp
+    src/VisionModelRuntimeOnnx.cpp
+    src/VisionModelRuntimeTensorRt.cpp
+    src/VisionPostprocessCommon.cpp
+    src/VisionPostprocessOcr.cpp
+    src/VisionPostprocessOutput.cpp
+    src/VisionPostprocessYolo.cpp
     src/OcrRecDataset.cpp
-    src/OcrRecTrainer.cpp
     src/SegmentationDataset.cpp
-    src/SegmentationTrainer.cpp
     src/PluginManager.cpp
     src/PluginMarketplace.cpp
     src/ProjectRepository.cpp
@@ -50,6 +59,7 @@ add_library(aitrain_core STATIC
     src/ProductWorkflowSupport.h
     src/ProductWorkflowSupport.cpp
     src/TaskModels.cpp
+    src/WorkerProtocol.cpp
 )
 
 target_include_directories(aitrain_core
@@ -59,6 +69,7 @@ target_include_directories(aitrain_core
 
 target_link_libraries(aitrain_core
     PUBLIC
+        aitrain_qt5_msvc_compat
         Qt${QT_VERSION_MAJOR}::Core
         Qt${QT_VERSION_MAJOR}::Gui
         Qt${QT_VERSION_MAJOR}::Network
@@ -83,6 +94,21 @@ if(AITRAIN_WITH_ONNXRUNTIME)
     target_link_libraries(aitrain_core
         PRIVATE
             ${AITRAIN_ONNXRUNTIME_LIBRARY}
+    )
+endif()
+
+if(AITRAIN_WITH_NCNN)
+    target_compile_definitions(aitrain_core
+        PUBLIC
+            AITRAIN_WITH_NCNN
+    )
+    target_include_directories(aitrain_core
+        PRIVATE
+            ${AITRAIN_NCNN_INCLUDE_DIR}
+    )
+    target_link_libraries(aitrain_core
+        PRIVATE
+            ${AITRAIN_NCNN_LIBRARY}
     )
 endif()
 

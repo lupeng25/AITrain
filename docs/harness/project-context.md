@@ -29,7 +29,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 - 官方后端必须显式记录来源、版本和许可证约束。
 - C++ 侧继续负责 GUI、Worker 编排、数据集校验、SQLite、ONNX Runtime/TensorRT 推理、打包和部署。
 - 不把 Python 嵌入 `MainWindow` 或 GUI 进程。
-- 现有 C++ tiny/scaffold 训练保留为 demo、回归测试和平台链路验证后端。
+- 旧的 C++ tiny/scaffold 训练实现已物理删除；生产训练只通过官方后端。
 
 ## 当前事实
 
@@ -46,8 +46,8 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 - 插件接口和三个内置插件骨架。
 - 数据集校验初版。
 - 数据集转换 GUI 入口：已实现 COCO/VOC/YOLO 转换矩阵的 Worker 编排、表单预检、进度/日志/取消和结果展示；转换产物不自动登记为数据集。
-- Tiny detection scaffold 训练、checkpoint、ONNX 导出和 ONNX Runtime 推理链路。
-- YOLO 分割 scaffold/baseline 闭环：
+- 官方 YOLO detection 训练、ONNX 导出和 ONNX Runtime 推理链路。
+- YOLO 分割官方训练与数据闭环：
   - `SegmentationDataset`
   - `SegmentationDataLoader`
   - polygon-to-mask
@@ -56,22 +56,22 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
   - overlay preview
   - mask preview artifact
   - Worker 端 `maskLoss`、`maskCoverage`、`maskIoU`、`segmentationMap50`
-  - scaffold checkpoint
-- OCR recognition scaffold/baseline 闭环：
+  - official backend artifacts
+- OCR recognition 官方训练与数据闭环：
   - `OcrRecDataset`
   - 字符字典加载
   - label encode/decode
   - resize/pad batching
   - Worker 端 `ctcLoss`、`accuracy`、`editDistance`
-  - scaffold checkpoint
+  - official backend artifacts
   - preview artifact
 - VSCode 构建、运行、调试配置。
 - QtTest 基础覆盖。
-- Worker-managed Python Trainer Adapter；`python_mock` 仅作为协议/scaffold fixture。
+- Worker-managed Python Trainer Adapter；协议测试使用临时 Python trainer fixture，仓库不再提供 shipped `python_mock`。
 - 官方 Ultralytics YOLO detection / segmentation 训练、导出和 ONNX Runtime 推理 smoke。
-- PaddlePaddle OCR Rec CTC 训练和 C++ ONNX greedy decode；官方 PaddleOCR Det/Rec/System 工具链 smoke。
+- 旧 PaddlePaddle OCR Rec CTC 训练实现已物理删除；生产 OCR 训练和验收主线使用官方 PaddleOCR Det/Rec/System 工具链 smoke。
 - PaddleOCR Det DB-style ONNX probability-map 后处理和 Phase 47 真实导出 Det ONNX wiring smoke。
-- TensorRT SDK-backed 导出/推理路径和 RTX 4090 D 验收证据；旧 GTX 1060 / SM 61 仍应为 `hardware-blocked`。
+- TensorRT SDK-backed ONNX 到 engine 导出路径和 RTX 4090 D 验收证据；旧 GTX 1060 / SM 61 仍应为 `hardware-blocked`。当前官方-only smoke 不再使用已删除的 tiny-detector TensorRT 推理 fixture。
 - Windows 打包、package smoke、release freeze handoff、离线授权和注册码生成器。
 - 本地产品闭环：数据集质量报告、问题样本、X-AnyLabeling 复核清单、snapshot、训练 lineage、评估、benchmark、模型注册、pipeline、交付报告。
 - Phase 49 交付闭环：样本复核页、交付验收页、客户域 OCR 验收向导、一键诊断包和导出后部署验证。
@@ -81,7 +81,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 - Clean Windows package acceptance 仍需要外部返回证据；不能只凭本机结果标记为通过。
 - package-root TensorRT rerun 只有在重新打开外部验收时才执行；旧 GPU 的正确状态仍是 `hardware-blocked`。
 - 客户域 OCR 生产声明必须使用真实客户/目标域数据和官方报告；public Total-Text、generated smoke、`.deps` 示例只能证明流程。
-- NCNN v1 仍是产物存在校验，不是 runtime 推理验收。
+- NCNN runtime validation 已替代 artifact-only：有 NCNN SDK/runtime 和样本图时验证 YOLO 检测/分割推理；无 SDK/runtime 时必须明确 failed/blocked。本机 2026-05-16 证据覆盖 Hyuto YOLOv8 detection ONNX -> NCNN 和 nihui 预转换 YOLOv8n-seg pnnx/DFL NCNN；YOLOv8-seg ONNX 若经 `onnx2ncnn` 后仍包含 unsupported `Shape` layer，当前是失败报告而不是通过项。
 - 插件签名、远程 marketplace、账号、支付、云调度和多人协作后置。
 - 分类、姿态、OBB、异常检测、YOLO-World、YOLOE 等新算法后端后置。
 
@@ -118,7 +118,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 当前机器验证过的组合：
 
 - MSVC 19.50
-- Qt 5.12.9 `C:\Qt\Qt5.12.9\5.12.9\msvc2015_64`
+- Qt 5.12.9 `C:\Qt\Qt5.12.9\5.12.9\msvc2017_64`（`tools\toolchain-env.ps1` 优先选择该 kit；缺失时会 fallback 到 `msvc2015_64`）
 - CMake NMake Makefiles
 - 构建目录：`build-vscode`
 
@@ -127,6 +127,14 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 ```powershell
 .\tools\harness-check.ps1
 ```
+
+## 编码与终端约束
+
+- 仓库文本文件按 UTF-8 处理；中文源文案、文档、翻译文件和脚本输出说明都不能依赖系统 ANSI/GBK 猜测。
+- Windows PowerShell 读取中文或中英混排文件时必须显式指定 `-Encoding UTF8`，例如 `Get-Content -LiteralPath HARNESS.md -Encoding UTF8`。
+- 如果终端显示 `鐨勭洰鏍`、`\345\220...` 等乱码或转义，先确认读取编码和 Git 路径输出设置；不要把终端 mojibake 当成文件内容损坏。
+- Git 枚举中文路径时使用 `git -c core.quotepath=false ...`，或在本机配置 `git config --global core.quotepath false`。
+- 修改已有文本文件时保留 UTF-8，并尽量保留文件原有 BOM / no BOM 风格；二进制文件不要按文本编码处理。
 
 ## 关键约束
 

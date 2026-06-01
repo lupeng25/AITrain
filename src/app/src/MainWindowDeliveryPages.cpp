@@ -106,7 +106,6 @@ QWidget* MainWindow::buildConversionPage()
     conversionFormatCombo_ = new QComboBox;
     conversionFormatCombo_->addItem(exportComboLabel(QStringLiteral("onnx")), QStringLiteral("onnx"));
     conversionFormatCombo_->addItem(exportComboLabel(QStringLiteral("ncnn")), QStringLiteral("ncnn"));
-    conversionFormatCombo_->addItem(exportComboLabel(QStringLiteral("tiny_detector_json")), QStringLiteral("tiny_detector_json"));
     conversionFormatCombo_->addItem(exportComboLabel(QStringLiteral("tensorrt")), QStringLiteral("tensorrt"));
 
     conversionOutputEdit_ = new QLineEdit;
@@ -199,7 +198,7 @@ QWidget* MainWindow::buildConversionPage()
     rightLayout->setSpacing(16);
 
     auto* matrixPanel = new InfoPanel(QStringLiteral("格式矩阵"));
-    auto* matrixTable = new QTableWidget(4, 4);
+    auto* matrixTable = new QTableWidget(3, 4);
     matrixTable->setWordWrap(true);
     matrixTable->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("格式")
@@ -216,16 +215,12 @@ QWidget* MainWindow::buildConversionPage()
     const QStringList formats = {
         QStringLiteral("onnx"),
         QStringLiteral("ncnn"),
-        QStringLiteral("tiny_detector_json"),
         QStringLiteral("tensorrt")
     };
     for (int row = 0; row < formats.size(); ++row) {
         const QString format = formats.at(row);
         matrixTable->setItem(row, 0, new QTableWidgetItem(exportFormatLabel(format)));
-        matrixTable->setItem(row, 1, new QTableWidgetItem(
-            format == QStringLiteral("tiny_detector_json")
-                ? QStringLiteral("tiny detector checkpoint")
-                : uiText("checkpoint 或 ONNX")));
+        matrixTable->setItem(row, 1, new QTableWidgetItem(uiText("官方 ONNX")));
         matrixTable->setItem(row, 2, new QTableWidgetItem(defaultExportFileName(format)));
         matrixTable->setItem(row, 3, new QTableWidgetItem(exportFormatNote(format)));
     }
@@ -236,7 +231,7 @@ QWidget* MainWindow::buildConversionPage()
     resultPanel->bodyLayout()->addWidget(exportResultLabel_);
     deploymentValidationResultLabel_ = inlineStatusLabel(uiText("尚未执行导出后验证。"));
     resultPanel->bodyLayout()->addWidget(deploymentValidationResultLabel_);
-    resultPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("ONNX 会写入 AITrain sidecar；NCNN 依赖本机 onnx2ncnn；TensorRT 需兼容 GPU/runtime，不兼容硬件会记录为 hardware-blocked。")));
+    resultPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("ONNX 会写入 AITrain sidecar；NCNN 导出依赖 onnx2ncnn，部署验证需要 NCNN SDK/runtime 和样本图；TensorRT 需兼容 GPU/runtime，不兼容硬件会记录为 hardware-blocked。")));
     resultPanel->bodyLayout()->addStretch();
 
     rightLayout->addWidget(matrixPanel);

@@ -50,11 +50,7 @@ QWidget* MainWindow::buildTrainingPage()
     trainingBackendCombo_->addItem(backendLabel(QStringLiteral("ultralytics_yolo_detect")), QStringLiteral("ultralytics_yolo_detect"));
     trainingBackendCombo_->addItem(backendLabel(QStringLiteral("ultralytics_yolo_segment")), QStringLiteral("ultralytics_yolo_segment"));
     trainingBackendCombo_->addItem(backendLabel(QStringLiteral("paddleocr_det_official")), QStringLiteral("paddleocr_det_official"));
-    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("paddleocr_rec")), QStringLiteral("paddleocr_rec"));
     trainingBackendCombo_->addItem(backendLabel(QStringLiteral("paddleocr_rec_official")), QStringLiteral("paddleocr_rec_official"));
-    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("paddleocr_system_official")), QStringLiteral("paddleocr_system_official"));
-    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("tiny_linear_detector")), QStringLiteral("tiny_linear_detector"));
-    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("python_mock")), QStringLiteral("python_mock"));
     modelPresetCombo_ = new QComboBox;
     modelPresetCombo_->setEditable(true);
     modelPresetCombo_->addItems(QStringList()
@@ -65,10 +61,7 @@ QWidget* MainWindow::buildTrainingPage()
         << QStringLiteral("yolo12n.yaml")
         << QStringLiteral("yolo12n-seg.yaml")
         << QStringLiteral("PP-OCRv4_mobile_det")
-        << QStringLiteral("paddle_ctc_smoke")
-        << QStringLiteral("PP-OCRv4_mobile_rec")
-        << QStringLiteral("PP-OCRv4_det_rec_system")
-        << QStringLiteral("diagnostic"));
+        << QStringLiteral("PP-OCRv4_mobile_rec"));
     epochsEdit_ = new QLineEdit(QStringLiteral("20"));
     batchEdit_ = new QLineEdit(QStringLiteral("8"));
     imageSizeEdit_ = new QLineEdit(QStringLiteral("640"));
@@ -99,7 +92,7 @@ QWidget* MainWindow::buildTrainingPage()
     trainingDatasetSummaryLabel_ = inlineStatusLabel(QStringLiteral("当前数据集：未选择。请先在数据集页导入并通过校验。"));
     trainingDatasetSummaryLabel_->setMinimumHeight(34);
     allowLabelToShrink(trainingDatasetSummaryLabel_);
-    trainingBackendHintLabel_ = mutedLabel(QStringLiteral("官方后端会由 Worker 启动独立 Python 进程；scaffold 后端只用于高级诊断。"));
+    trainingBackendHintLabel_ = mutedLabel(QStringLiteral("生产训练仅使用官方后端：Ultralytics YOLO 或 PaddleOCR official adapter。"));
     allowLabelToShrink(trainingBackendHintLabel_);
     trainingRunSummaryLabel_ = inlineStatusLabel(QStringLiteral("等待配置训练实验。"));
     trainingRunSummaryLabel_->setMinimumHeight(42);

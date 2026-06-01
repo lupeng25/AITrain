@@ -40,8 +40,9 @@ function Resolve-AITrainQtRoot {
     }
 
     $candidates = @(
-        "C:\Qt\Qt5.12.9\5.12.9\msvc2015_64",
+        "C:\Qt\Qt5.12.9\5.12.9\msvc2017_64",
         "D:\Qt\Qt5.12.9\5.12.9\msvc2017_64",
+        "C:\Qt\Qt5.12.9\5.12.9\msvc2015_64",
         "D:\Qt\Qt5.12.9\5.12.9\msvc2015_64"
     )
 
@@ -58,7 +59,7 @@ function Resolve-AITrainQtRoot {
 
         $qtRoot = Get-ChildItem $base -Recurse -Directory -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -match '5\.12\.9\\msvc20(15|17)_64$' } |
-            Sort-Object FullName |
+            Sort-Object @{ Expression = { if ($_.Name -eq "msvc2017_64") { 0 } else { 1 } } }, FullName |
             Select-Object -First 1
         if ($qtRoot) {
             return [System.IO.Path]::GetFullPath($qtRoot.FullName)
@@ -66,6 +67,16 @@ function Resolve-AITrainQtRoot {
     }
 
     throw "Qt kit not found. Set AITRAIN_QT_ROOT to a Qt 5.12 msvc*_64 kit."
+}
+
+function Write-AITrainToolchainSelection {
+    param(
+        [string]$VcVars,
+        [string]$QtRoot
+    )
+
+    Write-Host ("AITrain toolchain: MSVC environment = {0}" -f $VcVars) -ForegroundColor DarkCyan
+    Write-Host ("AITrain toolchain: Qt root = {0}" -f $QtRoot) -ForegroundColor DarkCyan
 }
 
 function Get-AITrainBuildCommandPrefix {
@@ -84,7 +95,7 @@ function Get-AITrainBuildCommandPrefix {
     $qtBin = Join-Path $QtRoot "bin"
     $qtPlugins = Join-Path $QtRoot "plugins"
     $qtPlatforms = Join-Path $qtPlugins "platforms"
-    return "set `"PATH=$qtBin;%PATH%`" && set `"QT_PLUGIN_PATH=$qtPlugins`" && set `"QT_QPA_PLATFORM_PLUGIN_PATH=$qtPlatforms`" && call `"$VcVars`" >nul"
+    return "set `"VSLANG=1033`" && set `"PATH=$qtBin;%PATH%`" && set `"QT_PLUGIN_PATH=$qtPlugins`" && set `"QT_QPA_PLATFORM_PLUGIN_PATH=$qtPlatforms`" && call `"$VcVars`" >nul"
 }
 
 function Set-AITrainQtRuntimeEnvironment {

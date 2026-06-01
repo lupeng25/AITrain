@@ -49,13 +49,14 @@
 - Worker self-check JSON:
 - `nvidia-smi` output:
 - TensorRT smoke output:
+- Official ONNX path:
 - Generated engine path, if any:
-- Generated prediction/output path, if any:
+- Generated export report path, if any:
 
 ## Acceptance Decision
 
 - TensorRT engine build passed:
-- TensorRT inference passed:
+- TensorRT runtime inference available/passed, if enabled:
 - Result can update Phase 7 / Phase 10 status:
 - Status wording to add to `docs\harness\current-status.md`:
 

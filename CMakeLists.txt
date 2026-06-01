@@ -17,9 +17,13 @@ option(AITRAIN_BUILD_TESTS "Build AITrain Studio tests" ON)
 option(AITRAIN_BUILD_LICENSE_GENERATOR "Build the AITrain graphical license generator" ON)
 option(AITRAIN_INSTALL_LICENSE_GENERATOR "Install the AITrain license generator with the package" OFF)
 option(AITRAIN_ENABLE_ONNXRUNTIME "Enable ONNX Runtime inference when an SDK is available" ON)
+option(AITRAIN_ENABLE_NCNN "Enable NCNN inference when an SDK is available" ON)
 option(AITRAIN_INSTALL_QT_RUNTIME "Run windeployqt during install on Windows when available" ON)
 set(AITRAIN_LICENSE_PUBLIC_KEY "" CACHE STRING "Base64 encoded ECDSA P-256 public key for offline license verification")
+set(AITRAIN_LICENSE_KEY_FILE "" CACHE FILEPATH "Optional local JSON key file containing publicKey for offline license verification")
 set(AITRAIN_ONNXRUNTIME_ROOT "" CACHE PATH "Optional ONNX Runtime SDK root containing include and lib directories")
+set(AITRAIN_NCNN_ROOT "" CACHE PATH "Optional NCNN SDK root containing include, lib, bin, and tools directories")
+set(AITRAIN_NCNN_ONNX2NCNN "" CACHE FILEPATH "Optional onnx2ncnn converter executable")
 set(AITRAIN_CUDA_ROOT "" CACHE PATH "Optional CUDA Toolkit root used for packaging runtime DLLs")
 set(AITRAIN_CUDNN_ROOT "" CACHE PATH "Optional cuDNN root used for packaging runtime DLLs")
 set(AITRAIN_TENSORRT_ROOT "" CACHE PATH "Optional TensorRT SDK root used for packaging runtime DLLs")
@@ -29,8 +33,58 @@ if(MSVC)
     add_compile_options(/utf-8)
 endif()
 
+if(NOT AITRAIN_LICENSE_PUBLIC_KEY AND DEFINED ENV{AITRAIN_LICENSE_PUBLIC_KEY})
+    set(AITRAIN_LICENSE_PUBLIC_KEY "$ENV{AITRAIN_LICENSE_PUBLIC_KEY}" CACHE STRING "Base64 encoded ECDSA P-256 public key for offline license verification" FORCE)
+endif()
+
+if(NOT AITRAIN_LICENSE_KEY_FILE AND DEFINED ENV{AITRAIN_LICENSE_KEY_FILE})
+    set(AITRAIN_LICENSE_KEY_FILE "$ENV{AITRAIN_LICENSE_KEY_FILE}" CACHE FILEPATH "Optional local JSON key file containing publicKey for offline license verification" FORCE)
+endif()
+
+if(NOT AITRAIN_LICENSE_PUBLIC_KEY AND NOT AITRAIN_LICENSE_KEY_FILE)
+    foreach(AITRAIN_LICENSE_KEY_CANDIDATE
+        "${CMAKE_SOURCE_DIR}/.deps/local-license/aitrain-license-private-key.json"
+        "${CMAKE_SOURCE_DIR}/tools/aitrain-license-private-key.json"
+    )
+        if(EXISTS "${AITRAIN_LICENSE_KEY_CANDIDATE}")
+            set(AITRAIN_LICENSE_KEY_FILE "${AITRAIN_LICENSE_KEY_CANDIDATE}" CACHE FILEPATH "Optional local JSON key file containing publicKey for offline license verification" FORCE)
+            break()
+        endif()
+    endforeach()
+endif()
+
+if(NOT AITRAIN_LICENSE_PUBLIC_KEY AND AITRAIN_LICENSE_KEY_FILE)
+    if(EXISTS "${AITRAIN_LICENSE_KEY_FILE}")
+        file(READ "${AITRAIN_LICENSE_KEY_FILE}" AITRAIN_LICENSE_KEY_JSON)
+        string(JSON AITRAIN_LICENSE_KEY_JSON_PUBLIC_KEY ERROR_VARIABLE AITRAIN_LICENSE_KEY_JSON_ERROR GET "${AITRAIN_LICENSE_KEY_JSON}" publicKey)
+        if(NOT AITRAIN_LICENSE_KEY_JSON_ERROR AND AITRAIN_LICENSE_KEY_JSON_PUBLIC_KEY AND NOT AITRAIN_LICENSE_KEY_JSON_PUBLIC_KEY MATCHES "^<")
+            set(AITRAIN_LICENSE_PUBLIC_KEY "${AITRAIN_LICENSE_KEY_JSON_PUBLIC_KEY}" CACHE STRING "Base64 encoded ECDSA P-256 public key for offline license verification" FORCE)
+        else()
+            message(WARNING "License key file does not contain a usable publicKey: ${AITRAIN_LICENSE_KEY_FILE}")
+        endif()
+    else()
+        message(WARNING "AITRAIN_LICENSE_KEY_FILE does not exist: ${AITRAIN_LICENSE_KEY_FILE}")
+    endif()
+endif()
+
+if(AITRAIN_LICENSE_PUBLIC_KEY)
+    string(STRIP "${AITRAIN_LICENSE_PUBLIC_KEY}" AITRAIN_LICENSE_PUBLIC_KEY)
+    set(AITRAIN_LICENSE_PUBLIC_KEY "${AITRAIN_LICENSE_PUBLIC_KEY}" CACHE STRING "Base64 encoded ECDSA P-256 public key for offline license verification" FORCE)
+    message(STATUS "License public key configured for AITrain Studio")
+else()
+    message(WARNING "AITRAIN_LICENSE_PUBLIC_KEY is empty; AITrain Studio will report that the license public key is not configured")
+endif()
+
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Gui Widgets Network Sql Test Xml)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Widgets Network Sql Test Xml)
+
+add_library(aitrain_qt5_msvc_compat INTERFACE)
+if(MSVC AND QT_VERSION_MAJOR EQUAL 5)
+    target_compile_options(aitrain_qt5_msvc_compat
+        INTERFACE
+            "/FI${CMAKE_SOURCE_DIR}/src/core/include/aitrain/core/Qt5MsvcCompat.h"
+    )
+endif()
 
 if(WIN32 AND AITRAIN_INSTALL_QT_RUNTIME AND NOT AITRAIN_WINDEPLOYQT_EXECUTABLE)
     if(TARGET Qt${QT_VERSION_MAJOR}::qmake)
@@ -208,6 +262,103 @@ if(AITRAIN_ENABLE_ONNXRUNTIME)
     endif()
 endif()
 
+if(AITRAIN_ENABLE_NCNN)
+    find_path(AITRAIN_NCNN_INCLUDE_DIR
+        NAMES net.h
+        HINTS
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/include/ncnn
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/include
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/x64/include/ncnn
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/x64/include
+            ${AITRAIN_NCNN_ROOT}/include/ncnn
+            ${AITRAIN_NCNN_ROOT}/include
+            ${AITRAIN_NCNN_ROOT}/x64/include/ncnn
+            ${AITRAIN_NCNN_ROOT}/x64/include
+            $ENV{AITRAIN_NCNN_ROOT}/include/ncnn
+            $ENV{AITRAIN_NCNN_ROOT}/include
+            $ENV{AITRAIN_NCNN_ROOT}/x64/include/ncnn
+            $ENV{AITRAIN_NCNN_ROOT}/x64/include
+            $ENV{NCNN_ROOT}/include/ncnn
+            $ENV{NCNN_ROOT}/include
+            $ENV{NCNN_ROOT}/x64/include/ncnn
+            $ENV{NCNN_ROOT}/x64/include
+    )
+    find_library(AITRAIN_NCNN_LIBRARY
+        NAMES ncnn libncnn
+        HINTS
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/lib
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/lib/x64
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/lib64
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/x64/lib
+            ${AITRAIN_NCNN_ROOT}/lib
+            ${AITRAIN_NCNN_ROOT}/lib/x64
+            ${AITRAIN_NCNN_ROOT}/lib64
+            ${AITRAIN_NCNN_ROOT}/x64/lib
+            $ENV{AITRAIN_NCNN_ROOT}/lib
+            $ENV{AITRAIN_NCNN_ROOT}/lib/x64
+            $ENV{AITRAIN_NCNN_ROOT}/lib64
+            $ENV{AITRAIN_NCNN_ROOT}/x64/lib
+            $ENV{NCNN_ROOT}/lib
+            $ENV{NCNN_ROOT}/lib/x64
+            $ENV{NCNN_ROOT}/lib64
+            $ENV{NCNN_ROOT}/x64/lib
+    )
+    find_file(AITRAIN_NCNN_DLL
+        NAMES ncnn.dll
+        HINTS
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/x64/bin
+            ${AITRAIN_NCNN_ROOT}/bin
+            ${AITRAIN_NCNN_ROOT}/x64/bin
+            ${AITRAIN_NCNN_ROOT}/lib
+            ${AITRAIN_NCNN_ROOT}/lib/x64
+            $ENV{AITRAIN_NCNN_ROOT}/bin
+            $ENV{AITRAIN_NCNN_ROOT}/x64/bin
+            $ENV{AITRAIN_NCNN_ROOT}/lib
+            $ENV{AITRAIN_NCNN_ROOT}/lib/x64
+            $ENV{NCNN_ROOT}/bin
+            $ENV{NCNN_ROOT}/x64/bin
+            $ENV{NCNN_ROOT}/lib
+            $ENV{NCNN_ROOT}/lib/x64
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/bin
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/lib
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/lib/x64
+        NO_DEFAULT_PATH
+    )
+    if(NOT AITRAIN_NCNN_ONNX2NCNN)
+        find_program(AITRAIN_NCNN_ONNX2NCNN_DISCOVERED
+            NAMES onnx2ncnn.exe onnx2ncnn
+            HINTS
+                ${CMAKE_SOURCE_DIR}/.deps/ncnn/x64/bin
+            ${AITRAIN_NCNN_ROOT}/bin
+            ${AITRAIN_NCNN_ROOT}/tools/onnx
+            ${AITRAIN_NCNN_ROOT}/x64/bin
+            ${AITRAIN_NCNN_ROOT}/x64/tools/onnx
+            $ENV{AITRAIN_NCNN_ROOT}/bin
+            $ENV{AITRAIN_NCNN_ROOT}/tools/onnx
+            $ENV{AITRAIN_NCNN_ROOT}/x64/bin
+            $ENV{AITRAIN_NCNN_ROOT}/x64/tools/onnx
+            $ENV{NCNN_ROOT}/bin
+            $ENV{NCNN_ROOT}/tools/onnx
+            $ENV{NCNN_ROOT}/x64/bin
+            $ENV{NCNN_ROOT}/x64/tools/onnx
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/bin
+            ${CMAKE_SOURCE_DIR}/.deps/ncnn/tools/onnx
+            NO_DEFAULT_PATH
+        )
+        if(AITRAIN_NCNN_ONNX2NCNN_DISCOVERED)
+            set(AITRAIN_NCNN_ONNX2NCNN "${AITRAIN_NCNN_ONNX2NCNN_DISCOVERED}" CACHE FILEPATH "Optional onnx2ncnn converter executable" FORCE)
+        endif()
+    endif()
+
+    if(AITRAIN_NCNN_INCLUDE_DIR AND AITRAIN_NCNN_LIBRARY)
+        set(AITRAIN_WITH_NCNN ON)
+        message(STATUS "NCNN SDK found: ${AITRAIN_NCNN_INCLUDE_DIR}")
+    else()
+        set(AITRAIN_WITH_NCNN OFF)
+        message(STATUS "NCNN SDK not found; NCNN runtime validation will report unavailable")
+    endif()
+endif()
+
 function(aitrain_copy_onnxruntime_runtime target_name)
     if(AITRAIN_WITH_ONNXRUNTIME)
         add_custom_command(TARGET ${target_name} POST_BUILD
@@ -224,6 +375,32 @@ function(aitrain_copy_onnxruntime_runtime target_name)
                 VERBATIM
             )
         endif()
+    endif()
+endfunction()
+
+function(aitrain_copy_ncnn_runtime target_name)
+    if(AITRAIN_WITH_NCNN AND AITRAIN_NCNN_DLL)
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                $<TARGET_FILE_DIR:${target_name}>/runtimes/ncnn
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${AITRAIN_NCNN_DLL}
+                $<TARGET_FILE_DIR:${target_name}>
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${AITRAIN_NCNN_DLL}
+                $<TARGET_FILE_DIR:${target_name}>/runtimes/ncnn
+            VERBATIM
+        )
+    endif()
+    if(AITRAIN_NCNN_ONNX2NCNN)
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                $<TARGET_FILE_DIR:${target_name}>/runtimes/ncnn
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${AITRAIN_NCNN_ONNX2NCNN}
+                $<TARGET_FILE_DIR:${target_name}>/runtimes/ncnn
+            VERBATIM
+        )
     endif()
 endfunction()
 
@@ -309,11 +486,15 @@ add_dependencies(aitrain_worker aitrain_python_trainers_copy)
 install(DIRECTORY DESTINATION plugins/models)
 install(DIRECTORY DESTINATION plugins/marketplace)
 install(DIRECTORY DESTINATION runtimes/onnxruntime)
+install(DIRECTORY DESTINATION runtimes/ncnn)
 install(DIRECTORY DESTINATION runtimes/tensorrt)
 install(DIRECTORY DESTINATION docs)
 install(DIRECTORY docs/harness DESTINATION docs)
 install(DIRECTORY docs/acceptance-templates DESTINATION docs)
-install(DIRECTORY examples DESTINATION .)
+install(DIRECTORY examples DESTINATION .
+    PATTERN "__pycache__" EXCLUDE
+    PATTERN "*.pyc" EXCLUDE
+    PATTERN "*.pyo" EXCLUDE)
 install(FILES
     docs/user-guide.md
     docs/training-backends.md
@@ -343,7 +524,9 @@ install(FILES
     tools/acceptance-smoke.ps1
     tools/toolchain-env.ps1
     tools/build-inno-installer.ps1
+    tools/ui-workbench-walkthrough.ps1
     tools/phase45-yolo-model-matrix-smoke.ps1
+    tools/phase-ncnn-runtime-smoke.ps1
     tools/local-rc-closeout.ps1
     tools/release-freeze-handoff.ps1
     tools/create-plugin-package.ps1
@@ -368,6 +551,14 @@ if(AITRAIN_WITH_ONNXRUNTIME)
         install(FILES ${AITRAIN_ONNXRUNTIME_PROVIDERS_DLL} DESTINATION .)
         install(FILES ${AITRAIN_ONNXRUNTIME_PROVIDERS_DLL} DESTINATION runtimes/onnxruntime)
     endif()
+endif()
+
+if(AITRAIN_WITH_NCNN AND AITRAIN_NCNN_DLL)
+    install(FILES ${AITRAIN_NCNN_DLL} DESTINATION .)
+    install(FILES ${AITRAIN_NCNN_DLL} DESTINATION runtimes/ncnn)
+endif()
+if(AITRAIN_NCNN_ONNX2NCNN)
+    install(FILES ${AITRAIN_NCNN_ONNX2NCNN} DESTINATION runtimes/ncnn)
 endif()
 
 if(AITRAIN_PACKAGED_ACCELERATOR_DLLS)

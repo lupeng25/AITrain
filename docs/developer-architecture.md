@@ -102,16 +102,18 @@ Marketplace v1 是本地/离线优先机制：
 - 禁用/卸载要兼容 Windows DLL 锁定。
 - 第三方插件的来源、许可证和二进制风险需要单独审查。
 
-## 当前 scaffold 说明
+## 当前训练边界
 
-以下能力不能写成生产训练能力：
+以下历史实现已从产品训练路径中物理删除，不能作为插件、Worker 后端或验收 passed 依据重新暴露：
 
 - `tiny_linear_detector`
-- `python_mock`
+- shipped `python_mock`
 - tiny detection checkpoint/export
-- segmentation baseline/scaffold
-- OCR baseline/scaffold
-- generated smoke 或 public dataset smoke
+- segmentation baseline/scaffold training
+- OCR baseline/scaffold training
+- small PaddleOCR Rec CTC trainer
+
+Generated smoke 或 public dataset smoke 只能证明官方链路接线和 artifact 生成，不能写成客户域生产精度结论。
 
 官方 Ultralytics、PaddleOCR、PaddlePaddle 等后端也需要独立依赖和许可证审查。Public smoke 只证明接线和 artifact 生成，不证明客户域精度。
 
