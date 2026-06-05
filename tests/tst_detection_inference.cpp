@@ -56,6 +56,42 @@ private slots:
         QVERIFY(!exported.config.value(QStringLiteral("scaffold")).toBool(true));
     }
 
+    void onnxExportUsesOfficialSiblingFromYoloCheckpoint()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString checkpointPath = dir.filePath(QStringLiteral("weights/best.pt"));
+        const QString sourceOnnx = dir.filePath(QStringLiteral("weights/best.onnx"));
+        writeTextFile(checkpointPath, QStringLiteral("fake yolo checkpoint\n"));
+        writeTextFile(sourceOnnx, QStringLiteral("fake official onnx\n"));
+
+        QJsonObject sidecar;
+        sidecar.insert(QStringLiteral("format"), QStringLiteral("onnx"));
+        sidecar.insert(QStringLiteral("backend"), QStringLiteral("ultralytics_yolo_detect"));
+        sidecar.insert(QStringLiteral("modelFamily"), QStringLiteral("yolo_detection"));
+        sidecar.insert(QStringLiteral("scaffold"), false);
+        sidecar.insert(QStringLiteral("classNames"), QJsonArray{QStringLiteral("item")});
+        writeTextFile(
+            dir.filePath(QStringLiteral("weights/best.aitrain-export.json")),
+            QString::fromUtf8(QJsonDocument(sidecar).toJson(QJsonDocument::Indented)));
+
+        const QString outputOnnx = dir.filePath(QStringLiteral("export/model.onnx"));
+        const aitrain::DetectionExportResult exported = aitrain::exportDetectionCheckpoint(
+            checkpointPath,
+            outputOnnx,
+            QStringLiteral("onnx"));
+
+        QVERIFY2(exported.ok, qPrintable(exported.error));
+        QCOMPARE(exported.format, QStringLiteral("onnx"));
+        QCOMPARE(exported.sourceCheckpointPath, checkpointPath);
+        QCOMPARE(exported.exportPath, outputOnnx);
+        QVERIFY(QFileInfo::exists(exported.exportPath));
+        QVERIFY(QFileInfo::exists(exported.reportPath));
+        QCOMPARE(exported.config.value(QStringLiteral("backend")).toString(), QStringLiteral("ultralytics_yolo_detect"));
+        QCOMPARE(exported.config.value(QStringLiteral("sourceCheckpoint")).toString(), checkpointPath);
+        QCOMPARE(QFileInfo(exported.config.value(QStringLiteral("sourceOnnx")).toString()).absoluteFilePath(), QFileInfo(sourceOnnx).absoluteFilePath());
+    }
+
     void postprocessFiltersOfficialDetectionPredictions()
     {
         QVector<aitrain::DetectionPrediction> predictions;

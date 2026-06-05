@@ -84,6 +84,19 @@ QString ncnnBinPathForParam(const QString& paramPath)
     return info.absoluteDir().filePath(QStringLiteral("%1.bin").arg(info.completeBaseName()));
 }
 
+QString officialOnnxSiblingForCheckpoint(const QString& checkpointPath)
+{
+    const QFileInfo checkpointInfo(checkpointPath);
+    if (checkpointInfo.suffix().compare(QStringLiteral("onnx"), Qt::CaseInsensitive) == 0) {
+        return {};
+    }
+
+    const QString siblingPath = checkpointInfo.absoluteDir().filePath(
+        QStringLiteral("%1.onnx").arg(checkpointInfo.completeBaseName()));
+    const QFileInfo siblingInfo(siblingPath);
+    return siblingInfo.exists() && siblingInfo.isFile() ? siblingInfo.absoluteFilePath() : QString();
+}
+
 struct NcnnExportParamMetadata {
     QString inputBlob;
     QStringList outputBlobs;
@@ -467,21 +480,23 @@ DetectionExportResult exportDetectionCheckpoint(
         return result;
     }
 
-    const bool sourceIsOnnx = QFileInfo(checkpointPath).suffix().toLower() == QStringLiteral("onnx");
+    const QString siblingOnnxPath = officialOnnxSiblingForCheckpoint(checkpointPath);
+    const QString effectiveCheckpointPath = siblingOnnxPath.isEmpty() ? checkpointPath : siblingOnnxPath;
+    const bool sourceIsOnnx = QFileInfo(effectiveCheckpointPath).suffix().toLower() == QStringLiteral("onnx");
     if (sourceIsOnnx) {
         QString finalOutputPath = outputPath;
         if (finalOutputPath.isEmpty()) {
             finalOutputPath = ncnnFormat
-                ? QFileInfo(checkpointPath).absoluteDir().filePath(QStringLiteral("model.param"))
-                : QFileInfo(checkpointPath).absoluteDir().filePath(
-                    tensorRtFormat ? QStringLiteral("model.engine") : QFileInfo(checkpointPath).fileName());
+                ? QFileInfo(effectiveCheckpointPath).absoluteDir().filePath(QStringLiteral("model.param"))
+                : QFileInfo(effectiveCheckpointPath).absoluteDir().filePath(
+                    tensorRtFormat ? QStringLiteral("model.engine") : QFileInfo(effectiveCheckpointPath).fileName());
         }
         if (QFileInfo(finalOutputPath).isDir()) {
             finalOutputPath = QDir(finalOutputPath).filePath(
-                ncnnFormat ? QStringLiteral("model.param") : (tensorRtFormat ? QStringLiteral("model.engine") : QFileInfo(checkpointPath).fileName()));
+                ncnnFormat ? QStringLiteral("model.param") : (tensorRtFormat ? QStringLiteral("model.engine") : QFileInfo(effectiveCheckpointPath).fileName()));
         }
         if (ncnnFormat) {
-            finalOutputPath = ncnnParamPathForOutput(finalOutputPath, checkpointPath);
+            finalOutputPath = ncnnParamPathForOutput(finalOutputPath, effectiveCheckpointPath);
         }
         if (!QDir().mkpath(QFileInfo(finalOutputPath).absolutePath())) {
             result.error = QStringLiteral("Cannot create export directory: %1").arg(QFileInfo(finalOutputPath).absolutePath());
@@ -493,15 +508,19 @@ DetectionExportResult exportDetectionCheckpoint(
                 result.error = QStringLiteral("Canceled by user");
                 return result;
             }
-            if (QFileInfo(checkpointPath).absoluteFilePath() != QFileInfo(finalOutputPath).absoluteFilePath()) {
+            if (QFileInfo(effectiveCheckpointPath).absoluteFilePath() != QFileInfo(finalOutputPath).absoluteFilePath()) {
                 QFile::remove(finalOutputPath);
-                if (!QFile::copy(checkpointPath, finalOutputPath)) {
+                if (!QFile::copy(effectiveCheckpointPath, finalOutputPath)) {
                     result.error = QStringLiteral("Cannot copy ONNX model to export path: %1").arg(finalOutputPath);
                     return result;
                 }
             }
             const QString reportPath = onnxExportReportPath(finalOutputPath);
-            const QJsonObject config = yoloOnnxExportConfig(checkpointPath, finalOutputPath, normalizedFormat);
+            QJsonObject config = yoloOnnxExportConfig(effectiveCheckpointPath, finalOutputPath, normalizedFormat);
+            if (!siblingOnnxPath.isEmpty()) {
+                config.insert(QStringLiteral("sourceCheckpoint"), checkpointPath);
+                config.insert(QStringLiteral("sourceOnnx"), effectiveCheckpointPath);
+            }
             if (isCancellationRequested(shouldCancel)) {
                 result.error = QStringLiteral("Canceled by user");
                 return result;
@@ -519,11 +538,15 @@ DetectionExportResult exportDetectionCheckpoint(
         if (ncnnFormat) {
             const QString binPath = ncnnBinPathForParam(finalOutputPath);
             QString converterPath;
-            if (!runOnnx2Ncnn(checkpointPath, finalOutputPath, binPath, shouldCancel, &converterPath, &result.error)) {
+            if (!runOnnx2Ncnn(effectiveCheckpointPath, finalOutputPath, binPath, shouldCancel, &converterPath, &result.error)) {
                 return result;
             }
             const QString reportPath = onnxExportReportPath(finalOutputPath);
-            const QJsonObject config = ncnnOnnxExportConfig(checkpointPath, finalOutputPath, binPath, converterPath);
+            QJsonObject config = ncnnOnnxExportConfig(effectiveCheckpointPath, finalOutputPath, binPath, converterPath);
+            if (!siblingOnnxPath.isEmpty()) {
+                config.insert(QStringLiteral("sourceCheckpoint"), checkpointPath);
+                config.insert(QStringLiteral("sourceOnnx"), effectiveCheckpointPath);
+            }
             if (isCancellationRequested(shouldCancel)) {
                 result.error = QStringLiteral("Canceled by user");
                 return result;
@@ -543,9 +566,9 @@ DetectionExportResult exportDetectionCheckpoint(
             result.error = QStringLiteral("TensorRT export is not available: %1").arg(tensorRtBackendStatus().message);
             return result;
 #else
-            QFile onnxFile(checkpointPath);
+            QFile onnxFile(effectiveCheckpointPath);
             if (!onnxFile.open(QIODevice::ReadOnly)) {
-                result.error = QStringLiteral("Cannot read source ONNX model for TensorRT export: %1").arg(checkpointPath);
+                result.error = QStringLiteral("Cannot read source ONNX model for TensorRT export: %1").arg(effectiveCheckpointPath);
                 return result;
             }
             const QByteArray onnxModel = onnxFile.readAll();
@@ -558,13 +581,17 @@ DetectionExportResult exportDetectionCheckpoint(
                 return result;
             }
             const QString reportPath = onnxExportReportPath(finalOutputPath);
-            QJsonObject config = yoloOnnxExportConfig(checkpointPath, finalOutputPath, normalizedFormat);
+            QJsonObject config = yoloOnnxExportConfig(effectiveCheckpointPath, finalOutputPath, normalizedFormat);
             config.insert(QStringLiteral("backend"), QStringLiteral("tensorrt_ultralytics_yolo_detect"));
             config.insert(QStringLiteral("tensorRt"), QJsonObject{
                 {QStringLiteral("precision"), fp16 ? QStringLiteral("fp16") : QStringLiteral("fp32")},
                 {QStringLiteral("workspaceBytes"), static_cast<double>(size_t{1} << 30)},
-                {QStringLiteral("sourceOnnx"), checkpointPath}
+                {QStringLiteral("sourceOnnx"), effectiveCheckpointPath}
             });
+            if (!siblingOnnxPath.isEmpty()) {
+                config.insert(QStringLiteral("sourceCheckpoint"), checkpointPath);
+                config.insert(QStringLiteral("sourceOnnx"), effectiveCheckpointPath);
+            }
             if (isCancellationRequested(shouldCancel)) {
                 result.error = QStringLiteral("Canceled by user");
                 return result;
