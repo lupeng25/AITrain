@@ -35,7 +35,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 
 阶段状态以 `docs/harness/current-status.md` 为准。不要只根据长期路线图末尾的历史“下一步建议”判断当前阶段。
 
-截至 2026-05-15，官方 YOLO 检测/分割、PaddleOCR Det/Rec/System 官方工具链、ONNX Runtime 推理、RTX 4090 TensorRT 验收证据、本地插件 marketplace、环境 profile、数据集质量/快照、数据集格式转换 GUI、评估、benchmark、模型库、交付报告、样本复核、部署验证、诊断包和交付验收 GUI 闭环都已落地到当前本地代码。准确阶段边界仍以 `docs/harness/current-status.md` 为准。
+截至 2026-06-05，官方 YOLO 检测/分割、PaddleOCR Det/Rec/System 官方工具链、ONNX Runtime 推理、RTX 4090D TensorRT 验收证据、本地插件 marketplace、环境 profile、数据集质量/快照、数据集格式转换 GUI、评估、benchmark、模型库、交付报告、样本复核、部署验证、诊断包和交付验收 GUI 闭环都已落地到当前本地代码。2026-06-05 RTX 4090D follow-up 刷新记录 local baseline/package acceptance、GUI walkthrough、Phase 47 Det ONNX+CTest、CPU training smoke、Phase 45 YOLO matrix、TensorRT 和 public OCR GPU workflow 均有通过证据；准确阶段边界仍以 `docs/harness/current-status.md` 为准。
 
 已完成：
 
@@ -72,6 +72,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 - 旧 PaddlePaddle OCR Rec CTC 训练实现已物理删除；生产 OCR 训练和验收主线使用官方 PaddleOCR Det/Rec/System 工具链 smoke。
 - PaddleOCR Det DB-style ONNX probability-map 后处理和 Phase 47 真实导出 Det ONNX wiring smoke。
 - TensorRT SDK-backed ONNX 到 engine 导出路径和 RTX 4090 D 验收证据；旧 GTX 1060 / SM 61 仍应为 `hardware-blocked`。当前官方-only smoke 不再使用已删除的 tiny-detector TensorRT 推理 fixture。
+- 2026-06-05 RTX 4090D follow-up 证据根目录：`.deps\rtx4090-validation\2026-06-05-122806-rtx4090d-followup-1-4`。该目录记录 LocalBaseline+Package、GUI walkthrough 和 Phase47 Det ONNX+CTest 的刷新通过证据；CPUTrainingSmoke 和 Phase45 的修复后通过证据分别在 `.deps\fix-1-3-cpu-training-smoke-final` 与 `.deps\fix-1-3-phase45-yolo-matrix`。
 - Windows 打包、package smoke、release freeze handoff、离线授权和注册码生成器。
 - 本地产品闭环：数据集质量报告、问题样本、X-AnyLabeling 复核清单、snapshot、训练 lineage、评估、benchmark、模型注册、pipeline、交付报告。
 - Phase 49 交付闭环：样本复核页、交付验收页、客户域 OCR 验收向导、一键诊断包和导出后部署验证。

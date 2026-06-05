@@ -164,6 +164,24 @@ function Resolve-PythonExe {
     throw "Python was not found. Install Python or pass -PythonExe."
 }
 
+function Resolve-OfficialOcrPythonExe {
+    param([string]$FallbackPython)
+
+    $candidates = @(
+        (Join-Path $script:Root ".deps\python-3.13.13-ocr-amd64\Scripts\python.exe"),
+        (Join-Path $script:Root ".deps\python-3.13.13-ocr-amd64\python.exe"),
+        (Join-Path $script:Root ".deps\rtx4090-validation\python-ocr\Scripts\python.exe"),
+        $FallbackPython,
+        (Join-Path $script:Root ".deps\rtx4090-validation\python-ocr-gpu\Scripts\python.exe")
+    )
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path $candidate)) {
+            return [System.IO.Path]::GetFullPath($candidate)
+        }
+    }
+    return ""
+}
+
 function Test-PythonModules {
     param(
         [string]$Python,
@@ -453,7 +471,12 @@ function Invoke-CpuTrainingSmoke {
     Assert-TrainingReport -ReportPath $segmentReportPath -ArtifactProperties @("checkpointPath", "onnxPath")
 
     $officialOcrWork = Join-Path $work "official-ocr-rec"
-    Invoke-Checked -FilePath (Join-Path $script:Root "tools\phase16-ocr-official-smoke.ps1") -Arguments @("-WorkDir", $officialOcrWork)
+    $officialOcrPython = Resolve-OfficialOcrPythonExe -FallbackPython $python
+    $officialOcrArgs = @("-WorkDir", $officialOcrWork)
+    if ($officialOcrPython) {
+        $officialOcrArgs += @("-PythonExe", $officialOcrPython)
+    }
+    Invoke-Checked -FilePath (Join-Path $script:Root "tools\phase16-ocr-official-smoke.ps1") -Arguments $officialOcrArgs
     $ocrReportPath = Join-Path $officialOcrWork "runs\paddleocr_rec_official\paddleocr_official_rec_report.json"
     Assert-TrainingReport -ReportPath $ocrReportPath -ArtifactProperties @("checkpointPath", "inferenceModelDir", "dictPath")
 
@@ -550,7 +573,12 @@ function Invoke-PublicDatasetSmoke {
     Assert-TrainingReport -ReportPath (Join-Path $segmentOutput "ultralytics_training_report.json") -ArtifactProperties @("checkpointPath", "onnxPath")
 
     $officialOcrWork = Join-Path $work "official-ocr-rec"
-    Invoke-Checked -FilePath (Join-Path $script:Root "tools\phase16-ocr-official-smoke.ps1") -Arguments @("-WorkDir", $officialOcrWork)
+    $officialOcrPython = Resolve-OfficialOcrPythonExe -FallbackPython $python
+    $officialOcrArgs = @("-WorkDir", $officialOcrWork)
+    if ($officialOcrPython) {
+        $officialOcrArgs += @("-PythonExe", $officialOcrPython)
+    }
+    Invoke-Checked -FilePath (Join-Path $script:Root "tools\phase16-ocr-official-smoke.ps1") -Arguments $officialOcrArgs
     Assert-TrainingReport -ReportPath (Join-Path $officialOcrWork "runs\paddleocr_rec_official\paddleocr_official_rec_report.json") -ArtifactProperties @("checkpointPath", "inferenceModelDir", "dictPath")
 
     Invoke-CtestForAcceptanceWorkDir -WorkRoot $work -TimeoutSeconds 240
