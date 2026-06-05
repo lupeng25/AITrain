@@ -37,6 +37,11 @@
 
 using namespace aitrain_app;
 
+QLabel* MainWindow::trainingLiveValueLabel(const QString& objectName) const
+{
+    return findChild<QLabel*>(objectName);
+}
+
 QWidget* MainWindow::buildTrainingPage()
 {
     auto* page = new QWidget;
@@ -213,22 +218,25 @@ QWidget* MainWindow::buildTrainingPage()
     liveGrid->setContentsMargins(0, 0, 0, 0);
     liveGrid->setHorizontalSpacing(8);
     liveGrid->setVerticalSpacing(0);
-    auto addLiveCard = [liveGrid](int row, int column, const QString& caption, QLabel** valueLabel) {
+    auto addLiveCard = [liveGrid](int row, int column, const QString& caption, const QString& valueObjectName, QLabel** valueLabel) {
         auto* frame = new QFrame;
-        frame->setObjectName(QStringLiteral("CompactMetricPanel"));
+        frame->setObjectName(QStringLiteral("TrainingLivePanel_%1").arg(valueObjectName));
+        frame->setProperty("trainingLiveRole", QStringLiteral("panel"));
         frame->setMinimumHeight(46);
         frame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
         auto* layout = new QVBoxLayout(frame);
         layout->setContentsMargins(8, 5, 8, 5);
         layout->setSpacing(1);
-        auto* value = new QLabel(QStringLiteral("--"));
-        value->setObjectName(QStringLiteral("CompactMetricValue"));
+        auto* value = new QLabel(QStringLiteral("--"), frame);
+        value->setObjectName(valueObjectName);
+        value->setProperty("trainingLiveRole", QStringLiteral("value"));
         value->setMinimumWidth(0);
         value->setMinimumHeight(20);
         value->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
         value->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-        auto* label = new QLabel(caption);
-        label->setObjectName(QStringLiteral("CompactMetricCaption"));
+        auto* label = new QLabel(caption, frame);
+        label->setObjectName(QStringLiteral("TrainingLiveCaption_%1").arg(valueObjectName));
+        label->setProperty("trainingLiveRole", QStringLiteral("caption"));
         label->setMinimumWidth(0);
         label->setMinimumHeight(15);
         label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
@@ -237,15 +245,15 @@ QWidget* MainWindow::buildTrainingPage()
         liveGrid->addWidget(frame, row, column);
         *valueLabel = value;
     };
-    for (int column = 0; column < 6; ++column) {
+    for (int column = 0; column < 3; ++column) {
         liveGrid->setColumnStretch(column, 1);
     }
-    addLiveCard(0, 0, QStringLiteral("Epoch"), &trainingEpochValueLabel_);
-    addLiveCard(0, 1, QStringLiteral("Batch"), &trainingBatchValueLabel_);
-    addLiveCard(0, 2, QStringLiteral("ETA"), &trainingEtaValueLabel_);
-    addLiveCard(0, 3, QStringLiteral("Device"), &trainingDeviceValueLabel_);
-    addLiveCard(0, 4, QStringLiteral("Loss"), &trainingLossValueLabel_);
-    addLiveCard(0, 5, QStringLiteral("mAP"), &trainingMapValueLabel_);
+    addLiveCard(0, 0, QStringLiteral("Epoch"), QStringLiteral("TrainingEpochValue"), &trainingEpochValueLabel_);
+    addLiveCard(0, 1, QStringLiteral("Batch"), QStringLiteral("TrainingBatchValue"), &trainingBatchValueLabel_);
+    addLiveCard(0, 2, QStringLiteral("ETA"), QStringLiteral("TrainingEtaValue"), &trainingEtaValueLabel_);
+    addLiveCard(1, 0, QStringLiteral("Device"), QStringLiteral("TrainingDeviceValue"), &trainingDeviceValueLabel_);
+    addLiveCard(1, 1, QStringLiteral("Loss"), QStringLiteral("TrainingLossValue"), &trainingLossValueLabel_);
+    addLiveCard(1, 2, QStringLiteral("mAP"), QStringLiteral("TrainingMapValue"), &trainingMapValueLabel_);
     monitorPanel->bodyLayout()->addLayout(liveGrid);
 
     progressBar_ = new QProgressBar;

@@ -194,37 +194,37 @@ void MainWindow::handleProgressMessage(const QJsonObject& payload)
     }
     const int epoch = payload.value(QStringLiteral("epoch")).toInt();
     const int epochs = payload.value(QStringLiteral("epochs")).toInt();
-    if (trainingEpochValueLabel_) {
-        trainingEpochValueLabel_->setText(epochs > 0
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingEpochValue"))) {
+        label->setText(epochs > 0
             ? QStringLiteral("%1/%2").arg(qMax(0, epoch)).arg(epochs)
             : QStringLiteral("--"));
     }
     const int batch = payload.value(QStringLiteral("batch")).toInt();
     const int batches = payload.value(QStringLiteral("batches")).toInt();
-    if (trainingBatchValueLabel_) {
-        trainingBatchValueLabel_->setText(batches > 0
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingBatchValue"))) {
+        label->setText(batches > 0
             ? QStringLiteral("%1/%2").arg(qMax(0, batch)).arg(batches)
             : QStringLiteral("--"));
     }
-    if (trainingEtaValueLabel_) {
-        trainingEtaValueLabel_->setText(etaText(payload.value(QStringLiteral("etaSeconds")).toInt()));
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingEtaValue"))) {
+        label->setText(etaText(payload.value(QStringLiteral("etaSeconds")).toInt()));
     }
     const QString device = payload.value(QStringLiteral("device")).toString();
-    if (trainingDeviceValueLabel_ && !device.isEmpty()) {
-        trainingDeviceValueLabel_->setText(device);
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingDeviceValue")); label && !device.isEmpty()) {
+        label->setText(device);
     }
     const QJsonObject liveMetrics = payload.value(QStringLiteral("liveMetrics")).toObject();
     if (!liveMetrics.isEmpty()) {
-        if (trainingLossValueLabel_) {
-            trainingLossValueLabel_->setText(metricText(liveMetrics, {
+        if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingLossValue"))) {
+            label->setText(metricText(liveMetrics, {
                 QStringLiteral("loss"),
                 QStringLiteral("boxLoss"),
                 QStringLiteral("classLoss"),
                 QStringLiteral("dflLoss")
             }));
         }
-        if (trainingMapValueLabel_) {
-            trainingMapValueLabel_->setText(metricText(liveMetrics, {
+        if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingMapValue"))) {
+            label->setText(metricText(liveMetrics, {
                 QStringLiteral("mAP50"),
                 QStringLiteral("maskMap50"),
                 QStringLiteral("precision"),
@@ -243,16 +243,17 @@ void MainWindow::handleMetricMessage(const QJsonObject& payload)
     const QString name = payload.value(QStringLiteral("name")).toString();
     const double value = payload.value(QStringLiteral("value")).toDouble();
     metricsWidget_->addMetric(name, value);
-    if (trainingLossValueLabel_ && (name.contains(QStringLiteral("Loss"), Qt::CaseInsensitive)
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingLossValue"));
+        label && (name.contains(QStringLiteral("Loss"), Qt::CaseInsensitive)
             || name.compare(QStringLiteral("loss"), Qt::CaseInsensitive) == 0)) {
-        trainingLossValueLabel_->setText(QString::number(value, 'f', 4));
+        label->setText(QString::number(value, 'f', 4));
     }
-    if (trainingMapValueLabel_
-        && (name == QStringLiteral("mAP50")
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingMapValue"));
+        label && (name == QStringLiteral("mAP50")
             || name == QStringLiteral("maskMap50")
             || name == QStringLiteral("precision")
             || name == QStringLiteral("accuracy"))) {
-        trainingMapValueLabel_->setText(QString::number(value, 'f', 4));
+        label->setText(QString::number(value, 'f', 4));
     }
 
     aitrain::MetricPoint point;

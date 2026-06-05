@@ -434,7 +434,10 @@ function(aitrain_copy_tensorrt_runtime target_name)
     endif()
 endfunction()
 
+set(AITRAIN_QT_RUNTIME_DLLS)
 set(AITRAIN_QT_PLATFORM_PLUGIN_DLLS)
+set(AITRAIN_QT_SQL_PLUGIN_DLLS)
+set(AITRAIN_QT_CONF_FILE)
 if(WIN32)
     if(AITRAIN_WINDEPLOYQT_EXECUTABLE)
         get_filename_component(AITRAIN_QT_RUNTIME_BIN_DIR "${AITRAIN_WINDEPLOYQT_EXECUTABLE}" DIRECTORY)
@@ -445,13 +448,41 @@ if(WIN32)
 
     if(AITRAIN_QT_RUNTIME_BIN_DIR)
         get_filename_component(AITRAIN_QT_RUNTIME_ROOT_DIR "${AITRAIN_QT_RUNTIME_BIN_DIR}/.." ABSOLUTE)
+        foreach(AITRAIN_QT_RUNTIME_MODULE Core Gui Widgets Network Sql Test Xml)
+            file(GLOB AITRAIN_QT_RUNTIME_MODULE_DLLS CONFIGURE_DEPENDS
+                "${AITRAIN_QT_RUNTIME_BIN_DIR}/Qt${QT_VERSION_MAJOR}${AITRAIN_QT_RUNTIME_MODULE}*.dll"
+            )
+            list(APPEND AITRAIN_QT_RUNTIME_DLLS ${AITRAIN_QT_RUNTIME_MODULE_DLLS})
+        endforeach()
+        foreach(AITRAIN_QT_RUNTIME_SUPPORT_DLL libEGL libGLESv2 d3dcompiler_47 opengl32sw)
+            file(GLOB AITRAIN_QT_RUNTIME_SUPPORT_DLLS CONFIGURE_DEPENDS
+                "${AITRAIN_QT_RUNTIME_BIN_DIR}/${AITRAIN_QT_RUNTIME_SUPPORT_DLL}*.dll"
+            )
+            list(APPEND AITRAIN_QT_RUNTIME_DLLS ${AITRAIN_QT_RUNTIME_SUPPORT_DLLS})
+        endforeach()
+        if(AITRAIN_QT_RUNTIME_DLLS)
+            list(REMOVE_DUPLICATES AITRAIN_QT_RUNTIME_DLLS)
+        endif()
         file(GLOB AITRAIN_QT_PLATFORM_PLUGIN_DLLS CONFIGURE_DEPENDS
             "${AITRAIN_QT_RUNTIME_ROOT_DIR}/plugins/platforms/qwindows*.dll"
         )
+        file(GLOB AITRAIN_QT_SQL_PLUGIN_DLLS CONFIGURE_DEPENDS
+            "${AITRAIN_QT_RUNTIME_ROOT_DIR}/plugins/sqldrivers/qsqlite*.dll"
+        )
+        set(AITRAIN_QT_CONF_FILE "${CMAKE_BINARY_DIR}/aitrain_qt.conf")
+        file(WRITE "${AITRAIN_QT_CONF_FILE}" "[Paths]\nPlugins = .\n")
     endif()
 endif()
 
 function(aitrain_copy_qt_platform_runtime target_name)
+    if(WIN32 AND AITRAIN_QT_RUNTIME_DLLS)
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${AITRAIN_QT_RUNTIME_DLLS}
+                $<TARGET_FILE_DIR:${target_name}>
+            VERBATIM
+        )
+    endif()
     if(WIN32 AND AITRAIN_QT_PLATFORM_PLUGIN_DLLS)
         add_custom_command(TARGET ${target_name} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory
@@ -459,6 +490,24 @@ function(aitrain_copy_qt_platform_runtime target_name)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 ${AITRAIN_QT_PLATFORM_PLUGIN_DLLS}
                 $<TARGET_FILE_DIR:${target_name}>/platforms
+            VERBATIM
+        )
+    endif()
+    if(WIN32 AND AITRAIN_QT_SQL_PLUGIN_DLLS)
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                $<TARGET_FILE_DIR:${target_name}>/sqldrivers
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${AITRAIN_QT_SQL_PLUGIN_DLLS}
+                $<TARGET_FILE_DIR:${target_name}>/sqldrivers
+            VERBATIM
+        )
+    endif()
+    if(WIN32 AND AITRAIN_QT_CONF_FILE)
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${AITRAIN_QT_CONF_FILE}"
+                $<TARGET_FILE_DIR:${target_name}>/qt.conf
             VERBATIM
         )
     endif()

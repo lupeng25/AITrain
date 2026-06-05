@@ -26,6 +26,7 @@ set_target_properties(aitrain_worker PROPERTIES
 aitrain_copy_onnxruntime_runtime(aitrain_worker)
 aitrain_copy_ncnn_runtime(aitrain_worker)
 aitrain_copy_tensorrt_runtime(aitrain_worker)
+aitrain_copy_qt_platform_runtime(aitrain_worker)
 
 install(TARGETS aitrain_worker
     RUNTIME DESTINATION .

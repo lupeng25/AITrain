@@ -43,6 +43,7 @@
 #include <QTabWidget>
 #include <QTableWidgetItem>
 #include <QTime>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QUrl>
@@ -118,7 +119,9 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     connect(&worker_, &WorkerClient::connected, this, [this]() {
         workerPill_->setStatus(tr("Worker 已连接"), StatusPill::Tone::Success);
     });
-    connect(&worker_, &WorkerClient::idle, this, &MainWindow::startNextQueuedTask);
+    connect(&worker_, &WorkerClient::idle, this, [this]() {
+        QTimer::singleShot(0, this, &MainWindow::startNextQueuedTask);
+    });
     connect(&worker_, &WorkerClient::finished, this, [this](bool ok, const QString& message) {
         progressBar_->setValue(ok ? 100 : progressBar_->value());
         if (trainingPhaseLabel_ && !state_.training.currentTaskId.isEmpty()) {
@@ -126,8 +129,8 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
                 ? uiText("阶段：快照 -> 训练 -> 验证 -> 导出 -> 完成 | 当前：完成")
                 : uiText("阶段：快照 -> 训练 -> 验证 -> 导出 -> 完成 | 当前：失败 | %1").arg(message));
         }
-        if (trainingEtaValueLabel_ && ok) {
-            trainingEtaValueLabel_->setText(QStringLiteral("0s"));
+        if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingEtaValue")); label && ok) {
+            label->setText(QStringLiteral("0s"));
         }
         workerPill_->setStatus(ok ? tr("任务完成") : tr("任务失败"),
             ok ? StatusPill::Tone::Success : StatusPill::Tone::Error);
@@ -166,7 +169,6 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
         } else if (kind == QStringLiteral("inference_predictions") && inferenceResultLabel_) {
             inferenceResultLabel_->setText(inferenceSummaryFromPredictions(path));
         }
-        startNextQueuedTask();
     });
 
     refreshPlugins();

@@ -51,6 +51,7 @@ function(add_aitrain_qt_test target source)
     aitrain_copy_onnxruntime_runtime(${target})
     aitrain_copy_ncnn_runtime(${target})
     aitrain_copy_tensorrt_runtime(${target})
+    aitrain_copy_qt_platform_runtime(${target})
 endfunction()
 
 add_aitrain_qt_test(aitrain_platform_tests tst_platform.cpp)

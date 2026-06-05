@@ -45,6 +45,7 @@
 #include <QTableWidgetItem>
 #include <QTextStream>
 #include <QTime>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QUrl>
@@ -303,7 +304,9 @@ void MainWindow::startTraining()
         return;
     }
 
-    startQueuedTraining(taskId, request);
+    QTimer::singleShot(0, this, [this, taskId, request]() {
+        startQueuedTraining(taskId, request);
+    });
 }
 
 void MainWindow::evaluateSelectedArtifact()

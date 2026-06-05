@@ -7,6 +7,7 @@
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFileInfo>
+#include <QTimer>
 #include <QUuid>
 
 namespace wp = aitrain::worker_protocol;
@@ -393,7 +394,9 @@ void WorkerClient::workerFinished(int exitCode, QProcess::ExitStatus status)
     pendingCommandType_.clear();
     pendingRequest_ = QJsonObject();
     finishing_ = false;
-    emit idle();
+    QTimer::singleShot(0, this, [this]() {
+        emit idle();
+    });
 }
 
 void WorkerClient::send(const QString& type, const QJsonObject& payload)
