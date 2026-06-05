@@ -126,6 +126,17 @@ void apply(QApplication& app)
             color: #2563EB;
         }
 
+        QLabel#TrainingPhaseStatus {
+            color: #0F172A;
+            background: #EEF6E8;
+            border: 1px solid #B9D99A;
+            border-left: 3px solid #76B900;
+            border-radius: 5px;
+            padding: 6px 10px;
+            min-height: 26px;
+            font-weight: 600;
+        }
+
         QLabel#TaskDetailSummary {
             color: #374151;
             background: #F9FAFB;

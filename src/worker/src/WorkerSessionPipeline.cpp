@@ -310,59 +310,65 @@ WorkerSession::PipelineTrainResult WorkerSession::runPipelineTrainingStep(
 void WorkerSession::drainPipelinePythonTrainerOutput(QByteArray* buffer, PipelineTrainResult* result, bool* terminalMessageSeen)
 {
     buffer->append(pythonTrainerProcess_.readAllStandardOutput());
-    int newline = buffer->indexOf('\n');
-    while (newline >= 0) {
-        const QByteArray line = buffer->left(newline).trimmed();
-        buffer->remove(0, newline + 1);
+    int delimiter = nextPythonOutputDelimiter(*buffer);
+    while (delimiter >= 0) {
+        const QByteArray line = buffer->left(delimiter).trimmed();
+        int removeCount = delimiter + 1;
+        while (removeCount < buffer->size()
+            && (buffer->at(removeCount) == '\n' || buffer->at(removeCount) == '\r')) {
+            ++removeCount;
+        }
+        buffer->remove(0, removeCount);
         if (!line.isEmpty()) {
             forwardPipelinePythonTrainerLine(line, result, terminalMessageSeen);
         }
-        newline = buffer->indexOf('\n');
+        delimiter = nextPythonOutputDelimiter(*buffer);
     }
 }
 
 void WorkerSession::drainPipelinePythonTrainerErrors(QByteArray* buffer, PipelineTrainResult* result)
 {
     buffer->append(pythonTrainerProcess_.readAllStandardError());
-    int newline = buffer->indexOf('\n');
-    while (newline >= 0) {
-        const QByteArray line = buffer->left(newline).trimmed();
-        buffer->remove(0, newline + 1);
-        if (!line.isEmpty()) {
-            QJsonObject logObject;
-            logObject.insert(QStringLiteral("taskId"), request_.taskId);
-            logObject.insert(QStringLiteral("backend"), requestedTrainingBackend(request_));
-            logObject.insert(QStringLiteral("message"), QString::fromUtf8(line));
-            result->logs.append(logObject);
-            send(wp::event::log(), logObject);
+    int delimiter = nextPythonOutputDelimiter(*buffer);
+    while (delimiter >= 0) {
+        const QByteArray line = buffer->left(delimiter).trimmed();
+        int removeCount = delimiter + 1;
+        while (removeCount < buffer->size()
+            && (buffer->at(removeCount) == '\n' || buffer->at(removeCount) == '\r')) {
+            ++removeCount;
         }
-        newline = buffer->indexOf('\n');
+        buffer->remove(0, removeCount);
+        if (!line.isEmpty()) {
+            const QJsonObject logObject = sanitizedTrainerLogPayload(line, request_.taskId, requestedTrainingBackend(request_));
+            if (!logObject.isEmpty()) {
+                result->logs.append(logObject);
+                send(wp::event::log(), logObject);
+            }
+        }
+        delimiter = nextPythonOutputDelimiter(*buffer);
     }
 }
 
 bool WorkerSession::forwardPipelinePythonTrainerLine(const QByteArray& line, PipelineTrainResult* result, bool* terminalMessageSeen)
 {
-    QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(line, &parseError);
-    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-        QJsonObject payload;
-        payload.insert(QStringLiteral("taskId"), request_.taskId);
-        payload.insert(QStringLiteral("backend"), requestedTrainingBackend(request_));
-        payload.insert(QStringLiteral("message"), QString::fromUtf8(line));
-        result->logs.append(payload);
-        send(wp::event::log(), payload);
+    QJsonDocument document;
+    if (!parseTrainerJsonDocument(line, &document)) {
+        const QJsonObject payload = sanitizedTrainerLogPayload(line, request_.taskId, requestedTrainingBackend(request_));
+        if (!payload.isEmpty()) {
+            result->logs.append(payload);
+            send(wp::event::log(), payload);
+        }
         return true;
     }
 
     const QJsonObject object = document.object();
     const QString type = object.value(QStringLiteral("type")).toString();
     if (type.isEmpty()) {
-        QJsonObject payload;
-        payload.insert(QStringLiteral("taskId"), request_.taskId);
-        payload.insert(QStringLiteral("backend"), requestedTrainingBackend(request_));
-        payload.insert(QStringLiteral("message"), QString::fromUtf8(line));
-        result->logs.append(payload);
-        send(wp::event::log(), payload);
+        const QJsonObject payload = sanitizedTrainerLogPayload(line, request_.taskId, requestedTrainingBackend(request_));
+        if (!payload.isEmpty()) {
+            result->logs.append(payload);
+            send(wp::event::log(), payload);
+        }
         return true;
     }
 

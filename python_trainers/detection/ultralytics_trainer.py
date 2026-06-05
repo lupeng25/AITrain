@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import os
 import re
 import sys
@@ -37,6 +38,24 @@ def emit(event_type: str, **payload: Any) -> None:
 
 def fail(message: str, code: str = "ultralytics_trainer_failed", details: dict[str, Any] | None = None) -> int:
     return emit_failed(BACKEND_ID, message, code, details)
+
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+
+def sanitize_log_line(text: str) -> str:
+    text = _ANSI_RE.sub("", str(text))
+    text = text.replace("\r", "\n").replace("\x08", "")
+    lines: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        # TQDM redraws contain partial progress bars and are not useful as durable GUI log lines.
+        if "━━" in line or "─" in line or line.startswith("[K"):
+            continue
+        lines.append(line)
+    return "\n".join(lines).strip()
 
 
 def read_request(path: Path) -> dict[str, Any]:
@@ -309,7 +328,10 @@ def parse_results_csv(path: Path) -> dict[str, float]:
             if source_name not in last:
                 continue
             try:
-                metrics[output_name] = float(str(last[source_name]).strip())
+                value = float(str(last[source_name]).strip())
+                if not math.isfinite(value):
+                    continue
+                metrics[output_name] = value
                 break
             except ValueError:
                 continue
@@ -321,18 +343,252 @@ def parse_results_csv(path: Path) -> dict[str, float]:
     return metrics
 
 
-def emit_metrics(metrics: dict[str, float]) -> None:
-    for name, value in metrics.items():
-        emit("metric", backend=BACKEND_ID, name=name, value=value)
-
-
 def emit_artifact(name: str, path: Path, artifact_kind: str) -> None:
     if path.exists():
         emit("artifact", backend=BACKEND_ID, name=name, path=str(path), kind=artifact_kind)
 
 
+def emit_artifact_once(emitted_artifacts: set[str], name: str, path: Path, artifact_kind: str) -> None:
+    if not path.exists():
+        return
+    key = f"{artifact_kind}:{path.resolve()}"
+    if key in emitted_artifacts:
+        return
+    emitted_artifacts.add(key)
+    emit_artifact(name, path, artifact_kind)
+
+
 def write_report(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def canonical_metric_name(name: str) -> str:
+    aliases = {
+        "train/box_loss": "boxLoss",
+        "train/cls_loss": "classLoss",
+        "train/dfl_loss": "dflLoss",
+        "metrics/precision(B)": "precision",
+        "metrics/recall(B)": "recall",
+        "metrics/mAP50(B)": "mAP50",
+        "metrics/mAP50-95(B)": "mAP50_95",
+        "metrics/precision(M)": "maskPrecision",
+        "metrics/recall(M)": "maskRecall",
+        "metrics/mAP50(M)": "maskMap50",
+        "metrics/mAP50-95(M)": "maskMap50_95",
+    }
+    return aliases.get(name, name)
+
+
+def numeric_dict(values: Any) -> dict[str, float]:
+    if not isinstance(values, dict):
+        return {}
+    result: dict[str, float] = {}
+    for key, value in values.items():
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(number):
+            result[canonical_metric_name(str(key))] = number
+    return result
+
+
+def trainer_loss_metrics(trainer: Any) -> dict[str, float]:
+    tloss = getattr(trainer, "tloss", None)
+    if tloss is None:
+        return {}
+    try:
+        items = trainer.label_loss_items(tloss)
+    except Exception:
+        return {}
+    metrics = numeric_dict(items)
+    loss_parts = [metrics.get("boxLoss"), metrics.get("classLoss"), metrics.get("dflLoss")]
+    available = [value for value in loss_parts if value is not None]
+    if available:
+        metrics["loss"] = float(sum(available))
+    return metrics
+
+
+def trainer_validation_metrics(trainer: Any) -> dict[str, float]:
+    return numeric_dict(getattr(trainer, "metrics", None))
+
+
+def json_number(value: float | int | None) -> float | int:
+    if value is None:
+        return 0
+    if isinstance(value, int):
+        return value
+    number = float(value)
+    if not math.isfinite(number):
+        return 0
+    return round(number, 6)
+
+
+def emit_metric_points(metrics: dict[str, float], epoch: int, step: int) -> None:
+    for name, value in metrics.items():
+        emit("metric", backend=BACKEND_ID, name=name, value=json_number(value), epoch=epoch, step=step)
+
+
+def register_training_callbacks(model: Any, epochs: int, device: str) -> dict[str, Any]:
+    state: dict[str, Any] = {
+        "startedAt": time.time(),
+        "epochStartedAt": time.time(),
+        "batch": 0,
+        "batches": 0,
+        "lastBatchProgressAt": 0.0,
+        "lastMetrics": {},
+        "device": device,
+        "emittedMetricEpochs": set(),
+        "emittedArtifacts": set(),
+    }
+
+    def batches_for(trainer: Any) -> int:
+        loader = getattr(trainer, "train_loader", None)
+        try:
+            value = len(loader) if loader is not None else 0
+        except TypeError:
+            value = 0
+        return max(0, int(value))
+
+    def epoch_for(trainer: Any) -> int:
+        return max(1, int(getattr(trainer, "epoch", 0)) + 1)
+
+    def percent_for(epoch: int, batch: int, batches: int) -> int:
+        if epochs <= 0:
+            return 0
+        if batches > 0:
+            completed = (epoch - 1) + min(batch, batches) / float(batches)
+        else:
+            completed = epoch - 1
+        return max(0, min(99, int(round((completed / float(epochs)) * 100.0))))
+
+    def eta_for(epoch: int, batch: int, batches: int) -> int:
+        elapsed = max(0.0, time.time() - float(state["startedAt"]))
+        if epochs <= 0 or elapsed <= 0:
+            return 0
+        completed = max(0.0, (epoch - 1) + (batch / float(batches) if batches > 0 else 0.0))
+        if completed <= 0.0:
+            return 0
+        remaining = max(0.0, epochs - completed)
+        return int(round((elapsed / completed) * remaining))
+
+    def progress_payload(
+        trainer: Any,
+        phase: str,
+        message: str,
+        *,
+        batch: int | None = None,
+        metrics: dict[str, float] | None = None,
+        percent: int | None = None,
+    ) -> dict[str, Any]:
+        current_epoch = epoch_for(trainer)
+        batch_count = batches_for(trainer)
+        current_batch = state.get("batch", 0) if batch is None else batch
+        payload: dict[str, Any] = {
+            "backend": BACKEND_ID,
+            "phase": phase,
+            "message": message,
+            "epoch": current_epoch,
+            "epochs": epochs,
+            "batch": int(current_batch),
+            "batches": int(batch_count),
+            "percent": percent_for(current_epoch, int(current_batch), int(batch_count)) if percent is None else percent,
+            "etaSeconds": eta_for(current_epoch, int(current_batch), int(batch_count)),
+            "device": state.get("device", device),
+        }
+        live_metrics = dict(state.get("lastMetrics") or {})
+        if metrics:
+            live_metrics.update(metrics)
+            state["lastMetrics"] = live_metrics
+        if live_metrics:
+            payload["liveMetrics"] = {key: json_number(value) for key, value in live_metrics.items()}
+        return payload
+
+    def on_train_start(trainer: Any) -> None:
+        state["startedAt"] = time.time()
+        state["batches"] = batches_for(trainer)
+        emit("progress", **progress_payload(trainer, "train", "训练开始", batch=0, percent=0))
+
+    def on_train_epoch_start(trainer: Any) -> None:
+        state["epochStartedAt"] = time.time()
+        state["batch"] = 0
+        state["batches"] = batches_for(trainer)
+        emit("progress", **progress_payload(trainer, "train", "开始训练 epoch", batch=0))
+
+    def on_train_batch_end(trainer: Any) -> None:
+        batches = batches_for(trainer)
+        current_batch = int(state.get("batch", 0)) + 1
+        state["batch"] = current_batch
+        now = time.time()
+        should_emit = current_batch >= batches or (now - float(state.get("lastBatchProgressAt", 0.0))) >= 0.75
+        if not should_emit:
+            return
+        state["lastBatchProgressAt"] = now
+        metrics = trainer_loss_metrics(trainer)
+        emit("progress", **progress_payload(trainer, "train", "训练 batch 更新", batch=current_batch, metrics=metrics))
+
+    def on_train_epoch_end(trainer: Any) -> None:
+        batches = batches_for(trainer)
+        metrics = trainer_loss_metrics(trainer)
+        emit("progress", **progress_payload(trainer, "validate", "训练 epoch 完成，开始验证", batch=batches, metrics=metrics))
+
+    def on_fit_epoch_end(trainer: Any) -> None:
+        current_epoch = epoch_for(trainer)
+        metrics = {}
+        metrics.update(trainer_loss_metrics(trainer))
+        metrics.update(trainer_validation_metrics(trainer))
+        emitted_epochs = state.setdefault("emittedMetricEpochs", set())
+        if current_epoch not in emitted_epochs:
+            emit_metric_points(metrics, current_epoch, current_epoch)
+            emitted_epochs.add(current_epoch)
+        emit("progress", **progress_payload(trainer, "validate", "验证指标已更新", batch=batches_for(trainer), metrics=metrics))
+
+    def on_model_save(trainer: Any) -> None:
+        emitted_artifacts = state.setdefault("emittedArtifacts", set())
+        for name, path, kind in [
+            ("best.pt", getattr(trainer, "best", None), "checkpoint"),
+            ("last.pt", getattr(trainer, "last", None), "checkpoint"),
+        ]:
+            if path:
+                emit_artifact_once(emitted_artifacts, name, Path(path), kind)
+
+    for event, callback in [
+        ("on_train_start", on_train_start),
+        ("on_train_epoch_start", on_train_epoch_start),
+        ("on_train_batch_end", on_train_batch_end),
+        ("on_train_epoch_end", on_train_epoch_end),
+        ("on_fit_epoch_end", on_fit_epoch_end),
+        ("on_model_save", on_model_save),
+    ]:
+        try:
+            model.add_callback(event, callback)
+        except Exception as exc:
+            emit("log", backend=BACKEND_ID, level="warning", message=f"Could not register Ultralytics callback {event}: {exc}")
+    return state
+
+
+def emit_training_artifacts(
+    save_dir: Path,
+    best_path: Path,
+    last_path: Path,
+    onnx_path: Path | None,
+    report_path: Path,
+    emitted_artifacts: set[str],
+) -> None:
+    emit_artifact_once(emitted_artifacts, "best.pt", best_path, "checkpoint")
+    emit_artifact_once(emitted_artifacts, "last.pt", last_path, "checkpoint")
+    if onnx_path:
+        emit_artifact_once(emitted_artifacts, "model.onnx", onnx_path, "onnx")
+    emit_artifact_once(emitted_artifacts, "ultralytics_training_report.json", report_path, "report")
+    for name, kind in [
+        ("results.csv", "training_results_csv"),
+        ("args.yaml", "training_args"),
+        ("labels.jpg", "training_plot"),
+        ("results.png", "training_plot"),
+        ("confusion_matrix.png", "training_plot"),
+        ("confusion_matrix_normalized.png", "training_plot"),
+    ]:
+        emit_artifact_once(emitted_artifacts, name, save_dir / name, kind)
 
 
 def run(request: dict[str, Any]) -> int:
@@ -385,10 +641,24 @@ def run(request: dict[str, Any]) -> int:
         level="info",
         message=f"Starting official Ultralytics YOLO detection training: model={model_name}, epochs={epochs}, device={device}",
     )
-    emit("progress", backend=BACKEND_ID, value=0.0, message="training started")
+    emit(
+        "progress",
+        backend=BACKEND_ID,
+        phase="train",
+        percent=0,
+        value=0.0,
+        epoch=0,
+        epochs=epochs,
+        batch=0,
+        batches=0,
+        etaSeconds=0,
+        device=device,
+        message="training started",
+    )
 
     try:
         model = YOLO(model_name)
+        callback_state = register_training_callbacks(model, epochs, device)
         train_result = model.train(
             data=str(data_yaml),
             epochs=epochs,
@@ -403,6 +673,7 @@ def run(request: dict[str, Any]) -> int:
         )
     except Exception as exc:
         return fail("Ultralytics training failed.", "ultralytics_train_failed", {"exception": str(exc)})
+    emitted_artifacts = callback_state.setdefault("emittedArtifacts", set())
 
     save_dir = resolve_save_dir(train_result, project_dir, run_name)
     emit("log", backend=BACKEND_ID, level="info", message=f"Ultralytics training returned save_dir={save_dir}")
@@ -414,17 +685,33 @@ def run(request: dict[str, Any]) -> int:
 
     metrics = parse_results_csv(results_csv)
     emit("log", backend=BACKEND_ID, level="info", message=f"Parsed {len(metrics)} training metrics from {results_csv}")
-    if not compact_events:
-        emit_metrics(metrics)
-        emit("log", backend=BACKEND_ID, level="info", message="Emitted Ultralytics training metrics")
-        emit_artifact("best.pt", best_path, "checkpoint")
-        emit_artifact("last.pt", last_path, "checkpoint")
-        emit("log", backend=BACKEND_ID, level="info", message="Emitted Ultralytics checkpoint artifacts")
-        emit("log", backend=BACKEND_ID, level="info", message="Ultralytics results/config artifacts are referenced from the final training report")
+    emitted_metric_epochs = callback_state.setdefault("emittedMetricEpochs", set())
+    if epochs not in emitted_metric_epochs:
+        emit_metric_points(metrics, epochs, epochs)
+        emitted_metric_epochs.add(epochs)
+        emit("log", backend=BACKEND_ID, level="info", message="Emitted final Ultralytics training metrics")
+    else:
+        emit("log", backend=BACKEND_ID, level="info", message="Final Ultralytics metrics were already emitted by callbacks")
+    if compact_events:
+        emit("log", backend=BACKEND_ID, level="info", message="Compact event mode still emits progress, epoch metrics, and final artifacts")
 
     onnx_path: Path | None = None
     if export_onnx:
         try:
+            emit(
+                "progress",
+                backend=BACKEND_ID,
+                phase="export",
+                percent=95,
+                epoch=epochs,
+                epochs=epochs,
+                batch=0,
+                batches=0,
+                etaSeconds=0,
+                device=device,
+                liveMetrics={key: json_number(value) for key, value in metrics.items()},
+                message="Starting Ultralytics ONNX export",
+            )
             emit("log", backend=BACKEND_ID, level="info", message="Starting Ultralytics ONNX export")
             export_model = YOLO(str(best_path if best_path.exists() else model_name))
             exported = export_model.export(format="onnx", imgsz=image_size, device=device)
@@ -434,8 +721,7 @@ def run(request: dict[str, Any]) -> int:
             elif best_path.exists():
                 onnx_path = best_path.with_suffix(".onnx")
             if onnx_path and onnx_path.exists():
-                if not compact_events:
-                    emit_artifact("model.onnx", onnx_path, "onnx")
+                emit_artifact_once(emitted_artifacts, "model.onnx", onnx_path, "onnx")
             else:
                 return fail("Ultralytics ONNX export completed without producing an ONNX file.", "onnx_missing")
         except Exception as exc:
@@ -455,9 +741,22 @@ def run(request: dict[str, Any]) -> int:
         "licenseNote": "Ultralytics YOLO is executed through the installed official Python package. Review its license before redistribution.",
     }
     write_report(report_path, report)
-    if not compact_events:
-        emit_artifact("ultralytics_training_report.json", report_path, "report")
-    emit("progress", backend=BACKEND_ID, value=1.0, message="training completed")
+    emit_training_artifacts(save_dir, best_path, last_path, onnx_path, report_path, emitted_artifacts)
+    emit(
+        "progress",
+        backend=BACKEND_ID,
+        phase="completed",
+        percent=100,
+        value=1.0,
+        epoch=epochs,
+        epochs=epochs,
+        batch=0,
+        batches=0,
+        etaSeconds=0,
+        device=device,
+        liveMetrics={key: json_number(value) for key, value in metrics.items()},
+        message="training completed",
+    )
     emit(
         "completed",
         backend=BACKEND_ID,

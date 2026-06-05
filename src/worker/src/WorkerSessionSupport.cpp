@@ -18,6 +18,7 @@
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QRandomGenerator>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QThread>
 
@@ -263,6 +264,135 @@ bool isPythonTrainingBackendId(const QString& backend, const QJsonObject& parame
         return true;
     }
     return false;
+}
+
+int nextPythonOutputDelimiter(const QByteArray& buffer)
+{
+    const int newline = buffer.indexOf('\n');
+    const int carriageReturn = buffer.indexOf('\r');
+    if (newline < 0) {
+        return carriageReturn;
+    }
+    if (carriageReturn < 0) {
+        return newline;
+    }
+    return qMin(newline, carriageReturn);
+}
+
+namespace {
+
+bool findJsonObjectEnd(const QByteArray& line, int start, int* end)
+{
+    int depth = 0;
+    bool inString = false;
+    bool escaped = false;
+    for (int index = start; index < line.size(); ++index) {
+        const char ch = line.at(index);
+        if (inString) {
+            if (escaped) {
+                escaped = false;
+            } else if (ch == '\\') {
+                escaped = true;
+            } else if (ch == '"') {
+                inString = false;
+            }
+            continue;
+        }
+        if (ch == '"') {
+            inString = true;
+        } else if (ch == '{') {
+            ++depth;
+        } else if (ch == '}') {
+            --depth;
+            if (depth == 0) {
+                *end = index + 1;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool parseJsonObject(const QByteArray& bytes, QJsonDocument* document)
+{
+    QJsonParseError parseError;
+    const QJsonDocument parsed = QJsonDocument::fromJson(bytes.trimmed(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !parsed.isObject()) {
+        return false;
+    }
+    if (document) {
+        *document = parsed;
+    }
+    return true;
+}
+
+} // namespace
+
+bool parseTrainerJsonDocument(const QByteArray& line, QJsonDocument* document)
+{
+    if (parseJsonObject(line, document)) {
+        return true;
+    }
+
+    int start = line.indexOf('{');
+    while (start >= 0) {
+        int end = -1;
+        QByteArray candidate;
+        if (findJsonObjectEnd(line, start, &end)) {
+            candidate = line.mid(start, end - start);
+        } else {
+            candidate = line.mid(start);
+        }
+        if (parseJsonObject(candidate, document)) {
+            return true;
+        }
+        start = line.indexOf('{', start + 1);
+    }
+    return false;
+}
+
+QString sanitizedPythonTrainerLogLine(const QByteArray& line)
+{
+    QString text = QString::fromUtf8(line).trimmed();
+    static const QRegularExpression ansiPattern(QStringLiteral("\\x1B\\[[0-9;?]*[A-Za-z]"));
+    text.remove(ansiPattern);
+    text.remove(QChar(0x0008));
+    text.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+
+    QStringList keptLines;
+    const QStringList lines = text.split(QLatin1Char('\n'));
+    for (QString item : lines) {
+        item = item.trimmed();
+        if (item.isEmpty()) {
+            continue;
+        }
+        const bool looksLikeProgressRedraw =
+            item.contains(QStringLiteral("━━"))
+            || item.contains(QStringLiteral("──"))
+            || item.contains(QStringLiteral("it/s"))
+            || item.startsWith(QStringLiteral("[K"));
+        if (looksLikeProgressRedraw) {
+            continue;
+        }
+        keptLines.append(item);
+    }
+    return keptLines.join(QLatin1Char('\n')).trimmed();
+}
+
+QJsonObject sanitizedTrainerLogPayload(
+    const QByteArray& line,
+    const QString& taskId,
+    const QString& backend)
+{
+    const QString sanitized = sanitizedPythonTrainerLogLine(line);
+    if (sanitized.isEmpty()) {
+        return {};
+    }
+    QJsonObject payload;
+    payload.insert(QStringLiteral("taskId"), taskId);
+    payload.insert(QStringLiteral("message"), sanitized);
+    payload.insert(QStringLiteral("backend"), backend);
+    return payload;
 }
 
 QJsonObject runPythonCommandCheck(

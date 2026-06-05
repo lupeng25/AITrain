@@ -121,6 +121,14 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     connect(&worker_, &WorkerClient::idle, this, &MainWindow::startNextQueuedTask);
     connect(&worker_, &WorkerClient::finished, this, [this](bool ok, const QString& message) {
         progressBar_->setValue(ok ? 100 : progressBar_->value());
+        if (trainingPhaseLabel_ && !state_.training.currentTaskId.isEmpty()) {
+            trainingPhaseLabel_->setText(ok
+                ? uiText("阶段：快照 -> 训练 -> 验证 -> 导出 -> 完成 | 当前：完成")
+                : uiText("阶段：快照 -> 训练 -> 验证 -> 导出 -> 完成 | 当前：失败 | %1").arg(message));
+        }
+        if (trainingEtaValueLabel_ && ok) {
+            trainingEtaValueLabel_->setText(QStringLiteral("0s"));
+        }
         workerPill_->setStatus(ok ? tr("任务完成") : tr("任务失败"),
             ok ? StatusPill::Tone::Success : StatusPill::Tone::Error);
         appendLog(ok ? tr("任务完成：%1").arg(message) : tr("任务失败：%1").arg(message));

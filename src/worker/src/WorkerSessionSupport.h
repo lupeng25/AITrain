@@ -2,7 +2,9 @@
 
 #include "aitrain/core/TaskModels.h"
 
+#include <QByteArray>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QString>
 #include <QStringList>
@@ -21,6 +23,10 @@ bool diagnosticTrainingBackendsEnabled();
 QString officialTrainingBackendForTask(const QString& taskType);
 bool isSupportedTrainingBackendId(const QString& backend, const QJsonObject& parameters);
 bool isPythonTrainingBackendId(const QString& backend, const QJsonObject& parameters);
+int nextPythonOutputDelimiter(const QByteArray& buffer);
+bool parseTrainerJsonDocument(const QByteArray& line, QJsonDocument* document);
+QString sanitizedPythonTrainerLogLine(const QByteArray& line);
+QJsonObject sanitizedTrainerLogPayload(const QByteArray& line, const QString& taskId, const QString& backend);
 QJsonObject runPythonCommandCheck(
     const QString& name,
     const QString& executable,

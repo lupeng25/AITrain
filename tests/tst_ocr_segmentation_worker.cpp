@@ -129,6 +129,82 @@ private slots:
         QVERIFY(QFileInfo::exists(QDir(request.outputPath).filePath(QStringLiteral("official_fixture_training_report.json"))));
     }
 
+    void pythonTrainerExtractsJsonAfterProgressRedraw()
+    {
+        const QString python = pythonExecutablePath();
+        if (python.isEmpty()) {
+            QSKIP("Python executable is not available.");
+        }
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString datasetRoot = dir.filePath(QStringLiteral("dataset"));
+        writeTinyDetectionDataset(datasetRoot);
+
+        const QString scriptPath = dir.filePath(QStringLiteral("mixed_line_trainer.py"));
+        writeTextFile(scriptPath,
+            QStringLiteral(
+                "import argparse, json, pathlib, sys\n"
+                "parser = argparse.ArgumentParser()\n"
+                "parser.add_argument('--request', required=True)\n"
+                "args = parser.parse_args()\n"
+                "request = json.loads(pathlib.Path(args.request).read_text(encoding='utf-8'))\n"
+                "out = pathlib.Path(request['outputPath'])\n"
+                "out.mkdir(parents=True, exist_ok=True)\n"
+                "progress = {'type': 'progress', 'payload': {'taskId': request['taskId'], 'phase': 'train', 'percent': 7, 'backend': request['backend'], 'liveMetrics': {'loss': 1.25}}}\n"
+                "sys.stdout.write('\\x1b[K        1/1 0G 0% 0/2 1.0it/s' + json.dumps(progress) + '\\r\\n')\n"
+                "sys.stdout.flush()\n"
+                "print(json.dumps({'type': 'completed', 'payload': {'taskId': request['taskId'], 'message': 'mixed line completed', 'backend': request['backend']}}), flush=True)\n"));
+
+        aitrain::TrainingRequest request;
+        request.taskId = QStringLiteral("mixed-line-fixture");
+        request.projectPath = dir.path();
+        request.pluginId = QStringLiteral("com.aitrain.plugins.yolo_native");
+        request.taskType = QStringLiteral("detection");
+        request.datasetPath = datasetRoot;
+        request.outputPath = dir.filePath(QStringLiteral("run"));
+        request.parameters.insert(QStringLiteral("trainingBackend"), QStringLiteral("ultralytics_yolo_detect"));
+        request.parameters.insert(QStringLiteral("pythonExecutable"), python);
+        request.parameters.insert(QStringLiteral("pythonTrainerScript"), scriptPath);
+
+        WorkerClient client;
+        QVector<QPair<QString, QJsonObject>> messages;
+        QStringList logs;
+        bool finished = false;
+        bool ok = false;
+        QString finishedMessage;
+        connect(&client, &WorkerClient::messageReceived, this, [&messages](const QString& type, const QJsonObject& payload) {
+            messages.append(qMakePair(type, payload));
+        });
+        connect(&client, &WorkerClient::logLine, this, [&logs](const QString& line) {
+            logs.append(line);
+        });
+        connect(&client, &WorkerClient::finished, this, [&finished, &ok, &finishedMessage](bool result, const QString& message) {
+            finished = true;
+            ok = result;
+            finishedMessage = message;
+        });
+
+        QString error;
+        QVERIFY2(client.startTraining(workerExecutablePath(), request, &error), qPrintable(error));
+        QTRY_VERIFY2_WITH_TIMEOUT(
+            finished,
+            qPrintable(QStringLiteral("Worker did not finish. Logs:\n%1").arg(logs.join(QStringLiteral("\n")))),
+            60000);
+        QVERIFY2(ok, qPrintable(finishedMessage));
+        QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
+
+        bool sawMixedProgress = false;
+        for (const auto& message : messages) {
+            if (message.first == QStringLiteral("progress")
+                && message.second.value(QStringLiteral("percent")).toInt() == 7
+                && message.second.value(QStringLiteral("liveMetrics")).toObject().value(QStringLiteral("loss")).toDouble() == 1.25) {
+                sawMixedProgress = true;
+            }
+        }
+        QVERIFY2(sawMixedProgress, "Worker dropped the JSON progress event embedded after a progress redraw.");
+    }
+
     void workerRunsPaddleOcrRecOfficialAdapterPrepareOnly()
     {
         const QString python = pythonExecutablePath();

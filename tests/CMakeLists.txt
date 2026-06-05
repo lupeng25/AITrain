@@ -60,3 +60,13 @@ add_aitrain_qt_test(aitrain_dataset_conversion_tests tst_dataset_conversion.cpp)
 add_aitrain_qt_test(aitrain_dataset_conversion_ui_tests tst_dataset_conversion_ui.cpp)
 add_aitrain_qt_test(aitrain_detection_inference_tests tst_detection_inference.cpp)
 add_aitrain_qt_test(aitrain_ocr_segmentation_worker_tests tst_ocr_segmentation_worker.cpp)
+
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME aitrain_yolo_telemetry_python_tests
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_yolo_telemetry.py"
+    )
+    set_tests_properties(aitrain_yolo_telemetry_python_tests PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    )
+endif()

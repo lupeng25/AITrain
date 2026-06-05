@@ -205,12 +205,54 @@ QWidget* MainWindow::buildTrainingPage()
 
     auto* monitorPanel = new InfoPanel(QStringLiteral("训练监控"));
     monitorPanel->setMinimumWidth(0);
+    trainingPhaseLabel_ = inlineStatusLabel(QStringLiteral("阶段：等待启动"));
+    trainingPhaseLabel_->setObjectName(QStringLiteral("TrainingPhaseStatus"));
+    monitorPanel->bodyLayout()->addWidget(trainingPhaseLabel_);
+
+    auto* liveGrid = new QGridLayout;
+    liveGrid->setContentsMargins(0, 0, 0, 0);
+    liveGrid->setHorizontalSpacing(8);
+    liveGrid->setVerticalSpacing(0);
+    auto addLiveCard = [liveGrid](int row, int column, const QString& caption, QLabel** valueLabel) {
+        auto* frame = new QFrame;
+        frame->setObjectName(QStringLiteral("CompactMetricPanel"));
+        frame->setMinimumHeight(46);
+        frame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+        auto* layout = new QVBoxLayout(frame);
+        layout->setContentsMargins(8, 5, 8, 5);
+        layout->setSpacing(1);
+        auto* value = new QLabel(QStringLiteral("--"));
+        value->setObjectName(QStringLiteral("CompactMetricValue"));
+        value->setMinimumWidth(0);
+        value->setMinimumHeight(20);
+        value->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        value->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        auto* label = new QLabel(caption);
+        label->setObjectName(QStringLiteral("CompactMetricCaption"));
+        label->setMinimumWidth(0);
+        label->setMinimumHeight(15);
+        label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        layout->addWidget(value);
+        layout->addWidget(label);
+        liveGrid->addWidget(frame, row, column);
+        *valueLabel = value;
+    };
+    for (int column = 0; column < 6; ++column) {
+        liveGrid->setColumnStretch(column, 1);
+    }
+    addLiveCard(0, 0, QStringLiteral("Epoch"), &trainingEpochValueLabel_);
+    addLiveCard(0, 1, QStringLiteral("Batch"), &trainingBatchValueLabel_);
+    addLiveCard(0, 2, QStringLiteral("ETA"), &trainingEtaValueLabel_);
+    addLiveCard(0, 3, QStringLiteral("Device"), &trainingDeviceValueLabel_);
+    addLiveCard(0, 4, QStringLiteral("Loss"), &trainingLossValueLabel_);
+    addLiveCard(0, 5, QStringLiteral("mAP"), &trainingMapValueLabel_);
+    monitorPanel->bodyLayout()->addLayout(liveGrid);
+
     progressBar_ = new QProgressBar;
     progressBar_->setRange(0, 100);
     progressBar_->setValue(0);
-    metricsWidget_ = new MetricsWidget;
     monitorPanel->bodyLayout()->addWidget(progressBar_);
-    monitorPanel->bodyLayout()->addWidget(metricsWidget_, 1);
+    monitorPanel->bodyLayout()->addStretch();
 
     auto* artifactPanel = new InfoPanel(QStringLiteral("任务与产物"));
     artifactPanel->setMinimumWidth(0);
@@ -221,8 +263,12 @@ QWidget* MainWindow::buildTrainingPage()
     artifactPanel->bodyLayout()->addWidget(artifactGuideLabel);
     artifactPanel->bodyLayout()->addWidget(artifactBoundaryLabel);
     latestCheckpointLabel_ = mutedLabel(QStringLiteral("最新 checkpoint：暂无"));
+    latestOnnxLabel_ = mutedLabel(QStringLiteral("最新 ONNX：暂无"));
+    latestReportLabel_ = mutedLabel(QStringLiteral("训练报告：暂无"));
     latestPreviewPathLabel_ = mutedLabel(QStringLiteral("最新预览：暂无"));
     allowLabelToShrink(latestCheckpointLabel_);
+    allowLabelToShrink(latestOnnxLabel_);
+    allowLabelToShrink(latestReportLabel_);
     allowLabelToShrink(latestPreviewPathLabel_);
     latestPreviewImageLabel_ = new QLabel(QStringLiteral("暂无预览图"));
     latestPreviewImageLabel_->setObjectName(QStringLiteral("MutedText"));
@@ -231,6 +277,8 @@ QWidget* MainWindow::buildTrainingPage()
     latestPreviewImageLabel_->setFrameShape(QFrame::StyledPanel);
     latestPreviewImageLabel_->setScaledContents(false);
     artifactPanel->bodyLayout()->addWidget(latestCheckpointLabel_);
+    artifactPanel->bodyLayout()->addWidget(latestOnnxLabel_);
+    artifactPanel->bodyLayout()->addWidget(latestReportLabel_);
     artifactPanel->bodyLayout()->addWidget(latestPreviewPathLabel_);
     artifactPanel->bodyLayout()->addWidget(latestPreviewImageLabel_);
     artifactPanel->bodyLayout()->addStretch();
@@ -245,9 +293,15 @@ QWidget* MainWindow::buildTrainingPage()
     logEdit_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
     logPanel->bodyLayout()->addWidget(logEdit_);
 
+    auto* metricsPanel = new InfoPanel(QStringLiteral("指标曲线"));
+    metricsPanel->setMinimumWidth(0);
+    metricsWidget_ = new MetricsWidget;
+    metricsPanel->bodyLayout()->addWidget(metricsWidget_, 1);
+
     auto* detailTabs = new QTabWidget;
     detailTabs->setObjectName(QStringLiteral("TrainingDetailTabs"));
     detailTabs->setDocumentMode(true);
+    detailTabs->addTab(metricsPanel, QStringLiteral("指标曲线"));
     detailTabs->addTab(logPanel, QStringLiteral("训练日志"));
     detailTabs->addTab(artifactPanel, QStringLiteral("任务与产物"));
 
@@ -255,9 +309,9 @@ QWidget* MainWindow::buildTrainingPage()
     rightSplitter->setMinimumWidth(0);
     rightSplitter->addWidget(monitorPanel);
     rightSplitter->addWidget(detailTabs);
-    rightSplitter->setStretchFactor(0, 1);
+    rightSplitter->setStretchFactor(0, 2);
     rightSplitter->setStretchFactor(1, 1);
-    rightSplitter->setSizes(QList<int>() << 330 << 330);
+    rightSplitter->setSizes(QList<int>() << 430 << 230);
 
     auto* bodySplitter = new QSplitter(Qt::Horizontal);
     bodySplitter->addWidget(setupScroll);

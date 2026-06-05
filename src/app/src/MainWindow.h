@@ -350,7 +350,16 @@ private:
     QLabel* deliveryAcceptanceSummaryLabel_ = nullptr;
     QTableWidget* deliveryAcceptanceTable_ = nullptr;
     QProgressBar* progressBar_ = nullptr;
+    QLabel* trainingPhaseLabel_ = nullptr;
+    QLabel* trainingEpochValueLabel_ = nullptr;
+    QLabel* trainingBatchValueLabel_ = nullptr;
+    QLabel* trainingEtaValueLabel_ = nullptr;
+    QLabel* trainingDeviceValueLabel_ = nullptr;
+    QLabel* trainingLossValueLabel_ = nullptr;
+    QLabel* trainingMapValueLabel_ = nullptr;
     QLabel* latestCheckpointLabel_ = nullptr;
+    QLabel* latestOnnxLabel_ = nullptr;
+    QLabel* latestReportLabel_ = nullptr;
     QLabel* latestPreviewPathLabel_ = nullptr;
     QLabel* latestPreviewImageLabel_ = nullptr;
     QTextEdit* logEdit_ = nullptr;
