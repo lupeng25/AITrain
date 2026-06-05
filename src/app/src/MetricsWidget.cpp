@@ -1,14 +1,43 @@
 #include "MetricsWidget.h"
 
+#include <QFont>
+#include <QFontMetrics>
 #include <QPainter>
 #include <QPainterPath>
 #include <QStringList>
 #include <QtMath>
 
+namespace {
+QString displayMetricName(const QString& name)
+{
+    if (name == QStringLiteral("classLoss")) {
+        return QStringLiteral("clsLoss");
+    }
+    if (name == QStringLiteral("precision")) {
+        return QStringLiteral("P");
+    }
+    if (name == QStringLiteral("recall")) {
+        return QStringLiteral("R");
+    }
+    if (name == QStringLiteral("mAP50_95")) {
+        return QStringLiteral("mAP50-95");
+    }
+    if (name == QStringLiteral("maskMap50_95")) {
+        return QStringLiteral("mask mAP50-95");
+    }
+    return name;
+}
+
+double clampRatio(double value)
+{
+    return qBound(0.0, value, 1.0);
+}
+} // namespace
+
 MetricsWidget::MetricsWidget(QWidget* parent)
     : QWidget(parent)
 {
-    setMinimumHeight(130);
+    setMinimumHeight(220);
     setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
 }
 
@@ -46,11 +75,11 @@ void MetricsWidget::paintEvent(QPaintEvent* event)
     Q_UNUSED(event)
 
     QPainter painter(this);
-    painter.fillRect(rect(), QColor(250, 251, 252));
     painter.setRenderHint(QPainter::Antialiasing);
+    painter.fillRect(rect(), QColor(250, 251, 252));
 
     if (series_.isEmpty()) {
-        const QRect plot = rect().adjusted(48, 18, -18, -18);
+        const QRect plot = rect().adjusted(12, 12, -12, -12);
         painter.setPen(QColor(210, 216, 222));
         painter.drawRect(plot);
         painter.setPen(QColor(130, 136, 142));
@@ -67,7 +96,7 @@ void MetricsWidget::paintEvent(QPaintEvent* event)
         ? QList<QString>{QStringLiteral("loss"), QStringLiteral("score")}
         : groups.keys();
     const int panelGap = 12;
-    const QRect content = rect().adjusted(44, 18, -18, -18);
+    const QRect content = rect().adjusted(8, 8, -8, -8);
     const int panelHeight = qMax(80, (content.height() - panelGap * qMax(0, orderedGroups.size() - 1)) / qMax(1, orderedGroups.size()));
 
     const QList<QColor> colors = {
@@ -83,12 +112,64 @@ void MetricsWidget::paintEvent(QPaintEvent* event)
     for (int groupIndex = 0; groupIndex < orderedGroups.size(); ++groupIndex) {
         const QString group = orderedGroups.at(groupIndex);
         const QStringList names = groups.value(group);
-        const QRect plot(content.left(), content.top() + groupIndex * (panelHeight + panelGap), content.width(), panelHeight);
+        const QRect panel(content.left(), content.top() + groupIndex * (panelHeight + panelGap), content.width(), panelHeight);
 
         painter.setPen(QColor(210, 216, 222));
-        painter.drawRect(plot);
-        painter.setPen(QColor(80, 86, 92));
-        painter.drawText(8, plot.top() + 18, labelForGroup(group));
+        painter.setBrush(QColor(255, 255, 255));
+        painter.drawRect(panel);
+
+        const QRect inner = panel.adjusted(10, 8, -10, -8);
+        const int titleWidth = qBound(74, inner.width() / 5, 118);
+        const int legendLeft = inner.left() + titleWidth + 10;
+        const int legendWidth = qMax(80, inner.right() - legendLeft + 1);
+        const int legendItemMinWidth = 118;
+        const int legendColumns = qMax(1, qMin(names.size(), legendWidth / legendItemMinWidth));
+        const int legendRows = qMax(1, (names.size() + legendColumns - 1) / legendColumns);
+        const int legendItemWidth = qMax(legendItemMinWidth, legendWidth / qMax(1, legendColumns));
+        const int legendItemHeight = 16;
+        const int headerHeight = qMin(inner.height() / 2, qMax(24, legendRows * legendItemHeight + 2));
+
+        QFont titleFont = painter.font();
+        titleFont.setBold(true);
+        painter.setFont(titleFont);
+        painter.setPen(QColor(55, 65, 81));
+        painter.drawText(QRect(inner.left(), inner.top(), titleWidth, 18),
+            Qt::AlignLeft | Qt::AlignVCenter,
+            labelForGroup(group));
+
+        QFont legendFont = painter.font();
+        legendFont.setBold(false);
+        legendFont.setPointSizeF(qMax(7.0, legendFont.pointSizeF() - 1.0));
+        painter.setFont(legendFont);
+        const QFontMetrics legendMetrics(legendFont);
+        for (int localIndex = 0; localIndex < names.size(); ++localIndex) {
+            const QString& name = names.at(localIndex);
+            const QColor color = colors.at((globalColorIndex + localIndex) % colors.size());
+            const QVector<double>& values = series_.value(name);
+            const double latest = values.isEmpty() ? 0.0 : values.last();
+            const int column = localIndex % legendColumns;
+            const int row = localIndex / legendColumns;
+            const QRect itemRect(
+                legendLeft + column * legendItemWidth,
+                inner.top() + row * legendItemHeight,
+                qMax(24, legendItemWidth - 8),
+                legendItemHeight);
+            const int markerY = itemRect.center().y();
+            painter.setPen(QPen(color, 2.0));
+            painter.drawLine(itemRect.left(), markerY, itemRect.left() + 12, markerY);
+            painter.setPen(color);
+            const QString legendText = legendMetrics.elidedText(
+                QStringLiteral("%1 %2").arg(displayMetricName(name)).arg(latest, 0, 'f', 4),
+                Qt::ElideRight,
+                qMax(20, itemRect.width() - 18));
+            painter.drawText(itemRect.adjusted(18, 0, 0, 0), Qt::AlignLeft | Qt::AlignVCenter, legendText);
+        }
+
+        const int plotTop = inner.top() + headerHeight + 8;
+        QRect plot(inner.left() + 42, plotTop, inner.width() - 48, inner.bottom() - plotTop - 16);
+        if (plot.height() < 32) {
+            plot = QRect(inner.left() + 36, inner.top() + 30, inner.width() - 42, qMax(32, inner.height() - 44));
+        }
 
         double minValue = group == QStringLiteral("score") ? 0.0 : 0.0;
         double maxValue = group == QStringLiteral("score") ? 1.0 : 1.0;
@@ -104,18 +185,40 @@ void MetricsWidget::paintEvent(QPaintEvent* event)
         if (qFuzzyCompare(minValue, maxValue)) {
             maxValue += 1.0;
         }
+        if (group == QStringLiteral("loss")) {
+            maxValue = qMax(1.0, maxValue * 1.08);
+        }
 
-        int localIndex = 0;
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QColor(222, 227, 233));
+        painter.drawRect(plot);
+        for (int gridLine = 1; gridLine < 3; ++gridLine) {
+            const int y = plot.top() + gridLine * plot.height() / 3;
+            painter.setPen(QColor(235, 239, 244));
+            painter.drawLine(plot.left(), y, plot.right(), y);
+        }
+
+        painter.setFont(legendFont);
+        painter.setPen(QColor(107, 114, 128));
+        painter.drawText(QRect(inner.left(), plot.top() - 2, 36, 14),
+            Qt::AlignRight | Qt::AlignVCenter,
+            QString::number(maxValue, 'g', 3));
+        painter.drawText(QRect(inner.left(), plot.bottom() - 12, 36, 14),
+            Qt::AlignRight | Qt::AlignVCenter,
+            QString::number(minValue, 'g', 3));
+
         for (const QString& name : names) {
             const QColor color = colors.at(globalColorIndex % colors.size());
             painter.setPen(QPen(color, 2.0));
 
             QPainterPath path;
+            QVector<QPointF> points;
             const QVector<double>& values = series_.value(name);
             for (int i = 0; i < values.size(); ++i) {
-                const double xRatio = maxCount <= 1 ? 0.0 : static_cast<double>(i) / static_cast<double>(maxCount - 1);
-                const double yRatio = (values.at(i) - minValue) / (maxValue - minValue);
+                const double xRatio = maxCount <= 1 ? 0.5 : static_cast<double>(i) / static_cast<double>(maxCount - 1);
+                const double yRatio = clampRatio((values.at(i) - minValue) / (maxValue - minValue));
                 const QPointF point(plot.left() + xRatio * plot.width(), plot.bottom() - yRatio * plot.height());
+                points.append(point);
                 if (i == 0) {
                     path.moveTo(point);
                 } else {
@@ -123,13 +226,12 @@ void MetricsWidget::paintEvent(QPaintEvent* event)
                 }
             }
             painter.drawPath(path);
-
-            painter.setPen(color);
-            const double latest = values.isEmpty() ? 0.0 : values.last();
-            const int legendX = plot.left() + localIndex * 150;
-            const int legendY = plot.top() + 18;
-            painter.drawText(legendX, legendY, QStringLiteral("%1 %2").arg(name).arg(latest, 0, 'f', 4));
-            ++localIndex;
+            painter.setBrush(color);
+            painter.setPen(QPen(QColor(255, 255, 255), 1.0));
+            for (const QPointF& point : points) {
+                painter.drawEllipse(point, 3.5, 3.5);
+            }
+            painter.setBrush(Qt::NoBrush);
             ++globalColorIndex;
         }
     }
