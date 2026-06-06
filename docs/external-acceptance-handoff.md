@@ -101,7 +101,7 @@ Acceptance requires:
 - Worker self-check resolves the CUDA/TensorRT runtime components needed for TensorRT ONNX-to-engine export.
 - GPU compute capability is accepted by the TensorRT release.
 - `acceptance-smoke.ps1 -TensorRT` generates a small official Ultralytics YOLO ONNX artifact, or uses `-TensorRtOnnxPath <official.onnx>` when supplied.
-- `aitrain_worker.exe --tensorrt-smoke <official.onnx>` builds a TensorRT engine. The current official-only smoke does not use the removed tiny-detector TensorRT inference fixture.
+- `aitrain_worker.exe --tensorrt-smoke <official.onnx>` builds a TensorRT engine from an official Ultralytics ONNX artifact. This is an official-artifact smoke with AITrain TensorRT export/runtime checks; it does not use the removed tiny-detector TensorRT inference fixture and is not an end-to-end Ultralytics Python runtime check.
 - The command finishes with `passed`, not `hardware-blocked`.
 
 Use `docs\acceptance-templates\tensorrt-acceptance-result.md` to record the result.

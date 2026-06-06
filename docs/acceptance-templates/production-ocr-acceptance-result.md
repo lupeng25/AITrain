@@ -84,13 +84,13 @@ System:
 - Prediction JSON path:
 - Visualization directory:
 
-## Optional C++ Det ONNX Evidence
+## Historical Phase 47 Archive Context
 
-- Required for this run: yes / no
 - Historical Phase 47 OCR ONNX evidence path, if referenced only for archive context:
-- Status:
-- ONNX path:
-- Overlay / prediction artifacts:
+- Historical status:
+- Historical ONNX path:
+- Historical overlay / prediction artifacts:
+- Current OCR acceptance note: C++ OCR ONNX evidence is not required and must not be used as current acceptance evidence.
 
 ## Command Output
 

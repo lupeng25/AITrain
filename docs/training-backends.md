@@ -8,14 +8,20 @@ Production training is official-backend only. The GUI training page and Worker p
 
 | Backend | Task | Status | Notes |
 |---|---|---|---|
-| `ultralytics_yolo_detect` | Detection | Official Ultralytics adapter | Uses Ultralytics YOLO detection training and ONNX export. Review AGPL-3.0 / Enterprise license before redistribution. |
-| `ultralytics_yolo_segment` | Segmentation | Official Ultralytics adapter | Uses Ultralytics YOLO segmentation training and ONNX export. C++ ONNX Runtime can decode boxes, mask coefficients, prototypes, and render mask overlays. |
+| `ultralytics_yolo_detect` | Detection | Official Ultralytics adapter | Uses Ultralytics YOLO detection training and ONNX export. Product inference, evaluation, benchmark, and deployment validation then run against the official artifacts through the AITrain C++ runtime. Review AGPL-3.0 / Enterprise license before redistribution. |
+| `ultralytics_yolo_segment` | Segmentation | Official Ultralytics adapter | Uses Ultralytics YOLO segmentation training and ONNX export. Product inference, evaluation, benchmark, and deployment validation then run against the official artifacts through the AITrain C++ runtime, including mask postprocess and overlays. |
 | `paddleocr_det_official` | OCR detection | Official PaddleOCR adapter | Generates a PP-OCRv4 detection config from PaddleOCR Det data and can run official PaddleOCR `tools/train.py` and `tools/export_model.py`. Artifacts include `aitrain_ppocrv4_det.yml`, `official_model/best_accuracy.pdparams`, `official_inference/inference.yml`, and `paddleocr_official_det_report.json`. |
 | `paddleocr_rec_official` / `paddleocr_ppocrv4_rec` | OCR recognition | Official PaddleOCR adapter | Generates a PP-OCRv4 recognition config from AITrain PaddleOCR-style Rec data and runs official PaddleOCR `tools/train.py`, `tools/export_model.py`, and optional `tools/infer/predict_rec.py` when `runOfficial=true` and `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` points to a checkout. Production GUI requests set `runOfficial=true` and `prepareOnly=false`. |
 
 `paddleocr_system_official` remains the official OCR System inference/validation adapter. It is not shown as a "train model" backend because it runs official `predict_system.py` against exported Det and Rec inference model directories.
 
 Legacy diagnostic training implementations have been physically removed from production packages and training routing. `paddleocr_rec` remains a dataset format, not a training backend. Protocol tests that need a Python trainer now create an explicit temporary fixture through `pythonTrainerScript` and require `AITRAIN_ENABLE_DIAGNOSTIC_BACKENDS=1`; no shipped `python_mock` trainer is provided.
+
+## YOLO Runtime Boundary
+
+YOLO detection and segmentation are not end-to-end official-only routes. AITrain uses official Ultralytics code for training and ONNX export, then treats the exported ONNX / TensorRT / NCNN artifacts as deployment inputs for its local C++ runtime. C++ ONNX Runtime, TensorRT, and NCNN paths handle prediction JSON, overlays, evaluation reports, benchmark summaries, and deployment validation so the packaged Windows product can run without embedding Python in the GUI process.
+
+Use Ultralytics official `val`, `predict`, or `benchmark` results as comparison evidence when needed, not as the default packaged product runtime. OCR is different: current OCR product inference, evaluation, benchmark, deployment validation, and acceptance are official-only through PaddleOCR Det/Rec/System reports.
 
 ## Environment Setup
 

@@ -210,14 +210,16 @@ images/sample.png<TAB>[{"transcription":"text","points":[[1,1],[30,1],[30,20],[1
 
 | 数据/任务 | 推荐后端 | 推荐模型预设 | 说明 |
 |---|---|---|---|
-| YOLO 检测 | `ultralytics_yolo_detect` | `yolov8n.yaml`、`yolo11n.yaml`、`yolo12n.yaml` | 官方 Ultralytics 检测训练和 ONNX 导出 |
-| YOLO 分割 | `ultralytics_yolo_segment` | `yolov8n-seg.yaml`、`yolo11n-seg.yaml`、`yolo12n-seg.yaml` | 官方 Ultralytics 分割训练和 mask ONNX 后处理 |
+| YOLO 检测 | `ultralytics_yolo_detect` | `yolov8n.yaml`、`yolo11n.yaml`、`yolo12n.yaml` | 官方 Ultralytics 检测训练和 ONNX 导出；推理、评估、benchmark、部署验证走 AITrain C++ runtime |
+| YOLO 分割 | `ultralytics_yolo_segment` | `yolov8n-seg.yaml`、`yolo11n-seg.yaml`、`yolo12n-seg.yaml` | 官方 Ultralytics 分割训练和 ONNX 导出；mask 后处理、推理、评估、benchmark、部署验证走 AITrain C++ runtime |
 | PaddleOCR Det | `paddleocr_det_official` | `PP-OCRv4_mobile_det` | 官方 PaddleOCR 检测工具链，建议使用隔离 OCR 环境 |
 | PaddleOCR Rec | `paddleocr_rec_official` | `PP-OCRv4_mobile_rec` | 官方 PaddleOCR Rec adapter，可运行 train/export/predict；`paddleocr_rec` 仅作为数据集格式保留 |
 
 官方后端依赖第三方包和许可条款。商业分发前需要单独审查 Ultralytics、PaddleOCR、PaddlePaddle、Torch 等依赖的许可证。
 
 旧的 `tiny_linear_detector`、小型 `paddleocr_rec` CTC trainer、`python_mock` 和 C++ 分割/OCR 训练 scaffold 已物理删除，不会出现在用户训练后端列表中，也不会作为主验收 passed 依据。`paddleocr_rec` 仅作为数据集格式保留。
+
+YOLO 与 OCR 的产品边界不同：YOLO 只要求训练和 ONNX 导出来自官方 Ultralytics；后续单图推理、评估报告、benchmark 和部署验证默认使用 AITrain C++ ONNX Runtime / TensorRT / NCNN runtime。OCR 则只接受 PaddleOCR 官方 Det / Rec / System 报告作为当前产品证据。
 
 ## 7. 任务与产物
 
@@ -242,9 +244,9 @@ images/sample.png<TAB>[{"transcription":"text","points":[[1,1],[30,1],[30,20],[1
 
 - YOLO 检测：precision、recall、AP50、mAP50、mAP50-95、per-class metrics、confusion matrix、error samples、overlay。
 - YOLO 分割：maskIoU、maskMap50、mask mAP50-95、per-class metrics、confusion matrix、error samples、overlay。
-- OCR Rec：accuracy、editDistance、CER、WER、error samples、overlay。
+- OCR Rec：通过 PaddleOCR 官方 Rec/System 报告和客户域 OCR 验收查看；AITrain 不用 C++ OCR ONNX 后处理生成当前产品评估证据。
 
-评估依赖模型格式、数据集格式和可用 runtime。非 ONNX 或官方工具链产物可能需要先导出，或通过官方报告查看。
+评估依赖模型格式、数据集格式和可用 runtime。YOLO 评估使用官方 Ultralytics 导出的 ONNX / TensorRT / NCNN 产物和 AITrain C++ runtime；如需与 Ultralytics 官方 `val` 指标对照，应单独记录为校准证据。OCR 评估通过官方 PaddleOCR 报告查看。
 
 “模型库”用于管理已注册的模型版本。建议注册时关联：
 
@@ -292,8 +294,8 @@ NCNN 当前本机验证边界：检测模型已经通过 Hyuto YOLOv8 ONNX -> NC
 
 当前本地推理验证支持：
 
-- YOLO 检测：类别、置信度、NMS、检测框 overlay。
-- YOLO 分割：检测框、mask、mask area、半透明 overlay。
+- YOLO 检测：基于官方 Ultralytics ONNX / TensorRT / NCNN 产物，由 AITrain C++ runtime 输出类别、置信度、NMS、检测框 overlay。
+- YOLO 分割：基于官方 Ultralytics ONNX / TensorRT / NCNN 产物，由 AITrain C++ runtime 输出检测框、mask、mask area、半透明 overlay。
 
 OCR 路线只依赖 PaddleOCR 官方实现。Det / Rec / System 的推理、评估和可视化结果应从官方 PaddleOCR 任务产物与报告中查看，不通过 AITrain C++ OCR ONNX 后处理作为产品路径。
 

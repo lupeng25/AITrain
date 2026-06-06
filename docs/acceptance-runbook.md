@@ -133,7 +133,7 @@ Acceptance requires:
 
 - Worker self-check resolves CUDA, cuDNN, TensorRT, TensorRT Plugin, TensorRT ONNX Parser, and ONNX Runtime components needed for ONNX-to-engine export.
 - `acceptance-smoke.ps1 -TensorRT` generates a small official Ultralytics YOLO ONNX artifact, or uses `-TensorRtOnnxPath <official.onnx>` when supplied.
-- `aitrain_worker.exe --tensorrt-smoke <official.onnx>` builds a TensorRT engine. The current official-only smoke does not use the removed tiny-detector TensorRT inference fixture.
+- `aitrain_worker.exe --tensorrt-smoke <official.onnx>` builds a TensorRT engine from an official Ultralytics ONNX artifact. This is an official-artifact smoke with AITrain TensorRT export/runtime checks; it does not use the removed tiny-detector TensorRT inference fixture and is not an end-to-end Ultralytics Python runtime check.
 - The result is recorded back in `docs\harness\current-status.md`; the current RTX 4090 D pass is already recorded.
 
 ## Phase 43 Lite: External Acceptance Handoff
