@@ -290,14 +290,12 @@ NCNN 当前本机验证边界：检测模型已经通过 Hyuto YOLOv8 ONNX -> NC
 5. 查看结果摘要和 overlay 预览。
 6. 在“任务与产物”中查看完整 prediction JSON、overlay 和耗时信息。
 
-当前 C++ ONNX Runtime 推理支持：
+当前本地推理验证支持：
 
 - YOLO 检测：类别、置信度、NMS、检测框 overlay。
 - YOLO 分割：检测框、mask、mask area、半透明 overlay。
-- OCR Rec：CTC greedy decode、文本和置信度摘要。
-- OCR Det：DB-style probability map v1 后处理，输出文字区域 polygon 和 overlay。
 
-PaddleOCR System 的端到端结果仍以官方工具链任务产物为主，不等同于完整 C++ PaddleOCR System runtime。
+OCR 路线只依赖 PaddleOCR 官方实现。Det / Rec / System 的推理、评估和可视化结果应从官方 PaddleOCR 任务产物与报告中查看，不通过 AITrain C++ OCR ONNX 后处理作为产品路径。
 
 ## 11. 样本复核、交付验收和诊断包
 
@@ -328,7 +326,7 @@ PaddleOCR System 的端到端结果仍以官方工具链任务产物为主，不
 
 ### 11.3 客户域 OCR 验收
 
-在“交付验收”页填写客户域 Det 数据集、Rec 数据集、System 图片、Det/Rec/System 官方报告，以及可选 Det ONNX evidence。默认门槛为 Rec accuracy >= `0.70`、CER <= `0.30`，且必须不是 public/generated/smoke 数据。Total-Text、generated smoke 和 `.deps` 示例只能证明流程可跑，不能证明客户域 OCR 生产精度。
+在“交付验收”页填写客户域 Det 数据集、Rec 数据集、System 图片，以及 Det/Rec/System 官方报告。默认门槛为 Rec accuracy >= `0.70`、CER <= `0.30`，且必须不是 public/generated/smoke 数据。Total-Text、generated smoke 和 `.deps` 示例只能证明流程可跑，不能证明客户域 OCR 生产精度。
 
 ### 11.4 一键诊断包
 

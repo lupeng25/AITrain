@@ -216,15 +216,15 @@ The official System adapter accepts these parameters:
 
 The final `paddleocr_official_system_report.json` records Python/Paddle/PaddleOCR versions, source checkout ref, command, exit code, log path, model directories, dictionary path, `official_system_prediction.json`, `system_results.txt`, and the visualization directory.
 
-## C++ PaddleOCR Det ONNX Postprocess
+## Historical OCR ONNX Wiring Evidence
 
-Phase 46 adds a C++ ONNX Runtime path for PaddleOCR Det DB-style detection maps. AITrain can identify `ocr_detection` ONNX sidecars/reports, run a single-output DB probability map shaped `[1,1,H,W]`, `[1,H,W]`, or `[H,W]`, threshold connected components, emit four-point text-box polygons, write `ocr_detection` prediction JSON, and render an overlay through the existing inference artifact path.
+AITrain's OCR product route is official-only. Training, export, prediction, evaluation, and customer acceptance should use the PaddleOCR official Det, Rec, and System adapters and their official reports.
 
-Phase 47 adds `tools\phase47-paddleocr-det-onnx-smoke.ps1`, which attempts to convert the official PaddleOCR Det inference model into ONNX through PaddleX `--paddle2onnx`, writes an AITrain sidecar when conversion succeeds, and calls `aitrain_worker --ocr-det-onnx-smoke` to produce C++ predictions and overlay artifacts.
+Phase 46/47 C++ OCR ONNX work is retained only as historical wiring evidence for older validation lanes. It is not a production OCR inference, benchmark, deployment, or acceptance route. The `aitrain_worker --ocr-det-onnx-smoke` compatibility option now reports `blocked` with an official-only message instead of running AITrain C++ OCR postprocess.
 
-RTX 4090 validation unblocked Phase 47 by exporting a Paddle 2.6 old-IR PaddleOCR Det inference model, converting it with Paddle2ONNX, writing the AITrain sidecar, and running `aitrain_worker --ocr-det-onnx-smoke`. The passing evidence is under `.deps/rtx4090-validation/phase47-paddleocr-det-onnx`, including `paddleocr_det_onnx_smoke_summary.json`, C++ predictions, and overlay PNG.
+Historical RTX 4090 Phase 47 evidence may remain in delivery archives to explain past wiring coverage, but new OCR closeout must cite PaddleOCR official Det/Rec/System reports and customer-domain acceptance outputs.
 
-This is a v1 DB-style postprocess plus prepared real exported ONNX wiring smoke path. It is not a replacement for the full official PaddleOCR System acceptance path, and it does not claim PP-OCRv5 accuracy parity. Use official `predict_system.py` for complete Det+Rec system validation until production-quality OCR accuracy acceptance is separately recorded.
+Use official `predict_system.py` for complete Det+Rec system validation. Use `paddleocr_official_rec_report.json`, `paddleocr_official_det_report.json`, and `paddleocr_official_system_report.json` as the OCR evidence set.
 
 If public dataset materialization fails or requires external interaction, the generated minimal datasets remain the required smoke baseline. The failure reason should be recorded as an external data acquisition blocker, not hidden as a successful public dataset run.
 
@@ -233,8 +233,8 @@ If public dataset materialization fails or requires external interaction, the ge
 - TensorRT engine building has passing RTX 4090 D acceptance evidence under `.deps/rtx4090-validation/acceptance-tensorrt`; older unsupported GPUs should still report `hardware-blocked`.
 - Phase 45 covers newer YOLO detection/segmentation model names only; it does not productize YOLO classification, pose, OBB, anomaly, YOLO-World, or YOLOE.
 - Historical GTX 1060 / SM 61 machines can run CPU training smoke and ONNX Runtime checks, but they cannot validate TensorRT 10 engine building and must not override RTX 4090 acceptance evidence.
-- C++ segmentation mask ONNX postprocess and OCR ONNX CTC greedy decode are available for the current smoke models.
-- C++ OCR Det ONNX Runtime DB-style postprocess is available as a Phase 46 v1 path for single-output probability maps, and Phase 47 now has real exported Det ONNX wiring smoke evidence. End-to-end PaddleOCR validation still uses official `predict_system.py`; per the current RTX 4090 validation decision, Rec accuracy is not considered for this pass and remains a future production-quality gate if reinstated.
+- C++ segmentation mask ONNX postprocess is available for YOLO segmentation smoke models.
+- OCR product inference, benchmark, evaluation, and acceptance are official-only. Historical C++ OCR ONNX wiring evidence must not be used as a current production OCR route.
 - Official third-party backend licensing must be reviewed before commercial redistribution.
 - The official PaddleOCR adapter should be run in an isolated OCR Python environment. Mixing PaddlePaddle and PyTorch in one Windows Python process can trigger DLL conflicts through newer `albumentations` builds.
 - The official PP-OCRv4 smoke uses a tiny generated dataset; it validates train/export/inference wiring and artifacts, not useful OCR accuracy.

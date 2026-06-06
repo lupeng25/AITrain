@@ -40,7 +40,7 @@ Phase 40 的分类、姿态、OBB、异常检测等训练后端扩展后置；�
 - 官方训练优先通过 Worker 管理的 Python trainer subprocess。
 - 旧的 C++ tiny detector、segmentation baseline、OCR baseline、small OCR CTC 和 shipped Python mock 已物理删除，不能作为产品训练 backend。
 - TensorRT 真机验收已有 RTX 4090 D 证据；当前/旧 GTX 1060 / SM 61 仍只记录为 `hardware-blocked`。
-- PaddleOCR System 当前是官方 `predict_system.py` 工具链路径；C++ DB-style Det ONNX probability-map 后处理已有 v1 wiring，但不代表 PP-OCRv5 精度 parity。
+- PaddleOCR System 当前是官方 `predict_system.py` 工具链路径；OCR 训练、导出、推理、评估和验收收口为 PaddleOCR 官方-only。历史 C++ Det ONNX wiring 不作为产品路线或验收要求。
 
 ## 3. Phase 39A：真实评估补齐
 
@@ -118,7 +118,7 @@ Phase 40 的分类、姿态、OBB、异常检测等训练后端扩展后置；�
 
 增强 `benchmarkModel`：
 
-- 支持 ONNX Runtime detection / segmentation / OCR Rec。
+- 支持 ONNX Runtime detection / segmentation；OCR 结果通过 PaddleOCR 官方报告和任务产物汇总。
 - 对已有 TensorRT engine 可做 runtime benchmark；不在 GTX 1060 / SM 61 上伪造 engine build 成功。
 - 输出 average latency、P50、P95、P99、throughput、runtime、model family、input shape、sample image、timedInference。
 - 失败时写清 runtime 缺失、模型不支持或硬件受限原因。

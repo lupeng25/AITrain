@@ -1412,156 +1412,45 @@ WorkflowResult evaluateModelReport(
     }
 
     if (taskType == QStringLiteral("ocr_recognition") || taskType == QStringLiteral("ocr")) {
-        if (QFileInfo(modelPath).suffix().compare(QStringLiteral("onnx"), Qt::CaseInsensitive) != 0) {
-            return failedResult(QStringLiteral("OCR recognition evaluation currently requires an ONNX model."));
-        }
-        const QString modelFamily = inferOnnxModelFamily(modelPath);
-        if (modelFamily != QStringLiteral("ocr_recognition")) {
-            return failedResult(QStringLiteral("OCR recognition evaluation expects an OCR Rec ONNX model. Inferred model family: %1").arg(modelFamily));
-        }
-
-        const QString labelFilePath = resolveOcrLabelFilePath(datasetPath, options);
-        const QString dictionaryPath = resolveOcrDictionaryPath(datasetPath, options);
-        const int maxTextLength = options.value(QStringLiteral("maxTextLength")).toInt(64);
-        const int maxErrorSamples = options.value(QStringLiteral("maxErrorSamples")).toInt(200);
-        const int maxOverlaySamples = options.value(QStringLiteral("maxOverlaySamples")).toInt(50);
-
-        OcrRecDataset dataset;
+        const QDir outputDir(outputPath);
         QString error;
-        if (!dataset.load(datasetPath, labelFilePath, dictionaryPath, maxTextLength, &error)) {
-            return failedResult(error);
+        if (!QDir().mkpath(outputDir.absolutePath())) {
+            return failedResult(QStringLiteral("Cannot create OCR evaluation output directory: %1").arg(outputPath));
         }
         if (isCancellationRequested(shouldCancel)) {
             return canceledResult();
         }
 
-        int correctCount = 0;
-        int totalCount = 0;
-        int totalEditDistance = 0;
-        int totalCharCount = 0;
-        int totalWordEditDistance = 0;
-        int totalWordCount = 0;
-        double confidenceSum = 0.0;
-        int overlayCount = 0;
-        QJsonArray sampleSummaries;
-        QJsonArray errorSamples;
-        const QDir outputDir(outputPath);
-        QDir().mkpath(outputDir.filePath(QStringLiteral("overlays")));
-
-        for (const OcrRecSample& sample : dataset.samples()) {
-            if (isCancellationRequested(shouldCancel)) {
-                return canceledResult();
-            }
-            QString predictionError;
-            const OcrRecPrediction prediction = predictOcrRecOnnxRuntime(modelPath, sample.imagePath, &predictionError);
-            if (!predictionError.isEmpty()) {
-                return failedResult(predictionError);
-            }
-
-            const QString expected = sample.label;
-            const QString predicted = prediction.text;
-            const bool matched = expected == predicted;
-            const int editDistance = stringEditDistance(expected, predicted);
-            const QStringList expectedWords = splitOcrWords(expected);
-            const QStringList predictedWords = splitOcrWords(predicted);
-            const int wordDistance = wordEditDistance(expectedWords, predictedWords);
-
-            ++totalCount;
-            if (matched) {
-                ++correctCount;
-            }
-            totalEditDistance += editDistance;
-            totalCharCount += expected.size();
-            totalWordEditDistance += wordDistance;
-            totalWordCount += expectedWords.size();
-            confidenceSum += prediction.confidence;
-
-            QString overlayPath;
-            if (!matched && overlayCount < maxOverlaySamples) {
-                QString overlayError;
-                const QImage overlay = renderOcrRecPrediction(sample.imagePath, prediction, &overlayError);
-                if (!overlay.isNull()) {
-                    overlayPath = outputDir.filePath(QStringLiteral("overlays/%1_%2.png")
-                        .arg(overlayCount, 4, 10, QLatin1Char('0'))
-                        .arg(QFileInfo(sample.imagePath).completeBaseName()));
-                    if (overlay.save(overlayPath)) {
-                        ++overlayCount;
-                    } else {
-                        overlayPath.clear();
-                    }
-                }
-            }
-
-            QJsonObject sampleSummary;
-            sampleSummary.insert(QStringLiteral("imagePath"), sample.imagePath);
-            sampleSummary.insert(QStringLiteral("labelPath"), dataset.labelFilePath());
-            sampleSummary.insert(QStringLiteral("groundTruth"), expected);
-            sampleSummary.insert(QStringLiteral("prediction"), predicted);
-            sampleSummary.insert(QStringLiteral("confidence"), prediction.confidence);
-            sampleSummary.insert(QStringLiteral("editDistance"), editDistance);
-            sampleSummary.insert(QStringLiteral("wordEditDistance"), wordDistance);
-            sampleSummary.insert(QStringLiteral("matched"), matched);
-            if (!overlayPath.isEmpty()) {
-                sampleSummary.insert(QStringLiteral("overlayPath"), overlayPath);
-            }
-            sampleSummaries.append(sampleSummary);
-
-            if (!matched && errorSamples.size() < maxErrorSamples) {
-                errorSamples.append(sampleSummary);
-            }
-        }
-
-        const double accuracy = totalCount > 0 ? static_cast<double>(correctCount) / static_cast<double>(totalCount) : 0.0;
-        const double cer = totalCharCount > 0 ? static_cast<double>(totalEditDistance) / static_cast<double>(totalCharCount) : 0.0;
-        const double wer = totalWordCount > 0 ? static_cast<double>(totalWordEditDistance) / static_cast<double>(totalWordCount) : 0.0;
-        const double averageEditDistance = totalCount > 0 ? static_cast<double>(totalEditDistance) / static_cast<double>(totalCount) : 0.0;
-        const double averageConfidence = totalCount > 0 ? confidenceSum / static_cast<double>(totalCount) : 0.0;
-
-        QJsonObject metrics;
-        metrics.insert(QStringLiteral("accuracy"), accuracy);
-        metrics.insert(QStringLiteral("editDistance"), averageEditDistance);
-        metrics.insert(QStringLiteral("cer"), cer);
-        metrics.insert(QStringLiteral("wer"), wer);
-        metrics.insert(QStringLiteral("correct"), correctCount);
-        metrics.insert(QStringLiteral("samples"), totalCount);
-        metrics.insert(QStringLiteral("averageConfidence"), averageConfidence);
-
         QJsonObject report;
-        report.insert(QStringLiteral("ok"), true);
+        report.insert(QStringLiteral("ok"), false);
         report.insert(QStringLiteral("kind"), QStringLiteral("evaluation_report"));
         report.insert(QStringLiteral("createdAt"), nowIso());
         report.insert(QStringLiteral("modelPath"), modelPath);
         report.insert(QStringLiteral("datasetPath"), datasetPath);
         report.insert(QStringLiteral("taskType"), QStringLiteral("ocr_recognition"));
-        report.insert(QStringLiteral("runtime"), QStringLiteral("onnxruntime"));
+        report.insert(QStringLiteral("runtime"), QStringLiteral("paddleocr_official"));
+        report.insert(QStringLiteral("status"), QStringLiteral("blocked"));
+        report.insert(QStringLiteral("failureCategory"), QStringLiteral("official-only"));
         report.insert(QStringLiteral("datasetSnapshotId"), options.value(QStringLiteral("datasetSnapshotId")).toInt());
         report.insert(QStringLiteral("datasetSnapshotHash"), options.value(QStringLiteral("datasetSnapshotHash")).toString());
         report.insert(QStringLiteral("datasetSnapshotManifest"), options.value(QStringLiteral("datasetSnapshotManifest")).toString());
-        report.insert(QStringLiteral("labelFilePath"), dataset.labelFilePath());
-        report.insert(QStringLiteral("dictionaryPath"), dataset.dictionary().path);
         report.insert(QStringLiteral("scaffold"), false);
-        report.insert(QStringLiteral("metrics"), metrics);
-        report.insert(QStringLiteral("samples"), sampleSummaries);
-        report.insert(QStringLiteral("errorSamples"), errorSamples);
-        report.insert(QStringLiteral("sampleCount"), dataset.size());
-        report.insert(QStringLiteral("decisionSummary"), evaluationDecisionSummary(QStringLiteral("ocr_recognition"), metrics, errorSamples, dataset.size()));
-        report.insert(QStringLiteral("errorTaxonomy"), errorTaxonomyObject(QStringLiteral("ocr_recognition"), metrics, errorSamples));
-        report.insert(QStringLiteral("limitations"), QStringLiteral("Phase 39A OCR evaluation uses exact-match accuracy, CER, and WER from OCR Rec ONNX predictions."));
+        report.insert(QStringLiteral("metrics"), QJsonObject{});
+        report.insert(QStringLiteral("message"),
+            QStringLiteral("OCR evaluation is official-only. Use PaddleOCR official Rec evaluation/predict reports or the customer OCR acceptance gate instead of AITrain C++ ONNX OCR postprocess."));
+        report.insert(QStringLiteral("officialRoute"), QStringLiteral("paddleocr_rec_official / paddleocr_system_official"));
+        report.insert(QStringLiteral("limitations"), QJsonArray{
+            QStringLiteral("AITrain does not compute product OCR metrics from C++ ONNX OCR postprocess."),
+            QStringLiteral("Production OCR evidence must come from PaddleOCR official reports on representative customer-domain data.")
+        });
 
         const QString reportPath = outputDir.filePath(QStringLiteral("evaluation_report.json"));
-        const QString errorPath = outputDir.filePath(QStringLiteral("error_samples.json"));
         const QString summaryPath = outputDir.filePath(QStringLiteral("evaluation_summary.md"));
-        if (isCancellationRequested(shouldCancel)) {
-            return canceledResult();
-        }
-        if (!writeJsonFile(errorPath, QJsonObject{{QStringLiteral("samples"), errorSamples}}, &error)) {
-            return failedResult(error);
-        }
         report.insert(QStringLiteral("reportPath"), reportPath);
-        report.insert(QStringLiteral("errorSamplesPath"), errorPath);
-        report.insert(QStringLiteral("overlayDir"), outputDir.filePath(QStringLiteral("overlays")));
         report.insert(QStringLiteral("evaluationSummaryPath"), summaryPath);
-        if (!writeTextFile(summaryPath, evaluationSummaryMarkdown(report), &error)) {
+        if (!writeTextFile(summaryPath,
+                QStringLiteral("# OCR Evaluation\n\nStatus: blocked\n\nOCR evaluation is official-only. Use PaddleOCR official Rec/System reports and customer-domain acceptance evidence.\n"),
+                &error)) {
             return failedResult(error);
         }
         if (!writeJsonFile(reportPath, report, &error)) {
@@ -1580,7 +1469,7 @@ WorkflowResult evaluateModelReport(
     summary.insert(QStringLiteral("datasetSnapshotHash"), options.value(QStringLiteral("datasetSnapshotHash")).toString());
     summary.insert(QStringLiteral("datasetSnapshotManifest"), options.value(QStringLiteral("datasetSnapshotManifest")).toString());
     summary.insert(QStringLiteral("scaffold"), true);
-    summary.insert(QStringLiteral("note"), QStringLiteral("Real evaluation is implemented for detection, segmentation (ONNX), and OCR recognition (ONNX). Unsupported task types still produce scaffold summaries."));
+    summary.insert(QStringLiteral("note"), QStringLiteral("Real evaluation is implemented for detection and segmentation ONNX artifacts. OCR evaluation is official-only and must use PaddleOCR official reports."));
 
     QJsonObject metrics;
     if (taskType == QStringLiteral("ocr_recognition") || taskType == QStringLiteral("ocr")) {

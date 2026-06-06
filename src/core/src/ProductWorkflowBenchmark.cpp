@@ -126,6 +126,16 @@ WorkflowResult benchmarkModelReport(
             return false;
         }
         if (runtime == QStringLiteral("onnxruntime")) {
+            if (modelFamily == QStringLiteral("ocr_recognition")) {
+                inferenceError = QStringLiteral("OCR benchmark is official-only. Use PaddleOCR official predict_rec.py or predict_system.py reports instead of AITrain C++ ONNX OCR postprocess.");
+                failureCategory = QStringLiteral("official-only");
+                return false;
+            }
+            if (modelFamily == QStringLiteral("ocr_detection")) {
+                inferenceError = QStringLiteral("OCR benchmark is official-only. Use PaddleOCR official Det/System reports instead of AITrain C++ ONNX OCR postprocess.");
+                failureCategory = QStringLiteral("official-only");
+                return false;
+            }
             if (!isOnnxRuntimeInferenceAvailable()) {
                 inferenceError = QStringLiteral("ONNX Runtime is not available in this build.");
                 failureCategory = QStringLiteral("runtime-missing");
@@ -151,14 +161,6 @@ WorkflowResult benchmarkModelReport(
                 timer.start();
                 if (modelFamily == QStringLiteral("yolo_segmentation")) {
                     const QVector<SegmentationPrediction> predictions = predictSegmentationOnnxRuntime(modelPath, sampleImagePath, inferenceOptions, &inferenceError);
-                    outputCount = predictions.size();
-                } else if (modelFamily == QStringLiteral("ocr_recognition")) {
-                    const OcrRecPrediction prediction = predictOcrRecOnnxRuntime(modelPath, sampleImagePath, &inferenceError);
-                    outputCount = prediction.text.isEmpty() ? 0 : 1;
-                } else if (modelFamily == QStringLiteral("ocr_detection")) {
-                    OcrDetPostprocessOptions detOptions;
-                    detOptions.maxDetections = inferenceOptions.maxDetections;
-                    const QVector<OcrDetPrediction> predictions = predictOcrDetOnnxRuntime(modelPath, sampleImagePath, detOptions, &inferenceError);
                     outputCount = predictions.size();
                 } else {
                     const QVector<DetectionPrediction> predictions = predictDetectionOnnxRuntime(modelPath, sampleImagePath, inferenceOptions, &inferenceError);

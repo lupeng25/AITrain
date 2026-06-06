@@ -130,7 +130,7 @@ Assert-PathExists "tools\create-plugin-package.ps1" "plugin package creation scr
 Assert-PathExists "tools\create-plugin-marketplace-demo.ps1" "plugin marketplace demo script"
 Assert-PathExists "tools\materialize-ultralytics-dataset.py" "Ultralytics dataset materializer"
 Assert-PathExists "tools\phase31-paddleocr-full-official-smoke.ps1" "Phase 31 PaddleOCR full smoke script"
-Assert-PathExists "tools\phase47-paddleocr-det-onnx-smoke.ps1" "Phase 47 PaddleOCR Det ONNX smoke script"
+Assert-PathExists "tools\phase47-paddleocr-det-onnx-smoke.ps1" "historical Phase 47 PaddleOCR Det ONNX compatibility script"
 Assert-PathExists "tools\prepare-production-ocr-data.ps1" "production OCR public data preparation script"
 Assert-PathExists "tools\prepare_production_ocr_data.py" "production OCR public data preparation helper"
 Assert-PathExists "tools\run-production-ocr-rec-experiment.ps1" "production OCR Rec experiment script"

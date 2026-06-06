@@ -7,7 +7,7 @@
 ## 摘要
 
 - 目标：把当前 RTX 4090 D 验证结果冻结为可追溯的 release-candidate 基线，并准备本地交付包；除非显式重开，否则本轮不补采 clean Windows/package-root 外部证据。
-- 当前基线：RTX 4090 D 验证已经完成。TensorRT、Phase 45 YOLO11/YOLO12 矩阵、Phase 47 PaddleOCR Det ONNX、Production OCR acceptance 均有通过证据，主要位于 `.deps\rtx4090-validation`。
+- 当前基线：RTX 4090 D 验证已经完成。TensorRT、Phase 45 YOLO11/YOLO12 矩阵、Production OCR acceptance 均有通过证据，主要位于 `.deps\rtx4090-validation`。Phase 47 PaddleOCR Det ONNX 仅作为历史 wiring 证据保留，不再作为 OCR 产品路线。
 - 当前 handoff：本地 RC handoff 已从 source commit `8457da88738706f32fa1ec014a317e264bc08c67` 刷新，`build-vscode\release-freeze-handoff\release_handoff_manifest.json` 记录 `worktreeDirty=false`，ZIP SHA256 为 `72B5C2A1933E32EFD353857862F3E59F5AA0B984C91C4DE412E34E78E64934EE`。
 - Phase 49 本地交付闭环已经完成：打包 GUI 覆盖样本复核、交付验收、客户 OCR 验收、诊断包、部署验证和 mAP50-95 报告证据。这些是本地报告/流程界面，不替代 clean-machine、客户域数据或 package-root TensorRT 返回证据。
 - Production OCR gate：当前默认门槛接受 Rec `accuracy > 0.7`；CER 会记录，但只有使用 `-RequireRecCer` 时才作为阻断项。
@@ -80,7 +80,7 @@
 - 当前 Production OCR 结果只在降低后的 `accuracy > 0.7` gate 下成立；它是 public Total-Text 工作流证据，不是客户域 OCR 生产质量证明。
 - Phase 49 customer OCR validation 是收集客户域证据的本地机制，但输入数据和报告必须来自真实客户/目标域。
 - 旧的 `accuracy >= 0.90` 与 `CER <= 0.10` 目标不是当前默认阻断 gate；如需恢复，必须单独制定模型、数据和训练改进计划。
-- Phase 47 验证 PaddleOCR Det ONNX 转换和 C++ DB-style 后处理接线，不证明 PP-OCRv5 精度一致性。
+- Phase 47 仅是历史 PaddleOCR Det ONNX 转换和 C++ 后处理接线证据；当前 OCR 验收必须使用 PaddleOCR 官方 Det/Rec/System 报告。
 - Phase 45 只验证 YOLO detection/segmentation 接线和产物，不新增 classification、pose、OBB、anomaly、YOLO-World 或 YOLOE 范围。
 - Plugin marketplace v1 是 local/offline-first 且未启用 publisher signature enforcement；除非后续阶段明确增加签名策略，不得把它描述为可信插件商店。
 - Windows 锁定活动 Qt plugin DLL 时，marketplace disable/uninstall 需要保持状态安全：GUI 只释放已记录的 marketplace active DLL，删除失败时报 `disable-failed`，否则更新 marketplace 状态，不强制热重扫全局插件矩阵。需要刷新数量时使用 rescan。

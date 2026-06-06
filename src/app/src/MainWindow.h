@@ -340,12 +340,10 @@ private:
     QLineEdit* customerOcrDetReportEdit_ = nullptr;
     QLineEdit* customerOcrRecReportEdit_ = nullptr;
     QLineEdit* customerOcrSystemReportEdit_ = nullptr;
-    QLineEdit* customerOcrDetOnnxEvidenceEdit_ = nullptr;
     QLineEdit* customerOcrOutputEdit_ = nullptr;
     QLineEdit* customerOcrMinAccEdit_ = nullptr;
     QLineEdit* customerOcrMaxCerEdit_ = nullptr;
     QCheckBox* customerOcrAllowPublicCheck_ = nullptr;
-    QCheckBox* customerOcrRequireDetOnnxCheck_ = nullptr;
     QLabel* customerOcrStatusLabel_ = nullptr;
     QLabel* diagnosticsStatusLabel_ = nullptr;
     QLabel* deliveryAcceptanceSummaryLabel_ = nullptr;

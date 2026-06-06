@@ -309,7 +309,7 @@ QWidget* MainWindow::buildInferencePage()
     boundaryLabel->setObjectName(QStringLiteral("InferenceMeta"));
     auto* executionStatus = inlineStatusLabel(QStringLiteral("Worker 隔离执行推理；任务、产物和失败原因写入任务历史。"));
     executionStatus->setObjectName(QStringLiteral("DarkInlineStatus"));
-    auto* boundaryStatus = inlineStatusLabel(QStringLiteral("C++ ONNX 支持 detection / segmentation / OCR Rec；PaddleOCR System 仍查看官方工具链产物。"));
+    auto* boundaryStatus = inlineStatusLabel(QStringLiteral("C++ ONNX 仅支持 YOLO detection / segmentation；OCR 只查看 PaddleOCR 官方工具链产物。"));
     boundaryStatus->setObjectName(QStringLiteral("DarkInlineStatus"));
     allowLabelToShrink(executionStatus);
     allowLabelToShrink(boundaryStatus);
@@ -411,7 +411,7 @@ QWidget* MainWindow::buildInferencePage()
     toolbar->bodyLayout()->addStretch();
 
     auto* capabilityPanel = new InfoPanel(QStringLiteral("可解析结果"));
-    auto* capabilityHint = mutedLabel(QStringLiteral("推理验证会根据 ONNX 模型族或 AITrain 导出信息选择后处理；scaffold / 官方工具链边界保持显式。"));
+    auto* capabilityHint = mutedLabel(QStringLiteral("推理验证仅解析 YOLO ONNX / TensorRT 产物；OCR 端到端结果通过 PaddleOCR 官方任务产物查看。"));
     allowLabelToShrink(capabilityHint);
     capabilityPanel->bodyLayout()->addWidget(capabilityHint);
     auto* capabilityGrid = new QGridLayout;
@@ -419,8 +419,7 @@ QWidget* MainWindow::buildInferencePage()
     capabilityGrid->setVerticalSpacing(10);
     capabilityGrid->addWidget(createInferenceCapability(QStringLiteral("YOLO 检测"), QStringLiteral("box、类别、置信度、NMS 与 overlay。")), 0, 0);
     capabilityGrid->addWidget(createInferenceCapability(QStringLiteral("YOLO 分割"), QStringLiteral("box、mask、mask area 与半透明 overlay。")), 0, 1);
-    capabilityGrid->addWidget(createInferenceCapability(QStringLiteral("OCR Rec"), QStringLiteral("CTC greedy decode、文本与置信度摘要。")), 1, 0);
-    capabilityGrid->addWidget(createInferenceCapability(QStringLiteral("PaddleOCR System"), QStringLiteral("端到端结果仍通过官方工具链任务产物查看。")), 1, 1);
+    capabilityGrid->addWidget(createInferenceCapability(QStringLiteral("PaddleOCR 官方"), QStringLiteral("Det / Rec / System 结果通过官方报告和可视化产物查看。")), 1, 0, 1, 2);
     capabilityGrid->setColumnStretch(0, 1);
     capabilityGrid->setColumnStretch(1, 1);
     capabilityPanel->bodyLayout()->addLayout(capabilityGrid);
@@ -461,7 +460,7 @@ QWidget* MainWindow::buildInferencePage()
     summaryPanel->bodyLayout()->addStretch();
 
     auto* resultPanel = new InfoPanel(QStringLiteral("Overlay 预览"));
-    auto* overlayHint = mutedLabel(QStringLiteral("完成后显示检测框、分割 mask 或 OCR 可视化图；失败时保留明确状态文本。"));
+    auto* overlayHint = mutedLabel(QStringLiteral("完成后显示检测框或分割 mask；OCR 可视化图来自 PaddleOCR 官方任务产物。"));
     allowLabelToShrink(overlayHint);
     resultPanel->bodyLayout()->addWidget(overlayHint);
     inferenceOverlayLabel_ = new QLabel(QStringLiteral("暂无 overlay\n运行推理后显示可视化产物。"));
@@ -604,7 +603,6 @@ QWidget* MainWindow::buildDeliveryAcceptancePage()
     ocrForm->addRow(uiText("Det 报告"), makePathRow(&customerOcrDetReportEdit_, uiText("官方 Det 评估报告 JSON/Markdown"), false));
     ocrForm->addRow(uiText("Rec 报告"), makePathRow(&customerOcrRecReportEdit_, uiText("官方 Rec 评估报告，需包含 accuracy / CER"), false));
     ocrForm->addRow(uiText("System 报告"), makePathRow(&customerOcrSystemReportEdit_, uiText("官方 System 验收报告 JSON/Markdown"), false));
-    ocrForm->addRow(uiText("Det ONNX evidence"), makePathRow(&customerOcrDetOnnxEvidenceEdit_, uiText("可选 Det ONNX 验证报告"), false));
     customerOcrOutputEdit_ = new QLineEdit;
     customerOcrOutputEdit_->setPlaceholderText(uiText("留空则写入当前项目 runs/<taskId>"));
     ocrForm->addRow(uiText("输出目录"), customerOcrOutputEdit_);
@@ -620,12 +618,10 @@ QWidget* MainWindow::buildDeliveryAcceptancePage()
     thresholdLayout->addWidget(customerOcrMaxCerEdit_);
     ocrForm->addRow(uiText("门槛"), thresholdRow);
     customerOcrAllowPublicCheck_ = new QCheckBox(uiText("允许 public/generated 数据仅作为 smoke"));
-    customerOcrRequireDetOnnxCheck_ = new QCheckBox(uiText("要求 Det ONNX evidence"));
     auto* optionsRow = new QWidget;
     auto* optionsLayout = new QHBoxLayout(optionsRow);
     optionsLayout->setContentsMargins(0, 0, 0, 0);
     optionsLayout->addWidget(customerOcrAllowPublicCheck_);
-    optionsLayout->addWidget(customerOcrRequireDetOnnxCheck_);
     optionsLayout->addStretch();
     ocrForm->addRow(uiText("选项"), optionsRow);
     ocrPanel->bodyLayout()->addLayout(ocrForm);

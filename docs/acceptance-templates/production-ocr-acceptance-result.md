@@ -17,7 +17,7 @@
 - Acceptance status: passed
 - Acceptance report: `.deps\rtx4090-validation\production-ocr-acceptance-gpu-chain\production_ocr_acceptance_report.json`
 - Acceptance summary: `.deps\rtx4090-validation\production-ocr-acceptance-gpu-chain\production_ocr_acceptance_summary.md`
-- Result: data-size checks, official Det report, official Rec metrics, official System report, and Phase 47 Det ONNX evidence passed.
+- Result: data-size checks, official Det report, official Rec metrics, and official System report passed.
 - Rec metrics: `accuracy=0.71874997504340365`, `CER=0.14153062880387579`
 - Thresholds: `accuracy>0.70`; CER is recorded and not blocking by default.
 - Interpretation: the historical `acc==0` report is old CPU/default blocked evidence; the current RTX 4090 run passes the lowered Rec accuracy gate.
@@ -32,9 +32,7 @@ Command used:
   -SystemImages .deps\rtx4090-validation\production-ocr-data\system_images `
   -OfficialDetReport .deps\rtx4090-validation\production-ocr-official-chain-gpu\reports\det_official\paddleocr_official_det_report.json `
   -OfficialRecReport .deps\rtx4090-validation\production-ocr-official-chain-gpu\reports\rec_official\paddleocr_official_rec_report.json `
-  -OfficialSystemReport .deps\rtx4090-validation\production-ocr-official-chain-gpu\reports\system_official\paddleocr_official_system_report.json `
-  -OcrDetOnnxSummary .deps\rtx4090-validation\phase47-paddleocr-det-onnx\paddleocr_det_onnx_smoke_summary.json `
-  -RequireDetOnnxEvidence
+  -OfficialSystemReport .deps\rtx4090-validation\production-ocr-official-chain-gpu\reports\system_official\paddleocr_official_system_report.json
 ```
 
 ## Dataset Evidence
@@ -89,7 +87,7 @@ System:
 ## Optional C++ Det ONNX Evidence
 
 - Required for this run: yes / no
-- `paddleocr_det_onnx_smoke_summary.json` path:
+- Historical Phase 47 OCR ONNX evidence path, if referenced only for archive context:
 - Status:
 - ONNX path:
 - Overlay / prediction artifacts:

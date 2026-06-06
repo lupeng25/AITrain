@@ -66,37 +66,54 @@ void WorkerSession::evaluateModel(const QJsonObject& payload)
         return;
     }
 
-    QJsonObject artifact;
-    artifact.insert(QStringLiteral("taskId"), taskId);
-    artifact.insert(QStringLiteral("kind"), QStringLiteral("evaluation_report"));
-    artifact.insert(QStringLiteral("path"), result.reportPath);
-    artifact.insert(QStringLiteral("message"), QStringLiteral("Model evaluation report"));
-    send(wp::event::artifact(), artifact);
-    for (const auto& item : {
-             qMakePair(QStringLiteral("per_class_metrics"), QStringLiteral("perClassMetricsPath")),
-             qMakePair(QStringLiteral("error_samples"), QStringLiteral("errorSamplesPath")),
-             qMakePair(QStringLiteral("confusion_matrix"), QStringLiteral("confusionMatrixPath")),
-             qMakePair(QStringLiteral("evaluation_summary"), QStringLiteral("evaluationSummaryPath")),
-             qMakePair(QStringLiteral("evaluation_overlays"), QStringLiteral("overlayDir"))}) {
-        const QString path = result.payload.value(item.second).toString();
-        if (!path.isEmpty()) {
+    const auto emitEvaluationArtifacts = [&]() {
+        QJsonObject artifact;
+        artifact.insert(QStringLiteral("taskId"), taskId);
+        artifact.insert(QStringLiteral("kind"), QStringLiteral("evaluation_report"));
+        artifact.insert(QStringLiteral("path"), result.reportPath);
+        artifact.insert(QStringLiteral("message"), QStringLiteral("Model evaluation report"));
+        send(wp::event::artifact(), artifact);
+        for (const auto& item : {
+                 qMakePair(QStringLiteral("per_class_metrics"), QStringLiteral("perClassMetricsPath")),
+                 qMakePair(QStringLiteral("error_samples"), QStringLiteral("errorSamplesPath")),
+                 qMakePair(QStringLiteral("confusion_matrix"), QStringLiteral("confusionMatrixPath")),
+                 qMakePair(QStringLiteral("evaluation_summary"), QStringLiteral("evaluationSummaryPath")),
+                 qMakePair(QStringLiteral("evaluation_overlays"), QStringLiteral("overlayDir"))}) {
+            const QString path = result.payload.value(item.second).toString();
+            if (!path.isEmpty()) {
+                QJsonObject extraArtifact;
+                extraArtifact.insert(QStringLiteral("taskId"), taskId);
+                extraArtifact.insert(QStringLiteral("kind"), item.first);
+                extraArtifact.insert(QStringLiteral("path"), path);
+                extraArtifact.insert(QStringLiteral("message"), QStringLiteral("Model evaluation artifact"));
+                send(wp::event::artifact(), extraArtifact);
+            }
+        }
+        const QString legacyOverlaysPath = result.payload.value(QStringLiteral("overlaysPath")).toString();
+        if (!legacyOverlaysPath.isEmpty()) {
             QJsonObject extraArtifact;
             extraArtifact.insert(QStringLiteral("taskId"), taskId);
-            extraArtifact.insert(QStringLiteral("kind"), item.first);
-            extraArtifact.insert(QStringLiteral("path"), path);
+            extraArtifact.insert(QStringLiteral("kind"), QStringLiteral("evaluation_overlays"));
+            extraArtifact.insert(QStringLiteral("path"), legacyOverlaysPath);
             extraArtifact.insert(QStringLiteral("message"), QStringLiteral("Model evaluation artifact"));
             send(wp::event::artifact(), extraArtifact);
         }
+    };
+
+    emitEvaluationArtifacts();
+    if (!result.payload.value(QStringLiteral("ok")).toBool(true)) {
+        const QString failureCategory = result.payload.value(QStringLiteral("failureCategory")).toString(
+            QStringLiteral("evaluation_failed"));
+        const QString message = result.payload.value(QStringLiteral("message")).toString(
+            QStringLiteral("Model evaluation report did not pass."));
+        QJsonObject details = result.payload;
+        details.insert(wp::field::reportPath(), result.reportPath);
+        send(wp::event::evaluationReport(), result.payload);
+        socket_.waitForBytesWritten(1000);
+        failWithDetails(message, failureCategory, details);
+        return;
     }
-    const QString legacyOverlaysPath = result.payload.value(QStringLiteral("overlaysPath")).toString();
-    if (!legacyOverlaysPath.isEmpty()) {
-        QJsonObject extraArtifact;
-        extraArtifact.insert(QStringLiteral("taskId"), taskId);
-        extraArtifact.insert(QStringLiteral("kind"), QStringLiteral("evaluation_overlays"));
-        extraArtifact.insert(QStringLiteral("path"), legacyOverlaysPath);
-        extraArtifact.insert(QStringLiteral("message"), QStringLiteral("Model evaluation artifact"));
-        send(wp::event::artifact(), extraArtifact);
-    }
+
     QJsonObject progressDone;
     progressDone.insert(QStringLiteral("taskId"), taskId);
     progressDone.insert(QStringLiteral("percent"), 100);
@@ -156,6 +173,18 @@ void WorkerSession::benchmarkModel(const QJsonObject& payload)
     artifact.insert(QStringLiteral("path"), result.reportPath);
     artifact.insert(QStringLiteral("message"), QStringLiteral("Model benchmark report"));
     send(wp::event::artifact(), artifact);
+    if (!result.payload.value(QStringLiteral("ok")).toBool(true)) {
+        const QString failureCategory = result.payload.value(QStringLiteral("failureCategory")).toString(
+            QStringLiteral("benchmark_failed"));
+        const QString message = result.payload.value(QStringLiteral("message")).toString(
+            QStringLiteral("Model benchmark report did not pass."));
+        QJsonObject details = result.payload;
+        details.insert(wp::field::reportPath(), result.reportPath);
+        send(wp::event::benchmarkReport(), result.payload);
+        socket_.waitForBytesWritten(1000);
+        failWithDetails(message, failureCategory, details);
+        return;
+    }
     QJsonObject progressDone;
     progressDone.insert(QStringLiteral("taskId"), taskId);
     progressDone.insert(QStringLiteral("percent"), 100);
@@ -560,6 +589,11 @@ void WorkerSession::runInference(const QJsonObject& payload)
     const bool tensorRtModel = modelSuffix == QStringLiteral("engine") || modelSuffix == QStringLiteral("plan");
     if (onnxModel) {
         const QString modelFamily = aitrain::inferOnnxModelFamily(checkpointPath);
+        if (modelFamily == QStringLiteral("ocr_recognition")
+            || modelFamily == QStringLiteral("ocr_detection")) {
+            fail(QStringLiteral("OCR inference is official-only. Use the PaddleOCR official Det/Rec/System adapter artifacts instead of AITrain C++ ONNX OCR postprocess."));
+            return;
+        }
         if (modelFamily == QStringLiteral("yolo_segmentation")) {
             taskType = QStringLiteral("segmentation");
             const QVector<aitrain::SegmentationPrediction> predictions = aitrain::predictSegmentationOnnxRuntime(checkpointPath, imagePath, options, &error);
@@ -571,33 +605,6 @@ void WorkerSession::runInference(const QJsonObject& payload)
                 predictionArray.append(aitrain::segmentationPredictionToJson(prediction));
             }
             overlay = aitrain::renderSegmentationPredictions(imagePath, predictions, &error);
-            predictionCount = predictions.size();
-        } else if (modelFamily == QStringLiteral("ocr_recognition")) {
-            taskType = QStringLiteral("ocr_recognition");
-            const aitrain::OcrRecPrediction prediction = aitrain::predictOcrRecOnnxRuntime(checkpointPath, imagePath, &error);
-            if (!error.isEmpty()) {
-                fail(error);
-                return;
-            }
-            predictionArray.append(aitrain::ocrRecPredictionToJson(prediction));
-            overlay = aitrain::renderOcrRecPrediction(imagePath, prediction, &error);
-            predictionCount = 1;
-        } else if (modelFamily == QStringLiteral("ocr_detection")) {
-            taskType = QStringLiteral("ocr_detection");
-            aitrain::OcrDetPostprocessOptions detOptions;
-            detOptions.binaryThreshold = payload.value(QStringLiteral("binaryThreshold")).toDouble(detOptions.binaryThreshold);
-            detOptions.boxThreshold = payload.value(QStringLiteral("boxThreshold")).toDouble(detOptions.boxThreshold);
-            detOptions.minArea = payload.value(QStringLiteral("minArea")).toInt(detOptions.minArea);
-            detOptions.maxDetections = payload.value(QStringLiteral("maxDetections")).toInt(detOptions.maxDetections);
-            const QVector<aitrain::OcrDetPrediction> predictions = aitrain::predictOcrDetOnnxRuntime(checkpointPath, imagePath, detOptions, &error);
-            if (!error.isEmpty()) {
-                fail(error);
-                return;
-            }
-            for (const aitrain::OcrDetPrediction& prediction : predictions) {
-                predictionArray.append(aitrain::ocrDetPredictionToJson(prediction));
-            }
-            overlay = aitrain::renderOcrDetPredictions(imagePath, predictions, &error);
             predictionCount = predictions.size();
         } else {
             const QVector<aitrain::DetectionPrediction> predictions = aitrain::predictDetectionOnnxRuntime(checkpointPath, imagePath, options, &error);

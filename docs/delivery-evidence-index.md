@@ -16,7 +16,7 @@
 | Clean Windows package acceptance | 延后 / 未返回 | `docs\external-acceptance-handoff.md`；`docs\acceptance-templates\clean-windows-acceptance-result.md` | 没有 clean-machine 返回证据时不得标记 passed。 |
 | Package-root TensorRT rerun | 延后 / 未返回 | `docs\acceptance-templates\tensorrt-acceptance-result.md` | RTX 4090 D 源侧通过证据与 package-root rerun 分开记录。 |
 | Phase 45 YOLO11/YOLO12 matrix | 已通过 RTX validation lane | `.deps\fix-1-3-phase45-yolo-matrix\yolo_model_matrix_summary.json`；`.\tools\phase45-yolo-model-matrix-smoke.ps1` | 2026-06-05 修复后矩阵 `status=passed`、`ctestStatus=passed`；验证 detection/segmentation 接线和产物，不是精度 benchmark。 |
-| Phase 47 PaddleOCR Det ONNX | 已通过 RTX validation lane | `.deps\rtx4090-validation\2026-06-05-122806-rtx4090d-followup-1-4\phase47-paddleocr-det-onnx\paddleocr_det_onnx_smoke_summary.json` | 2026-06-05 follow-up 记录 old-IR ONNX 转换、C++ DB-style 后处理、`predictionCount=100`、overlay/predictions 和 `ctestStatus=passed`。 |
+| Historical Phase 47 PaddleOCR Det ONNX | 历史 wiring 证据 | `.deps\rtx4090-validation\2026-06-05-122806-rtx4090d-followup-1-4\phase47-paddleocr-det-onnx\paddleocr_det_onnx_smoke_summary.json` | 仅用于解释过去的 ONNX 转换和 C++ 后处理接线范围；当前 OCR 验收必须使用 PaddleOCR 官方 Det/Rec/System 报告。 |
 | Production OCR public workflow | 已通过 public workflow lane | `.deps\rtx4090-validation\2026-06-05-090927-rtx4090d-refresh\production-ocr-official-chain-gpu\acceptance\production_ocr_acceptance_report.json` | Public Total-Text 证据不能证明客户域生产精度。 |
 | Customer-domain OCR | 需要客户/目标域证据 | `.\tools\customer-ocr-validation.ps1`；交付验收页导入结果 | 只有真实客户/目标域数据和报告才能支撑生产声明。 |
 | 数据集转换 GUI closeout | 已完成本地验证 | `.deps\ui-walkthrough-dataset-conversion\walkthrough-summary.json` | 转换产物不自动注册为数据集。 |

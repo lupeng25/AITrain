@@ -6,14 +6,12 @@ param(
     [string]$OfficialDetReport = "",
     [string]$OfficialRecReport = "",
     [string]$OfficialSystemReport = "",
-    [string]$OcrDetOnnxSummary = "",
     [int]$MinimumDetImages = 100,
     [int]$MinimumRecSamples = 1000,
     [int]$MinimumSystemImages = 100,
     [double]$MinimumRecAccuracy = 0.70,
     [double]$MaximumRecCer = 0.10,
-    [switch]$RequireRecCer,
-    [switch]$RequireDetOnnxEvidence
+    [switch]$RequireRecCer
 )
 
 Set-StrictMode -Version Latest
@@ -109,7 +107,6 @@ $systemImagesPath = Resolve-RepoPath $SystemImages
 $officialDetReportPath = Resolve-RepoPath $OfficialDetReport
 $officialRecReportPath = Resolve-RepoPath $OfficialRecReport
 $officialSystemReportPath = Resolve-RepoPath $OfficialSystemReport
-$ocrDetOnnxSummaryPath = Resolve-RepoPath $OcrDetOnnxSummary
 
 $checks = @()
 function Add-Check {
@@ -177,19 +174,9 @@ Add-Check "official_system_report" ($(if ($null -ne $systemReport) { "passed" } 
     "Official PaddleOCR System prediction/evaluation report must be supplied for end-to-end OCR acceptance." `
     ([ordered]@{ path = $officialSystemReportPath })
 
-if ($RequireDetOnnxEvidence) {
-    $detOnnxSummary = Read-Json -Path $ocrDetOnnxSummaryPath
-    $detOnnxPassed = $null -ne $detOnnxSummary -and
-        ($detOnnxSummary.PSObject.Properties.Name -contains "ok") -and
-        $detOnnxSummary.ok -and
-        ($detOnnxSummary.PSObject.Properties.Name -contains "status") -and
-        $detOnnxSummary.status -eq "passed"
-    Add-Check "ocr_det_onnx_cpp_smoke" ($(if ($detOnnxPassed) { "passed" } else { "blocked" })) `
-        "C++ OCR Det ONNX smoke evidence is required when -RequireDetOnnxEvidence is set." `
-        ([ordered]@{ path = $ocrDetOnnxSummaryPath; status = if ($null -ne $detOnnxSummary) { $detOnnxSummary.status } else { "" } })
-} else {
-    Add-Check "ocr_det_onnx_cpp_smoke" "warning" "C++ Det ONNX smoke was not required for this production OCR acceptance run."
-}
+Add-Check "ocr_official_only_policy" "passed" `
+    "Production OCR acceptance uses only PaddleOCR official Det, Rec, and System reports; C++ OCR ONNX smoke is not acceptance evidence." `
+    ([ordered]@{ implementationPolicy = "official-only" })
 
 $blocked = @($checks | Where-Object { $_.status -eq "blocked" })
 $warnings = @($checks | Where-Object { $_.status -eq "warning" })
@@ -209,7 +196,7 @@ $report = [ordered]@{
         minimumRecAccuracy = $MinimumRecAccuracy
         maximumRecCer = $MaximumRecCer
         requireRecCer = [bool]$RequireRecCer
-        requireDetOnnxEvidence = [bool]$RequireDetOnnxEvidence
+        ocrImplementationPolicy = "official-only"
     }
     checks = $checks
     blockedCount = $blocked.Count

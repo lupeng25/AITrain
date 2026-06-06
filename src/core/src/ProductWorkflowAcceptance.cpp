@@ -508,10 +508,8 @@ WorkflowResult runCustomerOcrAcceptanceReport(const QString& outputPath, const Q
     const QString detReportPath = QDir::fromNativeSeparators(options.value(QStringLiteral("detReportPath")).toString().trimmed());
     const QString recReportPath = QDir::fromNativeSeparators(options.value(QStringLiteral("recReportPath")).toString().trimmed());
     const QString systemReportPath = QDir::fromNativeSeparators(options.value(QStringLiteral("systemReportPath")).toString().trimmed());
-    const QString detOnnxEvidencePath = QDir::fromNativeSeparators(options.value(QStringLiteral("detOnnxEvidencePath")).toString().trimmed());
     const bool allowPublicLikeData = options.value(QStringLiteral("allowPublicLikeData")).toBool(false);
     const bool requireFullDomainEvidence = options.value(QStringLiteral("requireFullDomainEvidence")).toBool(true);
-    const bool requireDetOnnxEvidence = options.value(QStringLiteral("requireDetOnnxEvidence")).toBool(false);
     const double minRecAccuracy = options.value(QStringLiteral("minRecAccuracy")).toDouble(0.70);
     const double maxRecCer = options.value(QStringLiteral("maxRecCer")).toDouble(0.30);
     const int minDetSamples = options.value(QStringLiteral("minDetSamples")).toInt(1);
@@ -656,22 +654,6 @@ WorkflowResult runCustomerOcrAcceptanceReport(const QString& outputPath, const Q
         QStringLiteral("Rec sample count %1 / required >= %2.").arg(recSamples).arg(minRecSamples),
         QJsonObject{{QStringLiteral("value"), recSamples}, {QStringLiteral("threshold"), minRecSamples}}));
 
-    if (requireDetOnnxEvidence) {
-        const QJsonObject evidence = readOptionalJson(detOnnxEvidencePath);
-        const bool evidencePassed = pathExists(detOnnxEvidencePath)
-            && (evidence.isEmpty()
-                || evidence.value(QStringLiteral("ok")).toBool(evidence.value(QStringLiteral("status")).toString() == QStringLiteral("passed"))
-                || evidence.value(QStringLiteral("status")).toString() == QStringLiteral("passed"));
-        appendGateCheck(&checks, &blocked, checkObjectWithDetails(
-            QStringLiteral("det_onnx_evidence"),
-            evidencePassed ? QStringLiteral("passed") : QStringLiteral("blocked"),
-            evidencePassed,
-            evidencePassed
-                ? QStringLiteral("Optional Det ONNX evidence passed.")
-                : QStringLiteral("Det ONNX evidence was required but missing or not passed."),
-            pathEvidenceObject(detOnnxEvidencePath)));
-    }
-
     QJsonObject report;
     report.insert(QStringLiteral("schemaVersion"), 1);
     report.insert(QStringLiteral("kind"), QStringLiteral("customer_ocr_acceptance"));
@@ -689,8 +671,7 @@ WorkflowResult runCustomerOcrAcceptanceReport(const QString& outputPath, const Q
     report.insert(QStringLiteral("reports"), QJsonObject{
         {QStringLiteral("detReport"), pathEvidenceObject(detReportPath)},
         {QStringLiteral("recReport"), pathEvidenceObject(recReportPath)},
-        {QStringLiteral("systemReport"), pathEvidenceObject(systemReportPath)},
-        {QStringLiteral("detOnnxEvidence"), pathEvidenceObject(detOnnxEvidencePath)}
+        {QStringLiteral("systemReport"), pathEvidenceObject(systemReportPath)}
     });
     report.insert(QStringLiteral("metrics"), QJsonObject{
         {QStringLiteral("recAccuracy"), recAccuracy},
@@ -704,9 +685,10 @@ WorkflowResult runCustomerOcrAcceptanceReport(const QString& outputPath, const Q
         {QStringLiteral("minRecSamples"), minRecSamples},
         {QStringLiteral("minSystemImages"), minSystemImages},
         {QStringLiteral("requireFullDomainEvidence"), requireFullDomainEvidence},
-        {QStringLiteral("requireDetOnnxEvidence"), requireDetOnnxEvidence},
         {QStringLiteral("allowPublicLikeData"), allowPublicLikeData}
     });
+    report.insert(QStringLiteral("ocrImplementationPolicy"),
+        QStringLiteral("official-only: customer OCR acceptance uses PaddleOCR official Det, Rec, and System reports; AITrain C++ OCR ONNX postprocess is not acceptance evidence."));
     report.insert(QStringLiteral("sensitiveDataNote"),
         QStringLiteral("Customer-domain OCR evidence may contain sensitive images and text. Review reports before external sharing."));
     report.insert(QStringLiteral("publicDataBoundary"),
@@ -978,7 +960,30 @@ WorkflowResult validateDeploymentArtifactReport(
             }
         }
     } else if (detectedFormat == QStringLiteral("onnx")) {
-        if (sampleImagePath.isEmpty() || !QFileInfo::exists(sampleImagePath)) {
+        QString modelFamilyWarning;
+        const QString onnxFamily = inferOnnxModelFamily(normalizedModelPath, &modelFamilyWarning);
+        if (onnxFamily == QStringLiteral("ocr_recognition")
+            || onnxFamily == QStringLiteral("ocr_detection")) {
+            QJsonObject details{
+                {QStringLiteral("modelFamily"), onnxFamily},
+                {QStringLiteral("taskType"), onnxFamily},
+                {QStringLiteral("officialRoute"), QStringLiteral("paddleocr_system_official")}
+            };
+            if (!modelFamilyWarning.isEmpty()) {
+                details.insert(QStringLiteral("modelFamilyWarning"), modelFamilyWarning);
+            }
+            checks.append(checkObjectWithDetails(
+                QStringLiteral("ocr_official_only_route"),
+                QStringLiteral("blocked"),
+                false,
+                QStringLiteral("OCR deployment validation is official-only. Use PaddleOCR official Det/Rec/System reports and predict_system.py artifacts instead of AITrain C++ ONNX OCR postprocess."),
+                details));
+            report.insert(QStringLiteral("runtime"), QStringLiteral("paddleocr_official"));
+            report.insert(QStringLiteral("modelFamily"), onnxFamily);
+            report.insert(QStringLiteral("taskType"), onnxFamily);
+            report.insert(QStringLiteral("checks"), checks);
+            setDeploymentStatusFromChecks(&report, checks, QStringLiteral("blocked"));
+        } else if (sampleImagePath.isEmpty() || !QFileInfo::exists(sampleImagePath)) {
             checks.append(checkObjectWithDetails(
                 QStringLiteral("onnx_sample_image_present"),
                 QStringLiteral("blocked"),
@@ -1002,8 +1007,7 @@ WorkflowResult validateDeploymentArtifactReport(
             QImage overlay;
             QJsonArray predictionArray;
             QString taskType = QStringLiteral("detection");
-            QString modelFamilyWarning;
-            const QString family = inferOnnxModelFamily(normalizedModelPath, &modelFamilyWarning);
+            const QString family = onnxFamily;
             QElapsedTimer timer;
             timer.start();
             if (family == QStringLiteral("yolo_segmentation")) {
@@ -1016,24 +1020,6 @@ WorkflowResult validateDeploymentArtifactReport(
                 }
                 if (error.isEmpty()) {
                     overlay = renderSegmentationPredictions(sampleImagePath, predictions, &error);
-                }
-            } else if (family == QStringLiteral("ocr_recognition")) {
-                taskType = QStringLiteral("ocr_recognition");
-                const OcrRecPrediction prediction = predictOcrRecOnnxRuntime(normalizedModelPath, sampleImagePath, &error);
-                if (error.isEmpty()) {
-                    predictionArray.append(ocrRecPredictionToJson(prediction));
-                    overlay = renderOcrRecPrediction(sampleImagePath, prediction, &error);
-                }
-            } else if (family == QStringLiteral("ocr_detection")) {
-                taskType = QStringLiteral("ocr_detection");
-                OcrDetPostprocessOptions detOptions;
-                const QVector<OcrDetPrediction> predictions =
-                    predictOcrDetOnnxRuntime(normalizedModelPath, sampleImagePath, detOptions, &error);
-                for (const OcrDetPrediction& prediction : predictions) {
-                    predictionArray.append(ocrDetPredictionToJson(prediction));
-                }
-                if (error.isEmpty()) {
-                    overlay = renderOcrDetPredictions(sampleImagePath, predictions, &error);
                 }
             } else {
                 DetectionInferenceOptions inferenceOptions;

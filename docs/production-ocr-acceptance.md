@@ -1,6 +1,6 @@
 # Production OCR Acceptance Preparation
 
-This runbook defines the evidence required before AITrain Studio can claim production OCR readiness. Tiny Phase 31/46/47 smoke artifacts validate wiring only; they must not be used as production OCR accuracy evidence.
+This runbook defines the evidence required before AITrain Studio can claim production OCR readiness. OCR acceptance is official-only: use PaddleOCR official Det, Rec, and System outputs, not AITrain C++ OCR ONNX postprocess smoke artifacts.
 
 ## Scope
 
@@ -10,7 +10,7 @@ Production OCR acceptance covers three paths:
 - PaddleOCR Rec: representative text recognition training/export metrics.
 - PaddleOCR System: end-to-end Det+Rec inference evidence on representative images.
 
-The current full-system acceptance path remains official PaddleOCR `predict_system.py`. C++ OCR Det ONNX postprocess is optional evidence unless the acceptance run explicitly sets `-RequireDetOnnxEvidence`.
+The full-system acceptance path is official PaddleOCR `predict_system.py`. C++ OCR Det/Rec ONNX postprocess is not production acceptance evidence.
 
 ## Data Requirements
 
@@ -100,7 +100,6 @@ The acceptance gate expects JSON report files:
 - `paddleocr_official_det_report.json`
 - `paddleocr_official_rec_report.json`
 - `paddleocr_official_system_report.json`
-- Optional: `paddleocr_det_onnx_smoke_summary.json` when requiring C++ Det ONNX evidence.
 
 The Rec report must expose `accuracy` or `acc`, either at top level or under `metrics`. `cer` or `CER` is recorded when present and becomes blocking only when `-RequireRecCer` is set.
 
@@ -117,21 +116,6 @@ Example:
   -OfficialDetReport D:\AITrainOCR\reports\paddleocr_official_det_report.json `
   -OfficialRecReport D:\AITrainOCR\reports\paddleocr_official_rec_report.json `
   -OfficialSystemReport D:\AITrainOCR\reports\paddleocr_official_system_report.json
-```
-
-To require the C++ OCR Det ONNX smoke:
-
-```powershell
-.\tools\production-ocr-acceptance.ps1 `
-  -WorkDir .deps\production-ocr-acceptance `
-  -DetDataset D:\AITrainOCR\det_dataset `
-  -RecDataset D:\AITrainOCR\rec_dataset `
-  -SystemImages D:\AITrainOCR\system_images `
-  -OfficialDetReport D:\AITrainOCR\reports\paddleocr_official_det_report.json `
-  -OfficialRecReport D:\AITrainOCR\reports\paddleocr_official_rec_report.json `
-  -OfficialSystemReport D:\AITrainOCR\reports\paddleocr_official_system_report.json `
-  -OcrDetOnnxSummary D:\AITrainOCR\reports\paddleocr_det_onnx_smoke_summary.json `
-  -RequireDetOnnxEvidence
 ```
 
 To run the full local official chain from prepared or auto-prepared data, use:

@@ -23,9 +23,7 @@ param(
     [switch]$SkipDataPrep,
     [switch]$SkipExistingReports,
     [switch]$Force,
-    [switch]$AllowBlocked,
-    [switch]$RequireDetOnnxEvidence,
-    [string]$OcrDetOnnxSummary = ""
+    [switch]$AllowBlocked
 )
 
 Set-StrictMode -Version Latest
@@ -277,13 +275,6 @@ $acceptanceArgs = @(
     "-OfficialRecReport", $recReport,
     "-OfficialSystemReport", $systemReport
 )
-if ($OcrDetOnnxSummary) {
-    $acceptanceArgs += @("-OcrDetOnnxSummary", (Resolve-RepoPath $OcrDetOnnxSummary))
-}
-if ($RequireDetOnnxEvidence) {
-    $acceptanceArgs += "-RequireDetOnnxEvidence"
-}
-
 Write-Host "[production-ocr-acceptance] tools\production-ocr-acceptance.ps1 $($acceptanceArgs -join ' ')" -ForegroundColor Cyan
 $acceptanceCommand = @(
     "-NoProfile",

@@ -309,13 +309,29 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
             return false;
         }
         evaluationReportPath = evaluation.reportPath;
-        artifactArray.append(pathArtifact(QStringLiteral("evaluation_report"), evaluation.reportPath, QStringLiteral("Evaluation report")));
+        const QJsonObject evaluationArtifact = pathArtifact(QStringLiteral("evaluation_report"), evaluation.reportPath, QStringLiteral("Evaluation report"));
+        artifactArray.append(evaluationArtifact);
         appendArtifactsFromPayload(evaluation.payload);
+        if (!evaluation.payload.value(QStringLiteral("ok")).toBool(true)) {
+            const QString failureCategory = evaluation.payload.value(QStringLiteral("failureCategory")).toString();
+            const QString message = evaluation.payload.value(QStringLiteral("message")).toString(
+                QStringLiteral("Model evaluation report did not pass."));
+            if (failureCategory == QStringLiteral("official-only")) {
+                appendStep(QStringLiteral("evaluateModel"),
+                    QStringLiteral("skipped"),
+                    message,
+                    evaluation.reportPath,
+                    QJsonArray{evaluationArtifact});
+                return true;
+            }
+            failureReason = message;
+            return false;
+        }
         appendStep(QStringLiteral("evaluateModel"),
             QStringLiteral("completed"),
             QStringLiteral("Model evaluation completed."),
             evaluation.reportPath,
-            QJsonArray{pathArtifact(QStringLiteral("evaluation_report"), evaluation.reportPath)});
+            QJsonArray{evaluationArtifact});
         return true;
     };
 
@@ -387,18 +403,17 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
                 }
                 overlay = renderSegmentationPredictions(imagePath, segPredictions, &error);
             } else if (family == QStringLiteral("ocr_recognition")) {
-                inferenceTaskType = QStringLiteral("ocr_recognition");
-                const OcrRecPrediction prediction = predictOcrRecOnnxRuntime(candidateModel, imagePath, &error);
-                predictions.append(ocrRecPredictionToJson(prediction));
-                overlay = renderOcrRecPrediction(imagePath, prediction, &error);
+                appendStep(QStringLiteral("infer"),
+                    QStringLiteral("skipped"),
+                    QStringLiteral("OCR inference smoke is official-only; use PaddleOCR official Rec/System task artifacts instead of AITrain C++ ONNX OCR postprocess."),
+                    candidateModel);
+                return true;
             } else if (family == QStringLiteral("ocr_detection")) {
-                inferenceTaskType = QStringLiteral("ocr_detection");
-                OcrDetPostprocessOptions detOptions;
-                const QVector<OcrDetPrediction> detPredictions = predictOcrDetOnnxRuntime(candidateModel, imagePath, detOptions, &error);
-                for (const OcrDetPrediction& prediction : detPredictions) {
-                    predictions.append(ocrDetPredictionToJson(prediction));
-                }
-                overlay = renderOcrDetPredictions(imagePath, detPredictions, &error);
+                appendStep(QStringLiteral("infer"),
+                    QStringLiteral("skipped"),
+                    QStringLiteral("OCR inference smoke is official-only; use PaddleOCR official Det/System task artifacts instead of AITrain C++ ONNX OCR postprocess."),
+                    candidateModel);
+                return true;
             } else {
                 DetectionInferenceOptions inferenceOptions;
                 const QVector<DetectionPrediction> detPredictions = predictDetectionOnnxRuntime(candidateModel, imagePath, inferenceOptions, &error);
@@ -463,12 +478,28 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
             return false;
         }
         benchmarkReportPath = benchmark.reportPath;
-        artifactArray.append(pathArtifact(QStringLiteral("benchmark_report"), benchmark.reportPath, QStringLiteral("Benchmark report")));
+        const QJsonObject benchmarkArtifact = pathArtifact(QStringLiteral("benchmark_report"), benchmark.reportPath, QStringLiteral("Benchmark report"));
+        artifactArray.append(benchmarkArtifact);
+        if (!benchmark.payload.value(QStringLiteral("ok")).toBool(true)) {
+            const QString failureCategory = benchmark.payload.value(QStringLiteral("failureCategory")).toString();
+            const QString message = benchmark.payload.value(QStringLiteral("message")).toString(
+                QStringLiteral("Benchmark report did not pass."));
+            if (failureCategory == QStringLiteral("official-only")) {
+                appendStep(QStringLiteral("benchmarkModel"),
+                    QStringLiteral("skipped"),
+                    message,
+                    benchmark.reportPath,
+                    QJsonArray{benchmarkArtifact});
+                return true;
+            }
+            failureReason = message;
+            return false;
+        }
         appendStep(QStringLiteral("benchmarkModel"),
             QStringLiteral("completed"),
             QStringLiteral("Benchmark completed."),
             benchmark.reportPath,
-            QJsonArray{pathArtifact(QStringLiteral("benchmark_report"), benchmark.reportPath)});
+            QJsonArray{benchmarkArtifact});
         return true;
     };
 
