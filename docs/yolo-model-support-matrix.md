@@ -2,9 +2,9 @@
 
 This document is the Phase 45 source of truth for Ultralytics YOLO model-family productization in AITrain Studio.
 
-AITrain Studio currently owns the orchestration and product runtime layer: Worker request routing, dataset normalization, artifact recording, official ONNX export checks, C++ ONNX Runtime / TensorRT / NCNN inference, evaluation, benchmark, deployment validation, and smoke regression. The actual YOLO training and first ONNX export run through the installed official `ultralytics` Python package, so supported model names depend on that package version and its license terms.
+AITrain Studio currently owns the orchestration and product runtime layer: Worker request routing, dataset normalization, artifact recording, official ONNX export checks, C++ ONNX Runtime / TensorRT / NCNN inference, benchmark, deployment validation, and smoke regression. The actual YOLO training, first ONNX export, and detection/segmentation evaluation run through the installed official `ultralytics` Python package, so supported model names and `val()` behavior depend on that package version and its license terms.
 
-This matrix is therefore an official-artifact productization matrix, not an end-to-end official-only runtime matrix. A passing row means AITrain can train/export through Ultralytics and then consume the exported artifacts through the local C++ runtime. Ultralytics official `val`, `predict`, or `benchmark` output may be attached as comparison evidence, but it is not the default packaged runtime path.
+This matrix is therefore an official-artifact productization matrix, not an end-to-end official-only runtime matrix. A passing row means AITrain can train/export/evaluate through Ultralytics and then consume the exported artifacts through the local C++ runtime for inference, benchmark, and deployment validation.
 
 ## Status Levels
 
@@ -54,7 +54,7 @@ When CTest is available, the script also points `AITRAIN_ACCEPTANCE_SMOKE_ROOT` 
 ## Boundaries
 
 - Phase 45 productizes detection and segmentation model-family acceptance only.
-- YOLO product training/export is official Ultralytics; YOLO product inference, evaluation, benchmark, and deployment validation are AITrain C++ runtime paths over official artifacts.
+- YOLO product training/export/evaluation is official Ultralytics; YOLO product inference, benchmark, and deployment validation are AITrain C++ runtime paths over official artifacts.
 - Classification, pose, OBB, anomaly, YOLO-World, and YOLOE are not productized by this matrix.
 - TensorRT engine building remains external RTX / SM 75+ acceptance and is not changed by this phase.
 - C++ PaddleOCR Det DB ONNX postprocess is unrelated to this YOLO matrix and remains tracked separately.

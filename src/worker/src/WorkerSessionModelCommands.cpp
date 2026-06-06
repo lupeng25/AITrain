@@ -61,12 +61,11 @@ void WorkerSession::evaluateModel(const QJsonObject& payload)
         sendCanceledAndFinish(taskId, result.error);
         return;
     }
-    if (!result.ok) {
-        fail(result.error);
-        return;
-    }
 
     const auto emitEvaluationArtifacts = [&]() {
+        if (result.reportPath.isEmpty()) {
+            return;
+        }
         QJsonObject artifact;
         artifact.insert(QStringLiteral("taskId"), taskId);
         artifact.insert(QStringLiteral("kind"), QStringLiteral("evaluation_report"));
@@ -78,7 +77,10 @@ void WorkerSession::evaluateModel(const QJsonObject& payload)
                  qMakePair(QStringLiteral("error_samples"), QStringLiteral("errorSamplesPath")),
                  qMakePair(QStringLiteral("confusion_matrix"), QStringLiteral("confusionMatrixPath")),
                  qMakePair(QStringLiteral("evaluation_summary"), QStringLiteral("evaluationSummaryPath")),
-                 qMakePair(QStringLiteral("evaluation_overlays"), QStringLiteral("overlayDir"))}) {
+                 qMakePair(QStringLiteral("evaluation_overlays"), QStringLiteral("overlayDir")),
+                 qMakePair(QStringLiteral("official_metrics"), QStringLiteral("officialMetricsPath")),
+                 qMakePair(QStringLiteral("official_run_dir"), QStringLiteral("officialRunDir")),
+                 qMakePair(QStringLiteral("official_log"), QStringLiteral("officialLogPath"))}) {
             const QString path = result.payload.value(item.second).toString();
             if (!path.isEmpty()) {
                 QJsonObject extraArtifact;
@@ -98,9 +100,34 @@ void WorkerSession::evaluateModel(const QJsonObject& payload)
             extraArtifact.insert(QStringLiteral("message"), QStringLiteral("Model evaluation artifact"));
             send(wp::event::artifact(), extraArtifact);
         }
+        const QJsonArray officialArtifacts = result.payload.value(QStringLiteral("officialArtifacts")).toArray();
+        for (const QJsonValue& value : officialArtifacts) {
+            const QJsonObject object = value.toObject();
+            const QString path = object.value(QStringLiteral("path")).toString();
+            if (path.isEmpty()) {
+                continue;
+            }
+            QJsonObject officialArtifact;
+            officialArtifact.insert(QStringLiteral("taskId"), taskId);
+            officialArtifact.insert(QStringLiteral("kind"), object.value(QStringLiteral("kind")).toString(QStringLiteral("official_artifact")));
+            officialArtifact.insert(QStringLiteral("path"), path);
+            officialArtifact.insert(QStringLiteral("message"), object.value(QStringLiteral("name")).toString(QStringLiteral("Official Ultralytics artifact")));
+            send(wp::event::artifact(), officialArtifact);
+        }
     };
 
     emitEvaluationArtifacts();
+    if (!result.ok) {
+        QJsonObject details = result.payload;
+        details.insert(wp::field::reportPath(), result.reportPath);
+        send(wp::event::evaluationReport(), result.payload);
+        socket_.waitForBytesWritten(1000);
+        failWithDetails(
+            result.error.isEmpty() ? QStringLiteral("Model evaluation failed.") : result.error,
+            result.payload.value(QStringLiteral("failureCategory")).toString(QStringLiteral("evaluation_failed")),
+            details);
+        return;
+    }
     if (!result.payload.value(QStringLiteral("ok")).toBool(true)) {
         const QString failureCategory = result.payload.value(QStringLiteral("failureCategory")).toString(
             QStringLiteral("evaluation_failed"));

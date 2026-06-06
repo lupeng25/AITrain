@@ -44,26 +44,23 @@ Phase 40 的分类、姿态、OBB、异常检测等训练后端扩展后置；�
 
 ## 3. Phase 39A：真实评估补齐
 
-目标：让 detection / segmentation / OCR Rec 都能通过 `evaluateModel` 生成可信的质量判断报告。
+目标：让 detection / segmentation / OCR Rec 都能通过 `evaluateModel` 生成可信的质量判断报告；YOLO detection/segmentation 指标由 Ultralytics 官方 `val()` 产生，AITrain 不再自行计算本地 AP/mAP 或 mask IoU。
 
 ### Detection
 
-保持现有 AP50 评估路径，并补充本地 COCO-style mAP50-95：
+使用 Ultralytics 官方 `YOLO(...).val()` 作为唯一评估路径：
 
-- 继续支持 official detection ONNX Runtime 和可用 TensorRT detection model。
-- 输出 precision、recall、AP50、mAP50、`mAP50_95`、per-class metrics、confusion matrix、error samples、overlay artifacts。
-- 后续只做报告结构统一，不重写已通过的核心逻辑。
+- 输出 AITrain wrapper `evaluation_report.json`、官方 metrics、官方 run dir、官方 plots/predictions。
+- 不再输出本地 per-class CSV、error samples、confusion CSV 或本地 overlay。
+- ONNX Runtime / TensorRT / NCNN 继续用于推理、benchmark 和部署验证，不作为评估指标来源。
 
 ### Segmentation
 
-新增真实 segmentation evaluation：
+使用 Ultralytics 官方 `YOLO(...).val()` 作为唯一 segmentation evaluation：
 
-- 读取 YOLO segmentation val / test / train split。
-- 将 polygon ground truth rasterize 为 mask。
-- 调用现有 YOLOv8-seg ONNX Runtime 后处理。
-- 计算 mask IoU、mask precision、mask recall、mask AP50、`maskMap50_95` 和 per-class mask 指标。
-- 输出 `evaluation_report.json`、`per_class_metrics.csv`、`error_samples.json`、overlay artifacts。
-- 报告 `scaffold=false`，但 limitations 说明本地 mAP50-95 仍需要客户/目标域验收配合使用。
+- 输出 AITrain wrapper `evaluation_report.json`、官方 box/mask metrics、官方 run dir、官方 plots/predictions。
+- AITrain 不再在 C++ 中执行 GT polygon -> mask、预测 mask IoU、本地 mask AP/mAP、error samples 或本地 overlay 评估。
+- 报告 `scaffold=false`，但 limitations 说明指标来源为 Ultralytics official val，客户/目标域验收仍需配合使用。
 
 ### OCR Rec
 

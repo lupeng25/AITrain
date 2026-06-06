@@ -8,8 +8,8 @@ Production training is official-backend only. The GUI training page and Worker p
 
 | Backend | Task | Status | Notes |
 |---|---|---|---|
-| `ultralytics_yolo_detect` | Detection | Official Ultralytics adapter | Uses Ultralytics YOLO detection training and ONNX export. Product inference, evaluation, benchmark, and deployment validation then run against the official artifacts through the AITrain C++ runtime. Review AGPL-3.0 / Enterprise license before redistribution. |
-| `ultralytics_yolo_segment` | Segmentation | Official Ultralytics adapter | Uses Ultralytics YOLO segmentation training and ONNX export. Product inference, evaluation, benchmark, and deployment validation then run against the official artifacts through the AITrain C++ runtime, including mask postprocess and overlays. |
+| `ultralytics_yolo_detect` | Detection | Official Ultralytics adapter | Uses Ultralytics YOLO detection training and ONNX export. Product evaluation uses Ultralytics official `val()`; product inference, benchmark, and deployment validation run against official artifacts through the AITrain C++ runtime. Review AGPL-3.0 / Enterprise license before redistribution. |
+| `ultralytics_yolo_segment` | Segmentation | Official Ultralytics adapter | Uses Ultralytics YOLO segmentation training and ONNX export. Product evaluation uses Ultralytics official `val()`; product inference, benchmark, and deployment validation run against official artifacts through the AITrain C++ runtime, including mask postprocess and overlays. |
 | `paddleocr_det_official` | OCR detection | Official PaddleOCR adapter | Generates PP-OCRv4 or PP-OCRv5 detection configs from PaddleOCR Det data and can run official PaddleOCR `tools/train.py` and `tools/export_model.py`. The default preset is `PP-OCRv5_mobile_det`; `PP-OCRv4_mobile_det` and `PP-OCRv5_server_det` remain selectable. |
 | `paddleocr_rec_official` / `paddleocr_ppocrv4_rec` | OCR recognition | Official PaddleOCR adapter | Generates PP-OCRv4 or PP-OCRv5 recognition configs from AITrain PaddleOCR-style Rec data and runs official PaddleOCR `tools/train.py`, `tools/export_model.py`, and optional `tools/infer/predict_rec.py` when `runOfficial=true` and `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` points to a checkout. The default preset is `PP-OCRv5_mobile_rec`; `PP-OCRv4_mobile_rec`, `PP-OCRv5_server_rec`, and `en_PP-OCRv5_mobile_rec` remain selectable. |
 
@@ -19,9 +19,9 @@ Legacy diagnostic training implementations have been physically removed from pro
 
 ## YOLO Runtime Boundary
 
-YOLO detection and segmentation are not end-to-end official-only routes. AITrain uses official Ultralytics code for training and ONNX export, then treats the exported ONNX / TensorRT / NCNN artifacts as deployment inputs for its local C++ runtime. C++ ONNX Runtime, TensorRT, and NCNN paths handle prediction JSON, overlays, evaluation reports, benchmark summaries, and deployment validation so the packaged Windows product can run without embedding Python in the GUI process.
+YOLO detection and segmentation are not end-to-end official-only routes. AITrain uses official Ultralytics code for training, ONNX export, and detection/segmentation evaluation via `YOLO(...).val()`, then treats the exported ONNX / TensorRT / NCNN artifacts as deployment inputs for its local C++ runtime. C++ ONNX Runtime, TensorRT, and NCNN paths handle prediction JSON, overlays, benchmark summaries, and deployment validation so the packaged Windows product can run without embedding Python in the GUI process.
 
-Use Ultralytics official `val`, `predict`, or `benchmark` results as comparison evidence when needed, not as the default packaged product runtime. OCR is different: current OCR product inference, evaluation, benchmark, deployment validation, and acceptance are official-only through PaddleOCR Det/Rec/System reports.
+AITrain no longer computes local YOLO AP/mAP, mask IoU, TP/FP/FN, local evaluation error samples, or local evaluation overlays. The `evaluation_report.json` wrapper remains for the GUI and task history, with `evaluationSource=ultralytics_official_val` and links to official plots/predictions when Ultralytics writes them. OCR is different: current OCR product inference, evaluation, benchmark, deployment validation, and acceptance are official-only through PaddleOCR Det/Rec/System reports.
 
 ## Environment Setup
 

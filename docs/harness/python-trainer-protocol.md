@@ -22,6 +22,14 @@ For official YOLO segmentation training, Worker routes `trainingBackend=ultralyt
 python python_trainers/segmentation/ultralytics_trainer.py --request <request-json>
 ```
 
+For YOLO detection/segmentation evaluation, `evaluateModel` launches the official evaluator directly:
+
+```powershell
+python python_trainers/yolo/ultralytics_evaluator.py --request <request-json>
+```
+
+The evaluator calls official `YOLO(modelPath).val()` and writes an AITrain-compatible `evaluation_report.json` with `evaluationSource=ultralytics_official_val`. AITrain no longer computes local YOLO AP/mAP, mask IoU, TP/FP/FN, local error samples, local confusion CSV, or local evaluation overlays.
+
 For the official PaddleOCR PP-OCRv4 / PP-OCRv5 Rec adapter, Worker routes `trainingBackend=paddleocr_rec_official` or the compatibility alias `trainingBackend=paddleocr_ppocrv4_rec` to:
 
 ```powershell
@@ -125,8 +133,15 @@ Common Phase 9 detection parameters:
 - `runName`: optional Ultralytics run name
 - `exportOnnx`: default `true`
 - `pythonPathPrepend`: optional test/dev-only module path injection
+- `ultralyticsTrainArgs`: optional JSON object of whitelisted official training args such as `optimizer`, `lr0`, `lrf`, `momentum`, `weight_decay`, `patience`, `cos_lr`, `amp`, `cache`, `classes`, `freeze`, `mosaic`, `mixup`, `copy_paste`, `overlap_mask`, and `mask_ratio`
 
 Common Phase 11 segmentation parameters are the same as detection, with default `model=yolov8n-seg.yaml`.
+
+Common YOLO evaluation options:
+
+- `ultralyticsValArgs`: optional JSON object passed through the official evaluator after whitelist validation. Supported keys include `split`, `batch`, `imgsz`, `device`, `workers`, `conf`, `iou`, `max_det`, `half`, `dnn`, `plots`, `save_json`, `save_txt`, `save_conf`, `rect`, `classes`, `single_cls`, `augment`, `agnostic_nms`, `visualize`, and `end2end`.
+- `pythonExecutable`: optional Python path for official evaluation.
+- `pythonPathPrepend`: optional test/dev-only module path injection.
 
 Common official PaddleOCR Rec parameters:
 

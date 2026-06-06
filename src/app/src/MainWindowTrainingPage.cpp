@@ -34,8 +34,145 @@
 #include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
+#include <QVector>
 
 using namespace aitrain_app;
+
+namespace {
+QString yoloArgObjectName(const QString& key)
+{
+    return QStringLiteral("YoloTrainArg_%1").arg(key);
+}
+
+QLineEdit* yoloArgLineEdit(const QString& key, const QString& placeholder = QString(), const QString& value = QString())
+{
+    auto* edit = new QLineEdit(value);
+    edit->setObjectName(yoloArgObjectName(key));
+    edit->setPlaceholderText(placeholder);
+    edit->setMinimumWidth(0);
+    return edit;
+}
+
+QComboBox* yoloArgComboBox(const QString& key, const QVector<QPair<QString, QString>>& items)
+{
+    auto* combo = new QComboBox;
+    combo->setObjectName(yoloArgObjectName(key));
+    combo->addItem(QStringLiteral("默认"), QString());
+    for (const auto& item : items) {
+        combo->addItem(item.first, item.second);
+    }
+    return combo;
+}
+
+QComboBox* yoloBoolComboBox(const QString& key)
+{
+    return yoloArgComboBox(key, {
+        {QStringLiteral("true"), QStringLiteral("true")},
+        {QStringLiteral("false"), QStringLiteral("false")}
+    });
+}
+
+QGroupBox* yoloArgGroup(const QString& title)
+{
+    auto* group = new QGroupBox(title);
+    auto* form = new QFormLayout(group);
+    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    form->setHorizontalSpacing(12);
+    form->setVerticalSpacing(8);
+    return group;
+}
+
+void addYoloRow(QGroupBox* group, const QString& label, QWidget* field)
+{
+    if (auto* form = qobject_cast<QFormLayout*>(group->layout())) {
+        form->addRow(label, field);
+    }
+}
+
+QWidget* buildYoloOfficialArgsPanel()
+{
+    auto* container = new QWidget;
+    auto* root = new QVBoxLayout(container);
+    root->setContentsMargins(0, 0, 0, 0);
+    root->setSpacing(10);
+
+    auto* deviceGroup = yoloArgGroup(QStringLiteral("数据与设备"));
+    addYoloRow(deviceGroup, QStringLiteral("seed"), yoloArgLineEdit(QStringLiteral("seed"), QStringLiteral("42"), QStringLiteral("42")));
+    addYoloRow(deviceGroup, QStringLiteral("device"), yoloArgLineEdit(QStringLiteral("device"), QStringLiteral("cpu / 0 / 0,1")));
+    addYoloRow(deviceGroup, QStringLiteral("workers"), yoloArgLineEdit(QStringLiteral("workers"), QStringLiteral("0")));
+    addYoloRow(deviceGroup, QStringLiteral("cache"), yoloArgComboBox(QStringLiteral("cache"), {
+        {QStringLiteral("false"), QStringLiteral("false")},
+        {QStringLiteral("true"), QStringLiteral("true")},
+        {QStringLiteral("ram"), QStringLiteral("ram")},
+        {QStringLiteral("disk"), QStringLiteral("disk")}
+    }));
+    addYoloRow(deviceGroup, QStringLiteral("deterministic"), yoloBoolComboBox(QStringLiteral("deterministic")));
+    addYoloRow(deviceGroup, QStringLiteral("amp"), yoloBoolComboBox(QStringLiteral("amp")));
+    addYoloRow(deviceGroup, QStringLiteral("pretrained"), yoloArgComboBox(QStringLiteral("pretrained"), {
+        {QStringLiteral("true"), QStringLiteral("true")},
+        {QStringLiteral("false"), QStringLiteral("false")}
+    }));
+    addYoloRow(deviceGroup, QStringLiteral("resume"), yoloBoolComboBox(QStringLiteral("resume")));
+    addYoloRow(deviceGroup, QStringLiteral("save_period"), yoloArgLineEdit(QStringLiteral("save_period"), QStringLiteral("-1 / 10")));
+    addYoloRow(deviceGroup, QStringLiteral("fraction"), yoloArgLineEdit(QStringLiteral("fraction"), QStringLiteral("0.0-1.0")));
+    addYoloRow(deviceGroup, QStringLiteral("rect"), yoloBoolComboBox(QStringLiteral("rect")));
+    addYoloRow(deviceGroup, QStringLiteral("multi_scale"), yoloArgLineEdit(QStringLiteral("multi_scale"), QStringLiteral("0.5")));
+    addYoloRow(deviceGroup, QStringLiteral("single_cls"), yoloBoolComboBox(QStringLiteral("single_cls")));
+    addYoloRow(deviceGroup, QStringLiteral("classes"), yoloArgLineEdit(QStringLiteral("classes"), QStringLiteral("0,1,2")));
+    addYoloRow(deviceGroup, QStringLiteral("freeze"), yoloArgLineEdit(QStringLiteral("freeze"), QStringLiteral("10 或 0,1,2")));
+
+    auto* optimizerGroup = yoloArgGroup(QStringLiteral("优化器与学习率"));
+    addYoloRow(optimizerGroup, QStringLiteral("optimizer"), yoloArgComboBox(QStringLiteral("optimizer"), {
+        {QStringLiteral("auto"), QStringLiteral("auto")},
+        {QStringLiteral("SGD"), QStringLiteral("SGD")},
+        {QStringLiteral("Adam"), QStringLiteral("Adam")},
+        {QStringLiteral("AdamW"), QStringLiteral("AdamW")},
+        {QStringLiteral("RMSProp"), QStringLiteral("RMSProp")}
+    }));
+    addYoloRow(optimizerGroup, QStringLiteral("lr0"), yoloArgLineEdit(QStringLiteral("lr0"), QStringLiteral("0.01")));
+    addYoloRow(optimizerGroup, QStringLiteral("lrf"), yoloArgLineEdit(QStringLiteral("lrf"), QStringLiteral("0.01")));
+    addYoloRow(optimizerGroup, QStringLiteral("momentum"), yoloArgLineEdit(QStringLiteral("momentum"), QStringLiteral("0.937")));
+    addYoloRow(optimizerGroup, QStringLiteral("weight_decay"), yoloArgLineEdit(QStringLiteral("weight_decay"), QStringLiteral("0.0005")));
+    addYoloRow(optimizerGroup, QStringLiteral("warmup_epochs"), yoloArgLineEdit(QStringLiteral("warmup_epochs"), QStringLiteral("3.0")));
+    addYoloRow(optimizerGroup, QStringLiteral("cos_lr"), yoloBoolComboBox(QStringLiteral("cos_lr")));
+    addYoloRow(optimizerGroup, QStringLiteral("box"), yoloArgLineEdit(QStringLiteral("box"), QStringLiteral("7.5")));
+    addYoloRow(optimizerGroup, QStringLiteral("cls"), yoloArgLineEdit(QStringLiteral("cls"), QStringLiteral("0.5")));
+    addYoloRow(optimizerGroup, QStringLiteral("dfl"), yoloArgLineEdit(QStringLiteral("dfl"), QStringLiteral("1.5")));
+    addYoloRow(optimizerGroup, QStringLiteral("nbs"), yoloArgLineEdit(QStringLiteral("nbs"), QStringLiteral("64")));
+
+    auto* augmentGroup = yoloArgGroup(QStringLiteral("增强"));
+    for (const QString& key : {
+             QStringLiteral("hsv_h"), QStringLiteral("hsv_s"), QStringLiteral("hsv_v"),
+             QStringLiteral("degrees"), QStringLiteral("translate"), QStringLiteral("scale"),
+             QStringLiteral("shear"), QStringLiteral("perspective"), QStringLiteral("flipud"),
+             QStringLiteral("fliplr"), QStringLiteral("mosaic"), QStringLiteral("mixup"),
+             QStringLiteral("cutmix"), QStringLiteral("copy_paste"), QStringLiteral("close_mosaic")}) {
+        addYoloRow(augmentGroup, key, yoloArgLineEdit(key));
+    }
+
+    auto* segmentationGroup = yoloArgGroup(QStringLiteral("分割专属"));
+    addYoloRow(segmentationGroup, QStringLiteral("copy_paste_mode"), yoloArgComboBox(QStringLiteral("copy_paste_mode"), {
+        {QStringLiteral("flip"), QStringLiteral("flip")},
+        {QStringLiteral("mixup"), QStringLiteral("mixup")}
+    }));
+    addYoloRow(segmentationGroup, QStringLiteral("overlap_mask"), yoloBoolComboBox(QStringLiteral("overlap_mask")));
+    addYoloRow(segmentationGroup, QStringLiteral("mask_ratio"), yoloArgLineEdit(QStringLiteral("mask_ratio"), QStringLiteral("4")));
+
+    auto* validationGroup = yoloArgGroup(QStringLiteral("验证与导出"));
+    addYoloRow(validationGroup, QStringLiteral("val"), yoloBoolComboBox(QStringLiteral("val")));
+    addYoloRow(validationGroup, QStringLiteral("plots"), yoloBoolComboBox(QStringLiteral("plots")));
+    addYoloRow(validationGroup, QStringLiteral("max_det"), yoloArgLineEdit(QStringLiteral("max_det"), QStringLiteral("300")));
+    addYoloRow(validationGroup, QStringLiteral("patience"), yoloArgLineEdit(QStringLiteral("patience"), QStringLiteral("100")));
+
+    root->addWidget(deviceGroup);
+    root->addWidget(optimizerGroup);
+    root->addWidget(augmentGroup);
+    root->addWidget(segmentationGroup);
+    root->addWidget(validationGroup);
+    return container;
+}
+} // namespace
 
 QLabel* MainWindow::trainingLiveValueLabel(const QString& objectName) const
 {
@@ -183,6 +320,12 @@ QWidget* MainWindow::buildTrainingPage()
     form->addRow(QStringLiteral("Batch Size"), batchEdit_);
     form->addRow(QStringLiteral("Image Size"), imageSizeEdit_);
     setupPanel->bodyLayout()->addLayout(form);
+    auto* yoloOfficialArgsGroup = new QGroupBox(QStringLiteral("YOLO 官方高级参数"));
+    auto* yoloOfficialArgsLayout = new QVBoxLayout(yoloOfficialArgsGroup);
+    yoloOfficialArgsLayout->setContentsMargins(10, 8, 10, 8);
+    yoloOfficialArgsLayout->setSpacing(8);
+    yoloOfficialArgsLayout->addWidget(buildYoloOfficialArgsPanel());
+    setupPanel->bodyLayout()->addWidget(yoloOfficialArgsGroup);
     setupPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("当前模型能力说明")));
     setupPanel->bodyLayout()->addWidget(trainingBackendHintLabel_);
 

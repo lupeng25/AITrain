@@ -28,7 +28,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 - 检测和分割优先评估 Ultralytics YOLO；OCR Det / Rec / System 优先评估 PaddleOCR / PaddlePaddle 官方工具链。
 - 官方后端必须显式记录来源、版本和许可证约束。
 - C++ 侧继续负责 GUI、Worker 编排、数据集校验、SQLite、ONNX Runtime/TensorRT 推理、打包和部署。
-- YOLO 检测/分割的产品边界是“官方 Ultralytics 训练/ONNX 导出 + AITrain C++ runtime 推理/评估/benchmark/部署验证”，不是 OCR 那种端到端 official-only。
+- YOLO 检测/分割的产品边界是“官方 Ultralytics 训练/ONNX 导出/`val()` 评估 + AITrain C++ runtime 推理/benchmark/部署验证”，不是 OCR 那种端到端 official-only。
 - 不把 Python 嵌入 `MainWindow` 或 GUI 进程。
 - 旧的 C++ tiny/scaffold 训练实现已物理删除；生产训练只通过官方后端。
 
@@ -47,7 +47,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 - 插件接口和三个内置插件骨架。
 - 数据集校验初版。
 - 数据集转换 GUI 入口：已实现 COCO/VOC/YOLO 转换矩阵的 Worker 编排、表单预检、进度/日志/取消和结果展示；转换产物不自动登记为数据集。
-- 官方 Ultralytics YOLO detection 训练和 ONNX 导出；ONNX Runtime 推理、overlay、评估和部署验证由 AITrain C++ runtime 执行。
+- 官方 Ultralytics YOLO detection 训练、ONNX 导出和 `val()` 评估；ONNX Runtime 推理、overlay、benchmark 和部署验证由 AITrain C++ runtime 执行。
 - YOLO 分割官方训练与数据闭环：
   - `SegmentationDataset`
   - `SegmentationDataLoader`

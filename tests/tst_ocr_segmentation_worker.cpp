@@ -343,6 +343,84 @@ private slots:
         QVERIFY2(sawMixedProgress, "Worker dropped the JSON progress event embedded after a progress redraw.");
     }
 
+    void workerRunsOfficialYoloEvaluationAdapter()
+    {
+        const QString python = pythonExecutablePath();
+        if (python.isEmpty()) {
+            QSKIP("Python executable is not available.");
+        }
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString datasetRoot = dir.filePath(QStringLiteral("dataset"));
+        writeTinyDetectionDataset(datasetRoot);
+        const QString fakePackageRoot = dir.filePath(QStringLiteral("fake_ultralytics"));
+        QVERIFY(QDir().mkpath(fakePackageRoot));
+        writeFakeUltralyticsPackage(fakePackageRoot);
+        const QString modelPath = dir.filePath(QStringLiteral("best.pt"));
+        writeTextFile(modelPath, QStringLiteral("fake checkpoint\n"));
+        const QString outputPath = dir.filePath(QStringLiteral("evaluation"));
+
+        QJsonObject options;
+        options.insert(QStringLiteral("pythonExecutable"), python);
+        options.insert(QStringLiteral("pythonPathPrepend"), fakePackageRoot);
+        options.insert(QStringLiteral("ultralyticsValArgs"), QJsonObject{
+            {QStringLiteral("split"), QStringLiteral("val")},
+            {QStringLiteral("plots"), true},
+            {QStringLiteral("save_json"), true}
+        });
+
+        WorkerClient client;
+        QVector<QPair<QString, QJsonObject>> messages;
+        bool finished = false;
+        bool ok = false;
+        QString finishedMessage;
+        connect(&client, &WorkerClient::messageReceived, this, [&messages](const QString& type, const QJsonObject& payload) {
+            messages.append(qMakePair(type, payload));
+        });
+        connect(&client, &WorkerClient::finished, this, [&finished, &ok, &finishedMessage](bool result, const QString& message) {
+            finished = true;
+            ok = result;
+            finishedMessage = message;
+        });
+
+        QString error;
+        QVERIFY2(client.requestModelEvaluation(
+            workerExecutablePath(),
+            modelPath,
+            datasetRoot,
+            outputPath,
+            QStringLiteral("detection"),
+            options,
+            &error,
+            QStringLiteral("official-yolo-eval-fixture")), qPrintable(error));
+        QTRY_VERIFY2_WITH_TIMEOUT(finished, qPrintable(finishedMessage), 60000);
+        QVERIFY2(ok, qPrintable(finishedMessage));
+        QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
+
+        const QString reportPath = QDir(outputPath).filePath(QStringLiteral("evaluation_report.json"));
+        const QJsonObject report = readJsonObject(reportPath);
+        QCOMPARE(report.value(QStringLiteral("evaluationSource")).toString(), QStringLiteral("ultralytics_official_val"));
+        QCOMPARE(report.value(QStringLiteral("runtime")).toString(), QStringLiteral("ultralytics_official_val"));
+        QVERIFY(report.value(QStringLiteral("metrics")).toObject().contains(QStringLiteral("mAP50")));
+        QVERIFY(!report.value(QStringLiteral("metrics")).toObject().contains(QStringLiteral("cocoMap50_95")));
+        QVERIFY(QFileInfo::exists(report.value(QStringLiteral("officialMetricsPath")).toString()));
+
+        bool sawOfficialMetrics = false;
+        bool sawEvaluationReport = false;
+        for (const auto& message : messages) {
+            if (message.first != QStringLiteral("artifact")) {
+                continue;
+            }
+            sawEvaluationReport = sawEvaluationReport
+                || message.second.value(QStringLiteral("kind")).toString() == QStringLiteral("evaluation_report");
+            sawOfficialMetrics = sawOfficialMetrics
+                || message.second.value(QStringLiteral("kind")).toString() == QStringLiteral("official_metrics");
+        }
+        QVERIFY(sawEvaluationReport);
+        QVERIFY(sawOfficialMetrics);
+    }
+
     void workerRunsPaddleOcrRecOfficialAdapterPrepareOnly()
     {
         const QString python = pythonExecutablePath();

@@ -12,6 +12,7 @@
 #include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
+#include <QComboBox>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
@@ -36,6 +37,7 @@
 #include <QRegularExpression>
 #include <QScrollArea>
 #include <QSettings>
+#include <QSet>
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSplitter>
@@ -52,6 +54,141 @@
 #include <QUuid>
 
 using namespace aitrain_app;
+
+namespace {
+QString yoloArgObjectName(const QString& key)
+{
+    return QStringLiteral("YoloTrainArg_%1").arg(key);
+}
+
+QString yoloTrainArgText(const QWidget* root, const QString& key)
+{
+    if (!root) {
+        return {};
+    }
+    if (const auto* edit = root->findChild<QLineEdit*>(yoloArgObjectName(key))) {
+        return edit->text().trimmed();
+    }
+    if (const auto* combo = root->findChild<QComboBox*>(yoloArgObjectName(key))) {
+        const QString value = combo->currentData().toString().trimmed();
+        return value.isEmpty() ? combo->currentText().trimmed() : value;
+    }
+    return {};
+}
+
+bool isIntegerLike(const QString& text)
+{
+    bool ok = false;
+    text.toInt(&ok);
+    return ok;
+}
+
+bool isNumberLike(const QString& text)
+{
+    bool ok = false;
+    text.toDouble(&ok);
+    return ok;
+}
+
+QJsonValue yoloTrainArgJsonValue(const QString& key, const QString& text)
+{
+    const QString normalized = text.trimmed();
+    if (normalized.isEmpty() || normalized == QStringLiteral("默认")) {
+        return QJsonValue();
+    }
+    const QSet<QString> boolKeys = {
+        QStringLiteral("cos_lr"), QStringLiteral("amp"), QStringLiteral("deterministic"),
+        QStringLiteral("resume"), QStringLiteral("rect"), QStringLiteral("single_cls"),
+        QStringLiteral("val"), QStringLiteral("plots"), QStringLiteral("overlap_mask")
+    };
+    if (boolKeys.contains(key)) {
+        const QString lower = normalized.toLower();
+        if (lower == QStringLiteral("true") || lower == QStringLiteral("1") || lower == QStringLiteral("yes")) {
+            return true;
+        }
+        if (lower == QStringLiteral("false") || lower == QStringLiteral("0") || lower == QStringLiteral("no")) {
+            return false;
+        }
+    }
+    if (key == QStringLiteral("classes")) {
+        QJsonArray values;
+        for (const QString& part : normalized.split(QLatin1Char(','), QString::SkipEmptyParts)) {
+            bool ok = false;
+            const int value = part.trimmed().toInt(&ok);
+            if (ok) {
+                values.append(value);
+            }
+        }
+        return values;
+    }
+    if (key == QStringLiteral("freeze") && normalized.contains(QLatin1Char(','))) {
+        QJsonArray values;
+        for (const QString& part : normalized.split(QLatin1Char(','), QString::SkipEmptyParts)) {
+            bool ok = false;
+            const int value = part.trimmed().toInt(&ok);
+            if (ok) {
+                values.append(value);
+            }
+        }
+        return values;
+    }
+    const QSet<QString> intKeys = {
+        QStringLiteral("workers"), QStringLiteral("patience"), QStringLiteral("save_period"),
+        QStringLiteral("freeze"), QStringLiteral("nbs"), QStringLiteral("max_det"),
+        QStringLiteral("close_mosaic"), QStringLiteral("mask_ratio")
+    };
+    if (intKeys.contains(key) && isIntegerLike(normalized)) {
+        return normalized.toInt();
+    }
+    const QSet<QString> numericKeys = {
+        QStringLiteral("lr0"), QStringLiteral("lrf"), QStringLiteral("momentum"),
+        QStringLiteral("weight_decay"), QStringLiteral("warmup_epochs"), QStringLiteral("warmup_momentum"),
+        QStringLiteral("warmup_bias_lr"), QStringLiteral("fraction"), QStringLiteral("multi_scale"),
+        QStringLiteral("box"), QStringLiteral("cls"), QStringLiteral("dfl"), QStringLiteral("hsv_h"),
+        QStringLiteral("hsv_s"), QStringLiteral("hsv_v"), QStringLiteral("degrees"), QStringLiteral("translate"),
+        QStringLiteral("scale"), QStringLiteral("shear"), QStringLiteral("perspective"), QStringLiteral("flipud"),
+        QStringLiteral("fliplr"), QStringLiteral("mosaic"), QStringLiteral("mixup"), QStringLiteral("cutmix"),
+        QStringLiteral("copy_paste")
+    };
+    if (numericKeys.contains(key) && isNumberLike(normalized)) {
+        return normalized.toDouble();
+    }
+    if (normalized == QStringLiteral("true")) {
+        return true;
+    }
+    if (normalized == QStringLiteral("false")) {
+        return false;
+    }
+    return normalized;
+}
+
+QJsonObject yoloTrainArgsFromUi(const QWidget* root)
+{
+    const QStringList keys = {
+        QStringLiteral("device"), QStringLiteral("workers"), QStringLiteral("patience"), QStringLiteral("optimizer"),
+        QStringLiteral("lr0"), QStringLiteral("lrf"), QStringLiteral("momentum"), QStringLiteral("weight_decay"),
+        QStringLiteral("warmup_epochs"), QStringLiteral("cos_lr"), QStringLiteral("amp"), QStringLiteral("deterministic"),
+        QStringLiteral("cache"), QStringLiteral("pretrained"), QStringLiteral("resume"), QStringLiteral("save_period"),
+        QStringLiteral("fraction"), QStringLiteral("rect"), QStringLiteral("multi_scale"), QStringLiteral("single_cls"),
+        QStringLiteral("classes"), QStringLiteral("freeze"), QStringLiteral("box"), QStringLiteral("cls"),
+        QStringLiteral("dfl"), QStringLiteral("nbs"), QStringLiteral("val"), QStringLiteral("plots"),
+        QStringLiteral("max_det"), QStringLiteral("hsv_h"), QStringLiteral("hsv_s"), QStringLiteral("hsv_v"),
+        QStringLiteral("degrees"), QStringLiteral("translate"), QStringLiteral("scale"), QStringLiteral("shear"),
+        QStringLiteral("perspective"), QStringLiteral("flipud"), QStringLiteral("fliplr"), QStringLiteral("mosaic"),
+        QStringLiteral("mixup"), QStringLiteral("cutmix"), QStringLiteral("copy_paste"), QStringLiteral("copy_paste_mode"),
+        QStringLiteral("close_mosaic"), QStringLiteral("overlap_mask"), QStringLiteral("mask_ratio")
+    };
+    QJsonObject args;
+    for (const QString& key : keys) {
+        const QString text = yoloTrainArgText(root, key);
+        const QJsonValue value = yoloTrainArgJsonValue(key, text);
+        if (!value.isUndefined() && !value.isNull()) {
+            args.insert(key, value);
+        }
+    }
+    return args;
+}
+} // namespace
 
 void MainWindow::startModelExport()
 {
@@ -199,7 +336,8 @@ void MainWindow::startTraining()
     parameters.insert(QStringLiteral("batchSize"), batchEdit_->text().toInt());
     parameters.insert(QStringLiteral("imageSize"), imageSizeEdit_->text().toInt());
     parameters.insert(QStringLiteral("gridSize"), gridSizeEdit_->text().toInt());
-    parameters.insert(QStringLiteral("seed"), 42);
+    const QString yoloSeedText = yoloTrainArgText(this, QStringLiteral("seed"));
+    parameters.insert(QStringLiteral("seed"), yoloSeedText.isEmpty() ? 42 : yoloSeedText.toInt());
     parameters.insert(QStringLiteral("resumeCheckpointPath"), QDir::fromNativeSeparators(resumeCheckpointEdit_->text().trimmed()));
     parameters.insert(QStringLiteral("horizontalFlip"), horizontalFlipCheck_ && horizontalFlipCheck_->isChecked());
     parameters.insert(QStringLiteral("colorJitter"), colorJitterCheck_ && colorJitterCheck_->isChecked());
@@ -239,6 +377,15 @@ void MainWindow::startTraining()
         return;
     }
     parameters.insert(QStringLiteral("trainingBackend"), backendForRequest);
+    if (backendForRequest.startsWith(QStringLiteral("ultralytics_yolo"))) {
+        QJsonObject yoloArgs = yoloTrainArgsFromUi(this);
+        if ((horizontalFlipCheck_ && horizontalFlipCheck_->isChecked()) && !yoloArgs.contains(QStringLiteral("fliplr"))) {
+            yoloArgs.insert(QStringLiteral("fliplr"), 0.5);
+        }
+        if (!yoloArgs.isEmpty()) {
+            parameters.insert(QStringLiteral("ultralyticsTrainArgs"), yoloArgs);
+        }
+    }
     if (backendForRequest == QStringLiteral("paddleocr_det_official")
         || backendForRequest == QStringLiteral("paddleocr_rec_official")
         || backendForRequest == QStringLiteral("paddleocr_ppocrv4_rec")) {

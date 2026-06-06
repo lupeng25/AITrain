@@ -121,9 +121,10 @@ QString inferredTaskTypeFromMetrics(const QJsonObject& metrics)
 QString primaryMetricName(const QJsonObject& metrics, bool* lowerIsBetter)
 {
     const QVector<QPair<QString, bool>> ordered = {
+        {QStringLiteral("maskMap50"), false},
+        {QStringLiteral("maskMap50_95"), false},
         {QStringLiteral("mAP50"), false},
         {QStringLiteral("mAP50_95"), false},
-        {QStringLiteral("maskMap50"), false},
         {QStringLiteral("maskIoU"), false},
         {QStringLiteral("accuracy"), false},
         {QStringLiteral("precision"), false},

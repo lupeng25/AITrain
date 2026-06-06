@@ -9,8 +9,12 @@ ROOT = Path(__file__).resolve().parents[1]
 TRAINER_DIR = ROOT / "python_trainers" / "detection"
 if str(TRAINER_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINER_DIR))
+YOLO_DIR = ROOT / "python_trainers" / "yolo"
+if str(YOLO_DIR) not in sys.path:
+    sys.path.insert(0, str(YOLO_DIR))
 
 import ultralytics_trainer as trainer  # noqa: E402
+import ultralytics_evaluator as evaluator  # noqa: E402
 
 
 class FakeModel:
@@ -78,6 +82,96 @@ def test_yolo_callbacks_emit_structured_progress_and_epoch_metrics() -> None:
     assert sum(1 for item in metrics if item["name"] == "mAP50" and item["epoch"] == 1) == 1
 
 
+def test_ultralytics_train_args_are_sanitized_and_merged() -> None:
+    kwargs = trainer.build_ultralytics_train_kwargs(
+        {
+            "trainingBackend": "ultralytics_yolo_detect",
+            "epochs": 3,
+            "batchSize": 2,
+            "imageSize": 128,
+            "seed": 42,
+            "ultralyticsTrainArgs": {
+                "device": "cpu",
+                "optimizer": "AdamW",
+                "lr0": "0.002",
+                "classes": "0, 2",
+                "copy_paste": "0.5",
+            },
+        },
+        Path("data.yaml"),
+        Path("runs"),
+        "ultralytics_yolo_detect",
+    )
+
+    assert kwargs["epochs"] == 3
+    assert kwargs["batch"] == 2
+    assert kwargs["imgsz"] == 128
+    assert kwargs["seed"] == 42
+    assert kwargs["optimizer"] == "AdamW"
+    assert kwargs["lr0"] == 0.002
+    assert kwargs["classes"] == [0, 2]
+    assert "copy_paste" not in kwargs
+
+
+def test_ultralytics_segment_args_allow_mask_parameters() -> None:
+    kwargs = trainer.build_ultralytics_train_kwargs(
+        {
+            "trainingBackend": "ultralytics_yolo_segment",
+            "ultralyticsTrainArgs": {
+                "copy_paste": "0.5",
+                "overlap_mask": "false",
+                "mask_ratio": "4",
+            },
+        },
+        Path("data.yaml"),
+        Path("runs"),
+        "ultralytics_yolo_segment",
+    )
+
+    assert kwargs["copy_paste"] == 0.5
+    assert kwargs["overlap_mask"] is False
+    assert kwargs["mask_ratio"] == 4
+
+
+def test_ultralytics_train_args_reject_unknown_keys() -> None:
+    try:
+        trainer.build_ultralytics_train_kwargs(
+            {"ultralyticsTrainArgs": {"unknown_arg": 1}},
+            Path("data.yaml"),
+            Path("runs"),
+            "ultralytics_yolo_detect",
+        )
+    except ValueError as exc:
+        assert "unknown_arg" in str(exc)
+    else:
+        raise AssertionError("unknown Ultralytics train argument was accepted")
+
+
+def test_official_val_metric_extraction_detection_and_segmentation() -> None:
+    raw = {
+        "metrics/precision(B)": 0.8,
+        "metrics/recall(B)": 0.7,
+        "metrics/mAP50(B)": 0.6,
+        "metrics/mAP50-95(B)": 0.5,
+        "metrics/precision(M)": 0.55,
+        "metrics/recall(M)": 0.45,
+        "metrics/mAP50(M)": 0.35,
+        "metrics/mAP50-95(M)": 0.25,
+    }
+
+    detection = evaluator.extract_metrics(raw, "detection")
+    segmentation = evaluator.extract_metrics(raw, "segmentation")
+
+    assert detection["mAP50"] == 0.6
+    assert detection["mAP50_95"] == 0.5
+    assert segmentation["maskMap50"] == 0.35
+    assert segmentation["maskMap50_95"] == 0.25
+
+
 if __name__ == "__main__":
     test_sanitize_log_line_removes_ansi_tqdm_noise()
     test_yolo_callbacks_emit_structured_progress_and_epoch_metrics()
+    test_ultralytics_train_args_are_sanitized_and_merged()
+    test_ultralytics_segment_args_allow_mask_parameters()
+    test_ultralytics_train_args_reject_unknown_keys()
+    test_official_val_metric_extraction_detection_and_segmentation()

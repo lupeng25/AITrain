@@ -86,6 +86,244 @@ def as_bool(value: Any, default: bool) -> bool:
     return bool(value)
 
 
+def as_float(value: Any, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if math.isfinite(parsed) else default
+
+
+def parse_bool_arg(name: str, value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    raise ValueError(f"Ultralytics argument '{name}' must be a boolean")
+
+
+def parse_int_arg(name: str, value: Any, minimum: int | None = None) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"Ultralytics argument '{name}' must be an integer") from None
+    if minimum is not None and parsed < minimum:
+        raise ValueError(f"Ultralytics argument '{name}' must be >= {minimum}")
+    return parsed
+
+
+def parse_float_arg(name: str, value: Any, minimum: float | None = None, maximum: float | None = None) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"Ultralytics argument '{name}' must be numeric") from None
+    if not math.isfinite(parsed):
+        raise ValueError(f"Ultralytics argument '{name}' must be finite")
+    if minimum is not None and parsed < minimum:
+        raise ValueError(f"Ultralytics argument '{name}' must be >= {minimum}")
+    if maximum is not None and parsed > maximum:
+        raise ValueError(f"Ultralytics argument '{name}' must be <= {maximum}")
+    return parsed
+
+
+def parse_list_arg(name: str, value: Any, item_type: str = "int") -> list[Any]:
+    items: list[Any]
+    if isinstance(value, list):
+        items = list(value)
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        if text.startswith("["):
+            try:
+                loaded = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"Ultralytics argument '{name}' must be a JSON array or comma-separated list") from exc
+            if not isinstance(loaded, list):
+                raise ValueError(f"Ultralytics argument '{name}' must be a list")
+            items = loaded
+        else:
+            items = [part.strip() for part in text.split(",") if part.strip()]
+    else:
+        raise ValueError(f"Ultralytics argument '{name}' must be a list")
+
+    if item_type == "int":
+        return [parse_int_arg(name, item) for item in items]
+    return [str(item) for item in items]
+
+
+def parse_freeze_arg(name: str, value: Any) -> int | list[int] | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, list):
+        return [parse_int_arg(name, item, 0) for item in value]
+    if isinstance(value, str) and "," in value:
+        return [parse_int_arg(name, item.strip(), 0) for item in value.split(",") if item.strip()]
+    return parse_int_arg(name, value, 0)
+
+
+TRAIN_ARG_TYPES: dict[str, str] = {
+    "device": "str",
+    "workers": "int_nonnegative",
+    "patience": "int_nonnegative",
+    "optimizer": "str",
+    "lr0": "float_nonnegative",
+    "lrf": "float_nonnegative",
+    "momentum": "float_nonnegative",
+    "weight_decay": "float_nonnegative",
+    "warmup_epochs": "float_nonnegative",
+    "warmup_momentum": "float_nonnegative",
+    "warmup_bias_lr": "float_nonnegative",
+    "cos_lr": "bool",
+    "amp": "bool",
+    "deterministic": "bool",
+    "cache": "cache",
+    "pretrained": "bool_or_str",
+    "resume": "bool",
+    "save_period": "int",
+    "fraction": "float_0_1",
+    "rect": "bool",
+    "multi_scale": "float_nonnegative",
+    "single_cls": "bool",
+    "classes": "int_list",
+    "freeze": "freeze",
+    "box": "float_nonnegative",
+    "cls": "float_nonnegative",
+    "dfl": "float_nonnegative",
+    "nbs": "int_positive",
+    "val": "bool",
+    "plots": "bool",
+    "max_det": "int_positive",
+    "hsv_h": "float_0_1",
+    "hsv_s": "float_0_1",
+    "hsv_v": "float_0_1",
+    "degrees": "float_nonnegative",
+    "translate": "float_0_1",
+    "scale": "float_nonnegative",
+    "shear": "float",
+    "perspective": "float_nonnegative",
+    "flipud": "float_0_1",
+    "fliplr": "float_0_1",
+    "mosaic": "float_0_1",
+    "mixup": "float_0_1",
+    "cutmix": "float_0_1",
+    "copy_paste": "float_0_1",
+    "copy_paste_mode": "str",
+    "close_mosaic": "int_nonnegative",
+    "overlap_mask": "bool",
+    "mask_ratio": "int_positive",
+}
+
+
+SEGMENT_ONLY_TRAIN_ARGS = {"copy_paste", "copy_paste_mode", "overlap_mask", "mask_ratio"}
+
+
+def coerce_train_arg(name: str, value: Any) -> Any:
+    kind = TRAIN_ARG_TYPES[name]
+    if kind == "str":
+        return str(value)
+    if kind == "bool":
+        return parse_bool_arg(name, value)
+    if kind == "int":
+        return parse_int_arg(name, value)
+    if kind == "int_nonnegative":
+        return parse_int_arg(name, value, 0)
+    if kind == "int_positive":
+        return parse_int_arg(name, value, 1)
+    if kind == "float":
+        return parse_float_arg(name, value)
+    if kind == "float_nonnegative":
+        return parse_float_arg(name, value, 0.0)
+    if kind == "float_0_1":
+        return parse_float_arg(name, value, 0.0, 1.0)
+    if kind == "int_list":
+        return parse_list_arg(name, value, "int")
+    if kind == "freeze":
+        return parse_freeze_arg(name, value)
+    if kind == "cache":
+        if isinstance(value, bool):
+            return value
+        text = str(value).strip().lower()
+        if text in {"", "false", "0", "none", "off"}:
+            return False
+        if text in {"true", "1", "on", "yes"}:
+            return True
+        if text in {"ram", "disk"}:
+            return text
+        raise ValueError("Ultralytics argument 'cache' must be false, true, ram, or disk")
+    if kind == "bool_or_str":
+        if isinstance(value, bool):
+            return value
+        text = str(value).strip()
+        lower = text.lower()
+        if lower in {"true", "1", "yes", "on"}:
+            return True
+        if lower in {"false", "0", "no", "off"}:
+            return False
+        return text
+    raise ValueError(f"Unsupported Ultralytics argument schema for '{name}'")
+
+
+def sanitized_ultralytics_train_args(parameters: dict[str, Any], backend: str) -> dict[str, Any]:
+    raw_args = parameters.get("ultralyticsTrainArgs")
+    if raw_args is None:
+        raw_args = {}
+    if not isinstance(raw_args, dict):
+        raise ValueError("parameters.ultralyticsTrainArgs must be a JSON object")
+
+    normalized_backend = backend.strip().lower()
+    is_segment = normalized_backend == "ultralytics_yolo_segment"
+    result: dict[str, Any] = {}
+    for name, value in raw_args.items():
+        key = str(name).strip()
+        if not key:
+            continue
+        if key not in TRAIN_ARG_TYPES:
+            raise ValueError(f"Unsupported Ultralytics train argument: {key}")
+        if key in SEGMENT_ONLY_TRAIN_ARGS and not is_segment:
+            continue
+        if value is None or value == "":
+            continue
+        coerced = coerce_train_arg(key, value)
+        if coerced is not None:
+            result[key] = coerced
+    return result
+
+
+def build_ultralytics_train_kwargs(
+    parameters: dict[str, Any],
+    data_yaml: Path | str,
+    project_dir: Path | str,
+    backend: str | None = None,
+) -> dict[str, Any]:
+    backend_id = backend or str(parameters.get("trainingBackend") or BACKEND_ID)
+    model_name = str(parameters.get("model") or "yolov8n.pt")
+    kwargs: dict[str, Any] = {
+        "data": str(data_yaml),
+        "epochs": as_int(parameters.get("epochs"), 1, 1),
+        "imgsz": as_int(parameters.get("imageSize", parameters.get("imgsz")), 320, 32),
+        "batch": as_int(parameters.get("batchSize", parameters.get("batch")), 1, 1),
+        "device": str(parameters.get("device") or "cpu"),
+        "workers": as_int(parameters.get("workers"), 0, 0),
+        "project": str(project_dir),
+        "name": str(parameters.get("runName") or f"aitrain-{int(time.time())}"),
+        "exist_ok": True,
+        "verbose": False,
+    }
+    if "seed" in parameters:
+        kwargs["seed"] = as_int(parameters.get("seed"), 0, 0)
+    advanced_args = sanitized_ultralytics_train_args(parameters, backend_id)
+    kwargs.update(advanced_args)
+    kwargs["modelName"] = model_name
+    return kwargs
+
+
 def yaml_scalar(value: str) -> str:
     escaped = value.replace("\\", "\\\\").replace("\"", "\\\"")
     return f"\"{escaped}\""
@@ -624,22 +862,24 @@ def run(request: dict[str, Any]) -> int:
         message=f"Using Ultralytics module: {getattr(ultralytics, '__file__', 'built-in')}",
     )
 
-    model_name = str(parameters.get("model") or "yolov8n.pt")
-    epochs = as_int(parameters.get("epochs"), 1, 1)
-    batch = as_int(parameters.get("batchSize", parameters.get("batch")), 1, 1)
-    image_size = as_int(parameters.get("imageSize", parameters.get("imgsz")), 320, 32)
-    workers = as_int(parameters.get("workers"), 0, 0)
-    device = str(parameters.get("device") or "cpu")
-    run_name = str(parameters.get("runName") or f"aitrain-{int(time.time())}")
+    try:
+        train_kwargs = build_ultralytics_train_kwargs(parameters, data_yaml, project_dir := output_path / "ultralytics_runs", BACKEND_ID)
+    except ValueError as exc:
+        return fail(str(exc), "ultralytics_train_args_invalid")
+
+    model_name = str(train_kwargs.pop("modelName"))
+    epochs = int(train_kwargs.get("epochs", 1))
+    image_size = int(train_kwargs.get("imgsz", 320))
+    device = str(train_kwargs.get("device") or "cpu")
+    run_name = str(train_kwargs.get("name") or f"aitrain-{int(time.time())}")
     export_onnx = as_bool(parameters.get("exportOnnx"), True)
     compact_events = as_bool(parameters.get("compactEvents"), False)
 
-    project_dir = output_path / "ultralytics_runs"
     emit(
         "log",
         backend=BACKEND_ID,
         level="info",
-        message=f"Starting official Ultralytics YOLO detection training: model={model_name}, epochs={epochs}, device={device}",
+        message=f"Starting official Ultralytics YOLO training: model={model_name}, epochs={epochs}, device={device}",
     )
     emit(
         "progress",
@@ -659,18 +899,7 @@ def run(request: dict[str, Any]) -> int:
     try:
         model = YOLO(model_name)
         callback_state = register_training_callbacks(model, epochs, device)
-        train_result = model.train(
-            data=str(data_yaml),
-            epochs=epochs,
-            imgsz=image_size,
-            batch=batch,
-            device=device,
-            workers=workers,
-            project=str(project_dir),
-            name=run_name,
-            exist_ok=True,
-            verbose=False,
-        )
+        train_result = model.train(**train_kwargs)
     except Exception as exc:
         return fail("Ultralytics training failed.", "ultralytics_train_failed", {"exception": str(exc)})
     emitted_artifacts = callback_state.setdefault("emittedArtifacts", set())
@@ -738,6 +967,7 @@ def run(request: dict[str, Any]) -> int:
         "checkpointPath": str(best_path if best_path.exists() else last_path),
         "onnxPath": str(onnx_path) if onnx_path else "",
         "metrics": metrics,
+        "ultralyticsTrainArgs": {key: value for key, value in train_kwargs.items() if key not in {"data", "project", "name"}},
         "licenseNote": "Ultralytics YOLO is executed through the installed official Python package. Review its license before redistribution.",
     }
     write_report(report_path, report)

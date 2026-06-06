@@ -465,7 +465,29 @@ void writeFakeUltralyticsPackage(const QString& root)
             "        output_path = model_path.with_suffix('.onnx') if model_path.suffix else Path('model.onnx')\n"
             "        output_path.parent.mkdir(parents=True, exist_ok=True)\n"
             "        output_path.write_text('fake onnx\\n', encoding='utf-8')\n"
-            "        return str(output_path)\n"));
+            "        return str(output_path)\n"
+            "\n"
+            "    def val(self, **kwargs):\n"
+            "        save_dir = Path(kwargs.get('project', 'runs')) / kwargs.get('name', 'val')\n"
+            "        save_dir.mkdir(parents=True, exist_ok=True)\n"
+            "        (save_dir / 'confusion_matrix.png').write_text('fake confusion\\n', encoding='utf-8')\n"
+            "        (save_dir / 'predictions.json').write_text('[]\\n', encoding='utf-8')\n"
+            "        class MetricGroup:\n"
+            "            maps = [0.54]\n"
+            "        return SimpleNamespace(\n"
+            "            save_dir=str(save_dir),\n"
+            "            box=MetricGroup(),\n"
+            "            seg=MetricGroup(),\n"
+            "            results_dict={\n"
+            "                'metrics/precision(B)': 0.81,\n"
+            "                'metrics/recall(B)': 0.72,\n"
+            "                'metrics/mAP50(B)': 0.63,\n"
+            "                'metrics/mAP50-95(B)': 0.54,\n"
+            "                'metrics/precision(M)': 0.71,\n"
+            "                'metrics/recall(M)': 0.62,\n"
+            "                'metrics/mAP50(M)': 0.53,\n"
+            "                'metrics/mAP50-95(M)': 0.44,\n"
+            "            })\n"));
 }
 
 } // namespace

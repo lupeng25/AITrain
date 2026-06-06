@@ -138,9 +138,9 @@ EvaluationReportView::EvaluationReportView(QWidget* parent)
     perClassTable_ = new QTableWidget(0, 8);
     perClassTable_->setHorizontalHeaderLabels(QStringList()
         << uiText("类别")
+        << uiText("来源")
         << QStringLiteral("GT")
-        << QStringLiteral("TP")
-        << QStringLiteral("FP")
+        << QStringLiteral("TP/FP")
         << QStringLiteral("FN")
         << uiText("Precision")
         << uiText("Recall")
@@ -353,15 +353,24 @@ void EvaluationReportView::populatePerClass(const QJsonObject& report)
         perClassTable_->insertRow(row);
         perClassTable_->setItem(row, 0, new QTableWidgetItem(item.value(QStringLiteral("className")).toString(
             QStringLiteral("class_%1").arg(item.value(QStringLiteral("classId")).toInt()))));
-        perClassTable_->setItem(row, 1, new QTableWidgetItem(QString::number(item.value(QStringLiteral("gt")).toInt())));
-        perClassTable_->setItem(row, 2, new QTableWidgetItem(QString::number(item.value(QStringLiteral("tp")).toInt())));
-        perClassTable_->setItem(row, 3, new QTableWidgetItem(QString::number(item.value(QStringLiteral("fp")).toInt())));
-        perClassTable_->setItem(row, 4, new QTableWidgetItem(QString::number(item.value(QStringLiteral("fn")).toInt())));
-        perClassTable_->setItem(row, 5, new QTableWidgetItem(formatNumber(item.value(QStringLiteral("precision")).toDouble())));
-        perClassTable_->setItem(row, 6, new QTableWidgetItem(formatNumber(item.value(QStringLiteral("recall")).toDouble())));
-        QString quality = item.contains(QStringLiteral("ap50"))
+        const bool official = item.value(QStringLiteral("official")).toBool(false);
+        perClassTable_->setItem(row, 1, new QTableWidgetItem(official ? QStringLiteral("Ultralytics") : QStringLiteral("AITrain")));
+        perClassTable_->setItem(row, 2, new QTableWidgetItem(item.contains(QStringLiteral("gt")) ? QString::number(item.value(QStringLiteral("gt")).toInt()) : QStringLiteral("-")));
+        const QString tpFpText = item.contains(QStringLiteral("tp")) || item.contains(QStringLiteral("fp"))
+            ? QStringLiteral("%1/%2").arg(item.value(QStringLiteral("tp")).toInt()).arg(item.value(QStringLiteral("fp")).toInt())
+            : QStringLiteral("-");
+        perClassTable_->setItem(row, 3, new QTableWidgetItem(tpFpText));
+        perClassTable_->setItem(row, 4, new QTableWidgetItem(item.contains(QStringLiteral("fn")) ? QString::number(item.value(QStringLiteral("fn")).toInt()) : QStringLiteral("-")));
+        perClassTable_->setItem(row, 5, new QTableWidgetItem(item.contains(QStringLiteral("precision")) ? formatNumber(item.value(QStringLiteral("precision")).toDouble()) : QStringLiteral("-")));
+        perClassTable_->setItem(row, 6, new QTableWidgetItem(item.contains(QStringLiteral("recall")) ? formatNumber(item.value(QStringLiteral("recall")).toDouble()) : QStringLiteral("-")));
+        QString quality = item.contains(QStringLiteral("mAP50_95"))
+            ? QStringLiteral("mAP50-95=%1").arg(formatNumber(item.value(QStringLiteral("mAP50_95")).toDouble()))
+            : item.contains(QStringLiteral("ap50"))
             ? QStringLiteral("AP50=%1").arg(formatNumber(item.value(QStringLiteral("ap50")).toDouble()))
             : QStringLiteral("maskAP50=%1").arg(formatNumber(item.value(QStringLiteral("maskAP50")).toDouble()));
+        if (item.contains(QStringLiteral("maskMap50_95"))) {
+            quality.append(QStringLiteral(" | mask mAP50-95=%1").arg(formatNumber(item.value(QStringLiteral("maskMap50_95")).toDouble())));
+        }
         if (item.contains(QStringLiteral("maskIoU"))) {
             quality.append(QStringLiteral(" | maskIoU=%1").arg(formatNumber(item.value(QStringLiteral("maskIoU")).toDouble())));
         }

@@ -395,10 +395,13 @@ void TaskArtifactPanel::previewArtifactPath(const QString& path)
                 lines << uiText("评估报告摘要");
                 lines << uiText("任务类型：%1").arg(report.value(QStringLiteral("taskType")).toString());
                 lines << uiText("真实评估：%1").arg(report.value(QStringLiteral("scaffold")).toBool() ? uiText("否，scaffold") : uiText("是"));
-                lines << uiText("precision=%1 recall=%2 mAP50=%3")
+                lines << uiText("来源：%1").arg(report.value(QStringLiteral("evaluationSource")).toString(report.value(QStringLiteral("runtime")).toString()));
+                const QString primaryMapKey = metrics.contains(QStringLiteral("maskMap50")) ? QStringLiteral("maskMap50") : QStringLiteral("mAP50");
+                lines << uiText("precision=%1 recall=%2 %3=%4")
                     .arg(metrics.value(QStringLiteral("precision")).toDouble(), 0, 'f', 4)
                     .arg(metrics.value(QStringLiteral("recall")).toDouble(), 0, 'f', 4)
-                    .arg(metrics.value(QStringLiteral("mAP50")).toDouble(), 0, 'f', 4);
+                    .arg(primaryMapKey)
+                    .arg(metrics.value(primaryMapKey).toDouble(), 0, 'f', 4);
                 lines << uiText("错误样本：%1；低置信样本：%2")
                     .arg(report.value(QStringLiteral("errorSamples")).toArray().size())
                     .arg(report.value(QStringLiteral("lowConfidenceSamples")).toArray().size());
