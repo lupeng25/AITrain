@@ -14,6 +14,7 @@
 #include <QLabel>
 #include <QPixmap>
 #include <QPlainTextEdit>
+#include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSplitter>
 #include <QTableWidget>
@@ -46,19 +47,6 @@ QJsonObject readJsonObjectFile(const QString& path)
     return document.object();
 }
 
-QStringList readCsvRows(const QString& path)
-{
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        return {};
-    }
-    QStringList rows;
-    while (!file.atEnd()) {
-        rows.append(QString::fromUtf8(file.readLine()).trimmed());
-    }
-    return rows;
-}
-
 QString taskTypeLabel(const QString& taskType)
 {
     if (taskType == QStringLiteral("detection")) {
@@ -77,6 +65,45 @@ QString taskTypeLabel(const QString& taskType)
         return uiText("OCR 端到端");
     }
     return taskType.isEmpty() ? uiText("未选择") : taskType;
+}
+
+bool isPreviewImagePath(const QString& path)
+{
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    return suffix == QStringLiteral("png")
+        || suffix == QStringLiteral("jpg")
+        || suffix == QStringLiteral("jpeg")
+        || suffix == QStringLiteral("bmp")
+        || suffix == QStringLiteral("webp");
+}
+
+QString artifactKindLabel(const QString& kind)
+{
+    if (kind == QStringLiteral("official_metrics")) {
+        return uiText("官方指标");
+    }
+    if (kind == QStringLiteral("official_run_dir")) {
+        return uiText("官方运行目录");
+    }
+    if (kind == QStringLiteral("official_log")) {
+        return uiText("官方日志");
+    }
+    if (kind == QStringLiteral("official_plot")) {
+        return uiText("官方图表");
+    }
+    if (kind == QStringLiteral("official_predictions")) {
+        return uiText("官方预测");
+    }
+    if (kind.startsWith(QStringLiteral("legacy_"))) {
+        return uiText("历史兼容");
+    }
+    return kind.isEmpty() ? uiText("官方产物") : kind;
+}
+
+bool isUltralyticsOfficialYoloReport(const QJsonObject& report)
+{
+    return report.value(QStringLiteral("evaluationSource")).toString() == QStringLiteral("ultralytics_official_val")
+        || report.value(QStringLiteral("runtime")).toString() == QStringLiteral("ultralytics_official_val");
 }
 
 QString jsonValueSummary(const QJsonValue& value)
@@ -165,57 +192,66 @@ EvaluationReportView::EvaluationReportView(QWidget* parent)
 
     auto* lowerSplitter = new QSplitter(Qt::Horizontal);
 
-    auto* confusionPanel = new InfoPanel(uiText("混淆矩阵"));
-    confusionTable_ = new QTableWidget(0, 0);
-    configureTable(confusionTable_, false);
-    confusionTable_->setMinimumHeight(240);
-    confusionTable_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    confusionPanel->bodyLayout()->addWidget(confusionTable_);
-    lowerSplitter->addWidget(confusionPanel);
+    auto* officialPanel = new InfoPanel(uiText("官方产物"));
+    officialArtifactsTable_ = new QTableWidget(0, 3);
+    officialArtifactsTable_->setHorizontalHeaderLabels(QStringList()
+        << uiText("类型")
+        << uiText("名称")
+        << uiText("路径"));
+    configureTable(officialArtifactsTable_);
+    officialArtifactsTable_->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    officialArtifactsTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    officialArtifactsTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    officialArtifactsTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    officialArtifactsTable_->setMinimumHeight(240);
+    officialArtifactsTable_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    connect(officialArtifactsTable_, &QTableWidget::itemSelectionChanged, this, &EvaluationReportView::updateArtifactPreview);
+    officialPanel->bodyLayout()->addWidget(officialArtifactsTable_);
+    lowerSplitter->addWidget(officialPanel);
 
-    auto* errorPanel = new InfoPanel(uiText("错误样本"));
-    errorTable_ = new QTableWidget(0, 5);
-    errorTable_->setHorizontalHeaderLabels(QStringList()
-        << uiText("原因")
+    auto* samplePanel = new InfoPanel(uiText("样本与预览"));
+    sampleTable_ = new QTableWidget(0, 5);
+    sampleTable_->setHorizontalHeaderLabels(QStringList()
+        << uiText("类型")
         << uiText("样本")
         << uiText("目标")
         << uiText("预测")
         << uiText("补充信息"));
-    configureTable(errorTable_);
-    errorTable_->setWordWrap(true);
-    errorTable_->verticalHeader()->setDefaultSectionSize(40);
-    errorTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    errorTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
-    errorTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    errorTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-    errorTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
-    errorTable_->setMinimumHeight(180);
-    errorTable_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    connect(errorTable_, &QTableWidget::itemSelectionChanged, this, &EvaluationReportView::updateErrorPreview);
+    configureTable(sampleTable_);
+    sampleTable_->setWordWrap(true);
+    sampleTable_->verticalHeader()->setDefaultSectionSize(40);
+    sampleTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    sampleTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    sampleTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    sampleTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    sampleTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
+    sampleTable_->setMinimumHeight(180);
+    sampleTable_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    connect(sampleTable_, &QTableWidget::itemSelectionChanged, this, &EvaluationReportView::updateSamplePreview);
 
     auto* previewSplitter = new QSplitter(Qt::Vertical);
-    overlayLabel_ = new QLabel(uiText("暂无 overlay 预览"));
-    overlayLabel_->setObjectName(QStringLiteral("MutedText"));
-    overlayLabel_->setAlignment(Qt::AlignCenter);
-    overlayLabel_->setMinimumHeight(180);
-    overlayLabel_->setFrameShape(QFrame::StyledPanel);
+    previewLabel_ = new QLabel(uiText("选择官方图表或样本 overlay 后显示预览。"));
+    previewLabel_->setObjectName(QStringLiteral("MutedText"));
+    previewLabel_->setAlignment(Qt::AlignCenter);
+    previewLabel_->setMinimumHeight(180);
+    previewLabel_->setFrameShape(QFrame::StyledPanel);
     detailText_ = new QPlainTextEdit;
     detailText_->setReadOnly(true);
-    detailText_->setPlainText(uiText("选择一个错误样本后显示详情。"));
-    previewSplitter->addWidget(overlayLabel_);
+    detailText_->setPlainText(uiText("选择官方产物或样本后显示详情。"));
+    previewSplitter->addWidget(previewLabel_);
     previewSplitter->addWidget(detailText_);
     previewSplitter->setStretchFactor(0, 2);
     previewSplitter->setStretchFactor(1, 1);
     previewSplitter->setChildrenCollapsible(false);
     previewSplitter->setSizes(QList<int>() << 220 << 120);
 
-    errorPanel->bodyLayout()->addWidget(errorTable_, 2);
-    errorPanel->bodyLayout()->addWidget(previewSplitter, 2);
-    lowerSplitter->addWidget(errorPanel);
+    samplePanel->bodyLayout()->addWidget(sampleTable_, 2);
+    samplePanel->bodyLayout()->addWidget(previewSplitter, 2);
+    lowerSplitter->addWidget(samplePanel);
     lowerSplitter->setStretchFactor(0, 1);
     lowerSplitter->setStretchFactor(1, 2);
     lowerSplitter->setChildrenCollapsible(false);
-    lowerSplitter->setSizes(QList<int>() << 360 << 620);
+    lowerSplitter->setSizes(QList<int>() << 420 << 620);
     root->addWidget(lowerSplitter, 2);
 
     clear();
@@ -224,19 +260,19 @@ EvaluationReportView::EvaluationReportView(QWidget* parent)
 void EvaluationReportView::clear()
 {
     currentReportPath_.clear();
-    rowOverlayPaths_.clear();
-    rowDetailTexts_.clear();
+    artifactPreviewPaths_.clear();
+    artifactDetailTexts_.clear();
+    samplePreviewPaths_.clear();
+    sampleDetailTexts_.clear();
     statusLabel_->setText(uiText("请选择一个评估报告。"));
     summaryLabel_->setText(uiText("暂无评估数据。"));
     metricsTable_->setRowCount(0);
     perClassTable_->setRowCount(0);
-    confusionTable_->clear();
-    confusionTable_->setRowCount(0);
-    confusionTable_->setColumnCount(0);
-    errorTable_->setRowCount(0);
-    overlayLabel_->clear();
-    overlayLabel_->setText(uiText("暂无 overlay 预览"));
-    detailText_->setPlainText(uiText("选择一个错误样本后显示详情。"));
+    officialArtifactsTable_->setRowCount(0);
+    sampleTable_->setRowCount(0);
+    previewLabel_->clear();
+    previewLabel_->setText(uiText("选择官方图表或样本 overlay 后显示预览。"));
+    detailText_->setPlainText(uiText("选择官方产物或样本后显示详情。"));
 }
 
 bool EvaluationReportView::loadReport(const QString& reportPath)
@@ -270,6 +306,14 @@ bool EvaluationReportView::loadReport(const QString& reportPath)
     if (report.contains(QStringLiteral("split"))) {
         summaryLines << uiText("数据划分：%1").arg(report.value(QStringLiteral("split")).toString());
     }
+    const QString evaluationSource = report.value(QStringLiteral("evaluationSource")).toString();
+    if (!evaluationSource.isEmpty()) {
+        summaryLines << uiText("评估来源：%1").arg(evaluationSource);
+    }
+    const QString officialRunDir = report.value(QStringLiteral("officialRunDir")).toString();
+    if (!officialRunDir.isEmpty()) {
+        summaryLines << uiText("官方运行目录：%1").arg(QDir::toNativeSeparators(officialRunDir));
+    }
     const QJsonValue limitations = report.value(QStringLiteral("limitations"));
     if (!limitations.isUndefined() && !limitations.isNull()) {
         summaryLines << uiText("限制说明：%1").arg(jsonValueSummary(limitations));
@@ -281,23 +325,41 @@ bool EvaluationReportView::loadReport(const QString& reportPath)
 
     populateMetrics(report);
     populatePerClass(report);
-    populateConfusion(report);
-    populateErrors(report);
+    populateSamples(report);
+    populateOfficialArtifacts(report);
     return true;
 }
 
-void EvaluationReportView::updateErrorPreview()
+void EvaluationReportView::updateArtifactPreview()
 {
-    if (errorTable_->selectedItems().isEmpty()) {
-        overlayLabel_->clear();
-        overlayLabel_->setText(uiText("暂无 overlay 预览"));
-        detailText_->setPlainText(uiText("选择一个错误样本后显示详情。"));
+    if (officialArtifactsTable_->selectedItems().isEmpty()) {
+        previewLabel_->clear();
+        previewLabel_->setText(uiText("选择官方图表或样本 overlay 后显示预览。"));
+        detailText_->setPlainText(uiText("选择官方产物或样本后显示详情。"));
         return;
     }
 
-    const int row = errorTable_->selectedItems().first()->row();
-    showOverlayImage(rowOverlayPaths_.value(row));
-    detailText_->setPlainText(rowDetailTexts_.value(row, uiText("该样本没有更多详情。")));
+    const int row = officialArtifactsTable_->selectedItems().first()->row();
+    QSignalBlocker sampleBlocker(sampleTable_);
+    sampleTable_->clearSelection();
+    showPreviewImage(artifactPreviewPaths_.value(row));
+    detailText_->setPlainText(artifactDetailTexts_.value(row, uiText("该官方产物没有更多详情。")));
+}
+
+void EvaluationReportView::updateSamplePreview()
+{
+    if (sampleTable_->selectedItems().isEmpty()) {
+        previewLabel_->clear();
+        previewLabel_->setText(uiText("选择官方图表或样本 overlay 后显示预览。"));
+        detailText_->setPlainText(uiText("选择官方产物或样本后显示详情。"));
+        return;
+    }
+
+    const int row = sampleTable_->selectedItems().first()->row();
+    QSignalBlocker artifactBlocker(officialArtifactsTable_);
+    officialArtifactsTable_->clearSelection();
+    showPreviewImage(samplePreviewPaths_.value(row));
+    detailText_->setPlainText(sampleDetailTexts_.value(row, uiText("该样本没有更多详情。")));
 }
 
 void EvaluationReportView::configureTable(QTableWidget* table, bool stretchLast) const
@@ -385,41 +447,70 @@ void EvaluationReportView::populatePerClass(const QJsonObject& report)
     perClassTable_->resizeColumnToContents(7);
 }
 
-void EvaluationReportView::populateConfusion(const QJsonObject& report)
+void EvaluationReportView::populateOfficialArtifacts(const QJsonObject& report)
 {
-    confusionTable_->clear();
-    const QString csvPath = report.value(QStringLiteral("confusionMatrixPath")).toString();
-    const QStringList rows = readCsvRows(csvPath);
-    if (rows.isEmpty()) {
-        confusionTable_->setRowCount(1);
-        confusionTable_->setColumnCount(1);
-        confusionTable_->setHorizontalHeaderLabels(QStringList() << uiText("矩阵"));
-        confusionTable_->setItem(0, 0, new QTableWidgetItem(uiText("暂无混淆矩阵")));
+    officialArtifactsTable_->setRowCount(0);
+    artifactPreviewPaths_.clear();
+    artifactDetailTexts_.clear();
+    QStringList seenPaths;
+
+    auto appendArtifact = [this, &seenPaths](const QString& kind, const QString& name, const QString& path) {
+        if (path.trimmed().isEmpty() || seenPaths.contains(path)) {
+            return;
+        }
+        seenPaths.append(path);
+        const QFileInfo info(path);
+        const int row = officialArtifactsTable_->rowCount();
+        officialArtifactsTable_->insertRow(row);
+        officialArtifactsTable_->setItem(row, 0, new QTableWidgetItem(artifactKindLabel(kind)));
+        officialArtifactsTable_->setItem(row, 1, new QTableWidgetItem(name.isEmpty() ? info.fileName() : name));
+        officialArtifactsTable_->setItem(row, 2, new QTableWidgetItem(QDir::toNativeSeparators(path)));
+        if (isPreviewImagePath(path)) {
+            artifactPreviewPaths_.insert(row, path);
+        }
+        artifactDetailTexts_.insert(row,
+            uiText("类型：%1\n名称：%2\n路径：%3")
+                .arg(artifactKindLabel(kind), name.isEmpty() ? info.fileName() : name, QDir::toNativeSeparators(path)));
+    };
+
+    appendArtifact(QStringLiteral("official_metrics"), QStringLiteral("ultralytics_official_metrics.json"), report.value(QStringLiteral("officialMetricsPath")).toString());
+    appendArtifact(QStringLiteral("official_run_dir"), uiText("Ultralytics official val"), report.value(QStringLiteral("officialRunDir")).toString());
+    appendArtifact(QStringLiteral("official_log"), QStringLiteral("ultralytics_official_val.log"), report.value(QStringLiteral("officialLogPath")).toString());
+    appendArtifact(QStringLiteral("evaluation_summary"), QStringLiteral("evaluation_summary.md"), report.value(QStringLiteral("evaluationSummaryPath")).toString());
+
+    const QJsonArray officialArtifacts = report.value(QStringLiteral("officialArtifacts")).toArray();
+    for (const QJsonValue& value : officialArtifacts) {
+        const QJsonObject artifact = value.toObject();
+        appendArtifact(
+            artifact.value(QStringLiteral("kind")).toString(QStringLiteral("official_artifact")),
+            artifact.value(QStringLiteral("name")).toString(),
+            artifact.value(QStringLiteral("path")).toString());
+    }
+
+    appendArtifact(QStringLiteral("legacy_per_class_metrics"), QStringLiteral("per_class_metrics"), report.value(QStringLiteral("perClassMetricsPath")).toString());
+    appendArtifact(QStringLiteral("legacy_error_samples"), QStringLiteral("error_samples"), report.value(QStringLiteral("errorSamplesPath")).toString());
+    appendArtifact(QStringLiteral("legacy_confusion_matrix"), QStringLiteral("confusion_matrix"), report.value(QStringLiteral("confusionMatrixPath")).toString());
+    appendArtifact(QStringLiteral("legacy_overlay_dir"), QStringLiteral("evaluation_overlays"), report.value(QStringLiteral("overlayDir")).toString(report.value(QStringLiteral("overlaysPath")).toString()));
+
+    if (officialArtifactsTable_->rowCount() == 0) {
+        officialArtifactsTable_->insertRow(0);
+        officialArtifactsTable_->setItem(0, 0, new QTableWidgetItem(uiText("暂无官方产物")));
+        officialArtifactsTable_->setItem(0, 1, new QTableWidgetItem(QString()));
+        officialArtifactsTable_->setItem(0, 2, new QTableWidgetItem(uiText("该报告没有记录 officialArtifacts 或官方路径字段。")));
+        detailText_->setPlainText(uiText("该报告没有记录官方产物。旧历史报告仍可通过任务产物列表查看原始文件。"));
         return;
     }
 
-    const QStringList header = rows.first().split(QLatin1Char(','));
-    confusionTable_->setColumnCount(header.size());
-    confusionTable_->setHorizontalHeaderLabels(header);
-    confusionTable_->setRowCount(qMax(0, rows.size() - 1));
-
-    QStringList verticalLabels;
-    for (int row = 1; row < rows.size(); ++row) {
-        const QStringList columns = rows.at(row).split(QLatin1Char(','));
-        verticalLabels.append(columns.isEmpty() ? QString::number(row) : columns.first());
-        for (int column = 0; column < header.size() && column < columns.size(); ++column) {
-            confusionTable_->setItem(row - 1, column, new QTableWidgetItem(columns.at(column)));
-        }
-    }
-    confusionTable_->setVerticalHeaderLabels(verticalLabels);
-    confusionTable_->resizeColumnsToContents();
+    officialArtifactsTable_->resizeColumnToContents(0);
+    officialArtifactsTable_->resizeColumnToContents(1);
+    officialArtifactsTable_->selectRow(0);
 }
 
-void EvaluationReportView::populateErrors(const QJsonObject& report)
+void EvaluationReportView::populateSamples(const QJsonObject& report)
 {
-    errorTable_->setRowCount(0);
-    rowOverlayPaths_.clear();
-    rowDetailTexts_.clear();
+    sampleTable_->setRowCount(0);
+    samplePreviewPaths_.clear();
+    sampleDetailTexts_.clear();
 
     const QJsonArray samples = report.value(QStringLiteral("samples")).toArray();
     QHash<QString, QString> overlayByImage;
@@ -432,9 +523,9 @@ void EvaluationReportView::populateErrors(const QJsonObject& report)
         }
     }
 
-    auto appendErrorRow = [this, &overlayByImage](const QJsonObject& item) {
-        const int row = errorTable_->rowCount();
-        errorTable_->insertRow(row);
+    auto appendSampleRow = [this, &overlayByImage](const QJsonObject& item, const QString& fallbackType) {
+        const int row = sampleTable_->rowCount();
+        sampleTable_->insertRow(row);
 
         const QString imagePath = item.value(QStringLiteral("imagePath")).toString();
         const QString predictionText = item.value(QStringLiteral("prediction")).isObject()
@@ -443,7 +534,9 @@ void EvaluationReportView::populateErrors(const QJsonObject& report)
         const QString groundTruthText = item.value(QStringLiteral("groundTruth")).isObject()
             ? QString::fromUtf8(QJsonDocument(item.value(QStringLiteral("groundTruth")).toObject()).toJson(QJsonDocument::Compact))
             : item.value(QStringLiteral("groundTruth")).toString();
-        QString detail = uiText("图片：%1").arg(QDir::toNativeSeparators(imagePath));
+        QString detail = imagePath.isEmpty()
+            ? uiText("未记录图片路径")
+            : uiText("图片：%1").arg(QDir::toNativeSeparators(imagePath));
         const QString labelPath = item.value(QStringLiteral("labelPath")).toString();
         if (!labelPath.isEmpty()) {
             detail.append(uiText("\n标签：%1").arg(QDir::toNativeSeparators(labelPath)));
@@ -455,8 +548,7 @@ void EvaluationReportView::populateErrors(const QJsonObject& report)
             detail.append(QStringLiteral("\n%1: %2").arg(it.key(), jsonValueSummary(it.value())));
         }
 
-        const QString reason = item.value(QStringLiteral("reason")).toString(
-            item.contains(QStringLiteral("matched")) ? uiText("识别错误") : uiText("错误样本"));
+        const QString reason = item.value(QStringLiteral("reason")).toString(fallbackType);
         const QString extra = item.contains(QStringLiteral("matchedIou"))
             ? QStringLiteral("IoU=%1").arg(formatNumber(item.value(QStringLiteral("matchedIou")).toDouble()))
             : item.contains(QStringLiteral("confidence"))
@@ -465,60 +557,69 @@ void EvaluationReportView::populateErrors(const QJsonObject& report)
                     ? QStringLiteral("edit=%1").arg(item.value(QStringLiteral("editDistance")).toInt())
                     : QString();
 
-        errorTable_->setItem(row, 0, new QTableWidgetItem(reason));
-        errorTable_->setItem(row, 1, new QTableWidgetItem(QFileInfo(imagePath).fileName()));
-        errorTable_->setItem(row, 2, new QTableWidgetItem(groundTruthText));
-        errorTable_->setItem(row, 3, new QTableWidgetItem(predictionText));
-        errorTable_->setItem(row, 4, new QTableWidgetItem(extra));
+        sampleTable_->setItem(row, 0, new QTableWidgetItem(reason));
+        sampleTable_->setItem(row, 1, new QTableWidgetItem(imagePath.isEmpty() ? QStringLiteral("-") : QFileInfo(imagePath).fileName()));
+        sampleTable_->setItem(row, 2, new QTableWidgetItem(groundTruthText));
+        sampleTable_->setItem(row, 3, new QTableWidgetItem(predictionText));
+        sampleTable_->setItem(row, 4, new QTableWidgetItem(extra));
 
-        rowOverlayPaths_.insert(row, item.value(QStringLiteral("overlayPath")).toString(overlayByImage.value(imagePath)));
-        rowDetailTexts_.insert(row, detail);
+        samplePreviewPaths_.insert(row, item.value(QStringLiteral("overlayPath")).toString(overlayByImage.value(imagePath)));
+        sampleDetailTexts_.insert(row, detail);
     };
 
     const QJsonArray errors = report.value(QStringLiteral("errorSamples")).toArray();
     for (const QJsonValue& value : errors) {
-        appendErrorRow(value.toObject());
+        appendSampleRow(value.toObject(), uiText("错误样本"));
     }
     const QJsonArray lowConfidence = report.value(QStringLiteral("lowConfidenceSamples")).toArray();
     for (const QJsonValue& value : lowConfidence) {
-        QJsonObject item = value.toObject();
-        if (!item.contains(QStringLiteral("reason"))) {
-            item.insert(QStringLiteral("reason"), uiText("低置信样本"));
+        appendSampleRow(value.toObject(), uiText("低置信样本"));
+    }
+    if (sampleTable_->rowCount() == 0) {
+        for (const QJsonValue& value : samples) {
+            appendSampleRow(value.toObject(), uiText("历史样本"));
         }
-        appendErrorRow(item);
     }
 
-    if (errorTable_->rowCount() == 0) {
-        errorTable_->insertRow(0);
-        errorTable_->setItem(0, 0, new QTableWidgetItem(uiText("暂无错误样本")));
-        for (int column = 1; column < errorTable_->columnCount(); ++column) {
-            errorTable_->setItem(0, column, new QTableWidgetItem(QString()));
-        }
-        overlayLabel_->setText(uiText("暂无 overlay 预览"));
-        detailText_->setPlainText(uiText("该报告没有记录错误样本。"));
+    if (sampleTable_->rowCount() == 0) {
+        const bool officialYolo = isUltralyticsOfficialYoloReport(report);
+        sampleTable_->insertRow(0);
+        sampleTable_->setItem(0, 0, new QTableWidgetItem(officialYolo ? uiText("官方评估") : uiText("无样本预览")));
+        sampleTable_->setItem(0, 1, new QTableWidgetItem(QString()));
+        sampleTable_->setItem(0, 2, new QTableWidgetItem(QString()));
+        sampleTable_->setItem(0, 3, new QTableWidgetItem(QString()));
+        sampleTable_->setItem(0, 4, new QTableWidgetItem(officialYolo
+                ? uiText("Ultralytics val() 不生成 AITrain 本地错误样本。请查看官方图表和 predictions。")
+                : uiText("该报告没有记录本地错误样本。请查看官方产物或报告详情。")));
+        previewLabel_->setText(officialYolo
+                ? uiText("官方 YOLO 评估不生成本地 overlay。")
+                : uiText("该报告没有记录本地 overlay。"));
+        detailText_->setPlainText(officialYolo
+                ? uiText("YOLO 检测/分割指标来自 Ultralytics official val()。AITrain 不再生成本地 AP/mAP、mask IoU、混淆矩阵、错误样本或 overlay。")
+                : uiText("该报告没有本地样本预览；请查看上方指标、官方产物和报告详情。"));
         return;
     }
 
-    errorTable_->resizeColumnToContents(0);
-    errorTable_->resizeColumnToContents(2);
-    errorTable_->resizeColumnToContents(3);
-    errorTable_->selectRow(0);
+    sampleTable_->resizeColumnToContents(0);
+    sampleTable_->resizeColumnToContents(2);
+    sampleTable_->resizeColumnToContents(3);
+    sampleTable_->selectRow(0);
 }
 
-void EvaluationReportView::showOverlayImage(const QString& overlayPath)
+void EvaluationReportView::showPreviewImage(const QString& imagePath)
 {
-    overlayLabel_->clear();
-    if (overlayPath.isEmpty()) {
-        overlayLabel_->setText(uiText("该样本没有 overlay。"));
+    previewLabel_->clear();
+    if (imagePath.isEmpty()) {
+        previewLabel_->setText(uiText("该条目没有可预览图片。"));
         return;
     }
-    const QPixmap image(overlayPath);
+    const QPixmap image(imagePath);
     if (image.isNull()) {
-        overlayLabel_->setText(uiText("overlay 无法读取：%1").arg(QDir::toNativeSeparators(overlayPath)));
+        previewLabel_->setText(uiText("图片无法读取：%1").arg(QDir::toNativeSeparators(imagePath)));
         return;
     }
-    overlayLabel_->setPixmap(image.scaled(
-        overlayLabel_->size().boundedTo(QSize(520, 320)),
+    previewLabel_->setPixmap(image.scaled(
+        previewLabel_->size().boundedTo(QSize(520, 320)),
         Qt::KeepAspectRatio,
         Qt::SmoothTransformation));
 }
@@ -528,10 +629,8 @@ void EvaluationReportView::showEmptyState(const QString& text)
     summaryLabel_->setText(text);
     metricsTable_->setRowCount(0);
     perClassTable_->setRowCount(0);
-    confusionTable_->clear();
-    confusionTable_->setRowCount(0);
-    confusionTable_->setColumnCount(0);
-    errorTable_->setRowCount(0);
-    overlayLabel_->setText(uiText("暂无 overlay 预览"));
+    officialArtifactsTable_->setRowCount(0);
+    sampleTable_->setRowCount(0);
+    previewLabel_->setText(uiText("选择官方图表或样本 overlay 后显示预览。"));
     detailText_->setPlainText(text);
 }
