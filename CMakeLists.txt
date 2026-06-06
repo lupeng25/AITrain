@@ -575,6 +575,7 @@ install(FILES
     tools/build-inno-installer.ps1
     tools/ui-workbench-walkthrough.ps1
     tools/phase45-yolo-model-matrix-smoke.ps1
+    tools/phase-p1-yolo-full-matrix-smoke.ps1
     tools/phase-ncnn-runtime-smoke.ps1
     tools/local-rc-closeout.ps1
     tools/release-freeze-handoff.ps1

@@ -164,6 +164,58 @@ QWidget* MainWindow::buildConversionPage()
     validationImageLayout->addWidget(conversionValidationImageEdit_, 1);
     validationImageLayout->addWidget(chooseValidationImageButton);
 
+    auto* exportArgsBox = new QWidget;
+    auto* exportArgsLayout = new QGridLayout(exportArgsBox);
+    exportArgsLayout->setContentsMargins(0, 0, 0, 0);
+    exportArgsLayout->setHorizontalSpacing(8);
+    exportArgsLayout->setVerticalSpacing(6);
+    auto* dynamicCheck = new QCheckBox(QStringLiteral("dynamic"));
+    dynamicCheck->setObjectName(QStringLiteral("YoloModelExportArg_dynamic"));
+    auto* halfCheck = new QCheckBox(QStringLiteral("half"));
+    halfCheck->setObjectName(QStringLiteral("YoloModelExportArg_half"));
+    auto* int8Check = new QCheckBox(QStringLiteral("int8"));
+    int8Check->setObjectName(QStringLiteral("YoloModelExportArg_int8"));
+    auto* exportImageSizeEdit = new QLineEdit;
+    exportImageSizeEdit->setObjectName(QStringLiteral("YoloModelExportArg_imgsz"));
+    exportImageSizeEdit->setPlaceholderText(QStringLiteral("imgsz 640"));
+    auto* exportBatchEdit = new QLineEdit;
+    exportBatchEdit->setObjectName(QStringLiteral("YoloModelExportArg_batch"));
+    exportBatchEdit->setPlaceholderText(QStringLiteral("batch 1"));
+    auto* exportDeviceEdit = new QLineEdit;
+    exportDeviceEdit->setObjectName(QStringLiteral("YoloModelExportArg_device"));
+    exportDeviceEdit->setPlaceholderText(QStringLiteral("device cpu / 0"));
+    auto* exportDataEdit = new QLineEdit;
+    exportDataEdit->setObjectName(QStringLiteral("YoloModelExportArg_data"));
+    exportDataEdit->setPlaceholderText(QStringLiteral("TensorRT INT8 calibration data.yaml"));
+    auto* chooseExportDataButton = new QPushButton(QStringLiteral("选择 data.yaml"));
+    connect(chooseExportDataButton, &QPushButton::clicked, this, [this, exportDataEdit]() {
+        const QString inputPath = QDir::fromNativeSeparators(conversionCheckpointEdit_ ? conversionCheckpointEdit_->text().trimmed() : QString());
+        const QString defaultDir = !currentProjectPath_.isEmpty()
+            ? currentProjectPath_
+            : QFileInfo(inputPath).absolutePath();
+        const QString selected = QFileDialog::getOpenFileName(
+            this,
+            uiText("选择 calibration data.yaml"),
+            defaultDir,
+            QStringLiteral("YOLO data yaml (*.yaml *.yml);;All files (*.*)"));
+        if (!selected.isEmpty()) {
+            exportDataEdit->setText(QDir::toNativeSeparators(selected));
+        }
+    });
+    auto* exportDataRow = new QWidget;
+    auto* exportDataLayout = new QHBoxLayout(exportDataRow);
+    exportDataLayout->setContentsMargins(0, 0, 0, 0);
+    exportDataLayout->setSpacing(8);
+    exportDataLayout->addWidget(exportDataEdit, 1);
+    exportDataLayout->addWidget(chooseExportDataButton);
+    exportArgsLayout->addWidget(dynamicCheck, 0, 0);
+    exportArgsLayout->addWidget(halfCheck, 0, 1);
+    exportArgsLayout->addWidget(int8Check, 0, 2);
+    exportArgsLayout->addWidget(exportImageSizeEdit, 1, 0);
+    exportArgsLayout->addWidget(exportBatchEdit, 1, 1);
+    exportArgsLayout->addWidget(exportDeviceEdit, 1, 2);
+    exportArgsLayout->addWidget(exportDataRow, 2, 0, 1, 3);
+
     auto* form = new QFormLayout;
     form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
@@ -171,6 +223,7 @@ QWidget* MainWindow::buildConversionPage()
     form->setVerticalSpacing(10);
     form->addRow(QStringLiteral("模型输入"), inputRow);
     form->addRow(QStringLiteral("目标格式"), conversionFormatCombo_);
+    form->addRow(QStringLiteral("官方参数"), exportArgsBox);
     form->addRow(QStringLiteral("输出路径"), outputRow);
     form->addRow(uiText("验证图片"), validationImageRow);
     setupPanel->bodyLayout()->addLayout(form);

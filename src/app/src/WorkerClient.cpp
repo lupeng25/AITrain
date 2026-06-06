@@ -178,10 +178,15 @@ bool WorkerClient::requestDeploymentValidation(
 
 bool WorkerClient::requestModelExport(const QString& workerProgram, const QString& checkpointPath, const QString& outputPath, const QString& format, QString* error, const QString& taskId)
 {
+    return requestModelExport(workerProgram, checkpointPath, outputPath, format, QJsonObject(), error, taskId);
+}
+
+bool WorkerClient::requestModelExport(const QString& workerProgram, const QString& checkpointPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId)
+{
     return startWorkerCommand(
         workerProgram,
         wp::command::exportModel(),
-        wp::modelExportRequest(taskId, checkpointPath, outputPath, format),
+        wp::modelExportRequest(taskId, checkpointPath, outputPath, format, options),
         error);
 }
 

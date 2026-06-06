@@ -164,6 +164,21 @@ QWidget* buildYoloOfficialArgsPanel()
     addYoloRow(validationGroup, QStringLiteral("plots"), yoloBoolComboBox(QStringLiteral("plots")));
     addYoloRow(validationGroup, QStringLiteral("max_det"), yoloArgLineEdit(QStringLiteral("max_det"), QStringLiteral("300")));
     addYoloRow(validationGroup, QStringLiteral("patience"), yoloArgLineEdit(QStringLiteral("patience"), QStringLiteral("100")));
+    auto* exportDynamic = new QCheckBox(QStringLiteral("dynamic"));
+    exportDynamic->setObjectName(QStringLiteral("YoloTrainExportArg_dynamic"));
+    auto* exportHalf = new QCheckBox(QStringLiteral("half"));
+    exportHalf->setObjectName(QStringLiteral("YoloTrainExportArg_half"));
+    auto* exportInt8 = new QCheckBox(QStringLiteral("int8 TensorRT"));
+    exportInt8->setObjectName(QStringLiteral("YoloTrainExportArg_int8"));
+    auto* exportFlags = new QWidget;
+    auto* exportFlagsLayout = new QHBoxLayout(exportFlags);
+    exportFlagsLayout->setContentsMargins(0, 0, 0, 0);
+    exportFlagsLayout->setSpacing(8);
+    exportFlagsLayout->addWidget(exportDynamic);
+    exportFlagsLayout->addWidget(exportHalf);
+    exportFlagsLayout->addWidget(exportInt8);
+    exportFlagsLayout->addStretch();
+    addYoloRow(validationGroup, QStringLiteral("export"), exportFlags);
 
     root->addWidget(deviceGroup);
     root->addWidget(optimizerGroup);
@@ -195,20 +210,16 @@ QWidget* MainWindow::buildTrainingPage()
     trainingBackendCombo_->addItem(backendLabel(QStringLiteral("paddleocr_rec_official")), QStringLiteral("paddleocr_rec_official"));
     modelPresetCombo_ = new QComboBox;
     modelPresetCombo_->setEditable(true);
-    modelPresetCombo_->addItems(QStringList()
-        << QStringLiteral("yolov8n.yaml")
-        << QStringLiteral("yolov8n-seg.yaml")
-        << QStringLiteral("yolo11n.yaml")
-        << QStringLiteral("yolo11n-seg.yaml")
-        << QStringLiteral("yolo12n.yaml")
-        << QStringLiteral("yolo12n-seg.yaml")
+    QStringList modelPresetItems = yoloModelPresetItems();
+    modelPresetItems
         << QStringLiteral("PP-OCRv5_mobile_det")
         << QStringLiteral("PP-OCRv5_server_det")
         << QStringLiteral("PP-OCRv5_mobile_rec")
         << QStringLiteral("PP-OCRv5_server_rec")
         << QStringLiteral("en_PP-OCRv5_mobile_rec")
         << QStringLiteral("PP-OCRv4_mobile_det")
-        << QStringLiteral("PP-OCRv4_mobile_rec"));
+        << QStringLiteral("PP-OCRv4_mobile_rec");
+    modelPresetCombo_->addItems(modelPresetItems);
     epochsEdit_ = new QLineEdit(QStringLiteral("20"));
     batchEdit_ = new QLineEdit(QStringLiteral("8"));
     imageSizeEdit_ = new QLineEdit(QStringLiteral("640"));

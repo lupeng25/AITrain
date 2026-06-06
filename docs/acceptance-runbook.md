@@ -1,6 +1,6 @@
 ﻿# AITrain Studio Acceptance Runbook
 
-This runbook is the Phase 17-50 acceptance path. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, records a traceable release-freeze package identity, validates newer YOLO detection/segmentation model-family candidates, documents the delivery-closeout workbench, and adds the PP-OCRv5 GPU official-chain gate. OCR acceptance is official-only through PaddleOCR Det/Rec/System reports. RTX 4090 D TensorRT smoke evidence is recorded under `.deps\\rtx4090-validation\\acceptance-tensorrt`; clean Windows and customer-domain OCR production evidence still require returned external/customer data.
+This runbook is the Phase 17-50 plus P1 acceptance path. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, records a traceable release-freeze package identity, validates newer YOLO detection/segmentation model-family candidates, documents the delivery-closeout workbench, adds the PP-OCRv5 GPU official-chain gate, and defines the P1 full YOLO preset/export-argument matrix. OCR acceptance is official-only through PaddleOCR Det/Rec/System reports. RTX 4090 D TensorRT smoke evidence is recorded under `.deps\\rtx4090-validation\\acceptance-tensorrt`; clean Windows and customer-domain OCR production evidence still require returned external/customer data.
 
 ## Acceptance Modes
 
@@ -13,6 +13,7 @@ Run the unified smoke script from the repository root:
 .\tools\acceptance-smoke.ps1 -PublicDatasets
 .\tools\acceptance-smoke.ps1 -CpuTrainingSmoke
 .\tools\phase45-yolo-model-matrix-smoke.ps1
+.\tools\phase-p1-yolo-full-matrix-smoke.ps1
 .\tools\acceptance-smoke.ps1 -TensorRT
 .\tools\customer-ocr-validation.ps1
 ```
@@ -34,7 +35,7 @@ For external handoff, use `docs\external-acceptance-handoff.md` and the result t
 
 For release-freeze package identity, use `docs\release-freeze-handoff.md` and `tools\release-freeze-handoff.ps1`. This generates the CPack ZIP, SHA256 hashes, and a handoff manifest without marking external acceptance as passed.
 
-For YOLO model-family productization, use `docs\yolo-model-support-matrix.md` and `tools\phase45-yolo-model-matrix-smoke.ps1`. Phase 45 validates newer Ultralytics detection/segmentation model names only; it does not expand the productized scope to classification, pose, OBB, anomaly, YOLO-World, YOLOE, or TensorRT.
+For YOLO model-family productization, use `docs\yolo-model-support-matrix.md`. Phase 45 validates newer Ultralytics detection/segmentation nano model names only. P1 validates the full YOLOv8 / YOLO11 / YOLO12 detection and instance-segmentation preset matrix, `.yaml` and `.pt` source types, YOLOv8 P2/P6 detection YAML architectures, and the official export-argument protocol. Neither path expands the productized scope to YOLO26, semantic segmentation, classification, pose, OBB, anomaly, YOLO-World, YOLOE, tracking, or other tasks.
 
 ## Phase 49 Lite: Delivery Closeout Workbench
 
@@ -205,6 +206,32 @@ Expected artifacts:
 - If CTest is available, the script runs C++ ONNX Runtime regression checks with `AITRAIN_ACCEPTANCE_SMOKE_ROOT` pointed at the Phase 45 work directory.
 
 Required Phase 45 models are `yolo11n.yaml`, `yolo11n-seg.yaml`, `yolo12n.yaml`, and `yolo12n-seg.yaml`. This is a wiring/artifact/productization smoke, not an accuracy benchmark.
+
+## P1: YOLO Full Preset and Export-Argument Matrix
+
+Run the required full YOLO detection/instance-segmentation matrix:
+
+```powershell
+.\tools\phase-p1-yolo-full-matrix-smoke.ps1
+```
+
+The script writes `p1_yolo_full_matrix_summary.json` under `.deps\phase-p1-yolo-full-matrix` by default. `status=passed` requires every required row to pass; download failures, official model-resolution failures, GPU/TensorRT gaps, and INT8 calibration failures are recorded as failed/blocker evidence rather than skipped.
+
+Required rows:
+
+- Standard detection: YOLOv8 / YOLO11 / YOLO12, scales `n/s/m/l/x`, source types `.yaml` and `.pt`.
+- Standard instance segmentation: YOLOv8 / YOLO11 / YOLO12, scales `n/s/m/l/x`, source types `.yaml` and `.pt`.
+- YOLOv8 detection architecture YAML: P2 and P6 variants, scales `n/s/m/l/x`.
+
+Each row must produce a completed Worker training task, `best.pt`, `best.onnx` or official ONNX export path, and `ultralytics_training_report.json` containing `model`, `backend`, `metrics`, and `ultralyticsExportArgs`. `.pt` source rows must preserve the `.pt` model name in the report to prove the pretrained fine-tuning route was used.
+
+P1 also covers official YOLO export parameters from both the training page and model export page:
+
+- ONNX supports `dynamic` and `half`, but rejects `int8=true`.
+- TensorRT supports INT8 only through official Ultralytics export and requires compatible GPU/TensorRT plus calibration data.
+- NCNN rejects `dynamic`, `half`, and `int8`; `.pt -> ncnn` first creates a static FP32 official ONNX intermediate, then runs `onnx2ncnn`.
+
+The full P1 matrix is intentionally separate from `harness-check.ps1` because it downloads/runs many official YOLO models and is expected to be slow on CPU.
 
 ## Historical Phase 46/47 OCR ONNX Wiring
 

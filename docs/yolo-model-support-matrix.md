@@ -1,61 +1,76 @@
 # YOLO Model Support Matrix
 
-This document is the Phase 45 source of truth for Ultralytics YOLO model-family productization in AITrain Studio.
+This document is the source of truth for Ultralytics YOLO detection and instance-segmentation model-family productization in AITrain Studio.
 
-AITrain Studio currently owns the orchestration and product runtime layer: Worker request routing, dataset normalization, artifact recording, official ONNX export checks, C++ ONNX Runtime / TensorRT / NCNN inference, benchmark, deployment validation, and smoke regression. The actual YOLO training, first ONNX export, and detection/segmentation evaluation run through the installed official `ultralytics` Python package, so supported model names and `val()` behavior depend on that package version and its license terms.
+AITrain owns Worker routing, dataset normalization, artifact recording, official export checks, C++ ONNX Runtime / TensorRT / NCNN inference, benchmark, deployment validation, and smoke regression. Training, first official export, and detection/segmentation evaluation still run through the installed official `ultralytics` Python package, so supported model resolution depends on that package version and its license terms.
 
-This matrix is therefore an official-artifact productization matrix, not an end-to-end official-only runtime matrix. A passing row means AITrain can train/export/evaluate through Ultralytics and then consume the exported artifacts through the local C++ runtime for inference, benchmark, and deployment validation.
+## Productized Families
 
-## Status Levels
+P1 expands the GUI and acceptance matrix from nano-only entries to full YOLOv8 / YOLO11 / YOLO12 detection and instance-segmentation presets:
 
-| Status | Meaning |
-|---|---|
-| Product default | Exposed as the stable default path and covered by earlier local CPU smoke evidence. |
-| Phase 45 validated | Covered by the Phase 45 model matrix smoke on this repository. |
-| Candidate | The local Ultralytics package resolves the model name, but this repository has not recorded a required Phase 45 pass for it yet. |
-| Out of scope | Not productized by the current detection/segmentation acceptance path. |
+| Family | Task | Source types | Scales | AITrain backend | Status |
+|---|---|---|---|---|---|
+| YOLOv8 | Detection | `.yaml`, `.pt` | `n`, `s`, `m`, `l`, `x` | `ultralytics_yolo_detect` | P1 full matrix required |
+| YOLO11 | Detection | `.yaml`, `.pt` | `n`, `s`, `m`, `l`, `x` | `ultralytics_yolo_detect` | P1 full matrix required |
+| YOLO12 | Detection | `.yaml`, `.pt` | `n`, `s`, `m`, `l`, `x` | `ultralytics_yolo_detect` | P1 full matrix required |
+| YOLOv8 | Segmentation | `.yaml`, `.pt` | `n`, `s`, `m`, `l`, `x` | `ultralytics_yolo_segment` | P1 full matrix required |
+| YOLO11 | Segmentation | `.yaml`, `.pt` | `n`, `s`, `m`, `l`, `x` | `ultralytics_yolo_segment` | P1 full matrix required |
+| YOLO12 | Segmentation | `.yaml`, `.pt` | `n`, `s`, `m`, `l`, `x` | `ultralytics_yolo_segment` | P1 full matrix required |
+| YOLOv8 P2/P6 | Detection architecture only | `.yaml` | `n`, `s`, `m`, `l`, `x` | `ultralytics_yolo_detect` | P1 full matrix required |
 
-## Current Matrix
+The GUI remains editable, so operators may type an official model name that is not listed here. Such runs are accepted only when the installed Ultralytics package resolves the model and the backend/task pairing is valid. They are not counted as P1 matrix evidence unless added to the matrix script.
 
-| Family / model | Task | AITrain backend | Status | Notes |
-|---|---|---|---|---|
-| `yolov8n.yaml` | Detection | `ultralytics_yolo_detect` | Product default | Earlier local CPU smoke produced `best.pt`, `best.onnx`, and `ultralytics_training_report.json`. |
-| `yolov8n-seg.yaml` | Segmentation | `ultralytics_yolo_segment` | Product default | Earlier local CPU smoke produced `best.pt`, `best.onnx`, report metrics, and C++ ONNX Runtime segmentation smoke coverage. |
-| `yolo11n.yaml` | Detection | `ultralytics_yolo_detect` | Phase 45 validated after smoke pass | Required Phase 45 model-matrix target. |
-| `yolo11n-seg.yaml` | Segmentation | `ultralytics_yolo_segment` | Phase 45 validated after smoke pass | Required Phase 45 model-matrix target. |
-| `yolo12n.yaml` | Detection | `ultralytics_yolo_detect` | Phase 45 validated after smoke pass | Required Phase 45 model-matrix target. |
-| `yolo12n-seg.yaml` | Segmentation | `ultralytics_yolo_segment` | Phase 45 validated after smoke pass | Required Phase 45 model-matrix target. |
+## Export Parameters
 
-The local development baseline used for Phase 45 investigation has `ultralytics` 8.4.45 installed, and that package resolves the YOLO11 and YOLO12 nano detection/segmentation YAML names above.
+YOLO official export arguments are recorded under `ultralyticsExportArgs`:
+
+```json
+{
+  "format": "onnx",
+  "dynamic": false,
+  "half": false,
+  "int8": false,
+  "imgsz": 640,
+  "batch": 1,
+  "device": "cpu"
+}
+```
+
+- Training still creates an ONNX artifact by default.
+- `dynamic` and `half` are passed to official ONNX export.
+- `int8=true` is treated as TensorRT engine export and requires calibration data from the normalized YOLO `data.yaml`.
+- Model export requests may include optional `data` for `.pt -> TensorRT INT8` calibration.
+- Existing `.onnx` inputs continue through AITrain C++ copy / NCNN / TensorRT conversion paths.
+- `.pt -> onnx` and `.pt -> tensorrt` run official Ultralytics Python export through Worker.
+- `.pt -> ncnn` first runs a static FP32 official ONNX export, then uses the existing `onnx2ncnn` path.
+- NCNN rejects `dynamic`, `half`, and `int8`; ONNX rejects `int8`.
 
 ## Acceptance Command
 
-Run the required YOLO11 + YOLO12 matrix:
+Run the full P1 matrix:
+
+```powershell
+.\tools\phase-p1-yolo-full-matrix-smoke.ps1
+```
+
+The script writes `p1_yolo_full_matrix_summary.json` under `.deps\phase-p1-yolo-full-matrix` by default. A pass requires all 70 rows to produce:
+
+- `best.pt`
+- `best.onnx` or the official ONNX export path
+- `ultralytics_training_report.json`
+- report `model`, `backend`, `metrics`, and `ultralyticsExportArgs`
+- `.pt` rows preserving the `.pt` model name in the report
+
+The previous Phase 45 smoke remains as a faster historical YOLO11/YOLO12 nano wiring check:
 
 ```powershell
 .\tools\phase45-yolo-model-matrix-smoke.ps1
 ```
 
-The legacy `-IncludeYolo12` switch is still accepted for older command lines, but YOLO12 is now included by default:
-
-```powershell
-.\tools\phase45-yolo-model-matrix-smoke.ps1 -IncludeYolo12
-```
-
-The script writes `yolo_model_matrix_summary.json` under `.deps\phase45-yolo-model-matrix` by default. A required pass means each required model has:
-
-- `ultralytics_training_report.json`
-- `checkpointPath` resolving to a real `.pt` file
-- `onnxPath` resolving to a real `.onnx` file
-- report fields for `backend`, `model`, and `metrics`
-
-When CTest is available, the script also points `AITRAIN_ACCEPTANCE_SMOKE_ROOT` at the Phase 45 work directory and runs the existing C++ ONNX Runtime regression tests against the generated artifacts.
-
 ## Boundaries
 
-- Phase 45 productizes detection and segmentation model-family acceptance only.
-- YOLO product training/export/evaluation is official Ultralytics; YOLO product inference, benchmark, and deployment validation are AITrain C++ runtime paths over official artifacts.
-- Classification, pose, OBB, anomaly, YOLO-World, and YOLOE are not productized by this matrix.
-- TensorRT engine building remains external RTX / SM 75+ acceptance and is not changed by this phase.
-- C++ PaddleOCR Det DB ONNX postprocess is unrelated to this YOLO matrix and remains tracked separately.
+- This matrix covers detection and instance segmentation only.
+- YOLO26, semantic segmentation, tracking, YOLOE, YOLO-World, classification, pose, OBB, and anomaly remain outside P1.
+- Full matrix acceptance is a wiring/artifact/productization gate, not an accuracy benchmark.
+- `.pt` weights are not bundled with AITrain Studio; official Ultralytics may download them into the user environment.
 - Ultralytics licensing must be reviewed before redistribution of official backend dependencies or weights.

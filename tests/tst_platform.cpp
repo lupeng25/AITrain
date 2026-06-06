@@ -203,6 +203,24 @@ private slots:
         QCOMPARE(exportRequest.value(QStringLiteral("checkpointPath")).toString(), checkpointPath);
         QCOMPARE(exportRequest.value(QStringLiteral("outputPath")).toString(), outputPath);
         QCOMPARE(exportRequest.value(QStringLiteral("format")).toString(), format);
+        QVERIFY(!exportRequest.contains(QStringLiteral("options")));
+
+        const QJsonObject exportOptions{
+            {QStringLiteral("ultralyticsExportArgs"), QJsonObject{
+                {QStringLiteral("format"), QStringLiteral("onnx")},
+                {QStringLiteral("dynamic"), true},
+                {QStringLiteral("half"), false},
+                {QStringLiteral("int8"), false},
+                {QStringLiteral("imgsz"), 640},
+                {QStringLiteral("batch"), 1},
+                {QStringLiteral("device"), QStringLiteral("cpu")}
+            }}
+        };
+        const QJsonObject exportRequestWithOptions = wp::modelExportRequest(taskId, checkpointPath, outputPath, format, exportOptions);
+        QCOMPARE(exportRequestWithOptions.value(QStringLiteral("taskId")).toString(), taskId);
+        QCOMPARE(exportRequestWithOptions.value(QStringLiteral("options")).toObject()
+            .value(QStringLiteral("ultralyticsExportArgs")).toObject()
+            .value(QStringLiteral("dynamic")).toBool(), true);
 
         const QJsonObject inference = wp::inferenceRequest(taskId, checkpointPath, imagePath, outputPath);
         QCOMPARE(inference.value(QStringLiteral("taskId")).toString(), taskId);

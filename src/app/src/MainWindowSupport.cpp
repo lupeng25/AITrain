@@ -562,6 +562,69 @@ QString defaultBackendForTask(const QString& taskType)
     return {};
 }
 
+namespace {
+QStringList yoloModelPresetsForTask(bool segmentation)
+{
+    const QStringList families = {
+        QStringLiteral("yolov8"),
+        QStringLiteral("yolo11"),
+        QStringLiteral("yolo12")
+    };
+    const QStringList scales = {
+        QStringLiteral("n"),
+        QStringLiteral("s"),
+        QStringLiteral("m"),
+        QStringLiteral("l"),
+        QStringLiteral("x")
+    };
+    QStringList presets;
+    for (const QString& family : families) {
+        for (const QString& scale : scales) {
+            const QString stem = segmentation
+                ? QStringLiteral("%1%2-seg").arg(family, scale)
+                : QStringLiteral("%1%2").arg(family, scale);
+            presets << QStringLiteral("%1.yaml").arg(stem)
+                    << QStringLiteral("%1.pt").arg(stem);
+        }
+    }
+    if (!segmentation) {
+        for (const QString& scale : scales) {
+            presets << QStringLiteral("yolov8%1-p2.yaml").arg(scale)
+                    << QStringLiteral("yolov8%1-p6.yaml").arg(scale);
+        }
+    }
+    return presets;
+}
+} // namespace
+
+QStringList yoloModelPresetItems()
+{
+    QStringList presets;
+    presets << yoloModelPresetsForTask(false)
+            << yoloModelPresetsForTask(true);
+    return presets;
+}
+
+bool yoloModelPresetMatchesBackend(const QString& modelPreset, const QString& backend)
+{
+    const QString model = modelPreset.trimmed().toLower();
+    const QString normalizedBackend = backend.trimmed().toLower();
+    if (model.isEmpty()
+        || !(normalizedBackend.startsWith(QStringLiteral("ultralytics_yolo")))) {
+        return true;
+    }
+
+    const bool modelLooksSegment = model.contains(QStringLiteral("-seg."));
+    if (normalizedBackend == QStringLiteral("ultralytics_yolo_segment")) {
+        return modelLooksSegment;
+    }
+    if (normalizedBackend == QStringLiteral("ultralytics_yolo_detect")
+        || normalizedBackend == QStringLiteral("ultralytics_yolo")) {
+        return !modelLooksSegment;
+    }
+    return true;
+}
+
 QString defaultModelForBackend(const QString& backend)
 {
     if (backend == QStringLiteral("ultralytics_yolo_segment")) {
@@ -679,6 +742,10 @@ QJsonObject trainingPreflightReport(
     }
     if (!backend.isEmpty() && !isTrainingBackendCompatible(datasetFormat, backend)) {
         blockers.append(QStringLiteral("backend_dataset_mismatch"));
+    }
+    if (!yoloModelPresetMatchesBackend(modelPreset, backend)) {
+        blockers.append(QStringLiteral("yolo_model_backend_mismatch"));
+        nextActions.append(QStringLiteral("select_matching_yolo_model_preset"));
     }
     if ((backend == QStringLiteral("paddleocr_det_official")
             || backend == QStringLiteral("paddleocr_rec_official")

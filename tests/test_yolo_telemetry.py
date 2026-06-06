@@ -15,6 +15,7 @@ if str(YOLO_DIR) not in sys.path:
 
 import ultralytics_trainer as trainer  # noqa: E402
 import ultralytics_evaluator as evaluator  # noqa: E402
+from yolo import ultralytics_exporter as exporter  # noqa: E402
 
 
 class FakeModel:
@@ -168,6 +169,76 @@ def test_official_val_metric_extraction_detection_and_segmentation() -> None:
     assert segmentation["maskMap50_95"] == 0.25
 
 
+def test_ultralytics_export_args_are_sanitized() -> None:
+    plan = exporter.build_export_plan(
+        {
+            "ultralyticsExportArgs": {
+                "format": "onnx",
+                "dynamic": "true",
+                "half": "false",
+                "int8": False,
+                "imgsz": "640",
+                "batch": "2",
+                "device": "cpu",
+            }
+        }
+    )
+
+    assert plan["productFormat"] == "onnx"
+    assert plan["officialFormat"] == "onnx"
+    assert plan["kwargs"]["dynamic"] is True
+    assert plan["kwargs"]["half"] is False
+    assert plan["kwargs"]["int8"] is False
+    assert plan["kwargs"]["imgsz"] == 640
+    assert plan["kwargs"]["batch"] == 2
+    assert plan["kwargs"]["device"] == "cpu"
+
+
+def test_ultralytics_export_args_reject_unknown_keys() -> None:
+    try:
+        exporter.build_export_plan({"ultralyticsExportArgs": {"unknown": 1}})
+    except ValueError as exc:
+        assert "unknown" in str(exc)
+    else:
+        raise AssertionError("unknown Ultralytics export argument was accepted")
+
+
+def test_ultralytics_export_args_reject_unsupported_combinations() -> None:
+    for raw in [
+        {"format": "onnx", "int8": True},
+        {"format": "ncnn", "dynamic": True},
+        {"format": "ncnn", "half": True},
+        {"format": "ncnn", "int8": True},
+        {"format": "tensorrt", "int8": True},
+    ]:
+        try:
+            exporter.build_export_plan({"ultralyticsExportArgs": raw})
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"unsupported export combination was accepted: {raw}")
+
+
+def test_ultralytics_export_args_accept_tensorrt_int8_with_data() -> None:
+    plan = exporter.build_export_plan(
+        {
+            "ultralyticsExportArgs": {
+                "format": "tensorrt",
+                "int8": True,
+                "data": "aitrain_yolo_data.yaml",
+                "imgsz": 640,
+                "batch": 1,
+                "device": "0",
+            }
+        }
+    )
+
+    assert plan["productFormat"] == "tensorrt"
+    assert plan["officialFormat"] == "engine"
+    assert plan["kwargs"]["int8"] is True
+    assert plan["kwargs"]["data"] == "aitrain_yolo_data.yaml"
+
+
 if __name__ == "__main__":
     test_sanitize_log_line_removes_ansi_tqdm_noise()
     test_yolo_callbacks_emit_structured_progress_and_epoch_metrics()
@@ -175,3 +246,7 @@ if __name__ == "__main__":
     test_ultralytics_segment_args_allow_mask_parameters()
     test_ultralytics_train_args_reject_unknown_keys()
     test_official_val_metric_extraction_detection_and_segmentation()
+    test_ultralytics_export_args_are_sanitized()
+    test_ultralytics_export_args_reject_unknown_keys()
+    test_ultralytics_export_args_reject_unsupported_combinations()
+    test_ultralytics_export_args_accept_tensorrt_int8_with_data()

@@ -24,6 +24,7 @@ if str(TRAINER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRAINER_ROOT))
 
 from trainer_protocol import configure_stdio, emit_failed, exception_details, unhandled_failure  # noqa: E402
+from yolo.ultralytics_exporter import LICENSE_NOTE, build_export_plan, onnx_kwargs_from_plan  # noqa: E402
 
 
 BACKEND_ID = "ultralytics_yolo_detect"
@@ -810,6 +811,7 @@ def emit_training_artifacts(
     best_path: Path,
     last_path: Path,
     onnx_path: Path | None,
+    tensorrt_path: Path | None,
     report_path: Path,
     emitted_artifacts: set[str],
 ) -> None:
@@ -817,6 +819,8 @@ def emit_training_artifacts(
     emit_artifact_once(emitted_artifacts, "last.pt", last_path, "checkpoint")
     if onnx_path:
         emit_artifact_once(emitted_artifacts, "model.onnx", onnx_path, "onnx")
+    if tensorrt_path:
+        emit_artifact_once(emitted_artifacts, "model.engine", tensorrt_path, "tensorrt")
     emit_artifact_once(emitted_artifacts, "ultralytics_training_report.json", report_path, "report")
     for name, kind in [
         ("results.csv", "training_results_csv"),
@@ -874,6 +878,17 @@ def run(request: dict[str, Any]) -> int:
     run_name = str(train_kwargs.get("name") or f"aitrain-{int(time.time())}")
     export_onnx = as_bool(parameters.get("exportOnnx"), True)
     compact_events = as_bool(parameters.get("compactEvents"), False)
+    try:
+        export_plan = build_export_plan(
+            parameters,
+            default_format="onnx",
+            default_imgsz=image_size,
+            default_batch=int(train_kwargs.get("batch", 1)),
+            default_device=device,
+            data_yaml=data_yaml,
+        )
+    except ValueError as exc:
+        return fail(str(exc), "ultralytics_export_args_invalid")
 
     emit(
         "log",
@@ -925,6 +940,7 @@ def run(request: dict[str, Any]) -> int:
         emit("log", backend=BACKEND_ID, level="info", message="Compact event mode still emits progress, epoch metrics, and final artifacts")
 
     onnx_path: Path | None = None
+    tensorrt_path: Path | None = None
     if export_onnx:
         try:
             emit(
@@ -943,7 +959,7 @@ def run(request: dict[str, Any]) -> int:
             )
             emit("log", backend=BACKEND_ID, level="info", message="Starting Ultralytics ONNX export")
             export_model = YOLO(str(best_path if best_path.exists() else model_name))
-            exported = export_model.export(format="onnx", imgsz=image_size, device=device)
+            exported = export_model.export(**onnx_kwargs_from_plan(export_plan))
             emit("log", backend=BACKEND_ID, level="info", message=f"Ultralytics ONNX export returned {exported}")
             if exported:
                 onnx_path = Path(str(exported))
@@ -956,6 +972,37 @@ def run(request: dict[str, Any]) -> int:
         except Exception as exc:
             return fail("Ultralytics ONNX export failed.", "onnx_export_failed", {"exception": str(exc)})
 
+    if export_plan["productFormat"] == "tensorrt":
+        try:
+            emit(
+                "progress",
+                backend=BACKEND_ID,
+                phase="export",
+                percent=97,
+                epoch=epochs,
+                epochs=epochs,
+                batch=0,
+                batches=0,
+                etaSeconds=0,
+                device=device,
+                liveMetrics={key: json_number(value) for key, value in metrics.items()},
+                message="Starting Ultralytics TensorRT export",
+            )
+            emit("log", backend=BACKEND_ID, level="info", message="Starting Ultralytics TensorRT export")
+            export_model = YOLO(str(best_path if best_path.exists() else model_name))
+            exported = export_model.export(**export_plan["kwargs"])
+            emit("log", backend=BACKEND_ID, level="info", message=f"Ultralytics TensorRT export returned {exported}")
+            if exported:
+                tensorrt_path = Path(str(exported))
+            elif best_path.exists():
+                tensorrt_path = best_path.with_suffix(".engine")
+            if tensorrt_path and tensorrt_path.exists():
+                emit_artifact_once(emitted_artifacts, "model.engine", tensorrt_path, "tensorrt")
+            else:
+                return fail("Ultralytics TensorRT export completed without producing an engine file.", "tensorrt_export_missing")
+        except Exception as exc:
+            return fail("Ultralytics TensorRT export failed.", "tensorrt_export_failed", {"exception": str(exc)})
+
     report_path = output_path / "ultralytics_training_report.json"
     report = {
         "ok": True,
@@ -966,12 +1013,14 @@ def run(request: dict[str, Any]) -> int:
         "saveDir": str(save_dir),
         "checkpointPath": str(best_path if best_path.exists() else last_path),
         "onnxPath": str(onnx_path) if onnx_path else "",
+        "tensorrtPath": str(tensorrt_path) if tensorrt_path else "",
         "metrics": metrics,
         "ultralyticsTrainArgs": {key: value for key, value in train_kwargs.items() if key not in {"data", "project", "name"}},
-        "licenseNote": "Ultralytics YOLO is executed through the installed official Python package. Review its license before redistribution.",
+        "ultralyticsExportArgs": export_plan["normalized"],
+        "licenseNote": LICENSE_NOTE,
     }
     write_report(report_path, report)
-    emit_training_artifacts(save_dir, best_path, last_path, onnx_path, report_path, emitted_artifacts)
+    emit_training_artifacts(save_dir, best_path, last_path, onnx_path, tensorrt_path, report_path, emitted_artifacts)
     emit(
         "progress",
         backend=BACKEND_ID,
@@ -992,6 +1041,7 @@ def run(request: dict[str, Any]) -> int:
         backend=BACKEND_ID,
         checkpointPath=report["checkpointPath"],
         onnxPath=report["onnxPath"],
+        tensorrtPath=report["tensorrtPath"],
         reportPath=str(report_path),
         metrics=metrics,
     )

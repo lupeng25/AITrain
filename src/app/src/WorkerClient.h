@@ -31,6 +31,7 @@ public:
     bool requestDiagnosticsBundle(const QString& workerProgram, const QString& outputPath, const QJsonObject& context, QString* error, const QString& taskId = {});
     bool requestDeploymentValidation(const QString& workerProgram, const QString& modelPath, const QString& outputPath, const QString& format, const QString& sampleImagePath, const QJsonObject& options, QString* error, const QString& taskId = {});
     bool requestModelExport(const QString& workerProgram, const QString& checkpointPath, const QString& outputPath, const QString& format, QString* error, const QString& taskId = {});
+    bool requestModelExport(const QString& workerProgram, const QString& checkpointPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId = {});
     bool requestInference(const QString& workerProgram, const QString& checkpointPath, const QString& imagePath, const QString& outputPath, QString* error, const QString& taskId = {});
     void cancel();
     void pause();

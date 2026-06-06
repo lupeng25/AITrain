@@ -26,6 +26,63 @@
 using namespace worker_support;
 namespace wp = aitrain::worker_protocol;
 
+namespace {
+bool jsonBool(const QJsonObject& object, const QString& key)
+{
+    const QJsonValue value = object.value(key);
+    if (value.isBool()) {
+        return value.toBool();
+    }
+    if (value.isString()) {
+        const QString text = value.toString().trimmed().toLower();
+        return text == QStringLiteral("true") || text == QStringLiteral("1") || text == QStringLiteral("yes");
+    }
+    return value.toInt(0) != 0;
+}
+
+bool ncnnOfficialExportOptionsUnsupported(const QJsonObject& options)
+{
+    const QJsonObject args = options.value(QStringLiteral("ultralyticsExportArgs")).toObject();
+    return jsonBool(args, QStringLiteral("dynamic"))
+        || jsonBool(args, QStringLiteral("half"))
+        || jsonBool(args, QStringLiteral("int8"));
+}
+
+QString unsupportedOfficialExportOptionsError(const QString& format, const QString& checkpointSuffix, const QJsonObject& options)
+{
+    const QJsonObject args = options.value(QStringLiteral("ultralyticsExportArgs")).toObject();
+    if (args.isEmpty()) {
+        return {};
+    }
+
+    const QString normalizedFormat = format.trimmed().toLower();
+    const bool dynamic = jsonBool(args, QStringLiteral("dynamic"));
+    const bool half = jsonBool(args, QStringLiteral("half"));
+    const bool int8 = jsonBool(args, QStringLiteral("int8"));
+    if (normalizedFormat == QStringLiteral("onnx") && int8) {
+        return QStringLiteral("ONNX export does not support int8 in AITrain; use TensorRT export for INT8.");
+    }
+    if (normalizedFormat == QStringLiteral("ncnn") && (dynamic || half || int8)) {
+        return QStringLiteral("NCNN export requires a static FP32 ONNX intermediate; dynamic/half/int8 are unsupported.");
+    }
+    if (checkpointSuffix != QStringLiteral("pt") && normalizedFormat.startsWith(QStringLiteral("tensorrt")) && int8) {
+        return QStringLiteral("TensorRT INT8 export requires official Ultralytics .pt export with calibration data; existing ONNX TensorRT conversion does not consume int8 options.");
+    }
+    return {};
+}
+
+QString defaultExportOutputPath(const QString& checkpointPath, const QString& outputPath, const QString& format)
+{
+    if (!outputPath.trimmed().isEmpty()) {
+        return outputPath;
+    }
+    const QString suffix = format == QStringLiteral("ncnn")
+        ? QStringLiteral("param")
+        : (format.startsWith(QStringLiteral("tensorrt")) ? QStringLiteral("engine") : QStringLiteral("onnx"));
+    return QFileInfo(checkpointPath).absoluteDir().filePath(QStringLiteral("model.%1").arg(suffix));
+}
+} // namespace
+
 void WorkerSession::evaluateModel(const QJsonObject& payload)
 {
     const QString taskId = payload.value(QStringLiteral("taskId")).toString();
@@ -500,9 +557,11 @@ void WorkerSession::exportModel(const QJsonObject& payload)
     activeTaskId_ = taskId;
     canceled_ = false;
     running_ = true;
-    const QString checkpointPath = payload.value(QStringLiteral("checkpointPath")).toString();
-    const QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
+    QString checkpointPath = payload.value(QStringLiteral("checkpointPath")).toString();
+    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
     const QString format = payload.value(QStringLiteral("format")).toString(QStringLiteral("onnx"));
+    const QJsonObject options = payload.value(QStringLiteral("options")).toObject();
+    outputPath = defaultExportOutputPath(checkpointPath, outputPath, format);
     activeOutputPath_ = outputPath;
 
     QJsonObject startProgress;
@@ -512,6 +571,248 @@ void WorkerSession::exportModel(const QJsonObject& payload)
     if (pollPendingCancel()) {
         sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
         return;
+    }
+
+    const QString checkpointSuffix = QFileInfo(checkpointPath).suffix().toLower();
+    const QString unsupportedOptions = unsupportedOfficialExportOptionsError(format, checkpointSuffix, options);
+    if (!unsupportedOptions.isEmpty()) {
+        running_ = false;
+        failWithDetails(
+            unsupportedOptions,
+            QStringLiteral("unsupported_export_options"),
+            QJsonObject{
+                {QStringLiteral("format"), format},
+                {QStringLiteral("checkpointPath"), checkpointPath},
+                {QStringLiteral("outputPath"), outputPath}});
+        return;
+    }
+    if (checkpointSuffix == QStringLiteral("pt")) {
+        const auto runOfficialYoloExport = [&](const QString& sourcePath,
+                                               const QString& officialOutputPath,
+                                               const QString& productFormat,
+                                               const QJsonObject& exportOptions,
+                                               bool forwardExportEvents,
+                                               QJsonObject* modelExportPayload,
+                                               QString* error) {
+            const QString pythonExecutable = firstUsablePythonExecutable(exportOptions);
+            if (pythonExecutable.isEmpty()) {
+                if (error) *error = QStringLiteral("Official YOLO export requires a usable Python executable.");
+                return false;
+            }
+            const QString exporterScript = pythonYoloExporterScriptPath(exportOptions);
+            if (!QFileInfo::exists(exporterScript)) {
+                if (error) *error = QStringLiteral("Official YOLO exporter script not found: %1").arg(exporterScript);
+                return false;
+            }
+            if (!QDir().mkpath(QFileInfo(officialOutputPath).absolutePath())) {
+                if (error) *error = QStringLiteral("Cannot create official YOLO export directory: %1").arg(QFileInfo(officialOutputPath).absolutePath());
+                return false;
+            }
+
+            const QString requestPath = QDir(QFileInfo(officialOutputPath).absolutePath()).filePath(QStringLiteral("official_yolo_export_request.json"));
+            QJsonObject request;
+            request.insert(QStringLiteral("protocolVersion"), 1);
+            request.insert(QStringLiteral("taskId"), taskId);
+            request.insert(QStringLiteral("modelPath"), sourcePath);
+            request.insert(QStringLiteral("checkpointPath"), sourcePath);
+            request.insert(QStringLiteral("outputPath"), officialOutputPath);
+            request.insert(QStringLiteral("format"), productFormat);
+            request.insert(QStringLiteral("options"), exportOptions);
+            QFile requestFile(requestPath);
+            if (!requestFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                if (error) *error = QStringLiteral("Cannot write official YOLO export request: %1").arg(requestPath);
+                return false;
+            }
+            requestFile.write(QJsonDocument(request).toJson(QJsonDocument::Indented));
+            requestFile.close();
+
+            QProcess process;
+            QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+            environment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
+            environment.insert(QStringLiteral("PYTHONIOENCODING"), QStringLiteral("utf-8"));
+            process.setProcessEnvironment(environment);
+            process.setProgram(pythonExecutable);
+            process.setArguments(QStringList() << QStringLiteral("-u") << exporterScript << QStringLiteral("--request") << requestPath);
+            process.setProcessChannelMode(QProcess::SeparateChannels);
+            process.start();
+            if (!process.waitForStarted(5000)) {
+                if (error) *error = QStringLiteral("Cannot start official YOLO exporter: %1").arg(process.errorString());
+                return false;
+            }
+
+            QByteArray stdoutBuffer;
+            QByteArray stderrBuffer;
+            QString failedMessage;
+            QString failedCode;
+            bool completedSeen = false;
+            const auto handleStdoutLine = [&](const QByteArray& line) {
+                if (line.isEmpty()) {
+                    return;
+                }
+                QJsonDocument document;
+                if (parseTrainerJsonDocument(line, &document)) {
+                    QJsonObject object = document.object();
+                    const QString type = object.value(QStringLiteral("type")).toString();
+                    QJsonObject eventPayload = object.value(QStringLiteral("payload")).toObject();
+                    if (eventPayload.isEmpty()) {
+                        eventPayload = object;
+                        eventPayload.remove(QStringLiteral("type"));
+                    }
+                    eventPayload.insert(QStringLiteral("taskId"), taskId);
+                    if (type == wp::event::failed()) {
+                        failedMessage = eventPayload.value(QStringLiteral("message")).toString(QStringLiteral("Official YOLO export failed."));
+                        failedCode = eventPayload.value(QStringLiteral("errorCode")).toString(eventPayload.value(QStringLiteral("code")).toString(QStringLiteral("ultralytics_export_failed")));
+                    } else if (type == wp::event::completed()) {
+                        completedSeen = true;
+                    } else {
+                        if (type == wp::event::modelExport() && modelExportPayload) {
+                            *modelExportPayload = eventPayload;
+                        }
+                        if (forwardExportEvents || type == wp::event::progress() || type == wp::event::log()) {
+                            send(type, eventPayload);
+                        }
+                    }
+                } else {
+                    const QJsonObject logPayload = sanitizedTrainerLogPayload(line, taskId, QStringLiteral("ultralytics_yolo_export"));
+                    if (!logPayload.isEmpty()) {
+                        send(wp::event::log(), logPayload);
+                    }
+                }
+            };
+            const auto drainStdout = [&]() {
+                stdoutBuffer.append(process.readAllStandardOutput());
+                int delimiter = nextPythonOutputDelimiter(stdoutBuffer);
+                while (delimiter >= 0) {
+                    const QByteArray line = stdoutBuffer.left(delimiter).trimmed();
+                    int removeCount = delimiter + 1;
+                    while (removeCount < stdoutBuffer.size()
+                        && (stdoutBuffer.at(removeCount) == '\n' || stdoutBuffer.at(removeCount) == '\r')) {
+                        ++removeCount;
+                    }
+                    stdoutBuffer.remove(0, removeCount);
+                    handleStdoutLine(line);
+                    delimiter = nextPythonOutputDelimiter(stdoutBuffer);
+                }
+            };
+            const auto drainStderr = [&]() {
+                stderrBuffer.append(process.readAllStandardError());
+                int delimiter = nextPythonOutputDelimiter(stderrBuffer);
+                while (delimiter >= 0) {
+                    const QByteArray line = stderrBuffer.left(delimiter).trimmed();
+                    int removeCount = delimiter + 1;
+                    while (removeCount < stderrBuffer.size()
+                        && (stderrBuffer.at(removeCount) == '\n' || stderrBuffer.at(removeCount) == '\r')) {
+                        ++removeCount;
+                    }
+                    stderrBuffer.remove(0, removeCount);
+                    const QJsonObject logPayload = sanitizedTrainerLogPayload(line, taskId, QStringLiteral("ultralytics_yolo_export"));
+                    if (!logPayload.isEmpty()) {
+                        send(wp::event::log(), logPayload);
+                    }
+                    delimiter = nextPythonOutputDelimiter(stderrBuffer);
+                }
+            };
+            while (process.state() != QProcess::NotRunning) {
+                process.waitForReadyRead(50);
+                drainStdout();
+                drainStderr();
+                if (pollPendingCancel(1)) {
+                    process.terminate();
+                    if (!process.waitForFinished(1500)) {
+                        process.kill();
+                        process.waitForFinished(1500);
+                    }
+                    if (error) *error = QStringLiteral("Canceled by user");
+                    return false;
+                }
+                QCoreApplication::processEvents();
+            }
+            drainStdout();
+            drainStderr();
+            if (!stdoutBuffer.trimmed().isEmpty()) {
+                handleStdoutLine(stdoutBuffer.trimmed());
+            }
+            if (!stderrBuffer.trimmed().isEmpty()) {
+                const QJsonObject logPayload = sanitizedTrainerLogPayload(stderrBuffer.trimmed(), taskId, QStringLiteral("ultralytics_yolo_export"));
+                if (!logPayload.isEmpty()) {
+                    send(wp::event::log(), logPayload);
+                }
+            }
+            if (!failedMessage.isEmpty()) {
+                if (error) *error = failedCode.isEmpty() ? failedMessage : QStringLiteral("%1: %2").arg(failedCode, failedMessage);
+                return false;
+            }
+            if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0 || !completedSeen) {
+                if (error) *error = QStringLiteral("Official YOLO exporter exited without a completed message.");
+                return false;
+            }
+            if (modelExportPayload && modelExportPayload->isEmpty()) {
+                if (error) *error = QStringLiteral("Official YOLO exporter did not emit a modelExport payload.");
+                return false;
+            }
+            return true;
+        };
+
+        QJsonObject modelExportPayload;
+        QString officialError;
+        if (format == QStringLiteral("onnx") || format.startsWith(QStringLiteral("tensorrt"))) {
+            if (!runOfficialYoloExport(checkpointPath, outputPath, format, options, true, &modelExportPayload, &officialError)) {
+                running_ = false;
+                if (officialError == QStringLiteral("Canceled by user")) {
+                    sendCanceledAndFinish(taskId, officialError);
+                    return;
+                }
+                failWithDetails(officialError, QStringLiteral("official_yolo_export_failed"), QJsonObject{{QStringLiteral("outputPath"), outputPath}});
+                return;
+            }
+            running_ = false;
+            if (canceled_) {
+                return;
+            }
+            QJsonObject completed;
+            completed.insert(QStringLiteral("message"), QStringLiteral("Model export completed"));
+            completed.insert(QStringLiteral("taskId"), taskId);
+            completed.insert(QStringLiteral("command"), activeCommand_);
+            completed.insert(QStringLiteral("status"), QStringLiteral("completed"));
+            completed.insert(QStringLiteral("exportPath"), modelExportPayload.value(QStringLiteral("exportPath")).toString());
+            completed.insert(QStringLiteral("reportPath"), modelExportPayload.value(QStringLiteral("reportPath")).toString());
+            send(wp::event::completed(), completed);
+            finishSession();
+            return;
+        }
+        if (format == QStringLiteral("ncnn")) {
+            if (ncnnOfficialExportOptionsUnsupported(options)) {
+                running_ = false;
+                failWithDetails(
+                    QStringLiteral("NCNN export from .pt requires a static FP32 ONNX intermediate; dynamic/half/int8 are unsupported."),
+                    QStringLiteral("unsupported_export_options"),
+                    QJsonObject{{QStringLiteral("format"), format}, {QStringLiteral("outputPath"), outputPath}});
+                return;
+            }
+            QJsonObject intermediateOptions = options;
+            QJsonObject args = intermediateOptions.value(QStringLiteral("ultralyticsExportArgs")).toObject();
+            args.insert(QStringLiteral("format"), QStringLiteral("onnx"));
+            args.insert(QStringLiteral("dynamic"), false);
+            args.insert(QStringLiteral("half"), false);
+            args.insert(QStringLiteral("int8"), false);
+            intermediateOptions.insert(QStringLiteral("ultralyticsExportArgs"), args);
+            const QString intermediateDir = QDir(QFileInfo(outputPath).absolutePath()).filePath(QStringLiteral("official_onnx_intermediate"));
+            const QString intermediateOnnx = QDir(intermediateDir).filePath(QStringLiteral("model.onnx"));
+            if (!runOfficialYoloExport(checkpointPath, intermediateOnnx, QStringLiteral("onnx"), intermediateOptions, false, &modelExportPayload, &officialError)) {
+                running_ = false;
+                if (officialError == QStringLiteral("Canceled by user")) {
+                    sendCanceledAndFinish(taskId, officialError);
+                    return;
+                }
+                failWithDetails(officialError, QStringLiteral("official_yolo_export_failed"), QJsonObject{{QStringLiteral("outputPath"), intermediateOnnx}});
+                return;
+            }
+            checkpointPath = intermediateOnnx;
+        } else {
+            running_ = false;
+            fail(QStringLiteral("Unsupported export format for .pt source: %1").arg(format));
+            return;
+        }
     }
 
     const aitrain::DetectionExportResult result = aitrain::exportDetectionCheckpoint(checkpointPath, outputPath, format, cancellationCallback());

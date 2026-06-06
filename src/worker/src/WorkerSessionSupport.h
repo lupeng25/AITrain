@@ -18,6 +18,7 @@ QJsonObject nvidiaSmiCheck();
 QString firstUsablePythonExecutable(const QJsonObject& parameters = {});
 QString pythonTrainerScriptFileForBackend(const QString& backend);
 QString pythonTrainerScriptPath(const QJsonObject& parameters, const QString& backend);
+QString pythonYoloExporterScriptPath(const QJsonObject& parameters = {});
 QString requestedTrainingBackend(const aitrain::TrainingRequest& request);
 bool diagnosticTrainingBackendsEnabled();
 QString officialTrainingBackendForTask(const QString& taskType);

@@ -210,8 +210,8 @@ images/sample.png<TAB>[{"transcription":"text","points":[[1,1],[30,1],[30,20],[1
 
 | 数据/任务 | 推荐后端 | 推荐模型预设 | 说明 |
 |---|---|---|---|
-| YOLO 检测 | `ultralytics_yolo_detect` | `yolov8n.yaml`、`yolo11n.yaml`、`yolo12n.yaml` | 官方 Ultralytics 检测训练、ONNX 导出和 `val()` 评估；推理、benchmark、部署验证走 AITrain C++ runtime |
-| YOLO 分割 | `ultralytics_yolo_segment` | `yolov8n-seg.yaml`、`yolo11n-seg.yaml`、`yolo12n-seg.yaml` | 官方 Ultralytics 分割训练、ONNX 导出和 `val()` 评估；mask 后处理、推理、benchmark、部署验证走 AITrain C++ runtime |
+| YOLO 检测 | `ultralytics_yolo_detect` | 默认 `yolov8n.yaml`；可选 YOLOv8 / YOLO11 / YOLO12 `n/s/m/l/x` `.yaml`、`.pt`，以及 YOLOv8 P2/P6 `.yaml` | 官方 Ultralytics 检测训练、ONNX 导出和 `val()` 评估；推理、benchmark、部署验证走 AITrain C++ runtime |
+| YOLO 分割 | `ultralytics_yolo_segment` | 默认 `yolov8n-seg.yaml`；可选 YOLOv8 / YOLO11 / YOLO12 `n/s/m/l/x` `-seg.yaml`、`-seg.pt` | 官方 Ultralytics 分割训练、ONNX 导出和 `val()` 评估；mask 后处理、推理、benchmark、部署验证走 AITrain C++ runtime |
 | PaddleOCR Det | `paddleocr_det_official` | 默认 `PP-OCRv5_mobile_det`；可选 `PP-OCRv4_mobile_det`、`PP-OCRv5_server_det` | 官方 PaddleOCR 检测工具链，建议使用隔离 OCR 环境；PP-OCRv5 preset 需要 PaddleOCR 源码 checkout |
 | PaddleOCR Rec | `paddleocr_rec_official` | 默认 `PP-OCRv5_mobile_rec`；可选 `PP-OCRv4_mobile_rec`、`PP-OCRv5_server_rec`、`en_PP-OCRv5_mobile_rec` | 官方 PaddleOCR Rec adapter，可运行 train/export/predict；`paddleocr_rec` 仅作为数据集格式保留 |
 
@@ -220,6 +220,10 @@ images/sample.png<TAB>[{"transcription":"text","points":[[1,1],[30,1],[30,20],[1
 旧的 `tiny_linear_detector`、小型 `paddleocr_rec` CTC trainer、`python_mock` 和 C++ 分割/OCR 训练 scaffold 已物理删除，不会出现在用户训练后端列表中，也不会作为主验收 passed 依据。`paddleocr_rec` 仅作为数据集格式保留。
 
 YOLO 与 OCR 的产品边界不同：YOLO 的训练、ONNX 导出和检测/分割评估来自官方 Ultralytics；后续单图推理、benchmark 和部署验证默认使用 AITrain C++ ONNX Runtime / TensorRT / NCNN runtime。OCR 则只接受 PaddleOCR 官方 Det / Rec / System 报告作为当前产品证据。PP-OCRv5 支持只增加 Det / Rec / System 官方链路，不表示已经覆盖 PP-StructureV3、PP-ChatOCR、PaddleOCR-VL、文档方向分类、图像矫正、文本行方向分类或 PaddleOCR C++ 本地部署。
+
+YOLO 模型预设下拉是完整产品化入口，但仍允许手动输入官方 Ultralytics 可解析的模型名。训练页会做任务匹配预检：检测后端不能选择 `-seg` 模型，分割后端必须选择 `-seg` 模型。`.pt` 权重不随 AITrain 包分发，首次使用时可能由官方 Ultralytics 包下载到用户环境。
+
+训练页“验证与导出”区域支持 YOLO 官方导出参数：`dynamic`、`half` 和 `int8 TensorRT`。默认仍导出 ONNX；勾选 `dynamic` 或 `half` 会传给官方 ONNX export；勾选 `int8 TensorRT` 会在 ONNX 之外额外尝试官方 TensorRT INT8 engine export，并使用本次训练的 `data.yaml` 做 calibration。不支持的组合会明确失败，不会静默降级。
 
 ## 7. 任务与产物
 
@@ -267,11 +271,13 @@ YOLO 与 OCR 的产品边界不同：YOLO 的训练、ONNX 导出和检测/分�
 
 | 格式 | 输入 | 输出 | 说明 |
 |---|---|---|---|
-| ONNX | checkpoint、已有 ONNX、AITrain export | `.onnx` 和 sidecar report | 主交付格式，可继续推理验证 |
-| NCNN | ONNX 或可生成 ONNX 的输入 | `.param` 和 `.bin` | 导出依赖本机 `onnx2ncnn`；部署验证在配置 NCNN SDK/runtime 且提供样本图时运行 YOLO 检测/分割推理 |
-| TensorRT | ONNX | `.engine` / `.plan` | 需要 RTX / SM 75+ 和 TensorRT runtime；旧 GPU 会 `hardware-blocked` |
+| ONNX | checkpoint、`.pt`、已有 ONNX、AITrain export | `.onnx` 和 sidecar report | `.pt` 输入走官方 Ultralytics export；已有 ONNX 继续走 AITrain copy / report 路径 |
+| NCNN | ONNX 或 `.pt` | `.param` 和 `.bin` | `.pt` 输入会先生成静态 FP32 官方 ONNX，再走 `onnx2ncnn`；`dynamic`、`half`、`int8` 会被拒绝 |
+| TensorRT | ONNX 或 `.pt` | `.engine` / `.plan` | `.pt` 输入走官方 Ultralytics TensorRT export；INT8 需要 GPU/TensorRT 和 calibration data；旧 GPU 会 `hardware-blocked` |
 
 输出路径留空时，已打开项目会默认写入项目的 `models/exported`；未打开项目时通常写入输入模型同目录。
+
+“官方参数”区域会随模型导出请求传递 `format`、`dynamic`、`half`、`int8`、`imgsz`、`batch`、`device`，以及 TensorRT INT8 所需的 calibration `data.yaml`。ONNX 不支持 `int8=true`；NCNN 不支持 `dynamic/half/int8`；无 TensorRT、GPU 环境或 calibration data 时，TensorRT INT8 会明确失败或阻塞。
 
 导出后建议在同页填写“验证图片”，点击“验证导出产物”：
 

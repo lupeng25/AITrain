@@ -178,6 +178,35 @@ QString pythonTrainerScriptPath(const QJsonObject& parameters, const QString& ba
     return candidates.first();
 }
 
+QString pythonYoloExporterScriptPath(const QJsonObject& parameters)
+{
+    if (diagnosticTrainingBackendsEnabled()) {
+        const QString requested = parameters.value(QStringLiteral("pythonYoloExporterScript")).toString().trimmed();
+        if (!requested.isEmpty()) {
+            return QFileInfo(requested).absoluteFilePath();
+        }
+        const QString envRequested = QString::fromLocal8Bit(qgetenv("AITRAIN_PYTHON_YOLO_EXPORTER_SCRIPT")).trimmed();
+        if (!envRequested.isEmpty()) {
+            return QFileInfo(envRequested).absoluteFilePath();
+        }
+    }
+
+    const QString exporterFile = QStringLiteral("python_trainers/yolo/ultralytics_exporter.py");
+    const QString applicationDir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        QDir(applicationDir).absoluteFilePath(exporterFile),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../%1").arg(exporterFile)),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../../%1").arg(exporterFile)),
+        QDir::current().absoluteFilePath(exporterFile)
+    };
+    for (const QString& candidate : candidates) {
+        if (QFileInfo::exists(candidate)) {
+            return QFileInfo(candidate).absoluteFilePath();
+        }
+    }
+    return candidates.first();
+}
+
 QString requestedTrainingBackend(const aitrain::TrainingRequest& request)
 {
     const QString backend = request.parameters.value(QStringLiteral("trainingBackend")).toString().trimmed();
