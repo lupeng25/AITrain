@@ -21,7 +21,30 @@ from trainer_protocol import configure_stdio, emit_failed, exception_details, un
 
 
 BACKEND_ID = "paddleocr_det_official"
-DEFAULT_CONFIG_RELATIVE = "configs/det/PP-OCRv4/PP-OCRv4_mobile_det.yml"
+DEFAULT_MODEL_PRESET = "PP-OCRv5_mobile_det"
+DET_PRESETS: dict[str, dict[str, Any]] = {
+    "PP-OCRv4_mobile_det": {
+        "ocrVersion": "PP-OCRv4",
+        "config": "configs/det/PP-OCRv4/PP-OCRv4_mobile_det.yml",
+        "outputConfigName": "aitrain_ppocrv4_det.yml",
+        "modelName": "PP-OCRv4_mobile_det",
+        "requiresRepo": False,
+    },
+    "PP-OCRv5_mobile_det": {
+        "ocrVersion": "PP-OCRv5",
+        "config": "configs/det/PP-OCRv5/PP-OCRv5_mobile_det.yml",
+        "outputConfigName": "aitrain_ppocrv5_mobile_det.yml",
+        "modelName": "PP-OCRv5_mobile_det",
+        "requiresRepo": True,
+    },
+    "PP-OCRv5_server_det": {
+        "ocrVersion": "PP-OCRv5",
+        "config": "configs/det/PP-OCRv5/PP-OCRv5_server_det.yml",
+        "outputConfigName": "aitrain_ppocrv5_server_det.yml",
+        "modelName": "PP-OCRv5_server_det",
+        "requiresRepo": True,
+    },
+}
 
 configure_stdio()
 
@@ -51,6 +74,31 @@ def bool_param(parameters: dict[str, Any], key: str, default: bool) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on"}
     return bool(value)
+
+
+def resolve_preset(parameters: dict[str, Any]) -> dict[str, Any]:
+    requested = str(parameters.get("modelPreset") or parameters.get("model") or DEFAULT_MODEL_PRESET).strip()
+    if not requested:
+        requested = DEFAULT_MODEL_PRESET
+    preset = dict(DET_PRESETS.get(requested, DET_PRESETS[DEFAULT_MODEL_PRESET]))
+    preset["modelPreset"] = requested if requested in DET_PRESETS else DEFAULT_MODEL_PRESET
+    official_config = str(parameters.get("officialConfig") or "").strip().replace("\\", "/")
+    if official_config:
+        preset["config"] = official_config
+        preset["configSource"] = "officialConfig_override"
+        preset["requiresRepo"] = True
+    else:
+        preset["configSource"] = "builtin_preset"
+    return preset
+
+
+def config_model_name(config: dict[str, Any], fallback: str) -> str:
+    global_config = config.get("Global") if isinstance(config, dict) else {}
+    if isinstance(global_config, dict):
+        value = str(global_config.get("model_name") or "").strip()
+        if value:
+            return value
+    return fallback
 
 
 def resolve_dataset_file(dataset_path: Path, value: Any, default_name: str) -> Path:
@@ -167,6 +215,7 @@ def select_checkpoint_base(output_path: Path, explicit_base: Any) -> Path:
 def build_config(
     repo: Path | None,
     parameters: dict[str, Any],
+    preset: dict[str, Any],
     dataset_path: Path,
     output_path: Path,
     train_list_path: Path,
@@ -175,7 +224,7 @@ def build_config(
 ) -> dict[str, Any]:
     import yaml
 
-    template_relative = str(parameters.get("officialConfig") or DEFAULT_CONFIG_RELATIVE).replace("\\", "/")
+    template_relative = str(preset["config"]).replace("\\", "/")
     if repo:
         template_path = (repo / template_relative).resolve()
         if not template_path.exists():
@@ -309,6 +358,14 @@ def run(request: dict[str, Any]) -> int:
     dataset_path = Path(str(request.get("datasetPath") or parameters.get("datasetPath") or "")).resolve()
     output_path = Path(str(request.get("outputPath") or parameters.get("outputPath") or "aitrain-ppocr-det-output")).resolve()
     output_path.mkdir(parents=True, exist_ok=True)
+    preset = resolve_preset(parameters)
+    repo = find_repo(parameters)
+    if repo is None and preset.get("requiresRepo"):
+        return fail(
+            "Official PaddleOCR source checkout is required for this PaddleOCR detection preset or officialConfig override.",
+            "paddleocr_repo_missing",
+            {"modelPreset": preset["modelPreset"], "officialConfig": preset["config"]},
+        )
 
     try:
         train_label_source = resolve_dataset_file(dataset_path, parameters.get("trainLabelFile"), "det_gt.txt")
@@ -323,7 +380,6 @@ def run(request: dict[str, Any]) -> int:
     except Exception as exc:
         return fail(str(exc), "bad_dataset")
 
-    repo = find_repo(parameters)
     run_official = bool_param(parameters, "runOfficial", False)
     prepare_only = bool_param(parameters, "prepareOnly", not run_official)
     if repo is None and not prepare_only:
@@ -344,12 +400,13 @@ def run(request: dict[str, Any]) -> int:
     write_label_file(val_list_path, val_samples)
 
     try:
-        config = build_config(repo, parameters, dataset_path, output_path, train_list_path, val_list_path, samples[0][0])
+        config = build_config(repo, parameters, preset, dataset_path, output_path, train_list_path, val_list_path, samples[0][0])
     except Exception as exc:
         return fail(f"Failed to build official PaddleOCR det config: {exc}", "config_failed")
 
-    config_path = output_path / "aitrain_ppocrv4_det.yml"
+    config_path = output_path / str(preset["outputConfigName"])
     config_path.write_text(yaml_dump(config), encoding="utf-8")
+    resolved_model_name = config_model_name(config, str(preset["modelName"]))
     export_only = bool_param(parameters, "exportOnly", False)
     train_command = [sys.executable, "tools/train.py", "-c", str(config_path)]
     pretrained_base = select_checkpoint_base(output_path, parameters.get("pretrainedModel"))
@@ -374,7 +431,13 @@ def run(request: dict[str, Any]) -> int:
         "framework": "PaddleOCR official tools",
         "modelFamily": "ocr_detection",
         "mode": "prepareOnly" if prepare_only else ("exportOnly" if export_only else "officialTrain"),
-        "note": "PP-OCRv4 official detection adapter. It validates official train/export wiring, not OCR accuracy.",
+        "note": "PaddleOCR PP-OCRv4/PP-OCRv5 official detection adapter. It validates official train/export wiring, not OCR accuracy.",
+        "ocrVersion": preset["ocrVersion"],
+        "modelPreset": preset["modelPreset"],
+        "resolvedModelName": resolved_model_name,
+        "resolvedOfficialConfig": str(preset["config"]),
+        "configSource": preset["configSource"],
+        "presetDictionaryPath": "",
         "pythonVersion": sys.version.split()[0],
         "paddleVersion": module_version("paddlepaddle"),
         "paddleOcrPackageVersion": module_version("paddleocr"),
@@ -393,7 +456,7 @@ def run(request: dict[str, Any]) -> int:
         "metrics": {},
     }
 
-    emit("artifact", name="aitrain_ppocrv4_det.yml", path=str(config_path), kind="config")
+    emit("artifact", name=config_path.name, path=str(config_path), kind="config")
     emit("artifact", name="train_det_list.txt", path=str(train_list_path), kind="dataset")
     emit("artifact", name="val_det_list.txt", path=str(val_list_path), kind="dataset")
 

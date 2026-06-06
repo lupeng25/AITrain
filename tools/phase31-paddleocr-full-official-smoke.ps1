@@ -4,6 +4,11 @@ param(
     [string]$PaddleOcrRepo = ".deps\PaddleOCR",
     [string]$PaddleOcrRef = "f8b41a62bba991d35e578ffa712107a042b0c3b0",
     [string]$PaddlePaddleRequirement = "paddlepaddle==3.3.1",
+    [ValidateSet("PP-OCRv4", "PP-OCRv5")]
+    [string]$OcrVersion = "PP-OCRv5",
+    [string]$DetModelPreset = "",
+    [string]$RecModelPreset = "",
+    [switch]$UseGpu,
     [switch]$DisablePinnedConstraints,
     [switch]$SkipInstall
 )
@@ -64,6 +69,14 @@ if ($PaddleOcrRef) {
 $resolvedPaddleOcrRef = (& git -C $repoFull rev-parse HEAD).Trim()
 Write-Host "Using PaddleOCR ref: $resolvedPaddleOcrRef"
 
+if ([string]::IsNullOrWhiteSpace($DetModelPreset)) {
+    $DetModelPreset = if ($OcrVersion -eq "PP-OCRv5") { "PP-OCRv5_mobile_det" } else { "PP-OCRv4_mobile_det" }
+}
+if ([string]::IsNullOrWhiteSpace($RecModelPreset)) {
+    $RecModelPreset = if ($OcrVersion -eq "PP-OCRv5") { "PP-OCRv5_mobile_rec" } else { "PP-OCRv4_mobile_rec" }
+}
+Write-Host "Using OCR presets: Det=$DetModelPreset Rec=$RecModelPreset UseGpu=$([bool]$UseGpu)"
+
 if (!$SkipInstall) {
     $pipArgs = @("-m", "pip", "install", "--no-warn-script-location", $PaddlePaddleRequirement, "-r", (Join-Path $repoFull "requirements.txt"))
     if (!$DisablePinnedConstraints) {
@@ -111,10 +124,11 @@ $detRequest = [ordered]@{
         paddleOcrRef = $resolvedPaddleOcrRef
         runOfficial = $true
         prepareOnly = $false
+        modelPreset = $DetModelPreset
         epochs = 1
         batchSize = 1
         imageSize = 64
-        useGpu = $false
+        useGpu = [bool]$UseGpu
         validationRatio = 0.5
         calMetricDuringTrain = $false
     }
@@ -141,13 +155,14 @@ $recRequest = [ordered]@{
         paddleOcrRef = $resolvedPaddleOcrRef
         runOfficial = $true
         prepareOnly = $false
+        modelPreset = $RecModelPreset
         epochs = 1
         batchSize = 1
         imageWidth = 320
         imageHeight = 48
         recImageShape = "3,48,320"
         maxTextLength = 8
-        useGpu = $false
+        useGpu = [bool]$UseGpu
         validationRatio = 0.5
         runInferenceAfterExport = $true
         inferenceImage = "images\a.png"
@@ -172,12 +187,15 @@ $systemRequest = [ordered]@{
         trainingBackend = "paddleocr_system_official"
         paddleOcrRepoPath = $repoFull
         paddleOcrRef = $resolvedPaddleOcrRef
+        detModelPreset = $DetModelPreset
+        recModelPreset = $RecModelPreset
+        recReportPath = (Join-Path $recOutputPath "paddleocr_official_rec_report.json")
         detModelDir = (Join-Path $detOutputPath "official_inference")
         recModelDir = (Join-Path $recOutputPath "official_inference")
         dictionaryFile = (Join-Path $recOutputPath "official_data\dict.txt")
         inferenceImage = (Join-Path $detDatasetPath "images\a.png")
         dropScore = 0.0
-        useGpu = $false
+        useGpu = [bool]$UseGpu
     }
 }
 $systemRequest | ConvertTo-Json -Depth 20 | Set-Content $systemRequestPath -Encoding UTF8

@@ -15,8 +15,12 @@ param(
     [int]$RecEvalEverySteps = 1000000,
     [int]$RecSubsetTrain = 256,
     [int]$RecSubsetVal = 64,
+    [ValidateSet("PP-OCRv4", "PP-OCRv5")]
+    [string]$OcrVersion = "PP-OCRv5",
+    [string]$DetModelPreset = "",
+    [string]$RecModelPreset = "",
     [string]$RecOfficialConfig = "",
-    [string]$RecDictionaryFile = "dict.txt",
+    [string]$RecDictionaryFile = "",
     [string]$RecPretrainedModel = "",
     [switch]$UseGpu,
     [switch]$UseRecCpuSubset,
@@ -150,6 +154,13 @@ $resolvedPaddleOcrRef = (& git -C $repoFull rev-parse HEAD 2>$null).Trim()
 if ($PaddleOcrRef -and $resolvedPaddleOcrRef -ne $PaddleOcrRef) {
     Write-Host "Requested PaddleOCR ref '$PaddleOcrRef', current checkout is '$resolvedPaddleOcrRef'. The script does not checkout refs automatically." -ForegroundColor Yellow
 }
+if ([string]::IsNullOrWhiteSpace($DetModelPreset)) {
+    $DetModelPreset = if ($OcrVersion -eq "PP-OCRv5") { "PP-OCRv5_mobile_det" } else { "PP-OCRv4_mobile_det" }
+}
+if ([string]::IsNullOrWhiteSpace($RecModelPreset)) {
+    $RecModelPreset = if ($OcrVersion -eq "PP-OCRv5") { "en_PP-OCRv5_mobile_rec" } else { "PP-OCRv4_mobile_rec" }
+}
+Write-Host "Using production OCR presets: Det=$DetModelPreset Rec=$RecModelPreset OcrVersion=$OcrVersion UseGpu=$([bool]$UseGpu)" -ForegroundColor Cyan
 
 $detDataset = Join-Path $dataFull "det_dataset"
 $recDataset = Join-Path $dataFull "rec_dataset"
@@ -181,6 +192,7 @@ $detRequest = [ordered]@{
         paddleOcrRef = $resolvedPaddleOcrRef
         runOfficial = $true
         prepareOnly = $false
+        modelPreset = $DetModelPreset
         epochs = $DetEpochs
         batchSize = $DetBatchSize
         imageSize = $DetImageSize
@@ -214,6 +226,7 @@ $recRequest = [ordered]@{
         paddleOcrRef = $resolvedPaddleOcrRef
         runOfficial = $true
         prepareOnly = $false
+        modelPreset = $RecModelPreset
         epochs = $RecEpochs
         batchSize = $RecBatchSize
         imageWidth = $RecImageWidth
@@ -223,12 +236,14 @@ $recRequest = [ordered]@{
         useGpu = [bool]$UseGpu
         trainLabelFile = $recLabels.train
         valLabelFile = $recLabels.val
-        dictionaryFile = $RecDictionaryFile
         runInferenceAfterExport = $true
         inferenceImage = "images/test/totaltext_002700_img589_0.jpg"
         evalEverySteps = $RecEvalEverySteps
         acceptanceNote = $(if ($UseRecCpuSubset) { "CPU subset run from public Total-Text crops; not a production accuracy pass." } else { "Full public Total-Text Rec run; still not customer-domain production evidence." })
     }
+}
+if (-not [string]::IsNullOrWhiteSpace($RecDictionaryFile)) {
+    $recRequest.parameters.dictionaryFile = $RecDictionaryFile
 }
 if (-not [string]::IsNullOrWhiteSpace($RecOfficialConfig)) {
     $recRequest.parameters.officialConfig = $RecOfficialConfig
@@ -250,6 +265,9 @@ $systemRequest = [ordered]@{
         trainingBackend = "paddleocr_system_official"
         paddleOcrRepoPath = $repoFull
         paddleOcrRef = $resolvedPaddleOcrRef
+        detModelPreset = $DetModelPreset
+        recModelPreset = $RecModelPreset
+        recReportPath = $recReport
         detModelDir = (Join-Path $detOutput "official_inference")
         recModelDir = (Join-Path $recOutput "official_inference")
         dictionaryFile = (Join-Path $recOutput "official_data\dict.txt")
@@ -306,6 +324,9 @@ $chainSummary = [ordered]@{
     paddleOcrRepo = $repoFull
     paddleOcrRef = $resolvedPaddleOcrRef
     useGpu = [bool]$UseGpu
+    ocrVersion = $OcrVersion
+    detModelPreset = $DetModelPreset
+    recModelPreset = $RecModelPreset
     useRecCpuSubset = [bool]$UseRecCpuSubset
     steps = $steps
     requests = [ordered]@{

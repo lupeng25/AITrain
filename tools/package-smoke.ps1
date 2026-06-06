@@ -137,6 +137,7 @@ Assert-PathExists "tools\run-production-ocr-rec-experiment.ps1" "production OCR 
 Assert-PathExists "tools\run-production-ocr-official-chain.ps1" "production OCR official chain script"
 Assert-PathExists "tools\production-ocr-acceptance.ps1" "production OCR acceptance script"
 Assert-PathExists "tools\customer-ocr-validation.ps1" "customer OCR validation script"
+Assert-PathExists "tools\phase50-paddleocr-v5-gpu-official-chain.ps1" "Phase 50 PP-OCRv5 GPU official chain script"
 
 $pythonCacheDirs = @(Get-ChildItem -LiteralPath $prefixFull -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue)
 $pythonCacheFiles = @(Get-ChildItem -LiteralPath $prefixFull -Recurse -File -ErrorAction SilentlyContinue |

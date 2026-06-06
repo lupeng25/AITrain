@@ -15,7 +15,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 
 - 训练 YOLO 风格检测模型。
 - 训练 YOLO 风格分割模型。
-- 训练 PaddleOCR Rec 风格字符识别模型。
+- 训练 PaddleOCR Det / Rec 官方模型，并通过 PaddleOCR System 做端到端 OCR 推理验收。
 - 管理数据集。
 - 转换模型格式。
 - 做推理验证。
@@ -25,7 +25,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 
 - 真实模型训练优先通过 Worker 启动独立 Python 子进程实现。
 - 若官方 Python 实现可用，优先适配官方实现，而不是自研训练框架。
-- 检测和分割优先评估 Ultralytics YOLO；OCR Rec 优先评估 PaddleOCR / PaddlePaddle。
+- 检测和分割优先评估 Ultralytics YOLO；OCR Det / Rec / System 优先评估 PaddleOCR / PaddlePaddle 官方工具链。
 - 官方后端必须显式记录来源、版本和许可证约束。
 - C++ 侧继续负责 GUI、Worker 编排、数据集校验、SQLite、ONNX Runtime/TensorRT 推理、打包和部署。
 - YOLO 检测/分割的产品边界是“官方 Ultralytics 训练/ONNX 导出 + AITrain C++ runtime 推理/评估/benchmark/部署验证”，不是 OCR 那种端到端 official-only。
@@ -36,7 +36,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 
 阶段状态以 `docs/harness/current-status.md` 为准。不要只根据长期路线图末尾的历史“下一步建议”判断当前阶段。
 
-截至 2026-06-05，官方 YOLO 检测/分割训练与 ONNX 导出、PaddleOCR Det/Rec/System 官方工具链、YOLO C++ ONNX Runtime 推理、RTX 4090D TensorRT 验收证据、本地插件 marketplace、环境 profile、数据集质量/快照、数据集格式转换 GUI、评估、benchmark、模型库、交付报告、样本复核、部署验证、诊断包和交付验收 GUI 闭环都已落地到当前本地代码。2026-06-05 RTX 4090D follow-up 刷新记录 local baseline/package acceptance、GUI walkthrough、历史 Phase 47 Det ONNX+CTest、CPU training smoke、Phase 45 YOLO matrix、TensorRT 和 public OCR GPU workflow 均有通过证据；准确阶段边界仍以 `docs/harness/current-status.md` 为准。
+截至 2026-06-06，官方 YOLO 检测/分割训练与 ONNX 导出、PaddleOCR Det/Rec/System 官方工具链、PP-OCRv4/v5 official adapter preset、YOLO C++ ONNX Runtime 推理、RTX 4090D TensorRT 验收证据、本地插件 marketplace、环境 profile、数据集质量/快照、数据集格式转换 GUI、评估、benchmark、模型库、交付报告、样本复核、部署验证、诊断包和交付验收 GUI 闭环都已落地到当前本地代码。2026-06-05 RTX 4090D follow-up 刷新记录 local baseline/package acceptance、GUI walkthrough、历史 Phase 47 Det ONNX+CTest、CPU training smoke、Phase 45 YOLO matrix、TensorRT 和 public OCR GPU workflow 均有通过证据；准确阶段边界仍以 `docs/harness/current-status.md` 为准。
 
 已完成：
 
@@ -58,7 +58,10 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
   - mask preview artifact
   - Worker 端 `maskLoss`、`maskCoverage`、`maskIoU`、`segmentationMap50`
   - official backend artifacts
-- OCR recognition 官方训练与数据闭环：
+- OCR Det / Rec / System 官方训练、导出、推理与数据闭环：
+  - `paddleocr_det_official` 支持 `PP-OCRv4_mobile_det`、`PP-OCRv5_mobile_det`、`PP-OCRv5_server_det`
+  - `paddleocr_rec_official` 支持 `PP-OCRv4_mobile_rec`、`PP-OCRv5_mobile_rec`、`PP-OCRv5_server_rec`、`en_PP-OCRv5_mobile_rec`
+  - `paddleocr_system_official` 调用官方 `predict_system.py`，并从 Rec preset/report 推导 `rec_algorithm`
   - `OcrRecDataset`
   - 字符字典加载
   - label encode/decode
@@ -71,7 +74,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 - Worker-managed Python Trainer Adapter；协议测试使用临时 Python trainer fixture，仓库不再提供 shipped `python_mock`。
 - 官方 Ultralytics YOLO detection / segmentation 训练、导出，以及 AITrain C++ ONNX Runtime 推理 smoke。
 - 旧 PaddlePaddle OCR Rec CTC 训练实现已物理删除；生产 OCR 训练和验收主线使用官方 PaddleOCR Det/Rec/System 工具链 smoke。
-- OCR 路线已收口为官方-only：训练、导出、推理、评估和客户验收使用 PaddleOCR Det/Rec/System 官方工具链和报告；Phase 46/47 的 C++ OCR ONNX 内容只作为历史 wiring 证据保留。
+- OCR 路线已收口为官方-only：训练、导出、推理、评估和客户验收使用 PaddleOCR Det/Rec/System 官方工具链和报告；Phase 46/47 的 C++ OCR ONNX 内容只作为历史 wiring 证据保留。PP-OCRv5 仅覆盖这些官方 OCR preset，不扩展到 PP-StructureV3、PP-ChatOCR、PaddleOCR-VL、文档方向分类、图像矫正、文本行方向分类或 PaddleOCR C++ 本地部署。
 - TensorRT SDK-backed ONNX 到 engine 导出路径和 RTX 4090 D 验收证据；旧 GTX 1060 / SM 61 仍应为 `hardware-blocked`。当前 official-artifact smoke 使用官方 Ultralytics ONNX 产物，不再使用已删除的 tiny-detector TensorRT 推理 fixture。
 - 2026-06-05 RTX 4090D follow-up 证据根目录：`.deps\rtx4090-validation\2026-06-05-122806-rtx4090d-followup-1-4`。该目录记录 LocalBaseline+Package、GUI walkthrough 和历史 Phase47 Det ONNX+CTest 的刷新证据；CPUTrainingSmoke 和 Phase45 的修复后通过证据分别在 `.deps\fix-1-3-cpu-training-smoke-final` 与 `.deps\fix-1-3-phase45-yolo-matrix`。新 OCR 路线不再把 Phase47 作为产品验收要求。
 - Windows 打包、package smoke、release freeze handoff、离线授权和注册码生成器。

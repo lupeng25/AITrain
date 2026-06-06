@@ -114,6 +114,7 @@ $request = [ordered]@{
     backend = "paddleocr_rec_official"
     parameters = [ordered]@{
         trainingBackend = "paddleocr_rec_official"
+        modelPreset = "PP-OCRv4_mobile_rec"
         paddleOcrRepoPath = $repoFull
         paddleOcrRef = $resolvedPaddleOcrRef
         runOfficial = $true

@@ -590,6 +590,7 @@ install(FILES
     tools/run-production-ocr-official-chain.ps1
     tools/production-ocr-acceptance.ps1
     tools/customer-ocr-validation.ps1
+    tools/phase50-paddleocr-v5-gpu-official-chain.ps1
     DESTINATION tools
 )
 

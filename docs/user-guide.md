@@ -29,7 +29,7 @@
 - 主流程优先使用官方 YOLO / PaddleOCR 后端，训练由 Worker 启动独立 Python 进程执行。
 - 生产训练只使用官方后端；旧的 tiny detector、Python mock、小型 OCR CTC 和 C++ 分割/OCR 训练 scaffold 已从产品训练路径中物理删除。
 - TensorRT 需要兼容的 NVIDIA RTX / SM 75+ 环境；不支持的 GPU 会显示为 `hardware-blocked`。
-- OCR 的公开数据或生成数据 smoke 只能证明流程和产物可用，不能替代客户业务数据上的精度验收。
+- OCR 的公开数据或生成数据 smoke 只能证明流程和产物可用，不能替代客户业务数据上的精度验收；当前 OCR 产品路线仅覆盖 PaddleOCR Det / Rec / System 官方工具链。
 
 ## 2. 启动、授权和项目
 
@@ -212,14 +212,14 @@ images/sample.png<TAB>[{"transcription":"text","points":[[1,1],[30,1],[30,20],[1
 |---|---|---|---|
 | YOLO 检测 | `ultralytics_yolo_detect` | `yolov8n.yaml`、`yolo11n.yaml`、`yolo12n.yaml` | 官方 Ultralytics 检测训练和 ONNX 导出；推理、评估、benchmark、部署验证走 AITrain C++ runtime |
 | YOLO 分割 | `ultralytics_yolo_segment` | `yolov8n-seg.yaml`、`yolo11n-seg.yaml`、`yolo12n-seg.yaml` | 官方 Ultralytics 分割训练和 ONNX 导出；mask 后处理、推理、评估、benchmark、部署验证走 AITrain C++ runtime |
-| PaddleOCR Det | `paddleocr_det_official` | `PP-OCRv4_mobile_det` | 官方 PaddleOCR 检测工具链，建议使用隔离 OCR 环境 |
-| PaddleOCR Rec | `paddleocr_rec_official` | `PP-OCRv4_mobile_rec` | 官方 PaddleOCR Rec adapter，可运行 train/export/predict；`paddleocr_rec` 仅作为数据集格式保留 |
+| PaddleOCR Det | `paddleocr_det_official` | 默认 `PP-OCRv5_mobile_det`；可选 `PP-OCRv4_mobile_det`、`PP-OCRv5_server_det` | 官方 PaddleOCR 检测工具链，建议使用隔离 OCR 环境；PP-OCRv5 preset 需要 PaddleOCR 源码 checkout |
+| PaddleOCR Rec | `paddleocr_rec_official` | 默认 `PP-OCRv5_mobile_rec`；可选 `PP-OCRv4_mobile_rec`、`PP-OCRv5_server_rec`、`en_PP-OCRv5_mobile_rec` | 官方 PaddleOCR Rec adapter，可运行 train/export/predict；`paddleocr_rec` 仅作为数据集格式保留 |
 
 官方后端依赖第三方包和许可条款。商业分发前需要单独审查 Ultralytics、PaddleOCR、PaddlePaddle、Torch 等依赖的许可证。
 
 旧的 `tiny_linear_detector`、小型 `paddleocr_rec` CTC trainer、`python_mock` 和 C++ 分割/OCR 训练 scaffold 已物理删除，不会出现在用户训练后端列表中，也不会作为主验收 passed 依据。`paddleocr_rec` 仅作为数据集格式保留。
 
-YOLO 与 OCR 的产品边界不同：YOLO 只要求训练和 ONNX 导出来自官方 Ultralytics；后续单图推理、评估报告、benchmark 和部署验证默认使用 AITrain C++ ONNX Runtime / TensorRT / NCNN runtime。OCR 则只接受 PaddleOCR 官方 Det / Rec / System 报告作为当前产品证据。
+YOLO 与 OCR 的产品边界不同：YOLO 只要求训练和 ONNX 导出来自官方 Ultralytics；后续单图推理、评估报告、benchmark 和部署验证默认使用 AITrain C++ ONNX Runtime / TensorRT / NCNN runtime。OCR 则只接受 PaddleOCR 官方 Det / Rec / System 报告作为当前产品证据。PP-OCRv5 支持只增加 Det / Rec / System 官方链路，不表示已经覆盖 PP-StructureV3、PP-ChatOCR、PaddleOCR-VL、文档方向分类、图像矫正、文本行方向分类或 PaddleOCR C++ 本地部署。
 
 ## 7. 任务与产物
 

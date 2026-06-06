@@ -22,23 +22,23 @@ For official YOLO segmentation training, Worker routes `trainingBackend=ultralyt
 python python_trainers/segmentation/ultralytics_trainer.py --request <request-json>
 ```
 
-For the official PaddleOCR PP-OCRv4 Rec adapter, Worker routes `trainingBackend=paddleocr_rec_official` or `trainingBackend=paddleocr_ppocrv4_rec` to:
+For the official PaddleOCR PP-OCRv4 / PP-OCRv5 Rec adapter, Worker routes `trainingBackend=paddleocr_rec_official` or the compatibility alias `trainingBackend=paddleocr_ppocrv4_rec` to:
 
 ```powershell
 python python_trainers/ocr_rec/paddleocr_official_adapter.py --request <request-json>
 ```
 
-Use `prepareOnly=true` to generate and validate the PP-OCRv4 config, label lists, dictionary copy, report, and reproducible command files without running official training. Use `runOfficial=true` or `prepareOnly=false` with `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` pointing at a PaddleOCR source checkout to execute official `tools/train.py` and `tools/export_model.py`. Set `runInferenceAfterExport=true` with `inferenceImage` to run official `tools/infer/predict_rec.py` after export and write `official_prediction.json`.
+Use `modelPreset` to select the official family. The default is `PP-OCRv5_mobile_rec`; `PP-OCRv4_mobile_rec`, `PP-OCRv5_server_rec`, and `en_PP-OCRv5_mobile_rec` remain selectable. Use `prepareOnly=true` to generate and validate the selected official config, label lists, dictionary selection, report, and reproducible command files without running official training. PP-OCRv5 built-in presets are resolved from a PaddleOCR source checkout and fail with `paddleocr_repo_missing` when no repo is available. Use `runOfficial=true` or `prepareOnly=false` with `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` pointing at a PaddleOCR source checkout to execute official `tools/train.py` and `tools/export_model.py`. Set `runInferenceAfterExport=true` with `inferenceImage` to run official `tools/infer/predict_rec.py` after export and write `official_prediction.json`.
 
 The former small CTC route for `trainingBackend=paddleocr_rec` has been removed. `paddleocr_rec` remains a dataset format only; use `paddleocr_rec_official` or `paddleocr_ppocrv4_rec` for production OCR Rec training.
 
-For the official PaddleOCR PP-OCRv4 Det adapter, Worker routes `trainingBackend=paddleocr_det_official` to:
+For the official PaddleOCR PP-OCRv4 / PP-OCRv5 Det adapter, Worker routes `trainingBackend=paddleocr_det_official` to:
 
 ```powershell
 python python_trainers/ocr_det/paddleocr_det_official_adapter.py --request <request-json>
 ```
 
-Use `prepareOnly=true` to generate and validate the PP-OCRv4 detection config, label lists, report, and reproducible command files without running official training. Use `runOfficial=true` or `prepareOnly=false` with `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` pointing at a PaddleOCR source checkout to execute official `tools/train.py` and `tools/export_model.py`.
+Use `modelPreset` to select `PP-OCRv5_mobile_det`, `PP-OCRv4_mobile_det`, or `PP-OCRv5_server_det`; the default is `PP-OCRv5_mobile_det`. Use `prepareOnly=true` to generate and validate the selected official detection config, label lists, report, and reproducible command files without running official training. PP-OCRv5 built-in presets are resolved from a PaddleOCR source checkout and fail with `paddleocr_repo_missing` when no repo is available. Use `runOfficial=true` or `prepareOnly=false` with `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` pointing at a PaddleOCR source checkout to execute official `tools/train.py` and `tools/export_model.py`.
 
 For official PaddleOCR end-to-end System inference, the Phase 31 smoke and official OCR toolchain call the inference adapter directly:
 
@@ -46,7 +46,7 @@ For official PaddleOCR end-to-end System inference, the Phase 31 smoke and offic
 python python_trainers/ocr_system/paddleocr_system_official_adapter.py --request <request-json>
 ```
 
-This adapter does not train and is not exposed as a production training backend. It calls official `tools/infer/predict_system.py` with exported Det and Rec inference model directories, a recognition dictionary, and an image or image directory. The first version fixes `use_angle_cls=false` and defaults to CPU.
+This adapter does not train and is not exposed as a production training backend. It calls official `tools/infer/predict_system.py` with exported Det and Rec inference model directories, a recognition dictionary, and an image or image directory. It keeps `use_angle_cls=false` by default. The recognition algorithm is selected from `recModelPreset`, `recReportPath`, `recModelDir/inference.yml`, or explicit `recAlgorithm`; `PP-OCRv5_server_rec` uses `SVTR_HGNet`, while v4 and mobile presets use `SVTR_LCNet`.
 
 The local isolated official smoke is:
 
@@ -58,6 +58,8 @@ The full official PaddleOCR Det + Rec + System smoke is:
 
 ```powershell
 .\tools\phase31-paddleocr-full-official-smoke.ps1
+.\tools\phase31-paddleocr-full-official-smoke.ps1 -OcrVersion PP-OCRv4
+.\tools\phase50-paddleocr-v5-gpu-official-chain.ps1 -UseGpu
 ```
 
 Request shape:
@@ -104,9 +106,9 @@ Official Python packages are adapted behind this protocol:
 
 - `ultralytics_yolo_detect`: Ultralytics YOLO detection training. The adapter writes normalized `aitrain_yolo_data.yaml`, calls official `YOLO(...).train()`, exports ONNX, and forwards `best.pt`, `last.pt`, `results.csv`, `args.yaml`, `model.onnx`, and `ultralytics_training_report.json`.
 - `ultralytics_yolo_segment`: Ultralytics YOLO segmentation training. It reuses the detection adapter with segmentation defaults such as `yolov8n-seg.yaml` and forwards mask metrics when the official results expose them.
-- `paddleocr_rec_official` / `paddleocr_ppocrv4_rec`: PaddleOCR official-recognition adapter. It prepares a PP-OCRv4 config and can run official PaddleOCR training/export/inference from a source checkout. `prepareOnly` artifacts are configuration validation, not trained model artifacts.
+- `paddleocr_rec_official` / `paddleocr_ppocrv4_rec`: PaddleOCR official-recognition adapter. It prepares a PP-OCRv4 or PP-OCRv5 config selected by `modelPreset` and can run official PaddleOCR training/export/inference from a source checkout. `prepareOnly` artifacts are configuration validation, not trained model artifacts.
   When official training runs, the adapter parses stdout metrics such as `loss`, `ctcLoss`, `nrtrLoss`, `accuracy`, and `normalizedEditDistance` into Worker `metric` events and the final report.
-- `paddleocr_det_official`: PaddleOCR official-detection adapter. It prepares a PP-OCRv4 Det config and can run official PaddleOCR training/export from a source checkout. `prepareOnly` artifacts are configuration validation, not trained model artifacts.
+- `paddleocr_det_official`: PaddleOCR official-detection adapter. It prepares a PP-OCRv4 or PP-OCRv5 Det config selected by `modelPreset` and can run official PaddleOCR training/export from a source checkout. `prepareOnly` artifacts are configuration validation, not trained model artifacts.
   When official training runs, the adapter parses stdout metrics such as `loss`, `hmean`, `precision`, and `recall` into Worker `metric` events and the final report.
 - `paddleocr_system_official`: PaddleOCR official-system inference adapter for the official OCR toolchain, not a production training backend. It calls official `predict_system.py` with exported Det and Rec inference model directories and emits `official_system_prediction.json`, `system_results.txt`, and visualization-image artifacts. It is the current full OCR acceptance path; it is not C++ DB detection ONNX postprocess.
 
@@ -131,6 +133,7 @@ Common official PaddleOCR Rec parameters:
 - `trainLabelFile`: optional explicit training label file.
 - `valLabelFile`: optional explicit validation label file.
 - `dictionaryFile`: optional explicit recognition dictionary.
+- `modelPreset`: `PP-OCRv4_mobile_rec`, `PP-OCRv5_mobile_rec`, `PP-OCRv5_server_rec`, or `en_PP-OCRv5_mobile_rec`.
 - `officialConfig`: optional official config source path.
 - `pretrainedModel`: optional pretrained/export input checkpoint.
 - `resumeCheckpoint`: optional official resume checkpoint.
@@ -143,6 +146,7 @@ Common official PaddleOCR Det parameters:
 
 - `trainLabelFile`: optional explicit training label file.
 - `valLabelFile`: optional explicit validation label file.
+- `modelPreset`: `PP-OCRv4_mobile_det`, `PP-OCRv5_mobile_det`, or `PP-OCRv5_server_det`.
 - `officialConfig`: optional official config source path.
 - `pretrainedModel`: optional pretrained/export input checkpoint.
 - `resumeCheckpoint`: optional official resume checkpoint.
@@ -155,8 +159,13 @@ Common official PaddleOCR System parameters:
 - `recModelDir`: exported official Rec inference model directory.
 - `dictionaryFile`: recognition dictionary file.
 - `inferenceImage`: image or directory for official system inference.
+- `detModelPreset` / `recModelPreset`: optional metadata used for report lineage and recognition algorithm selection.
+- `recReportPath`: optional Rec adapter report used to inherit `modelPreset`, `resolvedModelName`, dictionary, and `recAlgorithm`.
+- `recAlgorithm`: optional explicit official recognition algorithm override.
 - `dropScore`: optional recognition score threshold.
 - `useGpu`: defaults to `false`.
+
+The Det and Rec adapter reports include `ocrVersion`, `modelPreset`, `resolvedOfficialConfig`, `resolvedModelName`, `configSource`, and `presetDictionaryPath` (where applicable). When `officialConfig` overrides a built-in preset, `configSource` is `officialConfig_override`; reports must not describe override runs as built-in preset evidence.
 
 Generate minimal smoke datasets and request JSON files with:
 

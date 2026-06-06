@@ -10,7 +10,9 @@ Production OCR acceptance covers three paths:
 - PaddleOCR Rec: representative text recognition training/export metrics.
 - PaddleOCR System: end-to-end Det+Rec inference evidence on representative images.
 
-The full-system acceptance path is official PaddleOCR `predict_system.py`. C++ OCR Det/Rec ONNX postprocess is not production acceptance evidence.
+The full-system acceptance path is official PaddleOCR `predict_system.py`. C++ OCR Det/Rec ONNX postprocess is not production acceptance evidence. PP-OCRv5 is the default route through official Det/Rec `modelPreset` values, and PP-OCRv4 remains explicitly selectable for compatibility; no separate `paddleocr_ppocrv5_*` backend is introduced.
+
+PP-OCRv5 coverage in this phase is limited to PaddleOCR official Det, Rec, and System OCR. It does not cover PP-StructureV3, PP-ChatOCR, PaddleOCR-VL, document orientation classification, document unwarping, text-line orientation classification, or PaddleOCR C++ local deployment.
 
 ## Data Requirements
 
@@ -125,6 +127,25 @@ To run the full local official chain from prepared or auto-prepared data, use:
   -WorkDir .deps\production-ocr-official-chain `
   -DataDir .deps\production-ocr-data
 ```
+
+To run the same chain with PP-OCRv5 presets, use:
+
+```powershell
+.\tools\run-production-ocr-official-chain.ps1 `
+  -WorkDir .deps\production-ocr-official-chain-v5 `
+  -DataDir .deps\production-ocr-data `
+  -OcrVersion PP-OCRv5 `
+  -DetModelPreset PP-OCRv5_mobile_det `
+  -RecModelPreset en_PP-OCRv5_mobile_rec
+```
+
+For the PP-OCRv5 GPU gate, use the wrapper instead of relying on implicit device fallback:
+
+```powershell
+.\tools\phase50-paddleocr-v5-gpu-official-chain.ps1 -UseGpu
+```
+
+The wrapper blocks before training when PaddlePaddle is not CUDA-enabled. GPU mode is the default; `-UseGpu` is accepted as an explicit switch. A blocked GPU gate is valid diagnostic evidence; it must not be rewritten as a CPU pass.
 
 For a local CPU evidence run that is expected to remain blocked if Rec metrics are weak, use:
 

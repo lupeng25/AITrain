@@ -82,6 +82,84 @@ def resolve_path(parameters: dict[str, Any], key: str, fallback: str = "") -> Pa
     return Path(value).resolve() if value else Path()
 
 
+def read_json_object(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def rec_algorithm_for_preset(preset: str) -> str:
+    normalized = preset.strip().lower()
+    if normalized == "pp-ocrv5_server_rec":
+        return "SVTR_HGNet"
+    if normalized:
+        return "SVTR_LCNet"
+    return ""
+
+
+def infer_rec_metadata_from_inference_yml(model_dir: Path) -> dict[str, str]:
+    inference_config = model_dir / "inference.yml"
+    if not inference_config.exists():
+        return {}
+    try:
+        import yaml
+
+        config = yaml.safe_load(inference_config.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+    if not isinstance(config, dict):
+        return {}
+    metadata: dict[str, str] = {}
+    global_config = config.get("Global")
+    if isinstance(global_config, dict):
+        model_name = str(global_config.get("model_name") or "").strip()
+        if model_name:
+            metadata["modelName"] = model_name
+            algorithm = rec_algorithm_for_preset(model_name)
+            if algorithm:
+                metadata["recAlgorithm"] = algorithm
+    architecture = config.get("Architecture")
+    if isinstance(architecture, dict):
+        algorithm = str(architecture.get("algorithm") or "").strip()
+        if algorithm:
+            metadata["recAlgorithm"] = algorithm
+    return metadata
+
+
+def resolve_rec_metadata(parameters: dict[str, Any], rec_model_dir: Path) -> dict[str, str]:
+    metadata = infer_rec_metadata_from_inference_yml(rec_model_dir)
+    rec_report_path = resolve_path(parameters, "recReportPath")
+    report = read_json_object(rec_report_path) if str(rec_report_path) != "." else {}
+    if report:
+        for source_key, target_key in (
+            ("modelPreset", "recModelPreset"),
+            ("resolvedModelName", "recModelName"),
+            ("recAlgorithm", "recAlgorithm"),
+            ("ocrVersion", "ocrVersion"),
+        ):
+            value = str(report.get(source_key) or "").strip()
+            if value:
+                metadata[target_key] = value
+    for key in ("recModelPreset", "modelPreset"):
+        value = str(parameters.get(key) or "").strip()
+        if value:
+            metadata["recModelPreset"] = value
+            algorithm = rec_algorithm_for_preset(value)
+            if algorithm:
+                metadata["recAlgorithm"] = algorithm
+            break
+    explicit_algorithm = str(parameters.get("recAlgorithm") or "").strip()
+    if explicit_algorithm:
+        metadata["recAlgorithm"] = explicit_algorithm
+    if not metadata.get("recAlgorithm"):
+        metadata["recAlgorithm"] = "SVTR_LCNet"
+    return metadata
+
+
 def prepare_compatible_model_dir(source_dir: Path, output_path: Path, name: str) -> Path:
     inference_config = source_dir / "inference.yml"
     if not inference_config.exists():
@@ -183,6 +261,10 @@ def run(request: dict[str, Any]) -> int:
     rec_model_dir = resolve_path(parameters, "recModelDir")
     dictionary_file = resolve_path(parameters, "dictionaryFile")
     inference_image = resolve_path(parameters, "inferenceImage", str(request.get("datasetPath") or ""))
+    rec_metadata = resolve_rec_metadata(parameters, rec_model_dir)
+    rec_algorithm = rec_metadata.get("recAlgorithm", "SVTR_LCNet")
+    det_model_preset = str(parameters.get("detModelPreset") or "").strip()
+    rec_model_preset = rec_metadata.get("recModelPreset", str(parameters.get("recModelPreset") or "").strip())
     command_det_model_dir = det_model_dir
     command_rec_model_dir = rec_model_dir
     if not prepare_only:
@@ -201,7 +283,7 @@ def run(request: dict[str, Any]) -> int:
         f"--rec_model_dir={command_rec_model_dir}",
         f"--rec_char_dict_path={dictionary_file}",
         "--det_algorithm=DB",
-        "--rec_algorithm=SVTR_LCNet",
+        f"--rec_algorithm={rec_algorithm}",
         "--use_angle_cls=False",
         f"--use_gpu={str(bool_param(parameters, 'useGpu', False))}",
         "--enable_mkldnn=False",
@@ -216,7 +298,13 @@ def run(request: dict[str, Any]) -> int:
         "framework": "PaddleOCR official tools",
         "modelFamily": "ocr",
         "mode": "prepareOnly" if prepare_only else "officialSystemPredict",
-        "note": "Official PaddleOCR predict_system.py adapter. Angle classifier is disabled in Phase 31.",
+        "note": "Official PaddleOCR predict_system.py adapter for PP-OCRv4/PP-OCRv5 Det+Rec. Angle classifier is disabled in this product route.",
+        "detModelPreset": det_model_preset,
+        "recModelPreset": rec_model_preset,
+        "recModelName": rec_metadata.get("recModelName", rec_metadata.get("modelName", "")),
+        "recAlgorithm": rec_algorithm,
+        "ocrVersion": rec_metadata.get("ocrVersion", ""),
+        "recReportPath": str(resolve_path(parameters, "recReportPath")),
         "pythonVersion": sys.version.split()[0],
         "paddleVersion": module_version("paddlepaddle"),
         "paddleOcrPackageVersion": module_version("paddleocr"),

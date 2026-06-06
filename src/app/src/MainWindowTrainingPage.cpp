@@ -65,6 +65,11 @@ QWidget* MainWindow::buildTrainingPage()
         << QStringLiteral("yolo11n-seg.yaml")
         << QStringLiteral("yolo12n.yaml")
         << QStringLiteral("yolo12n-seg.yaml")
+        << QStringLiteral("PP-OCRv5_mobile_det")
+        << QStringLiteral("PP-OCRv5_server_det")
+        << QStringLiteral("PP-OCRv5_mobile_rec")
+        << QStringLiteral("PP-OCRv5_server_rec")
+        << QStringLiteral("en_PP-OCRv5_mobile_rec")
         << QStringLiteral("PP-OCRv4_mobile_det")
         << QStringLiteral("PP-OCRv4_mobile_rec"));
     epochsEdit_ = new QLineEdit(QStringLiteral("20"));
