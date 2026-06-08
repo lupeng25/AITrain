@@ -19,7 +19,7 @@ Legacy diagnostic training implementations have been physically removed from pro
 
 ## YOLO Runtime Boundary
 
-YOLO detection and segmentation are not end-to-end official-only routes. AITrain uses official Ultralytics code for training, ONNX export, and detection/segmentation evaluation via `YOLO(...).val()`, then treats the exported ONNX / TensorRT / NCNN artifacts as deployment inputs for its local C++ runtime. C++ ONNX Runtime, TensorRT, and NCNN paths handle prediction JSON, overlays, benchmark summaries, and deployment validation so the packaged Windows product can run without embedding Python in the GUI process.
+YOLO detection and segmentation are not end-to-end official-only routes. AITrain uses official Ultralytics code for training, ONNX export, and detection/segmentation evaluation via `YOLO(...).val()`, then treats the exported ONNX / TensorRT / NCNN artifacts as deployment inputs for its local runtime checks. C++ ONNX Runtime and NCNN paths handle single-image prediction JSON, overlays, benchmark summaries, and deployment validation; TensorRT currently covers engine export and deployment validation status, not single-image runtime decoding in the GUI.
 
 AITrain no longer computes local YOLO AP/mAP, mask IoU, TP/FP/FN, local evaluation error samples, or local evaluation overlays. The `evaluation_report.json` wrapper remains for the GUI and task history, with `evaluationSource=ultralytics_official_val` and links to official plots/predictions when Ultralytics writes them. OCR is different: current OCR product inference, evaluation, benchmark, deployment validation, and acceptance are official-only through PaddleOCR Det/Rec/System reports.
 
@@ -65,7 +65,7 @@ Official YOLO export parameters are recorded as `ultralyticsExportArgs` and are 
 }
 ```
 
-`dynamic` and `half` apply to official ONNX export. `int8=true` is TensorRT-only and requires calibration data; training uses the normalized YOLO `data.yaml`, while the model export page sends optional `data` when exporting `.pt` to TensorRT INT8. Existing `.onnx` inputs still use AITrain C++ copy / NCNN / TensorRT paths; `.pt` inputs use Worker-managed official Ultralytics export for ONNX/TensorRT, and `.pt -> ncnn` first creates a static FP32 official ONNX intermediate before `onnx2ncnn`.
+`dynamic` and `half` apply to official ONNX export. `int8=true` is TensorRT-only and requires calibration data; training uses the normalized YOLO `data.yaml`, while the model export page sends optional `data` when exporting `.pt` to TensorRT INT8. Existing `.onnx` inputs still use AITrain C++ copy / NCNN conversion and TensorRT export/deployment validation paths; `.pt` inputs use Worker-managed official Ultralytics export for ONNX/TensorRT, and `.pt -> ncnn` first creates a static FP32 official ONNX intermediate before `onnx2ncnn`.
 
 OCR recognition:
 

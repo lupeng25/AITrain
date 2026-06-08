@@ -31,6 +31,18 @@
 
 using namespace aitrain_app;
 
+namespace {
+QString selectedPathFromTable(QTableWidget* table, int pathColumn)
+{
+    if (!table || table->selectedItems().isEmpty()) {
+        return QString();
+    }
+    const int row = table->selectedItems().first()->row();
+    auto* item = table->item(row, pathColumn);
+    return item ? item->data(Qt::UserRole).toString() : QString();
+}
+} // namespace
+
 TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     : QWidget(parent)
 {
@@ -85,6 +97,7 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     exportTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     exportTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     exportTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    connect(exportTable_, &QTableWidget::itemSelectionChanged, this, &TaskArtifactPanel::updatePreviewFromSelection);
 
     imagePreviewLabel_ = new QLabel(QStringLiteral("暂无产物预览"));
     imagePreviewLabel_->setObjectName(QStringLiteral("ArtifactPreviewCanvas"));
@@ -166,20 +179,21 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     previewTabLayout->setContentsMargins(0, 0, 0, 0);
     previewTabLayout->addWidget(previewStack_);
 
-    auto* detailTabs = new QTabWidget;
-    detailTabs->setObjectName(QStringLiteral("TaskDetailTabs"));
-    detailTabs->addTab(artifactTab, uiText("产物"));
-    detailTabs->addTab(metricTab, uiText("指标"));
-    detailTabs->addTab(exportTab, uiText("导出"));
-    detailTabs->addTab(previewTab, uiText("预览"));
+    detailTabs_ = new QTabWidget;
+    detailTabs_->setObjectName(QStringLiteral("TaskDetailTabs"));
+    detailTabs_->addTab(artifactTab, uiText("产物"));
+    detailTabs_->addTab(metricTab, uiText("指标"));
+    detailTabs_->addTab(exportTab, uiText("导出"));
+    detailTabs_->addTab(previewTab, uiText("预览"));
+    connect(detailTabs_, &QTabWidget::currentChanged, this, &TaskArtifactPanel::updatePreviewFromSelection);
 
-    detailTabs->setMinimumHeight(300);
-    detailTabs->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    detailTabs_->setMinimumHeight(300);
+    detailTabs_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     previewStack_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
     layout->addWidget(selectedTaskSummaryLabel_);
     layout->addWidget(actionGridFrame);
-    layout->addWidget(detailTabs, 1);
+    layout->addWidget(detailTabs_, 1);
 
     clear();
 }
@@ -267,16 +281,18 @@ void TaskArtifactPanel::setExports(const QVector<aitrain::ExportRecord>& exports
         exportTable_->setItem(row, 1, pathItem);
         exportTable_->setItem(row, 2, new QTableWidgetItem(exportRecord.createdAt.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))));
     }
+
+    exportTable_->selectRow(0);
 }
 
 QString TaskArtifactPanel::selectedArtifactPath() const
 {
-    if (!artifactTable_ || artifactTable_->selectedItems().isEmpty()) {
-        return QString();
+    const QString artifactPath = selectedPathFromTable(artifactTable_, 1);
+    const QString exportPath = selectedPathFromTable(exportTable_, 1);
+    if (detailTabs_ && detailTabs_->currentIndex() == 2 && !exportPath.isEmpty()) {
+        return exportPath;
     }
-    const int row = artifactTable_->selectedItems().first()->row();
-    auto* item = artifactTable_->item(row, 1);
-    return item ? item->data(Qt::UserRole).toString() : QString();
+    return artifactPath.isEmpty() ? exportPath : artifactPath;
 }
 
 void TaskArtifactPanel::configureTable(QTableWidget* table) const

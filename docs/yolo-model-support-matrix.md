@@ -2,7 +2,7 @@
 
 This document is the source of truth for Ultralytics YOLO detection and instance-segmentation model-family productization in AITrain Studio.
 
-AITrain owns Worker routing, dataset normalization, artifact recording, official export checks, C++ ONNX Runtime / TensorRT / NCNN inference, benchmark, deployment validation, and smoke regression. Training, first official export, and detection/segmentation evaluation still run through the installed official `ultralytics` Python package, so supported model resolution depends on that package version and its license terms.
+AITrain owns Worker routing, dataset normalization, artifact recording, official export checks, C++ ONNX Runtime / NCNN single-image inference, benchmark, deployment validation, TensorRT export/deployment status, and smoke regression. Training, first official export, and detection/segmentation evaluation still run through the installed official `ultralytics` Python package, so supported model resolution depends on that package version and its license terms.
 
 ## Productized Families
 
@@ -40,7 +40,7 @@ YOLO official export arguments are recorded under `ultralyticsExportArgs`:
 - `dynamic` and `half` are passed to official ONNX export.
 - `int8=true` is treated as TensorRT engine export and requires calibration data from the normalized YOLO `data.yaml`.
 - Model export requests may include optional `data` for `.pt -> TensorRT INT8` calibration.
-- Existing `.onnx` inputs continue through AITrain C++ copy / NCNN / TensorRT conversion paths.
+- Existing `.onnx` inputs continue through AITrain C++ copy / NCNN conversion and TensorRT export/deployment validation paths.
 - `.pt -> onnx` and `.pt -> tensorrt` run official Ultralytics Python export through Worker.
 - `.pt -> ncnn` first runs a static FP32 official ONNX export, then uses the existing `onnx2ncnn` path.
 - NCNN rejects `dynamic`, `half`, and `int8`; ONNX rejects `int8`.

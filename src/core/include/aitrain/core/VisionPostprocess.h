@@ -12,7 +12,7 @@
 namespace aitrain {
 
 struct DetectionInferenceOptions {
-    double confidenceThreshold = 0.0;
+    double confidenceThreshold = 0.25;
     double iouThreshold = 0.45;
     int maxDetections = 100;
 };

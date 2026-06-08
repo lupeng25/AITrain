@@ -56,6 +56,44 @@ private slots:
         QVERIFY(!exported.config.value(QStringLiteral("scaffold")).toBool(true));
     }
 
+    void onnxExportFollowsSourceTrainingReportForClassNames()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString sourceOnnx = dir.filePath(QStringLiteral("runs/weights/best.onnx"));
+        const QString dataYaml = dir.filePath(QStringLiteral("dataset/data.yaml"));
+        const QString reportPath = dir.filePath(QStringLiteral("runs/ultralytics_training_report.json"));
+        writeTextFile(sourceOnnx, QStringLiteral("fake official onnx\n"));
+        writeTextFile(dataYaml, QStringLiteral("nc: 2\nnames: [widget, defect]\n"));
+
+        QJsonObject trainingReport;
+        trainingReport.insert(QStringLiteral("backend"), QStringLiteral("ultralytics_yolo_detect"));
+        trainingReport.insert(QStringLiteral("dataYaml"), dataYaml);
+        writeTextFile(reportPath, QString::fromUtf8(QJsonDocument(trainingReport).toJson(QJsonDocument::Indented)));
+
+        QJsonObject sidecar;
+        sidecar.insert(QStringLiteral("format"), QStringLiteral("onnx"));
+        sidecar.insert(QStringLiteral("backend"), QStringLiteral("ultralytics_yolo_detect"));
+        sidecar.insert(QStringLiteral("modelFamily"), QStringLiteral("yolo_detection"));
+        sidecar.insert(QStringLiteral("scaffold"), false);
+        sidecar.insert(QStringLiteral("sourceTrainingReport"), reportPath);
+        writeTextFile(
+            dir.filePath(QStringLiteral("runs/weights/best.aitrain-export.json")),
+            QString::fromUtf8(QJsonDocument(sidecar).toJson(QJsonDocument::Indented)));
+
+        const QString outputOnnx = dir.filePath(QStringLiteral("export/model.onnx"));
+        const aitrain::DetectionExportResult exported = aitrain::exportDetectionCheckpoint(
+            sourceOnnx,
+            outputOnnx,
+            QStringLiteral("onnx"));
+
+        QVERIFY2(exported.ok, qPrintable(exported.error));
+        const QJsonArray classNames = exported.config.value(QStringLiteral("classNames")).toArray();
+        QCOMPARE(classNames.size(), 2);
+        QCOMPARE(classNames.at(0).toString(), QStringLiteral("widget"));
+        QCOMPARE(classNames.at(1).toString(), QStringLiteral("defect"));
+    }
+
     void onnxExportUsesOfficialSiblingFromYoloCheckpoint()
     {
         QTemporaryDir dir;
@@ -117,6 +155,14 @@ private slots:
         QCOMPARE(filtered.size(), 1);
         QCOMPARE(filtered.first().className, QStringLiteral("item"));
         QCOMPARE(filtered.first().confidence, 0.9);
+    }
+
+    void inferenceOptionsUseProductionConfidenceDefault()
+    {
+        const aitrain::DetectionInferenceOptions options;
+        QCOMPARE(options.confidenceThreshold, 0.25);
+        QCOMPARE(options.iouThreshold, 0.45);
+        QCOMPARE(options.maxDetections, 100);
     }
 };
 

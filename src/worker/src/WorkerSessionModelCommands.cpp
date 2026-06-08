@@ -81,6 +81,57 @@ QString defaultExportOutputPath(const QString& checkpointPath, const QString& ou
         : (format.startsWith(QStringLiteral("tensorrt")) ? QStringLiteral("engine") : QStringLiteral("onnx"));
     return QFileInfo(checkpointPath).absoluteDir().filePath(QStringLiteral("model.%1").arg(suffix));
 }
+
+QString absoluteSidecarPath(const QJsonObject& object, const QString& sidecarPath, const QString& key)
+{
+    QString path = object.value(key).toString().trimmed();
+    if (path.isEmpty()) {
+        return {};
+    }
+    path = QDir::fromNativeSeparators(path);
+    if (QFileInfo(path).isRelative()) {
+        path = QFileInfo(sidecarPath).absoluteDir().filePath(path);
+    }
+    return QDir::cleanPath(path);
+}
+
+QJsonObject readJsonObjectFile(const QString& path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return {};
+    }
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+    return document.isObject() ? document.object() : QJsonObject();
+}
+
+QString resolveModelArtifactPath(QString path)
+{
+    path = QDir::fromNativeSeparators(path.trimmed());
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    if (suffix != QStringLiteral("json") && suffix != QStringLiteral("aitrain")) {
+        return path;
+    }
+
+    const QJsonObject sidecar = readJsonObjectFile(path);
+    if (sidecar.isEmpty()) {
+        return path;
+    }
+    const QJsonObject ncnn = sidecar.value(QStringLiteral("ncnn")).toObject();
+    const QStringList candidates = {
+        absoluteSidecarPath(sidecar, path, QStringLiteral("exportPath")),
+        absoluteSidecarPath(ncnn, path, QStringLiteral("paramPath")),
+        absoluteSidecarPath(sidecar, path, QStringLiteral("sourceOnnx")),
+        absoluteSidecarPath(ncnn, path, QStringLiteral("sourceOnnx"))
+    };
+    for (const QString& candidate : candidates) {
+        const QFileInfo info(candidate);
+        if (info.exists() && info.isFile()) {
+            return info.absoluteFilePath();
+        }
+    }
+    return path;
+}
 } // namespace
 
 void WorkerSession::evaluateModel(const QJsonObject& payload)
@@ -557,7 +608,7 @@ void WorkerSession::exportModel(const QJsonObject& payload)
     activeTaskId_ = taskId;
     canceled_ = false;
     running_ = true;
-    QString checkpointPath = payload.value(QStringLiteral("checkpointPath")).toString();
+    QString checkpointPath = resolveModelArtifactPath(payload.value(QStringLiteral("checkpointPath")).toString());
     QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
     const QString format = payload.value(QStringLiteral("format")).toString(QStringLiteral("onnx"));
     const QJsonObject options = payload.value(QStringLiteral("options")).toObject();
@@ -878,7 +929,7 @@ void WorkerSession::exportModel(const QJsonObject& payload)
 void WorkerSession::runInference(const QJsonObject& payload)
 {
     const QString taskId = payload.value(QStringLiteral("taskId")).toString();
-    const QString checkpointPath = payload.value(QStringLiteral("checkpointPath")).toString();
+    const QString checkpointPath = resolveModelArtifactPath(payload.value(QStringLiteral("checkpointPath")).toString());
     const QString imagePath = payload.value(QStringLiteral("imagePath")).toString();
     QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
     aitrain::DetectionInferenceOptions options;
@@ -890,6 +941,8 @@ void WorkerSession::runInference(const QJsonObject& payload)
     }
     activeTaskId_ = taskId;
     activeOutputPath_ = outputPath;
+    canceled_ = false;
+    running_ = true;
     if (!QDir().mkpath(outputPath)) {
         fail(QStringLiteral("Cannot create inference output directory: %1").arg(outputPath));
         return;
@@ -914,6 +967,7 @@ void WorkerSession::runInference(const QJsonObject& payload)
     int predictionCount = 0;
     const QString modelSuffix = QFileInfo(checkpointPath).suffix().toLower();
     const bool onnxModel = modelSuffix == QStringLiteral("onnx");
+    const bool ncnnModel = modelSuffix == QStringLiteral("param");
     const bool tensorRtModel = modelSuffix == QStringLiteral("engine") || modelSuffix == QStringLiteral("plan");
     if (onnxModel) {
         const QString modelFamily = aitrain::inferOnnxModelFamily(checkpointPath);
@@ -946,7 +1000,37 @@ void WorkerSession::runInference(const QJsonObject& payload)
             overlay = aitrain::renderDetectionPredictions(imagePath, predictions, &error);
             predictionCount = predictions.size();
         }
+    } else if (ncnnModel) {
+        const QString modelFamily = aitrain::inferNcnnModelFamily(checkpointPath);
+        if (modelFamily == QStringLiteral("yolo_segmentation")) {
+            taskType = QStringLiteral("segmentation");
+            const QVector<aitrain::SegmentationPrediction> predictions = aitrain::predictSegmentationNcnnRuntime(checkpointPath, imagePath, options, &error);
+            if (!error.isEmpty()) {
+                fail(error);
+                return;
+            }
+            for (const aitrain::SegmentationPrediction& prediction : predictions) {
+                predictionArray.append(aitrain::segmentationPredictionToJson(prediction));
+            }
+            overlay = aitrain::renderSegmentationPredictions(imagePath, predictions, &error);
+            predictionCount = predictions.size();
+        } else {
+            const QVector<aitrain::DetectionPrediction> predictions = aitrain::predictDetectionNcnnRuntime(checkpointPath, imagePath, options, &error);
+            if (!error.isEmpty()) {
+                fail(error);
+                return;
+            }
+            for (const aitrain::DetectionPrediction& prediction : predictions) {
+                predictionArray.append(aitrain::detectionPredictionToJson(prediction));
+            }
+            overlay = aitrain::renderDetectionPredictions(imagePath, predictions, &error);
+            predictionCount = predictions.size();
+        }
     } else if (tensorRtModel) {
+        if (!aitrain::isTensorRtInferenceAvailable()) {
+            fail(QStringLiteral("TensorRT single-image inference is not enabled in this build: %1").arg(aitrain::tensorRtBackendStatus().message));
+            return;
+        }
         const QVector<aitrain::DetectionPrediction> predictions = aitrain::predictDetectionTensorRt(checkpointPath, imagePath, options, &error);
         if (!error.isEmpty()) {
             fail(error);
@@ -958,7 +1042,7 @@ void WorkerSession::runInference(const QJsonObject& payload)
         overlay = aitrain::renderDetectionPredictions(imagePath, predictions, &error);
         predictionCount = predictions.size();
     } else {
-        fail(QStringLiteral("Unsupported inference model format: %1. Production inference requires official ONNX or TensorRT artifacts.").arg(checkpointPath));
+        fail(QStringLiteral("Unsupported inference model format: %1. Production inference requires official ONNX, NCNN .param, or TensorRT artifacts.").arg(checkpointPath));
         return;
     }
     if (overlay.isNull()) {
@@ -979,7 +1063,7 @@ void WorkerSession::runInference(const QJsonObject& payload)
     predictionsDocument.insert(QStringLiteral("taskType"), taskType);
     predictionsDocument.insert(QStringLiteral("runtime"), onnxModel
         ? QStringLiteral("onnxruntime")
-        : (tensorRtModel ? QStringLiteral("tensorrt") : QStringLiteral("unsupported")));
+        : (ncnnModel ? QStringLiteral("ncnn") : (tensorRtModel ? QStringLiteral("tensorrt") : QStringLiteral("unsupported"))));
     predictionsDocument.insert(QStringLiteral("elapsedMs"), static_cast<int>(elapsed.elapsed()));
     predictionsDocument.insert(QStringLiteral("postprocess"), QJsonObject{
         {QStringLiteral("confidenceThreshold"), options.confidenceThreshold},
@@ -1039,6 +1123,7 @@ void WorkerSession::runInference(const QJsonObject& payload)
     QJsonObject completed;
     completed.insert(QStringLiteral("taskId"), taskId);
     completed.insert(QStringLiteral("message"), QStringLiteral("Inference completed"));
+    running_ = false;
     send(wp::event::completed(), completed);
     finishSession();
 }

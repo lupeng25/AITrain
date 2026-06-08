@@ -29,6 +29,43 @@ namespace aitrain {
 
 using namespace detection_detail;
 
+namespace {
+int exportImageSize(const QJsonObject& config)
+{
+    const QJsonObject args = config.value(QStringLiteral("ultralyticsExportArgs")).toObject();
+    const QJsonValue rawSize = args.value(QStringLiteral("imgsz"));
+    if (rawSize.isDouble()) {
+        return qMax(32, rawSize.toInt(640));
+    }
+    if (rawSize.isString()) {
+        bool ok = false;
+        const int parsed = rawSize.toString().trimmed().toInt(&ok);
+        if (ok) {
+            return qMax(32, parsed);
+        }
+    }
+    if (rawSize.isArray() && !rawSize.toArray().isEmpty()) {
+        return qMax(32, rawSize.toArray().first().toInt(640));
+    }
+    return 640;
+}
+
+QSize yoloInputSizeFromShape(const std::vector<int64_t>& inputShape, const QJsonObject& config)
+{
+    if (inputShape.size() != 4) {
+        return {};
+    }
+    int height = static_cast<int>(inputShape.at(2));
+    int width = static_cast<int>(inputShape.at(3));
+    if (height <= 0 || width <= 0) {
+        const int imageSize = exportImageSize(config);
+        height = height <= 0 ? imageSize : height;
+        width = width <= 0 ? imageSize : width;
+    }
+    return QSize(width, height);
+}
+} // namespace
+
 bool isOnnxRuntimeInferenceAvailable()
 {
 #ifdef AITRAIN_WITH_ONNXRUNTIME
@@ -171,7 +208,6 @@ QVector<DetectionPrediction> predictDetectionOnnxRuntime(
 
     try {
         const QJsonObject exportConfig = loadOnnxExportConfig(onnxPath);
-        const QStringList classNames = stringListFromArray(exportConfig.value(QStringLiteral("classNames")).toArray());
         Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "aitrain");
         Ort::SessionOptions sessionOptions;
         sessionOptions.SetIntraOpNumThreads(1);
@@ -195,9 +231,8 @@ QVector<DetectionPrediction> predictDetectionOnnxRuntime(
         const std::vector<int64_t> inputShape = inputType.GetTensorTypeAndShapeInfo().GetShape();
         if (inputShape.size() == 4) {
             const int channels = static_cast<int>(inputShape.at(1));
-            const int inputHeight = static_cast<int>(inputShape.at(2));
-            const int inputWidth = static_cast<int>(inputShape.at(3));
-            if (channels != 3 || inputHeight <= 0 || inputWidth <= 0) {
+            const QSize inputSize = yoloInputSizeFromShape(inputShape, exportConfig);
+            if (channels != 3 || inputSize.isEmpty()) {
                 if (error) {
                     *error = QStringLiteral("YOLO detection ONNX input shape must be [1, 3, height, width]");
                 }
@@ -205,9 +240,8 @@ QVector<DetectionPrediction> predictDetectionOnnxRuntime(
             }
 
             LetterboxTransform transform;
-            const QSize inputSize(inputWidth, inputHeight);
             QVector<float> input = yoloImageTensorFromLetterbox(image, inputSize, &transform);
-            std::vector<int64_t> tensorShape = inputShape;
+            std::vector<int64_t> tensorShape = {1, 3, inputSize.height(), inputSize.width()};
             Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
             Ort::Value inputTensor = Ort::Value::CreateTensor<float>(
                 memoryInfo,
@@ -320,15 +354,16 @@ QVector<SegmentationPrediction> predictSegmentationOnnxRuntime(
             }
             return {};
         }
+        const QJsonObject exportConfig = loadOnnxExportConfig(onnxPath);
         const std::vector<int64_t> inputShape = session.GetInputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape();
-        if (inputShape.size() != 4 || inputShape.at(1) != 3 || inputShape.at(2) <= 0 || inputShape.at(3) <= 0) {
+        const QSize inputSize = yoloInputSizeFromShape(inputShape, exportConfig);
+        if (inputShape.size() != 4 || inputShape.at(1) != 3 || inputSize.isEmpty()) {
             if (error) {
                 *error = QStringLiteral("YOLO segmentation ONNX input shape must be [1, 3, height, width]");
             }
             return {};
         }
 
-        const QSize inputSize(static_cast<int>(inputShape.at(3)), static_cast<int>(inputShape.at(2)));
         LetterboxTransform transform;
         QVector<float> input = yoloImageTensorFromLetterbox(image, inputSize, &transform);
         std::vector<int64_t> tensorShape = {1, 3, inputSize.height(), inputSize.width()};

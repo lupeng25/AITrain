@@ -66,6 +66,79 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(jsonable(payload), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def read_json_object(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def find_ultralytics_training_report(model_path: Path) -> tuple[Path | None, dict[str, Any]]:
+    directories = [model_path.parent, *model_path.parents]
+    seen: set[Path] = set()
+    for directory in directories[:8]:
+        try:
+            resolved = directory.resolve()
+        except Exception:
+            resolved = directory
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        candidate = directory / "ultralytics_training_report.json"
+        report = read_json_object(candidate)
+        backend = str(report.get("backend") or "")
+        if backend in {"ultralytics_yolo_detect", "ultralytics_yolo_segment"}:
+            return candidate, report
+    return None, {}
+
+
+def model_family_from_text(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if text in {"segmentation", "segment", "yolo_segmentation", "ultralytics_yolo_segment"}:
+        return "yolo_segmentation"
+    if text in {"detection", "detect", "yolo_detection", "ultralytics_yolo_detect", "ultralytics_yolo"}:
+        return "yolo_detection"
+    return ""
+
+
+def infer_model_family(model_path: Path, model: Any | None, request: dict[str, Any]) -> tuple[str, Path | None, dict[str, Any]]:
+    options = request.get("options") if isinstance(request.get("options"), dict) else {}
+    parameters = request.get("parameters") if isinstance(request.get("parameters"), dict) else {}
+    for source in (options, parameters, request):
+        family = model_family_from_text(source.get("modelFamily"))
+        if family:
+            return family, None, {}
+        family = model_family_from_text(source.get("taskType"))
+        if family:
+            return family, None, {}
+        family = model_family_from_text(source.get("trainingBackend"))
+        if family:
+            return family, None, {}
+
+    report_path, report = find_ultralytics_training_report(model_path)
+    family = model_family_from_text(report.get("backend"))
+    if family:
+        return family, report_path, report
+    family = model_family_from_text(report.get("taskType"))
+    if family:
+        return family, report_path, report
+    report_model = str(report.get("model") or "")
+    if "-seg" in report_model.lower():
+        return "yolo_segmentation", report_path, report
+
+    for candidate in (
+        getattr(model, "task", None),
+        getattr(getattr(model, "model", None), "task", None),
+        getattr(getattr(model, "predictor", None), "task", None),
+    ):
+        family = model_family_from_text(candidate)
+        if family:
+            return family, report_path, report
+
+    return ("yolo_segmentation" if "-seg" in model_path.stem.lower() else "yolo_detection"), report_path, report
+
+
 def parse_bool(name: str, value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -238,6 +311,7 @@ def run_official_export(request: dict[str, Any]) -> int:
 
     try:
         model = YOLO(str(model_path))
+        model_family, source_report_path, source_report = infer_model_family(model_path, model, request)
         exported = model.export(**plan["kwargs"])
     except Exception as exc:
         return fail("Ultralytics official export failed.", "ultralytics_export_failed", exception_details(exc))
@@ -255,7 +329,9 @@ def run_official_export(request: dict[str, Any]) -> int:
         "backend": BACKEND_ID,
         "format": plan["productFormat"],
         "officialFormat": plan["officialFormat"],
-        "modelFamily": "yolo_segmentation" if "-seg" in model_path.stem else "yolo_detection",
+        "modelFamily": model_family,
+        "sourceTrainingBackend": str(source_report.get("backend") or ""),
+        "sourceTrainingReport": str(source_report_path) if source_report_path else "",
         "sourceCheckpoint": str(model_path),
         "officialExportPath": str(exported_path),
         "exportPath": str(final_path),

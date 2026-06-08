@@ -111,6 +111,41 @@ QJsonObject loadUltralyticsTrainingReport(const QString& onnxPath)
     return {};
 }
 
+QJsonObject loadUltralyticsTrainingReportFile(const QString& reportPath, const QString& referencePath)
+{
+    QString resolvedReportPath = reportPath;
+    if (QFileInfo(resolvedReportPath).isRelative()) {
+        resolvedReportPath = QDir(QFileInfo(referencePath).absolutePath()).absoluteFilePath(resolvedReportPath);
+    }
+    QFile file(QDir::cleanPath(resolvedReportPath));
+    if (!file.open(QIODevice::ReadOnly)) {
+        return {};
+    }
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+    if (!document.isObject()) {
+        return {};
+    }
+    const QJsonObject report = document.object();
+    const QString backend = report.value(QStringLiteral("backend")).toString();
+    if (backend != QStringLiteral("ultralytics_yolo_detect")
+        && backend != QStringLiteral("ultralytics_yolo_segment")) {
+        return {};
+    }
+    return report;
+}
+
+QStringList classNamesFromTrainingReport(const QJsonObject& report, const QString& referencePath)
+{
+    QString dataYaml = report.value(QStringLiteral("dataYaml")).toString();
+    if (dataYaml.isEmpty()) {
+        return {};
+    }
+    if (QFileInfo(dataYaml).isRelative()) {
+        dataYaml = QDir(QFileInfo(referencePath).absolutePath()).absoluteFilePath(dataYaml);
+    }
+    return classNamesFromYoloDataYaml(QDir::cleanPath(dataYaml));
+}
+
 QStringList ultralyticsClassNames(const QString& onnxPath)
 {
     const QJsonObject exportConfig = loadOnnxExportConfig(onnxPath);
@@ -119,11 +154,26 @@ QStringList ultralyticsClassNames(const QString& onnxPath)
         return classNames;
     }
 
-    const QJsonObject report = loadUltralyticsTrainingReport(onnxPath);
-    const QString dataYaml = report.value(QStringLiteral("dataYaml")).toString();
-    if (!dataYaml.isEmpty()) {
-        classNames = classNamesFromYoloDataYaml(dataYaml);
+    classNames = classNamesFromTrainingReport(exportConfig.value(QStringLiteral("trainingReport")).toObject(), onnxPath);
+    if (!classNames.isEmpty()) {
+        return classNames;
     }
+
+    QString sourceTrainingReport = exportConfig.value(QStringLiteral("sourceTrainingReport")).toString();
+    if (!sourceTrainingReport.isEmpty()) {
+        if (QFileInfo(sourceTrainingReport).isRelative()) {
+            sourceTrainingReport = QDir(QFileInfo(onnxPath).absolutePath()).absoluteFilePath(sourceTrainingReport);
+        }
+        classNames = classNamesFromTrainingReport(
+            loadUltralyticsTrainingReportFile(sourceTrainingReport, onnxPath),
+            sourceTrainingReport);
+        if (!classNames.isEmpty()) {
+            return classNames;
+        }
+    }
+
+    const QJsonObject report = loadUltralyticsTrainingReport(onnxPath);
+    classNames = classNamesFromTrainingReport(report, onnxPath);
     if (classNames.isEmpty()) {
         classNames.append(QStringLiteral("class_0"));
     }

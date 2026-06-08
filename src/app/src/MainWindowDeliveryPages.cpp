@@ -362,7 +362,7 @@ QWidget* MainWindow::buildInferencePage()
     boundaryLabel->setObjectName(QStringLiteral("InferenceMeta"));
     auto* executionStatus = inlineStatusLabel(QStringLiteral("Worker 隔离执行推理；任务、产物和失败原因写入任务历史。"));
     executionStatus->setObjectName(QStringLiteral("DarkInlineStatus"));
-    auto* boundaryStatus = inlineStatusLabel(QStringLiteral("C++ ONNX 仅支持 YOLO detection / segmentation；OCR 只查看 PaddleOCR 官方工具链产物。"));
+    auto* boundaryStatus = inlineStatusLabel(QStringLiteral("C++ ONNX / NCNN 仅支持 YOLO detection / segmentation；TensorRT engine 使用部署验证；OCR 只查看 PaddleOCR 官方工具链产物。"));
     boundaryStatus->setObjectName(QStringLiteral("DarkInlineStatus"));
     allowLabelToShrink(executionStatus);
     allowLabelToShrink(boundaryStatus);
@@ -389,7 +389,7 @@ QWidget* MainWindow::buildInferencePage()
         edit->setMinimumWidth(0);
         edit->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     }
-    inferenceCheckpointEdit_->setPlaceholderText(QStringLiteral("从任务产物带入，或选择 ONNX / AITrain export / TensorRT engine"));
+    inferenceCheckpointEdit_->setPlaceholderText(QStringLiteral("从任务产物带入，或选择 ONNX / NCNN param / AITrain export sidecar"));
     inferenceImageEdit_->setPlaceholderText(QStringLiteral("选择验证图片"));
     inferenceOutputEdit_->setPlaceholderText(QStringLiteral("输出目录；留空则输出到模型同目录 inference"));
     auto* chooseModelButton = new QPushButton(QStringLiteral("选择模型文件"));
@@ -397,7 +397,7 @@ QWidget* MainWindow::buildInferencePage()
     auto* chooseOutputButton = new QPushButton(QStringLiteral("选择输出目录"));
     auto* inferButton = primaryButton(QStringLiteral("开始推理"));
     connect(chooseModelButton, &QPushButton::clicked, this, [this]() {
-        const QString file = QFileDialog::getOpenFileName(this, uiText("选择模型文件"), currentProjectPath_, QStringLiteral("AITrain model (*.aitrain *.json *.onnx *.engine *.plan);;All files (*.*)"));
+        const QString file = QFileDialog::getOpenFileName(this, uiText("选择模型文件"), currentProjectPath_, QStringLiteral("AITrain model (*.onnx *.param *.aitrain-export.json *.json);;All files (*.*)"));
         if (!file.isEmpty()) {
             inferenceCheckpointEdit_->setText(QDir::toNativeSeparators(file));
         }
@@ -448,7 +448,7 @@ QWidget* MainWindow::buildInferencePage()
     inferForm->addRow(QStringLiteral("图片路径"), imageRow);
     inferForm->addRow(QStringLiteral("推理输出"), outputRow);
     toolbar->bodyLayout()->addLayout(inferForm);
-    auto* sourceHelp = emptyStateLabel(QStringLiteral("从“任务与产物”选中 ONNX、AITrain export 或 engine 后，可点击“用作推理模型”自动带入这里。输出目录留空会写到模型同目录 inference。"));
+    auto* sourceHelp = emptyStateLabel(QStringLiteral("从“任务与产物”选中 ONNX、NCNN param 或 AITrain export sidecar 后，可点击“用作推理模型”自动带入这里。输出目录留空会写到模型同目录 inference。TensorRT engine 请使用导出页部署验证。"));
     allowLabelToShrink(sourceHelp);
     toolbar->bodyLayout()->addWidget(sourceHelp);
     auto* actionStrip = new QFrame;
@@ -464,7 +464,7 @@ QWidget* MainWindow::buildInferencePage()
     toolbar->bodyLayout()->addStretch();
 
     auto* capabilityPanel = new InfoPanel(QStringLiteral("可解析结果"));
-    auto* capabilityHint = mutedLabel(QStringLiteral("推理验证仅解析 YOLO ONNX / TensorRT 产物；OCR 端到端结果通过 PaddleOCR 官方任务产物查看。"));
+    auto* capabilityHint = mutedLabel(QStringLiteral("推理验证解析 YOLO ONNX / NCNN param 产物；TensorRT engine 当前仅做部署验证状态记录；OCR 端到端结果通过 PaddleOCR 官方任务产物查看。"));
     allowLabelToShrink(capabilityHint);
     capabilityPanel->bodyLayout()->addWidget(capabilityHint);
     auto* capabilityGrid = new QGridLayout;
@@ -490,7 +490,7 @@ QWidget* MainWindow::buildInferencePage()
     auto* flowGrid = new QGridLayout;
     flowGrid->setHorizontalSpacing(10);
     flowGrid->setVerticalSpacing(10);
-    flowGrid->addWidget(createInferenceStep(QStringLiteral("1"), QStringLiteral("模型产物"), QStringLiteral("ONNX / AITrain export / TensorRT engine")), 0, 0);
+    flowGrid->addWidget(createInferenceStep(QStringLiteral("1"), QStringLiteral("模型产物"), QStringLiteral("ONNX / NCNN param / AITrain sidecar")), 0, 0);
     flowGrid->addWidget(createInferenceStep(QStringLiteral("2"), QStringLiteral("样本图片"), QStringLiteral("单张验证图进入预处理")), 0, 1);
     flowGrid->addWidget(createInferenceStep(QStringLiteral("3"), QStringLiteral("Worker 推理"), QStringLiteral("隔离执行，不阻塞 GUI")), 1, 0);
     flowGrid->addWidget(createInferenceStep(QStringLiteral("4"), QStringLiteral("结果归档"), QStringLiteral("prediction JSON + overlay")), 1, 1);

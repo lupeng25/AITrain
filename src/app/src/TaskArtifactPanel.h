@@ -10,6 +10,7 @@ class QLabel;
 class QPlainTextEdit;
 class QStackedWidget;
 class QTableWidget;
+class QTabWidget;
 
 class TaskArtifactPanel : public QWidget {
     Q_OBJECT
@@ -44,6 +45,7 @@ private:
     QTableWidget* artifactTable_ = nullptr;
     QTableWidget* metricTable_ = nullptr;
     QTableWidget* exportTable_ = nullptr;
+    QTabWidget* detailTabs_ = nullptr;
     QLabel* imagePreviewLabel_ = nullptr;
     QPlainTextEdit* previewText_ = nullptr;
     QStackedWidget* previewStack_ = nullptr;

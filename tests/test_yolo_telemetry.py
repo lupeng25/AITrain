@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import sys
+import json
+import tempfile
 from pathlib import Path
 
 
@@ -239,6 +241,26 @@ def test_ultralytics_export_args_accept_tensorrt_int8_with_data() -> None:
     assert plan["kwargs"]["data"] == "aitrain_yolo_data.yaml"
 
 
+def test_exporter_infers_segmentation_family_from_training_report() -> None:
+    with tempfile.TemporaryDirectory() as raw_dir:
+        root = Path(raw_dir)
+        weights_dir = root / "ultralytics_runs" / "aitrain-yolo-segment" / "weights"
+        weights_dir.mkdir(parents=True)
+        best_pt = weights_dir / "best.pt"
+        best_pt.write_text("fake checkpoint\n", encoding="utf-8")
+        report_path = root / "ultralytics_training_report.json"
+        report_path.write_text(
+            json.dumps({"backend": "ultralytics_yolo_segment", "model": "yolov8n-seg.yaml"}),
+            encoding="utf-8",
+        )
+
+        family, found_report, report = exporter.infer_model_family(best_pt, None, {})
+
+    assert family == "yolo_segmentation"
+    assert found_report == report_path
+    assert report["backend"] == "ultralytics_yolo_segment"
+
+
 if __name__ == "__main__":
     test_sanitize_log_line_removes_ansi_tqdm_noise()
     test_yolo_callbacks_emit_structured_progress_and_epoch_metrics()
@@ -250,3 +272,4 @@ if __name__ == "__main__":
     test_ultralytics_export_args_reject_unknown_keys()
     test_ultralytics_export_args_reject_unsupported_combinations()
     test_ultralytics_export_args_accept_tensorrt_int8_with_data()
+    test_exporter_infers_segmentation_family_from_training_report()
