@@ -10,30 +10,16 @@
 - `production_ocr_acceptance_report.json` path:
 - `production_ocr_acceptance_summary.md` path:
 
-## Current RTX 4090 Validation Snapshot
+## Current Evidence Reference
 
-- Date: 2026-05-12
-- Machine / environment: NVIDIA GeForce RTX 4090 D, GPU Paddle environment `.deps\rtx4090-validation\python-ocr-gpu`
-- Acceptance status: passed
-- Acceptance report: `.deps\rtx4090-validation\production-ocr-acceptance-gpu-chain\production_ocr_acceptance_report.json`
-- Acceptance summary: `.deps\rtx4090-validation\production-ocr-acceptance-gpu-chain\production_ocr_acceptance_summary.md`
-- Result: data-size checks, official Det report, official Rec metrics, and official System report passed.
-- Rec metrics: `accuracy=0.71874997504340365`, `CER=0.14153062880387579`
-- Thresholds: `accuracy>0.70`; CER is recorded and not blocking by default.
-- Interpretation: the historical `acc==0` report is old CPU/default blocked evidence; the current RTX 4090 run passes the lowered Rec accuracy gate.
+This file is a blank result template. Do not paste historical RTX, public Total-Text, generated-smoke, or `.deps` example results here as if they were the current run.
 
-Command used:
+For already-recorded public/RTX workflow evidence, see:
 
-```powershell
-.\tools\production-ocr-acceptance.ps1 `
-  -WorkDir .deps\rtx4090-validation\production-ocr-acceptance-gpu-chain `
-  -DetDataset .deps\rtx4090-validation\production-ocr-data\det_dataset `
-  -RecDataset .deps\rtx4090-validation\production-ocr-data\rec_dataset `
-  -SystemImages .deps\rtx4090-validation\production-ocr-data\system_images `
-  -OfficialDetReport .deps\rtx4090-validation\production-ocr-official-chain-gpu\reports\det_official\paddleocr_official_det_report.json `
-  -OfficialRecReport .deps\rtx4090-validation\production-ocr-official-chain-gpu\reports\rec_official\paddleocr_official_rec_report.json `
-  -OfficialSystemReport .deps\rtx4090-validation\production-ocr-official-chain-gpu\reports\system_official\paddleocr_official_system_report.json
-```
+- `docs\harness\current-status.md`
+- `docs\delivery-evidence-index.md`
+
+Customer-domain production OCR acceptance must use customer or target-domain data plus PaddleOCR official Det, Rec, and System reports. Public Total-Text and generated smoke data can prove workflow execution only.
 
 ## Dataset Evidence
 
@@ -90,7 +76,7 @@ System:
 - Historical status:
 - Historical ONNX path:
 - Historical overlay / prediction artifacts:
-- Current OCR acceptance note: C++ OCR ONNX evidence is not required and must not be used as current acceptance evidence.
+- Current OCR acceptance note: C++ OCR ONNX evidence is historical wiring context only and must not be used as current OCR acceptance evidence.
 
 ## Command Output
 

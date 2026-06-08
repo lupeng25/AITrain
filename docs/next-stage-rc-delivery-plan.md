@@ -8,7 +8,7 @@
 
 - 目标：把当前 RTX 4090 D 验证结果冻结为可追溯的 release-candidate 基线，并准备本地交付包；除非显式重开，否则本轮不补采 clean Windows/package-root 外部证据。
 - 当前基线：RTX 4090 D 验证已经完成。TensorRT、Phase 45 YOLO11/YOLO12 矩阵、Production OCR acceptance 均有通过证据，主要位于 `.deps\rtx4090-validation`。Phase 47 PaddleOCR Det ONNX 仅作为历史 wiring 证据保留，不再作为 OCR 产品路线。
-- 当前 handoff：本地 RC handoff 已从 source commit `8457da88738706f32fa1ec014a317e264bc08c67` 刷新，`build-vscode\release-freeze-handoff\release_handoff_manifest.json` 记录 `worktreeDirty=false`，ZIP SHA256 为 `72B5C2A1933E32EFD353857862F3E59F5AA0B984C91C4DE412E34E78E64934EE`。
+- 当前 handoff：本地 RC handoff 身份以 `build-vscode\release-freeze-handoff\release_handoff_manifest.json` 和 `release_handoff_summary.md` 为准。该 manifest 记录 source commit、dirty-worktree 状态、ZIP 路径、字节数和 SHA256；长期计划文档不固定某一次包 hash。
 - Phase 49 本地交付闭环已经完成：打包 GUI 覆盖样本复核、交付验收、客户 OCR 验收、诊断包、部署验证和 mAP50-95 报告证据。这些是本地报告/流程界面，不替代 clean-machine、客户域数据或 package-root TensorRT 返回证据。
 - Production OCR gate：当前默认门槛接受 Rec `accuracy > 0.7`；CER 会记录，但只有使用 `-RequireRecCer` 时才作为阻断项。
 - 产物规则：不得把 `.deps`、build 输出、数据集、模型权重、ONNX、TensorRT engine、生成 ZIP 或其它生成二进制加入源码控制。

@@ -14,7 +14,9 @@ For UI work, also read:
 
 For large implementation work, also inspect:
 
-- AITrainStudio_后续实施方案.md
+- docs/product-roadmap-local-training-platform.md
+
+AITrainStudio_后续实施方案.md is historical background only. Do not use it as the current phase status, next-step plan, or acceptance source unless the user explicitly asks for historical context.
 
 Rules:
 
@@ -30,7 +32,9 @@ Rules:
 - Avoid Chinese mojibake.
 - Treat repository text as UTF-8; in Windows PowerShell use explicit UTF-8 reads such as `Get-Content -Encoding UTF8`.
 - Use `git -c core.quotepath=false ...` when listing paths that may contain Chinese filenames.
-- Do not represent scaffold behavior as complete YOLO/OCR training.
+- Production training is official-backend only: Ultralytics YOLO detection/segmentation and PaddleOCR Det/Rec official adapters.
+- Do not represent removed diagnostic paths (`tiny_linear_detector`, shipped `python_mock`, small PaddleOCR Rec CTC, C++ segmentation/OCR scaffold training) as product backends.
+- Do not claim customer-domain OCR readiness, clean Windows acceptance, package-root TensorRT reruns, unsupported-hardware TensorRT success, or new algorithm support without returned evidence.
 
 Before finalizing code changes, run:
 

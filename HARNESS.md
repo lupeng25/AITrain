@@ -21,6 +21,12 @@ Harness 的目标是让 AITrain Studio 更适合 vibe coding：每次改动都�
 4. `docs/harness/quality-gates.md`
 5. 相关任务文档或当前用户需求
 
+如果任务较宽或实现量较大，再读：
+
+- `docs/product-roadmap-local-training-platform.md`
+
+`AITrainStudio_后续实施方案.md` 只作为历史路线档案保留；不要把它作为当前下一步计划、当前阶段状态或验收口径来源，除非用户明确要求查历史背景。
+
 如果是 UI 任务，再读：
 
 - `docs/harness/ui-guidelines.md`
@@ -83,8 +89,10 @@ Harness 的目标是让 AITrain Studio 更适合 vibe coding：每次改动都�
 - 长任务必须进入 `aitrain_worker`，不能直接堵塞 GUI 线程。
 - 插件通过 `IModelPlugin` 及其子接口扩展，不把模型逻辑塞进 `MainWindow`。
 - SQLite 元数据通过 `ProjectRepository` 管理，不在 UI 里手写散落 SQL。
-- 当前训练核心仍是 scaffold，不要在文档或 UI 中宣称已经完成真实 YOLO/OCR 训练。
-- 真实训练实现必须分阶段接入，并用测试或小数据集验证。
+- 当前生产训练入口只允许官方后端：Ultralytics YOLO detection/segmentation，以及 PaddleOCR Det/Rec 官方适配器。旧的 C++ tiny detector、segmentation/OCR scaffold 训练、小型 PaddleOCR Rec CTC 和 shipped `python_mock` 已从产品训练路径移除，不得重新作为产品后端描述。
+- YOLO 产品边界是“官方 Ultralytics 训练/首次 ONNX 导出/`val()` 评估 + AITrain C++ runtime 推理、benchmark、TensorRT/NCNN 部署验证、overlay 和交付报告”。OCR 产品验收是 PaddleOCR Det/Rec/System 官方报告路径，不使用历史 C++ OCR ONNX wiring 作为当前验收。
+- generated/public smoke 只证明接线和 artifact 生成，不证明客户域精度。clean Windows、package-root TensorRT、客户域 OCR 和 unsupported-hardware TensorRT 结论必须有对应外部或客户域证据。
+- 仍为 scaffold、smoke、diagnostic 或 report-only 的能力必须清楚标注，不伪装成完整生产能力。
 
 ## Definition of Done
 
@@ -95,4 +103,4 @@ Harness 的目标是让 AITrain Studio 更适合 vibe coding：每次改动都�
 - 没有破坏已有功能入口。
 - UI 文本没有乱码。
 - 新增行为有明确验收方式。
-- 如果只是 scaffold，必须清楚标注，不伪装成完整能力。
+- 如果只是 scaffold、smoke、diagnostic 或 report-only，必须清楚标注，不伪装成完整生产能力或客户域验收通过。

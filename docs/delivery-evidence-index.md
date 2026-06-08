@@ -12,7 +12,7 @@
 | 本地/RTX follow-up summary | 已通过并保留边界 | `.deps\rtx4090-validation\2026-06-05-122806-rtx4090d-followup-1-4\rtx4090d_followup_1_4_summary.json` | 记录 2026-06-05 LocalBaseline+Package、GUI walkthrough、Phase47+CTest 刷新结果，并引用 CPU smoke、Phase45、TensorRT、public OCR 通过证据。 |
 | 本地 RC closeout | 历史通过本地/RTX 验证 lane | `.deps\rtx4090-validation\2026-05-13-closeout` | 记录本地 closeout、CPU smoke、package smoke 等汇总。 |
 | RTX 4090 D TensorRT | 已通过当前 validation lane | `.deps\rtx4090-validation\acceptance-tensorrt`；`.\tools\acceptance-smoke.ps1 -TensorRT -WorkDir .deps\rtx4090-validation\acceptance-tensorrt` | 不等于后续任意 package-root rerun 已通过。 |
-| Release handoff | 已刷新 | `build-vscode\release-freeze-handoff\release_handoff_manifest.json` | source commit `8457da88738706f32fa1ec014a317e264bc08c67`，ZIP SHA256 `72B5C2A1933E32EFD353857862F3E59F5AA0B984C91C4DE412E34E78E64934EE`。 |
+| Release handoff | 已刷新 / 以 manifest 为准 | `build-vscode\release-freeze-handoff\release_handoff_manifest.json`；`build-vscode\release-freeze-handoff\release_handoff_summary.md` | 具体 source commit、dirty 状态、ZIP 路径和 SHA256 以最新 manifest 为准。不要在长期索引里把某一次 hash 当作当前包身份。 |
 | Clean Windows package acceptance | 延后 / 未返回 | `docs\external-acceptance-handoff.md`；`docs\acceptance-templates\clean-windows-acceptance-result.md` | 没有 clean-machine 返回证据时不得标记 passed。 |
 | Package-root TensorRT rerun | 延后 / 未返回 | `docs\acceptance-templates\tensorrt-acceptance-result.md` | RTX 4090 D 源侧通过证据与 package-root rerun 分开记录。 |
 | Phase 45 YOLO11/YOLO12 matrix | 已通过 RTX validation lane | `.deps\fix-1-3-phase45-yolo-matrix\yolo_model_matrix_summary.json`；`.\tools\phase45-yolo-model-matrix-smoke.ps1` | 2026-06-05 修复后矩阵 `status=passed`、`ctestStatus=passed`；验证 detection/segmentation 接线和产物，不是精度 benchmark。 |

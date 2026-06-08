@@ -86,14 +86,13 @@ For a repeatable public-data preparation pass, use:
 
 The script downloads the PaddleOCR-documented Total-Text archive, normalizes PaddleOCR Det labels, crops recognition samples from text boxes, writes `dict.txt`, copies end-to-end system images, and records `manifests\production_ocr_data_manifest.json`.
 
-This public data pass is useful for exercising the production OCR acceptance flow, but it is not customer-domain production evidence. A local CPU run can produce official PaddleOCR Det, Rec, and System reports from this public data, but the gate must still be reported as blocked when metrics do not meet thresholds. The historical local public-data evidence is blocked by Rec quality: the CPU-subset official Rec report has `accuracy=0.0` and `CER≈0.9653`. The newer RTX 4090 GPU official English PP-OCRv4 Rec run improved to `accuracy=0.7187499750434037` and `CER=0.1415306288038758`, which passes the current `accuracy>0.70` gate while recording CER as non-blocking evidence.
+This public data pass is useful for exercising the production OCR acceptance flow, but it is not customer-domain production evidence. Public Total-Text, generated smoke, and `.deps` examples can prove that the official Det/Rec/System workflow runs; they must not be used as customer-domain production-readiness proof.
 
-The local CPU public-data evidence paths are:
+Recorded public workflow evidence is indexed in `docs\harness\current-status.md` and `docs\delivery-evidence-index.md`. In short:
 
-- Det report: `.deps\production-ocr-data\reports\det_official\paddleocr_official_det_report.json`
-- Rec report: `.deps\production-ocr-data\reports\rec_official_cpu_subset\paddleocr_official_rec_report.json`
-- System report: `.deps\production-ocr-data\reports\system_official_public_cpu\paddleocr_official_system_report.json`
-- Gate summary: `.deps\production-ocr-acceptance-public-totaltext-run\production_ocr_acceptance_summary.md`
+- Historical CPU public-data OCR runs are blocked evidence when Rec quality does not meet the current gate.
+- The RTX 4090 D public Total-Text workflow passed the current `accuracy>0.70` Rec gate in the recorded validation lane.
+- That RTX/public result remains workflow evidence only; customer-domain OCR claims require real customer or target-domain data and returned official reports.
 
 ## Required Reports
 
@@ -163,107 +162,17 @@ For a local CPU evidence run that is expected to remain blocked if Rec metrics a
 
 ## Rec Metric Experiments
 
-To iterate on Rec metrics without rerunning Det and System evidence, use:
+Use Rec metric experiments only as iteration evidence. They are useful for improving public or customer-domain Rec quality, but they are not acceptance results until the full production OCR gate is rerun with Det, Rec, and System evidence.
 
-```powershell
-.\tools\run-production-ocr-rec-experiment.ps1 `
-  -ExperimentName rec-exp-256x64-e2-cpu `
-  -TrainLimit 256 `
-  -ValLimit 64 `
-  -Epochs 2 `
-  -BatchSize 32 `
-  -EvalEverySteps 8
-```
+To iterate on Rec metrics without rerunning Det and System evidence, use `tools\run-production-ocr-rec-experiment.ps1`. Each run writes an experiment directory under `.deps\production-ocr-rec-experiments` by default with the request JSON, reproducible command, official Rec report, and `rec_experiment_summary.json`.
 
-For English-heavy public data, keep the official English Rec config and dictionary aligned with the downloaded English pretrained checkpoint:
+Rules:
 
-```powershell
-$dict = (Resolve-Path .deps\PaddleOCR\ppocr\utils\en_dict.txt).Path
-.\tools\run-production-ocr-rec-experiment.ps1 `
-  -ExperimentName rec-exp-enpre-endict-256x64-e1-cpu `
-  -TrainLimit 256 `
-  -ValLimit 64 `
-  -Epochs 1 `
-  -BatchSize 32 `
-  -EvalEverySteps 8 `
-  -OfficialConfig configs/rec/PP-OCRv4/en_PP-OCRv4_mobile_rec.yml `
-  -DictionaryFile $dict `
-  -UsePretrained `
-  -PretrainedModel .deps\paddleocr-pretrained\en_PP-OCRv4_mobile_rec_pretrained
-```
-
-The latest local CPU iteration used the same English config, dictionary, and pretrained checkpoint with a larger subset:
-
-```powershell
-$dict = (Resolve-Path .deps\PaddleOCR\ppocr\utils\en_dict.txt).Path
-.\tools\run-production-ocr-rec-experiment.ps1 `
-  -ExperimentName rec-exp-enpre-endict-512x128-e2-cpu `
-  -TrainLimit 512 `
-  -ValLimit 128 `
-  -Epochs 2 `
-  -BatchSize 32 `
-  -EvalEverySteps 16 `
-  -OfficialConfig configs/rec/PP-OCRv4/en_PP-OCRv4_mobile_rec.yml `
-  -DictionaryFile $dict `
-  -UsePretrained `
-  -PretrainedModel .deps\paddleocr-pretrained\en_PP-OCRv4_mobile_rec_pretrained.pdparams
-```
-
-The follow-up local-only CPU run doubled the subset again to test whether more public crops help without external GPU acceleration:
-
-```powershell
-$dict = (Resolve-Path .deps\PaddleOCR\ppocr\utils\en_dict.txt).Path
-.\tools\run-production-ocr-rec-experiment.ps1 `
-  -ExperimentName rec-exp-enpre-endict-1024x256-e2-cpu `
-  -TrainLimit 1024 `
-  -ValLimit 256 `
-  -Epochs 2 `
-  -BatchSize 32 `
-  -EvalEverySteps 32 `
-  -OfficialConfig configs/rec/PP-OCRv4/en_PP-OCRv4_mobile_rec.yml `
-  -DictionaryFile $dict `
-  -UsePretrained `
-  -PretrainedModel .deps\paddleocr-pretrained\en_PP-OCRv4_mobile_rec_pretrained.pdparams
-```
-
-If a longer run finishes official training but stops before export/report generation, reuse the trained checkpoint with `-ExportOnly`:
-
-```powershell
-$dict = (Resolve-Path .deps\PaddleOCR\ppocr\utils\en_dict.txt).Path
-.\tools\run-production-ocr-rec-experiment.ps1 `
-  -ExperimentName rec-exp-enpre-endict-256x64-e2-cpu `
-  -TrainLimit 256 `
-  -ValLimit 64 `
-  -Epochs 2 `
-  -BatchSize 32 `
-  -EvalEverySteps 8 `
-  -OfficialConfig configs/rec/PP-OCRv4/en_PP-OCRv4_mobile_rec.yml `
-  -DictionaryFile $dict `
-  -ExportOnly `
-  -PretrainedModel .deps\production-ocr-rec-experiments\rec-exp-enpre-endict-256x64-e2-cpu\official_rec\official_model\best_accuracy
-```
-
-Each run writes an experiment directory under `.deps\production-ocr-rec-experiments` by default, including:
-
-- `paddleocr_rec_official_request.json`
-- `run_experiment.ps1`
-- `official_rec\paddleocr_official_rec_report.json`
-- `rec_experiment_summary.json`
-
-Use `-UsePretrained -PretrainedModel <checkpoint-base>` only when initializing from a compatible PaddleOCR Rec checkpoint. A Rec experiment summary is iteration evidence only; it is not a production acceptance pass. After a qualifying Rec report is produced, rerun `tools\production-ocr-acceptance.ps1` or the full official chain to record gate status.
-
-GPU runs should use the same experiment script with `-UseGpu`, but the script first probes the selected Python/Paddle environment and fails before training if Paddle is not CUDA-enabled. The current local OCR Python environment reports `paddleVersion=3.3.1`, `compiledWithCuda=false`, `device=cpu`; the local GPU is `NVIDIA GeForce GTX 1060`, compute capability `6.1`. Treat this machine as GPU-blocked for official PaddleOCR Rec acceleration. Use an external RTX / compute-capability 7.5+ machine with a Paddle GPU wheel compatible with its Python/CUDA stack for production-speed Rec training.
-
-Latest local Rec experiment evidence:
-
-- Baseline run: `.deps\production-ocr-rec-experiments\rec-exp-256x64-e2-cpu\rec_experiment_summary.json`, 256 train samples, 64 validation samples, 2 CPU epochs, batch size 32, completed but blocked (`accuracy=0.0`, `CER=0.958901679695572`).
-- Pretrained English run: `.deps\production-ocr-rec-experiments\rec-exp-enpre-endict-256x64-e1-cpu\rec_experiment_summary.json`, 256 train samples, 64 validation samples, 1 CPU epoch, official English config and dictionary, official English PP-OCRv4 Rec pretrained checkpoint. This completed train/export/single-image inference and improved to `accuracy=0.4062498730469146`, `CER=0.33262638414949297`, but remains below production thresholds.
-- Pretrained English 2-epoch run: `.deps\production-ocr-rec-experiments\rec-exp-enpre-endict-256x64-e2-cpu\rec_experiment_summary.json`, training completed before tool timeout and export/report was recovered through `-ExportOnly`. Best validation metrics remained `accuracy=0.4062498730469146`, `CER=0.33262638414949297`.
-- Larger pretrained English run: `.deps\production-ocr-rec-experiments\rec-exp-enpre-endict-512x128-e2-cpu\rec_experiment_summary.json`, 512 train samples, 128 validation samples, 2 CPU epochs, official English config and dictionary, official English PP-OCRv4 Rec pretrained checkpoint. This completed train/export/single-image inference and improved to `accuracy=0.6458332660590348`, `CER=0.17084158273310235`, but remains below production thresholds.
-- Larger local-only CPU run: `.deps\production-ocr-rec-experiments\rec-exp-enpre-endict-1024x256-e2-cpu\rec_experiment_summary.json`, 1024 train samples, 256 validation samples, 2 CPU epochs, same official English config/dictionary/pretrained checkpoint. This completed train/export/single-image inference but dropped to `accuracy=0.1741071350845029`, `CER=0.33266419593813057`; the gate rerun under `.deps\production-ocr-acceptance-enpre-1024x256-e2` remains blocked only on `official_rec_metrics`.
-- RTX 4090 GPU official English run: `.deps\rtx4090-validation\production-ocr-official-chain-gpu\reports\rec_official\paddleocr_official_rec_report.json`, 20 GPU epochs with the official English PP-OCRv4 Rec config, `en_dict.txt`, and pretrained checkpoint. Train/export/predict all exited 0, with `accuracy=0.7187499750434037` and `CER=0.1415306288038758`; the gate rerun under `.deps\rtx4090-validation\production-ocr-acceptance-gpu-chain` uses GPU Det/Rec/System reports and passes under the current `accuracy>0.70` Rec gate.
-- Local GPU preflight: `-UseGpu` is blocked before training on this machine because the selected OCR Python environment is CPU-only Paddle (`compiledWithCuda=false`) and the local GTX 1060 is not a valid target for the current PaddleOCR GPU acceleration baseline.
-- Gate rerun: `.deps\production-ocr-acceptance-enpre-512x128-e2\production_ocr_acceptance_summary.md` remains `blocked`; Det data/report, Rec data size, and System images/report passed, and only `official_rec_metrics` failed.
+- Use `-UsePretrained -PretrainedModel <checkpoint-base>` only with a compatible PaddleOCR Rec checkpoint.
+- Use `-ExportOnly` only to recover export/report artifacts from a completed official training run.
+- GPU runs must use `-UseGpu`; the script must block before training if the selected Python/Paddle environment is not CUDA-enabled.
+- After a qualifying Rec report is produced, rerun `tools\production-ocr-acceptance.ps1` or the full official chain to record gate status.
+- Keep experiment outputs under `.deps` or another ignored work directory. Do not commit public data, customer data, checkpoints, inference models, or generated reports.
 
 ## Returned Evidence
 

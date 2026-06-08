@@ -4,7 +4,7 @@
 
 定位：Windows + Qt Widgets + Worker 的本地视觉训练平台。
 
-本文是 Phase 39+ 的当前方向文档。长期历史阶段仍可参考 `AITrainStudio_后续实施方案.md`，但下一步实施优先以本文和 `docs/harness/current-status.md` 为准。当前权威状态仍以 `docs/harness/current-status.md` 为准。
+本文是 Phase 39+ 的当前方向文档。当前权威状态仍以 `docs/harness/current-status.md` 为准。`AITrainStudio_后续实施方案.md` 只保留为历史路线背景，不作为下一步实施、阶段状态或验收口径来源。
 
 ## 1. 当前基线与判断
 

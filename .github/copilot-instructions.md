@@ -24,7 +24,10 @@ For UI work, follow:
 - Use UTF-8 and `QStringLiteral` for Chinese UI text.
 - When reading project text in Windows PowerShell, specify UTF-8 explicitly, for example `Get-Content -Encoding UTF8`; mojibake in terminal output is not proof that the file is corrupt.
 - When listing Git paths with possible Chinese filenames, use `git -c core.quotepath=false ...` or set `core.quotepath=false`.
-- Do not claim real LibTorch/CUDA YOLO/OCR training exists while it is still scaffolded.
+- Production training is official-backend only: Ultralytics YOLO detection/segmentation and PaddleOCR Det/Rec official adapters.
+- Do not reintroduce or describe removed diagnostic paths (`tiny_linear_detector`, shipped `python_mock`, small PaddleOCR Rec CTC, C++ segmentation/OCR scaffold training) as product backends.
+- Keep YOLO and OCR boundaries explicit: YOLO uses official Ultralytics for training/export/`val()` evaluation plus AITrain C++ runtime for packaged inference/benchmark/deployment validation; OCR acceptance uses PaddleOCR Det/Rec/System official reports.
+- Do not claim customer-domain OCR readiness, clean Windows acceptance, package-root TensorRT reruns, unsupported-hardware TensorRT success, or new algorithm support without returned evidence.
 
 ## Verification
 

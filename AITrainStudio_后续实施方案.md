@@ -1,8 +1,12 @@
-# AITrain Studio 后续实施方案
+# AITrain Studio 后续实施方案（历史归档）
 
 生成日期：2026-05-01
 项目目录：`C:\Users\73200\Desktop\code\AITrain`
 权威状态入口：`docs/harness/current-status.md`
+
+> **历史归档警告：本文不再作为新任务默认阅读材料，也不作为当前下一步计划、阶段状态或验收口径来源。**
+>
+> 当前阶段状态以 `docs/harness/current-status.md` 为准；当前宽口径路线以 `docs/product-roadmap-local-training-platform.md` 为准。本文保留早期路线、阶段复盘和历史上下文，其中关于 tiny detector、C++ scaffold、small CTC、python_mock、旧 TensorRT pending、Phase 46/47 OCR ONNX 等描述可能已经被后续阶段废弃。新实现不得根据本文重新引入已移除的产品训练路径。
 
 > 当前 Phase 39+ 的下一步方向以 `docs/product-roadmap-local-training-platform.md` 和 `docs/harness/current-status.md` 为准。本文保留中长期历史路线、阶段复盘和背景材料，不作为当前下一步优先级的唯一来源。
 

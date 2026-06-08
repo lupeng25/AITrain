@@ -94,7 +94,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 
 | 路径 | 职责 |
 |---|---|
-| `src/core` | 协议、插件接口、任务模型、SQLite 仓库、dataset/training scaffold、product workflow companion files |
+| `src/core` | 协议、插件接口、任务模型、SQLite 仓库、数据集/训练/评估/交付 workflow、product workflow companion files |
 | `src/app` | Qt Widgets GUI |
 | `src/app/translations` | GUI 翻译源文件，构建时生成 `.qm` 并随应用安装 |
 | `src/license_generator` | 内部 Qt 注册码生成器，用私钥签发绑定机器码的离线注册码 |
@@ -150,4 +150,4 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 - 注册码系统使用离线签名 token；主应用只内置公钥，私钥文件必须本地保管，不进入客户包和源码提交。
 - Worker 协议改动必须同步测试。
 - 插件接口改动必须考虑已有三个内置插件。
-- scaffold 能力必须明确标注，不要描述为真实 YOLO/OCR 训练。
+- scaffold、smoke、diagnostic 或 report-only 能力必须明确标注；已移除的 tiny/scaffold/mock/小型 CTC 训练路径不得重新描述为产品后端。
