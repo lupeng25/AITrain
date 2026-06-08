@@ -423,6 +423,7 @@ void MainWindow::startTraining()
     parameters.insert(QStringLiteral("batchSize"), batchEdit_->text().toInt());
     parameters.insert(QStringLiteral("imageSize"), imageSizeEdit_->text().toInt());
     parameters.insert(QStringLiteral("gridSize"), gridSizeEdit_->text().toInt());
+    parameters.insert(QStringLiteral("datasetFormat"), datasetFormat);
     const QString yoloSeedText = yoloTrainArgText(this, QStringLiteral("seed"));
     parameters.insert(QStringLiteral("seed"), yoloSeedText.isEmpty() ? 42 : yoloSeedText.toInt());
     parameters.insert(QStringLiteral("resumeCheckpointPath"), QDir::fromNativeSeparators(resumeCheckpointEdit_->text().trimmed()));

@@ -236,6 +236,141 @@ QString officialTrainingBackendForTask(const QString& taskType)
     return {};
 }
 
+bool isTrainingBackendCompatibleWithTask(const QString& taskType, const QString& backend)
+{
+    const QString normalizedTask = taskType.trimmed().toLower();
+    const QString normalizedBackend = backend.trimmed().toLower();
+    if (normalizedTask == QStringLiteral("detection")) {
+        return normalizedBackend == QStringLiteral("ultralytics_yolo")
+            || normalizedBackend == QStringLiteral("ultralytics_yolo_detect");
+    }
+    if (normalizedTask == QStringLiteral("segmentation")) {
+        return normalizedBackend == QStringLiteral("ultralytics_yolo_segment");
+    }
+    if (normalizedTask == QStringLiteral("ocr_detection")) {
+        return normalizedBackend == QStringLiteral("paddleocr_det_official");
+    }
+    if (normalizedTask == QStringLiteral("ocr_recognition")) {
+        return normalizedBackend == QStringLiteral("paddleocr_rec_official")
+            || normalizedBackend == QStringLiteral("paddleocr_ppocrv4_rec");
+    }
+    if (normalizedTask == QStringLiteral("ocr")) {
+        return normalizedBackend == QStringLiteral("paddleocr_det_official")
+            || normalizedBackend == QStringLiteral("paddleocr_rec_official")
+            || normalizedBackend == QStringLiteral("paddleocr_ppocrv4_rec");
+    }
+    return false;
+}
+
+namespace {
+QString datasetFormatForTrainingTask(const QString& taskType)
+{
+    const QString normalized = taskType.trimmed().toLower();
+    if (normalized == QStringLiteral("detection")) {
+        return QStringLiteral("yolo_detection");
+    }
+    if (normalized == QStringLiteral("segmentation")) {
+        return QStringLiteral("yolo_segmentation");
+    }
+    if (normalized == QStringLiteral("ocr_detection")) {
+        return QStringLiteral("paddleocr_det");
+    }
+    if (normalized == QStringLiteral("ocr_recognition")) {
+        return QStringLiteral("paddleocr_rec");
+    }
+    return {};
+}
+
+QString datasetFormatForTrainingRequest(const aitrain::TrainingRequest& request)
+{
+    QString format = request.parameters.value(QStringLiteral("datasetFormat")).toString().trimmed();
+    if (!format.isEmpty()) {
+        return format;
+    }
+    const QJsonObject preflight = request.parameters.value(QStringLiteral("trainingPreflight")).toObject();
+    format = preflight.value(QStringLiteral("datasetFormat")).toString().trimmed();
+    if (!format.isEmpty()) {
+        return format;
+    }
+    return datasetFormatForTrainingTask(request.taskType);
+}
+} // namespace
+
+bool verifyTrainingDatasetSnapshot(const aitrain::TrainingRequest& request, QString* error, QJsonObject* details)
+{
+    const QString expectedHash = request.parameters.value(QStringLiteral("datasetSnapshotHash")).toString().trimmed();
+    if (expectedHash.isEmpty()) {
+        return true;
+    }
+
+    QJsonObject localDetails;
+    localDetails.insert(QStringLiteral("taskId"), request.taskId);
+    localDetails.insert(QStringLiteral("taskType"), request.taskType);
+    localDetails.insert(QStringLiteral("datasetPath"), request.datasetPath);
+    localDetails.insert(QStringLiteral("expectedSnapshotHash"), expectedHash);
+    localDetails.insert(QStringLiteral("datasetSnapshotId"), request.parameters.value(QStringLiteral("datasetSnapshotId")).toInt());
+    localDetails.insert(QStringLiteral("datasetSnapshotManifest"), request.parameters.value(QStringLiteral("datasetSnapshotManifest")).toString());
+
+    const QString datasetFormat = datasetFormatForTrainingRequest(request);
+    localDetails.insert(QStringLiteral("datasetFormat"), datasetFormat);
+    if (request.datasetPath.trimmed().isEmpty()) {
+        if (error) {
+            *error = QStringLiteral("Training request carries datasetSnapshotHash but datasetPath is empty.");
+        }
+        if (details) {
+            *details = localDetails;
+        }
+        return false;
+    }
+    if (datasetFormat.isEmpty()) {
+        if (error) {
+            *error = QStringLiteral("Training request carries datasetSnapshotHash but dataset format cannot be inferred for task type '%1'.").arg(request.taskType);
+        }
+        if (details) {
+            *details = localDetails;
+        }
+        return false;
+    }
+
+    const QString verifyOutputPath = QDir(request.outputPath).filePath(QStringLiteral("snapshot_verification"));
+    QJsonObject snapshotOptions;
+    snapshotOptions.insert(QStringLiteral("maxFiles"), request.parameters.value(QStringLiteral("snapshotMaxFiles")).toInt(20000));
+    const aitrain::WorkflowResult currentSnapshot = aitrain::createDatasetSnapshotReport(
+        request.datasetPath,
+        verifyOutputPath,
+        datasetFormat,
+        snapshotOptions);
+    if (!currentSnapshot.ok) {
+        if (error) {
+            *error = QStringLiteral("Cannot verify training dataset snapshot: %1").arg(currentSnapshot.error);
+        }
+        localDetails.insert(QStringLiteral("verificationOutputPath"), verifyOutputPath);
+        if (details) {
+            *details = localDetails;
+        }
+        return false;
+    }
+
+    const QString currentHash = currentSnapshot.payload.value(QStringLiteral("contentHash")).toString().trimmed();
+    localDetails.insert(QStringLiteral("currentSnapshotHash"), currentHash);
+    localDetails.insert(QStringLiteral("currentSnapshotManifest"), currentSnapshot.reportPath);
+    localDetails.insert(QStringLiteral("verificationOutputPath"), verifyOutputPath);
+    if (currentHash.compare(expectedHash, Qt::CaseInsensitive) != 0) {
+        if (error) {
+            *error = QStringLiteral("Dataset snapshot mismatch: expected %1 but current dataset hash is %2. Recreate the snapshot before training or restore the original dataset.")
+                .arg(expectedHash, currentHash);
+        }
+        if (details) {
+            *details = localDetails;
+        }
+        return false;
+    }
+    if (details) {
+        *details = localDetails;
+    }
+    return true;
+}
+
 namespace {
 bool isOfficialWorkerBackendId(const QString& normalized)
 {

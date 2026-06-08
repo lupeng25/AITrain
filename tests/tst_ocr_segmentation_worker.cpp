@@ -198,6 +198,120 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
     }
 
+    void mismatchedTrainingBackendIsRejected()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString datasetRoot = dir.filePath(QStringLiteral("dataset"));
+        writeTinyDetectionDataset(datasetRoot);
+
+        aitrain::TrainingRequest request;
+        request.taskId = QStringLiteral("mismatched-backend");
+        request.projectPath = dir.path();
+        request.pluginId = QStringLiteral("com.aitrain.plugins.yolo_native");
+        request.taskType = QStringLiteral("detection");
+        request.datasetPath = datasetRoot;
+        request.outputPath = dir.filePath(QStringLiteral("run"));
+        request.parameters.insert(QStringLiteral("trainingBackend"), QStringLiteral("ultralytics_yolo_segment"));
+
+        WorkerClient client;
+        QVector<QPair<QString, QJsonObject>> messages;
+        bool finished = false;
+        bool ok = true;
+        QString finishedMessage;
+        connect(&client, &WorkerClient::messageReceived, this, [&messages](const QString& type, const QJsonObject& payload) {
+            messages.append(qMakePair(type, payload));
+        });
+        connect(&client, &WorkerClient::finished, this, [&finished, &ok, &finishedMessage](bool result, const QString& message) {
+            finished = true;
+            ok = result;
+            finishedMessage = message;
+        });
+
+        QString error;
+        QVERIFY2(client.startTraining(workerExecutablePath(), request, &error), qPrintable(error));
+        QTRY_VERIFY_WITH_TIMEOUT(finished, 60000);
+        QVERIFY(!ok);
+
+        bool sawMismatch = false;
+        for (const auto& message : messages) {
+            if (message.first == QStringLiteral("failed")) {
+                sawMismatch = message.second.value(QStringLiteral("errorCode")).toString()
+                    == QStringLiteral("training_backend_task_mismatch");
+            }
+        }
+        QVERIFY(sawMismatch);
+        QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
+    }
+
+    void trainingSnapshotMismatchIsRejected()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString datasetRoot = dir.filePath(QStringLiteral("dataset"));
+        writeTinyDetectionDataset(datasetRoot);
+
+        const QString snapshotOutput = dir.filePath(QStringLiteral("snapshot"));
+        const aitrain::WorkflowResult snapshot = aitrain::createDatasetSnapshotReport(
+            datasetRoot,
+            snapshotOutput,
+            QStringLiteral("yolo_detection"),
+            QJsonObject{{QStringLiteral("maxFiles"), 20000}});
+        QVERIFY2(snapshot.ok, qPrintable(snapshot.error));
+        const QString snapshotHash = snapshot.payload.value(QStringLiteral("contentHash")).toString();
+        QVERIFY(!snapshotHash.isEmpty());
+
+        writeTextFile(QDir(datasetRoot).filePath(QStringLiteral("labels/train/a.txt")),
+            QStringLiteral("0 0.5 0.5 0.30 0.30\n"));
+
+        aitrain::TrainingRequest request;
+        request.taskId = QStringLiteral("snapshot-mismatch");
+        request.projectPath = dir.path();
+        request.pluginId = QStringLiteral("com.aitrain.plugins.yolo_native");
+        request.taskType = QStringLiteral("detection");
+        request.datasetPath = datasetRoot;
+        request.outputPath = dir.filePath(QStringLiteral("run"));
+        request.parameters.insert(QStringLiteral("trainingBackend"), QStringLiteral("ultralytics_yolo_detect"));
+        request.parameters.insert(QStringLiteral("datasetFormat"), QStringLiteral("yolo_detection"));
+        request.parameters.insert(QStringLiteral("datasetSnapshotHash"), snapshotHash);
+        request.parameters.insert(QStringLiteral("datasetSnapshotManifest"), snapshot.reportPath);
+
+        WorkerClient client;
+        QVector<QPair<QString, QJsonObject>> messages;
+        bool finished = false;
+        bool ok = true;
+        QString finishedMessage;
+        connect(&client, &WorkerClient::messageReceived, this, [&messages](const QString& type, const QJsonObject& payload) {
+            messages.append(qMakePair(type, payload));
+        });
+        connect(&client, &WorkerClient::finished, this, [&finished, &ok, &finishedMessage](bool result, const QString& message) {
+            finished = true;
+            ok = result;
+            finishedMessage = message;
+        });
+
+        QString error;
+        QVERIFY2(client.startTraining(workerExecutablePath(), request, &error), qPrintable(error));
+        QTRY_VERIFY_WITH_TIMEOUT(finished, 60000);
+        QVERIFY(!ok);
+
+        bool sawSnapshotMismatch = false;
+        QStringList receivedMessages;
+        for (const auto& message : messages) {
+            receivedMessages.append(QStringLiteral("%1 %2").arg(
+                message.first,
+                QString::fromUtf8(QJsonDocument(message.second).toJson(QJsonDocument::Compact))));
+            if (message.first == QStringLiteral("failed")) {
+                const QJsonObject details = message.second.value(QStringLiteral("details")).toObject();
+                sawSnapshotMismatch = message.second.value(QStringLiteral("errorCode")).toString()
+                    == QStringLiteral("dataset_snapshot_mismatch")
+                    && !details.value(QStringLiteral("currentSnapshotHash")).toString().isEmpty();
+            }
+        }
+        QVERIFY2(sawSnapshotMismatch, qPrintable(receivedMessages.join(QStringLiteral("\n"))));
+        QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
+    }
+
     void pythonTrainerProtocolUsesTemporaryFixtureOnly()
     {
         const QString python = pythonExecutablePath();

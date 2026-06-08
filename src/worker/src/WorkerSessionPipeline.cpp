@@ -83,6 +83,16 @@ void WorkerSession::runLocalPipeline(const QJsonObject& payload)
                     {QStringLiteral("outputPath"), outputPath}});
             return;
         }
+        if (!isTrainingBackendCompatibleWithTask(pipelineTaskType, pipelineBackend)) {
+            failWithDetails(
+                QStringLiteral("Pipeline training backend '%1' is not compatible with task type '%2'.").arg(pipelineBackend, pipelineTaskType),
+                QStringLiteral("training_backend_task_mismatch"),
+                QJsonObject{
+                    {QStringLiteral("backend"), pipelineBackend},
+                    {QStringLiteral("taskType"), pipelineTaskType},
+                    {QStringLiteral("outputPath"), outputPath}});
+            return;
+        }
         const QString datasetPath = pipelineOptions.value(QStringLiteral("datasetPath")).toString();
         const QString trainOutputPath = QDir(outputPath).filePath(QStringLiteral("training"));
         const PipelineTrainResult trainingResult = runPipelineTrainingStep(
@@ -203,6 +213,18 @@ WorkerSession::PipelineTrainResult WorkerSession::runPipelineTrainingStep(
 
     if (!isSupportedTrainingBackendId(backend, request_.parameters)) {
         result.error = QStringLiteral("Pipeline training backend '%1' is not enabled for production training.").arg(backend);
+        return result;
+    }
+    if (!isTrainingBackendCompatibleWithTask(request_.taskType, backend)) {
+        result.error = QStringLiteral("Pipeline training backend '%1' is not compatible with task type '%2'.").arg(backend, request_.taskType);
+        return result;
+    }
+
+    QString snapshotError;
+    QJsonObject snapshotDetails;
+    if (!verifyTrainingDatasetSnapshot(request_, &snapshotError, &snapshotDetails)) {
+        Q_UNUSED(snapshotDetails);
+        result.error = snapshotError;
         return result;
     }
 

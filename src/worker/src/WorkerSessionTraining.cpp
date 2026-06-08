@@ -86,14 +86,6 @@ void WorkerSession::startTraining(const aitrain::TrainingRequest& request)
     canceled_ = false;
 
     QDir().mkpath(request_.outputPath);
-    QFile configFile(QDir(request_.outputPath).filePath(QStringLiteral("request.json")));
-    if (configFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        configFile.write(QJsonDocument(request_.toJson()).toJson(QJsonDocument::Indented));
-    }
-
-    QJsonObject payload;
-    payload.insert(QStringLiteral("message"), QStringLiteral("Worker accepted task %1 for plugin %2").arg(request_.taskId, request_.pluginId));
-    send(wp::event::log(), payload);
 
     const QString backend = requestedTrainingBackend(request_);
     if (!isSupportedTrainingBackendId(backend, request_.parameters)) {
@@ -108,6 +100,32 @@ void WorkerSession::startTraining(const aitrain::TrainingRequest& request)
                 {QStringLiteral("outputPath"), request_.outputPath}});
         return;
     }
+    if (!isTrainingBackendCompatibleWithTask(request_.taskType, backend)) {
+        failWithDetails(
+            QStringLiteral("Training backend '%1' is not compatible with task type '%2'.").arg(backend, request_.taskType),
+            QStringLiteral("training_backend_task_mismatch"),
+            QJsonObject{
+                {QStringLiteral("backend"), backend},
+                {QStringLiteral("taskType"), request_.taskType},
+                {QStringLiteral("outputPath"), request_.outputPath}});
+        return;
+    }
+
+    QString snapshotError;
+    QJsonObject snapshotDetails;
+    if (!verifyTrainingDatasetSnapshot(request_, &snapshotError, &snapshotDetails)) {
+        failWithDetails(snapshotError, QStringLiteral("dataset_snapshot_mismatch"), snapshotDetails);
+        return;
+    }
+
+    QFile configFile(QDir(request_.outputPath).filePath(QStringLiteral("request.json")));
+    if (configFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        configFile.write(QJsonDocument(request_.toJson()).toJson(QJsonDocument::Indented));
+    }
+
+    QJsonObject payload;
+    payload.insert(QStringLiteral("message"), QStringLiteral("Worker accepted task %1 for plugin %2").arg(request_.taskId, request_.pluginId));
+    send(wp::event::log(), payload);
 
     if (request_.taskType.compare(QStringLiteral("detection"), Qt::CaseInsensitive) == 0) {
         runDetectionTraining();
