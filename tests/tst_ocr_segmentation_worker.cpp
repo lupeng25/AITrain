@@ -118,6 +118,46 @@ QString writeFakePaddleOcrRepo(const QString& root)
     return repo.absolutePath();
 }
 
+bool pythonCanImportModule(const QString& python, const QString& module)
+{
+    QProcess process;
+    process.start(python, QStringList() << QStringLiteral("-c") << QStringLiteral("import %1").arg(module));
+    return process.waitForStarted(1000)
+        && process.waitForFinished(5000)
+        && process.exitStatus() == QProcess::NormalExit
+        && process.exitCode() == 0;
+}
+
+void writeFakeUltralyticsOnnxExportPackage(const QString& root)
+{
+    writeTextFile(
+        QDir(root).filePath(QStringLiteral("ultralytics/__init__.py")),
+        QStringLiteral(
+            "from pathlib import Path\n"
+            "__version__ = 'test-fixture'\n"
+            "\n"
+            "class YOLO:\n"
+            "    def __init__(self, model):\n"
+            "        self.model = str(model)\n"
+            "        self.task = 'detect'\n"
+            "\n"
+            "    def export(self, **kwargs):\n"
+            "        import onnx\n"
+            "        from onnx import TensorProto, helper\n"
+            "        model_path = Path(self.model)\n"
+            "        output_path = model_path.with_suffix('.onnx')\n"
+            "        output_path.parent.mkdir(parents=True, exist_ok=True)\n"
+            "        input_info = helper.make_tensor_value_info('images', TensorProto.FLOAT, [1, 3, 32, 32])\n"
+            "        output_info = helper.make_tensor_value_info('output0', TensorProto.FLOAT, [1, 5, 1])\n"
+            "        values = helper.make_tensor('values', TensorProto.FLOAT, [1, 5, 1], [16.0, 16.0, 8.0, 8.0, 0.10])\n"
+            "        node = helper.make_node('Constant', inputs=[], outputs=['output0'], value=values)\n"
+            "        graph = helper.make_graph([node], 'aitrain_fake_yolo', [input_info], [output_info])\n"
+            "        model = helper.make_model(graph, producer_name='aitrain-test', opset_imports=[helper.make_opsetid('', 13)])\n"
+            "        model.ir_version = 8\n"
+            "        onnx.save(model, output_path)\n"
+            "        return str(output_path)\n"));
+}
+
 QString repoRelativeFilePath(const QString& relative)
 {
     const QString applicationDir = QCoreApplication::applicationDirPath();
@@ -533,6 +573,117 @@ private slots:
         }
         QVERIFY(sawEvaluationReport);
         QVERIFY(sawOfficialMetrics);
+    }
+
+    void pipelinePreExportsYoloPtForExportInferBenchmark()
+    {
+        const QString python = pythonExecutablePath();
+        if (python.isEmpty()) {
+            QSKIP("Python executable is not available.");
+        }
+        if (!pythonCanImportModule(python, QStringLiteral("onnx"))) {
+            QSKIP("Python onnx package is not available for the fake YOLO export fixture.");
+        }
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString datasetRoot = dir.filePath(QStringLiteral("dataset"));
+        writeTinyDetectionDataset(datasetRoot);
+        const QString fakePackageRoot = dir.filePath(QStringLiteral("fake_ultralytics_export"));
+        QVERIFY(QDir().mkpath(fakePackageRoot));
+        writeFakeUltralyticsOnnxExportPackage(fakePackageRoot);
+
+        const QString checkpointPath = dir.filePath(QStringLiteral("weights/external.pt"));
+        writeTextFile(checkpointPath, QStringLiteral("fake external yolo checkpoint\n"));
+        const QString outputPath = dir.filePath(QStringLiteral("pipeline"));
+        const QString sampleImagePath = QDir(datasetRoot).filePath(QStringLiteral("images/val/a.png"));
+
+        QJsonObject options;
+        options.insert(QStringLiteral("modelPath"), checkpointPath);
+        options.insert(QStringLiteral("datasetPath"), datasetRoot);
+        options.insert(QStringLiteral("datasetFormat"), QStringLiteral("yolo_detection"));
+        options.insert(QStringLiteral("taskType"), QStringLiteral("detection"));
+        options.insert(QStringLiteral("trainingBackend"), QStringLiteral("ultralytics_yolo_detect"));
+        options.insert(QStringLiteral("exportFormat"), QStringLiteral("onnx"));
+        options.insert(QStringLiteral("sampleImagePath"), sampleImagePath);
+        options.insert(QStringLiteral("pythonExecutable"), python);
+        options.insert(QStringLiteral("pythonPathPrepend"), fakePackageRoot);
+        options.insert(QStringLiteral("ultralyticsExportArgs"), QJsonObject{
+            {QStringLiteral("format"), QStringLiteral("onnx")},
+            {QStringLiteral("imgsz"), 32},
+            {QStringLiteral("batch"), 1},
+            {QStringLiteral("device"), QStringLiteral("cpu")}
+        });
+
+        WorkerClient client;
+        QVector<QPair<QString, QJsonObject>> messages;
+        QStringList logs;
+        bool finished = false;
+        bool ok = false;
+        QString finishedMessage;
+        connect(&client, &WorkerClient::messageReceived, this, [&messages](const QString& type, const QJsonObject& payload) {
+            messages.append(qMakePair(type, payload));
+        });
+        connect(&client, &WorkerClient::logLine, this, [&logs](const QString& line) {
+            logs.append(line);
+        });
+        connect(&client, &WorkerClient::finished, this, [&finished, &ok, &finishedMessage](bool result, const QString& message) {
+            finished = true;
+            ok = result;
+            finishedMessage = message;
+        });
+
+        QString error;
+        QVERIFY2(client.requestLocalPipeline(
+            workerExecutablePath(),
+            outputPath,
+            QStringLiteral("export-infer-benchmark-report"),
+            options,
+            &error,
+            QStringLiteral("pipeline-pt-preexport-fixture")), qPrintable(error));
+        QTRY_VERIFY2_WITH_TIMEOUT(
+            finished,
+            qPrintable(QStringLiteral("Worker did not finish. Logs:\n%1").arg(logs.join(QStringLiteral("\n")))),
+            60000);
+        QVERIFY2(ok, qPrintable(finishedMessage));
+        QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
+
+        const QString officialOnnxPath = QDir(outputPath).filePath(QStringLiteral("official_yolo_export/model.onnx"));
+        const QString pipelineReportPath = QDir(outputPath).filePath(QStringLiteral("local_pipeline_plan.json"));
+        const QString finalExportPath = QDir(outputPath).filePath(QStringLiteral("export/model.onnx"));
+        QVERIFY(QFileInfo::exists(officialOnnxPath));
+        QVERIFY(QFileInfo::exists(pipelineReportPath));
+        QVERIFY(QFileInfo::exists(finalExportPath));
+
+        const QJsonObject report = readJsonObject(pipelineReportPath);
+        QCOMPARE(report.value(QStringLiteral("state")).toString(), QStringLiteral("completed"));
+        QCOMPARE(QFileInfo(report.value(QStringLiteral("pipelineOfficialExportPath")).toString()).absoluteFilePath(), QFileInfo(officialOnnxPath).absoluteFilePath());
+        QCOMPARE(report.value(QStringLiteral("pipelineOfficialExportSourceCheckpointPath")).toString(), checkpointPath);
+        QCOMPARE(QFileInfo(report.value(QStringLiteral("modelPath")).toString()).absoluteFilePath(), QFileInfo(officialOnnxPath).absoluteFilePath());
+        QCOMPARE(QFileInfo(report.value(QStringLiteral("exportPath")).toString()).absoluteFilePath(), QFileInfo(finalExportPath).absoluteFilePath());
+
+        bool sawOfficialExportStep = false;
+        bool sawExportStep = false;
+        bool sawBenchmarkStep = false;
+        for (const QJsonValue& value : report.value(QStringLiteral("steps")).toArray()) {
+            const QJsonObject step = value.toObject();
+            const QString command = step.value(QStringLiteral("command")).toString();
+            sawOfficialExportStep = sawOfficialExportStep || command == QStringLiteral("officialYoloExport");
+            sawExportStep = sawExportStep || command == QStringLiteral("exportModel");
+            sawBenchmarkStep = sawBenchmarkStep || command == QStringLiteral("benchmarkModel");
+        }
+        QVERIFY(sawOfficialExportStep);
+        QVERIFY(sawExportStep);
+        QVERIFY(sawBenchmarkStep);
+
+        bool sawInternalModelExportEvent = false;
+        for (const auto& message : messages) {
+            sawInternalModelExportEvent = sawInternalModelExportEvent
+                || message.first == QStringLiteral("modelExport")
+                || (message.first == QStringLiteral("artifact")
+                    && message.second.value(QStringLiteral("kind")).toString() == QStringLiteral("official_yolo_export"));
+        }
+        QVERIFY(sawInternalModelExportEvent);
     }
 
     void workerRunsPaddleOcrRecOfficialAdapterPrepareOnly()

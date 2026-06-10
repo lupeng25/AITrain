@@ -73,12 +73,25 @@ private:
         QJsonArray logs;
     };
 
+    struct OfficialYoloExportResult {
+        bool ok = false;
+        QString error;
+        QJsonObject modelExportPayload;
+    };
+
     PipelineTrainResult runPipelineTrainingStep(
         const QString& parentTaskId,
         const QString& outputPath,
         const QJsonObject& options,
         const QString& datasetPath,
         const QString& taskType);
+    OfficialYoloExportResult runOfficialYoloExport(
+        const QString& taskId,
+        const QString& sourcePath,
+        const QString& officialOutputPath,
+        const QString& productFormat,
+        const QJsonObject& exportOptions,
+        bool forwardExportEvents);
     void drainPipelinePythonTrainerOutput(QByteArray* buffer, PipelineTrainResult* result, bool* terminalMessageSeen);
     void drainPipelinePythonTrainerErrors(QByteArray* buffer, PipelineTrainResult* result);
     bool forwardPipelinePythonTrainerLine(const QByteArray& line, PipelineTrainResult* result, bool* terminalMessageSeen);

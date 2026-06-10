@@ -124,6 +124,82 @@ void WorkerSession::runLocalPipeline(const QJsonObject& payload)
         pipelineOptions.insert(QStringLiteral("pipelineOfficialTrainingOnnxPath"), trainingResult.onnxPath);
     }
 
+    const QString pipelineModelPath = pipelineOptions.value(QStringLiteral("modelPath")).toString(
+        pipelineOptions.value(QStringLiteral("checkpointPath")).toString());
+    if (resolvedTemplate == QStringLiteral("export-infer-benchmark-report")
+        && QFileInfo(pipelineModelPath).suffix().toLower() == QStringLiteral("pt")) {
+        const QString exportFormat = pipelineOptions.value(QStringLiteral("exportFormat")).toString(QStringLiteral("onnx")).trimmed().toLower();
+        if (exportFormat != QStringLiteral("onnx")
+            && exportFormat != QStringLiteral("ncnn")
+            && !exportFormat.startsWith(QStringLiteral("tensorrt"))) {
+            failWithDetails(
+                QStringLiteral("Pipeline export format '%1' is not supported for official YOLO .pt pre-export.").arg(exportFormat),
+                QStringLiteral("unsupported_export_format"),
+                QJsonObject{
+                    {QStringLiteral("format"), exportFormat},
+                    {QStringLiteral("modelPath"), pipelineModelPath},
+                    {QStringLiteral("outputPath"), outputPath}});
+            return;
+        }
+
+        QJsonObject officialExportOptions = pipelineOptions;
+        QJsonObject exportArgs = officialExportOptions.value(QStringLiteral("ultralyticsExportArgs")).toObject();
+        exportArgs.insert(QStringLiteral("format"), QStringLiteral("onnx"));
+        if (exportFormat != QStringLiteral("onnx")) {
+            exportArgs.insert(QStringLiteral("dynamic"), false);
+            exportArgs.insert(QStringLiteral("half"), false);
+            exportArgs.insert(QStringLiteral("int8"), false);
+        }
+        officialExportOptions.insert(QStringLiteral("ultralyticsExportArgs"), exportArgs);
+
+        QJsonObject preExportProgress;
+        preExportProgress.insert(QStringLiteral("taskId"), taskId);
+        preExportProgress.insert(QStringLiteral("percent"), 5);
+        preExportProgress.insert(QStringLiteral("message"), QStringLiteral("正在将 YOLO .pt 权重官方导出为 ONNX。"));
+        send(wp::event::progress(), preExportProgress);
+
+        const QString officialOnnxPath = QDir(outputPath).filePath(QStringLiteral("official_yolo_export/model.onnx"));
+        const OfficialYoloExportResult officialExport = runOfficialYoloExport(
+            taskId,
+            pipelineModelPath,
+            officialOnnxPath,
+            QStringLiteral("onnx"),
+            officialExportOptions,
+            true);
+        if (!officialExport.ok) {
+            if (officialExport.error == QStringLiteral("Canceled by user")) {
+                sendCanceledAndFinish(taskId, officialExport.error);
+                return;
+            }
+            failWithDetails(
+                officialExport.error,
+                QStringLiteral("official_yolo_export_failed"),
+                QJsonObject{
+                    {QStringLiteral("modelPath"), pipelineModelPath},
+                    {QStringLiteral("outputPath"), officialOnnxPath}});
+            return;
+        }
+
+        const QString officialExportPath = officialExport.modelExportPayload.value(QStringLiteral("exportPath")).toString(officialOnnxPath);
+        if (officialExportPath.isEmpty() || !QFileInfo::exists(officialExportPath)) {
+            failWithDetails(
+                QStringLiteral("Official YOLO .pt pre-export did not produce an ONNX artifact."),
+                QStringLiteral("official_yolo_export_missing"),
+                QJsonObject{
+                    {QStringLiteral("modelPath"), pipelineModelPath},
+                    {QStringLiteral("outputPath"), officialOnnxPath}});
+            return;
+        }
+
+        pipelineOptions.insert(QStringLiteral("modelPath"), officialExportPath);
+        pipelineOptions.insert(QStringLiteral("checkpointPath"), officialExportPath);
+        pipelineOptions.insert(QStringLiteral("pipelineOfficialExportCompleted"), true);
+        pipelineOptions.insert(QStringLiteral("pipelineOfficialExportPayload"), officialExport.modelExportPayload);
+        pipelineOptions.insert(QStringLiteral("pipelineOfficialExportPath"), officialExportPath);
+        pipelineOptions.insert(QStringLiteral("pipelineOfficialExportReportPath"), officialExport.modelExportPayload.value(QStringLiteral("reportPath")).toString());
+        pipelineOptions.insert(QStringLiteral("pipelineOfficialExportSourceCheckpointPath"), pipelineModelPath);
+    }
+
     const aitrain::WorkflowResult result = aitrain::runLocalPipelinePlan(outputPath, templateId, pipelineOptions);
     if (!result.ok) {
         fail(result.error);
