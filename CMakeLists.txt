@@ -24,6 +24,7 @@ set(AITRAIN_LICENSE_KEY_FILE "" CACHE FILEPATH "Optional local JSON key file con
 set(AITRAIN_ONNXRUNTIME_ROOT "" CACHE PATH "Optional ONNX Runtime SDK root containing include and lib directories")
 set(AITRAIN_NCNN_ROOT "" CACHE PATH "Optional NCNN SDK root containing include, lib, bin, and tools directories")
 set(AITRAIN_NCNN_ONNX2NCNN "" CACHE FILEPATH "Optional onnx2ncnn converter executable")
+set(AITRAIN_NCNN_PNNX "" CACHE FILEPATH "Optional pnnx converter executable for NCNN export")
 set(AITRAIN_CUDA_ROOT "" CACHE PATH "Optional CUDA Toolkit root used for packaging runtime DLLs")
 set(AITRAIN_CUDNN_ROOT "" CACHE PATH "Optional cuDNN root used for packaging runtime DLLs")
 set(AITRAIN_TENSORRT_ROOT "" CACHE PATH "Optional TensorRT SDK root used for packaging runtime DLLs")
@@ -349,6 +350,26 @@ if(AITRAIN_ENABLE_NCNN)
             set(AITRAIN_NCNN_ONNX2NCNN "${AITRAIN_NCNN_ONNX2NCNN_DISCOVERED}" CACHE FILEPATH "Optional onnx2ncnn converter executable" FORCE)
         endif()
     endif()
+    if(NOT AITRAIN_NCNN_PNNX)
+        find_program(AITRAIN_NCNN_PNNX_DISCOVERED
+            NAMES pnnx.exe pnnx
+            HINTS
+                ${CMAKE_SOURCE_DIR}/.deps/ncnn/x64/bin
+                ${AITRAIN_NCNN_ROOT}/bin
+                ${AITRAIN_NCNN_ROOT}/x64/bin
+                $ENV{AITRAIN_NCNN_ROOT}/bin
+                $ENV{AITRAIN_NCNN_ROOT}/x64/bin
+                $ENV{NCNN_ROOT}/bin
+                $ENV{NCNN_ROOT}/x64/bin
+                ${CMAKE_SOURCE_DIR}/.deps/ncnn/bin
+                ${CMAKE_SOURCE_DIR}/.deps/pnnx/pnnx
+                ${CMAKE_SOURCE_DIR}/.deps/pnnx/bin
+            NO_DEFAULT_PATH
+        )
+        if(AITRAIN_NCNN_PNNX_DISCOVERED)
+            set(AITRAIN_NCNN_PNNX "${AITRAIN_NCNN_PNNX_DISCOVERED}" CACHE FILEPATH "Optional pnnx converter executable for NCNN export" FORCE)
+        endif()
+    endif()
 
     if(AITRAIN_NCNN_INCLUDE_DIR AND AITRAIN_NCNN_LIBRARY)
         set(AITRAIN_WITH_NCNN ON)
@@ -398,6 +419,16 @@ function(aitrain_copy_ncnn_runtime target_name)
                 $<TARGET_FILE_DIR:${target_name}>/runtimes/ncnn
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 ${AITRAIN_NCNN_ONNX2NCNN}
+                $<TARGET_FILE_DIR:${target_name}>/runtimes/ncnn
+            VERBATIM
+        )
+    endif()
+    if(AITRAIN_NCNN_PNNX)
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                $<TARGET_FILE_DIR:${target_name}>/runtimes/ncnn
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${AITRAIN_NCNN_PNNX}
                 $<TARGET_FILE_DIR:${target_name}>/runtimes/ncnn
             VERBATIM
         )
@@ -610,6 +641,9 @@ if(AITRAIN_WITH_NCNN AND AITRAIN_NCNN_DLL)
 endif()
 if(AITRAIN_NCNN_ONNX2NCNN)
     install(FILES ${AITRAIN_NCNN_ONNX2NCNN} DESTINATION runtimes/ncnn)
+endif()
+if(AITRAIN_NCNN_PNNX)
+    install(FILES ${AITRAIN_NCNN_PNNX} DESTINATION runtimes/ncnn)
 endif()
 
 if(AITRAIN_PACKAGED_ACCELERATOR_DLLS)

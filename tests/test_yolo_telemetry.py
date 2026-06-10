@@ -196,6 +196,20 @@ def test_ultralytics_export_args_are_sanitized() -> None:
     assert plan["kwargs"]["device"] == "cpu"
 
 
+def test_training_export_defaults_to_single_image_batch() -> None:
+    plan = exporter.build_export_plan(
+        {},
+        default_format="onnx",
+        default_imgsz=128,
+        default_batch=1,
+        default_device="cpu",
+    )
+
+    assert plan["productFormat"] == "onnx"
+    assert plan["kwargs"]["batch"] == 1
+    assert plan["normalized"]["batch"] == 1
+
+
 def test_ultralytics_export_args_reject_unknown_keys() -> None:
     try:
         exporter.build_export_plan({"ultralyticsExportArgs": {"unknown": 1}})

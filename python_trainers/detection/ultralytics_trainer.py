@@ -883,7 +883,7 @@ def run(request: dict[str, Any]) -> int:
             parameters,
             default_format="onnx",
             default_imgsz=image_size,
-            default_batch=int(train_kwargs.get("batch", 1)),
+            default_batch=1,
             default_device=device,
             data_yaml=data_yaml,
         )

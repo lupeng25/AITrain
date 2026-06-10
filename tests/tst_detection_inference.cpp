@@ -94,6 +94,107 @@ private slots:
         QCOMPARE(classNames.at(1).toString(), QStringLiteral("defect"));
     }
 
+    void onnxExportKeepsOfficialSegmentationMetadata()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString sourceOnnx = dir.filePath(QStringLiteral("runs/weights/best.onnx"));
+        const QString reportPath = dir.filePath(QStringLiteral("runs/ultralytics_training_report.json"));
+        writeTextFile(sourceOnnx, QStringLiteral("fake official segmentation onnx\n"));
+
+        QJsonObject trainingReport;
+        trainingReport.insert(QStringLiteral("backend"), QStringLiteral("ultralytics_yolo_segment"));
+        writeTextFile(reportPath, QString::fromUtf8(QJsonDocument(trainingReport).toJson(QJsonDocument::Indented)));
+
+        QJsonObject sidecar;
+        sidecar.insert(QStringLiteral("format"), QStringLiteral("onnx"));
+        sidecar.insert(QStringLiteral("backend"), QStringLiteral("ultralytics_yolo_segment"));
+        sidecar.insert(QStringLiteral("modelFamily"), QStringLiteral("yolo_segmentation"));
+        sidecar.insert(QStringLiteral("scaffold"), false);
+        sidecar.insert(QStringLiteral("sourceTrainingReport"), reportPath);
+        sidecar.insert(QStringLiteral("classNames"), QJsonArray{QStringLiteral("part"), QStringLiteral("scratch")});
+        writeTextFile(
+            dir.filePath(QStringLiteral("runs/weights/best.aitrain-export.json")),
+            QString::fromUtf8(QJsonDocument(sidecar).toJson(QJsonDocument::Indented)));
+
+        QCOMPARE(aitrain::inferOnnxModelFamily(sourceOnnx), QStringLiteral("yolo_segmentation"));
+
+        const QString outputOnnx = dir.filePath(QStringLiteral("export/model.onnx"));
+        const aitrain::DetectionExportResult exported = aitrain::exportDetectionCheckpoint(
+            sourceOnnx,
+            outputOnnx,
+            QStringLiteral("onnx"));
+
+        QVERIFY2(exported.ok, qPrintable(exported.error));
+        QCOMPARE(exported.config.value(QStringLiteral("backend")).toString(), QStringLiteral("ultralytics_yolo_segment"));
+        QCOMPARE(exported.config.value(QStringLiteral("modelFamily")).toString(), QStringLiteral("yolo_segmentation"));
+        const QJsonObject postprocess = exported.config.value(QStringLiteral("postprocess")).toObject();
+        QCOMPARE(postprocess.value(QStringLiteral("decoder")).toString(), QStringLiteral("yolo_v8_segmentation"));
+    }
+
+    void ncnnExportUsesPnnxForYoloOnnxAndKeepsInputSize()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString sourceOnnx = dir.filePath(QStringLiteral("runs/weights/best.onnx"));
+        const QString reportPath = dir.filePath(QStringLiteral("runs/ultralytics_training_report.json"));
+        const QString dataYaml = dir.filePath(QStringLiteral("dataset/data.yaml"));
+        writeTextFile(sourceOnnx, QStringLiteral("fake official onnx\n"));
+        writeTextFile(dataYaml, QStringLiteral("nc: 2\nnames: [square, circle]\n"));
+
+        QJsonObject trainingReport;
+        trainingReport.insert(QStringLiteral("backend"), QStringLiteral("ultralytics_yolo_detect"));
+        trainingReport.insert(QStringLiteral("dataYaml"), dataYaml);
+        trainingReport.insert(QStringLiteral("ultralyticsExportArgs"), QJsonObject{
+            {QStringLiteral("format"), QStringLiteral("onnx")},
+            {QStringLiteral("imgsz"), 128},
+            {QStringLiteral("batch"), 1}
+        });
+        writeTextFile(reportPath, QString::fromUtf8(QJsonDocument(trainingReport).toJson(QJsonDocument::Indented)));
+
+        const QString outputParam = dir.filePath(QStringLiteral("export/model.param"));
+        const QString outputBin = dir.filePath(QStringLiteral("export/model.bin"));
+#ifdef Q_OS_WIN
+        const QString fakePnnx = dir.filePath(QStringLiteral("fake_pnnx.cmd"));
+        writeTextFile(fakePnnx,
+            QStringLiteral("@echo off\r\n"
+                           "echo 7767517>\"%1\"\r\n"
+                           "echo 2 2>>\"%1\"\r\n"
+                           "echo Input in0 0 1 in0>>\"%1\"\r\n"
+                           "echo MemoryData out0 1 1 in0 out0 0=1>>\"%1\"\r\n"
+                           "echo fake>\"%2\"\r\n")
+                .arg(QDir::toNativeSeparators(outputParam), QDir::toNativeSeparators(outputBin)));
+#else
+        const QString fakePnnx = dir.filePath(QStringLiteral("fake_pnnx.sh"));
+        writeTextFile(fakePnnx,
+            QStringLiteral("#!/bin/sh\n"
+                           "printf '7767517\\n2 2\\nInput in0 0 1 in0\\nMemoryData out0 1 1 in0 out0 0=1\\n' > '%1'\n"
+                           "printf 'fake\\n' > '%2'\n")
+                .arg(outputParam, outputBin));
+        QFile::setPermissions(fakePnnx, QFile::permissions(fakePnnx) | QFileDevice::ExeOwner | QFileDevice::ExeUser);
+#endif
+        const ScopedEnvVar pnnxEnv("AITRAIN_NCNN_PNNX", QFile::encodeName(fakePnnx));
+
+        const aitrain::DetectionExportResult exported = aitrain::exportDetectionCheckpoint(
+            sourceOnnx,
+            outputParam,
+            QStringLiteral("ncnn"));
+
+        QVERIFY2(exported.ok, qPrintable(exported.error));
+        QCOMPARE(exported.exportPath, outputParam);
+        QVERIFY(QFileInfo::exists(outputParam));
+        QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("export/model.bin"))));
+        QCOMPARE(exported.config.value(QStringLiteral("backend")).toString(), QStringLiteral("ultralytics_yolo_detect"));
+        QCOMPARE(exported.config.value(QStringLiteral("modelFamily")).toString(), QStringLiteral("yolo_detection"));
+        const QJsonObject ncnn = exported.config.value(QStringLiteral("ncnn")).toObject();
+        QCOMPARE(QFileInfo(ncnn.value(QStringLiteral("converter")).toString()).absoluteFilePath(), QFileInfo(fakePnnx).absoluteFilePath());
+        QCOMPARE(ncnn.value(QStringLiteral("inputBlob")).toString(), QStringLiteral("in0"));
+        QCOMPARE(ncnn.value(QStringLiteral("outputBlobs")).toArray().size(), 1);
+        QCOMPARE(ncnn.value(QStringLiteral("outputBlobs")).toArray().first().toString(), QStringLiteral("out0"));
+        QCOMPARE(ncnn.value(QStringLiteral("inputSize")).toInt(), 128);
+        QCOMPARE(exported.config.value(QStringLiteral("classNames")).toArray().size(), 2);
+    }
+
     void onnxExportUsesOfficialSiblingFromYoloCheckpoint()
     {
         QTemporaryDir dir;
