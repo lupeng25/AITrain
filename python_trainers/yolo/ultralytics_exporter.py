@@ -74,6 +74,21 @@ def read_json_object(path: Path) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def prepend_python_paths(parameters: dict[str, Any]) -> None:
+    raw_paths = parameters.get("pythonPathPrepend") or parameters.get("pythonPath")
+    if raw_paths is None:
+        return
+    if isinstance(raw_paths, str):
+        paths = [raw_paths]
+    elif isinstance(raw_paths, list):
+        paths = [str(item) for item in raw_paths]
+    else:
+        return
+    for path in reversed(paths):
+        if path and path not in sys.path:
+            sys.path.insert(0, path)
+
+
 def find_ultralytics_training_report(model_path: Path) -> tuple[Path | None, dict[str, Any]]:
     directories = [model_path.parent, *model_path.parents]
     seen: set[Path] = set()
@@ -277,6 +292,8 @@ def run_official_export(request: dict[str, Any]) -> int:
     if not isinstance(options, dict):
         options = {}
     parameters = request.get("parameters") if isinstance(request.get("parameters"), dict) else {}
+    prepend_python_paths(options)
+    prepend_python_paths(parameters)
     export_parameters: dict[str, Any] = {}
     export_parameters.update(parameters)
     if "ultralyticsExportArgs" in options:

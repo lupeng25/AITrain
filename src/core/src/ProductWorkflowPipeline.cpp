@@ -92,6 +92,7 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
     QJsonArray stepTaskIds;
     QJsonArray artifactArray;
     QString failureReason;
+    bool officialExportStepAppended = false;
 
     const auto appendStep = [&](const QString& command, const QString& state, const QString& message, const QString& reportPath, const QJsonArray& artifacts = QJsonArray()) {
         const QString stepTaskId = QStringLiteral("pipeline_step_%1").arg(stepArray.size() + 1);
@@ -122,6 +123,36 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
             }
             artifactArray.append(pathArtifact(QStringLiteral("workflow_artifact"), path, key));
         }
+    };
+
+    const auto appendOfficialExportStep = [&]() {
+        if (officialExportStepAppended
+            || !options.value(QStringLiteral("pipelineOfficialExportCompleted")).toBool(false)) {
+            return;
+        }
+        officialExportStepAppended = true;
+        const QJsonObject exportPayload = options.value(QStringLiteral("pipelineOfficialExportPayload")).toObject();
+        const QString officialExportPath = options.value(QStringLiteral("pipelineOfficialExportPath")).toString(
+            exportPayload.value(QStringLiteral("exportPath")).toString());
+        const QString officialReportPath = options.value(QStringLiteral("pipelineOfficialExportReportPath")).toString(
+            exportPayload.value(QStringLiteral("reportPath")).toString());
+        QJsonArray officialArtifacts;
+        if (!officialExportPath.isEmpty()) {
+            const QJsonObject artifact = pathArtifact(QStringLiteral("official_yolo_export"), officialExportPath, QStringLiteral("Official YOLO ONNX pre-export"));
+            officialArtifacts.append(artifact);
+            artifactArray.append(artifact);
+        }
+        if (!officialReportPath.isEmpty()) {
+            const QJsonObject artifact = pathArtifact(QStringLiteral("official_yolo_export_report"), officialReportPath, QStringLiteral("Official YOLO export sidecar"));
+            officialArtifacts.append(artifact);
+            artifactArray.append(artifact);
+        }
+        appendStep(
+            QStringLiteral("officialYoloExport"),
+            QStringLiteral("completed"),
+            QStringLiteral("Official YOLO .pt pre-export completed."),
+            officialReportPath.isEmpty() ? officialExportPath : officialReportPath,
+            officialArtifacts);
     };
 
     const auto failPipeline = [&](const QString& stepName, const QString& message) -> WorkflowResult {
@@ -336,6 +367,7 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
     };
 
     auto runExportStep = [&]() -> bool {
+        appendOfficialExportStep();
         if (modelPath.isEmpty()) {
             failureReason = QStringLiteral("Model export requires modelPath/checkpointPath.");
             return false;
@@ -615,6 +647,9 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
     pipeline.insert(QStringLiteral("artifacts"), artifactArray);
     pipeline.insert(QStringLiteral("modelPath"), modelPath);
     pipeline.insert(QStringLiteral("exportPath"), exportPath);
+    pipeline.insert(QStringLiteral("pipelineOfficialExportPath"), options.value(QStringLiteral("pipelineOfficialExportPath")).toString());
+    pipeline.insert(QStringLiteral("pipelineOfficialExportReportPath"), options.value(QStringLiteral("pipelineOfficialExportReportPath")).toString());
+    pipeline.insert(QStringLiteral("pipelineOfficialExportSourceCheckpointPath"), options.value(QStringLiteral("pipelineOfficialExportSourceCheckpointPath")).toString());
     pipeline.insert(QStringLiteral("evaluationReportPath"), evaluationReportPath);
     pipeline.insert(QStringLiteral("benchmarkReportPath"), benchmarkReportPath);
     pipeline.insert(QStringLiteral("deliveryReportPath"), deliveryReportPath);
