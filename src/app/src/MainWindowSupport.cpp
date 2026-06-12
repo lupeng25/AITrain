@@ -578,6 +578,12 @@ QStringList yoloModelPresetsForTask(bool segmentation)
         QStringLiteral("x")
     };
     QStringList presets;
+    if (!segmentation) {
+        for (const QString& scale : scales) {
+            presets << QStringLiteral("yolov5%1.yaml").arg(scale)
+                    << QStringLiteral("yolov5%1u.pt").arg(scale);
+        }
+    }
     for (const QString& family : families) {
         for (const QString& scale : scales) {
             const QString stem = segmentation
@@ -602,6 +608,44 @@ QStringList yoloModelPresetItems()
     QStringList presets;
     presets << yoloModelPresetsForTask(false)
             << yoloModelPresetsForTask(true);
+    return presets;
+}
+
+QStringList modelPresetItemsForBackend(const QString& backend)
+{
+    const QString normalized = backend.trimmed().toLower();
+    if (normalized == QStringLiteral("ultralytics_yolo")
+        || normalized == QStringLiteral("ultralytics_yolo_detect")) {
+        return yoloModelPresetsForTask(false);
+    }
+    if (normalized == QStringLiteral("ultralytics_yolo_segment")) {
+        return yoloModelPresetsForTask(true);
+    }
+    if (normalized == QStringLiteral("paddleocr_det_official")) {
+        return {
+            QStringLiteral("PP-OCRv5_mobile_det"),
+            QStringLiteral("PP-OCRv5_server_det"),
+            QStringLiteral("PP-OCRv4_mobile_det")
+        };
+    }
+    if (normalized == QStringLiteral("paddleocr_rec_official")
+        || normalized == QStringLiteral("paddleocr_ppocrv4_rec")) {
+        return {
+            QStringLiteral("PP-OCRv5_mobile_rec"),
+            QStringLiteral("PP-OCRv5_server_rec"),
+            QStringLiteral("en_PP-OCRv5_mobile_rec"),
+            QStringLiteral("PP-OCRv4_mobile_rec")
+        };
+    }
+
+    QStringList presets = yoloModelPresetItems();
+    presets << QStringLiteral("PP-OCRv5_mobile_det")
+            << QStringLiteral("PP-OCRv5_server_det")
+            << QStringLiteral("PP-OCRv5_mobile_rec")
+            << QStringLiteral("PP-OCRv5_server_rec")
+            << QStringLiteral("en_PP-OCRv5_mobile_rec")
+            << QStringLiteral("PP-OCRv4_mobile_det")
+            << QStringLiteral("PP-OCRv4_mobile_rec");
     return presets;
 }
 

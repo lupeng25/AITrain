@@ -210,16 +210,7 @@ QWidget* MainWindow::buildTrainingPage()
     trainingBackendCombo_->addItem(backendLabel(QStringLiteral("paddleocr_rec_official")), QStringLiteral("paddleocr_rec_official"));
     modelPresetCombo_ = new QComboBox;
     modelPresetCombo_->setEditable(true);
-    QStringList modelPresetItems = yoloModelPresetItems();
-    modelPresetItems
-        << QStringLiteral("PP-OCRv5_mobile_det")
-        << QStringLiteral("PP-OCRv5_server_det")
-        << QStringLiteral("PP-OCRv5_mobile_rec")
-        << QStringLiteral("PP-OCRv5_server_rec")
-        << QStringLiteral("en_PP-OCRv5_mobile_rec")
-        << QStringLiteral("PP-OCRv4_mobile_det")
-        << QStringLiteral("PP-OCRv4_mobile_rec");
-    modelPresetCombo_->addItems(modelPresetItems);
+    modelPresetCombo_->addItems(modelPresetItemsForBackend(trainingBackendCombo_->currentData().toString()));
     epochsEdit_ = new QLineEdit(QStringLiteral("20"));
     batchEdit_ = new QLineEdit(QStringLiteral("8"));
     imageSizeEdit_ = new QLineEdit(QStringLiteral("640"));
@@ -239,7 +230,13 @@ QWidget* MainWindow::buildTrainingPage()
     connect(taskTypeCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::refreshTrainingDefaults);
     connect(trainingBackendCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
         if (modelPresetCombo_ && trainingBackendCombo_) {
-            modelPresetCombo_->setCurrentText(defaultModelForBackend(trainingBackendCombo_->currentData().toString()));
+            const QString backend = trainingBackendCombo_->currentData().toString();
+            {
+                QSignalBlocker block(modelPresetCombo_);
+                modelPresetCombo_->clear();
+                modelPresetCombo_->addItems(modelPresetItemsForBackend(backend));
+                modelPresetCombo_->setCurrentText(defaultModelForBackend(backend));
+            }
         }
         updateTrainingSelectionSummary();
     });

@@ -649,6 +649,12 @@ void MainWindow::refreshTrainingDefaults()
         QSignalBlocker block(trainingBackendCombo_);
         setComboCurrentData(trainingBackendCombo_, preferredBackend);
     }
-    modelPresetCombo_->setCurrentText(defaultModelForBackend(trainingBackendCombo_->currentData().toString()));
+    const QString backend = trainingBackendCombo_->currentData().toString();
+    {
+        QSignalBlocker block(modelPresetCombo_);
+        modelPresetCombo_->clear();
+        modelPresetCombo_->addItems(modelPresetItemsForBackend(backend));
+        modelPresetCombo_->setCurrentText(defaultModelForBackend(backend));
+    }
     updateTrainingSelectionSummary();
 }

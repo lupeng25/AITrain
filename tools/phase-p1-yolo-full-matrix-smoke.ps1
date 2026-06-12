@@ -293,6 +293,24 @@ function New-P1Cases {
     $scales = @("n", "s", "m", "l", "x")
     $sourceTypes = @("yaml", "pt")
     $cases = @()
+    foreach ($scale in $scales) {
+        $cases += [pscustomobject]@{
+            name = "yolov5$scale-detect-yaml"
+            task = "detection"
+            backend = "ultralytics_yolo_detect"
+            model = "yolov5$scale.yaml"
+            sourceType = "yaml"
+            required = $true
+        }
+        $cases += [pscustomobject]@{
+            name = "yolov5$($scale)u-detect-pt"
+            task = "detection"
+            backend = "ultralytics_yolo_detect"
+            model = "yolov5$($scale)u.pt"
+            sourceType = "pt"
+            required = $true
+        }
+    }
     foreach ($family in $families) {
         foreach ($scale in $scales) {
             foreach ($sourceType in $sourceTypes) {
@@ -580,7 +598,7 @@ $summary = [ordered]@{
     ctestStatus = $ctestStatus
     ctestFailure = $ctestFailure
     results = $results
-    note = "P1 validates full YOLOv8/YOLO11/YOLO12 detection and instance-segmentation preset productization, including YAML and .pt fine-tuning entries plus YOLOv8 P2/P6 detection YAML architectures. It is not an accuracy benchmark and does not add YOLO26, semantic segmentation, tracking, YOLOE, classification, pose, or OBB."
+    note = "P1 validates YOLOv5u standard P5 detection plus full YOLOv8/YOLO11/YOLO12 detection and instance-segmentation preset productization, including YAML and .pt fine-tuning entries plus YOLOv8 P2/P6 detection YAML architectures. It is not an accuracy benchmark and does not add YOLOv5 segmentation, YOLOv5 P6, YOLO26, semantic segmentation, tracking, YOLOE, classification, pose, or OBB."
 }
 $summary | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $summaryPath -Encoding UTF8
 Write-Host ("  [ok] summary={0}" -f $summaryPath)

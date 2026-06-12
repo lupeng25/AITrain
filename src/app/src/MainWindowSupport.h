@@ -58,6 +58,7 @@ QString defaultBackendForTask(const QString& taskType);
 QString defaultModelForBackend(const QString& backend);
 QString trainingBackendDescription(const QString& backend);
 QStringList yoloModelPresetItems();
+QStringList modelPresetItemsForBackend(const QString& backend);
 bool yoloModelPresetMatchesBackend(const QString& modelPreset, const QString& backend);
 QJsonObject trainingPreflightReport(
     const QString& datasetPath,

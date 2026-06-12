@@ -167,7 +167,14 @@ if ($AllowBlocked) {
 }
 
 Write-Host "[phase50] tools\run-production-ocr-official-chain.ps1 $($chainArgs -join ' ')" -ForegroundColor Cyan
-& (Join-Path $script:Root "tools\run-production-ocr-official-chain.ps1") @chainArgs
+$chainCommand = @(
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    (Join-Path $script:Root "tools\run-production-ocr-official-chain.ps1")
+) + $chainArgs
+& powershell.exe @chainCommand
 $chainExitCode = $LASTEXITCODE
 
 $chainSummaryPath = Join-Path $workFull "production_ocr_official_chain_summary.json"

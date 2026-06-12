@@ -8,7 +8,7 @@ Production training is official-backend only. The GUI training page and Worker p
 
 | Backend | Task | Status | Notes |
 |---|---|---|---|
-| `ultralytics_yolo_detect` | Detection | Official Ultralytics adapter | Uses Ultralytics YOLO detection training and official export. P1 exposes YOLOv8 / YOLO11 / YOLO12 `n/s/m/l/x` `.yaml` and `.pt` presets plus YOLOv8 P2/P6 detection YAML architectures. Product evaluation uses Ultralytics official `val()`; product inference, benchmark, and deployment validation run against official artifacts through the AITrain C++ runtime. Review AGPL-3.0 / Enterprise license before redistribution. |
+| `ultralytics_yolo_detect` | Detection | Official Ultralytics adapter | Uses Ultralytics YOLO detection training and official export. P1 exposes YOLOv5u standard P5 detection presets, YOLOv8 / YOLO11 / YOLO12 `n/s/m/l/x` `.yaml` and `.pt` presets, plus YOLOv8 P2/P6 detection YAML architectures. Product evaluation uses Ultralytics official `val()`; product inference, benchmark, and deployment validation run against official artifacts through the AITrain C++ runtime. Review AGPL-3.0 / Enterprise license before redistribution. |
 | `ultralytics_yolo_segment` | Segmentation | Official Ultralytics adapter | Uses Ultralytics YOLO instance-segmentation training and official export. P1 exposes YOLOv8 / YOLO11 / YOLO12 `n/s/m/l/x` `-seg.yaml` and `-seg.pt` presets. Product evaluation uses Ultralytics official `val()`; product inference, benchmark, and deployment validation run against official artifacts through the AITrain C++ runtime, including mask postprocess and overlays. |
 | `paddleocr_det_official` | OCR detection | Official PaddleOCR adapter | Generates PP-OCRv4 or PP-OCRv5 detection configs from PaddleOCR Det data and can run official PaddleOCR `tools/train.py` and `tools/export_model.py`. The default preset is `PP-OCRv5_mobile_det`; `PP-OCRv4_mobile_det` and `PP-OCRv5_server_det` remain selectable. |
 | `paddleocr_rec_official` / `paddleocr_ppocrv4_rec` | OCR recognition | Official PaddleOCR adapter | Generates PP-OCRv4 or PP-OCRv5 recognition configs from AITrain PaddleOCR-style Rec data and runs official PaddleOCR `tools/train.py`, `tools/export_model.py`, and optional `tools/infer/predict_rec.py` when `runOfficial=true` and `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` points to a checkout. The default preset is `PP-OCRv5_mobile_rec`; `PP-OCRv4_mobile_rec`, `PP-OCRv5_server_rec`, and `en_PP-OCRv5_mobile_rec` remain selectable. |
@@ -34,7 +34,7 @@ python -m venv .venv-yolo
 .\.venv-yolo\Scripts\python.exe -m pip install -r python_trainers\requirements-yolo.txt
 ```
 
-YOLO model-family status is tracked in `docs\yolo-model-support-matrix.md`. The product defaults remain `yolov8n.yaml` for detection and `yolov8n-seg.yaml` for segmentation. P1 adds editable GUI presets for YOLOv8 / YOLO11 / YOLO12 detection and instance segmentation across `n/s/m/l/x`, both `.yaml` and `.pt`, plus YOLOv8 P2/P6 detection YAML architectures. `.pt` weights are not bundled; the installed Ultralytics package may download them into the user environment.
+YOLO model-family status is tracked in `docs\yolo-model-support-matrix.md`. The product defaults remain `yolov8n.yaml` for detection and `yolov8n-seg.yaml` for segmentation. P1 adds editable GUI presets for YOLOv5u standard P5 detection, YOLOv8 / YOLO11 / YOLO12 detection and instance segmentation across `n/s/m/l/x`, both `.yaml` and `.pt`, plus YOLOv8 P2/P6 detection YAML architectures. YOLOv5u uses `yolov5n/s/m/l/x.yaml` architecture entries and `yolov5nu/su/mu/lu/xu.pt` pretrained entries; original `ultralytics/yolov5` repository weights are not a compatibility promise. `.pt` weights are not bundled; the installed Ultralytics package may download them into the user environment.
 
 Run the full P1 productization matrix with:
 
@@ -49,7 +49,7 @@ The previous Phase 45 matrix remains useful as a faster YOLO11/YOLO12 nano wirin
 .\tools\phase45-yolo-model-matrix-smoke.ps1 -IncludeYolo12
 ```
 
-The P1 matrix does not productize YOLO26, semantic segmentation, tracking, classification, pose, OBB, anomaly, YOLO-World, or YOLOE.
+The P1 matrix does not productize YOLOv5 segmentation, YOLOv5 P6, YOLO26, semantic segmentation, tracking, classification, pose, OBB, anomaly, YOLO-World, or YOLOE.
 
 Official YOLO export parameters are recorded as `ultralyticsExportArgs` and are accepted by both training and model export flows:
 
@@ -273,7 +273,7 @@ If public dataset materialization fails or requires external interaction, the ge
 ## Known Boundaries
 
 - TensorRT engine building has passing RTX 4090 D acceptance evidence under `.deps/rtx4090-validation/acceptance-tensorrt`; older unsupported GPUs should still report `hardware-blocked`.
-- P1 covers YOLOv8 / YOLO11 / YOLO12 detection and instance-segmentation presets only; it does not productize YOLO26, semantic segmentation, tracking, classification, pose, OBB, anomaly, YOLO-World, or YOLOE.
+- P1 covers YOLOv5u standard P5 detection plus YOLOv8 / YOLO11 / YOLO12 detection and instance-segmentation presets only; it does not productize YOLOv5 segmentation, YOLOv5 P6, YOLO26, semantic segmentation, tracking, classification, pose, OBB, anomaly, YOLO-World, or YOLOE.
 - Historical GTX 1060 / SM 61 machines can run CPU training smoke and ONNX Runtime checks, but they cannot validate TensorRT 10 engine building and must not override RTX 4090 acceptance evidence.
 - C++ segmentation mask ONNX postprocess is available for YOLO segmentation smoke models.
 - OCR product inference, benchmark, evaluation, and acceptance are official-only. Historical C++ OCR ONNX wiring evidence must not be used as a current production OCR route.

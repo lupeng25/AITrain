@@ -35,7 +35,7 @@ For external handoff, use `docs\external-acceptance-handoff.md` and the result t
 
 For release-freeze package identity, use `docs\release-freeze-handoff.md` and `tools\release-freeze-handoff.ps1`. This generates the CPack ZIP, SHA256 hashes, and a handoff manifest without marking external acceptance as passed.
 
-For YOLO model-family productization, use `docs\yolo-model-support-matrix.md`. Phase 45 validates newer Ultralytics detection/segmentation nano model names only. P1 validates the full YOLOv8 / YOLO11 / YOLO12 detection and instance-segmentation preset matrix, `.yaml` and `.pt` source types, YOLOv8 P2/P6 detection YAML architectures, and the official export-argument protocol. Neither path expands the productized scope to YOLO26, semantic segmentation, classification, pose, OBB, anomaly, YOLO-World, YOLOE, tracking, or other tasks.
+For YOLO model-family productization, use `docs\yolo-model-support-matrix.md`. Phase 45 validates newer Ultralytics detection/segmentation nano model names only. P1 validates YOLOv5u standard P5 detection, the full YOLOv8 / YOLO11 / YOLO12 detection and instance-segmentation preset matrix, `.yaml` and `.pt` source types, YOLOv8 P2/P6 detection YAML architectures, and the official export-argument protocol. Neither path expands the productized scope to YOLOv5 segmentation, YOLOv5 P6, YOLO26, semantic segmentation, classification, pose, OBB, anomaly, YOLO-World, YOLOE, tracking, or other tasks.
 
 ## Phase 49 Lite: Delivery Closeout Workbench
 
@@ -219,9 +219,11 @@ The script writes `p1_yolo_full_matrix_summary.json` under `.deps\phase-p1-yolo-
 
 Required rows:
 
-- Standard detection: YOLOv8 / YOLO11 / YOLO12, scales `n/s/m/l/x`, source types `.yaml` and `.pt`.
+- Standard detection: YOLOv5u P5 plus YOLOv8 / YOLO11 / YOLO12, scales `n/s/m/l/x`, source types `.yaml` and `.pt`.
 - Standard instance segmentation: YOLOv8 / YOLO11 / YOLO12, scales `n/s/m/l/x`, source types `.yaml` and `.pt`.
 - YOLOv8 detection architecture YAML: P2 and P6 variants, scales `n/s/m/l/x`.
+
+YOLOv5u detection rows use `yolov5n/s/m/l/x.yaml` architecture entries and `yolov5nu/su/mu/lu/xu.pt` pretrained entries. Original `ultralytics/yolov5` repository weights, YOLOv5 segmentation, and YOLOv5 P6 variants are outside the required P1 matrix.
 
 Each row must produce a completed Worker training task, `best.pt`, `best.onnx` or official ONNX export path, and `ultralytics_training_report.json` containing `model`, `backend`, `metrics`, and `ultralyticsExportArgs`. `.pt` source rows must preserve the `.pt` model name in the report to prove the pretrained fine-tuning route was used.
 
