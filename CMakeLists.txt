@@ -617,6 +617,7 @@ install(FILES
     tools/materialize-ultralytics-dataset.py
     tools/phase16-ocr-official-smoke.ps1
     tools/phase31-paddleocr-full-official-smoke.ps1
+    tools/phase-ppocrv6-model-matrix-smoke.ps1
     tools/phase47-paddleocr-det-onnx-smoke.ps1
     tools/prepare-production-ocr-data.ps1
     tools/prepare_production_ocr_data.py

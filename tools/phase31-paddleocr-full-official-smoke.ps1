@@ -2,10 +2,12 @@ param(
     [string]$WorkDir = ".deps\phase31-paddleocr-full-official-smoke",
     [string]$PythonDir = ".deps\python-3.13.13-ocr-amd64",
     [string]$PaddleOcrRepo = ".deps\PaddleOCR",
-    [string]$PaddleOcrRef = "f8b41a62bba991d35e578ffa712107a042b0c3b0",
+    [string]$PaddleOcrRef = "v3.7.0",
     [string]$PaddlePaddleRequirement = "paddlepaddle==3.3.1",
-    [ValidateSet("PP-OCRv4", "PP-OCRv5")]
+    [ValidateSet("PP-OCRv4", "PP-OCRv5", "PP-OCRv6")]
     [string]$OcrVersion = "PP-OCRv5",
+    [ValidateSet("tiny", "small", "medium")]
+    [string]$PPOCRv6Tier = "medium",
     [string]$DetModelPreset = "",
     [string]$RecModelPreset = "",
     [switch]$UseGpu,
@@ -70,12 +72,20 @@ $resolvedPaddleOcrRef = (& git -C $repoFull rev-parse HEAD).Trim()
 Write-Host "Using PaddleOCR ref: $resolvedPaddleOcrRef"
 
 if ([string]::IsNullOrWhiteSpace($DetModelPreset)) {
-    $DetModelPreset = if ($OcrVersion -eq "PP-OCRv5") { "PP-OCRv5_mobile_det" } else { "PP-OCRv4_mobile_det" }
+    $DetModelPreset = switch ($OcrVersion) {
+        "PP-OCRv6" { "PP-OCRv6_{0}_det" -f $PPOCRv6Tier }
+        "PP-OCRv5" { "PP-OCRv5_mobile_det" }
+        default { "PP-OCRv4_mobile_det" }
+    }
 }
 if ([string]::IsNullOrWhiteSpace($RecModelPreset)) {
-    $RecModelPreset = if ($OcrVersion -eq "PP-OCRv5") { "PP-OCRv5_mobile_rec" } else { "PP-OCRv4_mobile_rec" }
+    $RecModelPreset = switch ($OcrVersion) {
+        "PP-OCRv6" { "PP-OCRv6_{0}_rec" -f $PPOCRv6Tier }
+        "PP-OCRv5" { "PP-OCRv5_mobile_rec" }
+        default { "PP-OCRv4_mobile_rec" }
+    }
 }
-Write-Host "Using OCR presets: Det=$DetModelPreset Rec=$RecModelPreset UseGpu=$([bool]$UseGpu)"
+Write-Host "Using OCR presets: Det=$DetModelPreset Rec=$RecModelPreset OcrVersion=$OcrVersion PPOCRv6Tier=$PPOCRv6Tier UseGpu=$([bool]$UseGpu)"
 
 if (!$SkipInstall) {
     $pipArgs = @("-m", "pip", "install", "--no-warn-script-location", $PaddlePaddleRequirement, "-r", (Join-Path $repoFull "requirements.txt"))

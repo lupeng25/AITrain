@@ -44,6 +44,27 @@ DET_PRESETS: dict[str, dict[str, Any]] = {
         "modelName": "PP-OCRv5_server_det",
         "requiresRepo": True,
     },
+    "PP-OCRv6_tiny_det": {
+        "ocrVersion": "PP-OCRv6",
+        "config": "configs/det/PP-OCRv6/PP-OCRv6_tiny_det.yml",
+        "outputConfigName": "aitrain_ppocrv6_tiny_det.yml",
+        "modelName": "PP-OCRv6_tiny_det",
+        "requiresRepo": True,
+    },
+    "PP-OCRv6_small_det": {
+        "ocrVersion": "PP-OCRv6",
+        "config": "configs/det/PP-OCRv6/PP-OCRv6_small_det.yml",
+        "outputConfigName": "aitrain_ppocrv6_small_det.yml",
+        "modelName": "PP-OCRv6_small_det",
+        "requiresRepo": True,
+    },
+    "PP-OCRv6_medium_det": {
+        "ocrVersion": "PP-OCRv6",
+        "config": "configs/det/PP-OCRv6/PP-OCRv6_medium_det.yml",
+        "outputConfigName": "aitrain_ppocrv6_medium_det.yml",
+        "modelName": "PP-OCRv6_medium_det",
+        "requiresRepo": True,
+    },
 }
 
 configure_stdio()
@@ -99,6 +120,21 @@ def config_model_name(config: dict[str, Any], fallback: str) -> str:
         if value:
             return value
     return fallback
+
+
+def resolve_repo_file(repo: Path, relative: str, description: str) -> tuple[Path, str]:
+    normalized = relative.replace("\\", "/")
+    candidates = [normalized]
+    if normalized.endswith(".yml"):
+        candidates.append(normalized[:-4] + ".yaml")
+    elif normalized.endswith(".yaml"):
+        candidates.append(normalized[:-5] + ".yml")
+    for candidate in candidates:
+        path = (repo / candidate).resolve()
+        if path.exists():
+            return path, candidate
+    tried = ", ".join(str((repo / candidate).resolve()) for candidate in candidates)
+    raise FileNotFoundError(f"{description} not found. Tried: {tried}")
 
 
 def resolve_dataset_file(dataset_path: Path, value: Any, default_name: str) -> Path:
@@ -226,9 +262,8 @@ def build_config(
 
     template_relative = str(preset["config"]).replace("\\", "/")
     if repo:
-        template_path = (repo / template_relative).resolve()
-        if not template_path.exists():
-            raise FileNotFoundError(f"PaddleOCR det config template not found: {template_path}")
+        template_path, resolved_relative = resolve_repo_file(repo, template_relative, "PaddleOCR det config template")
+        preset["resolvedConfig"] = resolved_relative
         with template_path.open("r", encoding="utf-8") as handle:
             config = yaml.safe_load(handle)
     else:
@@ -431,11 +466,11 @@ def run(request: dict[str, Any]) -> int:
         "framework": "PaddleOCR official tools",
         "modelFamily": "ocr_detection",
         "mode": "prepareOnly" if prepare_only else ("exportOnly" if export_only else "officialTrain"),
-        "note": "PaddleOCR PP-OCRv4/PP-OCRv5 official detection adapter. It validates official train/export wiring, not OCR accuracy.",
+        "note": "PaddleOCR PP-OCRv4/PP-OCRv5/PP-OCRv6 official detection adapter. It validates official train/export wiring, not OCR accuracy.",
         "ocrVersion": preset["ocrVersion"],
         "modelPreset": preset["modelPreset"],
         "resolvedModelName": resolved_model_name,
-        "resolvedOfficialConfig": str(preset["config"]),
+        "resolvedOfficialConfig": str(preset.get("resolvedConfig", preset["config"])),
         "configSource": preset["configSource"],
         "presetDictionaryPath": "",
         "pythonVersion": sys.version.split()[0],

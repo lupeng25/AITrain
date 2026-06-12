@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Official PaddleOCR recognition trainer adapter for AITrain Studio.
 
-This adapter prepares PaddleOCR PP-OCRv4 / PP-OCRv5 recognition configs from an
+This adapter prepares PaddleOCR PP-OCRv4 / PP-OCRv5 / PP-OCRv6 recognition configs from an
 AITrain PaddleOCR-style Rec dataset. When a PaddleOCR source checkout is
 available, it can also launch the official tools/train.py and export_model.py
 entry points. The lightweight smoke path uses prepareOnly=true so CI and local
@@ -64,6 +64,30 @@ REC_PRESETS: dict[str, dict[str, Any]] = {
         "modelName": "en_PP-OCRv5_mobile_rec",
         "recAlgorithm": "SVTR_LCNet",
         "presetDictionary": "ppocr/utils/dict/ppocrv5_en_dict.txt",
+        "requiresRepo": True,
+    },
+    "PP-OCRv6_tiny_rec": {
+        "ocrVersion": "PP-OCRv6",
+        "config": "configs/rec/PP-OCRv6/PP-OCRv6_tiny_rec.yml",
+        "outputConfigName": "aitrain_ppocrv6_tiny_rec.yml",
+        "modelName": "PP-OCRv6_tiny_rec",
+        "recAlgorithm": "",
+        "requiresRepo": True,
+    },
+    "PP-OCRv6_small_rec": {
+        "ocrVersion": "PP-OCRv6",
+        "config": "configs/rec/PP-OCRv6/PP-OCRv6_small_rec.yml",
+        "outputConfigName": "aitrain_ppocrv6_small_rec.yml",
+        "modelName": "PP-OCRv6_small_rec",
+        "recAlgorithm": "",
+        "requiresRepo": True,
+    },
+    "PP-OCRv6_medium_rec": {
+        "ocrVersion": "PP-OCRv6",
+        "config": "configs/rec/PP-OCRv6/PP-OCRv6_medium_rec.yml",
+        "outputConfigName": "aitrain_ppocrv6_medium_rec.yml",
+        "modelName": "PP-OCRv6_medium_rec",
+        "recAlgorithm": "",
         "requiresRepo": True,
     },
 }
@@ -156,6 +180,70 @@ def config_rec_algorithm(config: dict[str, Any], fallback: str) -> str:
         if value:
             return value
     return fallback
+
+
+def config_character_dict_path(config: dict[str, Any]) -> str:
+    global_config = config.get("Global") if isinstance(config, dict) else {}
+    if isinstance(global_config, dict):
+        value = str(global_config.get("character_dict_path") or "").strip()
+        if value:
+            return value.replace("\\", "/")
+    return ""
+
+
+def resolve_repo_file(repo: Path, relative: str, description: str) -> tuple[Path, str]:
+    normalized = relative.replace("\\", "/")
+    candidates = [normalized]
+    if normalized.endswith(".yml"):
+        candidates.append(normalized[:-4] + ".yaml")
+    elif normalized.endswith(".yaml"):
+        candidates.append(normalized[:-5] + ".yml")
+    for candidate in candidates:
+        path = (repo / candidate).resolve()
+        if path.exists():
+            return path, candidate
+    tried = ", ".join(str((repo / candidate).resolve()) for candidate in candidates)
+    raise FileNotFoundError(f"{description} not found. Tried: {tried}")
+
+
+def read_preset_config(repo: Path | None, preset: dict[str, Any]) -> dict[str, Any]:
+    if repo is None:
+        return {}
+    import yaml
+
+    template_path, resolved_relative = resolve_repo_file(
+        repo,
+        str(preset["config"]).replace("\\", "/"),
+        "PaddleOCR recognition config template",
+    )
+    preset["resolvedConfig"] = resolved_relative
+    with template_path.open("r", encoding="utf-8") as handle:
+        value = yaml.safe_load(handle)
+    return value if isinstance(value, dict) else {}
+
+
+def resolve_dictionary_source(
+    repo: Path | None,
+    preset: dict[str, Any],
+    parameters: dict[str, Any],
+    dataset_path: Path,
+) -> tuple[Path, str, str]:
+    dictionary_override = str(parameters.get("dictionaryFile") or "").strip()
+    if dictionary_override:
+        return resolve_dataset_file(dataset_path, dictionary_override, "dict.txt"), "request_dictionaryFile", ""
+    if preset.get("presetDictionary") and repo is not None:
+        relative = str(preset["presetDictionary"]).replace("\\", "/")
+        return (repo / relative).resolve(), "builtin_preset", relative
+
+    config = read_preset_config(repo, preset)
+    config_dictionary = config_character_dict_path(config)
+    if config_dictionary and repo is not None:
+        path = Path(config_dictionary)
+        if not path.is_absolute():
+            path = repo / config_dictionary
+        return path.resolve(), "official_config", config_dictionary
+
+    return resolve_dataset_file(dataset_path, None, "dict.txt"), "dataset_default", ""
 
 
 def find_repo(parameters: dict[str, Any]) -> Path | None:
@@ -284,9 +372,8 @@ def build_config(
 
     template_relative = str(preset["config"]).replace("\\", "/")
     if repo:
-        template_path = (repo / template_relative).resolve()
-        if not template_path.exists():
-            raise FileNotFoundError(f"PaddleOCR config template not found: {template_path}")
+        template_path, resolved_relative = resolve_repo_file(repo, template_relative, "PaddleOCR recognition config template")
+        preset["resolvedConfig"] = resolved_relative
         with template_path.open("r", encoding="utf-8") as handle:
             config = yaml.safe_load(handle)
     else:
@@ -485,13 +572,11 @@ def run(request: dict[str, Any]) -> int:
         )
 
     try:
-        dictionary_override = str(parameters.get("dictionaryFile") or "").strip()
-        if dictionary_override:
-            dict_source_path = resolve_dataset_file(dataset_path, dictionary_override, "dict.txt")
-        elif preset.get("presetDictionary") and repo is not None:
-            dict_source_path = (repo / str(preset["presetDictionary"])).resolve()
-        else:
-            dict_source_path = resolve_dataset_file(dataset_path, None, "dict.txt")
+        dict_source_path, dictionary_source, preset_dictionary_path = resolve_dictionary_source(repo, preset, parameters, dataset_path)
+    except Exception as exc:
+        return fail(backend, f"Failed to resolve official PaddleOCR config or dictionary source: {exc}", "config_failed")
+
+    try:
         chars = read_dictionary(dict_source_path)
         train_label_source = resolve_dataset_file(dataset_path, parameters.get("trainLabelFile"), "rec_gt.txt")
         train_samples_source = read_labels(train_label_source)
@@ -536,6 +621,13 @@ def run(request: dict[str, Any]) -> int:
     config_path.write_text(yaml_dump(config), encoding="utf-8")
     resolved_model_name = config_model_name(config, str(preset["modelName"]))
     rec_algorithm = config_rec_algorithm(config, str(preset["recAlgorithm"]))
+    if preset.get("ocrVersion") == "PP-OCRv6" and not rec_algorithm:
+        return fail(
+            backend,
+            "PP-OCRv6 recognition preset requires Architecture.algorithm from the official PaddleOCR config.",
+            "rec_algorithm_missing",
+            {"modelPreset": preset["modelPreset"], "officialConfig": preset.get("resolvedConfig", preset["config"])},
+        )
     export_only = bool_param(parameters, "exportOnly", False)
     run_inference_after_export = bool_param(parameters, "runInferenceAfterExport", False)
     _, image_height, image_width = parse_rec_image_shape(parameters)
@@ -581,13 +673,14 @@ def run(request: dict[str, Any]) -> int:
         "framework": "PaddleOCR official tools",
         "modelFamily": "ocr_recognition",
         "mode": "prepareOnly" if prepare_only else ("exportOnly" if export_only else "officialTrain"),
-        "note": "PaddleOCR PP-OCRv4/PP-OCRv5 official recognition adapter. prepareOnly=true validates dataset/config generation without running official training.",
+        "note": "PaddleOCR PP-OCRv4/PP-OCRv5/PP-OCRv6 official recognition adapter. prepareOnly=true validates dataset/config generation without running official training.",
         "ocrVersion": preset["ocrVersion"],
         "modelPreset": preset["modelPreset"],
         "resolvedModelName": resolved_model_name,
-        "resolvedOfficialConfig": str(preset["config"]),
+        "resolvedOfficialConfig": str(preset.get("resolvedConfig", preset["config"])),
         "configSource": preset["configSource"],
-        "presetDictionaryPath": str((repo / str(preset["presetDictionary"])).resolve()) if preset.get("presetDictionary") and repo else "",
+        "presetDictionaryPath": str((repo / preset_dictionary_path).resolve()) if preset_dictionary_path and dictionary_source == "builtin_preset" and repo else "",
+        "dictionarySource": dictionary_source,
         "recAlgorithm": rec_algorithm,
         "pythonVersion": sys.version.split()[0],
         "paddleVersion": module_version("paddlepaddle"),

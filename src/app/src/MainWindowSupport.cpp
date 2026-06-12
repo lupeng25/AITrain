@@ -143,7 +143,7 @@ QString backendLabel(const QString& backend)
         return uiText("PaddleOCR Det（官方/隔离环境）");
     }
     if (backend == QStringLiteral("paddleocr_rec_official")) {
-        return uiText("PaddleOCR Rec（PP-OCRv4/v5 官方）");
+        return uiText("PaddleOCR Rec（PP-OCRv4/v5/v6 官方）");
     }
     if (backend == QStringLiteral("paddleocr_system_official")) {
         return uiText("PaddleOCR System 推理（官方）");
@@ -626,6 +626,9 @@ QStringList modelPresetItemsForBackend(const QString& backend)
         return {
             QStringLiteral("PP-OCRv5_mobile_det"),
             QStringLiteral("PP-OCRv5_server_det"),
+            QStringLiteral("PP-OCRv6_tiny_det"),
+            QStringLiteral("PP-OCRv6_small_det"),
+            QStringLiteral("PP-OCRv6_medium_det"),
             QStringLiteral("PP-OCRv4_mobile_det")
         };
     }
@@ -635,6 +638,9 @@ QStringList modelPresetItemsForBackend(const QString& backend)
             QStringLiteral("PP-OCRv5_mobile_rec"),
             QStringLiteral("PP-OCRv5_server_rec"),
             QStringLiteral("en_PP-OCRv5_mobile_rec"),
+            QStringLiteral("PP-OCRv6_tiny_rec"),
+            QStringLiteral("PP-OCRv6_small_rec"),
+            QStringLiteral("PP-OCRv6_medium_rec"),
             QStringLiteral("PP-OCRv4_mobile_rec")
         };
     }
@@ -642,9 +648,15 @@ QStringList modelPresetItemsForBackend(const QString& backend)
     QStringList presets = yoloModelPresetItems();
     presets << QStringLiteral("PP-OCRv5_mobile_det")
             << QStringLiteral("PP-OCRv5_server_det")
+            << QStringLiteral("PP-OCRv6_tiny_det")
+            << QStringLiteral("PP-OCRv6_small_det")
+            << QStringLiteral("PP-OCRv6_medium_det")
             << QStringLiteral("PP-OCRv5_mobile_rec")
             << QStringLiteral("PP-OCRv5_server_rec")
             << QStringLiteral("en_PP-OCRv5_mobile_rec")
+            << QStringLiteral("PP-OCRv6_tiny_rec")
+            << QStringLiteral("PP-OCRv6_small_rec")
+            << QStringLiteral("PP-OCRv6_medium_rec")
             << QStringLiteral("PP-OCRv4_mobile_det")
             << QStringLiteral("PP-OCRv4_mobile_rec");
     return presets;
@@ -696,10 +708,10 @@ QString trainingBackendDescription(const QString& backend)
         return uiText("当前模型能力：官方 Ultralytics YOLO segmentation。适合 YOLO polygon 数据，输出 mask 指标、best.pt、ONNX，并可生成 mask prediction JSON 与 overlay。");
     }
     if (backend == QStringLiteral("paddleocr_rec_official") || backend == QStringLiteral("paddleocr_ppocrv4_rec")) {
-        return uiText("当前模型能力：官方 PaddleOCR PP-OCRv4/v5 Rec 适配器。通过模型预设选择版本，适合隔离 OCR Python 环境，记录 train/export/predict 命令、checkpoint、inference model 和官方预测报告。");
+        return uiText("当前模型能力：官方 PaddleOCR PP-OCRv4/v5/v6 Rec 适配器。通过模型预设选择版本，适合隔离 OCR Python 环境，记录 train/export/predict 命令、checkpoint、inference model 和官方预测报告。");
     }
     if (backend == QStringLiteral("paddleocr_det_official")) {
-        return uiText("当前模型能力：官方 PaddleOCR PP-OCRv4/v5 Det 适配器。通过模型预设选择版本，适合 PaddleOCR 原生 det_gt.txt 数据，输出官方配置、checkpoint、inference model 和报告。");
+        return uiText("当前模型能力：官方 PaddleOCR PP-OCRv4/v5/v6 Det 适配器。通过模型预设选择版本，适合 PaddleOCR 原生 det_gt.txt 数据，输出官方配置、checkpoint、inference model 和报告。");
     }
     if (backend == QStringLiteral("paddleocr_system_official")) {
         return uiText("当前模型能力：官方 PaddleOCR 端到端推理编排。使用已导出的 Det/Rec inference model 调用 predict_system.py；本阶段不做 C++ DB 后处理。");

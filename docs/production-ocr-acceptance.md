@@ -10,9 +10,9 @@ Production OCR acceptance covers three paths:
 - PaddleOCR Rec: representative text recognition training/export metrics.
 - PaddleOCR System: end-to-end Det+Rec inference evidence on representative images.
 
-The full-system acceptance path is official PaddleOCR `predict_system.py`. C++ OCR Det/Rec ONNX postprocess is not production acceptance evidence. PP-OCRv5 is the default route through official Det/Rec `modelPreset` values, and PP-OCRv4 remains explicitly selectable for compatibility; no separate `paddleocr_ppocrv5_*` backend is introduced.
+The full-system acceptance path is official PaddleOCR `predict_system.py`. C++ OCR Det/Rec ONNX postprocess is not production acceptance evidence. PP-OCRv5 is the default route through official Det/Rec `modelPreset` values, PP-OCRv4 remains explicitly selectable for compatibility, and PP-OCRv6 `tiny/small/medium` Det/Rec presets are explicitly selectable; no separate `paddleocr_ppocrv5_*` or `paddleocr_ppocrv6_*` backend is introduced.
 
-PP-OCRv5 coverage in this phase is limited to PaddleOCR official Det, Rec, and System OCR. It does not cover PP-StructureV3, PP-ChatOCR, PaddleOCR-VL, document orientation classification, document unwarping, text-line orientation classification, or PaddleOCR C++ local deployment.
+PP-OCRv5/PP-OCRv6 coverage in this phase is limited to PaddleOCR official Det, Rec, and System OCR. It does not cover PP-StructureV3, PP-ChatOCR, PaddleOCR-VL, document orientation classification, document unwarping, text-line orientation classification, or PaddleOCR C++ local deployment. PP-OCRv6 tiny follows the official language-coverage limitation and must not be used as a customer-domain production claim without customer data evidence.
 
 ## Data Requirements
 
@@ -136,6 +136,17 @@ To run the same chain with PP-OCRv5 presets, use:
   -OcrVersion PP-OCRv5 `
   -DetModelPreset PP-OCRv5_mobile_det `
   -RecModelPreset en_PP-OCRv5_mobile_rec
+```
+
+To run the same chain with PP-OCRv6 presets, use:
+
+```powershell
+.\tools\run-production-ocr-official-chain.ps1 `
+  -WorkDir .deps\production-ocr-official-chain-v6 `
+  -DataDir .deps\production-ocr-data `
+  -OcrVersion PP-OCRv6 `
+  -PPOCRv6Tier medium `
+  -AllowBlocked
 ```
 
 For the PP-OCRv5 GPU gate, use the wrapper instead of relying on implicit device fallback:

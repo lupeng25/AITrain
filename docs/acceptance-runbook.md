@@ -1,6 +1,6 @@
 ﻿# AITrain Studio Acceptance Runbook
 
-This runbook is the Phase 17-50 plus P1 acceptance path, with YOLO26 tracked as a separate compatibility phase. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, records a traceable release-freeze package identity, validates newer YOLO detection/segmentation model-family candidates, documents the delivery-closeout workbench, adds the PP-OCRv5 GPU official-chain gate, defines the P1 full YOLO preset/export-argument matrix, and adds the independent YOLO26 detection/instance-segmentation matrix. OCR acceptance is official-only through PaddleOCR Det/Rec/System reports. RTX 4090 D TensorRT smoke evidence is recorded under `.deps\\rtx4090-validation\\acceptance-tensorrt`; clean Windows and customer-domain OCR production evidence still require returned external/customer data.
+This runbook is the Phase 17-50 plus P1 acceptance path, with YOLO26 tracked as a separate compatibility phase. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, records a traceable release-freeze package identity, validates newer YOLO detection/segmentation model-family candidates, documents the delivery-closeout workbench, adds the PP-OCRv5 GPU official-chain gate, defines the P1 full YOLO preset/export-argument matrix, adds the independent YOLO26 detection/instance-segmentation matrix, and adds PP-OCRv6 Det/Rec/System official-chain acceptance. OCR acceptance is official-only through PaddleOCR Det/Rec/System reports. RTX 4090 D TensorRT smoke evidence is recorded under `.deps\\rtx4090-validation\\acceptance-tensorrt`; clean Windows and customer-domain OCR production evidence still require returned external/customer data.
 
 ## Acceptance Modes
 
@@ -15,6 +15,7 @@ Run the unified smoke script from the repository root:
 .\tools\phase45-yolo-model-matrix-smoke.ps1
 .\tools\phase-p1-yolo-full-matrix-smoke.ps1
 .\tools\phase-yolo26-model-matrix-smoke.ps1
+.\tools\phase-ppocrv6-model-matrix-smoke.ps1
 .\tools\acceptance-smoke.ps1 -TensorRT
 .\tools\customer-ocr-validation.ps1
 ```
@@ -97,9 +98,11 @@ For the full official PaddleOCR Det + Rec + System chain, run:
 ```powershell
 .\tools\phase31-paddleocr-full-official-smoke.ps1
 .\tools\phase31-paddleocr-full-official-smoke.ps1 -OcrVersion PP-OCRv4
+.\tools\phase31-paddleocr-full-official-smoke.ps1 -OcrVersion PP-OCRv6 -PPOCRv6Tier tiny
+.\tools\phase-ppocrv6-model-matrix-smoke.ps1
 ```
 
-This validates official Det train/export, official Rec train/export, and official `predict_system.py` inference with `use_angle_cls=false`. It checks the Det and Rec inference configs, official reports, `official_system_prediction.json`, `system_results.txt`, and visualized output images. The default is PP-OCRv5 mobile Det/Rec; `-OcrVersion PP-OCRv4` switches back to the legacy v4 mobile presets. It is still a tiny CPU smoke run, so it validates wiring and artifacts rather than OCR quality.
+This validates official Det train/export, official Rec train/export, and official `predict_system.py` inference with `use_angle_cls=false`. It checks the Det and Rec inference configs, official reports, `official_system_prediction.json`, `system_results.txt`, and visualized output images. The default is PP-OCRv5 mobile Det/Rec; `-OcrVersion PP-OCRv4` switches back to the legacy v4 mobile presets, and `-OcrVersion PP-OCRv6 -PPOCRv6Tier tiny|small|medium` selects matching v6 Det/Rec presets. `phase-ppocrv6-model-matrix-smoke.ps1` checks all six v6 Det/Rec presets in prepare-only mode and runs one v6 tiny full-chain smoke. It is still a tiny CPU smoke run, so it validates wiring and artifacts rather than OCR quality.
 
 For the PP-OCRv5 GPU official production-chain gate, run:
 
@@ -308,13 +311,14 @@ The script writes:
 
 Default thresholds are intentionally higher than tiny smoke data: at least 100 Det images, 1000 Rec samples, 100 System images, and Rec accuracy > 0.70. CER is recorded by default but is not blocking unless `-RequireRecCer` is supplied. If evidence is missing, the script exits blocked and records the missing checks instead of marking production OCR as accepted.
 
-The repeatable production chain supports both PP-OCRv4 and PP-OCRv5 presets:
+The repeatable production chain supports PP-OCRv4, PP-OCRv5, and PP-OCRv6 presets:
 
 ```powershell
 .\tools\run-production-ocr-official-chain.ps1 -OcrVersion PP-OCRv5 -UseGpu -AllowBlocked
+.\tools\run-production-ocr-official-chain.ps1 -OcrVersion PP-OCRv6 -PPOCRv6Tier medium -AllowBlocked
 ```
 
-PP-OCRv5 production-chain runs still use only PaddleOCR official Det, Rec, and System reports. They do not add a PaddleOCR C++ local OCR route and do not claim PP-StructureV3, PP-ChatOCR, PaddleOCR-VL, document orientation classification, document unwarping, or text-line orientation classification coverage.
+PP-OCRv5 and PP-OCRv6 production-chain runs still use only PaddleOCR official Det, Rec, and System reports. They do not add a PaddleOCR C++ local OCR route and do not claim PP-StructureV3, PP-ChatOCR, PaddleOCR-VL, document orientation classification, document unwarping, or text-line orientation classification coverage. PP-OCRv6 tiny follows the official language-coverage limitation and remains workflow evidence unless customer-domain data is accepted.
 
 Current RTX 4090D validation note: the 2026-06-05 refresh/follow-up records passing evidence for LocalBaseline+Package, GUI walkthrough, TensorRT, CPUTrainingSmoke, Phase45, Phase47 Det ONNX+CTest, and public OCR GPU workflow. The follow-up summary is `.deps\rtx4090-validation\2026-06-05-122806-rtx4090d-followup-1-4\rtx4090d_followup_1_4_summary.json`. The public OCR GPU workflow remains public Total-Text workflow evidence only; the 2026-06-05 public rerun passed under the current `accuracy>0.70` Rec gate, while the 2026-05-13 closeout remains a historical higher-accuracy public baseline.
 
@@ -418,4 +422,4 @@ Then check:
 - Third-party backend license notes remain visible, especially Ultralytics AGPL / Enterprise constraints.
 - Legacy C++ tiny detector, segmentation baseline, OCR baseline, small OCR CTC, and shipped Python mock trainer implementations remain removed from the product training path.
 - Historical Phase 46/47 OCR ONNX wiring evidence remains archived, but current OCR acceptance is official-only through PaddleOCR Det/Rec/System reports and customer-domain data.
-- PP-OCRv5 support is scoped to official Det/Rec/System presets and reports. It does not add PP-StructureV3, PP-ChatOCR, PaddleOCR-VL, document direction classification, image correction, text-line direction classification, or PaddleOCR C++ local deployment to the accepted product route.
+- PP-OCRv5/PP-OCRv6 support is scoped to official Det/Rec/System presets and reports. It does not add PP-StructureV3, PP-ChatOCR, PaddleOCR-VL, document direction classification, image correction, text-line direction classification, or PaddleOCR C++ local deployment to the accepted product route.

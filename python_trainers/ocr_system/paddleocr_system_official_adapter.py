@@ -96,9 +96,23 @@ def rec_algorithm_for_preset(preset: str) -> str:
     normalized = preset.strip().lower()
     if normalized == "pp-ocrv5_server_rec":
         return "SVTR_HGNet"
+    if normalized.startswith("pp-ocrv6"):
+        return ""
     if normalized:
         return "SVTR_LCNet"
     return ""
+
+
+def is_ppocrv6_metadata(parameters: dict[str, Any], metadata: dict[str, str]) -> bool:
+    values = [
+        str(parameters.get("recModelPreset") or ""),
+        str(parameters.get("modelPreset") or ""),
+        str(metadata.get("recModelPreset") or ""),
+        str(metadata.get("recModelName") or ""),
+        str(metadata.get("modelName") or ""),
+        str(metadata.get("ocrVersion") or ""),
+    ]
+    return any(value.strip().lower().startswith("pp-ocrv6") for value in values)
 
 
 def infer_rec_metadata_from_inference_yml(model_dir: Path) -> dict[str, str]:
@@ -155,7 +169,7 @@ def resolve_rec_metadata(parameters: dict[str, Any], rec_model_dir: Path) -> dic
     explicit_algorithm = str(parameters.get("recAlgorithm") or "").strip()
     if explicit_algorithm:
         metadata["recAlgorithm"] = explicit_algorithm
-    if not metadata.get("recAlgorithm"):
+    if not metadata.get("recAlgorithm") and not is_ppocrv6_metadata(parameters, metadata):
         metadata["recAlgorithm"] = "SVTR_LCNet"
     return metadata
 
@@ -262,7 +276,16 @@ def run(request: dict[str, Any]) -> int:
     dictionary_file = resolve_path(parameters, "dictionaryFile")
     inference_image = resolve_path(parameters, "inferenceImage", str(request.get("datasetPath") or ""))
     rec_metadata = resolve_rec_metadata(parameters, rec_model_dir)
-    rec_algorithm = rec_metadata.get("recAlgorithm", "SVTR_LCNet")
+    rec_algorithm = rec_metadata.get("recAlgorithm", "")
+    if not rec_algorithm:
+        return fail(
+            "PP-OCRv6 System inference requires recAlgorithm from Rec inference.yml, Rec report, or explicit recAlgorithm.",
+            "rec_algorithm_missing",
+            {
+                "recModelPreset": str(parameters.get("recModelPreset") or parameters.get("modelPreset") or ""),
+                "recReportPath": str(resolve_path(parameters, "recReportPath")),
+            },
+        )
     det_model_preset = str(parameters.get("detModelPreset") or "").strip()
     rec_model_preset = rec_metadata.get("recModelPreset", str(parameters.get("recModelPreset") or "").strip())
     command_det_model_dir = det_model_dir
@@ -298,7 +321,7 @@ def run(request: dict[str, Any]) -> int:
         "framework": "PaddleOCR official tools",
         "modelFamily": "ocr",
         "mode": "prepareOnly" if prepare_only else "officialSystemPredict",
-        "note": "Official PaddleOCR predict_system.py adapter for PP-OCRv4/PP-OCRv5 Det+Rec. Angle classifier is disabled in this product route.",
+        "note": "Official PaddleOCR predict_system.py adapter for PP-OCRv4/PP-OCRv5/PP-OCRv6 Det+Rec. Angle classifier is disabled in this product route.",
         "detModelPreset": det_model_preset,
         "recModelPreset": rec_model_preset,
         "recModelName": rec_metadata.get("recModelName", rec_metadata.get("modelName", "")),

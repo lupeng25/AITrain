@@ -15,8 +15,10 @@ param(
     [int]$RecEvalEverySteps = 1000000,
     [int]$RecSubsetTrain = 256,
     [int]$RecSubsetVal = 64,
-    [ValidateSet("PP-OCRv4", "PP-OCRv5")]
+    [ValidateSet("PP-OCRv4", "PP-OCRv5", "PP-OCRv6")]
     [string]$OcrVersion = "PP-OCRv5",
+    [ValidateSet("tiny", "small", "medium")]
+    [string]$PPOCRv6Tier = "medium",
     [string]$DetModelPreset = "",
     [string]$RecModelPreset = "",
     [string]$RecOfficialConfig = "",
@@ -155,12 +157,20 @@ if ($PaddleOcrRef -and $resolvedPaddleOcrRef -ne $PaddleOcrRef) {
     Write-Host "Requested PaddleOCR ref '$PaddleOcrRef', current checkout is '$resolvedPaddleOcrRef'. The script does not checkout refs automatically." -ForegroundColor Yellow
 }
 if ([string]::IsNullOrWhiteSpace($DetModelPreset)) {
-    $DetModelPreset = if ($OcrVersion -eq "PP-OCRv5") { "PP-OCRv5_mobile_det" } else { "PP-OCRv4_mobile_det" }
+    $DetModelPreset = switch ($OcrVersion) {
+        "PP-OCRv6" { "PP-OCRv6_{0}_det" -f $PPOCRv6Tier }
+        "PP-OCRv5" { "PP-OCRv5_mobile_det" }
+        default { "PP-OCRv4_mobile_det" }
+    }
 }
 if ([string]::IsNullOrWhiteSpace($RecModelPreset)) {
-    $RecModelPreset = if ($OcrVersion -eq "PP-OCRv5") { "en_PP-OCRv5_mobile_rec" } else { "PP-OCRv4_mobile_rec" }
+    $RecModelPreset = switch ($OcrVersion) {
+        "PP-OCRv6" { "PP-OCRv6_{0}_rec" -f $PPOCRv6Tier }
+        "PP-OCRv5" { "en_PP-OCRv5_mobile_rec" }
+        default { "PP-OCRv4_mobile_rec" }
+    }
 }
-Write-Host "Using production OCR presets: Det=$DetModelPreset Rec=$RecModelPreset OcrVersion=$OcrVersion UseGpu=$([bool]$UseGpu)" -ForegroundColor Cyan
+Write-Host "Using production OCR presets: Det=$DetModelPreset Rec=$RecModelPreset OcrVersion=$OcrVersion PPOCRv6Tier=$PPOCRv6Tier UseGpu=$([bool]$UseGpu)" -ForegroundColor Cyan
 
 $detDataset = Join-Path $dataFull "det_dataset"
 $recDataset = Join-Path $dataFull "rec_dataset"
@@ -325,6 +335,7 @@ $chainSummary = [ordered]@{
     paddleOcrRef = $resolvedPaddleOcrRef
     useGpu = [bool]$UseGpu
     ocrVersion = $OcrVersion
+    ppocrv6Tier = $PPOCRv6Tier
     detModelPreset = $DetModelPreset
     recModelPreset = $RecModelPreset
     useRecCpuSubset = [bool]$UseRecCpuSubset
