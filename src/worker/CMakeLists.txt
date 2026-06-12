@@ -2,6 +2,7 @@ add_executable(aitrain_worker
     src/main.cpp
     src/WorkerSession.h
     src/WorkerSession.cpp
+    src/WorkerSessionCommandRegistry.cpp
     src/WorkerSessionDatasetCommands.cpp
     src/WorkerSessionEnvironment.cpp
     src/WorkerSessionModelCommands.cpp

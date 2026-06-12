@@ -7,6 +7,7 @@
 #include "aitrain/core/JsonProtocol.h"
 #include "aitrain/core/ProductWorkflow.h"
 #include "aitrain/core/WorkerProtocol.h"
+#include "aitrain/core/WorkerRequests.h"
 
 #include <QDateTime>
 #include <QCoreApplication>
@@ -25,16 +26,18 @@
 
 using namespace worker_support;
 namespace wp = aitrain::worker_protocol;
+namespace wr = aitrain::worker_requests;
 
 void WorkerSession::runLocalPipeline(const QJsonObject& payload)
 {
-    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
-    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
+    const wr::LocalPipelineRequest request = wr::parseLocalPipelineRequest(payload);
+    const QString taskId = request.taskId;
+    QString outputPath = request.outputPath;
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QDir::currentPath(), taskId);
     }
-    const QString templateId = payload.value(QStringLiteral("templateId")).toString();
-    const QJsonObject options = payload.value(QStringLiteral("options")).toObject();
+    const QString templateId = request.templateId;
+    const QJsonObject options = request.options;
 
     QJsonObject progress;
     progress.insert(QStringLiteral("taskId"), taskId);

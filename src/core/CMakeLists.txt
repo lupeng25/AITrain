@@ -19,6 +19,7 @@ add_library(aitrain_core STATIC
     include/aitrain/core/VisionModelRuntime.h
     include/aitrain/core/VisionPostprocess.h
     include/aitrain/core/WorkerProtocol.h
+    include/aitrain/core/WorkerRequests.h
     src/JsonProtocol.cpp
     src/LicenseManager.cpp
     src/Deployment.cpp
@@ -48,6 +49,12 @@ add_library(aitrain_core STATIC
     src/PluginManager.cpp
     src/PluginMarketplace.cpp
     src/ProjectRepository.cpp
+    src/ProjectRepositoryDatasetStore.cpp
+    src/ProjectRepositoryInternal.h
+    src/ProjectRepositoryInternal.cpp
+    src/ProjectRepositoryModelStore.cpp
+    src/ProjectRepositorySchema.cpp
+    src/ProjectRepositoryTaskStore.cpp
     src/ProductWorkflow.cpp
     src/ProductWorkflowBenchmark.cpp
     src/ProductWorkflowAcceptance.cpp
@@ -60,6 +67,7 @@ add_library(aitrain_core STATIC
     src/ProductWorkflowSupport.cpp
     src/TaskModels.cpp
     src/WorkerProtocol.cpp
+    src/WorkerRequests.cpp
 )
 
 target_include_directories(aitrain_core

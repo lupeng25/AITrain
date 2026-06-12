@@ -7,6 +7,7 @@
 #include "aitrain/core/JsonProtocol.h"
 #include "aitrain/core/ProductWorkflow.h"
 #include "aitrain/core/WorkerProtocol.h"
+#include "aitrain/core/WorkerRequests.h"
 
 #include <QDateTime>
 #include <QCoreApplication>
@@ -26,6 +27,7 @@
 
 using namespace worker_support;
 namespace wp = aitrain::worker_protocol;
+namespace wr = aitrain::worker_requests;
 
 WorkerSession::WorkerSession(QObject* parent)
     : QObject(parent)
@@ -80,54 +82,125 @@ void WorkerSession::handleMessage(const QString& type, const QJsonObject& payloa
         activeOutputPath_ = payload.value(wp::field::outputPath()).toString();
         activeReportPath_.clear();
     }
-    if (type == wp::command::startTrain()) {
-        startTraining(aitrain::TrainingRequest::fromJson(payload));
-    } else if (type == wp::command::pause()) {
-        pauseTraining();
-    } else if (type == wp::command::resume()) {
-        resumeTraining();
-    } else if (type == wp::command::heartbeat()) {
-        sendHeartbeat();
-    } else if (type == wp::command::environmentCheck()) {
-        runEnvironmentCheck(payload);
-    } else if (type == wp::command::validateDataset()) {
-        validateDataset(payload);
-    } else if (type == wp::command::splitDataset()) {
-        splitDataset(payload);
-    } else if (type == wp::command::convertDataset()) {
-        convertDataset(payload);
-    } else if (type == wp::command::curateDataset()) {
-        curateDataset(payload);
-    } else if (type == wp::command::createDatasetSnapshot()) {
-        createDatasetSnapshot(payload);
-    } else if (type == wp::command::evaluateModel()) {
-        evaluateModel(payload);
-    } else if (type == wp::command::benchmarkModel()) {
-        benchmarkModel(payload);
-    } else if (type == wp::command::runLocalPipeline()) {
-        runLocalPipeline(payload);
-    } else if (type == wp::command::generateDeliveryReport()) {
-        generateDeliveryReport(payload);
-    } else if (type == wp::command::runCustomerOcrAcceptance()) {
-        runCustomerOcrAcceptance(payload);
-    } else if (type == wp::command::collectDiagnostics()) {
-        collectDiagnostics(payload);
-    } else if (type == wp::command::validateDeploymentArtifact()) {
-        validateDeploymentArtifact(payload);
-    } else if (type == wp::command::exportModel()) {
-        exportModel(payload);
-    } else if (type == wp::command::infer()) {
-        runInference(payload);
-    } else if (type == wp::command::cancel()) {
-        running_ = false;
-        paused_ = false;
-        canceled_ = true;
-        timer_.stop();
-        shutdownPythonTrainer(QStringLiteral("Canceled by user"), true);
-        sendCanceledAndFinish(activeTaskId_.isEmpty() ? request_.taskId : activeTaskId_, QStringLiteral("Canceled by user"));
-    } else {
-        fail(QStringLiteral("Unsupported command: %1").arg(type));
+
+    const QVector<CommandBinding> bindings = commandBindings();
+    for (const CommandBinding& binding : bindings) {
+        if (type == binding.command) {
+            (this->*binding.handler)(payload);
+            return;
+        }
     }
+
+    fail(QStringLiteral("Unsupported command: %1").arg(type));
+}
+
+void WorkerSession::startTrainingCommand(const QJsonObject& payload)
+{
+    startTraining(wr::parseTrainingRequest(payload));
+}
+
+void WorkerSession::pauseCommand(const QJsonObject& payload)
+{
+    Q_UNUSED(payload);
+    pauseTraining();
+}
+
+void WorkerSession::resumeCommand(const QJsonObject& payload)
+{
+    Q_UNUSED(payload);
+    resumeTraining();
+}
+
+void WorkerSession::heartbeatCommand(const QJsonObject& payload)
+{
+    Q_UNUSED(payload);
+    sendHeartbeat();
+}
+
+void WorkerSession::environmentCheckCommand(const QJsonObject& payload)
+{
+    runEnvironmentCheck(payload);
+}
+
+void WorkerSession::validateDatasetCommand(const QJsonObject& payload)
+{
+    validateDataset(payload);
+}
+
+void WorkerSession::splitDatasetCommand(const QJsonObject& payload)
+{
+    splitDataset(payload);
+}
+
+void WorkerSession::convertDatasetCommand(const QJsonObject& payload)
+{
+    convertDataset(payload);
+}
+
+void WorkerSession::curateDatasetCommand(const QJsonObject& payload)
+{
+    curateDataset(payload);
+}
+
+void WorkerSession::createDatasetSnapshotCommand(const QJsonObject& payload)
+{
+    createDatasetSnapshot(payload);
+}
+
+void WorkerSession::evaluateModelCommand(const QJsonObject& payload)
+{
+    evaluateModel(payload);
+}
+
+void WorkerSession::benchmarkModelCommand(const QJsonObject& payload)
+{
+    benchmarkModel(payload);
+}
+
+void WorkerSession::runLocalPipelineCommand(const QJsonObject& payload)
+{
+    runLocalPipeline(payload);
+}
+
+void WorkerSession::generateDeliveryReportCommand(const QJsonObject& payload)
+{
+    generateDeliveryReport(payload);
+}
+
+void WorkerSession::runCustomerOcrAcceptanceCommand(const QJsonObject& payload)
+{
+    runCustomerOcrAcceptance(payload);
+}
+
+void WorkerSession::collectDiagnosticsCommand(const QJsonObject& payload)
+{
+    collectDiagnostics(payload);
+}
+
+void WorkerSession::validateDeploymentArtifactCommand(const QJsonObject& payload)
+{
+    validateDeploymentArtifact(payload);
+}
+
+void WorkerSession::exportModelCommand(const QJsonObject& payload)
+{
+    exportModel(payload);
+}
+
+void WorkerSession::inferCommand(const QJsonObject& payload)
+{
+    runInference(payload);
+}
+
+void WorkerSession::cancelCommand(const QJsonObject& payload)
+{
+    Q_UNUSED(payload);
+    running_ = false;
+    paused_ = false;
+    canceled_ = true;
+    timer_.stop();
+    shutdownPythonTrainer(QStringLiteral("Canceled by user"), true);
+    sendCanceledAndFinish(activeTaskId_.isEmpty() ? request_.taskId : activeTaskId_, QStringLiteral("Canceled by user"));
 }
 
 void WorkerSession::handleSocketDisconnected()

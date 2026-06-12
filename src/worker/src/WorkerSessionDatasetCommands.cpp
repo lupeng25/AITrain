@@ -8,6 +8,7 @@
 #include "aitrain/core/JsonProtocol.h"
 #include "aitrain/core/ProductWorkflow.h"
 #include "aitrain/core/WorkerProtocol.h"
+#include "aitrain/core/WorkerRequests.h"
 
 #include <QDateTime>
 #include <QCoreApplication>
@@ -26,14 +27,16 @@
 
 using namespace worker_support;
 namespace wp = aitrain::worker_protocol;
+namespace wr = aitrain::worker_requests;
 
 void WorkerSession::validateDataset(const QJsonObject& payload)
 {
-    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
-    const QString datasetPath = payload.value(QStringLiteral("datasetPath")).toString();
-    const QString format = payload.value(QStringLiteral("format")).toString();
-    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
-    const QJsonObject options = payload.value(QStringLiteral("options")).toObject();
+    const wr::DatasetValidationRequest request = wr::parseDatasetValidationRequest(payload);
+    const QString taskId = request.taskId;
+    const QString datasetPath = request.datasetPath;
+    const QString format = request.format;
+    QString outputPath = request.outputPath;
+    const QJsonObject options = request.options;
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QFileInfo(datasetPath).absoluteDir().absolutePath(), taskId);
     }
@@ -115,11 +118,12 @@ void WorkerSession::validateDataset(const QJsonObject& payload)
 
 void WorkerSession::splitDataset(const QJsonObject& payload)
 {
-    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
-    const QString datasetPath = payload.value(QStringLiteral("datasetPath")).toString();
-    const QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
-    const QString format = payload.value(QStringLiteral("format")).toString();
-    const QJsonObject options = payload.value(QStringLiteral("options")).toObject();
+    const wr::DatasetSplitRequest request = wr::parseDatasetSplitRequest(payload);
+    const QString taskId = request.taskId;
+    const QString datasetPath = request.datasetPath;
+    const QString outputPath = request.outputPath;
+    const QString format = request.format;
+    const QJsonObject options = request.options;
     activeTaskId_ = taskId;
     activeOutputPath_ = outputPath;
 
@@ -194,17 +198,18 @@ void WorkerSession::splitDataset(const QJsonObject& payload)
 
 void WorkerSession::convertDataset(const QJsonObject& payload)
 {
-    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
+    const wr::DatasetConversionRequest parsedRequest = wr::parseDatasetConversionRequest(payload);
+    const QString taskId = parsedRequest.taskId;
     activeTaskId_ = taskId;
     canceled_ = false;
     running_ = true;
 
     aitrain::DatasetConversionRequest request;
-    request.sourcePath = payload.value(QStringLiteral("sourcePath")).toString();
-    request.sourceFormat = payload.value(QStringLiteral("sourceFormat")).toString();
-    request.targetFormat = payload.value(QStringLiteral("targetFormat")).toString();
-    request.outputPath = payload.value(QStringLiteral("outputPath")).toString();
-    request.options = payload.value(QStringLiteral("options")).toObject();
+    request.sourcePath = parsedRequest.sourcePath;
+    request.sourceFormat = parsedRequest.sourceFormat;
+    request.targetFormat = parsedRequest.targetFormat;
+    request.outputPath = parsedRequest.outputPath;
+    request.options = parsedRequest.options;
     activeOutputPath_ = request.outputPath;
 
     QJsonObject startProgress;
@@ -270,14 +275,15 @@ void WorkerSession::convertDataset(const QJsonObject& payload)
 
 void WorkerSession::curateDataset(const QJsonObject& payload)
 {
-    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
+    const wr::DatasetCurationRequest request = wr::parseDatasetCurationRequest(payload);
+    const QString taskId = request.taskId;
     activeTaskId_ = taskId;
     canceled_ = false;
     running_ = true;
-    const QString datasetPath = payload.value(QStringLiteral("datasetPath")).toString();
-    const QString format = payload.value(QStringLiteral("format")).toString();
-    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
-    const QJsonObject options = payload.value(QStringLiteral("options")).toObject();
+    const QString datasetPath = request.datasetPath;
+    const QString format = request.format;
+    QString outputPath = request.outputPath;
+    const QJsonObject options = request.options;
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QFileInfo(datasetPath).absoluteDir().absolutePath(), taskId);
     }
@@ -368,14 +374,15 @@ void WorkerSession::curateDataset(const QJsonObject& payload)
 
 void WorkerSession::createDatasetSnapshot(const QJsonObject& payload)
 {
-    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
+    const wr::DatasetSnapshotRequest request = wr::parseDatasetSnapshotRequest(payload);
+    const QString taskId = request.taskId;
     activeTaskId_ = taskId;
     canceled_ = false;
     running_ = true;
-    const QString datasetPath = payload.value(QStringLiteral("datasetPath")).toString();
-    const QString format = payload.value(QStringLiteral("format")).toString();
-    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
-    const QJsonObject options = payload.value(QStringLiteral("options")).toObject();
+    const QString datasetPath = request.datasetPath;
+    const QString format = request.format;
+    QString outputPath = request.outputPath;
+    const QJsonObject options = request.options;
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QFileInfo(datasetPath).absoluteDir().absolutePath(), taskId);
     }

@@ -7,6 +7,7 @@
 #include "aitrain/core/JsonProtocol.h"
 #include "aitrain/core/ProductWorkflow.h"
 #include "aitrain/core/WorkerProtocol.h"
+#include "aitrain/core/WorkerRequests.h"
 
 #include <QDateTime>
 #include <QCoreApplication>
@@ -25,6 +26,7 @@
 
 using namespace worker_support;
 namespace wp = aitrain::worker_protocol;
+namespace wr = aitrain::worker_requests;
 
 namespace {
 bool jsonBool(const QJsonObject& object, const QString& key)
@@ -308,15 +310,16 @@ WorkerSession::OfficialYoloExportResult WorkerSession::runOfficialYoloExport(
 
 void WorkerSession::evaluateModel(const QJsonObject& payload)
 {
-    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
+    const wr::ModelEvaluationRequest request = wr::parseModelEvaluationRequest(payload);
+    const QString taskId = request.taskId;
     activeTaskId_ = taskId;
     canceled_ = false;
     running_ = true;
-    const QString modelPath = payload.value(QStringLiteral("modelPath")).toString();
-    const QString datasetPath = payload.value(QStringLiteral("datasetPath")).toString();
-    const QString taskType = payload.value(QStringLiteral("taskType")).toString(QStringLiteral("detection"));
-    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
-    const QJsonObject options = payload.value(QStringLiteral("options")).toObject();
+    const QString modelPath = request.modelPath;
+    const QString datasetPath = request.datasetPath;
+    const QString taskType = request.taskType.isEmpty() ? QStringLiteral("detection") : request.taskType;
+    QString outputPath = request.outputPath;
+    const QJsonObject options = request.options;
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QFileInfo(modelPath).absoluteDir().absolutePath(), taskId);
     }
@@ -438,13 +441,14 @@ void WorkerSession::evaluateModel(const QJsonObject& payload)
 
 void WorkerSession::benchmarkModel(const QJsonObject& payload)
 {
-    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
+    const wr::ModelBenchmarkRequest request = wr::parseModelBenchmarkRequest(payload);
+    const QString taskId = request.taskId;
     activeTaskId_ = taskId;
     canceled_ = false;
     running_ = true;
-    const QString modelPath = payload.value(QStringLiteral("modelPath")).toString();
-    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
-    const QJsonObject options = payload.value(QStringLiteral("options")).toObject();
+    const QString modelPath = request.modelPath;
+    QString outputPath = request.outputPath;
+    const QJsonObject options = request.options;
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QFileInfo(modelPath).absoluteDir().absolutePath(), taskId);
     }
@@ -509,14 +513,15 @@ void WorkerSession::benchmarkModel(const QJsonObject& payload)
 
 void WorkerSession::generateDeliveryReport(const QJsonObject& payload)
 {
-    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
-    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
+    const wr::DeliveryReportRequest request = wr::parseDeliveryReportRequest(payload);
+    const QString taskId = request.taskId;
+    QString outputPath = request.outputPath;
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QDir::currentPath(), taskId);
     }
     activeTaskId_ = taskId;
     activeOutputPath_ = outputPath;
-    QJsonObject context = payload.value(QStringLiteral("context")).toObject();
+    QJsonObject context = request.context;
     context.insert(QStringLiteral("taskId"), taskId);
 
     const aitrain::WorkflowResult result = aitrain::generateTrainingDeliveryReport(outputPath, context);
@@ -577,14 +582,15 @@ void WorkerSession::generateDeliveryReport(const QJsonObject& payload)
 
 void WorkerSession::runCustomerOcrAcceptance(const QJsonObject& payload)
 {
-    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
-    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
+    const wr::CustomerOcrAcceptanceRequest request = wr::parseCustomerOcrAcceptanceRequest(payload);
+    const QString taskId = request.taskId;
+    QString outputPath = request.outputPath;
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QDir::currentPath(), taskId);
     }
     activeTaskId_ = taskId;
     activeOutputPath_ = outputPath;
-    QJsonObject options = payload.value(QStringLiteral("options")).toObject();
+    QJsonObject options = request.options;
     options.insert(QStringLiteral("taskId"), taskId);
 
     QJsonObject progress;
@@ -636,14 +642,15 @@ void WorkerSession::runCustomerOcrAcceptance(const QJsonObject& payload)
 
 void WorkerSession::collectDiagnostics(const QJsonObject& payload)
 {
-    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
-    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
+    const wr::DiagnosticsBundleRequest request = wr::parseDiagnosticsBundleRequest(payload);
+    const QString taskId = request.taskId;
+    QString outputPath = request.outputPath;
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QDir::currentPath(), taskId);
     }
     activeTaskId_ = taskId;
     activeOutputPath_ = outputPath;
-    QJsonObject context = payload.value(QStringLiteral("context")).toObject();
+    QJsonObject context = request.context;
     context.insert(QStringLiteral("taskId"), taskId);
     if (context.value(QStringLiteral("workerExecutable")).toString().isEmpty()) {
         context.insert(QStringLiteral("workerExecutable"), QCoreApplication::applicationFilePath());
@@ -698,17 +705,18 @@ void WorkerSession::collectDiagnostics(const QJsonObject& payload)
 
 void WorkerSession::validateDeploymentArtifact(const QJsonObject& payload)
 {
-    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
-    const QString modelPath = payload.value(QStringLiteral("modelPath")).toString();
-    const QString format = payload.value(QStringLiteral("format")).toString();
-    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
+    const wr::DeploymentValidationRequest request = wr::parseDeploymentValidationRequest(payload);
+    const QString taskId = request.taskId;
+    const QString modelPath = request.modelPath;
+    const QString format = request.format;
+    QString outputPath = request.outputPath;
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QFileInfo(modelPath).absoluteDir().absolutePath(), taskId);
     }
     activeTaskId_ = taskId;
     activeOutputPath_ = outputPath;
-    QJsonObject options = payload.value(QStringLiteral("options")).toObject();
-    const QString sampleImagePath = payload.value(QStringLiteral("sampleImagePath")).toString();
+    QJsonObject options = request.options;
+    const QString sampleImagePath = request.sampleImagePath;
     if (!sampleImagePath.isEmpty()) {
         options.insert(QStringLiteral("sampleImagePath"), sampleImagePath);
     }
@@ -776,14 +784,15 @@ void WorkerSession::validateDeploymentArtifact(const QJsonObject& payload)
 
 void WorkerSession::exportModel(const QJsonObject& payload)
 {
-    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
+    const wr::ModelExportRequest request = wr::parseModelExportRequest(payload);
+    const QString taskId = request.taskId;
     activeTaskId_ = taskId;
     canceled_ = false;
     running_ = true;
-    QString checkpointPath = resolveModelArtifactPath(payload.value(QStringLiteral("checkpointPath")).toString());
-    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
-    const QString format = payload.value(QStringLiteral("format")).toString(QStringLiteral("onnx"));
-    const QJsonObject options = payload.value(QStringLiteral("options")).toObject();
+    QString checkpointPath = resolveModelArtifactPath(request.checkpointPath);
+    QString outputPath = request.outputPath;
+    const QString format = request.format.isEmpty() ? QStringLiteral("onnx") : request.format;
+    const QJsonObject options = request.options;
     outputPath = defaultExportOutputPath(checkpointPath, outputPath, format);
     activeOutputPath_ = outputPath;
 
@@ -938,10 +947,11 @@ void WorkerSession::exportModel(const QJsonObject& payload)
 
 void WorkerSession::runInference(const QJsonObject& payload)
 {
-    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
-    const QString checkpointPath = resolveModelArtifactPath(payload.value(QStringLiteral("checkpointPath")).toString());
-    const QString imagePath = payload.value(QStringLiteral("imagePath")).toString();
-    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
+    const wr::InferenceRequest request = wr::parseInferenceRequest(payload);
+    const QString taskId = request.taskId;
+    const QString checkpointPath = resolveModelArtifactPath(request.checkpointPath);
+    const QString imagePath = request.imagePath;
+    QString outputPath = request.outputPath;
     aitrain::DetectionInferenceOptions options;
     options.confidenceThreshold = payload.value(QStringLiteral("confidenceThreshold")).toDouble(options.confidenceThreshold);
     options.iouThreshold = payload.value(QStringLiteral("iouThreshold")).toDouble(options.iouThreshold);
