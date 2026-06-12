@@ -99,6 +99,7 @@ void WorkerSession::runPythonTrainer()
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
     environment.insert(QStringLiteral("PYTHONIOENCODING"), QStringLiteral("utf-8"));
+    configurePackagedPythonEnvironment(&environment);
     pythonTrainerProcess_.setProcessEnvironment(environment);
     pythonTrainerProcess_.setProgram(pythonExecutable);
     pythonTrainerProcess_.setArguments(QStringList() << QStringLiteral("-u") << trainerScript << QStringLiteral("--request") << requestPath);

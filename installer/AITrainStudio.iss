@@ -23,6 +23,9 @@
 #ifndef InstallerSolidCompression
 #define InstallerSolidCompression "no"
 #endif
+#ifndef OutputBaseFilename
+#define OutputBaseFilename "AITrainStudio-" + AppVersion + "-Setup"
+#endif
 
 #if !DirExists(SourceDir)
 #error SourceDir does not exist. Run tools\package-smoke.ps1 first or pass /DSourceDir=<package root>.
@@ -47,7 +50,7 @@ ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 PrivilegesRequired=admin
 OutputDir={#OutputDir}
-OutputBaseFilename=AITrainStudio-{#AppVersion}-Setup
+OutputBaseFilename={#OutputBaseFilename}
 Compression={#InstallerCompression}
 SolidCompression={#InstallerSolidCompression}
 WizardStyle=modern

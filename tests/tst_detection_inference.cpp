@@ -1,5 +1,9 @@
 #include "TestSupport.h"
 
+#include "../src/core/src/DetectionTrainerInternal.h"
+
+#include <QtMath>
+
 class DetectionInferenceTests : public QObject {
     Q_OBJECT
 
@@ -256,6 +260,157 @@ private slots:
         QCOMPARE(filtered.size(), 1);
         QCOMPARE(filtered.first().className, QStringLiteral("item"));
         QCOMPARE(filtered.first().confidence, 0.9);
+    }
+
+    void yolo26EndToEndDetectionUsesCornerBoxesWithoutLocalNms()
+    {
+        const std::vector<float> output = {
+            10.0f, 20.0f, 50.0f, 60.0f, 0.90f, 0.0f,
+            12.0f, 22.0f, 52.0f, 62.0f, 0.80f, 0.0f,
+        };
+        const std::vector<int64_t> shape = {1, 2, 6};
+
+        aitrain::LetterboxTransform transform;
+        transform.sourceSize = QSize(100, 100);
+        transform.targetSize = QSize(100, 100);
+        transform.scale = 1.0;
+
+        aitrain::DetectionInferenceOptions options;
+        options.confidenceThreshold = 0.25;
+        options.iouThreshold = 0.01;
+        options.maxDetections = 100;
+        QString error;
+        const QVector<aitrain::DetectionPrediction> predictions =
+            aitrain::detection_detail::yoloEndToEndPredictionsFromOutput(
+                output.data(),
+                shape,
+                QStringList{QStringLiteral("item")},
+                QSize(100, 100),
+                transform,
+                options,
+                &error);
+
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(predictions.size(), 2);
+        QCOMPARE(predictions.first().className, QStringLiteral("item"));
+        QVERIFY(qAbs(predictions.first().confidence - 0.90) < 1.0e-6);
+        QVERIFY(qAbs(predictions.first().box.xCenter - 0.30) < 1.0e-6);
+        QVERIFY(qAbs(predictions.first().box.yCenter - 0.40) < 1.0e-6);
+        QVERIFY(qAbs(predictions.first().box.width - 0.40) < 1.0e-6);
+        QVERIFY(qAbs(predictions.first().box.height - 0.40) < 1.0e-6);
+    }
+
+    void yolo26EndToEndDetectionRejectsAttributeFirstShape()
+    {
+        const std::vector<float> output = {
+            10.0f, 12.0f,
+            20.0f, 22.0f,
+            50.0f, 52.0f,
+            60.0f, 62.0f,
+            0.90f, 0.80f,
+            0.0f, 0.0f,
+        };
+        const std::vector<int64_t> shape = {1, 6, 2};
+
+        aitrain::LetterboxTransform transform;
+        transform.sourceSize = QSize(100, 100);
+        transform.targetSize = QSize(100, 100);
+        transform.scale = 1.0;
+
+        aitrain::DetectionInferenceOptions options;
+        options.confidenceThreshold = 0.25;
+        options.iouThreshold = 0.45;
+        options.maxDetections = 100;
+        QString error;
+        const QVector<aitrain::DetectionPrediction> predictions =
+            aitrain::detection_detail::yoloEndToEndPredictionsFromOutput(
+                output.data(),
+                shape,
+                QStringList{QStringLiteral("item")},
+                QSize(100, 100),
+                transform,
+                options,
+                &error);
+
+        QVERIFY(predictions.isEmpty());
+        QVERIFY(error.contains(QStringLiteral("shape")));
+    }
+
+    void yolo26EndToEndSegmentationBuildsMaskFromPrototype()
+    {
+        const std::vector<float> boxesAndMasks = {
+            0.0f, 0.0f, 4.0f, 4.0f, 0.95f, 0.0f, 8.0f, 0.0f,
+        };
+        const std::vector<int64_t> boxesShape = {1, 1, 8};
+        std::vector<float> prototypes(2 * 4 * 4, 0.0f);
+        for (int index = 0; index < 16; ++index) {
+            prototypes[index] = 1.0f;
+        }
+        const std::vector<int64_t> prototypeShape = {1, 2, 4, 4};
+
+        aitrain::LetterboxTransform transform;
+        transform.sourceSize = QSize(4, 4);
+        transform.targetSize = QSize(4, 4);
+        transform.scale = 1.0;
+
+        aitrain::DetectionInferenceOptions options;
+        options.confidenceThreshold = 0.25;
+        options.iouThreshold = 0.45;
+        options.maxDetections = 100;
+        QString error;
+        const QVector<aitrain::SegmentationPrediction> predictions =
+            aitrain::detection_detail::yoloEndToEndSegmentationPredictionsFromOutputs(
+                boxesAndMasks.data(),
+                boxesShape,
+                prototypes.data(),
+                prototypeShape,
+                QStringList{QStringLiteral("part")},
+                QSize(4, 4),
+                transform,
+                options,
+                &error);
+
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(predictions.size(), 1);
+        QCOMPARE(predictions.first().detection.className, QStringLiteral("part"));
+        QVERIFY(qAbs(predictions.first().detection.confidence - 0.95) < 1.0e-6);
+        QVERIFY(!predictions.first().mask.isNull());
+        QVERIFY(predictions.first().maskArea > 0.90);
+    }
+
+    void yolo26EndToEndSegmentationRejectsAttributeFirstShape()
+    {
+        const std::vector<float> boxesAndMasks = {
+            0.0f, 0.0f, 4.0f, 4.0f, 0.95f, 0.0f, 8.0f, 0.0f,
+        };
+        const std::vector<int64_t> boxesShape = {1, 8, 1};
+        std::vector<float> prototypes(2 * 4 * 4, 1.0f);
+        const std::vector<int64_t> prototypeShape = {1, 2, 4, 4};
+
+        aitrain::LetterboxTransform transform;
+        transform.sourceSize = QSize(4, 4);
+        transform.targetSize = QSize(4, 4);
+        transform.scale = 1.0;
+
+        aitrain::DetectionInferenceOptions options;
+        options.confidenceThreshold = 0.25;
+        options.iouThreshold = 0.45;
+        options.maxDetections = 100;
+        QString error;
+        const QVector<aitrain::SegmentationPrediction> predictions =
+            aitrain::detection_detail::yoloEndToEndSegmentationPredictionsFromOutputs(
+                boxesAndMasks.data(),
+                boxesShape,
+                prototypes.data(),
+                prototypeShape,
+                QStringList{QStringLiteral("part")},
+                QSize(4, 4),
+                transform,
+                options,
+                &error);
+
+        QVERIFY(predictions.isEmpty());
+        QVERIFY(error.contains(QStringLiteral("outputs must be")));
     }
 
     void inferenceOptionsUseProductionConfidenceDefault()

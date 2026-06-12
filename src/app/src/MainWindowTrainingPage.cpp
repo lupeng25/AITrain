@@ -72,6 +72,16 @@ QComboBox* yoloBoolComboBox(const QString& key)
     });
 }
 
+QComboBox* yoloEndToEndComboBox(const QString& objectName)
+{
+    auto* combo = new QComboBox;
+    combo->setObjectName(objectName);
+    combo->addItem(QStringLiteral("auto"), QStringLiteral("auto"));
+    combo->addItem(QStringLiteral("true"), QStringLiteral("true"));
+    combo->addItem(QStringLiteral("false"), QStringLiteral("false"));
+    return combo;
+}
+
 QGroupBox* yoloArgGroup(const QString& title)
 {
     auto* group = new QGroupBox(title);
@@ -170,6 +180,7 @@ QWidget* buildYoloOfficialArgsPanel()
     exportHalf->setObjectName(QStringLiteral("YoloTrainExportArg_half"));
     auto* exportInt8 = new QCheckBox(QStringLiteral("int8 TensorRT"));
     exportInt8->setObjectName(QStringLiteral("YoloTrainExportArg_int8"));
+    auto* exportEndToEnd = yoloEndToEndComboBox(QStringLiteral("YoloTrainExportArg_end2end"));
     auto* exportFlags = new QWidget;
     auto* exportFlagsLayout = new QHBoxLayout(exportFlags);
     exportFlagsLayout->setContentsMargins(0, 0, 0, 0);
@@ -177,6 +188,8 @@ QWidget* buildYoloOfficialArgsPanel()
     exportFlagsLayout->addWidget(exportDynamic);
     exportFlagsLayout->addWidget(exportHalf);
     exportFlagsLayout->addWidget(exportInt8);
+    exportFlagsLayout->addWidget(new QLabel(QStringLiteral("end2end")));
+    exportFlagsLayout->addWidget(exportEndToEnd);
     exportFlagsLayout->addStretch();
     addYoloRow(validationGroup, QStringLiteral("export"), exportFlags);
 

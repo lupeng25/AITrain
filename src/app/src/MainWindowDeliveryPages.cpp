@@ -175,6 +175,11 @@ QWidget* MainWindow::buildConversionPage()
     halfCheck->setObjectName(QStringLiteral("YoloModelExportArg_half"));
     auto* int8Check = new QCheckBox(QStringLiteral("int8"));
     int8Check->setObjectName(QStringLiteral("YoloModelExportArg_int8"));
+    auto* endToEndCombo = new QComboBox;
+    endToEndCombo->setObjectName(QStringLiteral("YoloModelExportArg_end2end"));
+    endToEndCombo->addItem(QStringLiteral("end2end auto"), QStringLiteral("auto"));
+    endToEndCombo->addItem(QStringLiteral("end2end true"), QStringLiteral("true"));
+    endToEndCombo->addItem(QStringLiteral("end2end false"), QStringLiteral("false"));
     auto* exportImageSizeEdit = new QLineEdit;
     exportImageSizeEdit->setObjectName(QStringLiteral("YoloModelExportArg_imgsz"));
     exportImageSizeEdit->setPlaceholderText(QStringLiteral("imgsz 640"));
@@ -211,10 +216,11 @@ QWidget* MainWindow::buildConversionPage()
     exportArgsLayout->addWidget(dynamicCheck, 0, 0);
     exportArgsLayout->addWidget(halfCheck, 0, 1);
     exportArgsLayout->addWidget(int8Check, 0, 2);
+    exportArgsLayout->addWidget(endToEndCombo, 0, 3);
     exportArgsLayout->addWidget(exportImageSizeEdit, 1, 0);
     exportArgsLayout->addWidget(exportBatchEdit, 1, 1);
     exportArgsLayout->addWidget(exportDeviceEdit, 1, 2);
-    exportArgsLayout->addWidget(exportDataRow, 2, 0, 1, 3);
+    exportArgsLayout->addWidget(exportDataRow, 2, 0, 1, 4);
 
     auto* form = new QFormLayout;
     form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);

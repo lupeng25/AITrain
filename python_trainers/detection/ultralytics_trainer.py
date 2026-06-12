@@ -24,7 +24,7 @@ if str(TRAINER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRAINER_ROOT))
 
 from trainer_protocol import configure_stdio, emit_failed, exception_details, unhandled_failure  # noqa: E402
-from yolo.ultralytics_exporter import LICENSE_NOTE, build_export_plan, onnx_kwargs_from_plan  # noqa: E402
+from yolo.ultralytics_exporter import LICENSE_NOTE, apply_cpu_device_environment, build_export_plan, onnx_kwargs_from_plan  # noqa: E402
 
 
 BACKEND_ID = "ultralytics_yolo_detect"
@@ -851,6 +851,17 @@ def run(request: dict[str, Any]) -> int:
     emit("log", backend=BACKEND_ID, level="info", message=f"Prepared Ultralytics data yaml: {data_yaml}")
 
     try:
+        train_kwargs = build_ultralytics_train_kwargs(parameters, data_yaml, project_dir := output_path / "ultralytics_runs", BACKEND_ID)
+    except ValueError as exc:
+        return fail(str(exc), "ultralytics_train_args_invalid")
+
+    model_name = str(train_kwargs.pop("modelName"))
+    epochs = int(train_kwargs.get("epochs", 1))
+    image_size = int(train_kwargs.get("imgsz", 320))
+    device = str(train_kwargs.get("device") or "cpu")
+    apply_cpu_device_environment(parameters, default_device=device)
+
+    try:
         import ultralytics  # type: ignore
         from ultralytics import YOLO  # type: ignore
     except Exception as exc:
@@ -866,15 +877,6 @@ def run(request: dict[str, Any]) -> int:
         message=f"Using Ultralytics module: {getattr(ultralytics, '__file__', 'built-in')}",
     )
 
-    try:
-        train_kwargs = build_ultralytics_train_kwargs(parameters, data_yaml, project_dir := output_path / "ultralytics_runs", BACKEND_ID)
-    except ValueError as exc:
-        return fail(str(exc), "ultralytics_train_args_invalid")
-
-    model_name = str(train_kwargs.pop("modelName"))
-    epochs = int(train_kwargs.get("epochs", 1))
-    image_size = int(train_kwargs.get("imgsz", 320))
-    device = str(train_kwargs.get("device") or "cpu")
     run_name = str(train_kwargs.get("name") or f"aitrain-{int(time.time())}")
     export_onnx = as_bool(parameters.get("exportOnnx"), True)
     compact_events = as_bool(parameters.get("compactEvents"), False)
@@ -886,6 +888,8 @@ def run(request: dict[str, Any]) -> int:
             default_batch=1,
             default_device=device,
             data_yaml=data_yaml,
+            model_name=model_name,
+            model_family="yolo_segmentation" if BACKEND_ID == "ultralytics_yolo_segment" else "yolo_detection",
         )
     except ValueError as exc:
         return fail(str(exc), "ultralytics_export_args_invalid")

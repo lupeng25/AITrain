@@ -229,6 +229,37 @@ DetectionBox yoloBoxFromInputPixels(
     return box;
 }
 
+DetectionBox yoloBoxFromInputCorners(
+    double x1,
+    double y1,
+    double x2,
+    double y2,
+    int classId,
+    const QSize& inputSize,
+    const LetterboxTransform& transform)
+{
+    const double left = (qMin(x1, x2) - transform.padX) / qMax(1.0e-12, transform.scale);
+    const double top = (qMin(y1, y2) - transform.padY) / qMax(1.0e-12, transform.scale);
+    const double right = (qMax(x1, x2) - transform.padX) / qMax(1.0e-12, transform.scale);
+    const double bottom = (qMax(y1, y2) - transform.padY) / qMax(1.0e-12, transform.scale);
+    Q_UNUSED(inputSize)
+
+    const double sourceWidth = qMax(1, transform.sourceSize.width());
+    const double sourceHeight = qMax(1, transform.sourceSize.height());
+    const double clampedX1 = qBound(0.0, left, sourceWidth);
+    const double clampedY1 = qBound(0.0, top, sourceHeight);
+    const double clampedX2 = qBound(0.0, right, sourceWidth);
+    const double clampedY2 = qBound(0.0, bottom, sourceHeight);
+
+    DetectionBox box;
+    box.classId = classId;
+    box.xCenter = clamp01((clampedX1 + clampedX2) / 2.0 / sourceWidth);
+    box.yCenter = clamp01((clampedY1 + clampedY2) / 2.0 / sourceHeight);
+    box.width = qBound(1.0e-6, (clampedX2 - clampedX1) / sourceWidth, 1.0);
+    box.height = qBound(1.0e-6, (clampedY2 - clampedY1) / sourceHeight, 1.0);
+    return box;
+}
+
 QVector<DetectionPrediction> yoloPredictionsFromOutput(
     const float* output,
     const std::vector<int64_t>& shape,
@@ -307,6 +338,70 @@ QVector<DetectionPrediction> yoloPredictionsFromOutput(
         predictions.append(prediction);
     }
     return postProcessDetectionPredictions(predictions, options);
+}
+
+QVector<DetectionPrediction> yoloEndToEndPredictionsFromOutput(
+    const float* output,
+    const std::vector<int64_t>& shape,
+    const QStringList& classNames,
+    const QSize& inputSize,
+    const LetterboxTransform& transform,
+    const DetectionInferenceOptions& options,
+    QString* error)
+{
+    if (shape.size() != 3 || shape.at(0) != 1 || shape.at(1) <= 0 || shape.at(2) != 6) {
+        if (error) {
+            *error = QStringLiteral("YOLO end-to-end detection output shape must be [1, detections, 6]");
+        }
+        return {};
+    }
+
+    const int detectionCount = static_cast<int>(shape.at(1));
+    constexpr int attributeCount = 6;
+
+    auto valueAt = [output, attributeCount](int detection, int attribute) -> float {
+        return output[detection * attributeCount + attribute];
+    };
+
+    QVector<DetectionPrediction> predictions;
+    predictions.reserve(detectionCount);
+    for (int detection = 0; detection < detectionCount; ++detection) {
+        const double classValue = static_cast<double>(valueAt(detection, 5));
+        const int classId = qRound(classValue);
+        if (classId < 0 || qAbs(classValue - static_cast<double>(classId)) > 1.0e-3) {
+            if (error) {
+                *error = QStringLiteral("YOLO end-to-end detection class_id must be an integer attribute");
+            }
+            return {};
+        }
+        const double confidence = qBound(0.0, static_cast<double>(valueAt(detection, 4)), 1.0);
+        if (confidence < options.confidenceThreshold) {
+            continue;
+        }
+        DetectionPrediction prediction;
+        prediction.box = yoloBoxFromInputCorners(
+            static_cast<double>(valueAt(detection, 0)),
+            static_cast<double>(valueAt(detection, 1)),
+            static_cast<double>(valueAt(detection, 2)),
+            static_cast<double>(valueAt(detection, 3)),
+            classId,
+            inputSize,
+            transform);
+        prediction.className = classId >= 0 && classId < classNames.size()
+            ? classNames.at(classId)
+            : QStringLiteral("class_%1").arg(classId);
+        prediction.objectness = 1.0;
+        prediction.confidence = confidence;
+        predictions.append(prediction);
+    }
+
+    std::sort(predictions.begin(), predictions.end(), [](const DetectionPrediction& left, const DetectionPrediction& right) {
+        return left.confidence > right.confidence;
+    });
+    if (predictions.size() > options.maxDetections) {
+        predictions.resize(options.maxDetections);
+    }
+    return predictions;
 }
 
 QColor overlayColorForClass(int classId, int alpha)
@@ -513,6 +608,111 @@ QVector<SegmentationPrediction> yoloSegmentationPredictionsFromOutputs(
     predictions.reserve(selected.size());
     constexpr double maskThreshold = 0.5;
     for (const SegmentationCandidate& candidate : selected) {
+        SegmentationPrediction prediction;
+        prediction.detection = candidate.detection;
+        prediction.maskThreshold = maskThreshold;
+        prediction.mask = maskFromPrototype(
+            candidate.maskCoefficients,
+            prototypes,
+            prototypeShape,
+            candidate.detection.box,
+            inputSize,
+            transform,
+            maskThreshold,
+            &prediction.maskArea);
+        predictions.append(prediction);
+    }
+    return predictions;
+}
+
+QVector<SegmentationPrediction> yoloEndToEndSegmentationPredictionsFromOutputs(
+    const float* boxesAndMasks,
+    const std::vector<int64_t>& boxesShape,
+    const float* prototypes,
+    const std::vector<int64_t>& prototypeShape,
+    const QStringList& classNames,
+    const QSize& inputSize,
+    const LetterboxTransform& transform,
+    const DetectionInferenceOptions& options,
+    QString* error)
+{
+    if (boxesShape.size() != 3 || boxesShape.at(0) != 1 || prototypeShape.size() != 4 || prototypeShape.at(0) != 1) {
+        if (error) {
+            *error = QStringLiteral("YOLO end-to-end segmentation outputs must be [1, detections, 6 + maskDim] and [1, maskDim, maskH, maskW]");
+        }
+        return {};
+    }
+
+    const int maskDim = static_cast<int>(prototypeShape.at(1));
+    if (maskDim <= 0) {
+        if (error) {
+            *error = QStringLiteral("YOLO end-to-end segmentation prototype output does not contain mask channels");
+        }
+        return {};
+    }
+
+    const int expectedAttributeCount = 6 + maskDim;
+    if (boxesShape.at(1) <= 0 || boxesShape.at(2) != expectedAttributeCount) {
+        if (error) {
+            *error = QStringLiteral("YOLO end-to-end segmentation outputs must be [1, detections, 6 + maskDim] and [1, maskDim, maskH, maskW]");
+        }
+        return {};
+    }
+
+    const int detectionCount = static_cast<int>(boxesShape.at(1));
+    const int attributeCount = expectedAttributeCount;
+    auto valueAt = [boxesAndMasks, attributeCount](int detection, int attribute) -> float {
+        return boxesAndMasks[detection * attributeCount + attribute];
+    };
+
+    QVector<SegmentationCandidate> candidates;
+    candidates.reserve(detectionCount);
+    for (int detection = 0; detection < detectionCount; ++detection) {
+        const double classValue = static_cast<double>(valueAt(detection, 5));
+        const int classId = qRound(classValue);
+        if (classId < 0 || qAbs(classValue - static_cast<double>(classId)) > 1.0e-3) {
+            if (error) {
+                *error = QStringLiteral("YOLO end-to-end segmentation class_id must be an integer attribute");
+            }
+            return {};
+        }
+        const double confidence = qBound(0.0, static_cast<double>(valueAt(detection, 4)), 1.0);
+        if (confidence < options.confidenceThreshold) {
+            continue;
+        }
+
+        SegmentationCandidate candidate;
+        candidate.detection.box = yoloBoxFromInputCorners(
+            static_cast<double>(valueAt(detection, 0)),
+            static_cast<double>(valueAt(detection, 1)),
+            static_cast<double>(valueAt(detection, 2)),
+            static_cast<double>(valueAt(detection, 3)),
+            classId,
+            inputSize,
+            transform);
+        candidate.detection.className = classId >= 0 && classId < classNames.size()
+            ? classNames.at(classId)
+            : QStringLiteral("class_%1").arg(classId);
+        candidate.detection.objectness = 1.0;
+        candidate.detection.confidence = confidence;
+        candidate.maskCoefficients.reserve(maskDim);
+        for (int index = 0; index < maskDim; ++index) {
+            candidate.maskCoefficients.append(valueAt(detection, 6 + index));
+        }
+        candidates.append(candidate);
+    }
+
+    std::sort(candidates.begin(), candidates.end(), [](const SegmentationCandidate& left, const SegmentationCandidate& right) {
+        return left.detection.confidence > right.detection.confidence;
+    });
+    if (candidates.size() > options.maxDetections) {
+        candidates.resize(options.maxDetections);
+    }
+
+    QVector<SegmentationPrediction> predictions;
+    predictions.reserve(candidates.size());
+    constexpr double maskThreshold = 0.5;
+    for (const SegmentationCandidate& candidate : candidates) {
         SegmentationPrediction prediction;
         prediction.detection = candidate.detection;
         prediction.maskThreshold = maskThreshold;

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import shutil
 import sys
 import time
@@ -22,7 +23,7 @@ from trainer_protocol import configure_stdio, emit_failed, exception_details  # 
 
 BACKEND_ID = "ultralytics_yolo_export"
 LICENSE_NOTE = "Ultralytics YOLO is executed through the installed official Python package. Review its license before redistribution."
-SUPPORTED_EXPORT_ARGS = {"format", "dynamic", "half", "int8", "imgsz", "batch", "device", "data"}
+SUPPORTED_EXPORT_ARGS = {"format", "dynamic", "half", "int8", "imgsz", "batch", "device", "data", "end2end"}
 
 
 def emit(event_type: str, **payload: Any) -> None:
@@ -87,6 +88,15 @@ def prepend_python_paths(parameters: dict[str, Any]) -> None:
     for path in reversed(paths):
         if path and path not in sys.path:
             sys.path.insert(0, path)
+
+
+def apply_cpu_device_environment(parameters: dict[str, Any], default_device: str | None = None) -> None:
+    raw_args = parameters.get("ultralyticsExportArgs") if isinstance(parameters.get("ultralyticsExportArgs"), dict) else {}
+    device = raw_args.get("device", parameters.get("device", default_device))
+    if device is None or device == "":
+        device = default_device
+    if str(device or "").strip().lower() == "cpu":
+        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 
 def find_ultralytics_training_report(model_path: Path) -> tuple[Path | None, dict[str, Any]]:
@@ -168,6 +178,24 @@ def parse_bool(name: str, value: Any) -> bool:
     raise ValueError(f"Ultralytics export argument '{name}' must be a boolean")
 
 
+def parse_end2end(name: str, value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"", "auto", "default"}:
+            return None
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    raise ValueError(f"Ultralytics export argument '{name}' must be auto, true, or false")
+
+
 def parse_int(name: str, value: Any, minimum: int = 1) -> int:
     try:
         parsed = int(value)
@@ -191,6 +219,54 @@ def official_format_for(product_format: str) -> str:
     return "engine" if product_format == "tensorrt" else product_format
 
 
+def is_yolo26_model_name(value: Any) -> bool:
+    text = str(value or "").replace("\\", "/").lower()
+    return "yolo26" in Path(text).name or "yolo26" in Path(text).stem
+
+
+def model_name_hint(parameters: dict[str, Any], explicit: str | Path | None) -> str:
+    if explicit is not None and str(explicit) != "":
+        return str(explicit)
+    for key in ("model", "modelPreset", "checkpointPath", "modelPath"):
+        value = parameters.get(key)
+        if value is not None and str(value) != "":
+            return str(value)
+    return ""
+
+
+def model_family_hint(parameters: dict[str, Any], explicit: str | None, model_name: str) -> str:
+    family = model_family_from_text(explicit)
+    if family:
+        return family
+    for key in ("modelFamily", "trainingBackend", "backend", "taskType"):
+        family = model_family_from_text(parameters.get(key))
+        if family:
+            return family
+    return "yolo_segmentation" if "-seg" in model_name.lower() else "yolo_detection"
+
+
+def normalize_end2end(
+    raw_value: Any,
+    *,
+    product_format: str,
+    model_name: str,
+    model_family: str,
+) -> tuple[bool, bool]:
+    parsed = parse_end2end("end2end", raw_value)
+    explicitly_requested = parsed is not None
+    if product_format == "ncnn":
+        if parsed is True:
+            raise ValueError("NCNN export requires end2end=false because AITrain NCNN runtime uses traditional YOLO decoding.")
+        return False, explicitly_requested
+
+    if parsed is not None:
+        return parsed, explicitly_requested
+
+    if is_yolo26_model_name(model_name) and model_family == "yolo_detection":
+        return True, explicitly_requested
+    return False, explicitly_requested
+
+
 def export_report_path(export_path: Path) -> Path:
     return export_path.with_name(f"{export_path.stem}.aitrain-export.json")
 
@@ -202,6 +278,8 @@ def build_export_plan(
     default_batch: int | None = None,
     default_device: str | None = None,
     data_yaml: str | Path | None = None,
+    model_name: str | Path | None = None,
+    model_family: str | None = None,
 ) -> dict[str, Any]:
     parameters = parameters or {}
     raw_args = parameters.get("ultralyticsExportArgs")
@@ -215,14 +293,22 @@ def build_export_plan(
         raise ValueError(f"Unsupported Ultralytics export argument: {unknown[0]}")
 
     product_format = normalize_product_format(raw_args.get("format", default_format), default_format)
+    model_hint = model_name_hint(parameters, model_name)
+    family_hint = model_family_hint(parameters, model_family, model_hint)
     dynamic = parse_bool("dynamic", raw_args.get("dynamic", False))
     half = parse_bool("half", raw_args.get("half", False))
     int8 = parse_bool("int8", raw_args.get("int8", False))
+    end2end, explicit_end2end = normalize_end2end(
+        raw_args.get("end2end", "auto"),
+        product_format=product_format,
+        model_name=model_hint,
+        model_family=family_hint,
+    )
 
     if product_format == "onnx" and int8:
         raise ValueError("ONNX export does not support int8 in AITrain; use TensorRT export for INT8.")
     if product_format == "ncnn" and (dynamic or half or int8):
-        raise ValueError("NCNN export requires a static FP32 ONNX intermediate; dynamic/half/int8 are unsupported.")
+        raise ValueError("NCNN export requires a static FP32 ONNX intermediate; dynamic/half/int8/end2end are unsupported.")
     if int8 and product_format != "tensorrt":
         raise ValueError("INT8 export is only supported for TensorRT engine export.")
 
@@ -235,6 +321,7 @@ def build_export_plan(
         "dynamic": dynamic,
         "half": half,
         "int8": int8,
+        "end2end": end2end,
     }
     kwargs: dict[str, Any] = {
         "format": official_format_for(product_format),
@@ -242,6 +329,8 @@ def build_export_plan(
         "half": half,
         "int8": int8,
     }
+    if is_yolo26_model_name(model_hint) or explicit_end2end:
+        kwargs["end2end"] = end2end
     if imgsz not in {None, ""}:
         normalized["imgsz"] = parse_int("imgsz", imgsz, 32)
         kwargs["imgsz"] = normalized["imgsz"]
@@ -262,17 +351,19 @@ def build_export_plan(
     return {
         "productFormat": product_format,
         "officialFormat": kwargs["format"],
+        "modelName": model_hint,
+        "modelFamily": family_hint,
         "normalized": normalized,
         "kwargs": kwargs,
     }
 
 
 def onnx_kwargs_from_plan(plan: dict[str, Any]) -> dict[str, Any]:
-    normalized = dict(plan.get("normalized") or {})
-    normalized["format"] = "onnx"
-    normalized["int8"] = False
-    nested = {"ultralyticsExportArgs": normalized}
-    return build_export_plan(nested, default_format="onnx")["kwargs"]
+    kwargs = dict(plan.get("kwargs") or {})
+    kwargs["format"] = "onnx"
+    kwargs["int8"] = False
+    kwargs.pop("data", None)
+    return kwargs
 
 
 def copy_exported_artifact(exported_path: Path, output_path: Path) -> Path:
@@ -301,16 +392,12 @@ def run_official_export(request: dict[str, Any]) -> int:
     export_parameters.setdefault("ultralyticsExportArgs", {})
     if isinstance(export_parameters["ultralyticsExportArgs"], dict):
         export_parameters["ultralyticsExportArgs"].setdefault("format", product_format)
+    apply_cpu_device_environment(export_parameters)
 
     if not model_path.exists():
         return fail(f"model path does not exist: {model_path}", "model_missing")
     if output_path.name == "":
         return fail("outputPath is required for official YOLO export", "output_missing")
-
-    try:
-        plan = build_export_plan(export_parameters, default_format=product_format)
-    except ValueError as exc:
-        return fail(str(exc), "ultralytics_export_args_invalid")
 
     try:
         import ultralytics  # type: ignore
@@ -322,13 +409,28 @@ def run_official_export(request: dict[str, Any]) -> int:
             {"exception": str(exc)},
         )
 
+    try:
+        model = YOLO(str(model_path))
+        model_family, source_report_path, source_report = infer_model_family(model_path, model, request)
+    except Exception as exc:
+        return fail("Ultralytics model load failed.", "ultralytics_model_load_failed", exception_details(exc))
+
+    model_hint = str(source_report.get("model") or model_path.name)
+    try:
+        plan = build_export_plan(
+            export_parameters,
+            default_format=product_format,
+            model_name=model_hint,
+            model_family=model_family,
+        )
+    except ValueError as exc:
+        return fail(str(exc), "ultralytics_export_args_invalid")
+
     emit("progress", taskId=task_id, backend=BACKEND_ID, phase="export", percent=0, message="official YOLO export started")
     emit("log", taskId=task_id, backend=BACKEND_ID, level="info", message=f"Using Ultralytics module: {getattr(ultralytics, '__file__', 'built-in')}")
     emit("log", taskId=task_id, backend=BACKEND_ID, level="info", message=f"Exporting {model_path} as {plan['productFormat']}")
 
     try:
-        model = YOLO(str(model_path))
-        model_family, source_report_path, source_report = infer_model_family(model_path, model, request)
         exported = model.export(**plan["kwargs"])
     except Exception as exc:
         return fail("Ultralytics official export failed.", "ultralytics_export_failed", exception_details(exc))

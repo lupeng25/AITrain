@@ -6,6 +6,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QProcessEnvironment>
 #include <QString>
 #include <QStringList>
 
@@ -16,6 +17,8 @@ bool writeJsonFile(const QString& path, const QJsonObject& object, QString* erro
 QString defaultTaskOutputPath(const QString& basePath, const QString& taskId);
 QJsonObject nvidiaSmiCheck();
 QString firstUsablePythonExecutable(const QJsonObject& parameters = {});
+QString packagedPaddleOcrRepoPath();
+void configurePackagedPythonEnvironment(QProcessEnvironment* environment);
 QString pythonTrainerScriptFileForBackend(const QString& backend);
 QString pythonTrainerScriptPath(const QJsonObject& parameters, const QString& backend);
 QString pythonYoloExporterScriptPath(const QJsonObject& parameters = {});

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import sys
 import json
+import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -210,6 +211,64 @@ def test_training_export_defaults_to_single_image_batch() -> None:
     assert plan["normalized"]["batch"] == 1
 
 
+def test_cpu_device_environment_uses_default_cpu() -> None:
+    original = os.environ.get("CUDA_VISIBLE_DEVICES")
+    try:
+        os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+        exporter.apply_cpu_device_environment({}, default_device="cpu")
+        assert os.environ["CUDA_VISIBLE_DEVICES"] == "-1"
+    finally:
+        if original is None:
+            os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+        else:
+            os.environ["CUDA_VISIBLE_DEVICES"] = original
+
+
+def test_yolo26_detection_auto_end2end_defaults_true() -> None:
+    plan = exporter.build_export_plan(
+        {"ultralyticsExportArgs": {"format": "onnx", "end2end": "auto"}},
+        model_name="yolo26n.yaml",
+        model_family="yolo_detection",
+    )
+
+    assert plan["normalized"]["end2end"] is True
+    assert plan["kwargs"]["end2end"] is True
+
+
+def test_yolo26_segmentation_auto_end2end_defaults_false() -> None:
+    plan = exporter.build_export_plan(
+        {"ultralyticsExportArgs": {"format": "onnx", "end2end": "auto"}},
+        model_name="yolo26n-seg.pt",
+        model_family="yolo_segmentation",
+    )
+
+    assert plan["normalized"]["end2end"] is False
+    assert plan["kwargs"]["end2end"] is False
+
+
+def test_ultralytics_export_args_accept_bool_end2end_override() -> None:
+    plan = exporter.build_export_plan(
+        {"ultralyticsExportArgs": {"format": "onnx", "end2end": True}},
+        model_name="yolo26n-seg.yaml",
+        model_family="yolo_segmentation",
+    )
+
+    assert plan["normalized"]["end2end"] is True
+    assert plan["kwargs"]["end2end"] is True
+
+
+def test_yolo26_ncnn_auto_forces_traditional_end2end_false() -> None:
+    plan = exporter.build_export_plan(
+        {"ultralyticsExportArgs": {"format": "ncnn", "end2end": "auto"}},
+        model_name="yolo26n.yaml",
+        model_family="yolo_detection",
+    )
+
+    assert plan["productFormat"] == "ncnn"
+    assert plan["normalized"]["end2end"] is False
+    assert plan["kwargs"]["end2end"] is False
+
+
 def test_ultralytics_export_args_reject_unknown_keys() -> None:
     try:
         exporter.build_export_plan({"ultralyticsExportArgs": {"unknown": 1}})
@@ -225,6 +284,7 @@ def test_ultralytics_export_args_reject_unsupported_combinations() -> None:
         {"format": "ncnn", "dynamic": True},
         {"format": "ncnn", "half": True},
         {"format": "ncnn", "int8": True},
+        {"format": "ncnn", "end2end": True},
         {"format": "tensorrt", "int8": True},
     ]:
         try:
@@ -283,6 +343,12 @@ if __name__ == "__main__":
     test_ultralytics_train_args_reject_unknown_keys()
     test_official_val_metric_extraction_detection_and_segmentation()
     test_ultralytics_export_args_are_sanitized()
+    test_training_export_defaults_to_single_image_batch()
+    test_cpu_device_environment_uses_default_cpu()
+    test_yolo26_detection_auto_end2end_defaults_true()
+    test_yolo26_segmentation_auto_end2end_defaults_false()
+    test_ultralytics_export_args_accept_bool_end2end_override()
+    test_yolo26_ncnn_auto_forces_traditional_end2end_false()
     test_ultralytics_export_args_reject_unknown_keys()
     test_ultralytics_export_args_reject_unsupported_combinations()
     test_ultralytics_export_args_accept_tensorrt_int8_with_data()

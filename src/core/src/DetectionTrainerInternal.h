@@ -41,7 +41,23 @@ DetectionBox yoloBoxFromInputPixels(
     int classId,
     const QSize& inputSize,
     const LetterboxTransform& transform);
+DetectionBox yoloBoxFromInputCorners(
+    double x1,
+    double y1,
+    double x2,
+    double y2,
+    int classId,
+    const QSize& inputSize,
+    const LetterboxTransform& transform);
 QVector<DetectionPrediction> yoloPredictionsFromOutput(
+    const float* output,
+    const std::vector<int64_t>& shape,
+    const QStringList& classNames,
+    const QSize& inputSize,
+    const LetterboxTransform& transform,
+    const DetectionInferenceOptions& options,
+    QString* error);
+QVector<DetectionPrediction> yoloEndToEndPredictionsFromOutput(
     const float* output,
     const std::vector<int64_t>& shape,
     const QStringList& classNames,
@@ -60,6 +76,16 @@ QImage maskFromPrototype(
     double threshold,
     double* maskArea);
 QVector<SegmentationPrediction> yoloSegmentationPredictionsFromOutputs(
+    const float* boxesAndMasks,
+    const std::vector<int64_t>& boxesShape,
+    const float* prototypes,
+    const std::vector<int64_t>& prototypeShape,
+    const QStringList& classNames,
+    const QSize& inputSize,
+    const LetterboxTransform& transform,
+    const DetectionInferenceOptions& options,
+    QString* error);
+QVector<SegmentationPrediction> yoloEndToEndSegmentationPredictionsFromOutputs(
     const float* boxesAndMasks,
     const std::vector<int64_t>& boxesShape,
     const float* prototypes,

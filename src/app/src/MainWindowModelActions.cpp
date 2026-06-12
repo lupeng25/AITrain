@@ -231,6 +231,10 @@ QJsonObject yoloTrainingExportArgsFromUi(const QWidget* root, int imageSize)
     args.insert(QStringLiteral("imgsz"), imageSize);
     args.insert(QStringLiteral("batch"), 1);
     args.insert(QStringLiteral("device"), device);
+    const QString endToEnd = yoloExportArgText(root, QStringLiteral("YoloTrainExportArg"), QStringLiteral("end2end"));
+    if (!endToEnd.isEmpty()) {
+        args.insert(QStringLiteral("end2end"), endToEnd);
+    }
     return args;
 }
 
@@ -246,6 +250,10 @@ QJsonObject yoloModelExportArgsFromUi(const QWidget* root, const QString& format
     insertBoolIfTrue(QStringLiteral("dynamic"));
     insertBoolIfTrue(QStringLiteral("half"));
     insertBoolIfTrue(QStringLiteral("int8"));
+    const QString endToEnd = yoloExportArgText(root, QStringLiteral("YoloModelExportArg"), QStringLiteral("end2end"));
+    if (!endToEnd.isEmpty()) {
+        args.insert(QStringLiteral("end2end"), endToEnd);
+    }
     for (const QString& key : {QStringLiteral("imgsz"), QStringLiteral("batch")}) {
         const QString text = yoloExportArgText(root, QStringLiteral("YoloModelExportArg"), key);
         if (!text.isEmpty() && isIntegerLike(text)) {

@@ -139,6 +139,42 @@ bool pythonExecutableUsable(const QString& executable)
         && process.exitCode() == 0;
 }
 
+QString packagedPythonEnvRoot()
+{
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        QDir(appDir).absoluteFilePath(QStringLiteral("python_env")),
+        QDir(appDir).absoluteFilePath(QStringLiteral("../python_env")),
+        QDir::current().absoluteFilePath(QStringLiteral("python_env"))
+    };
+    for (const QString& candidate : candidates) {
+        if (QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("Scripts/python.exe")))
+            || QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("python.exe")))) {
+            return QFileInfo(candidate).absoluteFilePath();
+        }
+    }
+    return {};
+}
+
+void configurePackagedPythonEnvironment(QProcessEnvironment* environment)
+{
+    if (!environment) {
+        return;
+    }
+    const QString pythonRoot = packagedPythonEnvRoot();
+    if (pythonRoot.isEmpty()) {
+        return;
+    }
+    QStringList pathEntries;
+    pathEntries << QDir(pythonRoot).filePath(QStringLiteral("Scripts"));
+    pathEntries << pythonRoot;
+    const QString existingPath = environment->value(QStringLiteral("PATH"));
+    if (!existingPath.isEmpty()) {
+        pathEntries << existingPath;
+    }
+    environment->insert(QStringLiteral("PATH"), pathEntries.join(QDir::listSeparator()));
+}
+
 QString officialYoloEvaluationPython(const QJsonObject& options)
 {
     const QString requested = options.value(QStringLiteral("pythonExecutable")).toString().trimmed();
@@ -152,6 +188,12 @@ QString officialYoloEvaluationPython(const QJsonObject& options)
 
     const QString appDir = QCoreApplication::applicationDirPath();
     const QStringList candidates = {
+        QDir(appDir).absoluteFilePath(QStringLiteral("python_env/Scripts/python.exe")),
+        QDir(appDir).absoluteFilePath(QStringLiteral("python_env/python.exe")),
+        QDir(appDir).absoluteFilePath(QStringLiteral("../python_env/Scripts/python.exe")),
+        QDir(appDir).absoluteFilePath(QStringLiteral("../python_env/python.exe")),
+        QDir::current().absoluteFilePath(QStringLiteral("python_env/Scripts/python.exe")),
+        QDir::current().absoluteFilePath(QStringLiteral("python_env/python.exe")),
         QDir::current().absoluteFilePath(QStringLiteral(".deps/python-3.13.13-embed-amd64/python.exe")),
         QDir(appDir).absoluteFilePath(QStringLiteral("../.deps/python-3.13.13-embed-amd64/python.exe")),
         QDir(appDir).absoluteFilePath(QStringLiteral("../../.deps/python-3.13.13-embed-amd64/python.exe")),
@@ -281,6 +323,7 @@ WorkflowResult runOfficialYoloEvaluation(
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
     environment.insert(QStringLiteral("PYTHONIOENCODING"), QStringLiteral("utf-8"));
+    configurePackagedPythonEnvironment(&environment);
     process.setProcessEnvironment(environment);
     process.setProgram(python);
     process.setArguments(QStringList() << QStringLiteral("-u") << evaluatorScript << QStringLiteral("--request") << requestPath);

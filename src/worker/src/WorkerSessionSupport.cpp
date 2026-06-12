@@ -83,6 +83,62 @@ QJsonObject nvidiaSmiCheck()
     return checkObject(QStringLiteral("NVIDIA Driver"), QStringLiteral("ok"), QStringLiteral("检测到 NVIDIA GPU：%1").arg(output.split(QLatin1Char('\n')).first()), details);
 }
 
+QString packagedPythonEnvRoot()
+{
+    const QString applicationDir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("python_env")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../python_env")),
+        QDir::current().absoluteFilePath(QStringLiteral("python_env"))
+    };
+    for (const QString& candidate : candidates) {
+        if (QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("Scripts/python.exe")))
+            || QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("python.exe")))) {
+            return QFileInfo(candidate).absoluteFilePath();
+        }
+    }
+    return {};
+}
+
+QString packagedPaddleOcrRepoPath()
+{
+    const QString pythonRoot = packagedPythonEnvRoot();
+    if (pythonRoot.isEmpty()) {
+        return {};
+    }
+    const QString repo = QDir(pythonRoot).filePath(QStringLiteral("PaddleOCR"));
+    if (QFileInfo::exists(QDir(repo).filePath(QStringLiteral("tools/train.py")))) {
+        return QFileInfo(repo).absoluteFilePath();
+    }
+    return {};
+}
+
+void configurePackagedPythonEnvironment(QProcessEnvironment* environment)
+{
+    if (!environment) {
+        return;
+    }
+    const QString pythonRoot = packagedPythonEnvRoot();
+    if (!pythonRoot.isEmpty()) {
+        QStringList pathEntries;
+        pathEntries << QDir(pythonRoot).filePath(QStringLiteral("Scripts"));
+        pathEntries << pythonRoot;
+        const QString existingPath = environment->value(QStringLiteral("PATH"));
+        if (!existingPath.isEmpty()) {
+            pathEntries << existingPath;
+        }
+        environment->insert(QStringLiteral("PATH"), pathEntries.join(QDir::listSeparator()));
+    }
+
+    if (!environment->contains(QStringLiteral("AITRAIN_PADDLEOCR_REPO"))
+        && !environment->contains(QStringLiteral("AITRAIN_PADDLEOCR_SOURCE_ROOT"))) {
+        const QString repo = packagedPaddleOcrRepoPath();
+        if (!repo.isEmpty()) {
+            environment->insert(QStringLiteral("AITRAIN_PADDLEOCR_REPO"), repo);
+        }
+    }
+}
+
 QString firstUsablePythonExecutable(const QJsonObject& parameters)
 {
     QStringList candidates;
@@ -96,6 +152,12 @@ QString firstUsablePythonExecutable(const QJsonObject& parameters)
     }
 
     const QString applicationDir = QCoreApplication::applicationDirPath();
+    candidates.append(QDir(applicationDir).absoluteFilePath(QStringLiteral("python_env/Scripts/python.exe")));
+    candidates.append(QDir(applicationDir).absoluteFilePath(QStringLiteral("python_env/python.exe")));
+    candidates.append(QDir(applicationDir).absoluteFilePath(QStringLiteral("../python_env/Scripts/python.exe")));
+    candidates.append(QDir(applicationDir).absoluteFilePath(QStringLiteral("../python_env/python.exe")));
+    candidates.append(QDir::current().absoluteFilePath(QStringLiteral("python_env/Scripts/python.exe")));
+    candidates.append(QDir::current().absoluteFilePath(QStringLiteral("python_env/python.exe")));
     candidates.append(QDir(applicationDir).absoluteFilePath(QStringLiteral("../../.deps/python-3.13.13-embed-amd64/python.exe")));
     candidates.append(QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/python-3.13.13-embed-amd64/python.exe")));
     candidates.append(QDir::current().absoluteFilePath(QStringLiteral(".deps/python-3.13.13-embed-amd64/python.exe")));
@@ -675,6 +737,7 @@ QJsonObject yoloEnvironmentProfile(const QString& pythonExecutable)
             QStringLiteral("missing"),
             QStringLiteral("No usable Python executable was found for YOLO official backends.")));
         repairHints.append(QStringLiteral("Set training parameter `pythonExecutable` or environment variable `AITRAIN_PYTHON_EXECUTABLE` to a valid Python path."));
+        repairHints.append(QStringLiteral("Install the AITrain Python AI Environment package so `python_env` is available beside the application."));
         repairHints.append(QStringLiteral("Use local embed Python under `.deps/python-3.13.13-embed-amd64/python.exe` when available."));
     } else {
         checks.append(profileCheck(
@@ -717,21 +780,30 @@ QJsonObject ocrEnvironmentProfile(const QString& pythonExecutable)
     QJsonArray repairHints;
 
     const QString isolatedOcrPython = QString::fromLocal8Bit(qgetenv("AITRAIN_OCR_PYTHON_EXECUTABLE")).trimmed();
-    if (isolatedOcrPython.isEmpty()) {
+    const QString packagedPython = firstUsablePythonExecutable();
+    const QString normalizedPackagedPython = QFileInfo(packagedPython).absoluteFilePath().replace(QLatin1Char('\\'), QLatin1Char('/'));
+    const bool packagedPythonDetected = !packagedPython.isEmpty()
+        && normalizedPackagedPython.contains(QStringLiteral("/python_env/"), Qt::CaseInsensitive);
+    if (isolatedOcrPython.isEmpty() && !packagedPythonDetected) {
         checks.append(profileCheck(
             QStringLiteral("isolatedOcrPython"),
             QStringLiteral("warning"),
-            QStringLiteral("No isolated OCR Python is configured via AITRAIN_OCR_PYTHON_EXECUTABLE.")));
+            QStringLiteral("No isolated OCR Python is configured via AITRAIN_OCR_PYTHON_EXECUTABLE or packaged python_env.")));
         repairHints.append(QStringLiteral("Set `AITRAIN_OCR_PYTHON_EXECUTABLE` to isolated OCR Python for PaddleOCR official workflows."));
+        repairHints.append(QStringLiteral("Install the AITrain Python AI Environment package into the application directory."));
     } else {
         checks.append(profileCheck(
             QStringLiteral("isolatedOcrPython"),
             QStringLiteral("ok"),
-            QStringLiteral("Isolated OCR Python is configured."),
-            QJsonObject{{QStringLiteral("path"), isolatedOcrPython}}));
+            isolatedOcrPython.isEmpty()
+                ? QStringLiteral("Packaged OCR Python environment was found.")
+                : QStringLiteral("Isolated OCR Python is configured."),
+            QJsonObject{{QStringLiteral("path"), isolatedOcrPython.isEmpty() ? packagedPython : isolatedOcrPython}}));
     }
 
-    const QString activePython = !isolatedOcrPython.isEmpty() ? isolatedOcrPython : pythonExecutable;
+    const QString activePython = !isolatedOcrPython.isEmpty()
+        ? isolatedOcrPython
+        : (!packagedPython.isEmpty() ? packagedPython : pythonExecutable);
     if (activePython.isEmpty()) {
         checks.append(profileCheck(
             QStringLiteral("pythonExecutable"),
@@ -759,12 +831,14 @@ QJsonObject ocrEnvironmentProfile(const QString& pythonExecutable)
     const QString repoRoot = QString::fromLocal8Bit(qgetenv("AITRAIN_PADDLEOCR_REPO")).trimmed();
     const QString sourceRoot = !repoRoot.isEmpty()
         ? repoRoot
-        : QString::fromLocal8Bit(qgetenv("AITRAIN_PADDLEOCR_SOURCE_ROOT")).trimmed();
+        : (!QString::fromLocal8Bit(qgetenv("AITRAIN_PADDLEOCR_SOURCE_ROOT")).trimmed().isEmpty()
+                ? QString::fromLocal8Bit(qgetenv("AITRAIN_PADDLEOCR_SOURCE_ROOT")).trimmed()
+                : packagedPaddleOcrRepoPath());
     if (sourceRoot.isEmpty()) {
         checks.append(profileCheck(
             QStringLiteral("paddleOcrSourceCheckout"),
             QStringLiteral("warning"),
-            QStringLiteral("PaddleOCR source checkout path is not configured (AITRAIN_PADDLEOCR_REPO).")));
+            QStringLiteral("PaddleOCR source checkout path is not configured and no packaged python_env/PaddleOCR checkout was found.")));
     } else {
         const bool trainScriptExists = QFileInfo::exists(QDir(sourceRoot).filePath(QStringLiteral("tools/train.py")));
         checks.append(profileCheck(

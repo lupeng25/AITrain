@@ -45,7 +45,8 @@ bool ncnnOfficialExportOptionsUnsupported(const QJsonObject& options)
     const QJsonObject args = options.value(QStringLiteral("ultralyticsExportArgs")).toObject();
     return jsonBool(args, QStringLiteral("dynamic"))
         || jsonBool(args, QStringLiteral("half"))
-        || jsonBool(args, QStringLiteral("int8"));
+        || jsonBool(args, QStringLiteral("int8"))
+        || jsonBool(args, QStringLiteral("end2end"));
 }
 
 QString unsupportedOfficialExportOptionsError(const QString& format, const QString& checkpointSuffix, const QJsonObject& options)
@@ -59,11 +60,12 @@ QString unsupportedOfficialExportOptionsError(const QString& format, const QStri
     const bool dynamic = jsonBool(args, QStringLiteral("dynamic"));
     const bool half = jsonBool(args, QStringLiteral("half"));
     const bool int8 = jsonBool(args, QStringLiteral("int8"));
+    const bool end2end = jsonBool(args, QStringLiteral("end2end"));
     if (normalizedFormat == QStringLiteral("onnx") && int8) {
         return QStringLiteral("ONNX export does not support int8 in AITrain; use TensorRT export for INT8.");
     }
-    if (normalizedFormat == QStringLiteral("ncnn") && (dynamic || half || int8)) {
-        return QStringLiteral("NCNN export requires a static FP32 ONNX intermediate; dynamic/half/int8 are unsupported.");
+    if (normalizedFormat == QStringLiteral("ncnn") && (dynamic || half || int8 || end2end)) {
+        return QStringLiteral("NCNN export requires a static FP32 traditional YOLO ONNX intermediate; dynamic/half/int8/end2end are unsupported.");
     }
     if (checkpointSuffix != QStringLiteral("pt") && normalizedFormat.startsWith(QStringLiteral("tensorrt")) && int8) {
         return QStringLiteral("TensorRT INT8 export requires official Ultralytics .pt export with calibration data; existing ONNX TensorRT conversion does not consume int8 options.");
@@ -179,6 +181,7 @@ WorkerSession::OfficialYoloExportResult WorkerSession::runOfficialYoloExport(
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
     environment.insert(QStringLiteral("PYTHONIOENCODING"), QStringLiteral("utf-8"));
+    configurePackagedPythonEnvironment(&environment);
     process.setProcessEnvironment(environment);
     process.setProgram(pythonExecutable);
     process.setArguments(QStringList() << QStringLiteral("-u") << exporterScript << QStringLiteral("--request") << requestPath);
@@ -839,7 +842,7 @@ void WorkerSession::exportModel(const QJsonObject& payload)
             if (ncnnOfficialExportOptionsUnsupported(options)) {
                 running_ = false;
                 failWithDetails(
-                    QStringLiteral("NCNN export from .pt requires a static FP32 ONNX intermediate; dynamic/half/int8 are unsupported."),
+                    QStringLiteral("NCNN export from .pt requires a static FP32 traditional YOLO ONNX intermediate; dynamic/half/int8/end2end are unsupported."),
                     QStringLiteral("unsupported_export_options"),
                     QJsonObject{{QStringLiteral("format"), format}, {QStringLiteral("outputPath"), outputPath}});
                 return;
@@ -850,6 +853,7 @@ void WorkerSession::exportModel(const QJsonObject& payload)
             args.insert(QStringLiteral("dynamic"), false);
             args.insert(QStringLiteral("half"), false);
             args.insert(QStringLiteral("int8"), false);
+            args.insert(QStringLiteral("end2end"), false);
             intermediateOptions.insert(QStringLiteral("ultralyticsExportArgs"), args);
             const QString intermediateDir = QDir(QFileInfo(outputPath).absolutePath()).filePath(QStringLiteral("official_onnx_intermediate"));
             const QString intermediateOnnx = QDir(intermediateDir).filePath(QStringLiteral("model.onnx"));

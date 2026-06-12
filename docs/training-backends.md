@@ -8,8 +8,8 @@ Production training is official-backend only. The GUI training page and Worker p
 
 | Backend | Task | Status | Notes |
 |---|---|---|---|
-| `ultralytics_yolo_detect` | Detection | Official Ultralytics adapter | Uses Ultralytics YOLO detection training and official export. P1 exposes YOLOv5u standard P5 detection presets, YOLOv8 / YOLO11 / YOLO12 `n/s/m/l/x` `.yaml` and `.pt` presets, plus YOLOv8 P2/P6 detection YAML architectures. Product evaluation uses Ultralytics official `val()`; product inference, benchmark, and deployment validation run against official artifacts through the AITrain C++ runtime. Review AGPL-3.0 / Enterprise license before redistribution. |
-| `ultralytics_yolo_segment` | Segmentation | Official Ultralytics adapter | Uses Ultralytics YOLO instance-segmentation training and official export. P1 exposes YOLOv8 / YOLO11 / YOLO12 `n/s/m/l/x` `-seg.yaml` and `-seg.pt` presets. Product evaluation uses Ultralytics official `val()`; product inference, benchmark, and deployment validation run against official artifacts through the AITrain C++ runtime, including mask postprocess and overlays. |
+| `ultralytics_yolo_detect` | Detection | Official Ultralytics adapter | Uses Ultralytics YOLO detection training and official export. P1 exposes YOLOv5u standard P5 detection presets, YOLOv8 / YOLO11 / YOLO12 `n/s/m/l/x` `.yaml` and `.pt` presets, plus YOLOv8 P2/P6 detection YAML architectures. YOLO26 detection `n/s/m/l/x` `.yaml` and `.pt` presets are tracked in the separate YOLO26 compatibility matrix and default to `end2end=true`. Product evaluation uses Ultralytics official `val()`; product inference, benchmark, and deployment validation run against official artifacts through the AITrain C++ runtime. Review AGPL-3.0 / Enterprise license before redistribution. |
+| `ultralytics_yolo_segment` | Segmentation | Official Ultralytics adapter | Uses Ultralytics YOLO instance-segmentation training and official export. P1 exposes YOLOv8 / YOLO11 / YOLO12 `n/s/m/l/x` `-seg.yaml` and `-seg.pt` presets. YOLO26 instance-segmentation `n/s/m/l/x-seg` `.yaml` and `.pt` presets are tracked in the separate YOLO26 compatibility matrix and default to `end2end=false`, while explicit `end2end=true` is accepted for ONNX/TensorRT export validation. Product evaluation uses Ultralytics official `val()`; product inference, benchmark, and deployment validation run against official artifacts through the AITrain C++ runtime, including mask postprocess and overlays. |
 | `paddleocr_det_official` | OCR detection | Official PaddleOCR adapter | Generates PP-OCRv4 or PP-OCRv5 detection configs from PaddleOCR Det data and can run official PaddleOCR `tools/train.py` and `tools/export_model.py`. The default preset is `PP-OCRv5_mobile_det`; `PP-OCRv4_mobile_det` and `PP-OCRv5_server_det` remain selectable. |
 | `paddleocr_rec_official` / `paddleocr_ppocrv4_rec` | OCR recognition | Official PaddleOCR adapter | Generates PP-OCRv4 or PP-OCRv5 recognition configs from AITrain PaddleOCR-style Rec data and runs official PaddleOCR `tools/train.py`, `tools/export_model.py`, and optional `tools/infer/predict_rec.py` when `runOfficial=true` and `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` points to a checkout. The default preset is `PP-OCRv5_mobile_rec`; `PP-OCRv4_mobile_rec`, `PP-OCRv5_server_rec`, and `en_PP-OCRv5_mobile_rec` remain selectable. |
 
@@ -34,12 +34,14 @@ python -m venv .venv-yolo
 .\.venv-yolo\Scripts\python.exe -m pip install -r python_trainers\requirements-yolo.txt
 ```
 
-YOLO model-family status is tracked in `docs\yolo-model-support-matrix.md`. The product defaults remain `yolov8n.yaml` for detection and `yolov8n-seg.yaml` for segmentation. P1 adds editable GUI presets for YOLOv5u standard P5 detection, YOLOv8 / YOLO11 / YOLO12 detection and instance segmentation across `n/s/m/l/x`, both `.yaml` and `.pt`, plus YOLOv8 P2/P6 detection YAML architectures. YOLOv5u uses `yolov5n/s/m/l/x.yaml` architecture entries and `yolov5nu/su/mu/lu/xu.pt` pretrained entries; original `ultralytics/yolov5` repository weights are not a compatibility promise. `.pt` weights are not bundled; the installed Ultralytics package may download them into the user environment.
+YOLO model-family status is tracked in `docs\yolo-model-support-matrix.md`. The product defaults remain `yolov8n.yaml` for detection and `yolov8n-seg.yaml` for segmentation. P1 adds editable GUI presets for YOLOv5u standard P5 detection, YOLOv8 / YOLO11 / YOLO12 detection and instance segmentation across `n/s/m/l/x`, both `.yaml` and `.pt`, plus YOLOv8 P2/P6 detection YAML architectures. YOLO26 detection and instance-segmentation presets are imported as an independent compatibility phase, not into P1. YOLOv5u uses `yolov5n/s/m/l/x.yaml` architecture entries and `yolov5nu/su/mu/lu/xu.pt` pretrained entries; original `ultralytics/yolov5` repository weights are not a compatibility promise. `.pt` weights are not bundled; the installed Ultralytics package may download them into the user environment.
 
 Run the full P1 productization matrix with:
 
 ```powershell
 .\tools\phase-p1-yolo-full-matrix-smoke.ps1
+.\tools\phase-yolo26-model-matrix-smoke.ps1
+.\tools\phase-yolo26-model-matrix-smoke.ps1 -Focused
 ```
 
 The previous Phase 45 matrix remains useful as a faster YOLO11/YOLO12 nano wiring check:
@@ -49,7 +51,7 @@ The previous Phase 45 matrix remains useful as a faster YOLO11/YOLO12 nano wirin
 .\tools\phase45-yolo-model-matrix-smoke.ps1 -IncludeYolo12
 ```
 
-The P1 matrix does not productize YOLOv5 segmentation, YOLOv5 P6, YOLO26, semantic segmentation, tracking, classification, pose, OBB, anomaly, YOLO-World, or YOLOE.
+The P1 matrix does not productize YOLOv5 segmentation, YOLOv5 P6, YOLO26, semantic segmentation, tracking, classification, pose, OBB, anomaly, YOLO-World, or YOLOE. YOLO26 support is accepted only by its separate matrix and does not include semantic segmentation, classification, pose, OBB, tracking, or YOLOE-26.
 
 Official YOLO export parameters are recorded as `ultralyticsExportArgs` and are accepted by both training and model export flows:
 
@@ -59,13 +61,14 @@ Official YOLO export parameters are recorded as `ultralyticsExportArgs` and are 
   "dynamic": false,
   "half": false,
   "int8": false,
+  "end2end": false,
   "imgsz": 640,
   "batch": 1,
   "device": "cpu"
 }
 ```
 
-`dynamic` and `half` apply to official ONNX export. `int8=true` is TensorRT-only and requires calibration data; training uses the normalized YOLO `data.yaml`, while the model export page sends optional `data` when exporting `.pt` to TensorRT INT8. Existing `.onnx` inputs still use AITrain C++ copy / NCNN conversion and TensorRT export/deployment validation paths; `.pt` inputs use Worker-managed official Ultralytics export for ONNX/TensorRT, and `.pt -> ncnn` first creates a static FP32 official ONNX intermediate before `onnx2ncnn`.
+`dynamic` and `half` apply to official ONNX export. `int8=true` is TensorRT-only and requires calibration data; training uses the normalized YOLO `data.yaml`, while the model export page sends optional `data` when exporting `.pt` to TensorRT INT8. `end2end=auto` resolves to `true` for YOLO26 detection, `false` for YOLO26 segmentation, and `false` for non-YOLO26 models; reports store the final boolean. Existing `.onnx` inputs still use AITrain C++ copy / NCNN conversion and TensorRT export/deployment validation paths; `.pt` inputs use Worker-managed official Ultralytics export for ONNX/TensorRT, and `.pt -> ncnn` first creates a static FP32 traditional official ONNX intermediate before `onnx2ncnn`. NCNN rejects `end2end=true`.
 
 OCR recognition:
 

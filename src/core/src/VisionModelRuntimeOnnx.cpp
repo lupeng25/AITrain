@@ -64,6 +64,50 @@ QSize yoloInputSizeFromShape(const std::vector<int64_t>& inputShape, const QJson
     }
     return QSize(width, height);
 }
+
+bool jsonBoolValue(const QJsonValue& value, bool defaultValue = false)
+{
+    if (value.isBool()) {
+        return value.toBool();
+    }
+    if (value.isString()) {
+        const QString text = value.toString().trimmed().toLower();
+        if (text == QStringLiteral("true") || text == QStringLiteral("1") || text == QStringLiteral("yes")) {
+            return true;
+        }
+        if (text == QStringLiteral("false") || text == QStringLiteral("0") || text == QStringLiteral("no")
+            || text == QStringLiteral("auto") || text.isEmpty()) {
+            return false;
+        }
+    }
+    if (value.isDouble()) {
+        return value.toInt() != 0;
+    }
+    return defaultValue;
+}
+
+int reportEndToEndFlag(const QJsonObject& report)
+{
+    const QJsonObject args = report.value(QStringLiteral("ultralyticsExportArgs")).toObject();
+    if (!args.contains(QStringLiteral("end2end"))) {
+        return -1;
+    }
+    return jsonBoolValue(args.value(QStringLiteral("end2end")), false) ? 1 : 0;
+}
+
+bool yoloEndToEndFromExportConfig(const QString& onnxPath, const QJsonObject& config)
+{
+    int flag = reportEndToEndFlag(config);
+    if (flag >= 0) {
+        return flag == 1;
+    }
+    flag = reportEndToEndFlag(config.value(QStringLiteral("trainingReport")).toObject());
+    if (flag >= 0) {
+        return flag == 1;
+    }
+    flag = reportEndToEndFlag(loadUltralyticsTrainingReport(onnxPath));
+    return flag == 1;
+}
 } // namespace
 
 bool isOnnxRuntimeInferenceAvailable()
@@ -278,6 +322,16 @@ QVector<DetectionPrediction> predictDetectionOnnxRuntime(
 
             const QStringList classNames = ultralyticsClassNames(onnxPath);
             const std::vector<int64_t> outputShape = outputs.front().GetTensorTypeAndShapeInfo().GetShape();
+            if (yoloEndToEndFromExportConfig(onnxPath, exportConfig)) {
+                return yoloEndToEndPredictionsFromOutput(
+                    outputs.front().GetTensorData<float>(),
+                    outputShape,
+                    classNames,
+                    inputSize,
+                    transform,
+                    options,
+                    error);
+            }
             return yoloPredictionsFromOutput(
                 outputs.front().GetTensorData<float>(),
                 outputShape,
@@ -405,6 +459,18 @@ QVector<SegmentationPrediction> predictSegmentationOnnxRuntime(
             }
         }
         const QStringList classNames = ultralyticsClassNames(onnxPath);
+        if (yoloEndToEndFromExportConfig(onnxPath, exportConfig)) {
+            return yoloEndToEndSegmentationPredictionsFromOutputs(
+                outputs.at(boxesIndex).GetTensorData<float>(),
+                outputs.at(boxesIndex).GetTensorTypeAndShapeInfo().GetShape(),
+                outputs.at(prototypeIndex).GetTensorData<float>(),
+                outputs.at(prototypeIndex).GetTensorTypeAndShapeInfo().GetShape(),
+                classNames,
+                inputSize,
+                transform,
+                options,
+                error);
+        }
         return yoloSegmentationPredictionsFromOutputs(
             outputs.at(boxesIndex).GetTensorData<float>(),
             outputs.at(boxesIndex).GetTensorTypeAndShapeInfo().GetShape(),

@@ -598,6 +598,8 @@ install(DIRECTORY python_trainers DESTINATION .
 )
 install(FILES
     installer/AITrainStudio.iss
+    installer/AITrainStudioDependencies.iss
+    installer/AITrainStudioPythonEnv.iss
     DESTINATION installer
 )
 install(FILES

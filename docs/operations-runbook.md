@@ -6,15 +6,44 @@
 
 ## 包体边界
 
-标准交付包应包含：
+安装包分为三个：
+
+- 产品本体安装包：当前项目编译生成的 `AITrainStudio.exe`、`aitrain_worker.exe`、内置插件，以及产品随附的 `docs`、`examples`、`python_trainers`、`tools`、`translations`。
+- Native 依赖项安装包：Qt/VC runtime、Qt runtime plugin folders、ONNX Runtime、NCNN、TensorRT 和其他运行时 DLL。
+- Python AI 环境安装包：官方 YOLO / OCR 适配器使用的隔离 Python 环境，以及可选的 PaddleOCR 源码 checkout。默认安装到 `python_env`，不写系统 Python，不要求全局 `AITRAIN_PYTHON_EXECUTABLE`。
+
+三个安装包默认安装到同一个 `AITrain Studio` 目录，但写入不同子树，避免互相覆盖。产品本体安装后需要 Native 依赖项安装包和 Python AI 环境安装包，或等价运行时，才能完整启用 GUI、Worker、YOLO/OCR 官方后端和部署验证。
+
+产品本体安装包应包含：
 
 - `AITrainStudio.exe`
 - `aitrain_worker.exe`
 - 内置 Qt plugin DLL
 - `plugins\models` 下的内置插件
 - `translations` 下的 `.qm` 翻译文件
-- 必要的 Qt runtime DLL
 - `docs`、`examples`、`requirements` 和验收脚本
+
+Native 依赖项安装包应包含：
+
+- 必要的 Qt runtime DLL 和 Qt runtime plugin folders。
+- 必要的 MSVC runtime DLL。
+- `runtimes\onnxruntime`、`runtimes\ncnn`、`runtimes\tensorrt`。
+- 根目录下供 Worker 直接加载的 ONNX Runtime / NCNN 等 runtime DLL。
+
+Python AI 环境安装包应包含：
+
+- `python_env\python.exe` 或 `python_env\Scripts\python.exe`。
+- Ultralytics、Torch、ONNX、ONNX Runtime、PaddlePaddle、PaddleOCR、NumPy、Pillow、PyYAML 等官方适配器所需 Python 包。
+- 可选 `python_env\PaddleOCR\tools\train.py`，用于 PaddleOCR Det/Rec/System 官方工具链。
+
+安装顺序建议：
+
+1. 产品本体安装包。
+2. Native 依赖项安装包。
+3. Python AI 环境安装包。
+4. 启动 `AITrainStudio.exe` 并在“环境”页运行环境自检。
+
+如果安装顺序不同也不应产生文件冲突；最终三个包必须落在同一个安装目录。Python AI 环境安装包不应包含训练数据、客户数据、模型权重、运行输出或验收证据。正式交付前应从可搬移的 staging Python 环境构建，不建议直接使用开发机 venv 作为客户包来源。
 
 不得默认包含：
 

@@ -568,7 +568,8 @@ QStringList yoloModelPresetsForTask(bool segmentation)
     const QStringList families = {
         QStringLiteral("yolov8"),
         QStringLiteral("yolo11"),
-        QStringLiteral("yolo12")
+        QStringLiteral("yolo12"),
+        QStringLiteral("yolo26")
     };
     const QStringList scales = {
         QStringLiteral("n"),
@@ -711,7 +712,22 @@ bool paddleOcrOfficialRepoConfigured()
 {
     const QString repo = QString::fromLocal8Bit(qgetenv("AITRAIN_PADDLEOCR_REPO")).trimmed();
     const QString legacyRepo = QString::fromLocal8Bit(qgetenv("AITRAIN_PADDLEOCR_SOURCE_ROOT")).trimmed();
-    return !repo.isEmpty() || !legacyRepo.isEmpty();
+    if (!repo.isEmpty() || !legacyRepo.isEmpty()) {
+        return true;
+    }
+
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        QDir(appDir).absoluteFilePath(QStringLiteral("python_env/PaddleOCR")),
+        QDir(appDir).absoluteFilePath(QStringLiteral("../python_env/PaddleOCR")),
+        QDir::current().absoluteFilePath(QStringLiteral("python_env/PaddleOCR"))
+    };
+    for (const QString& candidate : candidates) {
+        if (QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("tools/train.py")))) {
+            return true;
+        }
+    }
+    return false;
 }
 
 QString expectedTrainingTaskForDatasetFormat(const QString& format)

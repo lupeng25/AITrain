@@ -1,6 +1,6 @@
 ﻿# AITrain Studio Acceptance Runbook
 
-This runbook is the Phase 17-50 plus P1 acceptance path. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, records a traceable release-freeze package identity, validates newer YOLO detection/segmentation model-family candidates, documents the delivery-closeout workbench, adds the PP-OCRv5 GPU official-chain gate, and defines the P1 full YOLO preset/export-argument matrix. OCR acceptance is official-only through PaddleOCR Det/Rec/System reports. RTX 4090 D TensorRT smoke evidence is recorded under `.deps\\rtx4090-validation\\acceptance-tensorrt`; clean Windows and customer-domain OCR production evidence still require returned external/customer data.
+This runbook is the Phase 17-50 plus P1 acceptance path, with YOLO26 tracked as a separate compatibility phase. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, records a traceable release-freeze package identity, validates newer YOLO detection/segmentation model-family candidates, documents the delivery-closeout workbench, adds the PP-OCRv5 GPU official-chain gate, defines the P1 full YOLO preset/export-argument matrix, and adds the independent YOLO26 detection/instance-segmentation matrix. OCR acceptance is official-only through PaddleOCR Det/Rec/System reports. RTX 4090 D TensorRT smoke evidence is recorded under `.deps\\rtx4090-validation\\acceptance-tensorrt`; clean Windows and customer-domain OCR production evidence still require returned external/customer data.
 
 ## Acceptance Modes
 
@@ -14,6 +14,7 @@ Run the unified smoke script from the repository root:
 .\tools\acceptance-smoke.ps1 -CpuTrainingSmoke
 .\tools\phase45-yolo-model-matrix-smoke.ps1
 .\tools\phase-p1-yolo-full-matrix-smoke.ps1
+.\tools\phase-yolo26-model-matrix-smoke.ps1
 .\tools\acceptance-smoke.ps1 -TensorRT
 .\tools\customer-ocr-validation.ps1
 ```
@@ -35,7 +36,7 @@ For external handoff, use `docs\external-acceptance-handoff.md` and the result t
 
 For release-freeze package identity, use `docs\release-freeze-handoff.md` and `tools\release-freeze-handoff.ps1`. This generates the CPack ZIP, SHA256 hashes, and a handoff manifest without marking external acceptance as passed.
 
-For YOLO model-family productization, use `docs\yolo-model-support-matrix.md`. Phase 45 validates newer Ultralytics detection/segmentation nano model names only. P1 validates YOLOv5u standard P5 detection, the full YOLOv8 / YOLO11 / YOLO12 detection and instance-segmentation preset matrix, `.yaml` and `.pt` source types, YOLOv8 P2/P6 detection YAML architectures, and the official export-argument protocol. Neither path expands the productized scope to YOLOv5 segmentation, YOLOv5 P6, YOLO26, semantic segmentation, classification, pose, OBB, anomaly, YOLO-World, YOLOE, tracking, or other tasks.
+For YOLO model-family productization, use `docs\yolo-model-support-matrix.md`. Phase 45 validates newer Ultralytics detection/segmentation nano model names only. P1 validates YOLOv5u standard P5 detection, the full YOLOv8 / YOLO11 / YOLO12 detection and instance-segmentation preset matrix, `.yaml` and `.pt` source types, YOLOv8 P2/P6 detection YAML architectures, and the official export-argument protocol. YOLO26 is validated by `tools\phase-yolo26-model-matrix-smoke.ps1` as a separate compatibility phase for detection and instance segmentation only. These paths do not expand scope to YOLOv5 segmentation, YOLOv5 P6, semantic segmentation, classification, pose, OBB, anomaly, YOLO-World, YOLOE-26, tracking, or other tasks.
 
 ## Phase 49 Lite: Delivery Closeout Workbench
 
@@ -231,9 +232,29 @@ P1 also covers official YOLO export parameters from both the training page and m
 
 - ONNX supports `dynamic` and `half`, but rejects `int8=true`.
 - TensorRT supports INT8 only through official Ultralytics export and requires compatible GPU/TensorRT plus calibration data.
-- NCNN rejects `dynamic`, `half`, and `int8`; `.pt -> ncnn` first creates a static FP32 official ONNX intermediate, then runs `onnx2ncnn`.
+- NCNN rejects `dynamic`, `half`, `int8`, and `end2end=true`; `.pt -> ncnn` first creates a static FP32 traditional official ONNX intermediate, then runs `onnx2ncnn`.
 
 The full P1 matrix is intentionally separate from `harness-check.ps1` because it downloads/runs many official YOLO models and is expected to be slow on CPU.
+
+## YOLO26 Compatibility Matrix
+
+Run the separate YOLO26 detection/instance-segmentation matrix:
+
+```powershell
+.\tools\phase-yolo26-model-matrix-smoke.ps1
+.\tools\phase-yolo26-model-matrix-smoke.ps1 -Focused
+```
+
+Full mode writes `yolo26_model_matrix_summary.json` under `.deps\phase-yolo26-model-matrix` by default and has 20 required rows:
+
+- YOLO26 detection: `yolo26n/s/m/l/x.yaml` and `yolo26n/s/m/l/x.pt`.
+- YOLO26 instance segmentation: `yolo26n/s/m/l/x-seg.yaml` and `yolo26n/s/m/l/x-seg.pt`.
+
+Focused mode is the quick gate for nano models and dual-output switching. It covers `yolo26n.yaml`, `yolo26n.pt`, `yolo26n-seg.yaml`, `yolo26n-seg.pt`, plus detection `end2end=false` and segmentation `end2end=true` override rows.
+
+`end2end=auto` resolves to `true` for YOLO26 detection and `false` for YOLO26 segmentation. Reports must record the normalized boolean under `ultralyticsExportArgs.end2end`. Each passed row must produce a completed Worker training task, `best.pt`, ONNX, `ultralytics_training_report.json`, AITrain inference JSON, and overlay output.
+
+YOLO26 semantic segmentation, classification, pose, OBB, tracking, YOLOE-26, and other task variants are not supported.
 
 ## Historical Phase 46/47 OCR ONNX Wiring
 

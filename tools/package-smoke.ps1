@@ -120,6 +120,8 @@ if (Test-Path (Join-Path $prefixFull "python_trainers\ocr_rec\paddleocr_trainer.
     throw "Removed small PaddleOCR CTC trainer must not be packaged"
 }
 Assert-PathExists "installer\AITrainStudio.iss" "Inno Setup installer script"
+Assert-PathExists "installer\AITrainStudioDependencies.iss" "Inno Setup dependency installer script"
+Assert-PathExists "installer\AITrainStudioPythonEnv.iss" "Inno Setup Python environment installer script"
 Assert-PathExists "tools\acceptance-smoke.ps1" "acceptance smoke script"
 Assert-PathExists "tools\build-inno-installer.ps1" "Inno Setup installer build script"
 Assert-PathExists "tools\ui-workbench-walkthrough.ps1" "UI workbench walkthrough RC script"
