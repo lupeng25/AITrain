@@ -18,6 +18,7 @@
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QRandomGenerator>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QThread>
 
@@ -82,6 +83,62 @@ QJsonObject nvidiaSmiCheck()
     return checkObject(QStringLiteral("NVIDIA Driver"), QStringLiteral("ok"), QStringLiteral("检测到 NVIDIA GPU：%1").arg(output.split(QLatin1Char('\n')).first()), details);
 }
 
+QString packagedPythonEnvRoot()
+{
+    const QString applicationDir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("python_env")),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../python_env")),
+        QDir::current().absoluteFilePath(QStringLiteral("python_env"))
+    };
+    for (const QString& candidate : candidates) {
+        if (QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("Scripts/python.exe")))
+            || QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("python.exe")))) {
+            return QFileInfo(candidate).absoluteFilePath();
+        }
+    }
+    return {};
+}
+
+QString packagedPaddleOcrRepoPath()
+{
+    const QString pythonRoot = packagedPythonEnvRoot();
+    if (pythonRoot.isEmpty()) {
+        return {};
+    }
+    const QString repo = QDir(pythonRoot).filePath(QStringLiteral("PaddleOCR"));
+    if (QFileInfo::exists(QDir(repo).filePath(QStringLiteral("tools/train.py")))) {
+        return QFileInfo(repo).absoluteFilePath();
+    }
+    return {};
+}
+
+void configurePackagedPythonEnvironment(QProcessEnvironment* environment)
+{
+    if (!environment) {
+        return;
+    }
+    const QString pythonRoot = packagedPythonEnvRoot();
+    if (!pythonRoot.isEmpty()) {
+        QStringList pathEntries;
+        pathEntries << QDir(pythonRoot).filePath(QStringLiteral("Scripts"));
+        pathEntries << pythonRoot;
+        const QString existingPath = environment->value(QStringLiteral("PATH"));
+        if (!existingPath.isEmpty()) {
+            pathEntries << existingPath;
+        }
+        environment->insert(QStringLiteral("PATH"), pathEntries.join(QDir::listSeparator()));
+    }
+
+    if (!environment->contains(QStringLiteral("AITRAIN_PADDLEOCR_REPO"))
+        && !environment->contains(QStringLiteral("AITRAIN_PADDLEOCR_SOURCE_ROOT"))) {
+        const QString repo = packagedPaddleOcrRepoPath();
+        if (!repo.isEmpty()) {
+            environment->insert(QStringLiteral("AITRAIN_PADDLEOCR_REPO"), repo);
+        }
+    }
+}
+
 QString firstUsablePythonExecutable(const QJsonObject& parameters)
 {
     QStringList candidates;
@@ -95,6 +152,12 @@ QString firstUsablePythonExecutable(const QJsonObject& parameters)
     }
 
     const QString applicationDir = QCoreApplication::applicationDirPath();
+    candidates.append(QDir(applicationDir).absoluteFilePath(QStringLiteral("python_env/Scripts/python.exe")));
+    candidates.append(QDir(applicationDir).absoluteFilePath(QStringLiteral("python_env/python.exe")));
+    candidates.append(QDir(applicationDir).absoluteFilePath(QStringLiteral("../python_env/Scripts/python.exe")));
+    candidates.append(QDir(applicationDir).absoluteFilePath(QStringLiteral("../python_env/python.exe")));
+    candidates.append(QDir::current().absoluteFilePath(QStringLiteral("python_env/Scripts/python.exe")));
+    candidates.append(QDir::current().absoluteFilePath(QStringLiteral("python_env/python.exe")));
     candidates.append(QDir(applicationDir).absoluteFilePath(QStringLiteral("../../.deps/python-3.13.13-embed-amd64/python.exe")));
     candidates.append(QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/python-3.13.13-embed-amd64/python.exe")));
     candidates.append(QDir::current().absoluteFilePath(QStringLiteral(".deps/python-3.13.13-embed-amd64/python.exe")));
@@ -177,6 +240,35 @@ QString pythonTrainerScriptPath(const QJsonObject& parameters, const QString& ba
     return candidates.first();
 }
 
+QString pythonYoloExporterScriptPath(const QJsonObject& parameters)
+{
+    if (diagnosticTrainingBackendsEnabled()) {
+        const QString requested = parameters.value(QStringLiteral("pythonYoloExporterScript")).toString().trimmed();
+        if (!requested.isEmpty()) {
+            return QFileInfo(requested).absoluteFilePath();
+        }
+        const QString envRequested = QString::fromLocal8Bit(qgetenv("AITRAIN_PYTHON_YOLO_EXPORTER_SCRIPT")).trimmed();
+        if (!envRequested.isEmpty()) {
+            return QFileInfo(envRequested).absoluteFilePath();
+        }
+    }
+
+    const QString exporterFile = QStringLiteral("python_trainers/yolo/ultralytics_exporter.py");
+    const QString applicationDir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        QDir(applicationDir).absoluteFilePath(exporterFile),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../%1").arg(exporterFile)),
+        QDir(applicationDir).absoluteFilePath(QStringLiteral("../../%1").arg(exporterFile)),
+        QDir::current().absoluteFilePath(exporterFile)
+    };
+    for (const QString& candidate : candidates) {
+        if (QFileInfo::exists(candidate)) {
+            return QFileInfo(candidate).absoluteFilePath();
+        }
+    }
+    return candidates.first();
+}
+
 QString requestedTrainingBackend(const aitrain::TrainingRequest& request)
 {
     const QString backend = request.parameters.value(QStringLiteral("trainingBackend")).toString().trimmed();
@@ -204,6 +296,141 @@ QString officialTrainingBackendForTask(const QString& taskType)
         return QStringLiteral("paddleocr_rec_official");
     }
     return {};
+}
+
+bool isTrainingBackendCompatibleWithTask(const QString& taskType, const QString& backend)
+{
+    const QString normalizedTask = taskType.trimmed().toLower();
+    const QString normalizedBackend = backend.trimmed().toLower();
+    if (normalizedTask == QStringLiteral("detection")) {
+        return normalizedBackend == QStringLiteral("ultralytics_yolo")
+            || normalizedBackend == QStringLiteral("ultralytics_yolo_detect");
+    }
+    if (normalizedTask == QStringLiteral("segmentation")) {
+        return normalizedBackend == QStringLiteral("ultralytics_yolo_segment");
+    }
+    if (normalizedTask == QStringLiteral("ocr_detection")) {
+        return normalizedBackend == QStringLiteral("paddleocr_det_official");
+    }
+    if (normalizedTask == QStringLiteral("ocr_recognition")) {
+        return normalizedBackend == QStringLiteral("paddleocr_rec_official")
+            || normalizedBackend == QStringLiteral("paddleocr_ppocrv4_rec");
+    }
+    if (normalizedTask == QStringLiteral("ocr")) {
+        return normalizedBackend == QStringLiteral("paddleocr_det_official")
+            || normalizedBackend == QStringLiteral("paddleocr_rec_official")
+            || normalizedBackend == QStringLiteral("paddleocr_ppocrv4_rec");
+    }
+    return false;
+}
+
+namespace {
+QString datasetFormatForTrainingTask(const QString& taskType)
+{
+    const QString normalized = taskType.trimmed().toLower();
+    if (normalized == QStringLiteral("detection")) {
+        return QStringLiteral("yolo_detection");
+    }
+    if (normalized == QStringLiteral("segmentation")) {
+        return QStringLiteral("yolo_segmentation");
+    }
+    if (normalized == QStringLiteral("ocr_detection")) {
+        return QStringLiteral("paddleocr_det");
+    }
+    if (normalized == QStringLiteral("ocr_recognition")) {
+        return QStringLiteral("paddleocr_rec");
+    }
+    return {};
+}
+
+QString datasetFormatForTrainingRequest(const aitrain::TrainingRequest& request)
+{
+    QString format = request.parameters.value(QStringLiteral("datasetFormat")).toString().trimmed();
+    if (!format.isEmpty()) {
+        return format;
+    }
+    const QJsonObject preflight = request.parameters.value(QStringLiteral("trainingPreflight")).toObject();
+    format = preflight.value(QStringLiteral("datasetFormat")).toString().trimmed();
+    if (!format.isEmpty()) {
+        return format;
+    }
+    return datasetFormatForTrainingTask(request.taskType);
+}
+} // namespace
+
+bool verifyTrainingDatasetSnapshot(const aitrain::TrainingRequest& request, QString* error, QJsonObject* details)
+{
+    const QString expectedHash = request.parameters.value(QStringLiteral("datasetSnapshotHash")).toString().trimmed();
+    if (expectedHash.isEmpty()) {
+        return true;
+    }
+
+    QJsonObject localDetails;
+    localDetails.insert(QStringLiteral("taskId"), request.taskId);
+    localDetails.insert(QStringLiteral("taskType"), request.taskType);
+    localDetails.insert(QStringLiteral("datasetPath"), request.datasetPath);
+    localDetails.insert(QStringLiteral("expectedSnapshotHash"), expectedHash);
+    localDetails.insert(QStringLiteral("datasetSnapshotId"), request.parameters.value(QStringLiteral("datasetSnapshotId")).toInt());
+    localDetails.insert(QStringLiteral("datasetSnapshotManifest"), request.parameters.value(QStringLiteral("datasetSnapshotManifest")).toString());
+
+    const QString datasetFormat = datasetFormatForTrainingRequest(request);
+    localDetails.insert(QStringLiteral("datasetFormat"), datasetFormat);
+    if (request.datasetPath.trimmed().isEmpty()) {
+        if (error) {
+            *error = QStringLiteral("Training request carries datasetSnapshotHash but datasetPath is empty.");
+        }
+        if (details) {
+            *details = localDetails;
+        }
+        return false;
+    }
+    if (datasetFormat.isEmpty()) {
+        if (error) {
+            *error = QStringLiteral("Training request carries datasetSnapshotHash but dataset format cannot be inferred for task type '%1'.").arg(request.taskType);
+        }
+        if (details) {
+            *details = localDetails;
+        }
+        return false;
+    }
+
+    const QString verifyOutputPath = QDir(request.outputPath).filePath(QStringLiteral("snapshot_verification"));
+    QJsonObject snapshotOptions;
+    snapshotOptions.insert(QStringLiteral("maxFiles"), request.parameters.value(QStringLiteral("snapshotMaxFiles")).toInt(20000));
+    const aitrain::WorkflowResult currentSnapshot = aitrain::createDatasetSnapshotReport(
+        request.datasetPath,
+        verifyOutputPath,
+        datasetFormat,
+        snapshotOptions);
+    if (!currentSnapshot.ok) {
+        if (error) {
+            *error = QStringLiteral("Cannot verify training dataset snapshot: %1").arg(currentSnapshot.error);
+        }
+        localDetails.insert(QStringLiteral("verificationOutputPath"), verifyOutputPath);
+        if (details) {
+            *details = localDetails;
+        }
+        return false;
+    }
+
+    const QString currentHash = currentSnapshot.payload.value(QStringLiteral("contentHash")).toString().trimmed();
+    localDetails.insert(QStringLiteral("currentSnapshotHash"), currentHash);
+    localDetails.insert(QStringLiteral("currentSnapshotManifest"), currentSnapshot.reportPath);
+    localDetails.insert(QStringLiteral("verificationOutputPath"), verifyOutputPath);
+    if (currentHash.compare(expectedHash, Qt::CaseInsensitive) != 0) {
+        if (error) {
+            *error = QStringLiteral("Dataset snapshot mismatch: expected %1 but current dataset hash is %2. Recreate the snapshot before training or restore the original dataset.")
+                .arg(expectedHash, currentHash);
+        }
+        if (details) {
+            *details = localDetails;
+        }
+        return false;
+    }
+    if (details) {
+        *details = localDetails;
+    }
+    return true;
 }
 
 namespace {
@@ -263,6 +490,135 @@ bool isPythonTrainingBackendId(const QString& backend, const QJsonObject& parame
         return true;
     }
     return false;
+}
+
+int nextPythonOutputDelimiter(const QByteArray& buffer)
+{
+    const int newline = buffer.indexOf('\n');
+    const int carriageReturn = buffer.indexOf('\r');
+    if (newline < 0) {
+        return carriageReturn;
+    }
+    if (carriageReturn < 0) {
+        return newline;
+    }
+    return qMin(newline, carriageReturn);
+}
+
+namespace {
+
+bool findJsonObjectEnd(const QByteArray& line, int start, int* end)
+{
+    int depth = 0;
+    bool inString = false;
+    bool escaped = false;
+    for (int index = start; index < line.size(); ++index) {
+        const char ch = line.at(index);
+        if (inString) {
+            if (escaped) {
+                escaped = false;
+            } else if (ch == '\\') {
+                escaped = true;
+            } else if (ch == '"') {
+                inString = false;
+            }
+            continue;
+        }
+        if (ch == '"') {
+            inString = true;
+        } else if (ch == '{') {
+            ++depth;
+        } else if (ch == '}') {
+            --depth;
+            if (depth == 0) {
+                *end = index + 1;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool parseJsonObject(const QByteArray& bytes, QJsonDocument* document)
+{
+    QJsonParseError parseError;
+    const QJsonDocument parsed = QJsonDocument::fromJson(bytes.trimmed(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !parsed.isObject()) {
+        return false;
+    }
+    if (document) {
+        *document = parsed;
+    }
+    return true;
+}
+
+} // namespace
+
+bool parseTrainerJsonDocument(const QByteArray& line, QJsonDocument* document)
+{
+    if (parseJsonObject(line, document)) {
+        return true;
+    }
+
+    int start = line.indexOf('{');
+    while (start >= 0) {
+        int end = -1;
+        QByteArray candidate;
+        if (findJsonObjectEnd(line, start, &end)) {
+            candidate = line.mid(start, end - start);
+        } else {
+            candidate = line.mid(start);
+        }
+        if (parseJsonObject(candidate, document)) {
+            return true;
+        }
+        start = line.indexOf('{', start + 1);
+    }
+    return false;
+}
+
+QString sanitizedPythonTrainerLogLine(const QByteArray& line)
+{
+    QString text = QString::fromUtf8(line).trimmed();
+    static const QRegularExpression ansiPattern(QStringLiteral("\\x1B\\[[0-9;?]*[A-Za-z]"));
+    text.remove(ansiPattern);
+    text.remove(QChar(0x0008));
+    text.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+
+    QStringList keptLines;
+    const QStringList lines = text.split(QLatin1Char('\n'));
+    for (QString item : lines) {
+        item = item.trimmed();
+        if (item.isEmpty()) {
+            continue;
+        }
+        const bool looksLikeProgressRedraw =
+            item.contains(QStringLiteral("━━"))
+            || item.contains(QStringLiteral("──"))
+            || item.contains(QStringLiteral("it/s"))
+            || item.startsWith(QStringLiteral("[K"));
+        if (looksLikeProgressRedraw) {
+            continue;
+        }
+        keptLines.append(item);
+    }
+    return keptLines.join(QLatin1Char('\n')).trimmed();
+}
+
+QJsonObject sanitizedTrainerLogPayload(
+    const QByteArray& line,
+    const QString& taskId,
+    const QString& backend)
+{
+    const QString sanitized = sanitizedPythonTrainerLogLine(line);
+    if (sanitized.isEmpty()) {
+        return {};
+    }
+    QJsonObject payload;
+    payload.insert(QStringLiteral("taskId"), taskId);
+    payload.insert(QStringLiteral("message"), sanitized);
+    payload.insert(QStringLiteral("backend"), backend);
+    return payload;
 }
 
 QJsonObject runPythonCommandCheck(
@@ -381,6 +737,7 @@ QJsonObject yoloEnvironmentProfile(const QString& pythonExecutable)
             QStringLiteral("missing"),
             QStringLiteral("No usable Python executable was found for YOLO official backends.")));
         repairHints.append(QStringLiteral("Set training parameter `pythonExecutable` or environment variable `AITRAIN_PYTHON_EXECUTABLE` to a valid Python path."));
+        repairHints.append(QStringLiteral("Install the AITrain Python AI Environment package so `python_env` is available beside the application."));
         repairHints.append(QStringLiteral("Use local embed Python under `.deps/python-3.13.13-embed-amd64/python.exe` when available."));
     } else {
         checks.append(profileCheck(
@@ -423,21 +780,30 @@ QJsonObject ocrEnvironmentProfile(const QString& pythonExecutable)
     QJsonArray repairHints;
 
     const QString isolatedOcrPython = QString::fromLocal8Bit(qgetenv("AITRAIN_OCR_PYTHON_EXECUTABLE")).trimmed();
-    if (isolatedOcrPython.isEmpty()) {
+    const QString packagedPython = firstUsablePythonExecutable();
+    const QString normalizedPackagedPython = QFileInfo(packagedPython).absoluteFilePath().replace(QLatin1Char('\\'), QLatin1Char('/'));
+    const bool packagedPythonDetected = !packagedPython.isEmpty()
+        && normalizedPackagedPython.contains(QStringLiteral("/python_env/"), Qt::CaseInsensitive);
+    if (isolatedOcrPython.isEmpty() && !packagedPythonDetected) {
         checks.append(profileCheck(
             QStringLiteral("isolatedOcrPython"),
             QStringLiteral("warning"),
-            QStringLiteral("No isolated OCR Python is configured via AITRAIN_OCR_PYTHON_EXECUTABLE.")));
+            QStringLiteral("No isolated OCR Python is configured via AITRAIN_OCR_PYTHON_EXECUTABLE or packaged python_env.")));
         repairHints.append(QStringLiteral("Set `AITRAIN_OCR_PYTHON_EXECUTABLE` to isolated OCR Python for PaddleOCR official workflows."));
+        repairHints.append(QStringLiteral("Install the AITrain Python AI Environment package into the application directory."));
     } else {
         checks.append(profileCheck(
             QStringLiteral("isolatedOcrPython"),
             QStringLiteral("ok"),
-            QStringLiteral("Isolated OCR Python is configured."),
-            QJsonObject{{QStringLiteral("path"), isolatedOcrPython}}));
+            isolatedOcrPython.isEmpty()
+                ? QStringLiteral("Packaged OCR Python environment was found.")
+                : QStringLiteral("Isolated OCR Python is configured."),
+            QJsonObject{{QStringLiteral("path"), isolatedOcrPython.isEmpty() ? packagedPython : isolatedOcrPython}}));
     }
 
-    const QString activePython = !isolatedOcrPython.isEmpty() ? isolatedOcrPython : pythonExecutable;
+    const QString activePython = !isolatedOcrPython.isEmpty()
+        ? isolatedOcrPython
+        : (!packagedPython.isEmpty() ? packagedPython : pythonExecutable);
     if (activePython.isEmpty()) {
         checks.append(profileCheck(
             QStringLiteral("pythonExecutable"),
@@ -465,12 +831,14 @@ QJsonObject ocrEnvironmentProfile(const QString& pythonExecutable)
     const QString repoRoot = QString::fromLocal8Bit(qgetenv("AITRAIN_PADDLEOCR_REPO")).trimmed();
     const QString sourceRoot = !repoRoot.isEmpty()
         ? repoRoot
-        : QString::fromLocal8Bit(qgetenv("AITRAIN_PADDLEOCR_SOURCE_ROOT")).trimmed();
+        : (!QString::fromLocal8Bit(qgetenv("AITRAIN_PADDLEOCR_SOURCE_ROOT")).trimmed().isEmpty()
+                ? QString::fromLocal8Bit(qgetenv("AITRAIN_PADDLEOCR_SOURCE_ROOT")).trimmed()
+                : packagedPaddleOcrRepoPath());
     if (sourceRoot.isEmpty()) {
         checks.append(profileCheck(
             QStringLiteral("paddleOcrSourceCheckout"),
             QStringLiteral("warning"),
-            QStringLiteral("PaddleOCR source checkout path is not configured (AITRAIN_PADDLEOCR_REPO).")));
+            QStringLiteral("PaddleOCR source checkout path is not configured and no packaged python_env/PaddleOCR checkout was found.")));
     } else {
         const bool trainScriptExists = QFileInfo::exists(QDir(sourceRoot).filePath(QStringLiteral("tools/train.py")));
         checks.append(profileCheck(

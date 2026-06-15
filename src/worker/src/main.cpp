@@ -270,144 +270,6 @@ int runNcnnParamSmoke(
     return ok ? 0 : 11;
 }
 
-int runOcrDetOnnxSmoke(
-    const QString& onnxPath,
-    const QString& imagePath,
-    const QString& outputDirectory,
-    double binaryThreshold,
-    double boxThreshold,
-    int minArea,
-    int maxDetections)
-{
-    const QString modelPath = QFileInfo(onnxPath).absoluteFilePath();
-    const QString samplePath = QFileInfo(imagePath).absoluteFilePath();
-    const QString outputPath = QFileInfo(outputDirectory.isEmpty()
-        ? QFileInfo(modelPath).absoluteDir().filePath(QStringLiteral("aitrain_ocr_det_onnx_smoke"))
-        : outputDirectory).absoluteFilePath();
-
-    if (!QFileInfo::exists(modelPath)) {
-        writeJsonLine(QJsonObject{
-            {QStringLiteral("ok"), false},
-            {QStringLiteral("stage"), QStringLiteral("model")},
-            {QStringLiteral("error"), QStringLiteral("OCR Det ONNX model does not exist: %1").arg(modelPath)}
-        });
-        return 5;
-    }
-    if (!QFileInfo::exists(samplePath)) {
-        writeJsonLine(QJsonObject{
-            {QStringLiteral("ok"), false},
-            {QStringLiteral("stage"), QStringLiteral("image")},
-            {QStringLiteral("error"), QStringLiteral("OCR Det smoke image does not exist: %1").arg(samplePath)}
-        });
-        return 6;
-    }
-    if (!QDir().mkpath(outputPath)) {
-        writeJsonLine(QJsonObject{
-            {QStringLiteral("ok"), false},
-            {QStringLiteral("stage"), QStringLiteral("output")},
-            {QStringLiteral("error"), QStringLiteral("Cannot create OCR Det smoke output directory: %1").arg(outputPath)}
-        });
-        return 7;
-    }
-
-    const QString family = aitrain::inferOnnxModelFamily(modelPath);
-    if (family != QStringLiteral("ocr_detection")) {
-        writeJsonLine(QJsonObject{
-            {QStringLiteral("ok"), false},
-            {QStringLiteral("stage"), QStringLiteral("model-family")},
-            {QStringLiteral("modelPath"), modelPath},
-            {QStringLiteral("inferredModelFamily"), family},
-            {QStringLiteral("error"), QStringLiteral("Expected OCR Det ONNX model family.")}
-        });
-        return 8;
-    }
-
-    aitrain::OcrDetPostprocessOptions options;
-    options.binaryThreshold = binaryThreshold;
-    options.boxThreshold = boxThreshold;
-    options.minArea = minArea;
-    options.maxDetections = maxDetections;
-
-    QString error;
-    const QVector<aitrain::OcrDetPrediction> predictions =
-        aitrain::predictOcrDetOnnxRuntime(modelPath, samplePath, options, &error);
-    if (!error.isEmpty()) {
-        writeJsonLine(QJsonObject{
-            {QStringLiteral("ok"), false},
-            {QStringLiteral("stage"), QStringLiteral("inference")},
-            {QStringLiteral("modelPath"), modelPath},
-            {QStringLiteral("imagePath"), samplePath},
-            {QStringLiteral("error"), error}
-        });
-        return 9;
-    }
-
-    QJsonArray predictionArray;
-    for (const aitrain::OcrDetPrediction& prediction : predictions) {
-        predictionArray.append(aitrain::ocrDetPredictionToJson(prediction));
-    }
-
-    const QString predictionsPath = QDir(outputPath).filePath(QStringLiteral("ocr_det_onnx_predictions.json"));
-    QFile predictionsFile(predictionsPath);
-    if (!predictionsFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        writeJsonLine(QJsonObject{
-            {QStringLiteral("ok"), false},
-            {QStringLiteral("stage"), QStringLiteral("predictions")},
-            {QStringLiteral("error"), QStringLiteral("Cannot write OCR Det predictions: %1").arg(predictionsPath)}
-        });
-        return 10;
-    }
-    QJsonObject predictionsDocument;
-    predictionsDocument.insert(QStringLiteral("taskType"), QStringLiteral("ocr_detection"));
-    predictionsDocument.insert(QStringLiteral("runtime"), QStringLiteral("onnxruntime"));
-    predictionsDocument.insert(QStringLiteral("modelPath"), modelPath);
-    predictionsDocument.insert(QStringLiteral("imagePath"), samplePath);
-    predictionsDocument.insert(QStringLiteral("postprocess"), QJsonObject{
-        {QStringLiteral("binaryThreshold"), options.binaryThreshold},
-        {QStringLiteral("boxThreshold"), options.boxThreshold},
-        {QStringLiteral("minArea"), options.minArea},
-        {QStringLiteral("maxDetections"), options.maxDetections}
-    });
-    predictionsDocument.insert(QStringLiteral("predictions"), predictionArray);
-    predictionsFile.write(QJsonDocument(predictionsDocument).toJson(QJsonDocument::Indented));
-    predictionsFile.close();
-
-    const QImage overlay = aitrain::renderOcrDetPredictions(samplePath, predictions, &error);
-    if (overlay.isNull()) {
-        writeJsonLine(QJsonObject{
-            {QStringLiteral("ok"), false},
-            {QStringLiteral("stage"), QStringLiteral("overlay")},
-            {QStringLiteral("error"), error}
-        });
-        return 11;
-    }
-    const QString overlayPath = QDir(outputPath).filePath(QStringLiteral("ocr_det_onnx_overlay.png"));
-    if (!overlay.save(overlayPath)) {
-        writeJsonLine(QJsonObject{
-            {QStringLiteral("ok"), false},
-            {QStringLiteral("stage"), QStringLiteral("overlay")},
-            {QStringLiteral("error"), QStringLiteral("Cannot write OCR Det overlay: %1").arg(overlayPath)}
-        });
-        return 12;
-    }
-
-    const QJsonObject result{
-        {QStringLiteral("ok"), true},
-        {QStringLiteral("stage"), QStringLiteral("completed")},
-        {QStringLiteral("taskType"), QStringLiteral("ocr_detection")},
-        {QStringLiteral("runtime"), QStringLiteral("onnxruntime")},
-        {QStringLiteral("modelPath"), modelPath},
-        {QStringLiteral("imagePath"), samplePath},
-        {QStringLiteral("outputPath"), outputPath},
-        {QStringLiteral("predictionsPath"), predictionsPath},
-        {QStringLiteral("overlayPath"), overlayPath},
-        {QStringLiteral("predictionCount"), predictions.size()},
-        {QStringLiteral("postprocess"), predictionsDocument.value(QStringLiteral("postprocess")).toObject()}
-    };
-    writeJsonLine(result);
-    return 0;
-}
-
 } // namespace
 
 int main(int argc, char* argv[])
@@ -423,7 +285,7 @@ int main(int argc, char* argv[])
     QCommandLineOption tensorRtSmokeOption(QStringLiteral("tensorrt-smoke"), QStringLiteral("Run TensorRT export smoke for an official ONNX model and print JSON."), QStringLiteral("onnx"));
     QCommandLineOption ncnnSmokeOption(QStringLiteral("ncnn-smoke"), QStringLiteral("Run NCNN export and deployment validation smoke and print JSON."), QStringLiteral("onnx"));
     QCommandLineOption ncnnParamSmokeOption(QStringLiteral("ncnn-param-smoke"), QStringLiteral("Run NCNN deployment validation smoke for an existing .param/.bin artifact and print JSON."), QStringLiteral("param"));
-    QCommandLineOption ocrDetOnnxSmokeOption(QStringLiteral("ocr-det-onnx-smoke"), QStringLiteral("Run OCR Det ONNX Runtime DB postprocess smoke and print JSON."), QStringLiteral("onnx"));
+    QCommandLineOption ocrDetOnnxSmokeOption(QStringLiteral("ocr-det-onnx-smoke"), QStringLiteral("Deprecated: OCR is official-only; use PaddleOCR official Det/Rec/System reports instead."), QStringLiteral("onnx"));
     QCommandLineOption imageOption(QStringLiteral("image"), QStringLiteral("Image path for smoke checks."), QStringLiteral("path"));
     QCommandLineOption outputOption(QStringLiteral("output"), QStringLiteral("Output directory for smoke artifacts."), QStringLiteral("directory"));
     QCommandLineOption taskTypeOption(QStringLiteral("task-type"), QStringLiteral("Task type for model smoke checks."), QStringLiteral("type"), QStringLiteral("detection"));
@@ -471,14 +333,14 @@ int main(int argc, char* argv[])
             parser.value(taskTypeOption).trimmed().toLower());
     }
     if (parser.isSet(ocrDetOnnxSmokeOption)) {
-        return runOcrDetOnnxSmoke(
-            parser.value(ocrDetOnnxSmokeOption),
-            parser.value(imageOption),
-            parser.value(outputOption),
-            parser.value(binaryThresholdOption).toDouble(),
-            parser.value(boxThresholdOption).toDouble(),
-            parser.value(minAreaOption).toInt(),
-            parser.value(maxDetectionsOption).toInt());
+        writeJsonLine(QJsonObject{
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("status"), QStringLiteral("blocked")},
+            {QStringLiteral("stage"), QStringLiteral("official-only")},
+            {QStringLiteral("modelPath"), QFileInfo(parser.value(ocrDetOnnxSmokeOption)).absoluteFilePath()},
+            {QStringLiteral("error"), QStringLiteral("OCR Det ONNX smoke is deprecated. AITrain OCR product routes are official-only; use PaddleOCR official Det/Rec/System reports and predict_system.py artifacts.")}
+        });
+        return 11;
     }
 
     const QString serverName = parser.value(serverOption);

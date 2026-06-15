@@ -28,6 +28,38 @@ private slots:
         QCOMPARE(invalid.issues.first().line, 1);
     }
 
+    void datasetValidationRejectsUnreadableImages()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        const QString yoloRoot = dir.filePath(QStringLiteral("bad-yolo"));
+        writeTextFile(QDir(yoloRoot).filePath(QStringLiteral("data.yaml")), QStringLiteral("nc: 1\nnames: [item]\n"));
+        writeTextFile(QDir(yoloRoot).filePath(QStringLiteral("images/train/bad.png")), QStringLiteral("not an image\n"));
+        writeTinyPng(QDir(yoloRoot).filePath(QStringLiteral("images/val/good.png")));
+        writeTextFile(QDir(yoloRoot).filePath(QStringLiteral("labels/train/bad.txt")), QStringLiteral("0 0.5 0.5 0.25 0.25\n"));
+        writeTextFile(QDir(yoloRoot).filePath(QStringLiteral("labels/val/good.txt")), QStringLiteral("0 0.5 0.5 0.25 0.25\n"));
+        const aitrain::DatasetValidationResult yolo = aitrain::validateYoloDetectionDataset(yoloRoot);
+        QVERIFY(!yolo.ok);
+        QVERIFY(jsonArrayContainsCode(yolo.toJson().value(QStringLiteral("issues")).toArray(), QStringLiteral("invalid_image")));
+
+        const QString detRoot = dir.filePath(QStringLiteral("bad-ocr-det"));
+        writeTextFile(QDir(detRoot).filePath(QStringLiteral("images/a.png")), QStringLiteral("not an image\n"));
+        writeTextFile(QDir(detRoot).filePath(QStringLiteral("det_gt.txt")),
+            QStringLiteral("images/a.png\t[{\"transcription\":\"x\",\"points\":[[0,0],[1,0],[1,1],[0,1]]}]\n"));
+        const aitrain::DatasetValidationResult det = aitrain::validatePaddleOcrDetDataset(detRoot);
+        QVERIFY(!det.ok);
+        QVERIFY(jsonArrayContainsCode(det.toJson().value(QStringLiteral("issues")).toArray(), QStringLiteral("invalid_image")));
+
+        const QString recRoot = dir.filePath(QStringLiteral("bad-ocr-rec"));
+        writeTextFile(QDir(recRoot).filePath(QStringLiteral("dict.txt")), QStringLiteral("a\n"));
+        writeTextFile(QDir(recRoot).filePath(QStringLiteral("images/a.png")), QStringLiteral("not an image\n"));
+        writeTextFile(QDir(recRoot).filePath(QStringLiteral("rec_gt.txt")), QStringLiteral("images/a.png\ta\n"));
+        const aitrain::DatasetValidationResult rec = aitrain::validatePaddleOcrRecDataset(recRoot);
+        QVERIFY(!rec.ok);
+        QVERIFY(jsonArrayContainsCode(rec.toJson().value(QStringLiteral("issues")).toArray(), QStringLiteral("invalid_image")));
+    }
+
     void yoloDetectionDatasetSplit()
     {
         QTemporaryDir dir;
@@ -170,6 +202,30 @@ private slots:
         QVERIFY(QFileInfo::exists(QDir(ocrOutput).filePath(QStringLiteral("rec_gt_val.txt"))));
         QVERIFY(QFileInfo::exists(QDir(ocrOutput).filePath(QStringLiteral("split_report.json"))));
         const aitrain::DatasetValidationResult validation = aitrain::validatePaddleOcrRecDataset(ocrOutput);
+        QVERIFY2(validation.ok, qPrintable(validation.errors.join(QStringLiteral("\n"))));
+    }
+
+    void paddleOcrRecSplitAllowsMissingDictionary()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("ocr-source-without-dict"));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("images/a.png")));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("images/b.png")));
+        writeTextFile(QDir(root).filePath(QStringLiteral("rec_gt.txt")), QStringLiteral("images/a.png\taz\nimages/b.png\tza\n"));
+
+        QJsonObject options;
+        options.insert(QStringLiteral("trainRatio"), 0.5);
+        options.insert(QStringLiteral("valRatio"), 0.5);
+        options.insert(QStringLiteral("testRatio"), 0.0);
+        const QString output = dir.filePath(QStringLiteral("ocr-normalized-without-dict"));
+        const aitrain::DatasetSplitResult result = aitrain::splitPaddleOcrRecDataset(root, output, options);
+        QVERIFY2(result.ok, qPrintable(result.errors.join(QStringLiteral("\n"))));
+        QVERIFY(!QFileInfo::exists(QDir(output).filePath(QStringLiteral("dict.txt"))));
+        QVERIFY(result.warnings.join(QStringLiteral("\n")).contains(QStringLiteral("字典")));
+        QVERIFY(QFileInfo::exists(QDir(output).filePath(QStringLiteral("rec_gt.txt"))));
+
+        const aitrain::DatasetValidationResult validation = aitrain::validatePaddleOcrRecDataset(output);
         QVERIFY2(validation.ok, qPrintable(validation.errors.join(QStringLiteral("\n"))));
     }
 

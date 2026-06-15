@@ -2,6 +2,7 @@ add_executable(aitrain_worker
     src/main.cpp
     src/WorkerSession.h
     src/WorkerSession.cpp
+    src/WorkerSessionCommandRegistry.cpp
     src/WorkerSessionDatasetCommands.cpp
     src/WorkerSessionEnvironment.cpp
     src/WorkerSessionModelCommands.cpp
@@ -26,6 +27,7 @@ set_target_properties(aitrain_worker PROPERTIES
 aitrain_copy_onnxruntime_runtime(aitrain_worker)
 aitrain_copy_ncnn_runtime(aitrain_worker)
 aitrain_copy_tensorrt_runtime(aitrain_worker)
+aitrain_copy_qt_platform_runtime(aitrain_worker)
 
 install(TARGETS aitrain_worker
     RUNTIME DESTINATION .

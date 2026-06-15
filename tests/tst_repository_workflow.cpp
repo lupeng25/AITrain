@@ -20,11 +20,14 @@ private slots:
         QVERIFY2(error.isEmpty(), qPrintable(error));
         const QVector<int> migrations = repository.appliedSchemaMigrations(&error);
         QVERIFY2(error.isEmpty(), qPrintable(error));
-        QCOMPARE(migrations, QVector<int>{1});
+        QCOMPARE(migrations.size(), 1);
+        QCOMPARE(migrations.value(0), 1);
         repository.close();
 
         QVERIFY2(repository.open(dir.filePath(QStringLiteral("project.sqlite")), &error), qPrintable(error));
-        QCOMPARE(repository.appliedSchemaMigrations(&error), QVector<int>{1});
+        const QVector<int> reopenedMigrations = repository.appliedSchemaMigrations(&error);
+        QCOMPARE(reopenedMigrations.size(), 1);
+        QCOMPARE(reopenedMigrations.value(0), 1);
         QVERIFY2(error.isEmpty(), qPrintable(error));
     }
 
@@ -73,7 +76,9 @@ private slots:
         QVERIFY2(repository.open(dbPath, &error), qPrintable(error));
         QCOMPARE(repository.schemaVersion(&error), 1);
         QVERIFY2(error.isEmpty(), qPrintable(error));
-        QCOMPARE(repository.appliedSchemaMigrations(&error), QVector<int>{1});
+        const QVector<int> legacyMigrations = repository.appliedSchemaMigrations(&error);
+        QCOMPARE(legacyMigrations.size(), 1);
+        QCOMPARE(legacyMigrations.value(0), 1);
         QVERIFY2(error.isEmpty(), qPrintable(error));
 
         const QVector<aitrain::TaskRecord> tasks = repository.recentTasks(10, &error);

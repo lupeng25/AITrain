@@ -90,7 +90,6 @@ QWidget* MainWindow::buildTopBar()
     topBarEnLanguageButton_->setCheckable(true);
     topBarEnLanguageButton_->setCursor(Qt::PointingHandCursor);
     topBarEnLanguageButton_->setToolTip(uiText("切换到英文，重启后生效"));
-    updateLanguageButtonState();
     languageLayout->addWidget(topBarZhLanguageButton_);
     languageLayout->addWidget(topBarEnLanguageButton_);
     connect(topBarZhLanguageButton_, &QToolButton::clicked, this, [this]() {

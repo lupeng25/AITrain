@@ -1,6 +1,6 @@
 # AITrain Studio 用户使用手册
 
-本文面向 AITrain Studio 的终端用户，说明如何在图形界面中完成数据集制作、导入、校验、训练、评估、导出和推理验证。本文不介绍源码结构、Worker 协议或 Python trainer JSON 细节。
+本文面向 AITrain Studio 的终端用户，说明如何在图形界面中完成数据集制作、导入、校验、训练、评估、部署验证和交付证据汇总。本文不介绍源码结构、Worker 协议或 Python trainer JSON 细节。
 
 ## 1. 快速闭环
 
@@ -17,11 +17,10 @@
   -> 划分数据集或创建数据快照
   -> 启动训练
   -> 在“任务与产物”查看 checkpoint、ONNX、报告和预览图
-  -> 评估模型并注册到“模型库”
-  -> 导出模型
-  -> 导出后验证
-  -> 推理验证
-  -> 交付验收和诊断包
+  -> 评估模型并在“模型库 > 评估报告”查看结果
+  -> 注册到“模型库”
+  -> 在“部署验证”完成模型导出、导出后验证和推理验证
+  -> 环境 > 交付证据和诊断包
 ```
 
 重要边界：
@@ -29,7 +28,9 @@
 - 主流程优先使用官方 YOLO / PaddleOCR 后端，训练由 Worker 启动独立 Python 进程执行。
 - 生产训练只使用官方后端；旧的 tiny detector、Python mock、小型 OCR CTC 和 C++ 分割/OCR 训练 scaffold 已从产品训练路径中物理删除。
 - TensorRT 需要兼容的 NVIDIA RTX / SM 75+ 环境；不支持的 GPU 会显示为 `hardware-blocked`。
-- OCR 的公开数据或生成数据 smoke 只能证明流程和产物可用，不能替代客户业务数据上的精度验收。
+- YOLO12 分割 `.pt` 预训练权重当前依赖 Ultralytics 上游是否提供 `yolo12*-seg.pt`；2026-06-14 记录的 Ultralytics 8.3.171 环境无法解析 `yolo12n-seg.pt`，应视为上游权重 blocker，不是数据集或 AITrain C++ runtime 问题。
+- YOLO26 当前是独立兼容阶段，不属于 P1 主矩阵。2026-06-14/15 共享 Ultralytics 8.3.171 生命周期环境下 20 个 YOLO26 行全部失败，属于模型配置/官方权重不可用或包代码不兼容 blocker；随后隔离 YOLO26 targeted full 在 2026-06-15 通过 20/20 训练、官方 ONNX、AITrain C++ ONNX 推理和 TensorRT 验证。YOLO26 不支持导出或转换为 NCNN。
+- OCR 的公开数据或生成数据 smoke 只能证明流程和产物可用，不能替代客户业务数据上的精度验收；当前 OCR 产品路线仅覆盖 PaddleOCR Det / Rec / System 官方工具链。
 
 ## 2. 启动、授权和项目
 
@@ -60,6 +61,8 @@
 | TensorRT | NVIDIA 驱动、CUDA、cuDNN、TensorRT、GPU compute capability | 使用 RTX / SM 75+ 机器，旧 GPU 保持 `hardware-blocked` |
 
 如果环境自检失败，先按“环境”页的修复建议处理，再启动训练、导出或推理。不要把缺少依赖的训练失败当作数据集或模型问题。
+
+如果训练参数使用 `device=0` 或其他 GPU 设备号，YOLO Python 环境必须安装 CUDA 版 PyTorch。CPU-only 环境只能使用 `device=cpu`，否则会在训练前失败。现场可通过训练参数 `pythonExecutable` 或环境变量 `AITRAIN_PYTHON_EXECUTABLE` 指向已验证的 CUDA YOLO Python。
 
 ## 4. 制作数据集
 
@@ -210,14 +213,20 @@ images/sample.png<TAB>[{"transcription":"text","points":[[1,1],[30,1],[30,20],[1
 
 | 数据/任务 | 推荐后端 | 推荐模型预设 | 说明 |
 |---|---|---|---|
-| YOLO 检测 | `ultralytics_yolo_detect` | `yolov8n.yaml`、`yolo11n.yaml`、`yolo12n.yaml` | 官方 Ultralytics 检测训练和 ONNX 导出 |
-| YOLO 分割 | `ultralytics_yolo_segment` | `yolov8n-seg.yaml`、`yolo11n-seg.yaml`、`yolo12n-seg.yaml` | 官方 Ultralytics 分割训练和 mask ONNX 后处理 |
-| PaddleOCR Det | `paddleocr_det_official` | `PP-OCRv4_mobile_det` | 官方 PaddleOCR 检测工具链，建议使用隔离 OCR 环境 |
-| PaddleOCR Rec | `paddleocr_rec_official` | `PP-OCRv4_mobile_rec` | 官方 PaddleOCR Rec adapter，可运行 train/export/predict；`paddleocr_rec` 仅作为数据集格式保留 |
+| YOLO 检测 | `ultralytics_yolo_detect` | 默认 `yolov8n.yaml`；可选 YOLOv5u 标准 P5 检测、YOLOv8 / YOLO11 / YOLO12 `n/s/m/l/x` `.yaml`、`.pt`，以及 YOLOv8 P2/P6 `.yaml`；YOLO26 检测按独立 targeted matrix 证据放行训练/ONNX/TensorRT，NCNN 不作为可选目标 | 官方 Ultralytics 检测训练、ONNX 导出和 `val()` 评估；推理、benchmark、部署验证走 AITrain C++ runtime |
+| YOLO 分割 | `ultralytics_yolo_segment` | 默认 `yolov8n-seg.yaml`；可选 YOLOv8 / YOLO11 `n/s/m/l/x` `-seg.yaml`、`-seg.pt`，YOLO12 `n/s/m/l/x` `-seg.yaml`；YOLO12 `-seg.pt` 按上游权重 blocker 处理，YOLO26 分割按独立 targeted matrix 证据放行训练/ONNX/TensorRT，NCNN 不作为可选目标 | 官方 Ultralytics 分割训练、ONNX 导出和 `val()` 评估；mask 后处理、推理、benchmark、部署验证走 AITrain C++ runtime |
+| PaddleOCR Det | `paddleocr_det_official` | 默认 `PP-OCRv5_mobile_det`；可选 `PP-OCRv4_mobile_det`、`PP-OCRv5_server_det`、`PP-OCRv6_tiny/small/medium_det` | 官方 PaddleOCR 检测工具链，建议使用隔离 OCR 环境；PP-OCRv5/v6 preset 需要 PaddleOCR 源码 checkout |
+| PaddleOCR Rec | `paddleocr_rec_official` | 默认 `PP-OCRv5_mobile_rec`；可选 `PP-OCRv4_mobile_rec`、`PP-OCRv5_server_rec`、`en_PP-OCRv5_mobile_rec`、`PP-OCRv6_tiny/small/medium_rec` | 官方 PaddleOCR Rec adapter，可运行 train/export/predict；`paddleocr_rec` 仅作为数据集格式保留 |
 
 官方后端依赖第三方包和许可条款。商业分发前需要单独审查 Ultralytics、PaddleOCR、PaddlePaddle、Torch 等依赖的许可证。
 
 旧的 `tiny_linear_detector`、小型 `paddleocr_rec` CTC trainer、`python_mock` 和 C++ 分割/OCR 训练 scaffold 已物理删除，不会出现在用户训练后端列表中，也不会作为主验收 passed 依据。`paddleocr_rec` 仅作为数据集格式保留。
+
+YOLO 与 OCR 的产品边界不同：YOLO 的训练、ONNX 导出和检测/分割评估来自官方 Ultralytics；后续单图推理、benchmark 和部署验证默认使用 AITrain C++ ONNX Runtime / NCNN runtime，TensorRT 当前用于 engine 导出和部署验证状态记录。OCR 则只接受 PaddleOCR 官方 Det / Rec / System 报告作为当前产品证据。PP-OCRv5/PP-OCRv6 支持只增加 Det / Rec / System 官方链路，不表示已经覆盖 PP-StructureV3、PP-ChatOCR、PaddleOCR-VL、文档方向分类、图像矫正、文本行方向分类或 PaddleOCR C++ 本地部署。PP-OCRv6 tiny 的语言覆盖按 PaddleOCR 官方限制处理，客户域生产声明仍需客户数据验收。
+
+YOLO 模型预设下拉是完整产品化入口，但仍允许手动输入官方 Ultralytics 可解析的模型名。训练页会做任务匹配预检：检测后端不能选择 `-seg` 模型，分割后端必须选择 `-seg` 模型。YOLOv5 支持按 Ultralytics YOLOv5u 检测路线处理，预设包含 `yolov5n/s/m/l/x.yaml` 和 `yolov5nu/su/mu/lu/xu.pt`；不承诺兼容原始 `ultralytics/yolov5` 仓库旧权重，也不把 YOLOv5 segmentation 或 P6 纳入当前产品矩阵。YOLO12 分割 `.yaml` 是当前可验证路线；YOLO12 分割 `.pt` 只有在安装的 Ultralytics 能解析官方 `yolo12*-seg.pt` 权重时才能运行，当前记录为 `blocked_missing_official_weight`。YOLO26 作为独立兼容阶段跟踪 detection 和 instance segmentation 标准 `n/s/m/l/x` `.yaml`、`.pt` 预设；共享 Ultralytics 8.3.171 环境下仍应记录为 `blocked_model_unavailable` / `blocked_ultralytics_incompatible`，隔离 targeted full 证据仅支持训练、官方 ONNX、AITrain C++ ONNX 推理和 TensorRT。YOLO26 NCNN 不作为客户可用部署目标，“部署验证 > 模型导出”会移除该选项，Worker 会拒绝 `format=ncnn`。YOLO26 不支持 semantic segmentation、classification、pose、OBB、tracking 或 YOLOE-26。`.pt` 权重不随 AITrain 包分发，首次使用时可能由官方 Ultralytics 包下载到用户环境。
+
+训练页“验证与导出”区域支持 YOLO 官方导出参数：`dynamic`、`half`、`int8 TensorRT` 和 `end2end`。默认仍导出 ONNX；勾选 `dynamic` 或 `half` 会传给官方 ONNX export；勾选 `int8 TensorRT` 会在 ONNX 之外额外尝试官方 TensorRT INT8 engine export，并使用本次训练的 `data.yaml` 做 calibration。`end2end=auto` 会优先读取已加载 Ultralytics 模型配置中的默认值；没有默认值时按 YOLO26 detection=true、其他模型=false 处理；需要时可显式选择 `true` 或 `false`。`end2end` 只有在当前 Ultralytics 版本和目标格式支持时才传给官方导出；不支持时必须显示 failed 或 blocked。NCNN 使用传统 YOLO 解码，拒绝 `end2end=true`，非 YOLO26 模型会生成 `end2end=false` 的中间 ONNX；YOLO26 会直接拒绝 NCNN。不支持的组合会明确失败，不会静默降级。
 
 ## 7. 任务与产物
 
@@ -227,26 +236,26 @@ images/sample.png<TAB>[{"transcription":"text","points":[[1,1],[30,1],[30,20],[1
 
 - 选择历史任务查看 artifacts、metrics、exports。
 - 预览 JSON、YAML、TXT、CSV、LOG、图片 overlay。
-- 选中 checkpoint、ONNX、engine 或官方导出目录后点击“用作导出输入”。
-- 选中 ONNX、AITrain export 或 TensorRT engine 后点击“用作推理模型”。
+- 选中 checkpoint、ONNX、engine 或官方导出目录后点击“用作导出输入”，会跳到“部署验证 > 模型导出”。
+- 选中 ONNX、NCNN `.param` 或 AITrain export sidecar 后点击“用作推理模型”，会跳到“部署验证 > 推理验证”。TensorRT engine 当前用于部署验证状态记录，不作为单图推理输入。
 - 选中训练产物后注册为模型版本。
 - 对训练任务执行“复现实验”，复用原请求、数据快照、seed、后端和模型预设。
 
 如果任务失败，先查看任务详情中的错误摘要和下一步建议，再检查“环境”页和数据集质量报告。
 
-## 8. 评估报告和模型库
+## 8. 模型库和评估报告
 
-训练完成后，可以对模型进行评估，并在“评估报告”页查看结果。
+训练完成后，可以对模型进行评估，并在“模型库 > 评估报告”查看结果。
 
 当前评估能力：
 
-- YOLO 检测：precision、recall、AP50、mAP50、mAP50-95、per-class metrics、confusion matrix、error samples、overlay。
-- YOLO 分割：maskIoU、maskMap50、mask mAP50-95、per-class metrics、confusion matrix、error samples、overlay。
-- OCR Rec：accuracy、editDistance、CER、WER、error samples、overlay。
+- YOLO 检测：通过 Ultralytics 官方 `val()` 输出 precision、recall、mAP50、mAP50-95、per-class maps、官方 confusion/PR/F1/P/R plots 和 predictions JSON（取决于官方版本和参数）。
+- YOLO 分割：通过 Ultralytics 官方 `val()` 输出 box/mask precision、recall、maskMap50、mask mAP50-95、per-class mask maps、官方 confusion/PR/F1/P/R plots 和 predictions JSON（取决于官方版本和参数）。
+- OCR Rec：通过 PaddleOCR 官方 Rec/System 报告和客户域 OCR 验收查看；AITrain 不用 C++ OCR ONNX 后处理生成当前产品评估证据。
 
-评估依赖模型格式、数据集格式和可用 runtime。非 ONNX 或官方工具链产物可能需要先导出，或通过官方报告查看。
+评估依赖模型格式、数据集格式和可用 Python/Ultralytics 环境。YOLO 检测和分割评估完全使用 Ultralytics 官方 `YOLO(...).val()`；AITrain 只保留 `evaluation_report.json` 外壳和任务产物记录，不再计算本地 AP/mAP、mask IoU、TP/FP/FN、错误样本或本地 overlay。OCR 评估通过官方 PaddleOCR 报告查看。
 
-“模型库”用于管理已注册的模型版本。建议注册时关联：
+“模型库 > 模型版本”用于管理已注册的模型版本。建议注册时关联：
 
 - 来源任务
 - 数据集快照
@@ -255,23 +264,25 @@ images/sample.png<TAB>[{"transcription":"text","points":[[1,1],[30,1],[30,20],[1
 - 评估报告
 - benchmark 或交付报告
 
-模型库中的模型可以继续进入导出或推理验证页面。
+模型库中的模型可以继续进入“部署验证 > 模型导出”或“部署验证 > 推理验证”。
 
-## 9. 模型导出
+## 9. 部署验证 > 模型导出
 
-在“模型导出”页可以从训练产物生成部署格式。推荐从“任务与产物”选中模型产物后点击“用作导出输入”，避免手动填错路径。
+在“部署验证 > 模型导出”可以从训练产物生成部署格式。推荐从“任务与产物”选中模型产物后点击“用作导出输入”，避免手动填错路径。
 
 导出格式：
 
 | 格式 | 输入 | 输出 | 说明 |
 |---|---|---|---|
-| ONNX | checkpoint、已有 ONNX、AITrain export | `.onnx` 和 sidecar report | 主交付格式，可继续推理验证 |
-| NCNN | ONNX 或可生成 ONNX 的输入 | `.param` 和 `.bin` | 导出依赖本机 `onnx2ncnn`；部署验证在配置 NCNN SDK/runtime 且提供样本图时运行 YOLO 检测/分割推理 |
-| TensorRT | ONNX | `.engine` / `.plan` | 需要 RTX / SM 75+ 和 TensorRT runtime；旧 GPU 会 `hardware-blocked` |
+| ONNX | checkpoint、`.pt`、已有 ONNX、AITrain export sidecar | `.onnx` 和 sidecar report | `.pt` 输入走官方 Ultralytics export；已有 ONNX 或指向 ONNX 的 sidecar 继续走 AITrain copy / report 路径 |
+| NCNN | ONNX 或 `.pt` | `.param` 和 `.bin` | `.pt` 输入会先生成静态 FP32 官方 ONNX，再走 `onnx2ncnn`；`dynamic`、`half`、`int8` 会被拒绝 |
+| TensorRT | ONNX 或 `.pt` | `.engine` / `.plan` | `.pt` 输入走官方 Ultralytics TensorRT export；INT8 需要 GPU/TensorRT 和 calibration data；旧 GPU 会 `hardware-blocked` |
 
 输出路径留空时，已打开项目会默认写入项目的 `models/exported`；未打开项目时通常写入输入模型同目录。
 
-导出后建议在同页填写“验证图片”，点击“验证导出产物”：
+“官方参数”区域会随模型导出请求传递 `format`、`dynamic`、`half`、`int8`、`imgsz`、`batch`、`device`，以及 TensorRT INT8 所需的 calibration `data.yaml`。ONNX 不支持 `int8=true`；NCNN 不支持 `dynamic/half/int8`；无 TensorRT、GPU 环境或 calibration data 时，TensorRT INT8 会明确失败或阻塞。
+
+导出后建议在同一 tab 填写“验证图片”，点击“验证导出产物”：
 
 - ONNX：必须能通过 ONNX Runtime 对样本图完成推理，才视为 `passed`。
 - TensorRT：兼容硬件和 runtime 上可推理为 `passed`；旧 GPU 或 runtime 不满足时显示 `hardware-blocked`。
@@ -279,31 +290,29 @@ images/sample.png<TAB>[{"transcription":"text","points":[[1,1],[30,1],[30,20],[1
 
 NCNN 当前本机验证边界：检测模型已经通过 Hyuto YOLOv8 ONNX -> NCNN runtime smoke；分割模型已经通过 nihui 预转换 YOLOv8n-seg pnnx/DFL NCNN artifact + AITrain sidecar 的 runtime smoke。部分 YOLOv8-seg ONNX 经 `onnx2ncnn` 后仍可能包含 NCNN 不支持的 `Shape` layer，此时会生成失败报告，不应标记为通过。
 
-## 10. 推理验证
+## 10. 部署验证 > 推理验证
 
-在“推理验证”页执行单张图片验证：
+在“部署验证 > 推理验证”执行单张图片验证：
 
-1. 选择模型路径。可以手动选择 ONNX、AITrain export、TensorRT engine，也可以从“任务与产物”点击“用作推理模型”带入。
+1. 选择模型路径。可以手动选择 ONNX、NCNN `.param` 或 AITrain export sidecar，也可以从“任务与产物”点击“用作推理模型”带入。
 2. 选择验证图片。
 3. 选择输出目录；留空时写入模型同目录的 `inference`。
 4. 点击“开始推理”。
 5. 查看结果摘要和 overlay 预览。
 6. 在“任务与产物”中查看完整 prediction JSON、overlay 和耗时信息。
 
-当前 C++ ONNX Runtime 推理支持：
+当前本地推理验证支持：
 
-- YOLO 检测：类别、置信度、NMS、检测框 overlay。
-- YOLO 分割：检测框、mask、mask area、半透明 overlay。
-- OCR Rec：CTC greedy decode、文本和置信度摘要。
-- OCR Det：DB-style probability map v1 后处理，输出文字区域 polygon 和 overlay。
+- YOLO 检测：基于官方 Ultralytics ONNX / NCNN 产物，由 AITrain C++ runtime 输出类别、置信度、NMS、检测框 overlay。TensorRT engine 当前请走“部署验证 > 模型导出”的“验证导出产物”。
+- YOLO 分割：基于官方 Ultralytics ONNX / NCNN 产物，由 AITrain C++ runtime 输出检测框、mask、mask area、半透明 overlay。TensorRT engine 当前请走“部署验证 > 模型导出”的“验证导出产物”。
 
-PaddleOCR System 的端到端结果仍以官方工具链任务产物为主，不等同于完整 C++ PaddleOCR System runtime。
+OCR 路线只依赖 PaddleOCR 官方实现。Det / Rec / System 的推理、评估和可视化结果应从官方 PaddleOCR 任务产物与报告中查看，不通过 AITrain C++ OCR ONNX 后处理作为产品路径。
 
-## 11. 样本复核、交付验收和诊断包
+## 11. 数据集复核、环境页交付证据和诊断包
 
-### 11.1 样本复核
+### 11.1 数据集 > 质量与复核
 
-“样本复核”页用于把问题样本重新送回标注和数据集校验闭环。可以加载：
+“数据集 > 质量与复核”用于把问题样本重新送回标注和数据集校验闭环。可以加载：
 
 - 数据质量报告中的 `problem_samples.json`
 - 评估报告中的 `error_samples.json`
@@ -312,9 +321,9 @@ PaddleOCR System 的端到端结果仍以官方工具链任务产物为主，不
 
 加载后可按来源、问题类型、类别、split、评估错误、OCR edit distance / CER、低置信信息筛选。点击“生成复核清单”会写出 X-AnyLabeling 可用的本地图片列表和 `rework_sample_set.json`。v1 不内嵌标注器，也不实现多人协作；标注完成后回到“数据集”页刷新、重新校验并创建快照。
 
-### 11.2 交付验收
+### 11.2 环境 > 交付证据
 
-“交付验收”页汇总以下状态：
+“环境”页中的“交付证据”分区汇总以下状态：
 
 - 本机 RC
 - clean Windows
@@ -324,19 +333,19 @@ PaddleOCR System 的端到端结果仍以官方工具链任务产物为主，不
 - 部署验证
 - 诊断包
 
-可以导入外部 JSON / Markdown 验收结果，状态会显示为 `passed`、`blocked`、`failed`、`hardware-blocked` 或 `not_run`。真实验收脚本仍以 `tools\local-rc-closeout.ps1`、`tools\release-freeze-handoff.ps1`、`tools\customer-ocr-validation.ps1` 为准；GUI 负责调度 Worker 或展示结果。
+可以导入外部 JSON / Markdown 验收结果，状态会显示为 `passed`、`blocked`、`failed`、`hardware-blocked` 或 `not_run`。真实验收脚本仍以 `tools\local-rc-closeout.ps1`、`tools\release-freeze-handoff.ps1`、`tools\customer-ocr-validation.ps1` 为准；GUI 负责调度 Worker 或展示结果，不替代 clean Windows、package-root TensorRT 或客户域 OCR 的真实返回证据。
 
 ### 11.3 客户域 OCR 验收
 
-在“交付验收”页填写客户域 Det 数据集、Rec 数据集、System 图片、Det/Rec/System 官方报告，以及可选 Det ONNX evidence。默认门槛为 Rec accuracy >= `0.70`、CER <= `0.30`，且必须不是 public/generated/smoke 数据。Total-Text、generated smoke 和 `.deps` 示例只能证明流程可跑，不能证明客户域 OCR 生产精度。
+在“环境 > 交付证据”中填写客户域 Det 数据集、Rec 数据集、System 图片，以及 Det/Rec/System 官方报告。默认门槛为 Rec accuracy >= `0.70`、CER <= `0.30`，且必须不是 public/generated/smoke 数据。Total-Text、generated smoke 和 `.deps` 示例只能证明流程可跑，不能证明客户域 OCR 生产精度。
 
 ### 11.4 一键诊断包
 
 “生成诊断包”会收集 Worker self-check、环境 profile、GPU/驱动、最近任务日志、失败请求、artifact index、插件状态和授权摘要。诊断包是只读证据，不会修改用户的全局 Python、CUDA 或驱动环境。
 
-## 12. 插件 marketplace
+## 12. 系统设置 > 插件
 
-“插件”页用于查看内置插件和本地 marketplace 插件。v1 是本地/离线优先机制，不是联网插件商店，也不代表插件发布者签名已经被强制校验。
+“系统设置 > 插件”用于查看内置插件和本地 marketplace 插件。v1 是本地/离线优先机制，不是联网插件商店，也不代表插件发布者签名已经被强制校验。
 
 常用操作：
 
@@ -375,7 +384,7 @@ PaddleOCR System 的端到端结果仍以官方工具链任务产物为主，不
 
 ### TensorRT 显示 hardware-blocked
 
-当前机器 GPU 或 runtime 不满足 TensorRT engine build 要求。使用 ONNX Runtime 继续验证，或换到 RTX / SM 75+ 机器执行 TensorRT 导出和推理。
+当前机器 GPU 或 runtime 不满足 TensorRT engine build 要求。使用 ONNX Runtime / NCNN 继续“部署验证 > 推理验证”，或换到 RTX / SM 75+ 机器执行 TensorRT 导出和部署验证。
 
 ### OCR smoke 通过但业务图片效果不好
 
@@ -404,7 +413,7 @@ python examples\create-minimal-datasets.py --output .deps\examples-smoke
 4. 校验数据集，必要时划分或创建快照。
 5. 在“训练实验”页选择 `ultralytics_yolo_detect` 和 `yolov8n.yaml`，运行少量 epoch。
 6. 在“任务与产物”查看 `best.pt`、`best.onnx` 和训练报告。
-7. 将 `best.onnx` 用作推理模型，进入“推理验证”页选择一张图片运行验证。
+7. 将 `best.onnx` 用作推理模型，进入“部署验证 > 推理验证”选择一张图片运行验证。
 
 该流程用于确认安装、环境和闭环是否正常，不代表训练精度。
 

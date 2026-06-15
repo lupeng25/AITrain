@@ -291,13 +291,17 @@ QJsonObject modelExportRequest(
     const QString& taskId,
     const QString& checkpointPath,
     const QString& outputPath,
-    const QString& format)
+    const QString& format,
+    const QJsonObject& options)
 {
     QJsonObject payload;
     payload.insert(field::taskId(), taskId);
     payload.insert(field::checkpointPath(), checkpointPath);
     payload.insert(field::outputPath(), outputPath);
     payload.insert(field::format(), format);
+    if (!options.isEmpty()) {
+        payload.insert(field::options(), options);
+    }
     return payload;
 }
 

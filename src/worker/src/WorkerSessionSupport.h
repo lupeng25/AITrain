@@ -2,8 +2,11 @@
 
 #include "aitrain/core/TaskModels.h"
 
+#include <QByteArray>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
+#include <QProcessEnvironment>
 #include <QString>
 #include <QStringList>
 
@@ -14,13 +17,22 @@ bool writeJsonFile(const QString& path, const QJsonObject& object, QString* erro
 QString defaultTaskOutputPath(const QString& basePath, const QString& taskId);
 QJsonObject nvidiaSmiCheck();
 QString firstUsablePythonExecutable(const QJsonObject& parameters = {});
+QString packagedPaddleOcrRepoPath();
+void configurePackagedPythonEnvironment(QProcessEnvironment* environment);
 QString pythonTrainerScriptFileForBackend(const QString& backend);
 QString pythonTrainerScriptPath(const QJsonObject& parameters, const QString& backend);
+QString pythonYoloExporterScriptPath(const QJsonObject& parameters = {});
 QString requestedTrainingBackend(const aitrain::TrainingRequest& request);
 bool diagnosticTrainingBackendsEnabled();
 QString officialTrainingBackendForTask(const QString& taskType);
+bool isTrainingBackendCompatibleWithTask(const QString& taskType, const QString& backend);
 bool isSupportedTrainingBackendId(const QString& backend, const QJsonObject& parameters);
 bool isPythonTrainingBackendId(const QString& backend, const QJsonObject& parameters);
+bool verifyTrainingDatasetSnapshot(const aitrain::TrainingRequest& request, QString* error, QJsonObject* details);
+int nextPythonOutputDelimiter(const QByteArray& buffer);
+bool parseTrainerJsonDocument(const QByteArray& line, QJsonDocument* document);
+QString sanitizedPythonTrainerLogLine(const QByteArray& line);
+QJsonObject sanitizedTrainerLogPayload(const QByteArray& line, const QString& taskId, const QString& backend);
 QJsonObject runPythonCommandCheck(
     const QString& name,
     const QString& executable,

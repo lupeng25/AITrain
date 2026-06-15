@@ -1,6 +1,6 @@
 ﻿# AITrain Studio Acceptance Runbook
 
-This runbook is the Phase 17-49 acceptance path. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, records a traceable release-freeze package identity, validates newer YOLO detection/segmentation model-family candidates, adds C++ PaddleOCR Det DB-style ONNX postprocess coverage, records real exported PaddleOCR Det ONNX wiring evidence, and documents the delivery-closeout workbench. RTX 4090 D TensorRT smoke evidence is recorded under `.deps\\rtx4090-validation\\acceptance-tensorrt`; clean Windows and customer-domain OCR production evidence still require returned external/customer data.
+This runbook is the Phase 17-50 plus P1 acceptance path, with YOLO26 tracked as a separate compatibility phase. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, records a traceable release-freeze package identity, validates newer YOLO detection/segmentation model-family candidates, documents the delivery-closeout workbench, adds the PP-OCRv5 GPU official-chain gate, defines the P1 full YOLO preset/export-argument matrix, adds the independent YOLO26 detection/instance-segmentation matrix, and adds PP-OCRv6 Det/Rec/System official-chain acceptance. OCR acceptance is official-only through PaddleOCR Det/Rec/System reports. RTX 4090 D TensorRT smoke evidence is recorded under `.deps\\rtx4090-validation\\acceptance-tensorrt`; clean Windows and customer-domain OCR production evidence still require returned external/customer data.
 
 ## Acceptance Modes
 
@@ -13,6 +13,9 @@ Run the unified smoke script from the repository root:
 .\tools\acceptance-smoke.ps1 -PublicDatasets
 .\tools\acceptance-smoke.ps1 -CpuTrainingSmoke
 .\tools\phase45-yolo-model-matrix-smoke.ps1
+.\tools\phase-p1-yolo-full-matrix-smoke.ps1
+.\tools\phase-yolo26-model-matrix-smoke.ps1
+.\tools\phase-ppocrv6-model-matrix-smoke.ps1
 .\tools\acceptance-smoke.ps1 -TensorRT
 .\tools\customer-ocr-validation.ps1
 ```
@@ -34,17 +37,20 @@ For external handoff, use `docs\external-acceptance-handoff.md` and the result t
 
 For release-freeze package identity, use `docs\release-freeze-handoff.md` and `tools\release-freeze-handoff.ps1`. This generates the CPack ZIP, SHA256 hashes, and a handoff manifest without marking external acceptance as passed.
 
-For YOLO model-family productization, use `docs\yolo-model-support-matrix.md` and `tools\phase45-yolo-model-matrix-smoke.ps1`. Phase 45 validates newer Ultralytics detection/segmentation model names only; it does not expand the productized scope to classification, pose, OBB, anomaly, YOLO-World, YOLOE, or TensorRT.
+For YOLO model-family productization, use `docs\yolo-model-support-matrix.md`. Phase 45 validates newer Ultralytics detection/segmentation nano model names only. P1 validates YOLOv5u standard P5 detection, YOLOv8 / YOLO11 / YOLO12 detection, YOLOv8 / YOLO11 instance segmentation, YOLO12 instance-segmentation `.yaml`, `.yaml` and `.pt` source types where the official asset resolves, YOLOv8 P2/P6 detection YAML architectures, and the official export-argument protocol. YOLO12 segmentation `.pt` rows are blocked in the recorded Ultralytics 8.3.171 environment because `yolo12n-seg.pt` cannot be resolved, so they must not be counted as passed until upstream official `yolo12*-seg.pt` weights resolve. YOLO26 is validated by `tools\phase-yolo26-model-matrix-smoke.ps1` as a separate compatibility phase for detection and instance segmentation only. The shared Ultralytics 8.3.171 lifecycle lane blocked/failed all 20 YOLO26 rows, but the isolated 2026-06-15 targeted full lane passed 20/20 rows for training, official ONNX, AITrain C++ ONNX inference, and TensorRT. YOLO26 NCNN is not a supported export/deployment target. These paths do not expand scope to YOLOv5 segmentation, YOLOv5 P6, semantic segmentation, classification, pose, OBB, anomaly, YOLO-World, YOLOE-26, tracking, or other tasks.
 
 ## Phase 49 Lite: Delivery Closeout Workbench
 
-The GUI delivery-closeout pages aggregate evidence; they do not replace the scripts or Worker report commands. Use the workbench to display imported JSON/Markdown acceptance evidence, run report-only Worker commands, and review `passed` / `blocked` / `failed` / `hardware-blocked` status.
+The GUI delivery-closeout surfaces aggregate evidence; they do not replace the scripts or Worker report commands. Use the workbench to display imported JSON/Markdown acceptance evidence in `环境 > 交付证据`, run report-only Worker commands, and review `passed` / `blocked` / `failed` / `hardware-blocked` status.
 
 Current GUI surfaces:
 
-- `样本复核`: load `problem_samples.json`, `error_samples.json`, `rework_sample_set.json`, or evaluation reports; filter by source, reason, class, split, OCR edit distance / CER, or search text; export an X-AnyLabeling review list.
-- `交付验收`: summarize local RC, clean Windows, TensorRT, package integrity, customer OCR, diagnostics, and deployment validation evidence.
-- Customer OCR acceptance wizard: collect Det dataset, Rec dataset, System images, official Det/Rec/System reports, optional Det ONNX evidence, and write customer OCR manifest/summary outputs.
+- `数据集 > 质量与复核`: load `problem_samples.json`, `error_samples.json`, `rework_sample_set.json`, or evaluation reports; filter by source, reason, class, split, OCR edit distance / CER, or search text; export an X-AnyLabeling review list.
+- `模型库 > 评估报告`: review model evaluation report records and visualized report details.
+- `部署验证 > 模型导出 / 推理验证`: export deployable artifacts, run export post-validation, and run single-image inference validation.
+- `系统设置 > 插件`: review loaded plugin capabilities and local marketplace plugin state.
+- `环境 > 交付证据`: summarize local RC, clean Windows, TensorRT, package integrity, customer OCR, diagnostics, and deployment validation evidence.
+- Customer OCR acceptance wizard: collect Det dataset, Rec dataset, System images, official Det/Rec/System reports, and write customer OCR manifest/summary outputs.
 - Export post-validation: validate ONNX by runnable inference where possible; preserve TensorRT `hardware-blocked`; validate NCNN by runtime inference for YOLO detection/segmentation when NCNN SDK/runtime and a sample image are available, otherwise report failed/blocked explicitly.
 - Diagnostics bundle: collect Worker self-check, environment profile, GPU/runtime state, recent task logs/request snippets, artifact index, plugin state, and license summary.
 
@@ -94,9 +100,20 @@ For the full official PaddleOCR Det + Rec + System chain, run:
 
 ```powershell
 .\tools\phase31-paddleocr-full-official-smoke.ps1
+.\tools\phase31-paddleocr-full-official-smoke.ps1 -OcrVersion PP-OCRv4
+.\tools\phase31-paddleocr-full-official-smoke.ps1 -OcrVersion PP-OCRv6 -PPOCRv6Tier tiny
+.\tools\phase-ppocrv6-model-matrix-smoke.ps1
 ```
 
-This validates official Det train/export, official Rec train/export, and official `predict_system.py` inference with `use_angle_cls=false`. It checks the Det and Rec inference configs, official reports, `official_system_prediction.json`, `system_results.txt`, and visualized output images. It is still a tiny CPU smoke run, so it validates wiring and artifacts rather than OCR quality.
+This validates official Det train/export, official Rec train/export, and official `predict_system.py` inference with `use_angle_cls=false`. It checks the Det and Rec inference configs, official reports, `official_system_prediction.json`, `system_results.txt`, and visualized output images. The default is PP-OCRv5 mobile Det/Rec; `-OcrVersion PP-OCRv4` switches back to the legacy v4 mobile presets, and `-OcrVersion PP-OCRv6 -PPOCRv6Tier tiny|small|medium` selects matching v6 Det/Rec presets. `phase-ppocrv6-model-matrix-smoke.ps1` checks all six v6 Det/Rec presets in prepare-only mode and runs one v6 tiny full-chain smoke. It is still a tiny CPU smoke run, so it validates wiring and artifacts rather than OCR quality.
+
+For the PP-OCRv5 GPU official production-chain gate, run:
+
+```powershell
+.\tools\phase50-paddleocr-v5-gpu-official-chain.ps1 -UseGpu
+```
+
+This wrapper first verifies that the selected OCR Python environment has a CUDA-enabled PaddlePaddle build. GPU mode is the default; `-UseGpu` is accepted as an explicit switch. If CUDA Paddle is missing, it writes a blocked summary instead of downgrading to CPU. A passing run must produce Det, Rec, and System official reports, System prediction output, the production OCR acceptance report, and the chain summary.
 
 ## Phase 18: Package Acceptance
 
@@ -121,7 +138,7 @@ Expected result:
 
 ## Phase 19: TensorRT Acceptance
 
-RTX 4090 D TensorRT acceptance has passed for the current validation lane, with evidence under `.deps\rtx4090-validation\acceptance-tensorrt`. Older GTX 1060 / SM 61 hardware remains `hardware-blocked` for TensorRT 10 and must not be treated as passing.
+RTX 4090 D TensorRT acceptance has passed for the current validation lane, with evidence archived in `docs\validation\rtx4090-validation-evidence-20260615.json`. Older GTX 1060 / SM 61 hardware remains `hardware-blocked` for TensorRT 10 and must not be treated as passing.
 
 To reproduce or refresh the evidence on an RTX / SM 75+ Windows machine or matching cloud GPU:
 
@@ -133,7 +150,7 @@ Acceptance requires:
 
 - Worker self-check resolves CUDA, cuDNN, TensorRT, TensorRT Plugin, TensorRT ONNX Parser, and ONNX Runtime components needed for ONNX-to-engine export.
 - `acceptance-smoke.ps1 -TensorRT` generates a small official Ultralytics YOLO ONNX artifact, or uses `-TensorRtOnnxPath <official.onnx>` when supplied.
-- `aitrain_worker.exe --tensorrt-smoke <official.onnx>` builds a TensorRT engine. The current official-only smoke does not use the removed tiny-detector TensorRT inference fixture.
+- `aitrain_worker.exe --tensorrt-smoke <official.onnx>` builds a TensorRT engine from an official Ultralytics ONNX artifact. This is an official-artifact smoke with AITrain TensorRT export/runtime checks; it does not use the removed tiny-detector TensorRT inference fixture and is not an end-to-end Ultralytics Python runtime check.
 - The result is recorded back in `docs\harness\current-status.md`; the current RTX 4090 D pass is already recorded.
 
 ## Phase 43 Lite: External Acceptance Handoff
@@ -197,15 +214,63 @@ Expected artifacts:
 
 Required Phase 45 models are `yolo11n.yaml`, `yolo11n-seg.yaml`, `yolo12n.yaml`, and `yolo12n-seg.yaml`. This is a wiring/artifact/productization smoke, not an accuracy benchmark.
 
-## Phase 46: PaddleOCR Det C++ ONNX Postprocess
+## P1: YOLO Full Preset and Export-Argument Matrix
 
-Phase 46 adds C++ DB-style postprocess for PaddleOCR Det ONNX probability maps. The required local acceptance is the normal harness check:
+Run the required full YOLO detection/instance-segmentation matrix:
 
 ```powershell
-.\tools\harness-check.ps1
+.\tools\phase-p1-yolo-full-matrix-smoke.ps1
 ```
 
-The CTest suite covers the deterministic postprocess path with a synthetic probability map. Expected behavior:
+The script writes `p1_yolo_full_matrix_summary.json` under `.deps\phase-p1-yolo-full-matrix` by default. `status=passed` requires every required row with a resolvable official asset to pass; download failures, official model-resolution failures, GPU/TensorRT gaps, and INT8 calibration failures are recorded as failed/blocker evidence rather than skipped or silently downgraded. YOLO12 segmentation `.pt` is the current known model-resolution blocker in Ultralytics 8.3.171 and must be recorded as `blocked_missing_official_weight` or equivalent until upstream weights resolve.
+
+Required rows:
+
+- Standard detection: YOLOv5u P5 plus YOLOv8 / YOLO11 / YOLO12, scales `n/s/m/l/x`, source types `.yaml` and `.pt`.
+- Standard instance segmentation: YOLOv8 / YOLO11, scales `n/s/m/l/x`, source types `.yaml` and `.pt`; YOLO12, scales `n/s/m/l/x`, source type `.yaml`, with `.pt` rows blocked unless official `yolo12*-seg.pt` weights resolve.
+- YOLOv8 detection architecture YAML: P2 and P6 variants, scales `n/s/m/l/x`.
+
+YOLOv5u detection rows use `yolov5n/s/m/l/x.yaml` architecture entries and `yolov5nu/su/mu/lu/xu.pt` pretrained entries. Original `ultralytics/yolov5` repository weights, YOLOv5 segmentation, and YOLOv5 P6 variants are outside the required P1 matrix.
+
+Each row must produce a completed Worker training task, `best.pt`, `best.onnx` or official ONNX export path, and `ultralytics_training_report.json` containing `model`, `backend`, `metrics`, and `ultralyticsExportArgs`. `.pt` source rows must preserve the `.pt` model name in the report to prove the pretrained fine-tuning route was used.
+
+P1 also covers official YOLO export parameters from both the training page and model export page:
+
+- ONNX supports `dynamic` and `half`, but rejects `int8=true`.
+- TensorRT supports INT8 only through official Ultralytics export and requires compatible GPU/TensorRT plus calibration data.
+- NCNN rejects `dynamic`, `half`, `int8`, and `end2end=true`; `.pt -> ncnn` first creates a static FP32 traditional official ONNX intermediate, then runs `onnx2ncnn`.
+
+The full P1 matrix is intentionally separate from `harness-check.ps1` because it downloads/runs many official YOLO models and is expected to be slow on CPU.
+
+## YOLO26 Compatibility Matrix
+
+Run the separate YOLO26 detection/instance-segmentation matrix:
+
+```powershell
+.\tools\phase-yolo26-model-matrix-smoke.ps1
+.\tools\phase-yolo26-model-matrix-smoke.ps1 -PrepareEnvironment -ProbeOnly -Device 0
+.\tools\phase-yolo26-model-matrix-smoke.ps1 -Focused -Epochs 1 -Device 0
+.\tools\phase-yolo26-model-matrix-smoke.ps1 -Full -Epochs 100 -Device 0
+```
+
+Full mode writes `yolo26_model_matrix_summary.json` under `.deps\phase-yolo26-model-matrix` by default and has 20 required rows:
+
+- YOLO26 detection: `yolo26n/s/m/l/x.yaml` and `yolo26n/s/m/l/x.pt`.
+- YOLO26 instance segmentation: `yolo26n/s/m/l/x-seg.yaml` and `yolo26n/s/m/l/x-seg.pt`.
+
+Probe mode writes `yolo26_environment_self_check.json` and validates the isolated Python environment, CUDA Torch when GPU is requested, `cfg/models/26`, and nano `.yaml` / `.pt` model loading before training. Focused mode is the quick lifecycle gate for nano models and covers `yolo26n.yaml`, `yolo26n.pt`, `yolo26n-seg.yaml`, and `yolo26n-seg.pt`.
+
+`end2end=auto` uses the loaded Ultralytics model config when it exposes an `end2end` default; otherwise it falls back to YOLO26 detection=true and other models=false. Reports must record the normalized boolean under `ultralyticsExportArgs.end2end`. Each passed YOLO26 row must produce a completed Worker training task, `best.pt`, ONNX, `ultralytics_training_report.json`, AITrain inference JSON, overlay output, and explicit ONNX/TensorRT deployment statuses. YOLO26 NCNN is not an accepted target.
+
+Current status: in the recorded shared Ultralytics 8.3.171 full lifecycle environment, all 20 YOLO26 rows failed before useful training. `.yaml` rows report missing model config files, most `.pt` rows report missing official weights, and nano `.pt` rows expose package/code incompatibility (`SPPF.__init__()` argument mismatch and missing `Segment26`). The isolated YOLO26 matrix full summary passed on 2026-06-15 for 20/20 training, official ONNX export, AITrain C++ ONNX inference, and TensorRT deployment validation. YOLO26 NCNN is removed from the accepted deployment target list.
+
+YOLO26 semantic segmentation, classification, pose, OBB, tracking, YOLOE-26, and other task variants are not supported.
+
+## Historical Phase 46/47 OCR ONNX Wiring
+
+Phase 46/47 C++ OCR ONNX work is historical wiring evidence only. It is not a current OCR product route, deployment gate, benchmark, or customer acceptance requirement. The required OCR product acceptance path is PaddleOCR official Det/Rec/System reports.
+
+The historical CTest suite covered the deterministic postprocess path with a synthetic probability map. That coverage is retained only as diagnostic background. New OCR acceptance should not require C++ OCR ONNX evidence. Historical behavior:
 
 - single connected text region becomes one `ocr_detection` prediction;
 - small noise regions are filtered by `minArea`;
@@ -214,27 +279,23 @@ The CTest suite covers the deterministic postprocess path with a synthetic proba
 
 This phase validates C++ postprocess wiring only. It does not mark PP-OCRv5 official training/export accuracy as accepted, and the full official PaddleOCR Det+Rec+System path remains `tools\phase31-paddleocr-full-official-smoke.ps1` / official `predict_system.py`.
 
-## Phase 47: Real PaddleOCR Det ONNX Wiring Smoke
+### Historical Phase 47 Evidence
 
-Phase 47 attempts to convert the official PaddleOCR Det inference model from Phase 31 into ONNX through the official PaddleX `--paddle2onnx` path, writes an AITrain sidecar with `modelFamily=ocr_detection`, then runs the C++ ONNX Runtime DB-style postprocess through `aitrain_worker --ocr-det-onnx-smoke`.
+Phase 47 evidence may remain in delivery archives to explain past wiring scope, but it is no longer a product route. Do not run Phase 47 as a new OCR closeout gate.
 
-```powershell
-.\tools\phase47-paddleocr-det-onnx-smoke.ps1
-```
+Use `tools\phase31-paddleocr-full-official-smoke.ps1`, `tools\production-ocr-acceptance.ps1`, `tools\customer-ocr-validation.ps1`, or the Phase 49 GUI customer OCR wizard for current OCR closeout.
 
-Expected passing artifacts under `.deps\phase47-paddleocr-det-onnx-smoke`:
+Historical artifacts may include:
 
 - `paddleocr_det_official.onnx`
 - `paddleocr_det_official.onnx.aitrain-export.json`
-- `cpp_onnx_smoke\ocr_det_onnx_predictions.json`
-- `cpp_onnx_smoke\ocr_det_onnx_overlay.png`
 - `paddleocr_det_onnx_smoke_summary.json`
 
-The script reuses existing Phase 31 Det artifacts when available. If the official Det inference model is missing or failed, it runs `tools\phase31-paddleocr-full-official-smoke.ps1` first. Conversion uses a separate Python 3.12 embeddable environment because the local Python 3.13 OCR environment only sees old `paddle2onnx` wheels that are not compatible with PaddlePaddle 3.x PIR inference exports. By default the conversion environment uses Paddle's Windows nightly CPU package source, which matches the official Windows guidance for Paddle2ONNX conversion; `-UseStablePaddleForConversion` can be used to reproduce the stable-wheel path.
+`tools\phase47-paddleocr-det-onnx-smoke.ps1` is now a compatibility boundary check only: it writes a blocked official-only summary and exits with code 11. It no longer runs Phase 31, Paddle2ONNX conversion, or Worker C++ OCR ONNX smoke.
 
-RTX 4090 validation passed Phase 47 by exporting a Paddle 2.6 old-IR PaddleOCR Det inference model, converting it with Paddle2ONNX, writing the AITrain sidecar, and running `aitrain_worker --ocr-det-onnx-smoke`. Passing evidence is under `.deps\rtx4090-validation\phase47-paddleocr-det-onnx`, including `paddleocr_det_onnx_smoke_summary.json`, C++ predictions, and overlay PNG. If a future conversion path is blocked again, preserve the blocked summary instead of weakening the gate.
+RTX 4090D historical Phase 47 evidence is archived in `docs\validation\rtx4090-validation-evidence-20260615.json`. Keep it as past wiring context only; do not use it as new OCR acceptance evidence.
 
-A passing Phase 47 run is real exported Det ONNX wiring evidence for the C++ postprocess path on a tiny CPU smoke model. It is still not PP-OCRv5 official accuracy parity or a production OCR benchmark.
+Current OCR acceptance requires PaddleOCR official Det/Rec/System reports and representative data.
 
 ## Production OCR Acceptance
 
@@ -247,9 +308,7 @@ Use this gate only with representative, non-tiny OCR data and returned official 
   -SystemImages <end-to-end-image-folder> `
   -OfficialDetReport <paddleocr_official_det_report.json> `
   -OfficialRecReport <paddleocr_official_rec_report.json> `
-  -OfficialSystemReport <paddleocr_official_system_report.json> `
-  -OcrDetOnnxSummary <paddleocr_det_onnx_smoke_summary.json> `
-  -RequireDetOnnxEvidence
+  -OfficialSystemReport <paddleocr_official_system_report.json>
 ```
 
 The script writes:
@@ -259,7 +318,16 @@ The script writes:
 
 Default thresholds are intentionally higher than tiny smoke data: at least 100 Det images, 1000 Rec samples, 100 System images, and Rec accuracy > 0.70. CER is recorded by default but is not blocking unless `-RequireRecCer` is supplied. If evidence is missing, the script exits blocked and records the missing checks instead of marking production OCR as accepted.
 
-Current RTX 4090 validation note: the historical CPU/default Rec gate is still blocked with `accuracy=0.0`, but the newer GPU official English PP-OCRv4 Rec run improved to `accuracy=0.7187499750434037` and `CER=0.1415306288038758`. The full GPU gate rerun under `.deps\rtx4090-validation\production-ocr-acceptance-gpu-chain` passes under the current `accuracy>0.70` Rec gate.
+The repeatable production chain supports PP-OCRv4, PP-OCRv5, and PP-OCRv6 presets:
+
+```powershell
+.\tools\run-production-ocr-official-chain.ps1 -OcrVersion PP-OCRv5 -UseGpu -AllowBlocked
+.\tools\run-production-ocr-official-chain.ps1 -OcrVersion PP-OCRv6 -PPOCRv6Tier medium -AllowBlocked
+```
+
+PP-OCRv5 and PP-OCRv6 production-chain runs still use only PaddleOCR official Det, Rec, and System reports. They do not add a PaddleOCR C++ local OCR route and do not claim PP-StructureV3, PP-ChatOCR, PaddleOCR-VL, document orientation classification, document unwarping, or text-line orientation classification coverage. PP-OCRv6 tiny follows the official language-coverage limitation and remains workflow evidence unless customer-domain data is accepted.
+
+Current RTX 4090D validation note: the 2026-06-05 refresh/follow-up records passing evidence for LocalBaseline+Package, GUI walkthrough, TensorRT, CPUTrainingSmoke, Phase45, Phase47 Det ONNX+CTest, and public OCR GPU workflow. The follow-up summary and related historical RTX4090 evidence are archived in `docs\validation\rtx4090-validation-evidence-20260615.json`. The public OCR GPU workflow remains public Total-Text workflow evidence only; the 2026-06-05 public rerun passed under the current `accuracy>0.70` Rec gate, while the 2026-05-13 closeout remains a historical higher-accuracy public baseline.
 
 Customer-domain production claims require customer/target-domain data and should use `tools\customer-ocr-validation.ps1` or the Phase 49 GUI customer OCR wizard. Public Total-Text, generated smoke data, and `.deps` samples can prove workflow execution only; they must remain `blocked` or smoke-only for production OCR readiness.
 
@@ -322,7 +390,7 @@ These phases do not change TensorRT acceptance. They make the local RC easier to
 - Official OCR: `phase16-ocr-official-smoke.ps1` covers official Rec train, export, and recognition inference. `phase31-paddleocr-full-official-smoke.ps1` covers official Det + Rec train/export and official System inference.
 - Annotation: the dataset page launches X-AnyLabeling as the default external annotation tool, detects its local path, and provides a post-labeling refresh/revalidation action.
 - UX closeout: task history can be filtered by category, status, and search text; failed tasks show a short diagnostic next-step summary.
-- Delivery closeout: sample review, delivery acceptance, customer OCR validation, diagnostics, and deployment validation are available through the Phase 49 GUI pages and Worker report commands.
+- Delivery closeout: sample review, environment-page delivery evidence, customer OCR validation, diagnostics, and deployment validation are available through the Phase 49 GUI surfaces and Worker report commands.
 
 Suggested manual GUI walkthrough:
 
@@ -330,13 +398,13 @@ Suggested manual GUI walkthrough:
 .\tools\ui-workbench-walkthrough.ps1
 ```
 
-The RC walkthrough wrapper runs the 1280x820 non-fullscreen page set: `总览`, `项目`, `数据集`, `样本复核`, `训练实验`, `任务与产物`, `模型库`, `评估报告`, `模型导出`, `推理验证`, `交付验收`, `插件`, `环境`, and `设置`. It writes `ui_walkthrough_rc_summary.json` under `.deps\ui-walkthrough-rc` by default and should be treated as the repeatable GUI usability gate.
+The RC walkthrough wrapper runs the 1280x820 non-fullscreen main page set: `总览`, `项目`, `数据集`, `训练实验`, `任务与产物`, `模型库`, `部署验证`, `环境`, and `系统设置`. It writes `ui_walkthrough_rc_summary.json` under `.deps\UI-Walkthrough\rc` by default and should be treated as the repeatable GUI usability gate. Tab-level coverage for `数据集 > 质量与复核`, `模型库 > 评估报告`, `部署验证 > 模型导出 / 推理验证`, `系统设置 > 插件 / 应用设置`, and `环境 > 交付证据` is handled by QtTest.
 
 If offline licensing stops startup at the registration dialog, the wrapper records `status=blocked` and `errorCode=license_required`. That is not a GUI layout pass; configure a valid license token and build-time public key, then rerun the wrapper.
 
 `tools\local-rc-closeout.ps1` runs this walkthrough by default after harness/package smoke. Use `-SkipGuiWalkthrough` only for intentionally headless environments, and record that omission in the handoff notes.
 
-For manual exploration beyond the automated pass, create or open a project, import generated detection, segmentation, OCR Rec, and OCR Det datasets, launch X-AnyLabeling from the dataset page, use post-labeling refresh/revalidation, validate and split each dataset, run one training/export/inference path, then confirm the task queue detail view lists report, checkpoint/model, ONNX, overlay, visualized OCR image, and prediction JSON/TXT artifacts. Also open `样本复核` and `交付验收` to confirm review-list export, diagnostics, customer OCR gate, and deployment validation entries are visible.
+For manual exploration beyond the automated pass, create or open a project, import generated detection, segmentation, OCR Rec, and OCR Det datasets, launch X-AnyLabeling from the dataset page, use post-labeling refresh/revalidation, validate and split each dataset, run one training/export/inference path, then confirm the task queue detail view lists report, checkpoint/model, ONNX, overlay, visualized OCR image, and prediction JSON/TXT artifacts. Also open `数据集 > 质量与复核`, `部署验证`, `系统设置 > 插件`, and `环境 > 交付证据` to confirm review-list export, export/inference validation, plugin state, diagnostics, customer OCR gate, and deployment validation entries are visible.
 
 X-AnyLabeling is detected from `AITRAIN_XANYLABELING_EXE`, the app directory, `tools\x-anylabeling`, `.deps\annotation-tools\X-AnyLabeling`, or `PATH`. Keep downloaded binaries in `.deps\` unless a separate redistribution review is completed.
 
@@ -350,6 +418,7 @@ Before marking a release baseline:
 .\tools\package-smoke.ps1 -SkipBuild
 .\tools\acceptance-smoke.ps1 -LocalBaseline -Package
 .\tools\phase31-paddleocr-full-official-smoke.ps1
+.\tools\phase31-paddleocr-full-official-smoke.ps1 -OcrVersion PP-OCRv4
 ```
 
 Then check:
@@ -359,4 +428,5 @@ Then check:
 - Phase 7 / Phase 10 TensorRT RTX 4090 D acceptance passed unless RTX / SM 75+ smoke passed.
 - Third-party backend license notes remain visible, especially Ultralytics AGPL / Enterprise constraints.
 - Legacy C++ tiny detector, segmentation baseline, OCR baseline, small OCR CTC, and shipped Python mock trainer implementations remain removed from the product training path.
-- C++ PaddleOCR Det DB-style ONNX postprocess has a Phase 46 v1 path for probability-map outputs. Phase 47 has real exported Det ONNX wiring evidence under `.deps\rtx4090-validation\phase47-paddleocr-det-onnx`; full OCR system acceptance remains official `predict_system.py`. Per current RTX 4090 validation scope, Rec accuracy is not considered for this pass and remains a future production-quality gate if reinstated.
+- Historical Phase 46/47 OCR ONNX wiring evidence remains archived, but current OCR acceptance is official-only through PaddleOCR Det/Rec/System reports and customer-domain data.
+- PP-OCRv5/PP-OCRv6 support is scoped to official Det/Rec/System presets and reports. It does not add PP-StructureV3, PP-ChatOCR, PaddleOCR-VL, document direction classification, image correction, text-line direction classification, or PaddleOCR C++ local deployment to the accepted product route.

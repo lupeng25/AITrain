@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,51 @@ from trainer_protocol import configure_stdio, emit_failed, exception_details, un
 
 
 BACKEND_ID = "paddleocr_det_official"
-DEFAULT_CONFIG_RELATIVE = "configs/det/PP-OCRv4/PP-OCRv4_mobile_det.yml"
+DEFAULT_MODEL_PRESET = "PP-OCRv5_mobile_det"
+DET_PRESETS: dict[str, dict[str, Any]] = {
+    "PP-OCRv4_mobile_det": {
+        "ocrVersion": "PP-OCRv4",
+        "config": "configs/det/PP-OCRv4/PP-OCRv4_mobile_det.yml",
+        "outputConfigName": "aitrain_ppocrv4_det.yml",
+        "modelName": "PP-OCRv4_mobile_det",
+        "requiresRepo": False,
+    },
+    "PP-OCRv5_mobile_det": {
+        "ocrVersion": "PP-OCRv5",
+        "config": "configs/det/PP-OCRv5/PP-OCRv5_mobile_det.yml",
+        "outputConfigName": "aitrain_ppocrv5_mobile_det.yml",
+        "modelName": "PP-OCRv5_mobile_det",
+        "requiresRepo": True,
+    },
+    "PP-OCRv5_server_det": {
+        "ocrVersion": "PP-OCRv5",
+        "config": "configs/det/PP-OCRv5/PP-OCRv5_server_det.yml",
+        "outputConfigName": "aitrain_ppocrv5_server_det.yml",
+        "modelName": "PP-OCRv5_server_det",
+        "requiresRepo": True,
+    },
+    "PP-OCRv6_tiny_det": {
+        "ocrVersion": "PP-OCRv6",
+        "config": "configs/det/PP-OCRv6/PP-OCRv6_tiny_det.yml",
+        "outputConfigName": "aitrain_ppocrv6_tiny_det.yml",
+        "modelName": "PP-OCRv6_tiny_det",
+        "requiresRepo": True,
+    },
+    "PP-OCRv6_small_det": {
+        "ocrVersion": "PP-OCRv6",
+        "config": "configs/det/PP-OCRv6/PP-OCRv6_small_det.yml",
+        "outputConfigName": "aitrain_ppocrv6_small_det.yml",
+        "modelName": "PP-OCRv6_small_det",
+        "requiresRepo": True,
+    },
+    "PP-OCRv6_medium_det": {
+        "ocrVersion": "PP-OCRv6",
+        "config": "configs/det/PP-OCRv6/PP-OCRv6_medium_det.yml",
+        "outputConfigName": "aitrain_ppocrv6_medium_det.yml",
+        "modelName": "PP-OCRv6_medium_det",
+        "requiresRepo": True,
+    },
+}
 
 configure_stdio()
 
@@ -53,6 +98,68 @@ def bool_param(parameters: dict[str, Any], key: str, default: bool) -> bool:
     return bool(value)
 
 
+def int_param(parameters: dict[str, Any], key: str, default: int, minimum: int = 0) -> int:
+    try:
+        return max(minimum, int(parameters.get(key, default)))
+    except (TypeError, ValueError):
+        return max(minimum, default)
+
+
+def official_log_options(parameters: dict[str, Any]) -> tuple[str, int, int]:
+    verbosity = str(parameters.get("officialLogVerbosity") or "summary").strip().lower()
+    if verbosity not in {"summary", "full", "quiet"}:
+        verbosity = "summary"
+    interval_seconds = int_param(parameters, "officialLogEventIntervalSeconds", 30, 1)
+    tail_lines = int_param(parameters, "officialLogTailLines", 200, 1)
+    return verbosity, interval_seconds, tail_lines
+
+
+def is_important_official_line(line: str) -> bool:
+    lower = line.lower()
+    important_tokens = ("traceback", "error", "exception", "failed", "warning", "fatal")
+    return any(token in lower for token in important_tokens)
+
+
+def resolve_preset(parameters: dict[str, Any]) -> dict[str, Any]:
+    requested = str(parameters.get("modelPreset") or parameters.get("model") or DEFAULT_MODEL_PRESET).strip()
+    if not requested:
+        requested = DEFAULT_MODEL_PRESET
+    preset = dict(DET_PRESETS.get(requested, DET_PRESETS[DEFAULT_MODEL_PRESET]))
+    preset["modelPreset"] = requested if requested in DET_PRESETS else DEFAULT_MODEL_PRESET
+    official_config = str(parameters.get("officialConfig") or "").strip().replace("\\", "/")
+    if official_config:
+        preset["config"] = official_config
+        preset["configSource"] = "officialConfig_override"
+        preset["requiresRepo"] = True
+    else:
+        preset["configSource"] = "builtin_preset"
+    return preset
+
+
+def config_model_name(config: dict[str, Any], fallback: str) -> str:
+    global_config = config.get("Global") if isinstance(config, dict) else {}
+    if isinstance(global_config, dict):
+        value = str(global_config.get("model_name") or "").strip()
+        if value:
+            return value
+    return fallback
+
+
+def resolve_repo_file(repo: Path, relative: str, description: str) -> tuple[Path, str]:
+    normalized = relative.replace("\\", "/")
+    candidates = [normalized]
+    if normalized.endswith(".yml"):
+        candidates.append(normalized[:-4] + ".yaml")
+    elif normalized.endswith(".yaml"):
+        candidates.append(normalized[:-5] + ".yml")
+    for candidate in candidates:
+        path = (repo / candidate).resolve()
+        if path.exists():
+            return path, candidate
+    tried = ", ".join(str((repo / candidate).resolve()) for candidate in candidates)
+    raise FileNotFoundError(f"{description} not found. Tried: {tried}")
+
+
 def resolve_dataset_file(dataset_path: Path, value: Any, default_name: str) -> Path:
     text = str(value or "").strip()
     if not text:
@@ -74,8 +181,11 @@ def find_repo(parameters: dict[str, Any]) -> Path | None:
     script = Path(__file__).resolve()
     candidates.extend(
         [
+            cwd / ".deps" / "repos" / "PaddleOCR",
             cwd / ".deps" / "PaddleOCR",
+            script.parents[3] / ".deps" / "repos" / "PaddleOCR" if len(script.parents) > 3 else script.parent,
             script.parents[3] / ".deps" / "PaddleOCR" if len(script.parents) > 3 else script.parent,
+            script.parents[2] / ".deps" / "repos" / "PaddleOCR" if len(script.parents) > 2 else script.parent,
             script.parents[2] / ".deps" / "PaddleOCR" if len(script.parents) > 2 else script.parent,
         ]
     )
@@ -167,6 +277,7 @@ def select_checkpoint_base(output_path: Path, explicit_base: Any) -> Path:
 def build_config(
     repo: Path | None,
     parameters: dict[str, Any],
+    preset: dict[str, Any],
     dataset_path: Path,
     output_path: Path,
     train_list_path: Path,
@@ -175,11 +286,10 @@ def build_config(
 ) -> dict[str, Any]:
     import yaml
 
-    template_relative = str(parameters.get("officialConfig") or DEFAULT_CONFIG_RELATIVE).replace("\\", "/")
+    template_relative = str(preset["config"]).replace("\\", "/")
     if repo:
-        template_path = (repo / template_relative).resolve()
-        if not template_path.exists():
-            raise FileNotFoundError(f"PaddleOCR det config template not found: {template_path}")
+        template_path, resolved_relative = resolve_repo_file(repo, template_relative, "PaddleOCR det config template")
+        preset["resolvedConfig"] = resolved_relative
         with template_path.open("r", encoding="utf-8") as handle:
             config = yaml.safe_load(handle)
     else:
@@ -198,6 +308,8 @@ def build_config(
     batch_size = max(1, int(parameters.get("batchSize", 1)))
     image_size = max(32, int(parameters.get("imageSize", parameters.get("detImageSize", 640))))
     eval_every_steps = max(1, int(parameters.get("evalEverySteps", 1000000)))
+    print_batch_step = int_param(parameters, "officialPrintBatchStep", 20, 1)
+    save_epoch_step = min(epochs, int_param(parameters, "officialSaveEpochStep", 10, 1))
     save_model_dir = output_path / "official_model"
     save_inference_dir = output_path / "official_inference"
 
@@ -206,9 +318,9 @@ def build_config(
         {
             "use_gpu": bool_param(parameters, "useGpu", False),
             "epoch_num": epochs,
-            "print_batch_step": 1,
+            "print_batch_step": print_batch_step,
             "save_model_dir": str(save_model_dir),
-            "save_epoch_step": 1,
+            "save_epoch_step": save_epoch_step,
             "eval_batch_step": [0, eval_every_steps],
             "pretrained_model": parameters.get("pretrainedModel") or None,
             "checkpoints": parameters.get("resumeCheckpoint") or None,
@@ -259,8 +371,16 @@ def parse_metrics(line: str, metrics: dict[str, float]) -> None:
         emit("metric", name=name, value=value)
 
 
-def run_process(command: list[str], cwd: Path, env: dict[str, str], metrics: dict[str, float] | None, log_path: Path) -> int:
+def run_process(
+    command: list[str],
+    cwd: Path,
+    env: dict[str, str],
+    metrics: dict[str, float] | None,
+    log_path: Path,
+    parameters: dict[str, Any],
+) -> int:
     emit("log", level="info", message=f"Running official PaddleOCR command: {' '.join(command)}")
+    verbosity, interval_seconds, tail_lines = official_log_options(parameters)
     process = subprocess.Popen(
         command,
         cwd=str(cwd),
@@ -272,17 +392,74 @@ def run_process(command: list[str], cwd: Path, env: dict[str, str], metrics: dic
         errors="replace",
     )
     assert process.stdout is not None
-    lines: list[str] = []
-    for line in process.stdout:
-        stripped = line.rstrip()
-        if stripped:
-            lines.append(stripped)
-            emit("log", level="info", message=stripped)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    tail: deque[str] = deque(maxlen=tail_lines)
+    line_count = 0
+    last_event_at = time.monotonic()
+    with log_path.open("w", encoding="utf-8") as log_file:
+        for line in process.stdout:
+            stripped = line.rstrip()
+            if not stripped:
+                continue
+            line_count += 1
+            log_file.write(stripped + "\n")
+            log_file.flush()
+            tail.append(stripped)
             if metrics is not None:
                 parse_metrics(stripped, metrics)
+            now = time.monotonic()
+            if verbosity == "full" or is_important_official_line(stripped):
+                emit("log", level="info", message=stripped[:2000])
+                last_event_at = now
+            elif verbosity == "summary" and now - last_event_at >= interval_seconds:
+                emit("log", level="info", message=f"Official PaddleOCR command still running; lines={line_count}; latest={stripped[:500]}")
+                last_event_at = now
     exit_code = process.wait()
-    log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    if verbosity != "full":
+        emit(
+            "log",
+            level="info" if exit_code == 0 else "error",
+            message=f"Official PaddleOCR command finished with exitCode={exit_code}; logPath={log_path}; tailLines={len(tail)}",
+        )
     return exit_code
+
+
+def prune_intermediate_checkpoints(output_path: Path, parameters: dict[str, Any]) -> int:
+    retention = str(parameters.get("checkpointRetention") or "").strip().lower()
+    if retention not in {"latest_best_inference", "latest-best-inference"}:
+        return 0
+    model_dir = output_path / "official_model"
+    if not model_dir.exists():
+        return 0
+    removed = 0
+    for path in model_dir.glob("iter_epoch_*"):
+        try:
+            if path.is_file():
+                path.unlink()
+                removed += 1
+        except OSError:
+            continue
+    return removed
+
+
+def patch_random_crop_numpy_choice(repo: Path | None) -> bool:
+    if repo is None:
+        return False
+    path = repo / "ppocr" / "data" / "imaug" / "random_crop_data.py"
+    if not path.exists():
+        return False
+    text = path.read_text(encoding="utf-8")
+    target = "int(np.random.choice(axis, size=1))"
+    replacement = "int(np.random.choice(axis, size=1)[0])"
+    if replacement in text:
+        return False
+    if target not in text:
+        return False
+    backup = path.with_suffix(path.suffix + ".aitrain.bak")
+    if not backup.exists():
+        backup.write_text(text, encoding="utf-8")
+    path.write_text(text.replace(target, replacement), encoding="utf-8")
+    return True
 
 
 def git_head(repo: Path | None) -> str:
@@ -309,6 +486,14 @@ def run(request: dict[str, Any]) -> int:
     dataset_path = Path(str(request.get("datasetPath") or parameters.get("datasetPath") or "")).resolve()
     output_path = Path(str(request.get("outputPath") or parameters.get("outputPath") or "aitrain-ppocr-det-output")).resolve()
     output_path.mkdir(parents=True, exist_ok=True)
+    preset = resolve_preset(parameters)
+    repo = find_repo(parameters)
+    if repo is None and preset.get("requiresRepo"):
+        return fail(
+            "Official PaddleOCR source checkout is required for this PaddleOCR detection preset or officialConfig override.",
+            "paddleocr_repo_missing",
+            {"modelPreset": preset["modelPreset"], "officialConfig": preset["config"]},
+        )
 
     try:
         train_label_source = resolve_dataset_file(dataset_path, parameters.get("trainLabelFile"), "det_gt.txt")
@@ -323,7 +508,6 @@ def run(request: dict[str, Any]) -> int:
     except Exception as exc:
         return fail(str(exc), "bad_dataset")
 
-    repo = find_repo(parameters)
     run_official = bool_param(parameters, "runOfficial", False)
     prepare_only = bool_param(parameters, "prepareOnly", not run_official)
     if repo is None and not prepare_only:
@@ -344,12 +528,13 @@ def run(request: dict[str, Any]) -> int:
     write_label_file(val_list_path, val_samples)
 
     try:
-        config = build_config(repo, parameters, dataset_path, output_path, train_list_path, val_list_path, samples[0][0])
+        config = build_config(repo, parameters, preset, dataset_path, output_path, train_list_path, val_list_path, samples[0][0])
     except Exception as exc:
         return fail(f"Failed to build official PaddleOCR det config: {exc}", "config_failed")
 
-    config_path = output_path / "aitrain_ppocrv4_det.yml"
+    config_path = output_path / str(preset["outputConfigName"])
     config_path.write_text(yaml_dump(config), encoding="utf-8")
+    resolved_model_name = config_model_name(config, str(preset["modelName"]))
     export_only = bool_param(parameters, "exportOnly", False)
     train_command = [sys.executable, "tools/train.py", "-c", str(config_path)]
     pretrained_base = select_checkpoint_base(output_path, parameters.get("pretrainedModel"))
@@ -374,7 +559,13 @@ def run(request: dict[str, Any]) -> int:
         "framework": "PaddleOCR official tools",
         "modelFamily": "ocr_detection",
         "mode": "prepareOnly" if prepare_only else ("exportOnly" if export_only else "officialTrain"),
-        "note": "PP-OCRv4 official detection adapter. It validates official train/export wiring, not OCR accuracy.",
+        "note": "PaddleOCR PP-OCRv4/PP-OCRv5/PP-OCRv6 official detection adapter. It validates official train/export wiring, not OCR accuracy.",
+        "ocrVersion": preset["ocrVersion"],
+        "modelPreset": preset["modelPreset"],
+        "resolvedModelName": resolved_model_name,
+        "resolvedOfficialConfig": str(preset.get("resolvedConfig", preset["config"])),
+        "configSource": preset["configSource"],
+        "presetDictionaryPath": "",
         "pythonVersion": sys.version.split()[0],
         "paddleVersion": module_version("paddlepaddle"),
         "paddleOcrPackageVersion": module_version("paddleocr"),
@@ -392,8 +583,12 @@ def run(request: dict[str, Any]) -> int:
         "exportLogPath": str(export_log_path),
         "metrics": {},
     }
+    compatibility_patches: list[str] = []
+    if bool_param(parameters, "patchPaddleOcrNumpyChoice", True) and patch_random_crop_numpy_choice(repo):
+        compatibility_patches.append("paddleocr_random_crop_numpy_choice_scalar")
+    report["compatibilityPatches"] = compatibility_patches
 
-    emit("artifact", name="aitrain_ppocrv4_det.yml", path=str(config_path), kind="config")
+    emit("artifact", name=config_path.name, path=str(config_path), kind="config")
     emit("artifact", name="train_det_list.txt", path=str(train_list_path), kind="dataset")
     emit("artifact", name="val_det_list.txt", path=str(val_list_path), kind="dataset")
 
@@ -403,7 +598,7 @@ def run(request: dict[str, Any]) -> int:
         env["PYTHONPATH"] = str(repo) + os.pathsep + env.get("PYTHONPATH", "")
         official_metrics: dict[str, float] = {}
         if not export_only:
-            train_exit = run_process(train_command, repo, env, official_metrics, train_log_path)
+            train_exit = run_process(train_command, repo, env, official_metrics, train_log_path, parameters)
             report["metrics"] = official_metrics
             report["trainExitCode"] = train_exit
             if train_exit != 0:
@@ -424,7 +619,7 @@ def run(request: dict[str, Any]) -> int:
         report["exportCommand"] = export_command
         report["checkpointBasePath"] = str(pretrained_base)
         write_command_file(output_path / "run_official_det_export.ps1", export_command, repo)
-        export_exit = run_process(export_command, repo, env, None, export_log_path)
+        export_exit = run_process(export_command, repo, env, None, export_log_path, parameters)
         report["exportExitCode"] = export_exit
         if export_exit != 0:
             report["ok"] = False
@@ -433,6 +628,9 @@ def run(request: dict[str, Any]) -> int:
             return fail("Official PaddleOCR detection export failed.", "official_export_failed", {"exitCode": export_exit, "logPath": str(export_log_path)})
         report["checkpointPath"] = str(pretrained_base.with_suffix(".pdparams"))
         report["inferenceModelDir"] = str(output_path / "official_inference")
+        pruned_count = prune_intermediate_checkpoints(output_path, parameters)
+        report["checkpointRetention"] = str(parameters.get("checkpointRetention") or "")
+        report["prunedCheckpointCount"] = pruned_count
         emit("artifact", name="official_det_model", path=str(output_path / "official_model"), kind="checkpoint_dir")
         emit("artifact", name="official_det_inference", path=str(output_path / "official_inference"), kind="model_dir")
 

@@ -143,7 +143,7 @@ QString backendLabel(const QString& backend)
         return uiText("PaddleOCR Det（官方/隔离环境）");
     }
     if (backend == QStringLiteral("paddleocr_rec_official")) {
-        return uiText("PaddleOCR PP-OCRv4 Rec（官方/隔离环境）");
+        return uiText("PaddleOCR Rec（PP-OCRv4/v5/v6 官方）");
     }
     if (backend == QStringLiteral("paddleocr_system_official")) {
         return uiText("PaddleOCR System 推理（官方）");
@@ -562,6 +562,214 @@ QString defaultBackendForTask(const QString& taskType)
     return {};
 }
 
+namespace {
+QStringList yoloModelPresetsForTask(bool segmentation)
+{
+    const QStringList families = {
+        QStringLiteral("yolov8"),
+        QStringLiteral("yolo11"),
+        QStringLiteral("yolo12"),
+        QStringLiteral("yolo26")
+    };
+    const QStringList scales = {
+        QStringLiteral("n"),
+        QStringLiteral("s"),
+        QStringLiteral("m"),
+        QStringLiteral("l"),
+        QStringLiteral("x")
+    };
+    QStringList presets;
+    if (!segmentation) {
+        for (const QString& scale : scales) {
+            presets << QStringLiteral("yolov5%1.yaml").arg(scale)
+                    << QStringLiteral("yolov5%1u.pt").arg(scale);
+        }
+    }
+    for (const QString& family : families) {
+        for (const QString& scale : scales) {
+            const QString stem = segmentation
+                ? QStringLiteral("%1%2-seg").arg(family, scale)
+                : QStringLiteral("%1%2").arg(family, scale);
+            presets << QStringLiteral("%1.yaml").arg(stem)
+                    << QStringLiteral("%1.pt").arg(stem);
+        }
+    }
+    if (!segmentation) {
+        for (const QString& scale : scales) {
+            presets << QStringLiteral("yolov8%1-p2.yaml").arg(scale)
+                    << QStringLiteral("yolov8%1-p6.yaml").arg(scale);
+        }
+    }
+    return presets;
+}
+} // namespace
+
+QStringList yoloModelPresetItems()
+{
+    QStringList presets;
+    presets << yoloModelPresetsForTask(false)
+            << yoloModelPresetsForTask(true);
+    return presets;
+}
+
+QStringList modelPresetItemsForBackend(const QString& backend)
+{
+    const QString normalized = backend.trimmed().toLower();
+    if (normalized == QStringLiteral("ultralytics_yolo")
+        || normalized == QStringLiteral("ultralytics_yolo_detect")) {
+        return yoloModelPresetsForTask(false);
+    }
+    if (normalized == QStringLiteral("ultralytics_yolo_segment")) {
+        return yoloModelPresetsForTask(true);
+    }
+    if (normalized == QStringLiteral("paddleocr_det_official")) {
+        return {
+            QStringLiteral("PP-OCRv5_mobile_det"),
+            QStringLiteral("PP-OCRv5_server_det"),
+            QStringLiteral("PP-OCRv6_tiny_det"),
+            QStringLiteral("PP-OCRv6_small_det"),
+            QStringLiteral("PP-OCRv6_medium_det"),
+            QStringLiteral("PP-OCRv4_mobile_det")
+        };
+    }
+    if (normalized == QStringLiteral("paddleocr_rec_official")
+        || normalized == QStringLiteral("paddleocr_ppocrv4_rec")) {
+        return {
+            QStringLiteral("PP-OCRv5_mobile_rec"),
+            QStringLiteral("PP-OCRv5_server_rec"),
+            QStringLiteral("en_PP-OCRv5_mobile_rec"),
+            QStringLiteral("PP-OCRv6_tiny_rec"),
+            QStringLiteral("PP-OCRv6_small_rec"),
+            QStringLiteral("PP-OCRv6_medium_rec"),
+            QStringLiteral("PP-OCRv4_mobile_rec")
+        };
+    }
+
+    QStringList presets = yoloModelPresetItems();
+    presets << QStringLiteral("PP-OCRv5_mobile_det")
+            << QStringLiteral("PP-OCRv5_server_det")
+            << QStringLiteral("PP-OCRv6_tiny_det")
+            << QStringLiteral("PP-OCRv6_small_det")
+            << QStringLiteral("PP-OCRv6_medium_det")
+            << QStringLiteral("PP-OCRv5_mobile_rec")
+            << QStringLiteral("PP-OCRv5_server_rec")
+            << QStringLiteral("en_PP-OCRv5_mobile_rec")
+            << QStringLiteral("PP-OCRv6_tiny_rec")
+            << QStringLiteral("PP-OCRv6_small_rec")
+            << QStringLiteral("PP-OCRv6_medium_rec")
+            << QStringLiteral("PP-OCRv4_mobile_det")
+            << QStringLiteral("PP-OCRv4_mobile_rec");
+    return presets;
+}
+
+bool yoloModelPresetMatchesBackend(const QString& modelPreset, const QString& backend)
+{
+    const QString model = modelPreset.trimmed().toLower();
+    const QString normalizedBackend = backend.trimmed().toLower();
+    if (model.isEmpty()
+        || !(normalizedBackend.startsWith(QStringLiteral("ultralytics_yolo")))) {
+        return true;
+    }
+
+    const bool modelLooksSegment = model.contains(QStringLiteral("-seg."));
+    if (normalizedBackend == QStringLiteral("ultralytics_yolo_segment")) {
+        return modelLooksSegment;
+    }
+    if (normalizedBackend == QStringLiteral("ultralytics_yolo_detect")
+        || normalizedBackend == QStringLiteral("ultralytics_yolo")) {
+        return !modelLooksSegment;
+    }
+    return true;
+}
+
+struct Yolo26TargetedMatrixStatus {
+    bool trainingAccepted = false;
+    bool ncnnUnsupported = true;
+    QString summaryPath;
+    QString pythonExecutable;
+};
+
+bool deploymentStatusIsExplicit(const QString& status)
+{
+    return status == QStringLiteral("passed")
+        || status == QStringLiteral("blocked")
+        || status == QStringLiteral("failed")
+        || status == QStringLiteral("hardware-blocked");
+}
+
+Yolo26TargetedMatrixStatus yolo26TargetedMatrixStatus()
+{
+    Yolo26TargetedMatrixStatus accepted;
+    QStringList candidates;
+    const QString envPath = QString::fromLocal8Bit(qgetenv("AITRAIN_YOLO26_MATRIX_SUMMARY")).trimmed();
+    if (!envPath.isEmpty()) {
+        candidates.append(envPath);
+    }
+    candidates.append(QDir(QDir::currentPath()).filePath(QStringLiteral(".deps/phase-yolo26-model-matrix/yolo26_model_matrix_summary.json")));
+    candidates.append(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../.deps/phase-yolo26-model-matrix/yolo26_model_matrix_summary.json")));
+
+    for (const QString& candidate : candidates) {
+        const QJsonObject summary = readJsonObjectFile(QDir::cleanPath(candidate));
+        if (summary.isEmpty()
+            || !summary.value(QStringLiteral("ok")).toBool()
+            || summary.value(QStringLiteral("status")).toString() != QStringLiteral("passed")
+            || summary.value(QStringLiteral("mode")).toString() != QStringLiteral("full")) {
+            continue;
+        }
+        const QJsonArray results = summary.value(QStringLiteral("results")).toArray();
+        int requiredCount = 0;
+        bool allRequiredPassed = true;
+        bool allOnnxPassed = true;
+        bool allTensorRtExplicit = true;
+        for (const QJsonValue& value : results) {
+            const QJsonObject result = value.toObject();
+            if (!result.value(QStringLiteral("required")).toBool()) {
+                continue;
+            }
+            ++requiredCount;
+            if (result.value(QStringLiteral("status")).toString() != QStringLiteral("passed")) {
+                allRequiredPassed = false;
+                break;
+            }
+            const QJsonObject deployments = result.value(QStringLiteral("deployments")).toObject();
+            const QString onnxStatus = deployments.value(QStringLiteral("onnx")).toObject().value(QStringLiteral("status")).toString();
+            if (onnxStatus != QStringLiteral("passed")) {
+                allOnnxPassed = false;
+                break;
+            }
+
+            const QString tensorrtStatus = deployments.value(QStringLiteral("tensorrt")).toObject().value(QStringLiteral("status")).toString();
+            if (!deploymentStatusIsExplicit(tensorrtStatus)) {
+                allTensorRtExplicit = false;
+                break;
+            }
+            if (!allRequiredPassed) {
+                break;
+            }
+        }
+        QString pythonExecutable = QDir::fromNativeSeparators(summary.value(QStringLiteral("yolo26Python")).toString().trimmed());
+        if (!pythonExecutable.isEmpty() && QFileInfo(pythonExecutable).isRelative()) {
+            pythonExecutable = QFileInfo(candidate).absoluteDir().filePath(pythonExecutable);
+        }
+        pythonExecutable = QDir::cleanPath(pythonExecutable);
+        if (pythonExecutable.isEmpty() || !QFileInfo::exists(pythonExecutable)) {
+            continue;
+        }
+
+        if (requiredCount >= 20
+            && allRequiredPassed
+            && allOnnxPassed
+            && allTensorRtExplicit) {
+            accepted.trainingAccepted = true;
+            accepted.ncnnUnsupported = true;
+            accepted.summaryPath = QDir::cleanPath(candidate);
+            accepted.pythonExecutable = pythonExecutable;
+            return accepted;
+        }
+    }
+    return accepted;
+}
+
 QString defaultModelForBackend(const QString& backend)
 {
     if (backend == QStringLiteral("ultralytics_yolo_segment")) {
@@ -571,10 +779,10 @@ QString defaultModelForBackend(const QString& backend)
         return QStringLiteral("yolov8n.yaml");
     }
     if (backend == QStringLiteral("paddleocr_rec_official") || backend == QStringLiteral("paddleocr_ppocrv4_rec")) {
-        return QStringLiteral("PP-OCRv4_mobile_rec");
+        return QStringLiteral("PP-OCRv5_mobile_rec");
     }
     if (backend == QStringLiteral("paddleocr_det_official")) {
-        return QStringLiteral("PP-OCRv4_mobile_det");
+        return QStringLiteral("PP-OCRv5_mobile_det");
     }
     return QStringLiteral("diagnostic");
 }
@@ -588,10 +796,10 @@ QString trainingBackendDescription(const QString& backend)
         return uiText("当前模型能力：官方 Ultralytics YOLO segmentation。适合 YOLO polygon 数据，输出 mask 指标、best.pt、ONNX，并可生成 mask prediction JSON 与 overlay。");
     }
     if (backend == QStringLiteral("paddleocr_rec_official") || backend == QStringLiteral("paddleocr_ppocrv4_rec")) {
-        return uiText("当前模型能力：官方 PaddleOCR PP-OCRv4 Rec 适配器。适合隔离 OCR Python 环境，记录 train/export/predict 命令、checkpoint、inference model 和官方预测报告。");
+        return uiText("当前模型能力：官方 PaddleOCR PP-OCRv4/v5/v6 Rec 适配器。通过模型预设选择版本，适合隔离 OCR Python 环境，记录 train/export/predict 命令、checkpoint、inference model 和官方预测报告。");
     }
     if (backend == QStringLiteral("paddleocr_det_official")) {
-        return uiText("当前模型能力：官方 PaddleOCR PP-OCRv4 Det 适配器。适合 PaddleOCR 原生 det_gt.txt 数据，输出官方配置、checkpoint、inference model 和报告。");
+        return uiText("当前模型能力：官方 PaddleOCR PP-OCRv4/v5/v6 Det 适配器。通过模型预设选择版本，适合 PaddleOCR 原生 det_gt.txt 数据，输出官方配置、checkpoint、inference model 和报告。");
     }
     if (backend == QStringLiteral("paddleocr_system_official")) {
         return uiText("当前模型能力：官方 PaddleOCR 端到端推理编排。使用已导出的 Det/Rec inference model 调用 predict_system.py；本阶段不做 C++ DB 后处理。");
@@ -604,7 +812,24 @@ bool paddleOcrOfficialRepoConfigured()
 {
     const QString repo = QString::fromLocal8Bit(qgetenv("AITRAIN_PADDLEOCR_REPO")).trimmed();
     const QString legacyRepo = QString::fromLocal8Bit(qgetenv("AITRAIN_PADDLEOCR_SOURCE_ROOT")).trimmed();
-    return !repo.isEmpty() || !legacyRepo.isEmpty();
+    if (!repo.isEmpty() || !legacyRepo.isEmpty()) {
+        return true;
+    }
+
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        QDir(appDir).absoluteFilePath(QStringLiteral("python_env/PaddleOCR")),
+        QDir(appDir).absoluteFilePath(QStringLiteral("../python_env/PaddleOCR")),
+        QDir::current().absoluteFilePath(QStringLiteral(".deps/repos/PaddleOCR")),
+        QDir::current().absoluteFilePath(QStringLiteral(".deps/PaddleOCR")),
+        QDir::current().absoluteFilePath(QStringLiteral("python_env/PaddleOCR"))
+    };
+    for (const QString& candidate : candidates) {
+        if (QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("tools/train.py")))) {
+            return true;
+        }
+    }
+    return false;
 }
 
 QString expectedTrainingTaskForDatasetFormat(const QString& format)
@@ -680,6 +905,31 @@ QJsonObject trainingPreflightReport(
     if (!backend.isEmpty() && !isTrainingBackendCompatible(datasetFormat, backend)) {
         blockers.append(QStringLiteral("backend_dataset_mismatch"));
     }
+    if (!yoloModelPresetMatchesBackend(modelPreset, backend)) {
+        blockers.append(QStringLiteral("yolo_model_backend_mismatch"));
+        nextActions.append(QStringLiteral("select_matching_yolo_model_preset"));
+    }
+    const QString normalizedBackend = backend.trimmed().toLower();
+    const QString normalizedModel = modelPreset.trimmed().toLower();
+    const Yolo26TargetedMatrixStatus yolo26Status = yolo26TargetedMatrixStatus();
+    const bool yolo26Model = normalizedBackend.startsWith(QStringLiteral("ultralytics_yolo"))
+        && normalizedModel.startsWith(QStringLiteral("yolo26"));
+    if (yolo26Model && !yolo26Status.trainingAccepted) {
+        blockers.append(QStringLiteral("yolo26_requires_targeted_compatibility_validation"));
+        nextActions.append(QStringLiteral("run_yolo26_targeted_matrix_after_full_lifecycle"));
+    }
+    if (yolo26Model
+        && yolo26Status.trainingAccepted
+        && yolo26Status.ncnnUnsupported) {
+        warnings.append(QStringLiteral("yolo26_ncnn_export_unsupported"));
+        nextActions.append(QStringLiteral("use_yolo26_onnx_or_tensorrt"));
+    }
+    if (normalizedBackend == QStringLiteral("ultralytics_yolo_segment")
+        && normalizedModel.startsWith(QStringLiteral("yolo12"))
+        && normalizedModel.endsWith(QStringLiteral("-seg.pt"))) {
+        blockers.append(QStringLiteral("yolo12_seg_pt_missing_official_weight"));
+        nextActions.append(QStringLiteral("use_yolo12_seg_yaml_or_wait_for_official_weight"));
+    }
     if ((backend == QStringLiteral("paddleocr_det_official")
             || backend == QStringLiteral("paddleocr_rec_official")
             || backend == QStringLiteral("paddleocr_ppocrv4_rec"))
@@ -725,6 +975,10 @@ QJsonObject trainingPreflightReport(
     preflight.insert(QStringLiteral("expectedTaskType"), expectedTask);
     preflight.insert(QStringLiteral("trainingBackend"), backend);
     preflight.insert(QStringLiteral("modelPreset"), modelPreset);
+    if (yolo26Model && yolo26Status.trainingAccepted) {
+        preflight.insert(QStringLiteral("yolo26MatrixSummary"), yolo26Status.summaryPath);
+        preflight.insert(QStringLiteral("yolo26PythonExecutable"), yolo26Status.pythonExecutable);
+    }
     preflight.insert(QStringLiteral("epochs"), epochs);
     preflight.insert(QStringLiteral("batchSize"), batchSize);
     preflight.insert(QStringLiteral("imageSize"), imageSize);
@@ -884,6 +1138,7 @@ QStringList xAnyLabelingCandidates()
         QDir(appDir).filePath(QStringLiteral("X-AnyLabeling.exe")),
         QDir(appDir).filePath(QStringLiteral("xanylabeling.exe")),
         QDir(appDir).filePath(QStringLiteral("tools/x-anylabeling/X-AnyLabeling.exe")),
+        QDir(QDir::currentPath()).filePath(QStringLiteral(".deps/tools/annotation-tools/X-AnyLabeling/X-AnyLabeling.exe")),
         QDir(QDir::currentPath()).filePath(QStringLiteral(".deps/annotation-tools/X-AnyLabeling/X-AnyLabeling.exe")),
         QStringLiteral("xanylabeling"),
         QStringLiteral("X-AnyLabeling.exe")
@@ -924,7 +1179,7 @@ QString xAnyLabelingStatusText()
 {
     const QString program = resolvedXAnyLabelingProgram();
     if (program.isEmpty()) {
-        return uiText("状态：未检测到 X-AnyLabeling。请检查 PATH、环境变量或 .deps/annotation-tools。");
+        return uiText("状态：未检测到 X-AnyLabeling。请检查 PATH、环境变量或 .deps/tools/annotation-tools。");
     }
     return uiText("状态：已安装 | %1").arg(compactPathForStatus(program, 72));
 }

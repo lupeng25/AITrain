@@ -7,6 +7,7 @@
 #include "aitrain/core/JsonProtocol.h"
 #include "aitrain/core/ProductWorkflow.h"
 #include "aitrain/core/WorkerProtocol.h"
+#include "aitrain/core/WorkerRequests.h"
 
 #include <QDateTime>
 #include <QCoreApplication>
@@ -25,18 +26,384 @@
 
 using namespace worker_support;
 namespace wp = aitrain::worker_protocol;
+namespace wr = aitrain::worker_requests;
+
+namespace {
+constexpr int kMaxExporterBufferBytes = 4 * 1024 * 1024;
+constexpr int kMaxExporterLineBytes = 256 * 1024;
+
+QByteArray boundedExporterLine(const QByteArray& line)
+{
+    if (line.size() <= kMaxExporterLineBytes) {
+        return line;
+    }
+    QByteArray bounded = line.left(kMaxExporterLineBytes);
+    bounded.append(" ... [log_truncated: single Python exporter line exceeded limit]");
+    return bounded;
+}
+
+bool jsonBool(const QJsonObject& object, const QString& key)
+{
+    const QJsonValue value = object.value(key);
+    if (value.isBool()) {
+        return value.toBool();
+    }
+    if (value.isString()) {
+        const QString text = value.toString().trimmed().toLower();
+        return text == QStringLiteral("true") || text == QStringLiteral("1") || text == QStringLiteral("yes");
+    }
+    return value.toInt(0) != 0;
+}
+
+bool ncnnOfficialExportOptionsUnsupported(const QJsonObject& options)
+{
+    const QJsonObject args = options.value(QStringLiteral("ultralyticsExportArgs")).toObject();
+    return jsonBool(args, QStringLiteral("dynamic"))
+        || jsonBool(args, QStringLiteral("half"))
+        || jsonBool(args, QStringLiteral("int8"))
+        || jsonBool(args, QStringLiteral("end2end"));
+}
+
+QString unsupportedOfficialExportOptionsError(const QString& format, const QString& checkpointSuffix, const QJsonObject& options)
+{
+    const QJsonObject args = options.value(QStringLiteral("ultralyticsExportArgs")).toObject();
+    if (args.isEmpty()) {
+        return {};
+    }
+
+    const QString normalizedFormat = format.trimmed().toLower();
+    const bool dynamic = jsonBool(args, QStringLiteral("dynamic"));
+    const bool half = jsonBool(args, QStringLiteral("half"));
+    const bool int8 = jsonBool(args, QStringLiteral("int8"));
+    const bool end2end = jsonBool(args, QStringLiteral("end2end"));
+    if (normalizedFormat == QStringLiteral("onnx") && int8) {
+        return QStringLiteral("ONNX export does not support int8 in AITrain; use TensorRT export for INT8.");
+    }
+    if (normalizedFormat == QStringLiteral("ncnn") && (dynamic || half || int8 || end2end)) {
+        return QStringLiteral("NCNN export requires a static FP32 traditional YOLO ONNX intermediate; dynamic/half/int8/end2end are unsupported.");
+    }
+    if (checkpointSuffix != QStringLiteral("pt") && normalizedFormat.startsWith(QStringLiteral("tensorrt")) && int8) {
+        return QStringLiteral("TensorRT INT8 export requires official Ultralytics .pt export with calibration data; existing ONNX TensorRT conversion does not consume int8 options.");
+    }
+    return {};
+}
+
+QString defaultExportOutputPath(const QString& checkpointPath, const QString& outputPath, const QString& format)
+{
+    if (!outputPath.trimmed().isEmpty()) {
+        return outputPath;
+    }
+    const QString suffix = format == QStringLiteral("ncnn")
+        ? QStringLiteral("param")
+        : (format.startsWith(QStringLiteral("tensorrt")) ? QStringLiteral("engine") : QStringLiteral("onnx"));
+    return QFileInfo(checkpointPath).absoluteDir().filePath(QStringLiteral("model.%1").arg(suffix));
+}
+
+QString absoluteSidecarPath(const QJsonObject& object, const QString& sidecarPath, const QString& key)
+{
+    QString path = object.value(key).toString().trimmed();
+    if (path.isEmpty()) {
+        return {};
+    }
+    path = QDir::fromNativeSeparators(path);
+    if (QFileInfo(path).isRelative()) {
+        path = QFileInfo(sidecarPath).absoluteDir().filePath(path);
+    }
+    return QDir::cleanPath(path);
+}
+
+QJsonObject readJsonObjectFile(const QString& path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return {};
+    }
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+    return document.isObject() ? document.object() : QJsonObject();
+}
+
+bool jsonLooksYolo26(const QJsonObject& object)
+{
+    const QStringList keys = {
+        QStringLiteral("modelSeries"),
+        QStringLiteral("model"),
+        QStringLiteral("modelName"),
+        QStringLiteral("sourceCheckpoint"),
+        QStringLiteral("sourceOnnx")
+    };
+    for (const QString& key : keys) {
+        const QString value = object.value(key).toString().trimmed().toLower();
+        if (value.contains(QStringLiteral("yolo26"))) {
+            return true;
+        }
+    }
+    const QJsonObject trainingReport = object.value(QStringLiteral("trainingReport")).toObject();
+    if (!trainingReport.isEmpty() && jsonLooksYolo26(trainingReport)) {
+        return true;
+    }
+    const QJsonObject ncnn = object.value(QStringLiteral("ncnn")).toObject();
+    return !ncnn.isEmpty() && jsonLooksYolo26(ncnn);
+}
+
+bool modelArtifactLooksYolo26(const QString& path)
+{
+    const QString normalized = QDir::fromNativeSeparators(path.trimmed());
+    if (normalized.toLower().contains(QStringLiteral("yolo26"))) {
+        return true;
+    }
+
+    const QFileInfo info(normalized);
+    const QString suffix = info.suffix().toLower();
+    if ((suffix == QStringLiteral("json") || suffix == QStringLiteral("aitrain"))
+        && jsonLooksYolo26(readJsonObjectFile(normalized))) {
+        return true;
+    }
+
+    const QString sidecarPath = info.dir().filePath(info.completeBaseName() + QStringLiteral(".aitrain-export.json"));
+    if (QFileInfo::exists(sidecarPath) && jsonLooksYolo26(readJsonObjectFile(sidecarPath))) {
+        return true;
+    }
+
+    const QString siblingReport = info.dir().filePath(QStringLiteral("ultralytics_training_report.json"));
+    if (QFileInfo::exists(siblingReport) && jsonLooksYolo26(readJsonObjectFile(siblingReport))) {
+        return true;
+    }
+
+    const QString parentReport = QFileInfo(info.dir().absolutePath()).dir().filePath(QStringLiteral("ultralytics_training_report.json"));
+    return QFileInfo::exists(parentReport) && jsonLooksYolo26(readJsonObjectFile(parentReport));
+}
+
+QString resolveModelArtifactPath(QString path)
+{
+    path = QDir::fromNativeSeparators(path.trimmed());
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    if (suffix != QStringLiteral("json") && suffix != QStringLiteral("aitrain")) {
+        return path;
+    }
+
+    const QJsonObject sidecar = readJsonObjectFile(path);
+    if (sidecar.isEmpty()) {
+        return path;
+    }
+    const QJsonObject ncnn = sidecar.value(QStringLiteral("ncnn")).toObject();
+    const QStringList candidates = {
+        absoluteSidecarPath(sidecar, path, QStringLiteral("exportPath")),
+        absoluteSidecarPath(ncnn, path, QStringLiteral("paramPath")),
+        absoluteSidecarPath(sidecar, path, QStringLiteral("sourceOnnx")),
+        absoluteSidecarPath(ncnn, path, QStringLiteral("sourceOnnx"))
+    };
+    for (const QString& candidate : candidates) {
+        const QFileInfo info(candidate);
+        if (info.exists() && info.isFile()) {
+            return info.absoluteFilePath();
+        }
+    }
+    return path;
+}
+} // namespace
+
+WorkerSession::OfficialYoloExportResult WorkerSession::runOfficialYoloExport(
+    const QString& taskId,
+    const QString& sourcePath,
+    const QString& officialOutputPath,
+    const QString& productFormat,
+    const QJsonObject& exportOptions,
+    bool forwardExportEvents)
+{
+    OfficialYoloExportResult result;
+    const QString pythonExecutable = firstUsablePythonExecutable(exportOptions);
+    if (pythonExecutable.isEmpty()) {
+        result.error = QStringLiteral("Official YOLO export requires a usable Python executable.");
+        return result;
+    }
+    const QString exporterScript = pythonYoloExporterScriptPath(exportOptions);
+    if (!QFileInfo::exists(exporterScript)) {
+        result.error = QStringLiteral("Official YOLO exporter script not found: %1").arg(exporterScript);
+        return result;
+    }
+    if (!QDir().mkpath(QFileInfo(officialOutputPath).absolutePath())) {
+        result.error = QStringLiteral("Cannot create official YOLO export directory: %1").arg(QFileInfo(officialOutputPath).absolutePath());
+        return result;
+    }
+
+    const QString requestPath = QDir(QFileInfo(officialOutputPath).absolutePath()).filePath(QStringLiteral("official_yolo_export_request.json"));
+    QJsonObject request;
+    request.insert(QStringLiteral("protocolVersion"), 1);
+    request.insert(QStringLiteral("taskId"), taskId);
+    request.insert(QStringLiteral("modelPath"), sourcePath);
+    request.insert(QStringLiteral("checkpointPath"), sourcePath);
+    request.insert(QStringLiteral("outputPath"), officialOutputPath);
+    request.insert(QStringLiteral("format"), productFormat);
+    request.insert(QStringLiteral("options"), exportOptions);
+    QFile requestFile(requestPath);
+    if (!requestFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        result.error = QStringLiteral("Cannot write official YOLO export request: %1").arg(requestPath);
+        return result;
+    }
+    requestFile.write(QJsonDocument(request).toJson(QJsonDocument::Indented));
+    requestFile.close();
+
+    QProcess process;
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
+    environment.insert(QStringLiteral("PYTHONIOENCODING"), QStringLiteral("utf-8"));
+    configurePackagedPythonEnvironment(&environment);
+    process.setProcessEnvironment(environment);
+    process.setProgram(pythonExecutable);
+    process.setArguments(QStringList() << QStringLiteral("-u") << exporterScript << QStringLiteral("--request") << requestPath);
+    process.setProcessChannelMode(QProcess::SeparateChannels);
+    process.start();
+    if (!process.waitForStarted(5000)) {
+        result.error = QStringLiteral("Cannot start official YOLO exporter: %1").arg(process.errorString());
+        return result;
+    }
+
+    QByteArray stdoutBuffer;
+    QByteArray stderrBuffer;
+    QString failedMessage;
+    QString failedCode;
+    bool completedSeen = false;
+    const auto handleStdoutLine = [&](const QByteArray& line) {
+        if (line.isEmpty()) {
+            return;
+        }
+        QJsonDocument document;
+        if (parseTrainerJsonDocument(line, &document)) {
+            QJsonObject object = document.object();
+            const QString type = object.value(QStringLiteral("type")).toString();
+            QJsonObject eventPayload = object.value(QStringLiteral("payload")).toObject();
+            if (eventPayload.isEmpty()) {
+                eventPayload = object;
+                eventPayload.remove(QStringLiteral("type"));
+            }
+            eventPayload.insert(QStringLiteral("taskId"), taskId);
+            if (type == wp::event::failed()) {
+                failedMessage = eventPayload.value(QStringLiteral("message")).toString(QStringLiteral("Official YOLO export failed."));
+                failedCode = eventPayload.value(QStringLiteral("errorCode")).toString(eventPayload.value(QStringLiteral("code")).toString(QStringLiteral("ultralytics_export_failed")));
+            } else if (type == wp::event::completed()) {
+                completedSeen = true;
+            } else {
+                if (type == wp::event::modelExport()) {
+                    result.modelExportPayload = eventPayload;
+                }
+                if (forwardExportEvents || type == wp::event::progress() || type == wp::event::log()) {
+                    send(type, eventPayload);
+                }
+            }
+        } else {
+            const QJsonObject logPayload = sanitizedTrainerLogPayload(line, taskId, QStringLiteral("ultralytics_yolo_export"));
+            if (!logPayload.isEmpty()) {
+                send(wp::event::log(), logPayload);
+            }
+        }
+    };
+    const auto drainStdout = [&]() {
+        stdoutBuffer.append(process.readAllStandardOutput());
+        if (stdoutBuffer.size() > kMaxExporterBufferBytes) {
+            stdoutBuffer = stdoutBuffer.right(kMaxExporterLineBytes);
+            const QJsonObject logPayload = sanitizedTrainerLogPayload(
+                QByteArray("Python exporter stdout buffer exceeded limit before a line delimiter; keeping bounded tail only. [log_truncated]"),
+                taskId,
+                QStringLiteral("ultralytics_yolo_export"));
+            if (!logPayload.isEmpty()) {
+                send(wp::event::log(), logPayload);
+            }
+        }
+        int delimiter = nextPythonOutputDelimiter(stdoutBuffer);
+        while (delimiter >= 0) {
+            const QByteArray line = boundedExporterLine(stdoutBuffer.left(delimiter).trimmed());
+            int removeCount = delimiter + 1;
+            while (removeCount < stdoutBuffer.size()
+                && (stdoutBuffer.at(removeCount) == '\n' || stdoutBuffer.at(removeCount) == '\r')) {
+                ++removeCount;
+            }
+            stdoutBuffer.remove(0, removeCount);
+            handleStdoutLine(line);
+            delimiter = nextPythonOutputDelimiter(stdoutBuffer);
+        }
+    };
+    const auto drainStderr = [&]() {
+        stderrBuffer.append(process.readAllStandardError());
+        if (stderrBuffer.size() > kMaxExporterBufferBytes) {
+            stderrBuffer = stderrBuffer.right(kMaxExporterLineBytes);
+            const QJsonObject logPayload = sanitizedTrainerLogPayload(
+                QByteArray("Python exporter stderr buffer exceeded limit before a line delimiter; keeping bounded tail only. [log_truncated]"),
+                taskId,
+                QStringLiteral("ultralytics_yolo_export"));
+            if (!logPayload.isEmpty()) {
+                send(wp::event::log(), logPayload);
+            }
+        }
+        int delimiter = nextPythonOutputDelimiter(stderrBuffer);
+        while (delimiter >= 0) {
+            const QByteArray line = boundedExporterLine(stderrBuffer.left(delimiter).trimmed());
+            int removeCount = delimiter + 1;
+            while (removeCount < stderrBuffer.size()
+                && (stderrBuffer.at(removeCount) == '\n' || stderrBuffer.at(removeCount) == '\r')) {
+                ++removeCount;
+            }
+            stderrBuffer.remove(0, removeCount);
+            const QJsonObject logPayload = sanitizedTrainerLogPayload(line, taskId, QStringLiteral("ultralytics_yolo_export"));
+            if (!logPayload.isEmpty()) {
+                send(wp::event::log(), logPayload);
+            }
+            delimiter = nextPythonOutputDelimiter(stderrBuffer);
+        }
+    };
+    while (process.state() != QProcess::NotRunning) {
+        process.waitForReadyRead(50);
+        drainStdout();
+        drainStderr();
+        if (pollPendingCancel(1)) {
+            process.terminate();
+            if (!process.waitForFinished(1500)) {
+                process.kill();
+                process.waitForFinished(1500);
+            }
+            result.error = QStringLiteral("Canceled by user");
+            return result;
+        }
+        QCoreApplication::processEvents();
+    }
+    drainStdout();
+    drainStderr();
+    if (!stdoutBuffer.trimmed().isEmpty()) {
+        handleStdoutLine(boundedExporterLine(stdoutBuffer.trimmed()));
+    }
+    if (!stderrBuffer.trimmed().isEmpty()) {
+        const QJsonObject logPayload = sanitizedTrainerLogPayload(boundedExporterLine(stderrBuffer.trimmed()), taskId, QStringLiteral("ultralytics_yolo_export"));
+        if (!logPayload.isEmpty()) {
+            send(wp::event::log(), logPayload);
+        }
+    }
+    if (!failedMessage.isEmpty()) {
+        result.error = failedCode.isEmpty() ? failedMessage : QStringLiteral("%1: %2").arg(failedCode, failedMessage);
+        return result;
+    }
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0 || !completedSeen) {
+        result.error = QStringLiteral("Official YOLO exporter exited without a completed message.");
+        return result;
+    }
+    if (result.modelExportPayload.isEmpty()) {
+        result.error = QStringLiteral("Official YOLO exporter did not emit a modelExport payload.");
+        return result;
+    }
+    result.ok = true;
+    return result;
+}
 
 void WorkerSession::evaluateModel(const QJsonObject& payload)
 {
-    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
+    const wr::ModelEvaluationRequest request = wr::parseModelEvaluationRequest(payload);
+    const QString taskId = request.taskId;
     activeTaskId_ = taskId;
     canceled_ = false;
     running_ = true;
-    const QString modelPath = payload.value(QStringLiteral("modelPath")).toString();
-    const QString datasetPath = payload.value(QStringLiteral("datasetPath")).toString();
-    const QString taskType = payload.value(QStringLiteral("taskType")).toString(QStringLiteral("detection"));
-    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
-    const QJsonObject options = payload.value(QStringLiteral("options")).toObject();
+    const QString modelPath = request.modelPath;
+    const QString datasetPath = request.datasetPath;
+    const QString taskType = request.taskType.isEmpty() ? QStringLiteral("detection") : request.taskType;
+    QString outputPath = request.outputPath;
+    const QJsonObject options = request.options;
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QFileInfo(modelPath).absoluteDir().absolutePath(), taskId);
     }
@@ -61,42 +428,86 @@ void WorkerSession::evaluateModel(const QJsonObject& payload)
         sendCanceledAndFinish(taskId, result.error);
         return;
     }
-    if (!result.ok) {
-        fail(result.error);
-        return;
-    }
 
-    QJsonObject artifact;
-    artifact.insert(QStringLiteral("taskId"), taskId);
-    artifact.insert(QStringLiteral("kind"), QStringLiteral("evaluation_report"));
-    artifact.insert(QStringLiteral("path"), result.reportPath);
-    artifact.insert(QStringLiteral("message"), QStringLiteral("Model evaluation report"));
-    send(wp::event::artifact(), artifact);
-    for (const auto& item : {
-             qMakePair(QStringLiteral("per_class_metrics"), QStringLiteral("perClassMetricsPath")),
-             qMakePair(QStringLiteral("error_samples"), QStringLiteral("errorSamplesPath")),
-             qMakePair(QStringLiteral("confusion_matrix"), QStringLiteral("confusionMatrixPath")),
-             qMakePair(QStringLiteral("evaluation_summary"), QStringLiteral("evaluationSummaryPath")),
-             qMakePair(QStringLiteral("evaluation_overlays"), QStringLiteral("overlayDir"))}) {
-        const QString path = result.payload.value(item.second).toString();
-        if (!path.isEmpty()) {
+    const auto emitEvaluationArtifacts = [&]() {
+        if (result.reportPath.isEmpty()) {
+            return;
+        }
+        QJsonObject artifact;
+        artifact.insert(QStringLiteral("taskId"), taskId);
+        artifact.insert(QStringLiteral("kind"), QStringLiteral("evaluation_report"));
+        artifact.insert(QStringLiteral("path"), result.reportPath);
+        artifact.insert(QStringLiteral("message"), QStringLiteral("Model evaluation report"));
+        send(wp::event::artifact(), artifact);
+        for (const auto& item : {
+                 qMakePair(QStringLiteral("per_class_metrics"), QStringLiteral("perClassMetricsPath")),
+                 qMakePair(QStringLiteral("error_samples"), QStringLiteral("errorSamplesPath")),
+                 qMakePair(QStringLiteral("confusion_matrix"), QStringLiteral("confusionMatrixPath")),
+                 qMakePair(QStringLiteral("evaluation_summary"), QStringLiteral("evaluationSummaryPath")),
+                 qMakePair(QStringLiteral("evaluation_overlays"), QStringLiteral("overlayDir")),
+                 qMakePair(QStringLiteral("official_metrics"), QStringLiteral("officialMetricsPath")),
+                 qMakePair(QStringLiteral("official_run_dir"), QStringLiteral("officialRunDir")),
+                 qMakePair(QStringLiteral("official_log"), QStringLiteral("officialLogPath"))}) {
+            const QString path = result.payload.value(item.second).toString();
+            if (!path.isEmpty()) {
+                QJsonObject extraArtifact;
+                extraArtifact.insert(QStringLiteral("taskId"), taskId);
+                extraArtifact.insert(QStringLiteral("kind"), item.first);
+                extraArtifact.insert(QStringLiteral("path"), path);
+                extraArtifact.insert(QStringLiteral("message"), QStringLiteral("Model evaluation artifact"));
+                send(wp::event::artifact(), extraArtifact);
+            }
+        }
+        const QString legacyOverlaysPath = result.payload.value(QStringLiteral("overlaysPath")).toString();
+        if (!legacyOverlaysPath.isEmpty()) {
             QJsonObject extraArtifact;
             extraArtifact.insert(QStringLiteral("taskId"), taskId);
-            extraArtifact.insert(QStringLiteral("kind"), item.first);
-            extraArtifact.insert(QStringLiteral("path"), path);
+            extraArtifact.insert(QStringLiteral("kind"), QStringLiteral("evaluation_overlays"));
+            extraArtifact.insert(QStringLiteral("path"), legacyOverlaysPath);
             extraArtifact.insert(QStringLiteral("message"), QStringLiteral("Model evaluation artifact"));
             send(wp::event::artifact(), extraArtifact);
         }
+        const QJsonArray officialArtifacts = result.payload.value(QStringLiteral("officialArtifacts")).toArray();
+        for (const QJsonValue& value : officialArtifacts) {
+            const QJsonObject object = value.toObject();
+            const QString path = object.value(QStringLiteral("path")).toString();
+            if (path.isEmpty()) {
+                continue;
+            }
+            QJsonObject officialArtifact;
+            officialArtifact.insert(QStringLiteral("taskId"), taskId);
+            officialArtifact.insert(QStringLiteral("kind"), object.value(QStringLiteral("kind")).toString(QStringLiteral("official_artifact")));
+            officialArtifact.insert(QStringLiteral("path"), path);
+            officialArtifact.insert(QStringLiteral("message"), object.value(QStringLiteral("name")).toString(QStringLiteral("Official Ultralytics artifact")));
+            send(wp::event::artifact(), officialArtifact);
+        }
+    };
+
+    emitEvaluationArtifacts();
+    if (!result.ok) {
+        QJsonObject details = result.payload;
+        details.insert(wp::field::reportPath(), result.reportPath);
+        send(wp::event::evaluationReport(), result.payload);
+        socket_.waitForBytesWritten(1000);
+        failWithDetails(
+            result.error.isEmpty() ? QStringLiteral("Model evaluation failed.") : result.error,
+            result.payload.value(QStringLiteral("failureCategory")).toString(QStringLiteral("evaluation_failed")),
+            details);
+        return;
     }
-    const QString legacyOverlaysPath = result.payload.value(QStringLiteral("overlaysPath")).toString();
-    if (!legacyOverlaysPath.isEmpty()) {
-        QJsonObject extraArtifact;
-        extraArtifact.insert(QStringLiteral("taskId"), taskId);
-        extraArtifact.insert(QStringLiteral("kind"), QStringLiteral("evaluation_overlays"));
-        extraArtifact.insert(QStringLiteral("path"), legacyOverlaysPath);
-        extraArtifact.insert(QStringLiteral("message"), QStringLiteral("Model evaluation artifact"));
-        send(wp::event::artifact(), extraArtifact);
+    if (!result.payload.value(QStringLiteral("ok")).toBool(true)) {
+        const QString failureCategory = result.payload.value(QStringLiteral("failureCategory")).toString(
+            QStringLiteral("evaluation_failed"));
+        const QString message = result.payload.value(QStringLiteral("message")).toString(
+            QStringLiteral("Model evaluation report did not pass."));
+        QJsonObject details = result.payload;
+        details.insert(wp::field::reportPath(), result.reportPath);
+        send(wp::event::evaluationReport(), result.payload);
+        socket_.waitForBytesWritten(1000);
+        failWithDetails(message, failureCategory, details);
+        return;
     }
+
     QJsonObject progressDone;
     progressDone.insert(QStringLiteral("taskId"), taskId);
     progressDone.insert(QStringLiteral("percent"), 100);
@@ -114,13 +525,14 @@ void WorkerSession::evaluateModel(const QJsonObject& payload)
 
 void WorkerSession::benchmarkModel(const QJsonObject& payload)
 {
-    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
+    const wr::ModelBenchmarkRequest request = wr::parseModelBenchmarkRequest(payload);
+    const QString taskId = request.taskId;
     activeTaskId_ = taskId;
     canceled_ = false;
     running_ = true;
-    const QString modelPath = payload.value(QStringLiteral("modelPath")).toString();
-    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
-    const QJsonObject options = payload.value(QStringLiteral("options")).toObject();
+    const QString modelPath = request.modelPath;
+    QString outputPath = request.outputPath;
+    const QJsonObject options = request.options;
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QFileInfo(modelPath).absoluteDir().absolutePath(), taskId);
     }
@@ -156,6 +568,18 @@ void WorkerSession::benchmarkModel(const QJsonObject& payload)
     artifact.insert(QStringLiteral("path"), result.reportPath);
     artifact.insert(QStringLiteral("message"), QStringLiteral("Model benchmark report"));
     send(wp::event::artifact(), artifact);
+    if (!result.payload.value(QStringLiteral("ok")).toBool(true)) {
+        const QString failureCategory = result.payload.value(QStringLiteral("failureCategory")).toString(
+            QStringLiteral("benchmark_failed"));
+        const QString message = result.payload.value(QStringLiteral("message")).toString(
+            QStringLiteral("Model benchmark report did not pass."));
+        QJsonObject details = result.payload;
+        details.insert(wp::field::reportPath(), result.reportPath);
+        send(wp::event::benchmarkReport(), result.payload);
+        socket_.waitForBytesWritten(1000);
+        failWithDetails(message, failureCategory, details);
+        return;
+    }
     QJsonObject progressDone;
     progressDone.insert(QStringLiteral("taskId"), taskId);
     progressDone.insert(QStringLiteral("percent"), 100);
@@ -173,14 +597,15 @@ void WorkerSession::benchmarkModel(const QJsonObject& payload)
 
 void WorkerSession::generateDeliveryReport(const QJsonObject& payload)
 {
-    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
-    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
+    const wr::DeliveryReportRequest request = wr::parseDeliveryReportRequest(payload);
+    const QString taskId = request.taskId;
+    QString outputPath = request.outputPath;
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QDir::currentPath(), taskId);
     }
     activeTaskId_ = taskId;
     activeOutputPath_ = outputPath;
-    QJsonObject context = payload.value(QStringLiteral("context")).toObject();
+    QJsonObject context = request.context;
     context.insert(QStringLiteral("taskId"), taskId);
 
     const aitrain::WorkflowResult result = aitrain::generateTrainingDeliveryReport(outputPath, context);
@@ -241,14 +666,15 @@ void WorkerSession::generateDeliveryReport(const QJsonObject& payload)
 
 void WorkerSession::runCustomerOcrAcceptance(const QJsonObject& payload)
 {
-    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
-    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
+    const wr::CustomerOcrAcceptanceRequest request = wr::parseCustomerOcrAcceptanceRequest(payload);
+    const QString taskId = request.taskId;
+    QString outputPath = request.outputPath;
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QDir::currentPath(), taskId);
     }
     activeTaskId_ = taskId;
     activeOutputPath_ = outputPath;
-    QJsonObject options = payload.value(QStringLiteral("options")).toObject();
+    QJsonObject options = request.options;
     options.insert(QStringLiteral("taskId"), taskId);
 
     QJsonObject progress;
@@ -300,14 +726,15 @@ void WorkerSession::runCustomerOcrAcceptance(const QJsonObject& payload)
 
 void WorkerSession::collectDiagnostics(const QJsonObject& payload)
 {
-    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
-    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
+    const wr::DiagnosticsBundleRequest request = wr::parseDiagnosticsBundleRequest(payload);
+    const QString taskId = request.taskId;
+    QString outputPath = request.outputPath;
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QDir::currentPath(), taskId);
     }
     activeTaskId_ = taskId;
     activeOutputPath_ = outputPath;
-    QJsonObject context = payload.value(QStringLiteral("context")).toObject();
+    QJsonObject context = request.context;
     context.insert(QStringLiteral("taskId"), taskId);
     if (context.value(QStringLiteral("workerExecutable")).toString().isEmpty()) {
         context.insert(QStringLiteral("workerExecutable"), QCoreApplication::applicationFilePath());
@@ -362,17 +789,18 @@ void WorkerSession::collectDiagnostics(const QJsonObject& payload)
 
 void WorkerSession::validateDeploymentArtifact(const QJsonObject& payload)
 {
-    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
-    const QString modelPath = payload.value(QStringLiteral("modelPath")).toString();
-    const QString format = payload.value(QStringLiteral("format")).toString();
-    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
+    const wr::DeploymentValidationRequest request = wr::parseDeploymentValidationRequest(payload);
+    const QString taskId = request.taskId;
+    const QString modelPath = request.modelPath;
+    const QString format = request.format;
+    QString outputPath = request.outputPath;
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QFileInfo(modelPath).absoluteDir().absolutePath(), taskId);
     }
     activeTaskId_ = taskId;
     activeOutputPath_ = outputPath;
-    QJsonObject options = payload.value(QStringLiteral("options")).toObject();
-    const QString sampleImagePath = payload.value(QStringLiteral("sampleImagePath")).toString();
+    QJsonObject options = request.options;
+    const QString sampleImagePath = request.sampleImagePath;
     if (!sampleImagePath.isEmpty()) {
         options.insert(QStringLiteral("sampleImagePath"), sampleImagePath);
     }
@@ -440,13 +868,17 @@ void WorkerSession::validateDeploymentArtifact(const QJsonObject& payload)
 
 void WorkerSession::exportModel(const QJsonObject& payload)
 {
-    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
+    const wr::ModelExportRequest request = wr::parseModelExportRequest(payload);
+    const QString taskId = request.taskId;
     activeTaskId_ = taskId;
     canceled_ = false;
     running_ = true;
-    const QString checkpointPath = payload.value(QStringLiteral("checkpointPath")).toString();
-    const QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
-    const QString format = payload.value(QStringLiteral("format")).toString(QStringLiteral("onnx"));
+    const QString requestedCheckpointPath = QDir::fromNativeSeparators(request.checkpointPath.trimmed());
+    QString checkpointPath = resolveModelArtifactPath(request.checkpointPath);
+    QString outputPath = request.outputPath;
+    const QString format = request.format.isEmpty() ? QStringLiteral("onnx") : request.format;
+    const QJsonObject options = request.options;
+    outputPath = defaultExportOutputPath(checkpointPath, outputPath, format);
     activeOutputPath_ = outputPath;
 
     QJsonObject startProgress;
@@ -456,6 +888,99 @@ void WorkerSession::exportModel(const QJsonObject& payload)
     if (pollPendingCancel()) {
         sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
         return;
+    }
+
+    if (format == QStringLiteral("ncnn")
+        && (modelArtifactLooksYolo26(requestedCheckpointPath) || modelArtifactLooksYolo26(checkpointPath))) {
+        running_ = false;
+        failWithDetails(
+            QStringLiteral("YOLO26 NCNN export is not supported by AITrain; use ONNX or TensorRT for YOLO26 deployment."),
+            QStringLiteral("unsupported_yolo26_ncnn"),
+            QJsonObject{
+                {QStringLiteral("format"), format},
+                {QStringLiteral("checkpointPath"), checkpointPath},
+                {QStringLiteral("outputPath"), outputPath}});
+        return;
+    }
+
+    const QString checkpointSuffix = QFileInfo(checkpointPath).suffix().toLower();
+    const QString unsupportedOptions = unsupportedOfficialExportOptionsError(format, checkpointSuffix, options);
+    if (!unsupportedOptions.isEmpty()) {
+        running_ = false;
+        failWithDetails(
+            unsupportedOptions,
+            QStringLiteral("unsupported_export_options"),
+            QJsonObject{
+                {QStringLiteral("format"), format},
+                {QStringLiteral("checkpointPath"), checkpointPath},
+                {QStringLiteral("outputPath"), outputPath}});
+        return;
+    }
+    if (checkpointSuffix == QStringLiteral("pt")) {
+        QJsonObject modelExportPayload;
+        if (format == QStringLiteral("onnx") || format.startsWith(QStringLiteral("tensorrt"))) {
+            const OfficialYoloExportResult officialExport = runOfficialYoloExport(taskId, checkpointPath, outputPath, format, options, true);
+            if (!officialExport.ok) {
+                running_ = false;
+                if (officialExport.error == QStringLiteral("Canceled by user")) {
+                    sendCanceledAndFinish(taskId, officialExport.error);
+                    return;
+                }
+                failWithDetails(officialExport.error, QStringLiteral("official_yolo_export_failed"), QJsonObject{{QStringLiteral("outputPath"), outputPath}});
+                return;
+            }
+            modelExportPayload = officialExport.modelExportPayload;
+            running_ = false;
+            if (canceled_) {
+                return;
+            }
+            QJsonObject completed;
+            completed.insert(QStringLiteral("message"), QStringLiteral("Model export completed"));
+            completed.insert(QStringLiteral("taskId"), taskId);
+            completed.insert(QStringLiteral("command"), activeCommand_);
+            completed.insert(QStringLiteral("status"), QStringLiteral("completed"));
+            completed.insert(QStringLiteral("exportPath"), modelExportPayload.value(QStringLiteral("exportPath")).toString());
+            completed.insert(QStringLiteral("reportPath"), modelExportPayload.value(QStringLiteral("reportPath")).toString());
+            send(wp::event::completed(), completed);
+            finishSession();
+            return;
+        }
+        if (format == QStringLiteral("ncnn")) {
+            if (ncnnOfficialExportOptionsUnsupported(options)) {
+                running_ = false;
+                failWithDetails(
+                    QStringLiteral("NCNN export from .pt requires a static FP32 traditional YOLO ONNX intermediate; dynamic/half/int8/end2end are unsupported."),
+                    QStringLiteral("unsupported_export_options"),
+                    QJsonObject{{QStringLiteral("format"), format}, {QStringLiteral("outputPath"), outputPath}});
+                return;
+            }
+            QJsonObject intermediateOptions = options;
+            QJsonObject args = intermediateOptions.value(QStringLiteral("ultralyticsExportArgs")).toObject();
+            args.insert(QStringLiteral("format"), QStringLiteral("onnx"));
+            args.insert(QStringLiteral("dynamic"), false);
+            args.insert(QStringLiteral("half"), false);
+            args.insert(QStringLiteral("int8"), false);
+            args.insert(QStringLiteral("end2end"), false);
+            intermediateOptions.insert(QStringLiteral("ultralyticsExportArgs"), args);
+            const QString intermediateDir = QDir(QFileInfo(outputPath).absolutePath()).filePath(QStringLiteral("official_onnx_intermediate"));
+            const QString intermediateOnnx = QDir(intermediateDir).filePath(QStringLiteral("model.onnx"));
+            const OfficialYoloExportResult officialExport = runOfficialYoloExport(taskId, checkpointPath, intermediateOnnx, QStringLiteral("onnx"), intermediateOptions, false);
+            if (!officialExport.ok) {
+                running_ = false;
+                if (officialExport.error == QStringLiteral("Canceled by user")) {
+                    sendCanceledAndFinish(taskId, officialExport.error);
+                    return;
+                }
+                failWithDetails(officialExport.error, QStringLiteral("official_yolo_export_failed"), QJsonObject{{QStringLiteral("outputPath"), intermediateOnnx}});
+                return;
+            }
+            modelExportPayload = officialExport.modelExportPayload;
+            checkpointPath = intermediateOnnx;
+        } else {
+            running_ = false;
+            fail(QStringLiteral("Unsupported export format for .pt source: %1").arg(format));
+            return;
+        }
     }
 
     const aitrain::DetectionExportResult result = aitrain::exportDetectionCheckpoint(checkpointPath, outputPath, format, cancellationCallback());
@@ -520,10 +1045,11 @@ void WorkerSession::exportModel(const QJsonObject& payload)
 
 void WorkerSession::runInference(const QJsonObject& payload)
 {
-    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
-    const QString checkpointPath = payload.value(QStringLiteral("checkpointPath")).toString();
-    const QString imagePath = payload.value(QStringLiteral("imagePath")).toString();
-    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
+    const wr::InferenceRequest request = wr::parseInferenceRequest(payload);
+    const QString taskId = request.taskId;
+    const QString checkpointPath = resolveModelArtifactPath(request.checkpointPath);
+    const QString imagePath = request.imagePath;
+    QString outputPath = request.outputPath;
     aitrain::DetectionInferenceOptions options;
     options.confidenceThreshold = payload.value(QStringLiteral("confidenceThreshold")).toDouble(options.confidenceThreshold);
     options.iouThreshold = payload.value(QStringLiteral("iouThreshold")).toDouble(options.iouThreshold);
@@ -533,6 +1059,8 @@ void WorkerSession::runInference(const QJsonObject& payload)
     }
     activeTaskId_ = taskId;
     activeOutputPath_ = outputPath;
+    canceled_ = false;
+    running_ = true;
     if (!QDir().mkpath(outputPath)) {
         fail(QStringLiteral("Cannot create inference output directory: %1").arg(outputPath));
         return;
@@ -557,9 +1085,15 @@ void WorkerSession::runInference(const QJsonObject& payload)
     int predictionCount = 0;
     const QString modelSuffix = QFileInfo(checkpointPath).suffix().toLower();
     const bool onnxModel = modelSuffix == QStringLiteral("onnx");
+    const bool ncnnModel = modelSuffix == QStringLiteral("param");
     const bool tensorRtModel = modelSuffix == QStringLiteral("engine") || modelSuffix == QStringLiteral("plan");
     if (onnxModel) {
         const QString modelFamily = aitrain::inferOnnxModelFamily(checkpointPath);
+        if (modelFamily == QStringLiteral("ocr_recognition")
+            || modelFamily == QStringLiteral("ocr_detection")) {
+            fail(QStringLiteral("OCR inference is official-only. Use the PaddleOCR official Det/Rec/System adapter artifacts instead of AITrain C++ ONNX OCR postprocess."));
+            return;
+        }
         if (modelFamily == QStringLiteral("yolo_segmentation")) {
             taskType = QStringLiteral("segmentation");
             const QVector<aitrain::SegmentationPrediction> predictions = aitrain::predictSegmentationOnnxRuntime(checkpointPath, imagePath, options, &error);
@@ -571,33 +1105,6 @@ void WorkerSession::runInference(const QJsonObject& payload)
                 predictionArray.append(aitrain::segmentationPredictionToJson(prediction));
             }
             overlay = aitrain::renderSegmentationPredictions(imagePath, predictions, &error);
-            predictionCount = predictions.size();
-        } else if (modelFamily == QStringLiteral("ocr_recognition")) {
-            taskType = QStringLiteral("ocr_recognition");
-            const aitrain::OcrRecPrediction prediction = aitrain::predictOcrRecOnnxRuntime(checkpointPath, imagePath, &error);
-            if (!error.isEmpty()) {
-                fail(error);
-                return;
-            }
-            predictionArray.append(aitrain::ocrRecPredictionToJson(prediction));
-            overlay = aitrain::renderOcrRecPrediction(imagePath, prediction, &error);
-            predictionCount = 1;
-        } else if (modelFamily == QStringLiteral("ocr_detection")) {
-            taskType = QStringLiteral("ocr_detection");
-            aitrain::OcrDetPostprocessOptions detOptions;
-            detOptions.binaryThreshold = payload.value(QStringLiteral("binaryThreshold")).toDouble(detOptions.binaryThreshold);
-            detOptions.boxThreshold = payload.value(QStringLiteral("boxThreshold")).toDouble(detOptions.boxThreshold);
-            detOptions.minArea = payload.value(QStringLiteral("minArea")).toInt(detOptions.minArea);
-            detOptions.maxDetections = payload.value(QStringLiteral("maxDetections")).toInt(detOptions.maxDetections);
-            const QVector<aitrain::OcrDetPrediction> predictions = aitrain::predictOcrDetOnnxRuntime(checkpointPath, imagePath, detOptions, &error);
-            if (!error.isEmpty()) {
-                fail(error);
-                return;
-            }
-            for (const aitrain::OcrDetPrediction& prediction : predictions) {
-                predictionArray.append(aitrain::ocrDetPredictionToJson(prediction));
-            }
-            overlay = aitrain::renderOcrDetPredictions(imagePath, predictions, &error);
             predictionCount = predictions.size();
         } else {
             const QVector<aitrain::DetectionPrediction> predictions = aitrain::predictDetectionOnnxRuntime(checkpointPath, imagePath, options, &error);
@@ -611,7 +1118,37 @@ void WorkerSession::runInference(const QJsonObject& payload)
             overlay = aitrain::renderDetectionPredictions(imagePath, predictions, &error);
             predictionCount = predictions.size();
         }
+    } else if (ncnnModel) {
+        const QString modelFamily = aitrain::inferNcnnModelFamily(checkpointPath);
+        if (modelFamily == QStringLiteral("yolo_segmentation")) {
+            taskType = QStringLiteral("segmentation");
+            const QVector<aitrain::SegmentationPrediction> predictions = aitrain::predictSegmentationNcnnRuntime(checkpointPath, imagePath, options, &error);
+            if (!error.isEmpty()) {
+                fail(error);
+                return;
+            }
+            for (const aitrain::SegmentationPrediction& prediction : predictions) {
+                predictionArray.append(aitrain::segmentationPredictionToJson(prediction));
+            }
+            overlay = aitrain::renderSegmentationPredictions(imagePath, predictions, &error);
+            predictionCount = predictions.size();
+        } else {
+            const QVector<aitrain::DetectionPrediction> predictions = aitrain::predictDetectionNcnnRuntime(checkpointPath, imagePath, options, &error);
+            if (!error.isEmpty()) {
+                fail(error);
+                return;
+            }
+            for (const aitrain::DetectionPrediction& prediction : predictions) {
+                predictionArray.append(aitrain::detectionPredictionToJson(prediction));
+            }
+            overlay = aitrain::renderDetectionPredictions(imagePath, predictions, &error);
+            predictionCount = predictions.size();
+        }
     } else if (tensorRtModel) {
+        if (!aitrain::isTensorRtInferenceAvailable()) {
+            fail(QStringLiteral("TensorRT single-image inference is not enabled in this build: %1").arg(aitrain::tensorRtBackendStatus().message));
+            return;
+        }
         const QVector<aitrain::DetectionPrediction> predictions = aitrain::predictDetectionTensorRt(checkpointPath, imagePath, options, &error);
         if (!error.isEmpty()) {
             fail(error);
@@ -623,7 +1160,7 @@ void WorkerSession::runInference(const QJsonObject& payload)
         overlay = aitrain::renderDetectionPredictions(imagePath, predictions, &error);
         predictionCount = predictions.size();
     } else {
-        fail(QStringLiteral("Unsupported inference model format: %1. Production inference requires official ONNX or TensorRT artifacts.").arg(checkpointPath));
+        fail(QStringLiteral("Unsupported inference model format: %1. Production inference requires official ONNX, NCNN .param, or TensorRT artifacts.").arg(checkpointPath));
         return;
     }
     if (overlay.isNull()) {
@@ -644,7 +1181,7 @@ void WorkerSession::runInference(const QJsonObject& payload)
     predictionsDocument.insert(QStringLiteral("taskType"), taskType);
     predictionsDocument.insert(QStringLiteral("runtime"), onnxModel
         ? QStringLiteral("onnxruntime")
-        : (tensorRtModel ? QStringLiteral("tensorrt") : QStringLiteral("unsupported")));
+        : (ncnnModel ? QStringLiteral("ncnn") : (tensorRtModel ? QStringLiteral("tensorrt") : QStringLiteral("unsupported"))));
     predictionsDocument.insert(QStringLiteral("elapsedMs"), static_cast<int>(elapsed.elapsed()));
     predictionsDocument.insert(QStringLiteral("postprocess"), QJsonObject{
         {QStringLiteral("confidenceThreshold"), options.confidenceThreshold},
@@ -704,6 +1241,7 @@ void WorkerSession::runInference(const QJsonObject& payload)
     QJsonObject completed;
     completed.insert(QStringLiteral("taskId"), taskId);
     completed.insert(QStringLiteral("message"), QStringLiteral("Inference completed"));
+    running_ = false;
     send(wp::event::completed(), completed);
     finishSession();
 }

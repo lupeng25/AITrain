@@ -6,15 +6,44 @@
 
 ## 包体边界
 
-标准交付包应包含：
+安装包分为三个：
+
+- 产品本体安装包：当前项目编译生成的 `AITrainStudio.exe`、`aitrain_worker.exe`、内置插件，以及产品随附的 `docs`、`examples`、`python_trainers`、`tools`、`translations`。
+- Native 依赖项安装包：Qt/VC runtime、Qt runtime plugin folders、ONNX Runtime、NCNN、TensorRT 和其他运行时 DLL。
+- Python AI 环境安装包：官方 YOLO / OCR 适配器使用的隔离 Python 环境，以及可选的 PaddleOCR 源码 checkout。默认安装到 `python_env`，不写系统 Python，不要求全局 `AITRAIN_PYTHON_EXECUTABLE`。
+
+三个安装包默认安装到同一个 `AITrain Studio` 目录，但写入不同子树，避免互相覆盖。产品本体安装后需要 Native 依赖项安装包和 Python AI 环境安装包，或等价运行时，才能完整启用 GUI、Worker、YOLO/OCR 官方后端和部署验证。
+
+产品本体安装包应包含：
 
 - `AITrainStudio.exe`
 - `aitrain_worker.exe`
 - 内置 Qt plugin DLL
 - `plugins\models` 下的内置插件
 - `translations` 下的 `.qm` 翻译文件
-- 必要的 Qt runtime DLL
 - `docs`、`examples`、`requirements` 和验收脚本
+
+Native 依赖项安装包应包含：
+
+- 必要的 Qt runtime DLL 和 Qt runtime plugin folders。
+- 必要的 MSVC runtime DLL。
+- `runtimes\onnxruntime`、`runtimes\ncnn`、`runtimes\tensorrt`。
+- 根目录下供 Worker 直接加载的 ONNX Runtime / NCNN 等 runtime DLL。
+
+Python AI 环境安装包应包含：
+
+- `python_env\python.exe` 或 `python_env\Scripts\python.exe`。
+- Ultralytics、Torch、ONNX、ONNX Runtime、PaddlePaddle、PaddleOCR、NumPy、Pillow、PyYAML 等官方适配器所需 Python 包。
+- 可选 `python_env\PaddleOCR\tools\train.py`，用于 PaddleOCR Det/Rec/System 官方工具链。
+
+安装顺序建议：
+
+1. 产品本体安装包。
+2. Native 依赖项安装包。
+3. Python AI 环境安装包。
+4. 启动 `AITrainStudio.exe` 并在“环境”页运行环境自检。
+
+如果安装顺序不同也不应产生文件冲突；最终三个包必须落在同一个安装目录。Python AI 环境安装包不应包含训练数据、客户数据、模型权重、运行输出或验收证据。正式交付前应从可搬移的 staging Python 环境构建，不建议直接使用开发机 venv 作为客户包来源。
 
 不得默认包含：
 
@@ -47,7 +76,7 @@
 - Ultralytics / Torch / ONNX / ONNX Runtime：用于官方 YOLO 训练、导出和 smoke。
 - PaddlePaddle / PaddleOCR / PaddleOCR 源码 checkout：用于官方 OCR 工具链。
 - CUDA / cuDNN / TensorRT：用于 TensorRT engine build 和推理验收。
-- NCNN 工具和 SDK/runtime：用于 NCNN `.param/.bin` 导出和部署验证；配置 NCNN SDK/runtime 后，部署验证可执行 YOLO 检测/分割 runtime 推理。本机验证根目录为 `.deps\ncnn`，交付机器应使用等价 SDK/runtime 路径。
+- NCNN 工具和 SDK/runtime：用于 NCNN `.param/.bin` 导出和部署验证；配置 NCNN SDK/runtime 后，部署验证可执行 YOLO 检测/分割 runtime 推理。本机验证根目录为 `.deps\sdks\ncnn`，交付机器应使用等价 SDK/runtime 路径。
 - X-AnyLabeling：作为外部标注工具。
 
 常见配置：
@@ -148,7 +177,10 @@ package-root TensorRT rerun：
 | 现象 | 优先检查 |
 |---|---|
 | 只能看到注册窗口 | 机器码和注册码是否匹配；公钥是否正确编译进主程序。 |
-| YOLO 后端启动失败 | Python 环境、Ultralytics、Torch、ONNX、ONNX Runtime。 |
+| YOLO 后端启动失败 | Python 环境、Ultralytics、Torch、ONNX、ONNX Runtime。若使用 `device=0`，确认该 Python 安装的是 CUDA 版 PyTorch；CPU-only 环境只能用 `device=cpu`。 |
+| YOLO12 分割 `.pt` 训练立即失败 | 当前记录的 Ultralytics 8.3.171 环境无法解析 `yolo12n-seg.pt`，按 `blocked_missing_official_weight` 处理；改用 YOLO12 `-seg.yaml` 架构训练，或等待上游官方 `yolo12*-seg.pt` 权重可解析。 |
+| YOLO26 共享环境失败，targeted 已过 | 共享 Ultralytics 8.3.171 环境没有可用的 YOLO26 configs/assets，且 nano `.pt` 权重与包代码不兼容；按 `blocked_model_unavailable` / `blocked_ultralytics_incompatible` 处理。隔离 targeted full 已在 2026-06-15 生成 20/20 训练、官方 ONNX、AITrain C++ ONNX 推理和 TensorRT 通过证据；YOLO26 NCNN 历史尝试 20/20 failed，当前产品不提供 YOLO26 NCNN 导出/转换。客户预检只能按 targeted summary 放行 YOLO26 训练/ONNX/TensorRT。 |
+| 浏览器进度页 failed 数和历史失败数不一致 | 进度页按当前 `runId` 统计主 failed/planned/passed，并把旧 `row_summary.json` 计入 `historicalRowCount` / `historicalByStatus`。排查时先确认页面顶部 `runId`，不要把历史 failed 当成当前 run 失败。 |
 | OCR 后端启动失败 | PaddlePaddle、PaddleOCR、源码 checkout、Python 环境隔离。 |
 | TensorRT 为 `hardware-blocked` | GPU compute capability、驱动、CUDA、TensorRT runtime。旧 GPU 不应强行通过。 |
 | NCNN 导出失败 | `AITRAIN_NCNN_ONNX2NCNN` 或 `AITRAIN_NCNN_ROOT` 是否指向有效工具。 |

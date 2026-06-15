@@ -46,9 +46,13 @@ The manifest records:
 - External acceptance docs/templates to send with the package.
 - Required external result artifacts to return.
 
-## Inno Setup Installer
+## Inno Setup Installers
 
-The repo also includes an Inno Setup 6 script for producing a Windows installer from the same verified package layout used by package smoke:
+The repo also includes Inno Setup 6 scripts for producing Windows installers from the same verified package layout used by package smoke. The default installer build is split into three files:
+
+- Product installer: AITrain Studio executables, built-in plugins, product scripts, docs, examples, translations, and Python trainer adapter files.
+- Dependency installer: Qt/VC runtime files, Qt runtime plugin folders, ONNX Runtime, NCNN, TensorRT, and other runtime dependency DLLs.
+- Python AI environment installer: a prepared Python environment for official YOLO/OCR adapters plus an optional PaddleOCR source checkout under `python_env\PaddleOCR`.
 
 ```powershell
 .\tools\build-inno-installer.ps1
@@ -56,7 +60,9 @@ The repo also includes an Inno Setup 6 script for producing a Windows installer 
 
 The command refreshes `build-vscode\package-smoke`, verifies the layout, locates `ISCC.exe`, and writes:
 
-- `build-vscode\inno\AITrainStudio-0.1.0-Setup.exe`
+- `build-vscode\inno\AITrainStudio-0.1.0-Product-Setup.exe`
+- `build-vscode\inno\AITrainStudio-0.1.0-Dependencies-Setup.exe`
+- `build-vscode\inno\AITrainStudio-0.1.0-PythonEnv-Setup.exe`
 
 For a faster compile after `package-smoke` has already passed:
 
@@ -64,13 +70,35 @@ For a faster compile after `package-smoke` has already passed:
 .\tools\build-inno-installer.ps1 -SkipPackageSmoke
 ```
 
-For a smaller CPU/ONNX installer that leaves TensorRT redistribution to the ZIP package or a separate GPU bundle:
+To build only one side of the split:
 
 ```powershell
-.\tools\build-inno-installer.ps1 -SkipPackageSmoke -ExcludeTensorRt
+.\tools\build-inno-installer.ps1 -SkipPackageSmoke -PackageMode Product
+.\tools\build-inno-installer.ps1 -SkipPackageSmoke -PackageMode Dependencies
+.\tools\build-inno-installer.ps1 -SkipPackageSmoke -PackageMode PythonEnv -PythonEnvSourceDir <prepared-python-env-root> -PaddleOcrSourceDir <paddleocr-source-root>
 ```
 
-The installer wraps the package-smoke directory only. It does not add `.deps`, generated datasets, downloaded tools, model weights, ONNX smoke outputs, TensorRT engines, or external acceptance evidence.
+For a smaller dependency installer that leaves TensorRT redistribution to a separate GPU bundle:
+
+```powershell
+.\tools\build-inno-installer.ps1 -SkipPackageSmoke -PackageMode Dependencies -ExcludeTensorRt
+```
+
+For legacy all-in-one installer output:
+
+```powershell
+.\tools\build-inno-installer.ps1 -SkipPackageSmoke -PackageMode Full
+```
+
+The product and native dependency installers wrap the package-smoke directory only. The Python AI environment installer wraps only the explicitly selected Python environment source and optional PaddleOCR source checkout; it must not include datasets, model weights, run outputs, or external acceptance evidence. The PaddleOCR `.git` directory and Python cache files are excluded by the installer script.
+
+Install all three packages into the same target directory. They write to separate roots and should not overwrite one another:
+
+- Product: application root, `plugins`, `docs`, `examples`, `python_trainers`, `tools`, `translations`.
+- Native dependencies: application root runtime DLLs, Qt runtime plugin folders, `runtimes`.
+- Python AI environment: `python_env` and optional `python_env\PaddleOCR`.
+
+The product installer is not self-contained until the dependency installer and Python AI environment installer, or equivalent runtime dependencies, are installed into the same target directory. For clean-machine release candidates, build the Python AI environment package from a prepared relocatable staging directory rather than an ad hoc developer venv.
 
 ## External Follow-Up
 

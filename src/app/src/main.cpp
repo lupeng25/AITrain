@@ -10,6 +10,8 @@
 #include <QSettings>
 #include <QTranslator>
 
+#include <memory>
+
 int main(int argc, char* argv[])
 {
     QApplication app(argc, argv);
@@ -38,10 +40,10 @@ int main(int argc, char* argv[])
     const QString licenseExpiry = license.payload.expiresAt.isValid()
         ? license.payload.expiresAt.toLocalTime().date().toString(Qt::ISODate)
         : QString();
-    MainWindow window(license.payload.customer, licenseExpiry);
-    window.setWindowIcon(QIcon(QStringLiteral(":/icons/app.ico")));
-    window.resize(1280, 820);
-    window.show();
+    auto window = std::make_unique<MainWindow>(license.payload.customer, licenseExpiry);
+    window->setWindowIcon(QIcon(QStringLiteral(":/icons/app.ico")));
+    window->resize(1280, 820);
+    window->show();
 
     return app.exec();
 }

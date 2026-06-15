@@ -16,7 +16,10 @@
 - 不破坏现有 VSCode 构建。
 - 在 Windows PowerShell 中读取中文文档时使用 `-Encoding UTF8`；Git 枚举中文路径时使用 `git -c core.quotepath=false ...`。
 - 长任务不要放进 GUI 线程。
-- 如果能力只是 scaffold，必须明确标注。
+- 生产训练入口只允许官方后端：Ultralytics YOLO detection/segmentation 和 PaddleOCR Det/Rec 官方适配器。
+- 不要把已移除的 `tiny_linear_detector`、shipped `python_mock`、小型 PaddleOCR Rec CTC 或 C++ segmentation/OCR scaffold 训练描述为产品后端。
+- 如果能力只是 scaffold、smoke、diagnostic helper 或 report-only workflow，必须明确标注。
+- 不要在没有返回证据时声称 clean Windows、package-root TensorRT、客户域 OCR 或 unsupported-hardware TensorRT 已通过。
 - 完成后运行 `.\tools\harness-check.ps1`。
 - 如果涉及乱码或编码，额外运行 `.\tools\encoding-check.ps1`。
 

@@ -1,7 +1,8 @@
 param(
     [string]$WorkDir = ".deps\phase16-ocr-official-smoke",
-    [string]$PythonDir = ".deps\python-3.13.13-ocr-amd64",
-    [string]$PaddleOcrRepo = ".deps\PaddleOCR",
+    [string]$PythonExe = "",
+    [string]$PythonDir = ".deps\envs\ocr-cpu",
+    [string]$PaddleOcrRepo = ".deps\repos\PaddleOCR",
     [string]$PaddleOcrRef = "f8b41a62bba991d35e578ffa712107a042b0c3b0",
     [string]$PaddlePaddleRequirement = "paddlepaddle==3.3.1",
     [switch]$DisablePinnedConstraints,
@@ -9,35 +10,47 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$script:Root = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $PSScriptRoot) "."))
+. (Join-Path $PSScriptRoot "deps-layout.ps1")
 
 function Resolve-RepoPath([string]$Path) {
-    if ([System.IO.Path]::IsPathRooted($Path)) {
-        return [System.IO.Path]::GetFullPath($Path)
-    }
-    return [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $Path))
+    return Resolve-AITrainRepoPath -Root $script:Root -Path $Path
 }
 
 $pythonDirFull = Resolve-RepoPath $PythonDir
-$pythonExe = Join-Path $pythonDirFull "python.exe"
-$repoFull = Resolve-RepoPath $PaddleOcrRepo
+$resolvedPythonExe = Join-Path $pythonDirFull "python.exe"
+$venvPython = Join-Path $pythonDirFull "Scripts\python.exe"
+if (Test-Path $venvPython) {
+    $resolvedPythonExe = $venvPython
+}
+if ($PythonExe) {
+    $resolvedPythonExe = Resolve-RepoPath $PythonExe
+}
+$repoFull = Resolve-AITrainPaddleOcrRepo -Root $script:Root -RequestedPath $PaddleOcrRepo
 $workFull = Resolve-RepoPath $WorkDir
 New-Item -ItemType Directory -Force $workFull | Out-Null
 
-if (!(Test-Path $pythonExe)) {
-    if (!(Test-Path ".deps\python-3.13.13-embed-amd64.zip")) {
-        throw "Missing .deps\python-3.13.13-embed-amd64.zip. Run the Phase 8 Python setup first."
+if (!(Test-Path $resolvedPythonExe)) {
+    if ($PythonExe) {
+        throw "Python executable was not found: $resolvedPythonExe"
+    }
+    $sourceZip = Resolve-AITrainFirstExistingPath -Candidates (Get-AITrainPortablePythonZipCandidates -Root $script:Root)
+    if ([string]::IsNullOrWhiteSpace($sourceZip)) {
+        throw "Missing portable Python zip. Expected .deps\archives\python-3.13.13-embed-amd64.zip or legacy .deps\python-3.13.13-embed-amd64.zip."
     }
     New-Item -ItemType Directory -Force $pythonDirFull | Out-Null
-    Expand-Archive -Path ".deps\python-3.13.13-embed-amd64.zip" -DestinationPath $pythonDirFull -Force
+    Expand-Archive -Path $sourceZip -DestinationPath $pythonDirFull -Force
     $pth = Join-Path $pythonDirFull "python313._pth"
     (Get-Content $pth) -replace "#import site", "import site" | Set-Content $pth -Encoding ASCII
 }
 
-if (!(Test-Path (Join-Path $pythonDirFull "Lib\site-packages\pip"))) {
-    if (!(Test-Path ".deps\get-pip.py")) {
-        throw "Missing .deps\get-pip.py. Run the Phase 8 Python setup first."
+$pipCheck = & $resolvedPythonExe -m pip --version 2>$null
+if ($LASTEXITCODE -ne 0) {
+    $getPip = Resolve-AITrainFirstExistingPath -Candidates (Get-AITrainGetPipCandidates -Root $script:Root)
+    if ([string]::IsNullOrWhiteSpace($getPip)) {
+        throw "Missing get-pip.py. Expected .deps\archives\get-pip.py or legacy .deps\get-pip.py."
     }
-    & $pythonExe ".deps\get-pip.py"
+    & $resolvedPythonExe $getPip
 }
 
 if (!(Test-Path (Join-Path $repoFull "tools\train.py"))) {
@@ -79,16 +92,16 @@ if (!$SkipInstall) {
         ) | Set-Content $constraintsPath -Encoding ASCII
         $pipArgs += @("-c", $constraintsPath)
     }
-    & $pythonExe @pipArgs
+    & $resolvedPythonExe @pipArgs
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to install pinned OCR Python dependencies."
     }
 }
 
-& $pythonExe -c "import paddle, albumentations; print('paddle', paddle.__version__); print('albumentations', albumentations.__version__)"
-& $pythonExe (Join-Path $repoFull "tools\train.py") -h | Out-Host
+& $resolvedPythonExe -c "import paddle, albumentations; print('paddle', paddle.__version__); print('albumentations', albumentations.__version__)"
+& $resolvedPythonExe (Join-Path $repoFull "tools\train.py") -h | Out-Host
 
-& $pythonExe "examples\create-minimal-datasets.py" --output $workFull
+& $resolvedPythonExe "examples\create-minimal-datasets.py" --output $workFull
 
 $requestPath = Join-Path $workFull "paddleocr_rec_official_request.json"
 $datasetPath = Join-Path $workFull "paddleocr_rec"
@@ -102,6 +115,7 @@ $request = [ordered]@{
     backend = "paddleocr_rec_official"
     parameters = [ordered]@{
         trainingBackend = "paddleocr_rec_official"
+        modelPreset = "PP-OCRv4_mobile_rec"
         paddleOcrRepoPath = $repoFull
         paddleOcrRef = $resolvedPaddleOcrRef
         runOfficial = $true
@@ -120,7 +134,7 @@ $request = [ordered]@{
 }
 $request | ConvertTo-Json -Depth 20 | Set-Content $requestPath -Encoding UTF8
 
-& $pythonExe "python_trainers\ocr_rec\paddleocr_official_adapter.py" --request $requestPath
+& $resolvedPythonExe "python_trainers\ocr_rec\paddleocr_official_adapter.py" --request $requestPath
 if ($LASTEXITCODE -ne 0) {
     throw "Official PaddleOCR adapter failed."
 }

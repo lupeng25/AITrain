@@ -142,6 +142,12 @@ QWidget* MainWindow::buildDatasetPage()
         addComboItem(datasetConversionSourceFormatCombo_, datasetConversionFormatLabel(format), format);
     }
     datasetConversionTargetFormatCombo_ = new QComboBox;
+    for (const QString& target : supportedDatasetConversionTargets(comboCurrentDataOrText(datasetConversionSourceFormatCombo_))) {
+        addComboItem(datasetConversionTargetFormatCombo_, datasetConversionFormatLabel(target), target);
+    }
+    if (datasetConversionTargetFormatCombo_->count() > 0) {
+        datasetConversionTargetFormatCombo_->setCurrentIndex(0);
+    }
     connect(datasetConversionSourceFormatCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::updateDatasetConversionTargetFormats);
 
     datasetConversionInputEdit_ = new QLineEdit;
@@ -218,7 +224,6 @@ QWidget* MainWindow::buildDatasetPage()
     conversionLayout->addWidget(datasetConversionResultLabel_);
     conversionLayout->addWidget(datasetConversionLog_);
     inputPanel->bodyLayout()->addWidget(conversionStrip);
-    updateDatasetConversionTargetFormats();
 
     auto* splitter = new QSplitter(Qt::Horizontal);
     auto* resultPanel = new InfoPanel(QStringLiteral("所选数据集详情"));
@@ -348,7 +353,7 @@ QWidget* MainWindow::buildDatasetPage()
             updateAnnotationToolStatus();
             QMessageBox::warning(this,
                 QStringLiteral("X-AnyLabeling"),
-                uiText("未找到 X-AnyLabeling。请确保 xanylabeling 在 PATH 中，或将 X-AnyLabeling.exe 放到程序目录 / tools/x-anylabeling / .deps/annotation-tools/X-AnyLabeling。"));
+                uiText("未找到 X-AnyLabeling。请确保 xanylabeling 在 PATH 中，或将 X-AnyLabeling.exe 放到程序目录 / tools/x-anylabeling / .deps/tools/annotation-tools/X-AnyLabeling。"));
             return;
         }
         const QStringList arguments = {QStringLiteral("--filename"), datasetPath, QStringLiteral("--no-auto-update-check")};
@@ -408,23 +413,34 @@ QWidget* MainWindow::buildDatasetPage()
     splitter->setStretchFactor(1, 3);
     splitter->setSizes(QList<int>() << 480 << 620);
 
+    auto* preparationTab = new QWidget;
+    auto* preparationLayout = new QVBoxLayout(preparationTab);
+    preparationLayout->setContentsMargins(0, 0, 0, 0);
+    preparationLayout->setSpacing(16);
+    preparationLayout->addWidget(inputPanel);
+    preparationLayout->addWidget(splitter, 1);
+
+    datasetTabs_ = new QTabWidget;
+    datasetTabs_->setObjectName(QStringLiteral("DatasetTabs"));
+    datasetTabs_->addTab(preparationTab, uiText("数据集准备"));
+    datasetTabs_->addTab(buildSampleReviewPanel(), uiText("质量与复核"));
+
     layout->addWidget(createWorkbenchHeader(
         QStringLiteral("DATASET VALIDATION"),
         QStringLiteral("数据集工作台"),
-        QStringLiteral("导入、校验、划分、快照和标注工具入口统一在这里；训练前必须先完成当前格式校验。"),
+        QStringLiteral("导入、校验、转换、快照，并处理质量复核样本。"),
         headerValidateButton,
         QStringList()
             << QStringLiteral("YOLO BBox")
             << QStringLiteral("YOLO Polygon")
             << QStringLiteral("PaddleOCR Det")
             << QStringLiteral("PaddleOCR Rec")));
-    layout->addWidget(inputPanel);
-    layout->addWidget(splitter, 1);
+    layout->addWidget(datasetTabs_, 1);
     page->setWidget(content);
     return page;
 }
 
-QWidget* MainWindow::buildSampleReviewPage()
+QWidget* MainWindow::buildSampleReviewPanel()
 {
     auto* page = new QScrollArea;
     page->setWidgetResizable(true);
@@ -433,18 +449,8 @@ QWidget* MainWindow::buildSampleReviewPage()
 
     auto* content = new QWidget;
     auto* layout = new QVBoxLayout(content);
-    layout->setContentsMargins(18, 18, 18, 18);
+    layout->setContentsMargins(0, 12, 0, 0);
     layout->setSpacing(16);
-
-    auto* loadButton = primaryButton(uiText("加载复核样本"));
-    connect(loadButton, &QPushButton::clicked, this, &MainWindow::loadSampleReviewFile);
-    auto* header = createWorkbenchHeader(
-        QStringLiteral("SAMPLE REVIEW LOOP"),
-        uiText("样本复核"),
-        uiText("从质量报告、评估错误、低置信预测和 rework 清单中筛出样本，生成 X-AnyLabeling 本地复核队列。"),
-        loadButton,
-        QStringList() << QStringLiteral("problem_samples.json") << QStringLiteral("error_samples.json") << QStringLiteral("rework_sample_set.json"));
-    layout->addWidget(header);
 
     auto* splitter = new QSplitter(Qt::Horizontal);
 
@@ -486,13 +492,16 @@ QWidget* MainWindow::buildSampleReviewPage()
     auto* actionLayout = new QHBoxLayout(actionStrip);
     actionLayout->setContentsMargins(10, 8, 10, 8);
     actionLayout->setSpacing(8);
+    auto* loadButton = primaryButton(uiText("加载复核样本"));
     auto* openButton = new QPushButton(uiText("打开样本"));
     auto* generateButton = primaryButton(uiText("生成复核清单"));
     auto* xAnyButton = new QPushButton(QStringLiteral("X-AnyLabeling"));
+    connect(loadButton, &QPushButton::clicked, this, &MainWindow::loadSampleReviewFile);
     connect(openButton, &QPushButton::clicked, this, &MainWindow::openSelectedReviewSample);
     connect(generateButton, &QPushButton::clicked, this, &MainWindow::generateFilteredReviewList);
     connect(xAnyButton, &QPushButton::clicked, this, &MainWindow::launchXAnyLabelingForReview);
     actionLayout->addWidget(mutedLabel(uiText("标注完成后回到“数据集”页重新校验并创建快照。")), 1);
+    actionLayout->addWidget(loadButton);
     actionLayout->addWidget(openButton);
     actionLayout->addWidget(generateButton);
     actionLayout->addWidget(xAnyButton);

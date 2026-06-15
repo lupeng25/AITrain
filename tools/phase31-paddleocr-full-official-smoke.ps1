@@ -1,20 +1,26 @@
 param(
     [string]$WorkDir = ".deps\phase31-paddleocr-full-official-smoke",
-    [string]$PythonDir = ".deps\python-3.13.13-ocr-amd64",
-    [string]$PaddleOcrRepo = ".deps\PaddleOCR",
-    [string]$PaddleOcrRef = "f8b41a62bba991d35e578ffa712107a042b0c3b0",
+    [string]$PythonDir = ".deps\envs\ocr-cpu",
+    [string]$PaddleOcrRepo = ".deps\repos\PaddleOCR",
+    [string]$PaddleOcrRef = "v3.7.0",
     [string]$PaddlePaddleRequirement = "paddlepaddle==3.3.1",
+    [ValidateSet("PP-OCRv4", "PP-OCRv5", "PP-OCRv6")]
+    [string]$OcrVersion = "PP-OCRv5",
+    [ValidateSet("tiny", "small", "medium")]
+    [string]$PPOCRv6Tier = "medium",
+    [string]$DetModelPreset = "",
+    [string]$RecModelPreset = "",
+    [switch]$UseGpu,
     [switch]$DisablePinnedConstraints,
     [switch]$SkipInstall
 )
 
 $ErrorActionPreference = "Stop"
+$script:Root = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $PSScriptRoot) "."))
+. (Join-Path $PSScriptRoot "deps-layout.ps1")
 
 function Resolve-RepoPath([string]$Path) {
-    if ([System.IO.Path]::IsPathRooted($Path)) {
-        return [System.IO.Path]::GetFullPath($Path)
-    }
-    return [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $Path))
+    return Resolve-AITrainRepoPath -Root $script:Root -Path $Path
 }
 
 $pythonDirFull = Resolve-RepoPath $PythonDir
@@ -23,25 +29,27 @@ $venvPython = Join-Path $pythonDirFull "Scripts\python.exe"
 if (Test-Path $venvPython) {
     $pythonExe = $venvPython
 }
-$repoFull = Resolve-RepoPath $PaddleOcrRepo
+$repoFull = Resolve-AITrainPaddleOcrRepo -Root $script:Root -RequestedPath $PaddleOcrRepo
 $workFull = Resolve-RepoPath $WorkDir
 New-Item -ItemType Directory -Force $workFull | Out-Null
 
 if (!(Test-Path $pythonExe)) {
-    if (!(Test-Path ".deps\python-3.13.13-embed-amd64.zip")) {
-        throw "Missing .deps\python-3.13.13-embed-amd64.zip. Run the Phase 8 Python setup first."
+    $sourceZip = Resolve-AITrainFirstExistingPath -Candidates (Get-AITrainPortablePythonZipCandidates -Root $script:Root)
+    if ([string]::IsNullOrWhiteSpace($sourceZip)) {
+        throw "Missing portable Python zip. Expected .deps\archives\python-3.13.13-embed-amd64.zip or legacy .deps\python-3.13.13-embed-amd64.zip."
     }
     New-Item -ItemType Directory -Force $pythonDirFull | Out-Null
-    Expand-Archive -Path ".deps\python-3.13.13-embed-amd64.zip" -DestinationPath $pythonDirFull -Force
+    Expand-Archive -Path $sourceZip -DestinationPath $pythonDirFull -Force
     $pth = Join-Path $pythonDirFull "python313._pth"
     (Get-Content $pth) -replace "#import site", "import site" | Set-Content $pth -Encoding ASCII
 }
 
 if (!(Test-Path (Join-Path $pythonDirFull "Lib\site-packages\pip"))) {
-    if (!(Test-Path ".deps\get-pip.py")) {
-        throw "Missing .deps\get-pip.py. Run the Phase 8 Python setup first."
+    $getPip = Resolve-AITrainFirstExistingPath -Candidates (Get-AITrainGetPipCandidates -Root $script:Root)
+    if ([string]::IsNullOrWhiteSpace($getPip)) {
+        throw "Missing get-pip.py. Expected .deps\archives\get-pip.py or legacy .deps\get-pip.py."
     }
-    & $pythonExe ".deps\get-pip.py"
+    & $pythonExe $getPip
 }
 
 if (!(Test-Path (Join-Path $repoFull "tools\train.py"))) {
@@ -63,6 +71,22 @@ if ($PaddleOcrRef) {
 }
 $resolvedPaddleOcrRef = (& git -C $repoFull rev-parse HEAD).Trim()
 Write-Host "Using PaddleOCR ref: $resolvedPaddleOcrRef"
+
+if ([string]::IsNullOrWhiteSpace($DetModelPreset)) {
+    $DetModelPreset = switch ($OcrVersion) {
+        "PP-OCRv6" { "PP-OCRv6_{0}_det" -f $PPOCRv6Tier }
+        "PP-OCRv5" { "PP-OCRv5_mobile_det" }
+        default { "PP-OCRv4_mobile_det" }
+    }
+}
+if ([string]::IsNullOrWhiteSpace($RecModelPreset)) {
+    $RecModelPreset = switch ($OcrVersion) {
+        "PP-OCRv6" { "PP-OCRv6_{0}_rec" -f $PPOCRv6Tier }
+        "PP-OCRv5" { "PP-OCRv5_mobile_rec" }
+        default { "PP-OCRv4_mobile_rec" }
+    }
+}
+Write-Host "Using OCR presets: Det=$DetModelPreset Rec=$RecModelPreset OcrVersion=$OcrVersion PPOCRv6Tier=$PPOCRv6Tier UseGpu=$([bool]$UseGpu)"
 
 if (!$SkipInstall) {
     $pipArgs = @("-m", "pip", "install", "--no-warn-script-location", $PaddlePaddleRequirement, "-r", (Join-Path $repoFull "requirements.txt"))
@@ -111,10 +135,11 @@ $detRequest = [ordered]@{
         paddleOcrRef = $resolvedPaddleOcrRef
         runOfficial = $true
         prepareOnly = $false
+        modelPreset = $DetModelPreset
         epochs = 1
         batchSize = 1
         imageSize = 64
-        useGpu = $false
+        useGpu = [bool]$UseGpu
         validationRatio = 0.5
         calMetricDuringTrain = $false
     }
@@ -141,13 +166,14 @@ $recRequest = [ordered]@{
         paddleOcrRef = $resolvedPaddleOcrRef
         runOfficial = $true
         prepareOnly = $false
+        modelPreset = $RecModelPreset
         epochs = 1
         batchSize = 1
         imageWidth = 320
         imageHeight = 48
         recImageShape = "3,48,320"
         maxTextLength = 8
-        useGpu = $false
+        useGpu = [bool]$UseGpu
         validationRatio = 0.5
         runInferenceAfterExport = $true
         inferenceImage = "images\a.png"
@@ -172,12 +198,15 @@ $systemRequest = [ordered]@{
         trainingBackend = "paddleocr_system_official"
         paddleOcrRepoPath = $repoFull
         paddleOcrRef = $resolvedPaddleOcrRef
+        detModelPreset = $DetModelPreset
+        recModelPreset = $RecModelPreset
+        recReportPath = (Join-Path $recOutputPath "paddleocr_official_rec_report.json")
         detModelDir = (Join-Path $detOutputPath "official_inference")
         recModelDir = (Join-Path $recOutputPath "official_inference")
         dictionaryFile = (Join-Path $recOutputPath "official_data\dict.txt")
         inferenceImage = (Join-Path $detDatasetPath "images\a.png")
         dropScore = 0.0
-        useGpu = $false
+        useGpu = [bool]$UseGpu
     }
 }
 $systemRequest | ConvertTo-Json -Depth 20 | Set-Content $systemRequestPath -Encoding UTF8

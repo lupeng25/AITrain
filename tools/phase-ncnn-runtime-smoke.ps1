@@ -12,6 +12,17 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$script:Root = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $PSScriptRoot) "."))
+. (Join-Path $PSScriptRoot "deps-layout.ps1")
+
+if ([string]::IsNullOrWhiteSpace($NcnnRoot)) {
+    foreach ($candidate in @((Get-AITrainDepsLayout -Root $script:Root).NcnnRoot, (Join-Path $script:Root ".deps\ncnn"))) {
+        if (Test-Path -LiteralPath $candidate) {
+            $NcnnRoot = $candidate
+            break
+        }
+    }
+}
 
 function Write-Summary {
     param([hashtable]$Summary)

@@ -160,7 +160,8 @@ QJsonObject modelExportRequest(
     const QString& taskId,
     const QString& checkpointPath,
     const QString& outputPath,
-    const QString& format);
+    const QString& format,
+    const QJsonObject& options = QJsonObject());
 QJsonObject inferenceRequest(
     const QString& taskId,
     const QString& checkpointPath,

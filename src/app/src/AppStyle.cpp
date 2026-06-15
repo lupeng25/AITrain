@@ -89,7 +89,8 @@ void apply(QApplication& app)
             border-radius: 6px;
         }
 
-        QFrame#CompactMetricPanel {
+        QFrame#CompactMetricPanel,
+        QFrame[trainingLiveRole="panel"] {
             background: #FFFFFF;
             border: 1px solid #D8DEE6;
             border-radius: 6px;
@@ -124,6 +125,17 @@ void apply(QApplication& app)
 
         QLabel#InlineStatus a {
             color: #2563EB;
+        }
+
+        QLabel#TrainingPhaseStatus {
+            color: #0F172A;
+            background: #EEF6E8;
+            border: 1px solid #B9D99A;
+            border-left: 3px solid #76B900;
+            border-radius: 5px;
+            padding: 6px 10px;
+            min-height: 26px;
+            font-weight: 600;
         }
 
         QLabel#TaskDetailSummary {
@@ -173,14 +185,16 @@ void apply(QApplication& app)
             font-size: 8pt;
         }
 
-        QLabel#CompactMetricValue {
+        QLabel#CompactMetricValue,
+        QLabel[trainingLiveRole="value"] {
             color: #111827;
             font-size: 11pt;
             font-weight: 700;
             min-height: 22px;
         }
 
-        QLabel#CompactMetricCaption {
+        QLabel#CompactMetricCaption,
+        QLabel[trainingLiveRole="caption"] {
             color: #6B7280;
             font-size: 8pt;
             min-height: 18px;

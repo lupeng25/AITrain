@@ -4,7 +4,7 @@
 
 定位：Windows + Qt Widgets + Worker 的本地视觉训练平台。
 
-本文是 Phase 39+ 的当前方向文档。长期历史阶段仍可参考 `AITrainStudio_后续实施方案.md`，但下一步实施优先以本文和 `docs/harness/current-status.md` 为准。当前权威状态仍以 `docs/harness/current-status.md` 为准。
+本文是 Phase 39+ 的当前方向文档。当前权威状态仍以 `docs/harness/current-status.md` 为准。`docs/archive/AITrainStudio_后续实施方案.md` 只保留为历史路线背景，不作为下一步实施、阶段状态或验收口径来源。
 
 ## 1. 当前基线与判断
 
@@ -31,6 +31,8 @@ AITrain Studio 已完成 Worker、SQLite、任务记录、artifact 浏览、YOLO
 
 Phase 40 的分类、姿态、OBB、异常检测等训练后端扩展后置；在现有闭环足够硬之前，不作为主线推进。
 
+2026-06-14/15 全量模型生命周期运行中的新增边界：共享 Ultralytics 8.3.171 环境下 YOLO26 检测/实例分割 20 行全部失败，原因是官方模型配置/权重不可用或包代码不兼容。YOLO26 随后在隔离 targeted matrix 中完成 `phase-yolo26-model-matrix-smoke.ps1 -Full -Epochs 100 -Device 0`，20/20 行通过训练、官方 ONNX、AITrain C++ ONNX 推理和 TensorRT 验证；YOLO26 NCNN 历史尝试 20/20 failed，当前产品不提供 YOLO26 NCNN 导出/转换，客户预检只放行 YOLO26 训练/ONNX/TensorRT 证据。
+
 ## 2. 架构约束
 
 - GUI 只做交互、调度和展示。
@@ -40,30 +42,27 @@ Phase 40 的分类、姿态、OBB、异常检测等训练后端扩展后置；�
 - 官方训练优先通过 Worker 管理的 Python trainer subprocess。
 - 旧的 C++ tiny detector、segmentation baseline、OCR baseline、small OCR CTC 和 shipped Python mock 已物理删除，不能作为产品训练 backend。
 - TensorRT 真机验收已有 RTX 4090 D 证据；当前/旧 GTX 1060 / SM 61 仍只记录为 `hardware-blocked`。
-- PaddleOCR System 当前是官方 `predict_system.py` 工具链路径；C++ DB-style Det ONNX probability-map 后处理已有 v1 wiring，但不代表 PP-OCRv5 精度 parity。
+- PaddleOCR System 当前是官方 `predict_system.py` 工具链路径；OCR 训练、导出、推理、评估和验收收口为 PaddleOCR 官方-only。历史 C++ Det ONNX wiring 不作为产品路线或验收要求。
 
 ## 3. Phase 39A：真实评估补齐
 
-目标：让 detection / segmentation / OCR Rec 都能通过 `evaluateModel` 生成可信的质量判断报告。
+目标：让 detection / segmentation / OCR Rec 都能通过 `evaluateModel` 生成可信的质量判断报告；YOLO detection/segmentation 指标由 Ultralytics 官方 `val()` 产生，AITrain 不再自行计算本地 AP/mAP 或 mask IoU。
 
 ### Detection
 
-保持现有 AP50 评估路径，并补充本地 COCO-style mAP50-95：
+使用 Ultralytics 官方 `YOLO(...).val()` 作为唯一评估路径：
 
-- 继续支持 official detection ONNX Runtime 和可用 TensorRT detection model。
-- 输出 precision、recall、AP50、mAP50、`mAP50_95`、per-class metrics、confusion matrix、error samples、overlay artifacts。
-- 后续只做报告结构统一，不重写已通过的核心逻辑。
+- 输出 AITrain wrapper `evaluation_report.json`、官方 metrics、官方 run dir、官方 plots/predictions。
+- 不再输出本地 per-class CSV、error samples、confusion CSV 或本地 overlay。
+- ONNX Runtime / TensorRT / NCNN 继续用于推理、benchmark 和部署验证，不作为评估指标来源。
 
 ### Segmentation
 
-新增真实 segmentation evaluation：
+使用 Ultralytics 官方 `YOLO(...).val()` 作为唯一 segmentation evaluation：
 
-- 读取 YOLO segmentation val / test / train split。
-- 将 polygon ground truth rasterize 为 mask。
-- 调用现有 YOLOv8-seg ONNX Runtime 后处理。
-- 计算 mask IoU、mask precision、mask recall、mask AP50、`maskMap50_95` 和 per-class mask 指标。
-- 输出 `evaluation_report.json`、`per_class_metrics.csv`、`error_samples.json`、overlay artifacts。
-- 报告 `scaffold=false`，但 limitations 说明本地 mAP50-95 仍需要客户/目标域验收配合使用。
+- 输出 AITrain wrapper `evaluation_report.json`、官方 box/mask metrics、官方 run dir、官方 plots/predictions。
+- AITrain 不再在 C++ 中执行 GT polygon -> mask、预测 mask IoU、本地 mask AP/mAP、error samples 或本地 overlay 评估。
+- 报告 `scaffold=false`，但 limitations 说明指标来源为 Ultralytics official val，客户/目标域验收仍需配合使用。
 
 ### OCR Rec
 
@@ -118,7 +117,7 @@ Phase 40 的分类、姿态、OBB、异常检测等训练后端扩展后置；�
 
 增强 `benchmarkModel`：
 
-- 支持 ONNX Runtime detection / segmentation / OCR Rec。
+- 支持 ONNX Runtime detection / segmentation；OCR 结果通过 PaddleOCR 官方报告和任务产物汇总。
 - 对已有 TensorRT engine 可做 runtime benchmark；不在 GTX 1060 / SM 61 上伪造 engine build 成功。
 - 输出 average latency、P50、P95、P99、throughput、runtime、model family、input shape、sample image、timedInference。
 - 失败时写清 runtime 缺失、模型不支持或硬件受限原因。
@@ -164,8 +163,8 @@ Phase 40 的分类、姿态、OBB、异常检测等训练后端扩展后置；�
 
 已落地能力：
 
-- `样本复核`：读取 `problem_samples.json`、`error_samples.json`、`rework_sample_set.json`、`evaluation_report.json`，按来源、问题类型、类别、split、OCR edit distance / CER、搜索文本过滤，并导出 X-AnyLabeling 复核清单。
-- `交付验收`：汇总本机 RC、clean Windows、TensorRT、客户域 OCR、包体完整性、诊断包和部署验证状态，显示 `passed` / `blocked` / `failed` / `hardware-blocked`。
+- `数据集 > 质量与复核`：读取 `problem_samples.json`、`error_samples.json`、`rework_sample_set.json`、`evaluation_report.json`，按来源、问题类型、类别、split、OCR edit distance / CER、搜索文本过滤，并导出 X-AnyLabeling 复核清单。
+- `环境 > 交付证据`：汇总本机 RC、clean Windows、TensorRT、客户域 OCR、包体完整性、诊断包和部署验证状态，显示 `passed` / `blocked` / `failed` / `hardware-blocked`。
 - 客户域 OCR 验收：通过 Worker/core 生成客户 OCR manifest 和 summary；public/generated/smoke 数据只能作为流程 evidence，不能作为生产 OCR 精度证明。
 - 诊断包：收集 Worker self-check、环境 profile、GPU/runtime、最近任务日志、失败 request、artifact index、插件状态和授权摘要。
 - 导出后验证：ONNX 要可推理；TensorRT 区分 `passed` / `failed` / `hardware-blocked`；NCNN 在配置 SDK/runtime 和样本图时执行 YOLO 检测/分割 runtime inference。2026-05-16 本机证据已覆盖 Hyuto YOLOv8 detection ONNX -> NCNN 和 nihui 预转换 YOLOv8n-seg pnnx/DFL NCNN；YOLOv8-seg ONNX 若残留 unsupported `Shape` layer，则记录 failed report。
@@ -213,10 +212,10 @@ git diff --check
 手工 GUI 验收：
 
 - 导入 generated detection / segmentation / OCR Rec 数据集。
-- 运行质检、snapshot、训练、评估、benchmark、报告、样本复核、部署验证和诊断包。
+- 运行质检、snapshot、训练、评估、benchmark、报告、`数据集 > 质量与复核`、`部署验证` 和诊断包。
 - 在任务与产物页检查 JSON / CSV / image / HTML artifact。
-- 在模型库检查 evaluation / benchmark / pipeline 记录。
-- 在交付验收页确认客户 OCR gate、TensorRT `hardware-blocked` 和 NCNN SDK/runtime/sample-image 要求文案。
+- 在模型库检查模型版本、评估报告、模型对比、benchmark / pipeline 记录。
+- 在 `环境 > 交付证据` 确认客户 OCR gate、TensorRT `hardware-blocked` 和 NCNN SDK/runtime/sample-image 要求文案。
 - 确认 scaffold 和 TensorRT hardware-blocked 文案清晰。
 
 ## 10. 参考平台

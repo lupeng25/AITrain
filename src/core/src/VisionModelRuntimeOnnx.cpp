@@ -29,6 +29,87 @@ namespace aitrain {
 
 using namespace detection_detail;
 
+namespace {
+int exportImageSize(const QJsonObject& config)
+{
+    const QJsonObject args = config.value(QStringLiteral("ultralyticsExportArgs")).toObject();
+    const QJsonValue rawSize = args.value(QStringLiteral("imgsz"));
+    if (rawSize.isDouble()) {
+        return qMax(32, rawSize.toInt(640));
+    }
+    if (rawSize.isString()) {
+        bool ok = false;
+        const int parsed = rawSize.toString().trimmed().toInt(&ok);
+        if (ok) {
+            return qMax(32, parsed);
+        }
+    }
+    if (rawSize.isArray() && !rawSize.toArray().isEmpty()) {
+        return qMax(32, rawSize.toArray().first().toInt(640));
+    }
+    return 640;
+}
+
+QSize yoloInputSizeFromShape(const std::vector<int64_t>& inputShape, const QJsonObject& config)
+{
+    if (inputShape.size() != 4) {
+        return {};
+    }
+    int height = static_cast<int>(inputShape.at(2));
+    int width = static_cast<int>(inputShape.at(3));
+    if (height <= 0 || width <= 0) {
+        const int imageSize = exportImageSize(config);
+        height = height <= 0 ? imageSize : height;
+        width = width <= 0 ? imageSize : width;
+    }
+    return QSize(width, height);
+}
+
+bool jsonBoolValue(const QJsonValue& value, bool defaultValue = false)
+{
+    if (value.isBool()) {
+        return value.toBool();
+    }
+    if (value.isString()) {
+        const QString text = value.toString().trimmed().toLower();
+        if (text == QStringLiteral("true") || text == QStringLiteral("1") || text == QStringLiteral("yes")) {
+            return true;
+        }
+        if (text == QStringLiteral("false") || text == QStringLiteral("0") || text == QStringLiteral("no")
+            || text == QStringLiteral("auto") || text.isEmpty()) {
+            return false;
+        }
+    }
+    if (value.isDouble()) {
+        return value.toInt() != 0;
+    }
+    return defaultValue;
+}
+
+int reportEndToEndFlag(const QJsonObject& report)
+{
+    const QJsonObject args = report.value(QStringLiteral("ultralyticsExportArgs")).toObject();
+    if (!args.contains(QStringLiteral("end2end"))) {
+        return -1;
+    }
+    return jsonBoolValue(args.value(QStringLiteral("end2end")), false) ? 1 : 0;
+}
+
+bool yoloEndToEndFromExportConfig(const QString& onnxPath, const QJsonObject& config)
+{
+    int flag = reportEndToEndFlag(config);
+    if (flag >= 0) {
+        return flag == 1;
+    }
+    flag = reportEndToEndFlag(config.value(QStringLiteral("trainingReport")).toObject());
+    if (flag >= 0) {
+        return flag == 1;
+    }
+    flag = reportEndToEndFlag(loadUltralyticsTrainingReport(onnxPath));
+    return flag == 1;
+}
+} // namespace
+
 bool isOnnxRuntimeInferenceAvailable()
 {
 #ifdef AITRAIN_WITH_ONNXRUNTIME
@@ -171,7 +252,6 @@ QVector<DetectionPrediction> predictDetectionOnnxRuntime(
 
     try {
         const QJsonObject exportConfig = loadOnnxExportConfig(onnxPath);
-        const QStringList classNames = stringListFromArray(exportConfig.value(QStringLiteral("classNames")).toArray());
         Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "aitrain");
         Ort::SessionOptions sessionOptions;
         sessionOptions.SetIntraOpNumThreads(1);
@@ -195,9 +275,8 @@ QVector<DetectionPrediction> predictDetectionOnnxRuntime(
         const std::vector<int64_t> inputShape = inputType.GetTensorTypeAndShapeInfo().GetShape();
         if (inputShape.size() == 4) {
             const int channels = static_cast<int>(inputShape.at(1));
-            const int inputHeight = static_cast<int>(inputShape.at(2));
-            const int inputWidth = static_cast<int>(inputShape.at(3));
-            if (channels != 3 || inputHeight <= 0 || inputWidth <= 0) {
+            const QSize inputSize = yoloInputSizeFromShape(inputShape, exportConfig);
+            if (channels != 3 || inputSize.isEmpty()) {
                 if (error) {
                     *error = QStringLiteral("YOLO detection ONNX input shape must be [1, 3, height, width]");
                 }
@@ -205,9 +284,8 @@ QVector<DetectionPrediction> predictDetectionOnnxRuntime(
             }
 
             LetterboxTransform transform;
-            const QSize inputSize(inputWidth, inputHeight);
             QVector<float> input = yoloImageTensorFromLetterbox(image, inputSize, &transform);
-            std::vector<int64_t> tensorShape = inputShape;
+            std::vector<int64_t> tensorShape = {1, 3, inputSize.height(), inputSize.width()};
             Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
             Ort::Value inputTensor = Ort::Value::CreateTensor<float>(
                 memoryInfo,
@@ -244,6 +322,16 @@ QVector<DetectionPrediction> predictDetectionOnnxRuntime(
 
             const QStringList classNames = ultralyticsClassNames(onnxPath);
             const std::vector<int64_t> outputShape = outputs.front().GetTensorTypeAndShapeInfo().GetShape();
+            if (yoloEndToEndFromExportConfig(onnxPath, exportConfig)) {
+                return yoloEndToEndPredictionsFromOutput(
+                    outputs.front().GetTensorData<float>(),
+                    outputShape,
+                    classNames,
+                    inputSize,
+                    transform,
+                    options,
+                    error);
+            }
             return yoloPredictionsFromOutput(
                 outputs.front().GetTensorData<float>(),
                 outputShape,
@@ -320,15 +408,16 @@ QVector<SegmentationPrediction> predictSegmentationOnnxRuntime(
             }
             return {};
         }
+        const QJsonObject exportConfig = loadOnnxExportConfig(onnxPath);
         const std::vector<int64_t> inputShape = session.GetInputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape();
-        if (inputShape.size() != 4 || inputShape.at(1) != 3 || inputShape.at(2) <= 0 || inputShape.at(3) <= 0) {
+        const QSize inputSize = yoloInputSizeFromShape(inputShape, exportConfig);
+        if (inputShape.size() != 4 || inputShape.at(1) != 3 || inputSize.isEmpty()) {
             if (error) {
                 *error = QStringLiteral("YOLO segmentation ONNX input shape must be [1, 3, height, width]");
             }
             return {};
         }
 
-        const QSize inputSize(static_cast<int>(inputShape.at(3)), static_cast<int>(inputShape.at(2)));
         LetterboxTransform transform;
         QVector<float> input = yoloImageTensorFromLetterbox(image, inputSize, &transform);
         std::vector<int64_t> tensorShape = {1, 3, inputSize.height(), inputSize.width()};
@@ -370,6 +459,18 @@ QVector<SegmentationPrediction> predictSegmentationOnnxRuntime(
             }
         }
         const QStringList classNames = ultralyticsClassNames(onnxPath);
+        if (yoloEndToEndFromExportConfig(onnxPath, exportConfig)) {
+            return yoloEndToEndSegmentationPredictionsFromOutputs(
+                outputs.at(boxesIndex).GetTensorData<float>(),
+                outputs.at(boxesIndex).GetTensorTypeAndShapeInfo().GetShape(),
+                outputs.at(prototypeIndex).GetTensorData<float>(),
+                outputs.at(prototypeIndex).GetTensorTypeAndShapeInfo().GetShape(),
+                classNames,
+                inputSize,
+                transform,
+                options,
+                error);
+        }
         return yoloSegmentationPredictionsFromOutputs(
             outputs.at(boxesIndex).GetTensorData<float>(),
             outputs.at(boxesIndex).GetTensorTypeAndShapeInfo().GetShape(),

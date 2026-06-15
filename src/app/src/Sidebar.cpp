@@ -2,6 +2,7 @@
 
 #include <QLabel>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QVBoxLayout>
 
 Sidebar::Sidebar(QWidget* parent)
@@ -29,11 +30,6 @@ Sidebar::Sidebar(QWidget* parent)
     layout->addStretch();
 
     buttons_.setExclusive(true);
-    connect(&buttons_, QOverload<int>::of(&QButtonGroup::buttonClicked), this, [this](int id) {
-        if (auto* button = buttons_.button(id)) {
-            emit pageRequested(id, button->text());
-        }
-    });
 }
 
 void Sidebar::addItem(const QString& text, int pageIndex)
@@ -43,6 +39,11 @@ void Sidebar::addItem(const QString& text, int pageIndex)
     button->setCheckable(true);
     button->setCursor(Qt::PointingHandCursor);
     buttons_.addButton(button, pageIndex);
+    connect(button, &QPushButton::toggled, this, [this, button, pageIndex](bool checked) {
+        if (checked) {
+            emit pageRequested(pageIndex, button->text());
+        }
+    });
     itemsLayout_->addWidget(button);
     if (pageIndex == 0) {
         button->setChecked(true);
@@ -60,6 +61,7 @@ void Sidebar::addSection(const QString& text)
 void Sidebar::setCurrentIndex(int pageIndex)
 {
     if (auto* button = buttons_.button(pageIndex)) {
+        const QSignalBlocker blocker(button);
         button->setChecked(true);
     }
 }

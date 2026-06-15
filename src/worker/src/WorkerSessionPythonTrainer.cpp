@@ -26,6 +26,21 @@
 using namespace worker_support;
 namespace wp = aitrain::worker_protocol;
 
+namespace {
+constexpr int kMaxPythonTrainerBufferBytes = 4 * 1024 * 1024;
+constexpr int kMaxPythonTrainerLineBytes = 256 * 1024;
+
+QByteArray boundedTrainerLine(const QByteArray& line)
+{
+    if (line.size() <= kMaxPythonTrainerLineBytes) {
+        return line;
+    }
+    QByteArray bounded = line.left(kMaxPythonTrainerLineBytes);
+    bounded.append(" ... [log_truncated: single Python trainer line exceeded limit]");
+    return bounded;
+}
+} // namespace
+
 bool WorkerSession::shouldUsePythonTrainer() const
 {
     return isPythonTrainingBackendId(requestedTrainingBackend(request_), request_.parameters);
@@ -99,6 +114,7 @@ void WorkerSession::runPythonTrainer()
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
     environment.insert(QStringLiteral("PYTHONIOENCODING"), QStringLiteral("utf-8"));
+    configurePackagedPythonEnvironment(&environment);
     pythonTrainerProcess_.setProcessEnvironment(environment);
     pythonTrainerProcess_.setProgram(pythonExecutable);
     pythonTrainerProcess_.setArguments(QStringList() << QStringLiteral("-u") << trainerScript << QStringLiteral("--request") << requestPath);
@@ -136,14 +152,13 @@ void WorkerSession::runPythonTrainer()
     drainPythonTrainerOutput(&stdoutBuffer, &terminalMessageSeen);
     drainPythonTrainerErrors(&stderrBuffer);
     if (!stdoutBuffer.trimmed().isEmpty()) {
-        forwardPythonTrainerLine(stdoutBuffer.trimmed(), &terminalMessageSeen);
+        forwardPythonTrainerLine(boundedTrainerLine(stdoutBuffer.trimmed()), &terminalMessageSeen);
     }
     if (!stderrBuffer.trimmed().isEmpty()) {
-        QJsonObject payload;
-        payload.insert(QStringLiteral("taskId"), request_.taskId);
-        payload.insert(QStringLiteral("message"), QString::fromUtf8(stderrBuffer.trimmed()));
-        payload.insert(QStringLiteral("backend"), backend);
-        send(wp::event::log(), payload);
+        const QJsonObject payload = sanitizedTrainerLogPayload(boundedTrainerLine(stderrBuffer.trimmed()), request_.taskId, backend);
+        if (!payload.isEmpty()) {
+            send(wp::event::log(), payload);
+        }
     }
 
     if (canceled_) {
@@ -180,32 +195,57 @@ void WorkerSession::runPythonTrainer()
 void WorkerSession::drainPythonTrainerOutput(QByteArray* buffer, bool* terminalMessageSeen)
 {
     buffer->append(pythonTrainerProcess_.readAllStandardOutput());
-    int newline = buffer->indexOf('\n');
-    while (newline >= 0) {
-        const QByteArray line = buffer->left(newline).trimmed();
-        buffer->remove(0, newline + 1);
+    if (buffer->size() > kMaxPythonTrainerBufferBytes) {
+        *buffer = buffer->right(kMaxPythonTrainerLineBytes);
+        const QByteArray message("Python trainer stdout buffer exceeded limit before a line delimiter; keeping bounded tail only. [log_truncated]");
+        const QJsonObject payload = sanitizedTrainerLogPayload(message, request_.taskId, requestedTrainingBackend(request_));
+        if (!payload.isEmpty()) {
+            send(wp::event::log(), payload);
+        }
+    }
+    int delimiter = nextPythonOutputDelimiter(*buffer);
+    while (delimiter >= 0) {
+        const QByteArray line = boundedTrainerLine(buffer->left(delimiter).trimmed());
+        int removeCount = delimiter + 1;
+        while (removeCount < buffer->size()
+            && (buffer->at(removeCount) == '\n' || buffer->at(removeCount) == '\r')) {
+            ++removeCount;
+        }
+        buffer->remove(0, removeCount);
         if (!line.isEmpty()) {
             forwardPythonTrainerLine(line, terminalMessageSeen);
         }
-        newline = buffer->indexOf('\n');
+        delimiter = nextPythonOutputDelimiter(*buffer);
     }
 }
 
 void WorkerSession::drainPythonTrainerErrors(QByteArray* buffer)
 {
     buffer->append(pythonTrainerProcess_.readAllStandardError());
-    int newline = buffer->indexOf('\n');
-    while (newline >= 0) {
-        const QByteArray line = buffer->left(newline).trimmed();
-        buffer->remove(0, newline + 1);
-        if (!line.isEmpty()) {
-            QJsonObject payload;
-            payload.insert(QStringLiteral("taskId"), request_.taskId);
-            payload.insert(QStringLiteral("message"), QString::fromUtf8(line));
-            payload.insert(QStringLiteral("backend"), requestedTrainingBackend(request_));
+    if (buffer->size() > kMaxPythonTrainerBufferBytes) {
+        *buffer = buffer->right(kMaxPythonTrainerLineBytes);
+        const QByteArray message("Python trainer stderr buffer exceeded limit before a line delimiter; keeping bounded tail only. [log_truncated]");
+        const QJsonObject payload = sanitizedTrainerLogPayload(message, request_.taskId, requestedTrainingBackend(request_));
+        if (!payload.isEmpty()) {
             send(wp::event::log(), payload);
         }
-        newline = buffer->indexOf('\n');
+    }
+    int delimiter = nextPythonOutputDelimiter(*buffer);
+    while (delimiter >= 0) {
+        const QByteArray line = boundedTrainerLine(buffer->left(delimiter).trimmed());
+        int removeCount = delimiter + 1;
+        while (removeCount < buffer->size()
+            && (buffer->at(removeCount) == '\n' || buffer->at(removeCount) == '\r')) {
+            ++removeCount;
+        }
+        buffer->remove(0, removeCount);
+        if (!line.isEmpty()) {
+            const QJsonObject payload = sanitizedTrainerLogPayload(line, request_.taskId, requestedTrainingBackend(request_));
+            if (!payload.isEmpty()) {
+                send(wp::event::log(), payload);
+            }
+        }
+        delimiter = nextPythonOutputDelimiter(*buffer);
     }
 }
 
@@ -215,25 +255,22 @@ bool WorkerSession::forwardPythonTrainerLine(const QByteArray& line, bool* termi
         return true;
     }
 
-    QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(line, &parseError);
-    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-        QJsonObject payload;
-        payload.insert(QStringLiteral("taskId"), request_.taskId);
-        payload.insert(QStringLiteral("message"), QString::fromUtf8(line));
-        payload.insert(QStringLiteral("backend"), requestedTrainingBackend(request_));
-        send(wp::event::log(), payload);
+    QJsonDocument document;
+    if (!parseTrainerJsonDocument(line, &document)) {
+        const QJsonObject payload = sanitizedTrainerLogPayload(line, request_.taskId, requestedTrainingBackend(request_));
+        if (!payload.isEmpty()) {
+            send(wp::event::log(), payload);
+        }
         return true;
     }
 
     const QJsonObject object = document.object();
     const QString type = object.value(QStringLiteral("type")).toString();
     if (type.isEmpty()) {
-        QJsonObject payload;
-        payload.insert(QStringLiteral("taskId"), request_.taskId);
-        payload.insert(QStringLiteral("message"), QString::fromUtf8(line));
-        payload.insert(QStringLiteral("backend"), requestedTrainingBackend(request_));
-        send(wp::event::log(), payload);
+        const QJsonObject payload = sanitizedTrainerLogPayload(line, request_.taskId, requestedTrainingBackend(request_));
+        if (!payload.isEmpty()) {
+            send(wp::event::log(), payload);
+        }
         return true;
     }
 

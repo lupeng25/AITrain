@@ -11,6 +11,7 @@
 #include <QJsonParseError>
 #include <QRandomGenerator>
 #include <QRegularExpression>
+#include <QSize>
 #include <QSet>
 #include <QTextStream>
 
@@ -122,6 +123,41 @@ QString canonicalImageKey(const QFileInfo& imageInfo)
     key = key.toLower();
 #endif
     return key;
+}
+
+bool validateReadableImageFile(
+    const QString& imagePath,
+    DatasetValidationResult& result,
+    const QString& code,
+    const QString& context)
+{
+    const QFileInfo imageInfo(imagePath);
+    if (!imageInfo.exists()) {
+        return false;
+    }
+    if (imageInfo.size() <= 0) {
+        addIssue(result, QStringLiteral("error"), code, imagePath, 0,
+            QStringLiteral("%1图片文件为空，无法用于训练。").arg(context));
+        return false;
+    }
+
+    QImageReader reader(imagePath);
+    reader.setAutoTransform(true);
+    if (!reader.canRead()) {
+        const QString readerError = reader.errorString().trimmed();
+        addIssue(result, QStringLiteral("error"), code, imagePath, 0,
+            readerError.isEmpty()
+                ? QStringLiteral("%1图片无法解码。").arg(context)
+                : QStringLiteral("%1图片无法解码：%2。").arg(context, readerError));
+        return false;
+    }
+    const QSize size = reader.size();
+    if (!size.isValid() || size.isEmpty()) {
+        addIssue(result, QStringLiteral("error"), code, imagePath, 0,
+            QStringLiteral("%1图片尺寸无效，无法用于训练。").arg(context));
+        return false;
+    }
+    return true;
 }
 
 int parseClassCount(const QString& yamlPath, DatasetValidationResult& result)
@@ -395,6 +431,10 @@ DatasetValidationResult validateYoloDataset(const QString& datasetPath, const QJ
                 return result;
             }
             ++result.sampleCount;
+            validateReadableImageFile(imageInfo.absoluteFilePath(), result, QStringLiteral("invalid_image"), QStringLiteral("YOLO "));
+            if (issueLimitReached(result, maxIssues)) {
+                return result;
+            }
             const QString labelPath = labelDir.filePath(imageInfo.completeBaseName() + QStringLiteral(".txt"));
             const QFileInfo labelInfo(labelPath);
             if (result.previewSamples.size() < 20) {
@@ -817,6 +857,8 @@ DatasetValidationResult validatePaddleOcrDetDataset(const QString& datasetPath, 
         if (!QFileInfo::exists(absoluteImagePath)) {
             addIssue(result, QStringLiteral("error"), QStringLiteral("missing_det_image"), absoluteImagePath, 0,
                 QStringLiteral("PaddleOCR Det 图片不存在。"));
+        } else {
+            validateReadableImageFile(absoluteImagePath, result, QStringLiteral("invalid_image"), QStringLiteral("PaddleOCR Det "));
         }
 
         QJsonParseError parseError;
@@ -962,6 +1004,8 @@ DatasetValidationResult validatePaddleOcrRecDataset(const QString& datasetPath, 
         if (!QFileInfo::exists(absoluteImagePath)) {
             addIssue(result, QStringLiteral("error"), QStringLiteral("missing_ocr_image"), absoluteImagePath, 0,
                 QStringLiteral("OCR 图片不存在。"));
+        } else {
+            validateReadableImageFile(absoluteImagePath, result, QStringLiteral("invalid_image"), QStringLiteral("PaddleOCR Rec "));
         }
         if (!dictionary.isEmpty()) {
             for (const QChar ch : text) {
@@ -1194,7 +1238,12 @@ DatasetSplitResult splitPaddleOcrRecDataset(const QString& datasetPath, const QS
     writeRows(outputRoot.filePath(QStringLiteral("rec_gt_val.txt")), valRows);
     writeRows(outputRoot.filePath(QStringLiteral("rec_gt_test.txt")), testRows);
 
-    copyFileReplacing(root.filePath(QStringLiteral("dict.txt")), outputRoot.filePath(QStringLiteral("dict.txt")), result.errors);
+    const QString dictionaryPath = options.value(QStringLiteral("dictionaryFile")).toString(root.filePath(QStringLiteral("dict.txt")));
+    if (QFileInfo::exists(dictionaryPath)) {
+        copyFileReplacing(dictionaryPath, outputRoot.filePath(QStringLiteral("dict.txt")), result.errors);
+    } else {
+        result.warnings.append(QStringLiteral("未找到 OCR Rec 字典文件；split 输出不包含 dict.txt，将依赖训练参数或官方预置字典。"));
+    }
 
     QJsonObject report = result.toJson();
     report.insert(QStringLiteral("sourcePath"), datasetPath);

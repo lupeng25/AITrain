@@ -45,6 +45,7 @@
 #include <QTableWidgetItem>
 #include <QTextStream>
 #include <QTime>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QUrl>
@@ -203,7 +204,9 @@ void MainWindow::reproduceSelectedTrainingTask()
     }
 
     updateRecentTasks();
-    startQueuedTraining(newTaskId, request);
+    QTimer::singleShot(0, this, [this, newTaskId, request]() {
+        startQueuedTraining(newTaskId, request);
+    });
 }
 
 void MainWindow::startQueuedTraining(const QString& taskId, const aitrain::TrainingRequest& request)
@@ -211,6 +214,23 @@ void MainWindow::startQueuedTraining(const QString& taskId, const aitrain::Train
     metricsWidget_->clear();
     logEdit_->clear();
     progressBar_->setValue(0);
+    if (trainingPhaseLabel_) {
+        trainingPhaseLabel_->setText(uiText("阶段：快照 -> 训练 -> 验证 -> 导出 -> 完成 | 当前：等待 Worker 启动"));
+    }
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingEpochValue"))) label->setText(QStringLiteral("--"));
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingBatchValue"))) label->setText(QStringLiteral("--"));
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingEtaValue"))) label->setText(QStringLiteral("--"));
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingDeviceValue"))) label->setText(QStringLiteral("--"));
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingLossValue"))) label->setText(QStringLiteral("--"));
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingMapValue"))) label->setText(QStringLiteral("--"));
+    if (latestCheckpointLabel_) latestCheckpointLabel_->setText(uiText("最新 checkpoint：暂无"));
+    if (latestOnnxLabel_) latestOnnxLabel_->setText(uiText("最新 ONNX：暂无"));
+    if (latestReportLabel_) latestReportLabel_->setText(uiText("训练报告：暂无"));
+    if (latestPreviewPathLabel_) latestPreviewPathLabel_->setText(uiText("最新预览：暂无"));
+    if (latestPreviewImageLabel_) {
+        latestPreviewImageLabel_->clear();
+        latestPreviewImageLabel_->setText(uiText("暂无预览图"));
+    }
     state_.training.currentTaskId = taskId;
 
     QString error;
@@ -243,7 +263,9 @@ void MainWindow::startNextQueuedTask()
 
     QString error;
     recordExperimentRunForRequest(next.request, next.datasetId, &error);
-    startQueuedTraining(next.taskId, next.request);
+    QTimer::singleShot(0, this, [this, next]() {
+        startQueuedTraining(next.taskId, next.request);
+    });
 }
 
 void MainWindow::startSnapshotForQueuedTraining(const PendingTrainingTask& pending)

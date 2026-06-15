@@ -38,6 +38,15 @@ QString ncnnConverterExecutableName()
 #endif
 }
 
+QString pnnxConverterExecutableName()
+{
+#ifdef Q_OS_WIN
+    return QStringLiteral("pnnx.exe");
+#else
+    return QStringLiteral("pnnx");
+#endif
+}
+
 QString unquotedPath(QString value)
 {
     value = value.trimmed();
@@ -82,6 +91,19 @@ QString ncnnBinPathForParam(const QString& paramPath)
 {
     const QFileInfo info(paramPath);
     return info.absoluteDir().filePath(QStringLiteral("%1.bin").arg(info.completeBaseName()));
+}
+
+QString officialOnnxSiblingForCheckpoint(const QString& checkpointPath)
+{
+    const QFileInfo checkpointInfo(checkpointPath);
+    if (checkpointInfo.suffix().compare(QStringLiteral("onnx"), Qt::CaseInsensitive) == 0) {
+        return {};
+    }
+
+    const QString siblingPath = checkpointInfo.absoluteDir().filePath(
+        QStringLiteral("%1.onnx").arg(checkpointInfo.completeBaseName()));
+    const QFileInfo siblingInfo(siblingPath);
+    return siblingInfo.exists() && siblingInfo.isFile() ? siblingInfo.absoluteFilePath() : QString();
 }
 
 struct NcnnExportParamMetadata {
@@ -195,6 +217,10 @@ NcnnConverterResolution resolveNcnnOnnx2Ncnn()
     const QDir appDir(QCoreApplication::applicationDirPath());
     candidates << appDir.filePath(QStringLiteral("runtimes/ncnn/%1").arg(executableName))
                << appDir.filePath(QStringLiteral("../runtimes/ncnn/%1").arg(executableName))
+               << QDir::current().filePath(QStringLiteral(".deps/sdks/ncnn/bin/%1").arg(executableName))
+               << QDir::current().filePath(QStringLiteral(".deps/sdks/ncnn/tools/onnx/%1").arg(executableName))
+               << QDir::current().filePath(QStringLiteral(".deps/sdks/ncnn/x64/bin/%1").arg(executableName))
+               << QDir::current().filePath(QStringLiteral(".deps/sdks/ncnn/x64/tools/onnx/%1").arg(executableName))
                << QDir::current().filePath(QStringLiteral(".deps/ncnn/bin/%1").arg(executableName))
                << QDir::current().filePath(QStringLiteral(".deps/ncnn/tools/onnx/%1").arg(executableName))
                << QDir::current().filePath(QStringLiteral(".deps/ncnn/x64/bin/%1").arg(executableName))
@@ -215,6 +241,68 @@ NcnnConverterResolution resolveNcnnOnnx2Ncnn()
     return {{}, QStringLiteral("NCNN export requires onnx2ncnn. Set AITRAIN_NCNN_ONNX2NCNN to onnx2ncnn.exe or AITRAIN_NCNN_ROOT to an NCNN install root.")};
 }
 
+NcnnConverterResolution resolveNcnnPnnx()
+{
+    const QString configured = unquotedPath(QString::fromLocal8Bit(qgetenv("AITRAIN_NCNN_PNNX")));
+    if (!configured.isEmpty()) {
+        const QString executable = existingExecutablePath(configured);
+        if (!executable.isEmpty()) {
+            return {executable, QString()};
+        }
+        return {{}, QStringLiteral("Configured NCNN pnnx converter was not found: %1").arg(configured)};
+    }
+
+    const QString alternateConfigured = unquotedPath(QString::fromLocal8Bit(qgetenv("AITRAIN_PNNX")));
+    if (!alternateConfigured.isEmpty()) {
+        const QString executable = existingExecutablePath(alternateConfigured);
+        if (!executable.isEmpty()) {
+            return {executable, QString()};
+        }
+        return {{}, QStringLiteral("Configured pnnx converter was not found: %1").arg(alternateConfigured)};
+    }
+
+    const QString executableName = pnnxConverterExecutableName();
+    QStringList candidates;
+    const auto appendRootCandidates = [&candidates, &executableName](const QString& rootValue) {
+        const QString root = unquotedPath(rootValue);
+        if (root.isEmpty()) {
+            return;
+        }
+        const QDir rootDir(root);
+        candidates << rootDir.filePath(QStringLiteral("bin/%1").arg(executableName))
+                   << rootDir.filePath(QStringLiteral("x64/bin/%1").arg(executableName))
+                   << rootDir.filePath(executableName);
+    };
+    appendRootCandidates(QString::fromLocal8Bit(qgetenv("AITRAIN_NCNN_ROOT")));
+    appendRootCandidates(QString::fromLocal8Bit(qgetenv("NCNN_ROOT")));
+
+    const QDir appDir(QCoreApplication::applicationDirPath());
+    candidates << appDir.filePath(QStringLiteral("runtimes/ncnn/%1").arg(executableName))
+               << appDir.filePath(QStringLiteral("../runtimes/ncnn/%1").arg(executableName))
+               << QDir::current().filePath(QStringLiteral(".deps/sdks/ncnn/bin/%1").arg(executableName))
+               << QDir::current().filePath(QStringLiteral(".deps/sdks/ncnn/x64/bin/%1").arg(executableName))
+               << QDir::current().filePath(QStringLiteral(".deps/sdks/pnnx/bin/%1").arg(executableName))
+               << QDir::current().filePath(QStringLiteral(".deps/sdks/pnnx/pnnx/%1").arg(executableName))
+               << QDir::current().filePath(QStringLiteral(".deps/ncnn/bin/%1").arg(executableName))
+               << QDir::current().filePath(QStringLiteral(".deps/ncnn/x64/bin/%1").arg(executableName))
+               << QDir::current().filePath(QStringLiteral(".deps/pnnx/bin/%1").arg(executableName))
+               << QDir::current().filePath(QStringLiteral(".deps/pnnx/pnnx/%1").arg(executableName));
+
+    for (const QString& candidate : candidates) {
+        const QString executable = existingExecutablePath(candidate);
+        if (!executable.isEmpty()) {
+            return {executable, QString()};
+        }
+    }
+
+    const QString pathExecutable = QStandardPaths::findExecutable(QStringLiteral("pnnx"));
+    if (!pathExecutable.isEmpty()) {
+        return {pathExecutable, QString()};
+    }
+
+    return {{}, QStringLiteral("NCNN export requires pnnx for modern YOLO ONNX conversion. Set AITRAIN_NCNN_PNNX to pnnx.exe or place pnnx under AITRAIN_NCNN_ROOT.")};
+}
+
 bool isWindowsCommandScript(const QString& path)
 {
 #ifdef Q_OS_WIN
@@ -224,6 +312,135 @@ bool isWindowsCommandScript(const QString& path)
     Q_UNUSED(path);
     return false;
 #endif
+}
+
+int positiveIntFromJsonValue(const QJsonValue& value)
+{
+    if (value.isDouble()) {
+        const int number = value.toInt();
+        return number > 0 ? number : 0;
+    }
+    if (value.isString()) {
+        bool ok = false;
+        const int number = value.toString().trimmed().toInt(&ok);
+        return ok && number > 0 ? number : 0;
+    }
+    return 0;
+}
+
+int imageSizeFromJsonValue(const QJsonValue& value)
+{
+    const int scalar = positiveIntFromJsonValue(value);
+    if (scalar > 0) {
+        return scalar;
+    }
+    if (!value.isObject()) {
+        return 0;
+    }
+    const QJsonObject object = value.toObject();
+    const int width = positiveIntFromJsonValue(object.value(QStringLiteral("width")));
+    const int height = positiveIntFromJsonValue(object.value(QStringLiteral("height")));
+    if (width > 0 && height > 0 && width == height) {
+        return width;
+    }
+    const int w = positiveIntFromJsonValue(object.value(QStringLiteral("w")));
+    const int h = positiveIntFromJsonValue(object.value(QStringLiteral("h")));
+    return w > 0 && h > 0 && w == h ? w : 0;
+}
+
+int yoloNcnnInputSize(const QString& sourceOnnxPath, const NcnnExportParamMetadata& paramMetadata = NcnnExportParamMetadata())
+{
+    if (paramMetadata.inputSize.isValid() && !paramMetadata.inputSize.isEmpty()
+        && paramMetadata.inputSize.width() == paramMetadata.inputSize.height()) {
+        return paramMetadata.inputSize.width();
+    }
+
+    const QJsonObject exportSidecar = loadOnnxExportConfig(sourceOnnxPath);
+    int size = imageSizeFromJsonValue(exportSidecar.value(QStringLiteral("inputSize")));
+    if (size > 0) {
+        return size;
+    }
+    size = imageSizeFromJsonValue(exportSidecar.value(QStringLiteral("ncnn")).toObject().value(QStringLiteral("inputSize")));
+    if (size > 0) {
+        return size;
+    }
+
+    QJsonObject report = exportSidecar.value(QStringLiteral("trainingReport")).toObject();
+    if (report.isEmpty()) {
+        report = loadUltralyticsTrainingReport(sourceOnnxPath);
+    }
+    size = imageSizeFromJsonValue(report.value(QStringLiteral("ultralyticsExportArgs")).toObject().value(QStringLiteral("imgsz")));
+    if (size > 0) {
+        return size;
+    }
+    size = imageSizeFromJsonValue(report.value(QStringLiteral("ultralyticsTrainArgs")).toObject().value(QStringLiteral("imgsz")));
+    return size > 0 ? size : 640;
+}
+
+QString yoloModelSeriesForOnnx(const QString& sourceOnnxPath)
+{
+    const QJsonObject exportSidecar = loadOnnxExportConfig(sourceOnnxPath);
+    QJsonObject report = exportSidecar.value(QStringLiteral("trainingReport")).toObject();
+    if (report.isEmpty()) {
+        report = loadUltralyticsTrainingReport(sourceOnnxPath);
+    }
+
+    QString modelSeries = exportSidecar.value(QStringLiteral("modelSeries")).toString().trimmed().toLower();
+    if (modelSeries.isEmpty()) {
+        modelSeries = report.value(QStringLiteral("modelSeries")).toString().trimmed().toLower();
+    }
+    if (modelSeries.isEmpty()) {
+        const QString modelName = report.value(QStringLiteral("model")).toString().trimmed().toLower();
+        if (modelName.contains(QStringLiteral("yolo26"))) {
+            modelSeries = QStringLiteral("yolo26");
+        }
+    }
+    if (modelSeries.isEmpty() && QFileInfo(sourceOnnxPath).absoluteFilePath().toLower().contains(QStringLiteral("yolo26"))) {
+        modelSeries = QStringLiteral("yolo26");
+    }
+    return modelSeries;
+}
+
+bool isYolo26OnnxSource(const QString& sourceOnnxPath)
+{
+    return yoloModelSeriesForOnnx(sourceOnnxPath) == QStringLiteral("yolo26");
+}
+
+bool runProcessWithCancellation(
+    QProcess* process,
+    const CancellationCallback& shouldCancel,
+    const QString& timeoutMessage,
+    QString* error)
+{
+    if (!process->waitForStarted(5000)) {
+        if (error) {
+            *error = timeoutMessage.arg(process->errorString());
+        }
+        return false;
+    }
+    while (!process->waitForFinished(100)) {
+        if (isCancellationRequested(shouldCancel)) {
+            process->terminate();
+            if (!process->waitForFinished(1500)) {
+                process->kill();
+                process->waitForFinished(1500);
+            }
+            if (error) {
+                *error = QStringLiteral("Canceled by user");
+            }
+            return false;
+        }
+        if (process->state() == QProcess::NotRunning) {
+            break;
+        }
+    }
+    if (process->state() != QProcess::NotRunning) {
+        if (error) {
+            *error = QStringLiteral("NCNN converter did not finish: %1").arg(process->errorString());
+        }
+        return false;
+    }
+    return true;
 }
 
 bool runOnnx2Ncnn(
@@ -282,34 +499,13 @@ bool runOnnx2Ncnn(
         process.start(converter.executablePath, QStringList() << sourceOnnxPath << paramPath << binPath);
     }
 
-    if (!process.waitForStarted(5000)) {
-        if (error) {
-            *error = QStringLiteral("Could not start NCNN converter %1: %2").arg(converter.executablePath, process.errorString());
-        }
-        return false;
-    }
-    while (!process.waitForFinished(100)) {
-        if (isCancellationRequested(shouldCancel)) {
-            process.terminate();
-            if (!process.waitForFinished(1500)) {
-                process.kill();
-                process.waitForFinished(1500);
-            }
-            QFile::remove(paramPath);
-            QFile::remove(binPath);
-            if (error) {
-                *error = QStringLiteral("Canceled by user");
-            }
-            return false;
-        }
-        if (process.state() == QProcess::NotRunning) {
-            break;
-        }
-    }
-    if (process.state() != QProcess::NotRunning) {
-        if (error) {
-            *error = QStringLiteral("NCNN converter did not finish: %1").arg(process.errorString());
-        }
+    if (!runProcessWithCancellation(
+            &process,
+            shouldCancel,
+            QStringLiteral("Could not start NCNN converter %1: %%1").arg(converter.executablePath),
+            error)) {
+        QFile::remove(paramPath);
+        QFile::remove(binPath);
         return false;
     }
 
@@ -323,6 +519,105 @@ bool runOnnx2Ncnn(
     if (!QFileInfo::exists(paramPath) || !QFileInfo::exists(binPath)) {
         if (error) {
             *error = QStringLiteral("NCNN converter finished but did not produce expected .param/.bin files. Output: %1").arg(converterOutput);
+        }
+        return false;
+    }
+
+    if (converterPath) {
+        *converterPath = converter.executablePath;
+    }
+    return true;
+}
+
+bool runPnnxNcnn(
+    const QString& sourceOnnxPath,
+    const QString& paramPath,
+    const QString& binPath,
+    const CancellationCallback& shouldCancel,
+    QString* converterPath,
+    QString* error)
+{
+    if (isCancellationRequested(shouldCancel)) {
+        if (error) {
+            *error = QStringLiteral("Canceled by user");
+        }
+        return false;
+    }
+    const NcnnConverterResolution converter = resolveNcnnPnnx();
+    if (converter.executablePath.isEmpty()) {
+        if (error) {
+            *error = converter.message;
+        }
+        return false;
+    }
+
+    if (!QFileInfo::exists(sourceOnnxPath)) {
+        if (error) {
+            *error = QStringLiteral("Cannot read source ONNX model for NCNN export: %1").arg(sourceOnnxPath);
+        }
+        return false;
+    }
+    if (!QDir().mkpath(QFileInfo(paramPath).absolutePath())) {
+        if (error) {
+            *error = QStringLiteral("Cannot create NCNN export directory: %1").arg(QFileInfo(paramPath).absolutePath());
+        }
+        return false;
+    }
+
+    QFile::remove(paramPath);
+    QFile::remove(binPath);
+
+    const QFileInfo paramInfo(paramPath);
+    const QString outputDir = paramInfo.absolutePath();
+    const QString baseName = paramInfo.completeBaseName();
+    const int inputSize = yoloNcnnInputSize(sourceOnnxPath);
+    const QString inputShape = QStringLiteral("inputshape=[1,3,%1,%1]").arg(inputSize);
+    const QStringList converterArgs{
+        sourceOnnxPath,
+        inputShape,
+        QStringLiteral("ncnnparam=%1").arg(paramPath),
+        QStringLiteral("ncnnbin=%1").arg(binPath),
+        QStringLiteral("pnnxparam=%1").arg(QDir(outputDir).filePath(baseName + QStringLiteral(".pnnx.param"))),
+        QStringLiteral("pnnxbin=%1").arg(QDir(outputDir).filePath(baseName + QStringLiteral(".pnnx.bin"))),
+        QStringLiteral("pnnxpy=%1").arg(QDir(outputDir).filePath(baseName + QStringLiteral("_pnnx.py"))),
+        QStringLiteral("pnnxonnx=%1").arg(QDir(outputDir).filePath(baseName + QStringLiteral(".pnnx.onnx"))),
+        QStringLiteral("ncnnpy=%1").arg(QDir(outputDir).filePath(baseName + QStringLiteral("_ncnn.py"))),
+        QStringLiteral("fp16=0")
+    };
+
+    QProcess process;
+    process.setProcessChannelMode(QProcess::MergedChannels);
+    process.setWorkingDirectory(outputDir);
+#ifdef Q_OS_WIN
+    if (isWindowsCommandScript(converter.executablePath)) {
+        process.start(QStringLiteral("cmd.exe"),
+            QStringList() << QStringLiteral("/D") << QStringLiteral("/C") << QDir::toNativeSeparators(converter.executablePath) << converterArgs);
+    } else
+#endif
+    {
+        process.start(converter.executablePath, converterArgs);
+    }
+
+    if (!runProcessWithCancellation(
+            &process,
+            shouldCancel,
+            QStringLiteral("Could not start NCNN pnnx converter %1: %%1").arg(converter.executablePath),
+            error)) {
+        QFile::remove(paramPath);
+        QFile::remove(binPath);
+        return false;
+    }
+
+    const QString converterOutput = QString::fromLocal8Bit(process.readAll()).trimmed();
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+        if (error) {
+            *error = QStringLiteral("NCNN pnnx converter failed with exit code %1: %2").arg(process.exitCode()).arg(converterOutput);
+        }
+        return false;
+    }
+    if (!QFileInfo::exists(paramPath) || !QFileInfo::exists(binPath)) {
+        if (error) {
+            *error = QStringLiteral("NCNN pnnx converter finished but did not produce expected .param/.bin files. Output: %1").arg(converterOutput);
         }
         return false;
     }
@@ -357,7 +652,9 @@ QJsonObject ncnnMetadata(
         metadata.insert(QStringLiteral("outputBlobs"), QJsonArray::fromStringList(paramMetadata.outputBlobs));
     }
     metadata.insert(QStringLiteral("inputSize"),
-        paramMetadata.inputSize.isValid() && !paramMetadata.inputSize.isEmpty() ? paramMetadata.inputSize.width() : 640);
+        modelFamily == QStringLiteral("yolo_detection") || modelFamily == QStringLiteral("yolo_segmentation")
+            ? yoloNcnnInputSize(sourceOnnxPath, paramMetadata)
+            : (paramMetadata.inputSize.isValid() && !paramMetadata.inputSize.isEmpty() ? paramMetadata.inputSize.width() : 640));
     if (modelFamily == QStringLiteral("yolo_detection") || modelFamily == QStringLiteral("yolo_segmentation")) {
         metadata.insert(QStringLiteral("decoder"), QStringLiteral("auto"));
         metadata.insert(QStringLiteral("strides"), QJsonArray{8, 16, 32});
@@ -413,7 +710,7 @@ QJsonObject yoloOnnxExportConfig(const QString& sourceOnnxPath, const QString& e
     const bool segmentation = configuredFamily == QStringLiteral("yolo_segmentation")
         || configuredBackend == QStringLiteral("ultralytics_yolo_segment")
         || reportBackend == QStringLiteral("ultralytics_yolo_segment");
-    return QJsonObject{
+    QJsonObject config{
         {QStringLiteral("format"), format},
         {QStringLiteral("backend"), segmentation ? QStringLiteral("ultralytics_yolo_segment") : QStringLiteral("ultralytics_yolo_detect")},
         {QStringLiteral("modelFamily"), segmentation ? QStringLiteral("yolo_segmentation") : QStringLiteral("yolo_detection")},
@@ -429,6 +726,41 @@ QJsonObject yoloOnnxExportConfig(const QString& sourceOnnxPath, const QString& e
             {QStringLiteral("coordinates"), QStringLiteral("letterbox_to_original_image")}
         }}
     };
+    QJsonObject exportArgs = exportSidecar.value(QStringLiteral("ultralyticsExportArgs")).toObject();
+    if (exportArgs.isEmpty()) {
+        exportArgs = report.value(QStringLiteral("ultralyticsExportArgs")).toObject();
+    }
+    if (!exportArgs.isEmpty()) {
+        config.insert(QStringLiteral("ultralyticsExportArgs"), exportArgs);
+    }
+
+    const QString modelSeries = yoloModelSeriesForOnnx(sourceOnnxPath);
+    if (!modelSeries.isEmpty()) {
+        config.insert(QStringLiteral("modelSeries"), modelSeries);
+    }
+
+    QString task = exportSidecar.value(QStringLiteral("task")).toString();
+    if (task.isEmpty()) {
+        task = report.value(QStringLiteral("task")).toString();
+    }
+    if (task.isEmpty()) {
+        task = segmentation ? QStringLiteral("segmentation") : QStringLiteral("detection");
+    }
+    config.insert(QStringLiteral("task"), task);
+
+    QJsonObject outputShapes = exportSidecar.value(QStringLiteral("outputShapes")).toObject();
+    if (outputShapes.isEmpty()) {
+        outputShapes = report.value(QStringLiteral("outputShapes")).toObject();
+    }
+    if (!outputShapes.isEmpty()) {
+        config.insert(QStringLiteral("outputShapes"), outputShapes);
+    }
+
+    const QString sourceTrainingReport = exportSidecar.value(QStringLiteral("sourceTrainingReport")).toString();
+    if (!sourceTrainingReport.isEmpty()) {
+        config.insert(QStringLiteral("sourceTrainingReport"), sourceTrainingReport);
+    }
+    return config;
 }
 
 DetectionExportResult exportDetectionCheckpoint(
@@ -467,21 +799,23 @@ DetectionExportResult exportDetectionCheckpoint(
         return result;
     }
 
-    const bool sourceIsOnnx = QFileInfo(checkpointPath).suffix().toLower() == QStringLiteral("onnx");
+    const QString siblingOnnxPath = officialOnnxSiblingForCheckpoint(checkpointPath);
+    const QString effectiveCheckpointPath = siblingOnnxPath.isEmpty() ? checkpointPath : siblingOnnxPath;
+    const bool sourceIsOnnx = QFileInfo(effectiveCheckpointPath).suffix().toLower() == QStringLiteral("onnx");
     if (sourceIsOnnx) {
         QString finalOutputPath = outputPath;
         if (finalOutputPath.isEmpty()) {
             finalOutputPath = ncnnFormat
-                ? QFileInfo(checkpointPath).absoluteDir().filePath(QStringLiteral("model.param"))
-                : QFileInfo(checkpointPath).absoluteDir().filePath(
-                    tensorRtFormat ? QStringLiteral("model.engine") : QFileInfo(checkpointPath).fileName());
+                ? QFileInfo(effectiveCheckpointPath).absoluteDir().filePath(QStringLiteral("model.param"))
+                : QFileInfo(effectiveCheckpointPath).absoluteDir().filePath(
+                    tensorRtFormat ? QStringLiteral("model.engine") : QFileInfo(effectiveCheckpointPath).fileName());
         }
         if (QFileInfo(finalOutputPath).isDir()) {
             finalOutputPath = QDir(finalOutputPath).filePath(
-                ncnnFormat ? QStringLiteral("model.param") : (tensorRtFormat ? QStringLiteral("model.engine") : QFileInfo(checkpointPath).fileName()));
+                ncnnFormat ? QStringLiteral("model.param") : (tensorRtFormat ? QStringLiteral("model.engine") : QFileInfo(effectiveCheckpointPath).fileName()));
         }
         if (ncnnFormat) {
-            finalOutputPath = ncnnParamPathForOutput(finalOutputPath, checkpointPath);
+            finalOutputPath = ncnnParamPathForOutput(finalOutputPath, effectiveCheckpointPath);
         }
         if (!QDir().mkpath(QFileInfo(finalOutputPath).absolutePath())) {
             result.error = QStringLiteral("Cannot create export directory: %1").arg(QFileInfo(finalOutputPath).absolutePath());
@@ -493,15 +827,19 @@ DetectionExportResult exportDetectionCheckpoint(
                 result.error = QStringLiteral("Canceled by user");
                 return result;
             }
-            if (QFileInfo(checkpointPath).absoluteFilePath() != QFileInfo(finalOutputPath).absoluteFilePath()) {
+            if (QFileInfo(effectiveCheckpointPath).absoluteFilePath() != QFileInfo(finalOutputPath).absoluteFilePath()) {
                 QFile::remove(finalOutputPath);
-                if (!QFile::copy(checkpointPath, finalOutputPath)) {
+                if (!QFile::copy(effectiveCheckpointPath, finalOutputPath)) {
                     result.error = QStringLiteral("Cannot copy ONNX model to export path: %1").arg(finalOutputPath);
                     return result;
                 }
             }
             const QString reportPath = onnxExportReportPath(finalOutputPath);
-            const QJsonObject config = yoloOnnxExportConfig(checkpointPath, finalOutputPath, normalizedFormat);
+            QJsonObject config = yoloOnnxExportConfig(effectiveCheckpointPath, finalOutputPath, normalizedFormat);
+            if (!siblingOnnxPath.isEmpty()) {
+                config.insert(QStringLiteral("sourceCheckpoint"), checkpointPath);
+                config.insert(QStringLiteral("sourceOnnx"), effectiveCheckpointPath);
+            }
             if (isCancellationRequested(shouldCancel)) {
                 result.error = QStringLiteral("Canceled by user");
                 return result;
@@ -517,13 +855,35 @@ DetectionExportResult exportDetectionCheckpoint(
         }
 
         if (ncnnFormat) {
-            const QString binPath = ncnnBinPathForParam(finalOutputPath);
-            QString converterPath;
-            if (!runOnnx2Ncnn(checkpointPath, finalOutputPath, binPath, shouldCancel, &converterPath, &result.error)) {
+            if (isYolo26OnnxSource(effectiveCheckpointPath)) {
+                result.error = QStringLiteral("YOLO26 NCNN export is not supported by AITrain; use ONNX or TensorRT for YOLO26 deployment.");
                 return result;
             }
+            const QString binPath = ncnnBinPathForParam(finalOutputPath);
+            QString converterPath;
+            const QString modelFamily = inferOnnxModelFamily(effectiveCheckpointPath);
+            QString pnnxError;
+            const bool preferPnnx = modelFamily == QStringLiteral("yolo_detection") || modelFamily == QStringLiteral("yolo_segmentation");
+            bool converted = false;
+            if (preferPnnx) {
+                converted = runPnnxNcnn(effectiveCheckpointPath, finalOutputPath, binPath, shouldCancel, &converterPath, &pnnxError);
+            }
+            if (!converted) {
+                QString onnx2NcnnError;
+                converted = runOnnx2Ncnn(effectiveCheckpointPath, finalOutputPath, binPath, shouldCancel, &converterPath, &onnx2NcnnError);
+                if (!converted) {
+                    result.error = !pnnxError.isEmpty()
+                        ? QStringLiteral("NCNN pnnx conversion failed: %1; onnx2ncnn conversion failed: %2").arg(pnnxError, onnx2NcnnError)
+                        : onnx2NcnnError;
+                    return result;
+                }
+            }
             const QString reportPath = onnxExportReportPath(finalOutputPath);
-            const QJsonObject config = ncnnOnnxExportConfig(checkpointPath, finalOutputPath, binPath, converterPath);
+            QJsonObject config = ncnnOnnxExportConfig(effectiveCheckpointPath, finalOutputPath, binPath, converterPath);
+            if (!siblingOnnxPath.isEmpty()) {
+                config.insert(QStringLiteral("sourceCheckpoint"), checkpointPath);
+                config.insert(QStringLiteral("sourceOnnx"), effectiveCheckpointPath);
+            }
             if (isCancellationRequested(shouldCancel)) {
                 result.error = QStringLiteral("Canceled by user");
                 return result;
@@ -543,9 +903,9 @@ DetectionExportResult exportDetectionCheckpoint(
             result.error = QStringLiteral("TensorRT export is not available: %1").arg(tensorRtBackendStatus().message);
             return result;
 #else
-            QFile onnxFile(checkpointPath);
+            QFile onnxFile(effectiveCheckpointPath);
             if (!onnxFile.open(QIODevice::ReadOnly)) {
-                result.error = QStringLiteral("Cannot read source ONNX model for TensorRT export: %1").arg(checkpointPath);
+                result.error = QStringLiteral("Cannot read source ONNX model for TensorRT export: %1").arg(effectiveCheckpointPath);
                 return result;
             }
             const QByteArray onnxModel = onnxFile.readAll();
@@ -558,13 +918,20 @@ DetectionExportResult exportDetectionCheckpoint(
                 return result;
             }
             const QString reportPath = onnxExportReportPath(finalOutputPath);
-            QJsonObject config = yoloOnnxExportConfig(checkpointPath, finalOutputPath, normalizedFormat);
-            config.insert(QStringLiteral("backend"), QStringLiteral("tensorrt_ultralytics_yolo_detect"));
+            QJsonObject config = yoloOnnxExportConfig(effectiveCheckpointPath, finalOutputPath, normalizedFormat);
+            const bool segmentation = config.value(QStringLiteral("modelFamily")).toString() == QStringLiteral("yolo_segmentation");
+            config.insert(
+                QStringLiteral("backend"),
+                segmentation ? QStringLiteral("tensorrt_ultralytics_yolo_segment") : QStringLiteral("tensorrt_ultralytics_yolo_detect"));
             config.insert(QStringLiteral("tensorRt"), QJsonObject{
                 {QStringLiteral("precision"), fp16 ? QStringLiteral("fp16") : QStringLiteral("fp32")},
                 {QStringLiteral("workspaceBytes"), static_cast<double>(size_t{1} << 30)},
-                {QStringLiteral("sourceOnnx"), checkpointPath}
+                {QStringLiteral("sourceOnnx"), effectiveCheckpointPath}
             });
+            if (!siblingOnnxPath.isEmpty()) {
+                config.insert(QStringLiteral("sourceCheckpoint"), checkpointPath);
+                config.insert(QStringLiteral("sourceOnnx"), effectiveCheckpointPath);
+            }
             if (isCancellationRequested(shouldCancel)) {
                 result.error = QStringLiteral("Canceled by user");
                 return result;

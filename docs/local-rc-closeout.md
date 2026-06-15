@@ -1,8 +1,8 @@
 # AITrain Studio Local RC Closeout
 
-This checklist is the local, non-external release-candidate closeout path after Phase 39B, Phase 39C, Phase 41 Lite, and Phase 49 Lite. It does not add new model backends. It exists to make the current detection, segmentation, OCR, pipeline, benchmark, model registry, delivery report, environment profile, sample review, deployment validation, diagnostics, and delivery acceptance loop repeatable on the development machine.
+This checklist is the local, non-external release-candidate closeout path after Phase 39B, Phase 39C, Phase 41 Lite, and Phase 49 Lite. It does not add new model backends. It exists to make the current detection, segmentation, OCR, pipeline, benchmark, model registry, delivery report, environment profile, sample review, deployment validation, diagnostics, and environment-page delivery evidence loop repeatable on the development machine.
 
-After this local gate passes, use `docs\external-acceptance-handoff.md` and `docs\acceptance-templates\` for the clean Windows package handoff and for any explicitly reopened package-root RTX / SM 75+ TensorRT rerun. The RTX 4090 D source-side TensorRT validation lane already has passing evidence recorded under `.deps\rtx4090-validation`; do not weaken or overwrite that lane with package-root or clean-machine status.
+After this local gate passes, use `docs\external-acceptance-handoff.md` and `docs\acceptance-templates\` for the clean Windows package handoff and for any explicitly reopened package-root RTX / SM 75+ TensorRT rerun. The RTX 4090 D source-side TensorRT validation lane already has passing evidence archived in `docs\validation\rtx4090-validation-evidence-20260615.json`; do not weaken or overwrite that lane with package-root or clean-machine status.
 
 ## Scope
 
@@ -62,7 +62,7 @@ The default RC command runs the fixed 1280x820 walkthrough wrapper:
 .\tools\ui-workbench-walkthrough.ps1
 ```
 
-It covers `总览`, `项目`, `数据集`, `样本复核`, `训练实验`, `任务与产物`, `模型库`, `评估报告`, `模型导出`, `推理验证`, `交付验收`, `插件`, `环境`, and `设置`, and writes `.deps\ui-walkthrough-rc\ui_walkthrough_rc_summary.json`.
+It covers `总览`, `项目`, `数据集`, `训练实验`, `任务与产物`, `模型库`, `部署验证`, `环境`, and `系统设置`, and writes `.deps\UI-Walkthrough\rc\ui_walkthrough_rc_summary.json`. Tab-level areas such as `数据集 > 质量与复核`, `模型库 > 评估报告`, `部署验证 > 模型导出 / 推理验证`, `系统设置 > 插件 / 应用设置`, and `环境 > 交付证据` are covered by QtTest rather than the main-page walkthrough.
 
 If the app opens the offline registration dialog before the workbench, the wrapper writes a blocked summary with `errorCode=license_required`. Treat that as environment/configuration blocked evidence: configure a valid offline license token and build-time `AITRAIN_LICENSE_PUBLIC_KEY`, then rerun the walkthrough instead of marking the GUI gate passed.
 
@@ -73,14 +73,15 @@ For manual exploration beyond the automated gate, walk through these screens:
 | Project | Create or open a project; dashboard should show project, task, dataset, model, plugin, and environment summaries. |
 | Environment | Run environment check; YOLO, OCR, and TensorRT profile rows should appear with repair hints. GTX 1060 / SM 61 TensorRT must read as `hardware-blocked` / hardware limited, not passed. |
 | Dataset | Import generated YOLO detection, YOLO segmentation, PaddleOCR Rec, and PaddleOCR Det datasets; auto-detection and validation should be visible. |
-| Sample Review | Load problem/error/rework sample JSON when available; filters and X-AnyLabeling review-list export should be visible. |
+| Dataset > Quality Review | Load problem/error/rework sample JSON when available; filters and X-AnyLabeling review-list export should be visible. |
 | Annotation | X-AnyLabeling remains an external tool; launch/detect actions should not block the GUI or imply embedded annotation. |
 | Training | Official YOLO / OCR backends should be the only product training choices; removed diagnostic/scaffold backends must not reappear in the GUI. |
 | Task Artifacts | Select recent tasks and preview JSON/TXT/CSV/image/ONNX/model artifacts; unsupported artifacts should show a clear message. |
-| Evaluation / Benchmark | Run evaluation and benchmark from model artifacts when available; reports should be recorded as Worker artifacts. |
-| Model Registry | Registered model versions should show lineage, evaluation, benchmark, artifact, and limitation summaries. |
+| Model Library | Registered model versions, evaluation reports, comparison rows, pipeline records, lineage, benchmarks, artifacts, and limitation summaries should be visible. |
+| Deployment Validation | Export and inference validation controls should be visible under the `模型导出` and `推理验证` tabs. |
+| System Settings | Plugin matrix/marketplace state and application settings should be visible under `插件` and `应用设置`. |
 | Delivery Report | Generate a delivery report and confirm HTML, model card, and artifact inventory are present and previewable. |
-| Delivery Acceptance | Open the delivery acceptance page; local RC, clean Windows, TensorRT, customer OCR, package integrity, diagnostics, and deployment validation states should render as `passed`, `blocked`, `failed`, `hardware-blocked`, or `not-run` without horizontal overflow. |
+| Delivery Evidence | Open `环境 > 交付证据`; local RC, clean Windows, TensorRT, customer OCR, package integrity, diagnostics, and deployment validation states should render as `passed`, `blocked`, `failed`, `hardware-blocked`, or `not-run` without horizontal overflow. |
 
 ## Boundary Wording Checklist
 

@@ -50,20 +50,22 @@ Get-Content -LiteralPath HARNESS.md -Encoding UTF8 -TotalCount 5
 git -c core.quotepath=false ls-files | Select-String -Pattern 'AITrainStudio'
 ```
 
-如果改动涉及当前项目状态、交付验收、客户域 OCR、部署验证或样本复核，需要同步检查 `docs/harness/current-status.md`、`docs/harness/project-context.md`、`docs/acceptance-runbook.md`、`docs/product-roadmap-local-training-platform.md` 和 `docs/user-guide.md` 是否一致。
+如果改动涉及当前项目状态、交付证据/验收、客户域 OCR、部署验证或样本复核，需要同步检查 `docs/harness/current-status.md`、`docs/harness/project-context.md`、`docs/acceptance-runbook.md`、`docs/product-roadmap-local-training-platform.md` 和 `docs/user-guide.md` 是否一致。
 
 如果修改 UI 布局，还需要至少执行一次非全屏 walkthrough：
 
 ```powershell
-$pages = @('总览','项目','数据集','样本复核','训练实验','任务与产物','模型库','评估报告','模型导出','推理验证','交付验收','插件','环境','设置')
+$pages = @('总览','项目','数据集','训练实验','任务与产物','模型库','部署验证','环境','系统设置')
 C:\Users\73200\.codex\skills\qt-gui-walkthrough\scripts\qt_walkthrough.ps1 `
   -AppPath .\build-vscode\bin\AITrainStudio.exe `
   -WorkingDirectory .\build-vscode\bin `
-  -OutDir .\.deps\ui-walkthrough `
+  -OutDir .\.deps\UI-Walkthrough\manual `
   -PageNames $pages `
   -Width 1280 `
   -Height 820
 ```
+
+Tab-level areas such as `数据集 > 质量与复核`, `模型库 > 评估报告`, `部署验证 > 模型导出 / 推理验证`, `系统设置 > 插件 / 应用设置`, and `环境 > 交付证据` should be covered by focused QtTest or manual notes when touched.
 
 验收重点：关键操作按钮不能被非全屏首屏裁切；长路径、长状态文本和表格不能造成横向溢出；允许页面纵向滚动。
 

@@ -12,6 +12,7 @@
 #include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
+#include <QComboBox>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
@@ -36,6 +37,7 @@
 #include <QRegularExpression>
 #include <QScrollArea>
 #include <QSettings>
+#include <QSet>
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSplitter>
@@ -45,12 +47,329 @@
 #include <QTableWidgetItem>
 #include <QTextStream>
 #include <QTime>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QUrl>
 #include <QUuid>
 
 using namespace aitrain_app;
+
+namespace {
+QString yoloArgObjectName(const QString& key)
+{
+    return QStringLiteral("YoloTrainArg_%1").arg(key);
+}
+
+QString yoloExportArgObjectName(const QString& prefix, const QString& key)
+{
+    return QStringLiteral("%1_%2").arg(prefix, key);
+}
+
+QString yoloTrainArgText(const QWidget* root, const QString& key)
+{
+    if (!root) {
+        return {};
+    }
+    if (const auto* edit = root->findChild<QLineEdit*>(yoloArgObjectName(key))) {
+        return edit->text().trimmed();
+    }
+    if (const auto* combo = root->findChild<QComboBox*>(yoloArgObjectName(key))) {
+        const QString value = combo->currentData().toString().trimmed();
+        return value.isEmpty() ? combo->currentText().trimmed() : value;
+    }
+    return {};
+}
+
+QString yoloExportArgText(const QWidget* root, const QString& prefix, const QString& key)
+{
+    if (!root) {
+        return {};
+    }
+    const QString objectName = yoloExportArgObjectName(prefix, key);
+    if (const auto* edit = root->findChild<QLineEdit*>(objectName)) {
+        return edit->text().trimmed();
+    }
+    if (const auto* combo = root->findChild<QComboBox*>(objectName)) {
+        const QString value = combo->currentData().toString().trimmed();
+        return value.isEmpty() ? combo->currentText().trimmed() : value;
+    }
+    if (const auto* check = root->findChild<QCheckBox*>(objectName)) {
+        return check->isChecked() ? QStringLiteral("true") : QStringLiteral("false");
+    }
+    return {};
+}
+
+bool isIntegerLike(const QString& text)
+{
+    bool ok = false;
+    text.toInt(&ok);
+    return ok;
+}
+
+bool isNumberLike(const QString& text)
+{
+    bool ok = false;
+    text.toDouble(&ok);
+    return ok;
+}
+
+QJsonValue yoloTrainArgJsonValue(const QString& key, const QString& text)
+{
+    const QString normalized = text.trimmed();
+    if (normalized.isEmpty() || normalized == QStringLiteral("默认")) {
+        return QJsonValue();
+    }
+    const QSet<QString> boolKeys = {
+        QStringLiteral("cos_lr"), QStringLiteral("amp"), QStringLiteral("deterministic"),
+        QStringLiteral("resume"), QStringLiteral("rect"), QStringLiteral("single_cls"),
+        QStringLiteral("val"), QStringLiteral("plots"), QStringLiteral("overlap_mask")
+    };
+    if (boolKeys.contains(key)) {
+        const QString lower = normalized.toLower();
+        if (lower == QStringLiteral("true") || lower == QStringLiteral("1") || lower == QStringLiteral("yes")) {
+            return true;
+        }
+        if (lower == QStringLiteral("false") || lower == QStringLiteral("0") || lower == QStringLiteral("no")) {
+            return false;
+        }
+    }
+    if (key == QStringLiteral("classes")) {
+        QJsonArray values;
+        for (const QString& part : normalized.split(QLatin1Char(','), QString::SkipEmptyParts)) {
+            bool ok = false;
+            const int value = part.trimmed().toInt(&ok);
+            if (ok) {
+                values.append(value);
+            }
+        }
+        return values;
+    }
+    if (key == QStringLiteral("freeze") && normalized.contains(QLatin1Char(','))) {
+        QJsonArray values;
+        for (const QString& part : normalized.split(QLatin1Char(','), QString::SkipEmptyParts)) {
+            bool ok = false;
+            const int value = part.trimmed().toInt(&ok);
+            if (ok) {
+                values.append(value);
+            }
+        }
+        return values;
+    }
+    const QSet<QString> intKeys = {
+        QStringLiteral("workers"), QStringLiteral("patience"), QStringLiteral("save_period"),
+        QStringLiteral("freeze"), QStringLiteral("nbs"), QStringLiteral("max_det"),
+        QStringLiteral("close_mosaic"), QStringLiteral("mask_ratio")
+    };
+    if (intKeys.contains(key) && isIntegerLike(normalized)) {
+        return normalized.toInt();
+    }
+    const QSet<QString> numericKeys = {
+        QStringLiteral("lr0"), QStringLiteral("lrf"), QStringLiteral("momentum"),
+        QStringLiteral("weight_decay"), QStringLiteral("warmup_epochs"), QStringLiteral("warmup_momentum"),
+        QStringLiteral("warmup_bias_lr"), QStringLiteral("fraction"), QStringLiteral("multi_scale"),
+        QStringLiteral("box"), QStringLiteral("cls"), QStringLiteral("dfl"), QStringLiteral("hsv_h"),
+        QStringLiteral("hsv_s"), QStringLiteral("hsv_v"), QStringLiteral("degrees"), QStringLiteral("translate"),
+        QStringLiteral("scale"), QStringLiteral("shear"), QStringLiteral("perspective"), QStringLiteral("flipud"),
+        QStringLiteral("fliplr"), QStringLiteral("mosaic"), QStringLiteral("mixup"), QStringLiteral("cutmix"),
+        QStringLiteral("copy_paste")
+    };
+    if (numericKeys.contains(key) && isNumberLike(normalized)) {
+        return normalized.toDouble();
+    }
+    if (normalized == QStringLiteral("true")) {
+        return true;
+    }
+    if (normalized == QStringLiteral("false")) {
+        return false;
+    }
+    return normalized;
+}
+
+QJsonObject yoloTrainArgsFromUi(const QWidget* root)
+{
+    const QStringList keys = {
+        QStringLiteral("device"), QStringLiteral("workers"), QStringLiteral("patience"), QStringLiteral("optimizer"),
+        QStringLiteral("lr0"), QStringLiteral("lrf"), QStringLiteral("momentum"), QStringLiteral("weight_decay"),
+        QStringLiteral("warmup_epochs"), QStringLiteral("cos_lr"), QStringLiteral("amp"), QStringLiteral("deterministic"),
+        QStringLiteral("cache"), QStringLiteral("pretrained"), QStringLiteral("resume"), QStringLiteral("save_period"),
+        QStringLiteral("fraction"), QStringLiteral("rect"), QStringLiteral("multi_scale"), QStringLiteral("single_cls"),
+        QStringLiteral("classes"), QStringLiteral("freeze"), QStringLiteral("box"), QStringLiteral("cls"),
+        QStringLiteral("dfl"), QStringLiteral("nbs"), QStringLiteral("val"), QStringLiteral("plots"),
+        QStringLiteral("max_det"), QStringLiteral("hsv_h"), QStringLiteral("hsv_s"), QStringLiteral("hsv_v"),
+        QStringLiteral("degrees"), QStringLiteral("translate"), QStringLiteral("scale"), QStringLiteral("shear"),
+        QStringLiteral("perspective"), QStringLiteral("flipud"), QStringLiteral("fliplr"), QStringLiteral("mosaic"),
+        QStringLiteral("mixup"), QStringLiteral("cutmix"), QStringLiteral("copy_paste"), QStringLiteral("copy_paste_mode"),
+        QStringLiteral("close_mosaic"), QStringLiteral("overlap_mask"), QStringLiteral("mask_ratio")
+    };
+    QJsonObject args;
+    for (const QString& key : keys) {
+        const QString text = yoloTrainArgText(root, key);
+        const QJsonValue value = yoloTrainArgJsonValue(key, text);
+        if (!value.isUndefined() && !value.isNull()) {
+            args.insert(key, value);
+        }
+    }
+    return args;
+}
+
+QJsonObject yoloTrainingExportArgsFromUi(const QWidget* root, int imageSize)
+{
+    const bool dynamic = yoloExportArgText(root, QStringLiteral("YoloTrainExportArg"), QStringLiteral("dynamic")) == QStringLiteral("true");
+    const bool half = yoloExportArgText(root, QStringLiteral("YoloTrainExportArg"), QStringLiteral("half")) == QStringLiteral("true");
+    const bool int8 = yoloExportArgText(root, QStringLiteral("YoloTrainExportArg"), QStringLiteral("int8")) == QStringLiteral("true");
+    QString device = yoloTrainArgText(root, QStringLiteral("device"));
+    if (device.isEmpty() || device == QStringLiteral("默认")) {
+        device = QStringLiteral("cpu");
+    }
+
+    QJsonObject args;
+    args.insert(QStringLiteral("format"), int8 ? QStringLiteral("tensorrt") : QStringLiteral("onnx"));
+    args.insert(QStringLiteral("dynamic"), dynamic);
+    args.insert(QStringLiteral("half"), half);
+    args.insert(QStringLiteral("int8"), int8);
+    args.insert(QStringLiteral("imgsz"), imageSize);
+    args.insert(QStringLiteral("batch"), 1);
+    args.insert(QStringLiteral("device"), device);
+    const QString endToEnd = yoloExportArgText(root, QStringLiteral("YoloTrainExportArg"), QStringLiteral("end2end"));
+    if (!endToEnd.isEmpty()) {
+        args.insert(QStringLiteral("end2end"), endToEnd);
+    }
+    return args;
+}
+
+QJsonObject yoloModelExportArgsFromUi(const QWidget* root, const QString& format)
+{
+    QJsonObject args;
+    args.insert(QStringLiteral("format"), format);
+    const auto insertBoolIfTrue = [&](const QString& key) {
+        if (yoloExportArgText(root, QStringLiteral("YoloModelExportArg"), key) == QStringLiteral("true")) {
+            args.insert(key, true);
+        }
+    };
+    insertBoolIfTrue(QStringLiteral("dynamic"));
+    insertBoolIfTrue(QStringLiteral("half"));
+    insertBoolIfTrue(QStringLiteral("int8"));
+    const QString endToEnd = yoloExportArgText(root, QStringLiteral("YoloModelExportArg"), QStringLiteral("end2end"));
+    if (!endToEnd.isEmpty()) {
+        args.insert(QStringLiteral("end2end"), endToEnd);
+    }
+    for (const QString& key : {QStringLiteral("imgsz"), QStringLiteral("batch")}) {
+        const QString text = yoloExportArgText(root, QStringLiteral("YoloModelExportArg"), key);
+        if (!text.isEmpty() && isIntegerLike(text)) {
+            args.insert(key, text.toInt());
+        }
+    }
+    const QString device = yoloExportArgText(root, QStringLiteral("YoloModelExportArg"), QStringLiteral("device"));
+    if (!device.isEmpty()) {
+        args.insert(QStringLiteral("device"), device);
+    }
+    const QString data = QDir::fromNativeSeparators(yoloExportArgText(root, QStringLiteral("YoloModelExportArg"), QStringLiteral("data")));
+    if (!data.isEmpty()) {
+        args.insert(QStringLiteral("data"), data);
+    }
+    return args;
+}
+
+bool jsonLooksYolo26(const QJsonObject& object)
+{
+    const QStringList keys = {
+        QStringLiteral("modelSeries"),
+        QStringLiteral("model"),
+        QStringLiteral("modelName"),
+        QStringLiteral("sourceCheckpoint"),
+        QStringLiteral("sourceOnnx")
+    };
+    for (const QString& key : keys) {
+        const QString value = object.value(key).toString().trimmed().toLower();
+        if (value.contains(QStringLiteral("yolo26"))) {
+            return true;
+        }
+    }
+    const QJsonObject trainingReport = object.value(QStringLiteral("trainingReport")).toObject();
+    if (!trainingReport.isEmpty() && jsonLooksYolo26(trainingReport)) {
+        return true;
+    }
+    const QJsonObject ncnn = object.value(QStringLiteral("ncnn")).toObject();
+    return !ncnn.isEmpty() && jsonLooksYolo26(ncnn);
+}
+
+QJsonObject readJsonObjectFile(const QString& path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return {};
+    }
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+    return document.isObject() ? document.object() : QJsonObject();
+}
+
+bool modelExportSourceLooksYolo26(const QString& path)
+{
+    const QString normalized = QDir::fromNativeSeparators(path.trimmed());
+    if (normalized.isEmpty()) {
+        return false;
+    }
+    if (normalized.toLower().contains(QStringLiteral("yolo26"))) {
+        return true;
+    }
+
+    const QFileInfo info(normalized);
+    const QString suffix = info.suffix().toLower();
+    if ((suffix == QStringLiteral("json") || suffix == QStringLiteral("aitrain"))
+        && jsonLooksYolo26(readJsonObjectFile(normalized))) {
+        return true;
+    }
+
+    const QString sidecarPath = info.dir().filePath(info.completeBaseName() + QStringLiteral(".aitrain-export.json"));
+    if (QFileInfo::exists(sidecarPath) && jsonLooksYolo26(readJsonObjectFile(sidecarPath))) {
+        return true;
+    }
+
+    const QString siblingReport = info.dir().filePath(QStringLiteral("ultralytics_training_report.json"));
+    if (QFileInfo::exists(siblingReport) && jsonLooksYolo26(readJsonObjectFile(siblingReport))) {
+        return true;
+    }
+
+    const QString parentReport = QFileInfo(info.dir().absolutePath()).dir().filePath(QStringLiteral("ultralytics_training_report.json"));
+    return QFileInfo::exists(parentReport) && jsonLooksYolo26(readJsonObjectFile(parentReport));
+}
+} // namespace
+
+void MainWindow::refreshModelExportFormatOptions()
+{
+    if (!conversionFormatCombo_) {
+        return;
+    }
+
+    const QString inputPath = conversionCheckpointEdit_ ? conversionCheckpointEdit_->text().trimmed() : QString();
+    const bool yolo26 = modelExportSourceLooksYolo26(inputPath);
+    const QString currentFormat = conversionFormatCombo_->currentData().toString();
+    QSignalBlocker blocker(conversionFormatCombo_);
+
+    const int ncnnIndex = conversionFormatCombo_->findData(QStringLiteral("ncnn"));
+    if (yolo26 && ncnnIndex >= 0) {
+        conversionFormatCombo_->removeItem(ncnnIndex);
+    } else if (!yolo26 && ncnnIndex < 0) {
+        const int insertAt = qMin(1, conversionFormatCombo_->count());
+        conversionFormatCombo_->insertItem(insertAt, exportComboLabel(QStringLiteral("ncnn")), QStringLiteral("ncnn"));
+    }
+
+    if (yolo26 && currentFormat == QStringLiteral("ncnn")) {
+        setComboCurrentData(conversionFormatCombo_, QStringLiteral("onnx"));
+        if (conversionOutputEdit_) {
+            const QString outputSuffix = QFileInfo(conversionOutputEdit_->text().trimmed()).suffix().toLower();
+            if (outputSuffix == QStringLiteral("param") || outputSuffix == QStringLiteral("bin")) {
+                conversionOutputEdit_->clear();
+            }
+        }
+    } else if (!currentFormat.isEmpty()) {
+        setComboCurrentData(conversionFormatCombo_, currentFormat);
+    }
+    conversionFormatCombo_->setToolTip(yolo26
+        ? uiText("YOLO26 不支持导出为 NCNN；请使用 ONNX 或 TensorRT。")
+        : QString());
+}
 
 void MainWindow::startModelExport()
 {
@@ -66,6 +385,14 @@ void MainWindow::startModelExport()
     const QString format = conversionFormatCombo_
         ? conversionFormatCombo_->currentData().toString()
         : QStringLiteral("onnx");
+    if (format == QStringLiteral("ncnn") && modelExportSourceLooksYolo26(checkpointPath)) {
+        QMessageBox::warning(
+            this,
+            uiText("模型导出"),
+            uiText("YOLO26 不支持导出为 NCNN；请使用 ONNX 或 TensorRT。"));
+        refreshModelExportFormatOptions();
+        return;
+    }
     QString outputPath = QDir::fromNativeSeparators(conversionOutputEdit_ ? conversionOutputEdit_->text().trimmed() : QString());
     if (outputPath.isEmpty()) {
         const QString outputDir = !currentProjectPath_.isEmpty()
@@ -74,6 +401,19 @@ void MainWindow::startModelExport()
         QDir().mkpath(outputDir);
         outputPath = QDir(outputDir).filePath(defaultExportFileName(format));
     }
+    const QJsonObject yoloExportArgs = yoloModelExportArgsFromUi(this, format);
+    if (QFileInfo(checkpointPath).suffix().compare(QStringLiteral("pt"), Qt::CaseInsensitive) == 0
+        && format.startsWith(QStringLiteral("tensorrt"))
+        && yoloExportArgs.value(QStringLiteral("int8")).toBool()
+        && yoloExportArgs.value(QStringLiteral("data")).toString().trimmed().isEmpty()) {
+        QMessageBox::warning(
+            this,
+            uiText("模型导出"),
+            uiText("TensorRT INT8 官方导出需要 calibration data.yaml。请在“官方参数”中选择本次训练使用的 YOLO data.yaml。"));
+        return;
+    }
+    QJsonObject exportOptions;
+    exportOptions.insert(QStringLiteral("ultralyticsExportArgs"), yoloExportArgs);
 
     QString taskId;
     if (repository_.isOpen()) {
@@ -89,7 +429,7 @@ void MainWindow::startModelExport()
     }
 
     QString error;
-    if (!worker_.requestModelExport(workerExecutablePath(), checkpointPath, outputPath, format, &error, taskId)) {
+    if (!worker_.requestModelExport(workerExecutablePath(), checkpointPath, outputPath, format, exportOptions, &error, taskId)) {
         if (!taskId.isEmpty() && repository_.isOpen()) {
             QString taskError;
             repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
@@ -198,7 +538,9 @@ void MainWindow::startTraining()
     parameters.insert(QStringLiteral("batchSize"), batchEdit_->text().toInt());
     parameters.insert(QStringLiteral("imageSize"), imageSizeEdit_->text().toInt());
     parameters.insert(QStringLiteral("gridSize"), gridSizeEdit_->text().toInt());
-    parameters.insert(QStringLiteral("seed"), 42);
+    parameters.insert(QStringLiteral("datasetFormat"), datasetFormat);
+    const QString yoloSeedText = yoloTrainArgText(this, QStringLiteral("seed"));
+    parameters.insert(QStringLiteral("seed"), yoloSeedText.isEmpty() ? 42 : yoloSeedText.toInt());
     parameters.insert(QStringLiteral("resumeCheckpointPath"), QDir::fromNativeSeparators(resumeCheckpointEdit_->text().trimmed()));
     parameters.insert(QStringLiteral("horizontalFlip"), horizontalFlipCheck_ && horizontalFlipCheck_->isChecked());
     parameters.insert(QStringLiteral("colorJitter"), colorJitterCheck_ && colorJitterCheck_->isChecked());
@@ -238,6 +580,23 @@ void MainWindow::startTraining()
         return;
     }
     parameters.insert(QStringLiteral("trainingBackend"), backendForRequest);
+    const QString yolo26PythonExecutable = QDir::fromNativeSeparators(
+        preflight.value(QStringLiteral("yolo26PythonExecutable")).toString().trimmed());
+    if (!yolo26PythonExecutable.isEmpty()) {
+        parameters.insert(QStringLiteral("pythonExecutable"), yolo26PythonExecutable);
+    }
+    if (backendForRequest.startsWith(QStringLiteral("ultralytics_yolo"))) {
+        QJsonObject yoloArgs = yoloTrainArgsFromUi(this);
+        if ((horizontalFlipCheck_ && horizontalFlipCheck_->isChecked()) && !yoloArgs.contains(QStringLiteral("fliplr"))) {
+            yoloArgs.insert(QStringLiteral("fliplr"), 0.5);
+        }
+        if (!yoloArgs.isEmpty()) {
+            parameters.insert(QStringLiteral("ultralyticsTrainArgs"), yoloArgs);
+        }
+        parameters.insert(QStringLiteral("ultralyticsExportArgs"), yoloTrainingExportArgsFromUi(
+            this,
+            imageSizeEdit_ ? imageSizeEdit_->text().toInt() : 640));
+    }
     if (backendForRequest == QStringLiteral("paddleocr_det_official")
         || backendForRequest == QStringLiteral("paddleocr_rec_official")
         || backendForRequest == QStringLiteral("paddleocr_ppocrv4_rec")) {
@@ -303,7 +662,9 @@ void MainWindow::startTraining()
         return;
     }
 
-    startQueuedTraining(taskId, request);
+    QTimer::singleShot(0, this, [this, taskId, request]() {
+        startQueuedTraining(taskId, request);
+    });
 }
 
 void MainWindow::evaluateSelectedArtifact()
@@ -419,7 +780,7 @@ void MainWindow::useSelectedComparisonForInference()
     if (inferenceCheckpointEdit_) {
         inferenceCheckpointEdit_->setText(QDir::toNativeSeparators(modelPath));
     }
-    showPage(InferencePage, uiText("推理验证"));
+    showDeploymentTab(1);
 }
 
 void MainWindow::useSelectedComparisonForExport()
@@ -432,7 +793,7 @@ void MainWindow::useSelectedComparisonForExport()
     if (conversionCheckpointEdit_) {
         conversionCheckpointEdit_->setText(QDir::toNativeSeparators(modelPath));
     }
-    showPage(ConversionPage, uiText("模型导出"));
+    showDeploymentTab(0);
 }
 
 void MainWindow::openSelectedComparisonReport()

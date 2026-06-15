@@ -8,14 +8,20 @@ Production training is official-backend only. The GUI training page and Worker p
 
 | Backend | Task | Status | Notes |
 |---|---|---|---|
-| `ultralytics_yolo_detect` | Detection | Official Ultralytics adapter | Uses Ultralytics YOLO detection training and ONNX export. Review AGPL-3.0 / Enterprise license before redistribution. |
-| `ultralytics_yolo_segment` | Segmentation | Official Ultralytics adapter | Uses Ultralytics YOLO segmentation training and ONNX export. C++ ONNX Runtime can decode boxes, mask coefficients, prototypes, and render mask overlays. |
-| `paddleocr_det_official` | OCR detection | Official PaddleOCR adapter | Generates a PP-OCRv4 detection config from PaddleOCR Det data and can run official PaddleOCR `tools/train.py` and `tools/export_model.py`. Artifacts include `aitrain_ppocrv4_det.yml`, `official_model/best_accuracy.pdparams`, `official_inference/inference.yml`, and `paddleocr_official_det_report.json`. |
-| `paddleocr_rec_official` / `paddleocr_ppocrv4_rec` | OCR recognition | Official PaddleOCR adapter | Generates a PP-OCRv4 recognition config from AITrain PaddleOCR-style Rec data and runs official PaddleOCR `tools/train.py`, `tools/export_model.py`, and optional `tools/infer/predict_rec.py` when `runOfficial=true` and `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` points to a checkout. Production GUI requests set `runOfficial=true` and `prepareOnly=false`. |
+| `ultralytics_yolo_detect` | Detection | Official Ultralytics adapter | Uses Ultralytics YOLO detection training and official export. P1 exposes YOLOv5u standard P5 detection presets, YOLOv8 / YOLO11 / YOLO12 `n/s/m/l/x` `.yaml` and `.pt` presets, plus YOLOv8 P2/P6 detection YAML architectures. YOLO26 detection `n/s/m/l/x` `.yaml` and `.pt` presets are tracked in the separate YOLO26 compatibility matrix; the 2026-06-15 isolated targeted full matrix passed training/ONNX/TensorRT, and NCNN is not offered for YOLO26. Product evaluation uses Ultralytics official `val()`; product inference, benchmark, and deployment validation run against official artifacts through the AITrain C++ runtime. Review AGPL-3.0 / Enterprise license before redistribution. |
+| `ultralytics_yolo_segment` | Segmentation | Official Ultralytics adapter | Uses Ultralytics YOLO instance-segmentation training and official export. P1 exposes YOLOv8 / YOLO11 `n/s/m/l/x` `-seg.yaml` and `-seg.pt` presets, plus YOLO12 `n/s/m/l/x` `-seg.yaml` presets. YOLO12 `-seg.pt` depends on upstream official weights and is currently blocked in the recorded Ultralytics 8.3.171 lifecycle run because `yolo12n-seg.pt` could not be resolved. YOLO26 instance-segmentation `n/s/m/l/x-seg` `.yaml` and `.pt` presets are tracked in the separate YOLO26 compatibility matrix; the 2026-06-15 isolated targeted full matrix passed training/ONNX/TensorRT, and NCNN is not offered for YOLO26. Product evaluation uses Ultralytics official `val()`; product inference, benchmark, and deployment validation run against official artifacts through the AITrain C++ runtime, including mask postprocess and overlays. |
+| `paddleocr_det_official` | OCR detection | Official PaddleOCR adapter | Generates PP-OCRv4, PP-OCRv5, or PP-OCRv6 detection configs from PaddleOCR Det data and can run official PaddleOCR `tools/train.py` and `tools/export_model.py`. The default preset remains `PP-OCRv5_mobile_det`; `PP-OCRv4_mobile_det`, `PP-OCRv5_server_det`, and PP-OCRv6 `tiny/small/medium` Det presets are selectable. |
+| `paddleocr_rec_official` / `paddleocr_ppocrv4_rec` | OCR recognition | Official PaddleOCR adapter | Generates PP-OCRv4, PP-OCRv5, or PP-OCRv6 recognition configs from AITrain PaddleOCR-style Rec data and runs official PaddleOCR `tools/train.py`, `tools/export_model.py`, and optional `tools/infer/predict_rec.py` when `runOfficial=true` and `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` points to a checkout. The default preset remains `PP-OCRv5_mobile_rec`; PP-OCRv6 `tiny/small/medium` Rec presets are selectable. |
 
 `paddleocr_system_official` remains the official OCR System inference/validation adapter. It is not shown as a "train model" backend because it runs official `predict_system.py` against exported Det and Rec inference model directories.
 
 Legacy diagnostic training implementations have been physically removed from production packages and training routing. `paddleocr_rec` remains a dataset format, not a training backend. Protocol tests that need a Python trainer now create an explicit temporary fixture through `pythonTrainerScript` and require `AITRAIN_ENABLE_DIAGNOSTIC_BACKENDS=1`; no shipped `python_mock` trainer is provided.
+
+## YOLO Runtime Boundary
+
+YOLO detection and segmentation are not end-to-end official-only routes. AITrain uses official Ultralytics code for training, ONNX export, and detection/segmentation evaluation via `YOLO(...).val()`, then treats the exported ONNX / TensorRT / NCNN artifacts as deployment inputs for its local runtime checks. C++ ONNX Runtime and NCNN paths handle single-image prediction JSON, overlays, benchmark summaries, and deployment validation; TensorRT currently covers engine export and deployment validation status, not single-image runtime decoding in the GUI.
+
+AITrain no longer computes local YOLO AP/mAP, mask IoU, TP/FP/FN, local evaluation error samples, or local evaluation overlays. The `evaluation_report.json` wrapper remains for the GUI and task history, with `evaluationSource=ultralytics_official_val` and links to official plots/predictions when Ultralytics writes them. OCR is different: current OCR product inference, evaluation, benchmark, deployment validation, and acceptance are official-only through PaddleOCR Det/Rec/System reports.
 
 ## Environment Setup
 
@@ -28,14 +34,47 @@ python -m venv .venv-yolo
 .\.venv-yolo\Scripts\python.exe -m pip install -r python_trainers\requirements-yolo.txt
 ```
 
-YOLO model-family status is tracked in `docs\yolo-model-support-matrix.md`. The product defaults remain `yolov8n.yaml` for detection and `yolov8n-seg.yaml` for segmentation. Phase 45 adds a repeatable acceptance matrix for newer detection/segmentation families:
+GPU YOLO training with `device=0` requires the selected Python to provide CUDA-enabled PyTorch. A CPU-only YOLO environment must use `device=cpu`; otherwise Ultralytics fails before training with an invalid CUDA device error. For packaged or validation runs, set training parameter `pythonExecutable` or `AITRAIN_PYTHON_EXECUTABLE` to the CUDA-capable YOLO Python path and verify `torch.cuda.is_available()` before starting long jobs.
+
+YOLO model-family status is tracked in `docs\yolo-model-support-matrix.md`. The product defaults remain `yolov8n.yaml` for detection and `yolov8n-seg.yaml` for segmentation. P1 adds editable GUI presets for YOLOv5u standard P5 detection, YOLOv8 / YOLO11 / YOLO12 detection across `n/s/m/l/x` with `.yaml` and `.pt`, YOLOv8 / YOLO11 instance segmentation with `-seg.yaml` and `-seg.pt`, YOLO12 instance segmentation with `-seg.yaml`, plus YOLOv8 P2/P6 detection YAML architectures. YOLO12 `-seg.pt` is currently a blocked upstream-weight case in Ultralytics 8.3.171, not a data or AITrain runtime failure. YOLO26 detection and instance-segmentation presets are imported as an independent compatibility phase, not into P1; the isolated YOLO26 full matrix gates training/ONNX/TensorRT only. YOLO26 NCNN export/conversion is not a product option. YOLOv5u uses `yolov5n/s/m/l/x.yaml` architecture entries and `yolov5nu/su/mu/lu/xu.pt` pretrained entries; original `ultralytics/yolov5` repository weights are not a compatibility promise. `.pt` weights are not bundled; the installed Ultralytics package may download them into the user environment.
+
+Run the full P1 productization matrix with:
+
+```powershell
+.\tools\phase-p1-yolo-full-matrix-smoke.ps1
+.\tools\phase-yolo26-model-matrix-smoke.ps1
+.\tools\phase-yolo26-model-matrix-smoke.ps1 -PrepareEnvironment -ProbeOnly -Device 0
+.\tools\phase-yolo26-model-matrix-smoke.ps1 -Focused -Epochs 1 -Device 0
+.\tools\phase-yolo26-model-matrix-smoke.ps1 -Full -Epochs 100 -Device 0
+```
+
+The previous Phase 45 matrix remains useful as a faster YOLO11/YOLO12 nano wiring check:
 
 ```powershell
 .\tools\phase45-yolo-model-matrix-smoke.ps1
 .\tools\phase45-yolo-model-matrix-smoke.ps1 -IncludeYolo12
 ```
 
-The required Phase 45 targets are `yolo11n.yaml`, `yolo11n-seg.yaml`, `yolo12n.yaml`, and `yolo12n-seg.yaml`. Classification, pose, OBB, anomaly, YOLO-World, and YOLOE remain out of the current productized training path.
+The P1 matrix does not productize YOLOv5 segmentation, YOLOv5 P6, YOLO26, semantic segmentation, tracking, classification, pose, OBB, anomaly, YOLO-World, or YOLOE. YOLO26 support is accepted only by a passing `phase-yolo26-model-matrix-smoke.ps1 -Full` summary and does not include semantic segmentation, classification, pose, OBB, tracking, or YOLOE-26.
+
+Current YOLO26 status: the 2026-06-14/15 shared lifecycle run showed all YOLO26 detection and instance-segmentation rows fail in Ultralytics 8.3.171 before useful training starts. `.yaml` entries report missing files, most `.pt` entries report missing official weights, and nano `.pt` entries expose package/code incompatibility. The isolated 2026-06-15 targeted full matrix passed 20/20 rows for training, official ONNX, AITrain C++ ONNX inference, and TensorRT validation. YOLO26 NCNN remains removed from supported export/deployment targets.
+
+Official YOLO export parameters are recorded as `ultralyticsExportArgs` and are accepted by both training and model export flows:
+
+```json
+{
+  "format": "onnx",
+  "dynamic": false,
+  "half": false,
+  "int8": false,
+  "end2end": false,
+  "imgsz": 640,
+  "batch": 1,
+  "device": "cpu"
+}
+```
+
+`dynamic` and `half` apply to official ONNX export. `int8=true` is TensorRT-only and requires calibration data; training uses the normalized YOLO `data.yaml`, while the model export page sends optional `data` when exporting `.pt` to TensorRT INT8. `end2end=auto` uses the loaded Ultralytics model config when it exposes an `end2end` default, then falls back to YOLO26 detection=true and other models=false; reports store the final boolean. Treat this as AITrain metadata until the installed Ultralytics export confirms the argument is supported for the requested model and format. The 2026-06-14 lifecycle run showed Ultralytics 8.3.171 rejects unsupported `end2end` arguments on generic ONNX export, so unsupported combinations must be recorded as failed or blocked rather than silently downgraded. Existing `.onnx` inputs still use AITrain C++ copy / NCNN conversion and TensorRT export/deployment validation paths; `.pt` inputs use Worker-managed official Ultralytics export for ONNX/TensorRT, and non-YOLO26 `.pt -> ncnn` first creates a static FP32 traditional official ONNX intermediate before `onnx2ncnn`. NCNN rejects `end2end=true`; YOLO26 rejects `format=ncnn` entirely.
 
 OCR recognition:
 
@@ -44,12 +83,16 @@ python -m venv .venv-ocr
 .\.venv-ocr\Scripts\python.exe -m pip install -r python_trainers\requirements-ocr.txt
 ```
 
+`requirements-ocr.txt` requires PaddleOCR 3.7+ so the PP-OCRv6 config and model family are available.
+
 Optional official PaddleOCR Det/Rec training and System inference require a PaddleOCR source checkout because the installed `paddleocr` package exposes inference pipelines, not the legacy `tools/train.py` training scripts:
 
 ```powershell
-git clone --depth 1 https://github.com/PaddlePaddle/PaddleOCR.git .deps\PaddleOCR
-$env:AITRAIN_PADDLEOCR_REPO = (Resolve-Path .deps\PaddleOCR).Path
+git clone --depth 1 https://github.com/PaddlePaddle/PaddleOCR.git .deps\repos\PaddleOCR
+$env:AITRAIN_PADDLEOCR_REPO = (Resolve-Path .deps\repos\PaddleOCR).Path
 ```
+
+Reusable Python environments, source checkouts, SDKs, and external tools should follow `docs/deps-layout.md`. The canonical OCR Python paths are `.deps\envs\ocr-cpu` and `.deps\envs\ocr-gpu`; legacy paths remain fallback-only for older local worktrees.
 
 The reproducible local smoke command is:
 
@@ -57,15 +100,26 @@ The reproducible local smoke command is:
 .\tools\phase16-ocr-official-smoke.ps1
 ```
 
-That script uses an isolated OCR Python embeddable environment under `.deps\python-3.13.13-ocr-amd64`, checks out a pinned PaddleOCR source ref, installs pinned OCR smoke constraints unless disabled, runs official PP-OCRv4 Rec training for 1 epoch on CPU, exports the official inference model, runs official recognition inference on one generated sample image, and checks the checkpoint, inference config, prediction report, resolved source ref, and metrics report.
+That script uses an isolated OCR Python embeddable environment under `.deps\envs\ocr-cpu`, checks out a pinned PaddleOCR source ref under `.deps\repos\PaddleOCR`, installs pinned OCR smoke constraints unless disabled, runs official PP-OCRv4 Rec training for 1 epoch on CPU, exports the official inference model, runs official recognition inference on one generated sample image, and checks the checkpoint, inference config, prediction report, resolved source ref, and metrics report.
 
 The full official PaddleOCR Det + Rec + System smoke is:
 
 ```powershell
 .\tools\phase31-paddleocr-full-official-smoke.ps1
+.\tools\phase31-paddleocr-full-official-smoke.ps1 -OcrVersion PP-OCRv4
+.\tools\phase31-paddleocr-full-official-smoke.ps1 -OcrVersion PP-OCRv6 -PPOCRv6Tier tiny
+.\tools\phase-ppocrv6-model-matrix-smoke.ps1
 ```
 
-That script reuses the isolated OCR environment and pinned PaddleOCR checkout, generates minimal PaddleOCR Det and Rec datasets, runs 1-epoch CPU official Det and Rec train/export, then calls official `predict_system.py` with `use_angle_cls=false`. It validates reports, exported `official_inference/inference.yml` files, `official_system_prediction.json`, and visualized system output images. The run proves toolchain wiring and task artifacts, not useful OCR accuracy.
+That script reuses the isolated OCR environment and PaddleOCR checkout, generates minimal PaddleOCR Det and Rec datasets, runs 1-epoch official Det and Rec train/export, then calls official `predict_system.py` with `use_angle_cls=false`. The default is PP-OCRv5 mobile Det/Rec; `-OcrVersion PP-OCRv4` switches back to the legacy v4 mobile presets, and `-OcrVersion PP-OCRv6 -PPOCRv6Tier tiny|small|medium` selects matching v6 Det/Rec presets. `phase-ppocrv6-model-matrix-smoke.ps1` checks all six v6 Det/Rec presets in prepare-only mode and runs one v6 tiny Det+Rec+System full-chain smoke. These runs prove toolchain wiring and task artifacts, not useful OCR accuracy.
+
+The PP-OCRv5 GPU production-chain wrapper is:
+
+```powershell
+.\tools\phase50-paddleocr-v5-gpu-official-chain.ps1 -UseGpu
+```
+
+This wrapper first checks that the selected OCR Python environment uses a CUDA-enabled PaddlePaddle build, then runs the production Det + Rec + System official chain with PP-OCRv5 presets. GPU mode is the default; `-UseGpu` is accepted as an explicit switch. Missing GPU support is recorded as `blocked`; the script must not downgrade to CPU and call the GPU gate passed.
 
 For offline deployment, build a wheelhouse on a connected machine:
 
@@ -180,30 +234,32 @@ For the Phase 45 newer-YOLO-family matrix, run:
 .\tools\phase45-yolo-model-matrix-smoke.ps1
 ```
 
-This validates the required YOLO11 and YOLO12 detection/segmentation candidates through the same official Ultralytics adapters, checks report/checkpoint/ONNX artifacts, and runs CTest against the generated work directory when a build tree is available. The legacy `-IncludeYolo12` switch is still accepted, but YOLO12 is now included by default.
+This validates the historical YOLO11 and YOLO12 nano detection/segmentation candidates through the same official Ultralytics adapters, checks report/checkpoint/ONNX artifacts, and runs CTest against the generated work directory when a build tree is available. The P1 full matrix should be used for full model-family acceptance.
 
 ## Official PaddleOCR Adapter Parameters
 
 The official Rec adapter accepts these extra parameters in addition to the common Python trainer request fields:
 
 - `trainLabelFile`, `valLabelFile`, and `dictionaryFile` to use explicit PaddleOCR Rec materials.
+- `modelPreset` to select `PP-OCRv4_mobile_rec`, `PP-OCRv5_mobile_rec`, `PP-OCRv5_server_rec`, `en_PP-OCRv5_mobile_rec`, `PP-OCRv6_tiny_rec`, `PP-OCRv6_small_rec`, or `PP-OCRv6_medium_rec`.
 - `officialConfig` to start from a specific PaddleOCR recognition config.
 - `pretrainedModel` and `resumeCheckpoint` for official train/export inputs.
 - `exportOnly=true` to skip training and export an existing checkpoint.
 - `runInferenceAfterExport=true` plus `inferenceImage` to run official `predict_rec.py` after export and write `official_prediction.json`.
 - `recImageShape` to override the generated recognition image shape, for example `3,48,320`.
 
-The final `paddleocr_official_rec_report.json` records PaddleOCR requested/resolved refs, Python/Paddle/PaddleOCR versions, train/export/predict commands, config and label paths, dictionary path, checkpoint and inference model paths, parsed metrics, exit codes, and failure log paths.
+The final `paddleocr_official_rec_report.json` records PaddleOCR requested/resolved refs, `ocrVersion`, `modelPreset`, `resolvedOfficialConfig`, `resolvedModelName`, `configSource`, `presetDictionaryPath`, `dictionarySource`, `recAlgorithm`, Python/Paddle/PaddleOCR versions, train/export/predict commands, config and label paths, dictionary path, checkpoint and inference model paths, parsed metrics, exit codes, and failure log paths. PP-OCRv6 uses the official config dictionary path when no explicit `dictionaryFile` is provided.
 
 The official Det adapter accepts these extra parameters:
 
 - `trainLabelFile` and `valLabelFile` to use explicit PaddleOCR Det label files.
+- `modelPreset` to select `PP-OCRv4_mobile_det`, `PP-OCRv5_mobile_det`, `PP-OCRv5_server_det`, `PP-OCRv6_tiny_det`, `PP-OCRv6_small_det`, or `PP-OCRv6_medium_det`.
 - `officialConfig` to start from a specific PaddleOCR detection config.
 - `pretrainedModel` and `resumeCheckpoint` for official train/export inputs.
 - `exportOnly=true` to skip training and export an existing checkpoint.
 - `imageSize` to override generated detection image size.
 
-The final `paddleocr_official_det_report.json` records PaddleOCR requested/resolved refs, Python/Paddle/PaddleOCR versions, train/export commands, config and label paths, checkpoint and inference model paths, parsed metrics, exit codes, and failure log paths.
+The final `paddleocr_official_det_report.json` records PaddleOCR requested/resolved refs, `ocrVersion`, `modelPreset`, `resolvedOfficialConfig`, `resolvedModelName`, `configSource`, Python/Paddle/PaddleOCR versions, train/export commands, config and label paths, checkpoint and inference model paths, parsed metrics, exit codes, and failure log paths.
 
 The official System adapter accepts these parameters:
 
@@ -213,28 +269,34 @@ The official System adapter accepts these parameters:
 - `inferenceImage`: image or directory to pass to official `predict_system.py`.
 - `dropScore`: optional recognition score threshold.
 - `useGpu`: default `false`.
+- `detModelPreset`, `recModelPreset`, and `recReportPath`: optional metadata used to select the correct official `predict_system.py` recognition algorithm. `PP-OCRv5_server_rec` uses `SVTR_HGNet`; PP-OCRv4/v5 mobile presets use `SVTR_LCNet`; PP-OCRv6 reads the algorithm from the Rec report, Rec `inference.yml`, or explicit `recAlgorithm`.
 
-The final `paddleocr_official_system_report.json` records Python/Paddle/PaddleOCR versions, source checkout ref, command, exit code, log path, model directories, dictionary path, `official_system_prediction.json`, `system_results.txt`, and the visualization directory.
+The final `paddleocr_official_system_report.json` records Python/Paddle/PaddleOCR versions, source checkout ref, Det/Rec presets, recognition algorithm, command, exit code, log path, model directories, dictionary path, `official_system_prediction.json`, `system_results.txt`, and the visualization directory.
 
-## C++ PaddleOCR Det ONNX Postprocess
+## Historical OCR ONNX Wiring Evidence
 
-Phase 46 adds a C++ ONNX Runtime path for PaddleOCR Det DB-style detection maps. AITrain can identify `ocr_detection` ONNX sidecars/reports, run a single-output DB probability map shaped `[1,1,H,W]`, `[1,H,W]`, or `[H,W]`, threshold connected components, emit four-point text-box polygons, write `ocr_detection` prediction JSON, and render an overlay through the existing inference artifact path.
+AITrain's OCR product route is official-only. Training, export, prediction, evaluation, and customer acceptance should use the PaddleOCR official Det, Rec, and System adapters and their official reports.
 
-Phase 47 adds `tools\phase47-paddleocr-det-onnx-smoke.ps1`, which attempts to convert the official PaddleOCR Det inference model into ONNX through PaddleX `--paddle2onnx`, writes an AITrain sidecar when conversion succeeds, and calls `aitrain_worker --ocr-det-onnx-smoke` to produce C++ predictions and overlay artifacts.
+Phase 46/47 C++ OCR ONNX work is retained only as historical wiring evidence for older validation lanes. It is not a production OCR inference, benchmark, deployment, or acceptance route. The `aitrain_worker --ocr-det-onnx-smoke` compatibility option now reports `blocked` with an official-only message instead of running AITrain C++ OCR postprocess.
 
-RTX 4090 validation unblocked Phase 47 by exporting a Paddle 2.6 old-IR PaddleOCR Det inference model, converting it with Paddle2ONNX, writing the AITrain sidecar, and running `aitrain_worker --ocr-det-onnx-smoke`. The passing evidence is under `.deps/rtx4090-validation/phase47-paddleocr-det-onnx`, including `paddleocr_det_onnx_smoke_summary.json`, C++ predictions, and overlay PNG.
+Historical RTX 4090 Phase 47 evidence may remain in delivery archives to explain past wiring coverage, but new OCR closeout must cite PaddleOCR official Det/Rec/System reports and customer-domain acceptance outputs.
 
-This is a v1 DB-style postprocess plus prepared real exported ONNX wiring smoke path. It is not a replacement for the full official PaddleOCR System acceptance path, and it does not claim PP-OCRv5 accuracy parity. Use official `predict_system.py` for complete Det+Rec system validation until production-quality OCR accuracy acceptance is separately recorded.
+Use official `predict_system.py` for complete Det+Rec system validation. Use `paddleocr_official_rec_report.json`, `paddleocr_official_det_report.json`, and `paddleocr_official_system_report.json` as the OCR evidence set.
 
 If public dataset materialization fails or requires external interaction, the generated minimal datasets remain the required smoke baseline. The failure reason should be recorded as an external data acquisition blocker, not hidden as a successful public dataset run.
 
 ## Known Boundaries
 
-- TensorRT engine building has passing RTX 4090 D acceptance evidence under `.deps/rtx4090-validation/acceptance-tensorrt`; older unsupported GPUs should still report `hardware-blocked`.
-- Phase 45 covers newer YOLO detection/segmentation model names only; it does not productize YOLO classification, pose, OBB, anomaly, YOLO-World, or YOLOE.
+- TensorRT engine building has passing RTX 4090 D acceptance evidence archived in `docs/validation/rtx4090-validation-evidence-20260615.json`; older unsupported GPUs should still report `hardware-blocked`.
+- P1 covers YOLOv5u standard P5 detection plus YOLOv8 / YOLO11 / YOLO12 detection and instance-segmentation presets only; it does not productize YOLOv5 segmentation, YOLOv5 P6, semantic segmentation, tracking, classification, pose, OBB, anomaly, YOLO-World, or YOLOE.
+- YOLO12 segmentation `.pt` rows are currently blocked by missing upstream official `yolo12*-seg.pt` resolution in the recorded Ultralytics 8.3.171 environment. Keep YOLO12 segmentation `.yaml` and YOLO12 detection `.pt` evidence separate.
+- YOLO26 detection/segmentation is a separate compatibility phase. The shared Ultralytics 8.3.171 environment blocked/failed all 20 YOLO26 rows, but the isolated 2026-06-15 targeted full matrix passed 20/20 training, official ONNX export, AITrain C++ ONNX inference, and TensorRT validation. YOLO26 NCNN is removed from supported export/deployment targets.
+- Progress dashboards that aggregate existing `row_summary.json` files can show historical failures from previous runs. Operators must filter by the current run start time or run id before interpreting failed counts as live failures.
 - Historical GTX 1060 / SM 61 machines can run CPU training smoke and ONNX Runtime checks, but they cannot validate TensorRT 10 engine building and must not override RTX 4090 acceptance evidence.
-- C++ segmentation mask ONNX postprocess and OCR ONNX CTC greedy decode are available for the current smoke models.
-- C++ OCR Det ONNX Runtime DB-style postprocess is available as a Phase 46 v1 path for single-output probability maps, and Phase 47 now has real exported Det ONNX wiring smoke evidence. End-to-end PaddleOCR validation still uses official `predict_system.py`; per the current RTX 4090 validation decision, Rec accuracy is not considered for this pass and remains a future production-quality gate if reinstated.
+- The Worker self-check may report `LibTorch` missing when `torch_cpu` DLLs are not installed. That does not block the current official Python YOLO/PaddleOCR routes, but it must remain visible and must not be used to claim C++ LibTorch training readiness.
+- C++ segmentation mask ONNX postprocess is available for YOLO segmentation smoke models.
+- OCR product inference, benchmark, evaluation, and acceptance are official-only. Historical C++ OCR ONNX wiring evidence must not be used as a current production OCR route.
+- PP-OCRv5 and PP-OCRv6 support in this phase covers official Det/Rec/System OCR only. It does not productize PP-StructureV3, PP-ChatOCR, PaddleOCR-VL, document orientation classification, document unwarping, text-line orientation classification, or PaddleOCR C++ local deployment. PP-OCRv6 tiny follows the official language-coverage limitation and is not a customer-domain production claim.
 - Official third-party backend licensing must be reviewed before commercial redistribution.
 - The official PaddleOCR adapter should be run in an isolated OCR Python environment. Mixing PaddlePaddle and PyTorch in one Windows Python process can trigger DLL conflicts through newer `albumentations` builds.
-- The official PP-OCRv4 smoke uses a tiny generated dataset; it validates train/export/inference wiring and artifacts, not useful OCR accuracy.
+- The official PP-OCRv4/v5/v6 smoke uses a tiny generated dataset; it validates train/export/inference wiring and artifacts, not useful OCR accuracy.

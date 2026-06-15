@@ -48,6 +48,7 @@
 #include <QVBoxLayout>
 #include <QUrl>
 #include <QUuid>
+#include <QtMath>
 
 using namespace aitrain_app;
 namespace wp = aitrain::worker_protocol;
@@ -73,6 +74,50 @@ void setAcceptanceTableRow(QTableWidget* table, const QString& stage, const QStr
     table->setItem(row, 1, new QTableWidgetItem(status));
     table->setItem(row, 2, new QTableWidgetItem(QDir::toNativeSeparators(evidence)));
     table->setItem(row, 3, new QTableWidgetItem(message));
+}
+
+QString phaseText(const QString& phase)
+{
+    if (phase == QStringLiteral("snapshot")) return QStringLiteral("快照");
+    if (phase == QStringLiteral("train")) return QStringLiteral("训练");
+    if (phase == QStringLiteral("validate")) return QStringLiteral("验证");
+    if (phase == QStringLiteral("export")) return QStringLiteral("导出");
+    if (phase == QStringLiteral("completed")) return QStringLiteral("完成");
+    if (phase == QStringLiteral("failed")) return QStringLiteral("失败");
+    return phase.isEmpty() ? QStringLiteral("运行中") : phase;
+}
+
+QString etaText(int seconds)
+{
+    if (seconds <= 0) {
+        return QStringLiteral("--");
+    }
+    const int hours = seconds / 3600;
+    const int minutes = (seconds % 3600) / 60;
+    const int secs = seconds % 60;
+    if (hours > 0) {
+        return QStringLiteral("%1h %2m").arg(hours).arg(minutes);
+    }
+    if (minutes > 0) {
+        return QStringLiteral("%1m %2s").arg(minutes).arg(secs);
+    }
+    return QStringLiteral("%1s").arg(secs);
+}
+
+QString metricText(const QJsonObject& metrics, const QStringList& keys)
+{
+    for (const QString& key : keys) {
+        if (metrics.contains(key)) {
+            return QString::number(metrics.value(key).toDouble(), 'f', 4);
+        }
+    }
+    return QStringLiteral("--");
+}
+
+QString artifactDisplayName(const QString& path)
+{
+    const QString fileName = QFileInfo(path).fileName();
+    return fileName.isEmpty() ? compactPathForStatus(path, 44) : fileName;
 }
 } // namespace
 
@@ -122,7 +167,11 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
 void MainWindow::handleProgressMessage(const QJsonObject& payload)
 {
     const QString taskId = payload.value(QStringLiteral("taskId")).toString();
-    const int percent = payload.value(QStringLiteral("percent")).toInt();
+    int percent = payload.value(QStringLiteral("percent")).toInt(-1);
+    if (percent < 0 && payload.contains(QStringLiteral("value"))) {
+        percent = qRound(payload.value(QStringLiteral("value")).toDouble() * 100.0);
+    }
+    percent = qBound(0, percent < 0 ? 0 : percent, 100);
     const QString message = payload.value(QStringLiteral("message")).toString();
     if (!state_.dataset.currentConversionTaskId.isEmpty() && taskId == state_.dataset.currentConversionTaskId) {
         if (datasetConversionProgressBar_) {
@@ -135,6 +184,55 @@ void MainWindow::handleProgressMessage(const QJsonObject& payload)
     if (!state_.training.currentTaskId.isEmpty()) {
         progressBar_->setValue(percent);
     }
+    const QString phase = payload.value(QStringLiteral("phase")).toString();
+    if (trainingPhaseLabel_ && (!phase.isEmpty() || !message.isEmpty())) {
+        const QString stageFlow = QStringLiteral("快照 -> 训练 -> 验证 -> 导出 -> 完成");
+        const QString current = phaseText(phase);
+        trainingPhaseLabel_->setText(message.isEmpty()
+            ? uiText("阶段：%1 | 当前：%2").arg(stageFlow, current)
+            : uiText("阶段：%1 | 当前：%2 | %3").arg(stageFlow, current, message));
+    }
+    const int epoch = payload.value(QStringLiteral("epoch")).toInt();
+    const int epochs = payload.value(QStringLiteral("epochs")).toInt();
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingEpochValue"))) {
+        label->setText(epochs > 0
+            ? QStringLiteral("%1/%2").arg(qMax(0, epoch)).arg(epochs)
+            : QStringLiteral("--"));
+    }
+    const int batch = payload.value(QStringLiteral("batch")).toInt();
+    const int batches = payload.value(QStringLiteral("batches")).toInt();
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingBatchValue"))) {
+        label->setText(batches > 0
+            ? QStringLiteral("%1/%2").arg(qMax(0, batch)).arg(batches)
+            : QStringLiteral("--"));
+    }
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingEtaValue"))) {
+        label->setText(etaText(payload.value(QStringLiteral("etaSeconds")).toInt()));
+    }
+    const QString device = payload.value(QStringLiteral("device")).toString();
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingDeviceValue")); label && !device.isEmpty()) {
+        label->setText(device);
+    }
+    const QJsonObject liveMetrics = payload.value(QStringLiteral("liveMetrics")).toObject();
+    if (!liveMetrics.isEmpty()) {
+        if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingLossValue"))) {
+            label->setText(metricText(liveMetrics, {
+                QStringLiteral("loss"),
+                QStringLiteral("boxLoss"),
+                QStringLiteral("classLoss"),
+                QStringLiteral("dflLoss")
+            }));
+        }
+        if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingMapValue"))) {
+            label->setText(metricText(liveMetrics, {
+                QStringLiteral("mAP50"),
+                QStringLiteral("maskMap50"),
+                QStringLiteral("precision"),
+                QStringLiteral("maskPrecision"),
+                QStringLiteral("accuracy")
+            }));
+        }
+    }
     if (!message.isEmpty()) {
         statusBar()->showMessage(message, 3000);
     }
@@ -145,6 +243,18 @@ void MainWindow::handleMetricMessage(const QJsonObject& payload)
     const QString name = payload.value(QStringLiteral("name")).toString();
     const double value = payload.value(QStringLiteral("value")).toDouble();
     metricsWidget_->addMetric(name, value);
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingLossValue"));
+        label && (name.contains(QStringLiteral("Loss"), Qt::CaseInsensitive)
+            || name.compare(QStringLiteral("loss"), Qt::CaseInsensitive) == 0)) {
+        label->setText(QString::number(value, 'f', 4));
+    }
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingMapValue"));
+        label && (name == QStringLiteral("mAP50")
+            || name == QStringLiteral("maskMap50")
+            || name == QStringLiteral("precision")
+            || name == QStringLiteral("accuracy"))) {
+        label->setText(QString::number(value, 'f', 4));
+    }
 
     aitrain::MetricPoint point;
     point.taskId = state_.training.currentTaskId;
@@ -163,14 +273,18 @@ void MainWindow::handleArtifactMessage(const QJsonObject& payload)
     const QString kind = payload.value(QStringLiteral("kind")).toString();
     appendLog(uiText("产物：%1").arg(path));
     if (kind == QStringLiteral("checkpoint") && latestCheckpointLabel_) {
-        const QString checkpointName = QFileInfo(path).fileName();
         latestCheckpointLabel_->setText(uiText("最新 checkpoint：%1")
-            .arg(checkpointName.isEmpty() ? compactPathForStatus(path, 44) : checkpointName));
+            .arg(artifactDisplayName(path)));
         latestCheckpointLabel_->setToolTip(QDir::toNativeSeparators(path));
-    } else if (kind == QStringLiteral("preview") && latestPreviewPathLabel_) {
-        const QString previewName = QFileInfo(path).fileName();
+    } else if (kind == QStringLiteral("onnx") && latestOnnxLabel_) {
+        latestOnnxLabel_->setText(uiText("最新 ONNX：%1").arg(artifactDisplayName(path)));
+        latestOnnxLabel_->setToolTip(QDir::toNativeSeparators(path));
+    } else if ((kind == QStringLiteral("report") || kind == QStringLiteral("training_results_csv") || kind == QStringLiteral("training_args")) && latestReportLabel_) {
+        latestReportLabel_->setText(uiText("训练报告：%1").arg(artifactDisplayName(path)));
+        latestReportLabel_->setToolTip(QDir::toNativeSeparators(path));
+    } else if ((kind == QStringLiteral("preview") || kind == QStringLiteral("training_plot")) && latestPreviewPathLabel_) {
         latestPreviewPathLabel_->setText(uiText("最新预览：%1")
-            .arg(previewName.isEmpty() ? compactPathForStatus(path, 44) : previewName));
+            .arg(artifactDisplayName(path)));
         latestPreviewPathLabel_->setToolTip(QDir::toNativeSeparators(path));
         if (latestPreviewImageLabel_) {
             QPixmap preview(path);

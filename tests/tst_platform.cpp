@@ -1,5 +1,7 @@
 ﻿#include "TestSupport.h"
 
+#include "aitrain/core/WorkerRequests.h"
+
 class PlatformTests : public QObject {
     Q_OBJECT
 
@@ -203,12 +205,217 @@ private slots:
         QCOMPARE(exportRequest.value(QStringLiteral("checkpointPath")).toString(), checkpointPath);
         QCOMPARE(exportRequest.value(QStringLiteral("outputPath")).toString(), outputPath);
         QCOMPARE(exportRequest.value(QStringLiteral("format")).toString(), format);
+        QVERIFY(!exportRequest.contains(QStringLiteral("options")));
+
+        const QJsonObject exportOptions{
+            {QStringLiteral("ultralyticsExportArgs"), QJsonObject{
+                {QStringLiteral("format"), QStringLiteral("onnx")},
+                {QStringLiteral("dynamic"), true},
+                {QStringLiteral("half"), false},
+                {QStringLiteral("int8"), false},
+                {QStringLiteral("imgsz"), 640},
+                {QStringLiteral("batch"), 1},
+                {QStringLiteral("device"), QStringLiteral("cpu")}
+            }}
+        };
+        const QJsonObject exportRequestWithOptions = wp::modelExportRequest(taskId, checkpointPath, outputPath, format, exportOptions);
+        QCOMPARE(exportRequestWithOptions.value(QStringLiteral("taskId")).toString(), taskId);
+        QCOMPARE(exportRequestWithOptions.value(QStringLiteral("options")).toObject()
+            .value(QStringLiteral("ultralyticsExportArgs")).toObject()
+            .value(QStringLiteral("dynamic")).toBool(), true);
 
         const QJsonObject inference = wp::inferenceRequest(taskId, checkpointPath, imagePath, outputPath);
         QCOMPARE(inference.value(QStringLiteral("taskId")).toString(), taskId);
         QCOMPARE(inference.value(QStringLiteral("checkpointPath")).toString(), checkpointPath);
         QCOMPARE(inference.value(QStringLiteral("imagePath")).toString(), imagePath);
         QCOMPARE(inference.value(QStringLiteral("outputPath")).toString(), outputPath);
+    }
+
+    void datasetWorkerRequestParsersStayWireCompatible()
+    {
+        namespace wp = aitrain::worker_protocol;
+        namespace wr = aitrain::worker_requests;
+
+        QJsonObject options;
+        options.insert(QStringLiteral("dryRun"), true);
+        const QString taskId = QStringLiteral("task-parse");
+        const QString datasetPath = QStringLiteral("dataset-root");
+        const QString sourcePath = QStringLiteral("annotations.json");
+        const QString outputPath = QStringLiteral("out-dir");
+        const QString format = QStringLiteral("yolo_detection");
+        const QString sourceFormat = QStringLiteral("coco_json");
+        const QString targetFormat = QStringLiteral("yolo_detection");
+
+        const auto expectDatasetPathRequest = [&] (const wr::DatasetPathRequest& request) {
+            QCOMPARE(request.taskId, taskId);
+            QCOMPARE(request.datasetPath, datasetPath);
+            QCOMPARE(request.outputPath, outputPath);
+            QCOMPARE(request.format, format);
+            QCOMPARE(request.options.value(QStringLiteral("dryRun")).toBool(), true);
+        };
+
+        expectDatasetPathRequest(wr::parseDatasetValidationRequest(
+            wp::datasetValidationRequest(taskId, datasetPath, format, options, outputPath)));
+        expectDatasetPathRequest(wr::parseDatasetSplitRequest(
+            wp::datasetSplitRequest(taskId, datasetPath, outputPath, format, options)));
+        expectDatasetPathRequest(wr::parseDatasetCurationRequest(
+            wp::datasetCurationRequest(taskId, datasetPath, outputPath, format, options)));
+        expectDatasetPathRequest(wr::parseDatasetSnapshotRequest(
+            wp::datasetSnapshotRequest(taskId, datasetPath, outputPath, format, options)));
+
+        const wr::DatasetConversionRequest conversion = wr::parseDatasetConversionRequest(
+            wp::datasetConversionRequest(taskId, sourcePath, outputPath, sourceFormat, targetFormat, options));
+        QCOMPARE(conversion.taskId, taskId);
+        QCOMPARE(conversion.sourcePath, sourcePath);
+        QCOMPARE(conversion.outputPath, outputPath);
+        QCOMPARE(conversion.sourceFormat, sourceFormat);
+        QCOMPARE(conversion.targetFormat, targetFormat);
+        QCOMPARE(conversion.options.value(QStringLiteral("dryRun")).toBool(), true);
+
+        const wr::DatasetPathRequest emptyDataset = wr::parseDatasetSplitRequest(QJsonObject());
+        QVERIFY(emptyDataset.taskId.isEmpty());
+        QVERIFY(emptyDataset.datasetPath.isEmpty());
+        QVERIFY(emptyDataset.outputPath.isEmpty());
+        QVERIFY(emptyDataset.format.isEmpty());
+        QVERIFY(emptyDataset.options.isEmpty());
+
+        const wr::DatasetConversionRequest emptyConversion = wr::parseDatasetConversionRequest(QJsonObject());
+        QVERIFY(emptyConversion.taskId.isEmpty());
+        QVERIFY(emptyConversion.sourcePath.isEmpty());
+        QVERIFY(emptyConversion.outputPath.isEmpty());
+        QVERIFY(emptyConversion.sourceFormat.isEmpty());
+        QVERIFY(emptyConversion.targetFormat.isEmpty());
+        QVERIFY(emptyConversion.options.isEmpty());
+    }
+
+    void modelWorkerRequestParsersStayWireCompatible()
+    {
+        namespace wp = aitrain::worker_protocol;
+        namespace wr = aitrain::worker_requests;
+
+        QJsonObject options;
+        options.insert(QStringLiteral("dryRun"), true);
+        QJsonObject context;
+        context.insert(QStringLiteral("customer"), QStringLiteral("fixture"));
+        const QString taskId = QStringLiteral("task-model-parse");
+        const QString modelPath = QStringLiteral("model.onnx");
+        const QString checkpointPath = QStringLiteral("best.pt");
+        const QString datasetPath = QStringLiteral("dataset-root");
+        const QString outputPath = QStringLiteral("out-dir");
+        const QString imagePath = QStringLiteral("sample.png");
+        const QString format = QStringLiteral("onnx");
+        const QString taskType = QStringLiteral("detection");
+        const QString templateId = QStringLiteral("export-infer-benchmark-report");
+
+        const wr::ModelEvaluationRequest evaluation = wr::parseModelEvaluationRequest(
+            wp::modelEvaluationRequest(taskId, modelPath, datasetPath, outputPath, taskType, options));
+        QCOMPARE(evaluation.taskId, taskId);
+        QCOMPARE(evaluation.modelPath, modelPath);
+        QCOMPARE(evaluation.datasetPath, datasetPath);
+        QCOMPARE(evaluation.outputPath, outputPath);
+        QCOMPARE(evaluation.taskType, taskType);
+        QCOMPARE(evaluation.options.value(QStringLiteral("dryRun")).toBool(), true);
+
+        const wr::ModelBenchmarkRequest benchmark = wr::parseModelBenchmarkRequest(
+            wp::modelBenchmarkRequest(taskId, modelPath, outputPath, options));
+        QCOMPARE(benchmark.taskId, taskId);
+        QCOMPARE(benchmark.modelPath, modelPath);
+        QCOMPARE(benchmark.outputPath, outputPath);
+        QCOMPARE(benchmark.options.value(QStringLiteral("dryRun")).toBool(), true);
+
+        const wr::LocalPipelineRequest pipeline = wr::parseLocalPipelineRequest(
+            wp::localPipelineRequest(taskId, outputPath, templateId, options));
+        QCOMPARE(pipeline.taskId, taskId);
+        QCOMPARE(pipeline.outputPath, outputPath);
+        QCOMPARE(pipeline.templateId, templateId);
+        QCOMPARE(pipeline.options.value(QStringLiteral("dryRun")).toBool(), true);
+
+        const wr::DeliveryReportRequest delivery = wr::parseDeliveryReportRequest(
+            wp::deliveryReportRequest(taskId, outputPath, context));
+        QCOMPARE(delivery.taskId, taskId);
+        QCOMPARE(delivery.outputPath, outputPath);
+        QCOMPARE(delivery.context.value(QStringLiteral("customer")).toString(), QStringLiteral("fixture"));
+
+        const wr::CustomerOcrAcceptanceRequest acceptance = wr::parseCustomerOcrAcceptanceRequest(
+            wp::customerOcrAcceptanceRequest(taskId, outputPath, options));
+        QCOMPARE(acceptance.taskId, taskId);
+        QCOMPARE(acceptance.outputPath, outputPath);
+        QCOMPARE(acceptance.options.value(QStringLiteral("dryRun")).toBool(), true);
+
+        const wr::DiagnosticsBundleRequest diagnostics = wr::parseDiagnosticsBundleRequest(
+            wp::diagnosticsBundleRequest(taskId, outputPath, context));
+        QCOMPARE(diagnostics.taskId, taskId);
+        QCOMPARE(diagnostics.outputPath, outputPath);
+        QCOMPARE(diagnostics.context.value(QStringLiteral("customer")).toString(), QStringLiteral("fixture"));
+
+        const wr::DeploymentValidationRequest deployment = wr::parseDeploymentValidationRequest(
+            wp::deploymentValidationRequest(taskId, modelPath, outputPath, format, imagePath, options));
+        QCOMPARE(deployment.taskId, taskId);
+        QCOMPARE(deployment.modelPath, modelPath);
+        QCOMPARE(deployment.outputPath, outputPath);
+        QCOMPARE(deployment.format, format);
+        QCOMPARE(deployment.sampleImagePath, imagePath);
+        QCOMPARE(deployment.options.value(QStringLiteral("dryRun")).toBool(), true);
+
+        const wr::ModelExportRequest exportRequest = wr::parseModelExportRequest(
+            wp::modelExportRequest(taskId, checkpointPath, outputPath, format, options));
+        QCOMPARE(exportRequest.taskId, taskId);
+        QCOMPARE(exportRequest.checkpointPath, checkpointPath);
+        QCOMPARE(exportRequest.outputPath, outputPath);
+        QCOMPARE(exportRequest.format, format);
+        QCOMPARE(exportRequest.options.value(QStringLiteral("dryRun")).toBool(), true);
+
+        const wr::InferenceRequest inference = wr::parseInferenceRequest(
+            wp::inferenceRequest(taskId, checkpointPath, imagePath, outputPath));
+        QCOMPARE(inference.taskId, taskId);
+        QCOMPARE(inference.checkpointPath, checkpointPath);
+        QCOMPARE(inference.imagePath, imagePath);
+        QCOMPARE(inference.outputPath, outputPath);
+
+        const wr::ModelExportRequest emptyExport = wr::parseModelExportRequest(QJsonObject());
+        QVERIFY(emptyExport.taskId.isEmpty());
+        QVERIFY(emptyExport.checkpointPath.isEmpty());
+        QVERIFY(emptyExport.outputPath.isEmpty());
+        QVERIFY(emptyExport.format.isEmpty());
+        QVERIFY(emptyExport.options.isEmpty());
+
+        const wr::DeploymentValidationRequest emptyDeployment = wr::parseDeploymentValidationRequest(QJsonObject());
+        QVERIFY(emptyDeployment.taskId.isEmpty());
+        QVERIFY(emptyDeployment.modelPath.isEmpty());
+        QVERIFY(emptyDeployment.outputPath.isEmpty());
+        QVERIFY(emptyDeployment.format.isEmpty());
+        QVERIFY(emptyDeployment.sampleImagePath.isEmpty());
+        QVERIFY(emptyDeployment.options.isEmpty());
+    }
+
+    void trainingWorkerRequestParserMatchesExistingRoundTrip()
+    {
+        namespace wr = aitrain::worker_requests;
+
+        aitrain::TrainingRequest request;
+        request.taskId = QStringLiteral("train-parse");
+        request.projectPath = QStringLiteral("project");
+        request.pluginId = QStringLiteral("yolo_native");
+        request.taskType = QStringLiteral("detection");
+        request.datasetPath = QStringLiteral("dataset");
+        request.outputPath = QStringLiteral("out");
+        request.parameters.insert(QStringLiteral("trainingBackend"), QStringLiteral("ultralytics_yolo_detect"));
+        request.parameters.insert(QStringLiteral("epochs"), 1);
+
+        const QJsonObject payload = request.toJson();
+        const aitrain::TrainingRequest parsed = wr::parseTrainingRequest(payload);
+        const aitrain::TrainingRequest direct = aitrain::TrainingRequest::fromJson(payload);
+
+        QCOMPARE(parsed.taskId, direct.taskId);
+        QCOMPARE(parsed.projectPath, direct.projectPath);
+        QCOMPARE(parsed.pluginId, direct.pluginId);
+        QCOMPARE(parsed.taskType, direct.taskType);
+        QCOMPARE(parsed.datasetPath, direct.datasetPath);
+        QCOMPARE(parsed.outputPath, direct.outputPath);
+        QCOMPARE(parsed.parameters.value(QStringLiteral("trainingBackend")).toString(),
+            direct.parameters.value(QStringLiteral("trainingBackend")).toString());
+        QCOMPARE(parsed.parameters.value(QStringLiteral("epochs")).toInt(),
+            direct.parameters.value(QStringLiteral("epochs")).toInt());
     }
 
     void pluginManagerReleasesLoadedPluginFiles()

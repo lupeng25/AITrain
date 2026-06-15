@@ -1,7 +1,7 @@
 param(
     [string]$AppPath = ".\build-vscode\bin\AITrainStudio.exe",
     [string]$WorkingDirectory = ".\build-vscode\bin",
-    [string]$OutDir = ".deps\ui-walkthrough-rc",
+    [string]$OutDir = ".deps\UI-Walkthrough\rc",
     [int]$Width = 1280,
     [int]$Height = 820,
     [string]$WalkthroughScript = (Join-Path $env:USERPROFILE ".codex\skills\qt-gui-walkthrough\scripts\qt_walkthrough.ps1")
@@ -50,51 +50,36 @@ $script:Pages = @(
     (New-UiLabel @(0x603B, 0x89C8)),
     (New-UiLabel @(0x9879, 0x76EE)),
     (New-UiLabel @(0x6570, 0x636E, 0x96C6)),
-    (New-UiLabel @(0x6837, 0x672C, 0x590D, 0x6838)),
     (New-UiLabel @(0x8BAD, 0x7EC3, 0x5B9E, 0x9A8C)),
     (New-UiLabel @(0x4EFB, 0x52A1, 0x4E0E, 0x4EA7, 0x7269)),
     (New-UiLabel @(0x6A21, 0x578B, 0x5E93)),
-    (New-UiLabel @(0x8BC4, 0x4F30, 0x62A5, 0x544A)),
-    (New-UiLabel @(0x6A21, 0x578B, 0x5BFC, 0x51FA)),
-    (New-UiLabel @(0x63A8, 0x7406, 0x9A8C, 0x8BC1)),
-    (New-UiLabel @(0x4EA4, 0x4ED8, 0x9A8C, 0x6536)),
-    (New-UiLabel @(0x63D2, 0x4EF6)),
+    (New-UiLabel @(0x90E8, 0x7F72, 0x9A8C, 0x8BC1)),
     (New-UiLabel @(0x73AF, 0x5883)),
-    (New-UiLabel @(0x8BBE, 0x7F6E))
+    (New-UiLabel @(0x7CFB, 0x7EDF, 0x8BBE, 0x7F6E))
 )
 
 $script:EnglishPages = @(
     "Overview",
     "Project",
     "Datasets",
-    "Sample Review",
     "Training Runs",
     "Tasks and Artifacts",
     "Model Library",
-    "Evaluation Reports",
-    "Model Export",
-    "Inference Check",
-    "Delivery Acceptance",
-    "Plugins",
+    "Deployment Validation",
     "Environment",
-    "Settings"
+    "System Settings"
 )
 
 $script:EnglishMixedPages = @(
     "Overview",
     "Project",
     "Datasets",
-    (New-UiLabel @(0x6837, 0x672C, 0x590D, 0x6838)),
     "Training Runs",
     "Tasks and Artifacts",
     "Model Library",
-    "Evaluation Reports",
-    "Model Export",
-    "Inference Check",
-    (New-UiLabel @(0x4EA4, 0x4ED8, 0x9A8C, 0x6536)),
-    "Plugins",
+    "Deployment Validation",
     "Environment",
-    "Settings"
+    "System Settings"
 )
 
 function Get-AppProcessName {

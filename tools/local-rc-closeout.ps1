@@ -70,7 +70,7 @@ if (-not $SkipGuiWalkthrough) {
         Invoke-PowerShellScript -ScriptPath (Join-Path $root "tools\ui-workbench-walkthrough.ps1") -Arguments @(
             "-AppPath", (Join-Path $binDir "AITrainStudio.exe"),
             "-WorkingDirectory", $binDir,
-            "-OutDir", (Join-Path $root ".deps\ui-walkthrough-rc"))
+            "-OutDir", (Join-Path $root ".deps\UI-Walkthrough\rc"))
     }
 }
 

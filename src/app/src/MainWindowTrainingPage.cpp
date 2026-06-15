@@ -30,12 +30,183 @@
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QTableWidget>
+#include <QTextDocument>
 #include <QTextEdit>
 #include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
+#include <QVector>
 
 using namespace aitrain_app;
+
+namespace {
+QString yoloArgObjectName(const QString& key)
+{
+    return QStringLiteral("YoloTrainArg_%1").arg(key);
+}
+
+QLineEdit* yoloArgLineEdit(const QString& key, const QString& placeholder = QString(), const QString& value = QString())
+{
+    auto* edit = new QLineEdit(value);
+    edit->setObjectName(yoloArgObjectName(key));
+    edit->setPlaceholderText(placeholder);
+    edit->setMinimumWidth(0);
+    return edit;
+}
+
+QComboBox* yoloArgComboBox(const QString& key, const QVector<QPair<QString, QString>>& items)
+{
+    auto* combo = new QComboBox;
+    combo->setObjectName(yoloArgObjectName(key));
+    combo->addItem(QStringLiteral("默认"), QString());
+    for (const auto& item : items) {
+        combo->addItem(item.first, item.second);
+    }
+    return combo;
+}
+
+QComboBox* yoloBoolComboBox(const QString& key)
+{
+    return yoloArgComboBox(key, {
+        {QStringLiteral("true"), QStringLiteral("true")},
+        {QStringLiteral("false"), QStringLiteral("false")}
+    });
+}
+
+QComboBox* yoloEndToEndComboBox(const QString& objectName)
+{
+    auto* combo = new QComboBox;
+    combo->setObjectName(objectName);
+    combo->addItem(QStringLiteral("auto"), QStringLiteral("auto"));
+    combo->addItem(QStringLiteral("true"), QStringLiteral("true"));
+    combo->addItem(QStringLiteral("false"), QStringLiteral("false"));
+    return combo;
+}
+
+QGroupBox* yoloArgGroup(const QString& title)
+{
+    auto* group = new QGroupBox(title);
+    auto* form = new QFormLayout(group);
+    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    form->setHorizontalSpacing(12);
+    form->setVerticalSpacing(8);
+    return group;
+}
+
+void addYoloRow(QGroupBox* group, const QString& label, QWidget* field)
+{
+    if (auto* form = qobject_cast<QFormLayout*>(group->layout())) {
+        form->addRow(label, field);
+    }
+}
+
+QWidget* buildYoloOfficialArgsPanel()
+{
+    auto* container = new QWidget;
+    auto* root = new QVBoxLayout(container);
+    root->setContentsMargins(0, 0, 0, 0);
+    root->setSpacing(10);
+
+    auto* deviceGroup = yoloArgGroup(QStringLiteral("数据与设备"));
+    addYoloRow(deviceGroup, QStringLiteral("seed"), yoloArgLineEdit(QStringLiteral("seed"), QStringLiteral("42"), QStringLiteral("42")));
+    addYoloRow(deviceGroup, QStringLiteral("device"), yoloArgLineEdit(QStringLiteral("device"), QStringLiteral("cpu / 0 / 0,1")));
+    addYoloRow(deviceGroup, QStringLiteral("workers"), yoloArgLineEdit(QStringLiteral("workers"), QStringLiteral("0")));
+    addYoloRow(deviceGroup, QStringLiteral("cache"), yoloArgComboBox(QStringLiteral("cache"), {
+        {QStringLiteral("false"), QStringLiteral("false")},
+        {QStringLiteral("true"), QStringLiteral("true")},
+        {QStringLiteral("ram"), QStringLiteral("ram")},
+        {QStringLiteral("disk"), QStringLiteral("disk")}
+    }));
+    addYoloRow(deviceGroup, QStringLiteral("deterministic"), yoloBoolComboBox(QStringLiteral("deterministic")));
+    addYoloRow(deviceGroup, QStringLiteral("amp"), yoloBoolComboBox(QStringLiteral("amp")));
+    addYoloRow(deviceGroup, QStringLiteral("pretrained"), yoloArgComboBox(QStringLiteral("pretrained"), {
+        {QStringLiteral("true"), QStringLiteral("true")},
+        {QStringLiteral("false"), QStringLiteral("false")}
+    }));
+    addYoloRow(deviceGroup, QStringLiteral("resume"), yoloBoolComboBox(QStringLiteral("resume")));
+    addYoloRow(deviceGroup, QStringLiteral("save_period"), yoloArgLineEdit(QStringLiteral("save_period"), QStringLiteral("-1 / 10")));
+    addYoloRow(deviceGroup, QStringLiteral("fraction"), yoloArgLineEdit(QStringLiteral("fraction"), QStringLiteral("0.0-1.0")));
+    addYoloRow(deviceGroup, QStringLiteral("rect"), yoloBoolComboBox(QStringLiteral("rect")));
+    addYoloRow(deviceGroup, QStringLiteral("multi_scale"), yoloArgLineEdit(QStringLiteral("multi_scale"), QStringLiteral("0.5")));
+    addYoloRow(deviceGroup, QStringLiteral("single_cls"), yoloBoolComboBox(QStringLiteral("single_cls")));
+    addYoloRow(deviceGroup, QStringLiteral("classes"), yoloArgLineEdit(QStringLiteral("classes"), QStringLiteral("0,1,2")));
+    addYoloRow(deviceGroup, QStringLiteral("freeze"), yoloArgLineEdit(QStringLiteral("freeze"), QStringLiteral("10 或 0,1,2")));
+
+    auto* optimizerGroup = yoloArgGroup(QStringLiteral("优化器与学习率"));
+    addYoloRow(optimizerGroup, QStringLiteral("optimizer"), yoloArgComboBox(QStringLiteral("optimizer"), {
+        {QStringLiteral("auto"), QStringLiteral("auto")},
+        {QStringLiteral("SGD"), QStringLiteral("SGD")},
+        {QStringLiteral("Adam"), QStringLiteral("Adam")},
+        {QStringLiteral("AdamW"), QStringLiteral("AdamW")},
+        {QStringLiteral("RMSProp"), QStringLiteral("RMSProp")}
+    }));
+    addYoloRow(optimizerGroup, QStringLiteral("lr0"), yoloArgLineEdit(QStringLiteral("lr0"), QStringLiteral("0.01")));
+    addYoloRow(optimizerGroup, QStringLiteral("lrf"), yoloArgLineEdit(QStringLiteral("lrf"), QStringLiteral("0.01")));
+    addYoloRow(optimizerGroup, QStringLiteral("momentum"), yoloArgLineEdit(QStringLiteral("momentum"), QStringLiteral("0.937")));
+    addYoloRow(optimizerGroup, QStringLiteral("weight_decay"), yoloArgLineEdit(QStringLiteral("weight_decay"), QStringLiteral("0.0005")));
+    addYoloRow(optimizerGroup, QStringLiteral("warmup_epochs"), yoloArgLineEdit(QStringLiteral("warmup_epochs"), QStringLiteral("3.0")));
+    addYoloRow(optimizerGroup, QStringLiteral("cos_lr"), yoloBoolComboBox(QStringLiteral("cos_lr")));
+    addYoloRow(optimizerGroup, QStringLiteral("box"), yoloArgLineEdit(QStringLiteral("box"), QStringLiteral("7.5")));
+    addYoloRow(optimizerGroup, QStringLiteral("cls"), yoloArgLineEdit(QStringLiteral("cls"), QStringLiteral("0.5")));
+    addYoloRow(optimizerGroup, QStringLiteral("dfl"), yoloArgLineEdit(QStringLiteral("dfl"), QStringLiteral("1.5")));
+    addYoloRow(optimizerGroup, QStringLiteral("nbs"), yoloArgLineEdit(QStringLiteral("nbs"), QStringLiteral("64")));
+
+    auto* augmentGroup = yoloArgGroup(QStringLiteral("增强"));
+    for (const QString& key : {
+             QStringLiteral("hsv_h"), QStringLiteral("hsv_s"), QStringLiteral("hsv_v"),
+             QStringLiteral("degrees"), QStringLiteral("translate"), QStringLiteral("scale"),
+             QStringLiteral("shear"), QStringLiteral("perspective"), QStringLiteral("flipud"),
+             QStringLiteral("fliplr"), QStringLiteral("mosaic"), QStringLiteral("mixup"),
+             QStringLiteral("cutmix"), QStringLiteral("copy_paste"), QStringLiteral("close_mosaic")}) {
+        addYoloRow(augmentGroup, key, yoloArgLineEdit(key));
+    }
+
+    auto* segmentationGroup = yoloArgGroup(QStringLiteral("分割专属"));
+    addYoloRow(segmentationGroup, QStringLiteral("copy_paste_mode"), yoloArgComboBox(QStringLiteral("copy_paste_mode"), {
+        {QStringLiteral("flip"), QStringLiteral("flip")},
+        {QStringLiteral("mixup"), QStringLiteral("mixup")}
+    }));
+    addYoloRow(segmentationGroup, QStringLiteral("overlap_mask"), yoloBoolComboBox(QStringLiteral("overlap_mask")));
+    addYoloRow(segmentationGroup, QStringLiteral("mask_ratio"), yoloArgLineEdit(QStringLiteral("mask_ratio"), QStringLiteral("4")));
+
+    auto* validationGroup = yoloArgGroup(QStringLiteral("验证与导出"));
+    addYoloRow(validationGroup, QStringLiteral("val"), yoloBoolComboBox(QStringLiteral("val")));
+    addYoloRow(validationGroup, QStringLiteral("plots"), yoloBoolComboBox(QStringLiteral("plots")));
+    addYoloRow(validationGroup, QStringLiteral("max_det"), yoloArgLineEdit(QStringLiteral("max_det"), QStringLiteral("300")));
+    addYoloRow(validationGroup, QStringLiteral("patience"), yoloArgLineEdit(QStringLiteral("patience"), QStringLiteral("100")));
+    auto* exportDynamic = new QCheckBox(QStringLiteral("dynamic"));
+    exportDynamic->setObjectName(QStringLiteral("YoloTrainExportArg_dynamic"));
+    auto* exportHalf = new QCheckBox(QStringLiteral("half"));
+    exportHalf->setObjectName(QStringLiteral("YoloTrainExportArg_half"));
+    auto* exportInt8 = new QCheckBox(QStringLiteral("int8 TensorRT"));
+    exportInt8->setObjectName(QStringLiteral("YoloTrainExportArg_int8"));
+    auto* exportEndToEnd = yoloEndToEndComboBox(QStringLiteral("YoloTrainExportArg_end2end"));
+    auto* exportFlags = new QWidget;
+    auto* exportFlagsLayout = new QHBoxLayout(exportFlags);
+    exportFlagsLayout->setContentsMargins(0, 0, 0, 0);
+    exportFlagsLayout->setSpacing(8);
+    exportFlagsLayout->addWidget(exportDynamic);
+    exportFlagsLayout->addWidget(exportHalf);
+    exportFlagsLayout->addWidget(exportInt8);
+    exportFlagsLayout->addWidget(new QLabel(QStringLiteral("end2end")));
+    exportFlagsLayout->addWidget(exportEndToEnd);
+    exportFlagsLayout->addStretch();
+    addYoloRow(validationGroup, QStringLiteral("export"), exportFlags);
+
+    root->addWidget(deviceGroup);
+    root->addWidget(optimizerGroup);
+    root->addWidget(augmentGroup);
+    root->addWidget(segmentationGroup);
+    root->addWidget(validationGroup);
+    return container;
+}
+} // namespace
+
+QLabel* MainWindow::trainingLiveValueLabel(const QString& objectName) const
+{
+    return findChild<QLabel*>(objectName);
+}
 
 QWidget* MainWindow::buildTrainingPage()
 {
@@ -53,15 +224,7 @@ QWidget* MainWindow::buildTrainingPage()
     trainingBackendCombo_->addItem(backendLabel(QStringLiteral("paddleocr_rec_official")), QStringLiteral("paddleocr_rec_official"));
     modelPresetCombo_ = new QComboBox;
     modelPresetCombo_->setEditable(true);
-    modelPresetCombo_->addItems(QStringList()
-        << QStringLiteral("yolov8n.yaml")
-        << QStringLiteral("yolov8n-seg.yaml")
-        << QStringLiteral("yolo11n.yaml")
-        << QStringLiteral("yolo11n-seg.yaml")
-        << QStringLiteral("yolo12n.yaml")
-        << QStringLiteral("yolo12n-seg.yaml")
-        << QStringLiteral("PP-OCRv4_mobile_det")
-        << QStringLiteral("PP-OCRv4_mobile_rec"));
+    modelPresetCombo_->addItems(modelPresetItemsForBackend(trainingBackendCombo_->currentData().toString()));
     epochsEdit_ = new QLineEdit(QStringLiteral("20"));
     batchEdit_ = new QLineEdit(QStringLiteral("8"));
     imageSizeEdit_ = new QLineEdit(QStringLiteral("640"));
@@ -81,7 +244,13 @@ QWidget* MainWindow::buildTrainingPage()
     connect(taskTypeCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::refreshTrainingDefaults);
     connect(trainingBackendCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
         if (modelPresetCombo_ && trainingBackendCombo_) {
-            modelPresetCombo_->setCurrentText(defaultModelForBackend(trainingBackendCombo_->currentData().toString()));
+            const QString backend = trainingBackendCombo_->currentData().toString();
+            {
+                QSignalBlocker block(modelPresetCombo_);
+                modelPresetCombo_->clear();
+                modelPresetCombo_->addItems(modelPresetItemsForBackend(backend));
+                modelPresetCombo_->setCurrentText(defaultModelForBackend(backend));
+            }
         }
         updateTrainingSelectionSummary();
     });
@@ -173,6 +342,12 @@ QWidget* MainWindow::buildTrainingPage()
     form->addRow(QStringLiteral("Batch Size"), batchEdit_);
     form->addRow(QStringLiteral("Image Size"), imageSizeEdit_);
     setupPanel->bodyLayout()->addLayout(form);
+    auto* yoloOfficialArgsGroup = new QGroupBox(QStringLiteral("YOLO 官方高级参数"));
+    auto* yoloOfficialArgsLayout = new QVBoxLayout(yoloOfficialArgsGroup);
+    yoloOfficialArgsLayout->setContentsMargins(10, 8, 10, 8);
+    yoloOfficialArgsLayout->setSpacing(8);
+    yoloOfficialArgsLayout->addWidget(buildYoloOfficialArgsPanel());
+    setupPanel->bodyLayout()->addWidget(yoloOfficialArgsGroup);
     setupPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("当前模型能力说明")));
     setupPanel->bodyLayout()->addWidget(trainingBackendHintLabel_);
 
@@ -205,12 +380,57 @@ QWidget* MainWindow::buildTrainingPage()
 
     auto* monitorPanel = new InfoPanel(QStringLiteral("训练监控"));
     monitorPanel->setMinimumWidth(0);
+    trainingPhaseLabel_ = inlineStatusLabel(QStringLiteral("阶段：等待启动"));
+    trainingPhaseLabel_->setObjectName(QStringLiteral("TrainingPhaseStatus"));
+    monitorPanel->bodyLayout()->addWidget(trainingPhaseLabel_);
+
+    auto* liveGrid = new QGridLayout;
+    liveGrid->setContentsMargins(0, 0, 0, 0);
+    liveGrid->setHorizontalSpacing(8);
+    liveGrid->setVerticalSpacing(0);
+    auto addLiveCard = [liveGrid](int row, int column, const QString& caption, const QString& valueObjectName, QLabel** valueLabel) {
+        auto* frame = new QFrame;
+        frame->setObjectName(QStringLiteral("TrainingLivePanel_%1").arg(valueObjectName));
+        frame->setProperty("trainingLiveRole", QStringLiteral("panel"));
+        frame->setMinimumHeight(46);
+        frame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+        auto* layout = new QVBoxLayout(frame);
+        layout->setContentsMargins(8, 5, 8, 5);
+        layout->setSpacing(1);
+        auto* value = new QLabel(QStringLiteral("--"), frame);
+        value->setObjectName(valueObjectName);
+        value->setProperty("trainingLiveRole", QStringLiteral("value"));
+        value->setMinimumWidth(0);
+        value->setMinimumHeight(20);
+        value->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        value->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        auto* label = new QLabel(caption, frame);
+        label->setObjectName(QStringLiteral("TrainingLiveCaption_%1").arg(valueObjectName));
+        label->setProperty("trainingLiveRole", QStringLiteral("caption"));
+        label->setMinimumWidth(0);
+        label->setMinimumHeight(15);
+        label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        layout->addWidget(value);
+        layout->addWidget(label);
+        liveGrid->addWidget(frame, row, column);
+        *valueLabel = value;
+    };
+    for (int column = 0; column < 3; ++column) {
+        liveGrid->setColumnStretch(column, 1);
+    }
+    addLiveCard(0, 0, QStringLiteral("Epoch"), QStringLiteral("TrainingEpochValue"), &trainingEpochValueLabel_);
+    addLiveCard(0, 1, QStringLiteral("Batch"), QStringLiteral("TrainingBatchValue"), &trainingBatchValueLabel_);
+    addLiveCard(0, 2, QStringLiteral("ETA"), QStringLiteral("TrainingEtaValue"), &trainingEtaValueLabel_);
+    addLiveCard(1, 0, QStringLiteral("Device"), QStringLiteral("TrainingDeviceValue"), &trainingDeviceValueLabel_);
+    addLiveCard(1, 1, QStringLiteral("Loss"), QStringLiteral("TrainingLossValue"), &trainingLossValueLabel_);
+    addLiveCard(1, 2, QStringLiteral("mAP"), QStringLiteral("TrainingMapValue"), &trainingMapValueLabel_);
+    monitorPanel->bodyLayout()->addLayout(liveGrid);
+
     progressBar_ = new QProgressBar;
     progressBar_->setRange(0, 100);
     progressBar_->setValue(0);
-    metricsWidget_ = new MetricsWidget;
     monitorPanel->bodyLayout()->addWidget(progressBar_);
-    monitorPanel->bodyLayout()->addWidget(metricsWidget_, 1);
+    monitorPanel->bodyLayout()->addStretch();
 
     auto* artifactPanel = new InfoPanel(QStringLiteral("任务与产物"));
     artifactPanel->setMinimumWidth(0);
@@ -221,8 +441,12 @@ QWidget* MainWindow::buildTrainingPage()
     artifactPanel->bodyLayout()->addWidget(artifactGuideLabel);
     artifactPanel->bodyLayout()->addWidget(artifactBoundaryLabel);
     latestCheckpointLabel_ = mutedLabel(QStringLiteral("最新 checkpoint：暂无"));
+    latestOnnxLabel_ = mutedLabel(QStringLiteral("最新 ONNX：暂无"));
+    latestReportLabel_ = mutedLabel(QStringLiteral("训练报告：暂无"));
     latestPreviewPathLabel_ = mutedLabel(QStringLiteral("最新预览：暂无"));
     allowLabelToShrink(latestCheckpointLabel_);
+    allowLabelToShrink(latestOnnxLabel_);
+    allowLabelToShrink(latestReportLabel_);
     allowLabelToShrink(latestPreviewPathLabel_);
     latestPreviewImageLabel_ = new QLabel(QStringLiteral("暂无预览图"));
     latestPreviewImageLabel_->setObjectName(QStringLiteral("MutedText"));
@@ -231,6 +455,8 @@ QWidget* MainWindow::buildTrainingPage()
     latestPreviewImageLabel_->setFrameShape(QFrame::StyledPanel);
     latestPreviewImageLabel_->setScaledContents(false);
     artifactPanel->bodyLayout()->addWidget(latestCheckpointLabel_);
+    artifactPanel->bodyLayout()->addWidget(latestOnnxLabel_);
+    artifactPanel->bodyLayout()->addWidget(latestReportLabel_);
     artifactPanel->bodyLayout()->addWidget(latestPreviewPathLabel_);
     artifactPanel->bodyLayout()->addWidget(latestPreviewImageLabel_);
     artifactPanel->bodyLayout()->addStretch();
@@ -241,13 +467,20 @@ QWidget* MainWindow::buildTrainingPage()
     logEdit_->setObjectName(QStringLiteral("LogView"));
     logEdit_->setReadOnly(true);
     logEdit_->setLineWrapMode(QTextEdit::WidgetWidth);
+    logEdit_->document()->setMaximumBlockCount(2000);
     logEdit_->setMinimumWidth(0);
     logEdit_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
     logPanel->bodyLayout()->addWidget(logEdit_);
 
+    auto* metricsPanel = new InfoPanel(QStringLiteral("指标曲线"));
+    metricsPanel->setMinimumWidth(0);
+    metricsWidget_ = new MetricsWidget;
+    metricsPanel->bodyLayout()->addWidget(metricsWidget_, 1);
+
     auto* detailTabs = new QTabWidget;
     detailTabs->setObjectName(QStringLiteral("TrainingDetailTabs"));
     detailTabs->setDocumentMode(true);
+    detailTabs->addTab(metricsPanel, QStringLiteral("指标曲线"));
     detailTabs->addTab(logPanel, QStringLiteral("训练日志"));
     detailTabs->addTab(artifactPanel, QStringLiteral("任务与产物"));
 
@@ -255,9 +488,9 @@ QWidget* MainWindow::buildTrainingPage()
     rightSplitter->setMinimumWidth(0);
     rightSplitter->addWidget(monitorPanel);
     rightSplitter->addWidget(detailTabs);
-    rightSplitter->setStretchFactor(0, 1);
+    rightSplitter->setStretchFactor(0, 2);
     rightSplitter->setStretchFactor(1, 1);
-    rightSplitter->setSizes(QList<int>() << 330 << 330);
+    rightSplitter->setSizes(QList<int>() << 430 << 230);
 
     auto* bodySplitter = new QSplitter(Qt::Horizontal);
     bodySplitter->addWidget(setupScroll);

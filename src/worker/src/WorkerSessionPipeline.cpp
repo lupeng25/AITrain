@@ -7,6 +7,7 @@
 #include "aitrain/core/JsonProtocol.h"
 #include "aitrain/core/ProductWorkflow.h"
 #include "aitrain/core/WorkerProtocol.h"
+#include "aitrain/core/WorkerRequests.h"
 
 #include <QDateTime>
 #include <QCoreApplication>
@@ -25,16 +26,33 @@
 
 using namespace worker_support;
 namespace wp = aitrain::worker_protocol;
+namespace wr = aitrain::worker_requests;
+
+namespace {
+constexpr int kMaxPipelineTrainerBufferBytes = 4 * 1024 * 1024;
+constexpr int kMaxPipelineTrainerLineBytes = 256 * 1024;
+
+QByteArray boundedPipelineTrainerLine(const QByteArray& line)
+{
+    if (line.size() <= kMaxPipelineTrainerLineBytes) {
+        return line;
+    }
+    QByteArray bounded = line.left(kMaxPipelineTrainerLineBytes);
+    bounded.append(" ... [log_truncated: single Python trainer line exceeded limit]");
+    return bounded;
+}
+} // namespace
 
 void WorkerSession::runLocalPipeline(const QJsonObject& payload)
 {
-    const QString taskId = payload.value(QStringLiteral("taskId")).toString();
-    QString outputPath = payload.value(QStringLiteral("outputPath")).toString();
+    const wr::LocalPipelineRequest request = wr::parseLocalPipelineRequest(payload);
+    const QString taskId = request.taskId;
+    QString outputPath = request.outputPath;
     if (outputPath.isEmpty()) {
         outputPath = defaultTaskOutputPath(QDir::currentPath(), taskId);
     }
-    const QString templateId = payload.value(QStringLiteral("templateId")).toString();
-    const QJsonObject options = payload.value(QStringLiteral("options")).toObject();
+    const QString templateId = request.templateId;
+    const QJsonObject options = request.options;
 
     QJsonObject progress;
     progress.insert(QStringLiteral("taskId"), taskId);
@@ -83,6 +101,16 @@ void WorkerSession::runLocalPipeline(const QJsonObject& payload)
                     {QStringLiteral("outputPath"), outputPath}});
             return;
         }
+        if (!isTrainingBackendCompatibleWithTask(pipelineTaskType, pipelineBackend)) {
+            failWithDetails(
+                QStringLiteral("Pipeline training backend '%1' is not compatible with task type '%2'.").arg(pipelineBackend, pipelineTaskType),
+                QStringLiteral("training_backend_task_mismatch"),
+                QJsonObject{
+                    {QStringLiteral("backend"), pipelineBackend},
+                    {QStringLiteral("taskType"), pipelineTaskType},
+                    {QStringLiteral("outputPath"), outputPath}});
+            return;
+        }
         const QString datasetPath = pipelineOptions.value(QStringLiteral("datasetPath")).toString();
         const QString trainOutputPath = QDir(outputPath).filePath(QStringLiteral("training"));
         const PipelineTrainResult trainingResult = runPipelineTrainingStep(
@@ -112,6 +140,83 @@ void WorkerSession::runLocalPipeline(const QJsonObject& payload)
         pipelineOptions.insert(QStringLiteral("pipelineOfficialTrainingReportPath"), trainingResult.reportPath);
         pipelineOptions.insert(QStringLiteral("pipelineOfficialTrainingCheckpointPath"), trainingResult.checkpointPath);
         pipelineOptions.insert(QStringLiteral("pipelineOfficialTrainingOnnxPath"), trainingResult.onnxPath);
+    }
+
+    const QString pipelineModelPath = pipelineOptions.value(QStringLiteral("modelPath")).toString(
+        pipelineOptions.value(QStringLiteral("checkpointPath")).toString());
+    if (resolvedTemplate == QStringLiteral("export-infer-benchmark-report")
+        && QFileInfo(pipelineModelPath).suffix().toLower() == QStringLiteral("pt")) {
+        const QString exportFormat = pipelineOptions.value(QStringLiteral("exportFormat")).toString(QStringLiteral("onnx")).trimmed().toLower();
+        if (exportFormat != QStringLiteral("onnx")
+            && exportFormat != QStringLiteral("ncnn")
+            && !exportFormat.startsWith(QStringLiteral("tensorrt"))) {
+            failWithDetails(
+                QStringLiteral("Pipeline export format '%1' is not supported for official YOLO .pt pre-export.").arg(exportFormat),
+                QStringLiteral("unsupported_export_format"),
+                QJsonObject{
+                    {QStringLiteral("format"), exportFormat},
+                    {QStringLiteral("modelPath"), pipelineModelPath},
+                    {QStringLiteral("outputPath"), outputPath}});
+            return;
+        }
+
+        QJsonObject officialExportOptions = pipelineOptions;
+        QJsonObject exportArgs = officialExportOptions.value(QStringLiteral("ultralyticsExportArgs")).toObject();
+        exportArgs.insert(QStringLiteral("format"), QStringLiteral("onnx"));
+        if (exportFormat != QStringLiteral("onnx")) {
+            exportArgs.insert(QStringLiteral("dynamic"), false);
+            exportArgs.insert(QStringLiteral("half"), false);
+            exportArgs.insert(QStringLiteral("int8"), false);
+            exportArgs.insert(QStringLiteral("end2end"), false);
+        }
+        officialExportOptions.insert(QStringLiteral("ultralyticsExportArgs"), exportArgs);
+
+        QJsonObject preExportProgress;
+        preExportProgress.insert(QStringLiteral("taskId"), taskId);
+        preExportProgress.insert(QStringLiteral("percent"), 5);
+        preExportProgress.insert(QStringLiteral("message"), QStringLiteral("正在将 YOLO .pt 权重官方导出为 ONNX。"));
+        send(wp::event::progress(), preExportProgress);
+
+        const QString officialOnnxPath = QDir(outputPath).filePath(QStringLiteral("official_yolo_export/model.onnx"));
+        const OfficialYoloExportResult officialExport = runOfficialYoloExport(
+            taskId,
+            pipelineModelPath,
+            officialOnnxPath,
+            QStringLiteral("onnx"),
+            officialExportOptions,
+            true);
+        if (!officialExport.ok) {
+            if (officialExport.error == QStringLiteral("Canceled by user")) {
+                sendCanceledAndFinish(taskId, officialExport.error);
+                return;
+            }
+            failWithDetails(
+                officialExport.error,
+                QStringLiteral("official_yolo_export_failed"),
+                QJsonObject{
+                    {QStringLiteral("modelPath"), pipelineModelPath},
+                    {QStringLiteral("outputPath"), officialOnnxPath}});
+            return;
+        }
+
+        const QString officialExportPath = officialExport.modelExportPayload.value(QStringLiteral("exportPath")).toString(officialOnnxPath);
+        if (officialExportPath.isEmpty() || !QFileInfo::exists(officialExportPath)) {
+            failWithDetails(
+                QStringLiteral("Official YOLO .pt pre-export did not produce an ONNX artifact."),
+                QStringLiteral("official_yolo_export_missing"),
+                QJsonObject{
+                    {QStringLiteral("modelPath"), pipelineModelPath},
+                    {QStringLiteral("outputPath"), officialOnnxPath}});
+            return;
+        }
+
+        pipelineOptions.insert(QStringLiteral("modelPath"), officialExportPath);
+        pipelineOptions.insert(QStringLiteral("checkpointPath"), officialExportPath);
+        pipelineOptions.insert(QStringLiteral("pipelineOfficialExportCompleted"), true);
+        pipelineOptions.insert(QStringLiteral("pipelineOfficialExportPayload"), officialExport.modelExportPayload);
+        pipelineOptions.insert(QStringLiteral("pipelineOfficialExportPath"), officialExportPath);
+        pipelineOptions.insert(QStringLiteral("pipelineOfficialExportReportPath"), officialExport.modelExportPayload.value(QStringLiteral("reportPath")).toString());
+        pipelineOptions.insert(QStringLiteral("pipelineOfficialExportSourceCheckpointPath"), pipelineModelPath);
     }
 
     const aitrain::WorkflowResult result = aitrain::runLocalPipelinePlan(outputPath, templateId, pipelineOptions);
@@ -205,6 +310,18 @@ WorkerSession::PipelineTrainResult WorkerSession::runPipelineTrainingStep(
         result.error = QStringLiteral("Pipeline training backend '%1' is not enabled for production training.").arg(backend);
         return result;
     }
+    if (!isTrainingBackendCompatibleWithTask(request_.taskType, backend)) {
+        result.error = QStringLiteral("Pipeline training backend '%1' is not compatible with task type '%2'.").arg(backend, request_.taskType);
+        return result;
+    }
+
+    QString snapshotError;
+    QJsonObject snapshotDetails;
+    if (!verifyTrainingDatasetSnapshot(request_, &snapshotError, &snapshotDetails)) {
+        Q_UNUSED(snapshotDetails);
+        result.error = snapshotError;
+        return result;
+    }
 
     if (!shouldUsePythonTrainer()) {
         result.error = QStringLiteral("Pipeline official training step requires a Python trainer backend. Got: %1").arg(backend);
@@ -249,6 +366,7 @@ WorkerSession::PipelineTrainResult WorkerSession::runPipelineTrainingStep(
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
     environment.insert(QStringLiteral("PYTHONIOENCODING"), QStringLiteral("utf-8"));
+    configurePackagedPythonEnvironment(&environment);
     pythonTrainerProcess_.setProcessEnvironment(environment);
     pythonTrainerProcess_.setProgram(pythonExecutable);
     pythonTrainerProcess_.setArguments(QStringList() << QStringLiteral("-u") << trainerScript << QStringLiteral("--request") << requestPath);
@@ -284,13 +402,13 @@ WorkerSession::PipelineTrainResult WorkerSession::runPipelineTrainingStep(
     interceptPythonTrainerMessages_ = false;
 
     if (!stdoutBuffer.trimmed().isEmpty()) {
-        forwardPipelinePythonTrainerLine(stdoutBuffer.trimmed(), &result, &terminalMessageSeen);
+        forwardPipelinePythonTrainerLine(boundedPipelineTrainerLine(stdoutBuffer.trimmed()), &result, &terminalMessageSeen);
     }
     if (!stderrBuffer.trimmed().isEmpty()) {
         QJsonObject logObject;
         logObject.insert(QStringLiteral("taskId"), request_.taskId);
         logObject.insert(QStringLiteral("backend"), backend);
-        logObject.insert(QStringLiteral("message"), QString::fromUtf8(stderrBuffer.trimmed()));
+        logObject.insert(QStringLiteral("message"), QString::fromUtf8(boundedPipelineTrainerLine(stderrBuffer.trimmed())));
         result.logs.append(logObject);
         send(wp::event::log(), logObject);
     }
@@ -310,59 +428,83 @@ WorkerSession::PipelineTrainResult WorkerSession::runPipelineTrainingStep(
 void WorkerSession::drainPipelinePythonTrainerOutput(QByteArray* buffer, PipelineTrainResult* result, bool* terminalMessageSeen)
 {
     buffer->append(pythonTrainerProcess_.readAllStandardOutput());
-    int newline = buffer->indexOf('\n');
-    while (newline >= 0) {
-        const QByteArray line = buffer->left(newline).trimmed();
-        buffer->remove(0, newline + 1);
+    if (buffer->size() > kMaxPipelineTrainerBufferBytes) {
+        *buffer = buffer->right(kMaxPipelineTrainerLineBytes);
+        const QByteArray message("Pipeline Python trainer stdout buffer exceeded limit before a line delimiter; keeping bounded tail only. [log_truncated]");
+        const QJsonObject payload = sanitizedTrainerLogPayload(message, request_.taskId, requestedTrainingBackend(request_));
+        if (!payload.isEmpty()) {
+            result->logs.append(payload);
+            send(wp::event::log(), payload);
+        }
+    }
+    int delimiter = nextPythonOutputDelimiter(*buffer);
+    while (delimiter >= 0) {
+        const QByteArray line = boundedPipelineTrainerLine(buffer->left(delimiter).trimmed());
+        int removeCount = delimiter + 1;
+        while (removeCount < buffer->size()
+            && (buffer->at(removeCount) == '\n' || buffer->at(removeCount) == '\r')) {
+            ++removeCount;
+        }
+        buffer->remove(0, removeCount);
         if (!line.isEmpty()) {
             forwardPipelinePythonTrainerLine(line, result, terminalMessageSeen);
         }
-        newline = buffer->indexOf('\n');
+        delimiter = nextPythonOutputDelimiter(*buffer);
     }
 }
 
 void WorkerSession::drainPipelinePythonTrainerErrors(QByteArray* buffer, PipelineTrainResult* result)
 {
     buffer->append(pythonTrainerProcess_.readAllStandardError());
-    int newline = buffer->indexOf('\n');
-    while (newline >= 0) {
-        const QByteArray line = buffer->left(newline).trimmed();
-        buffer->remove(0, newline + 1);
-        if (!line.isEmpty()) {
-            QJsonObject logObject;
-            logObject.insert(QStringLiteral("taskId"), request_.taskId);
-            logObject.insert(QStringLiteral("backend"), requestedTrainingBackend(request_));
-            logObject.insert(QStringLiteral("message"), QString::fromUtf8(line));
-            result->logs.append(logObject);
-            send(wp::event::log(), logObject);
+    if (buffer->size() > kMaxPipelineTrainerBufferBytes) {
+        *buffer = buffer->right(kMaxPipelineTrainerLineBytes);
+        const QByteArray message("Pipeline Python trainer stderr buffer exceeded limit before a line delimiter; keeping bounded tail only. [log_truncated]");
+        const QJsonObject payload = sanitizedTrainerLogPayload(message, request_.taskId, requestedTrainingBackend(request_));
+        if (!payload.isEmpty()) {
+            result->logs.append(payload);
+            send(wp::event::log(), payload);
         }
-        newline = buffer->indexOf('\n');
+    }
+    int delimiter = nextPythonOutputDelimiter(*buffer);
+    while (delimiter >= 0) {
+        const QByteArray line = boundedPipelineTrainerLine(buffer->left(delimiter).trimmed());
+        int removeCount = delimiter + 1;
+        while (removeCount < buffer->size()
+            && (buffer->at(removeCount) == '\n' || buffer->at(removeCount) == '\r')) {
+            ++removeCount;
+        }
+        buffer->remove(0, removeCount);
+        if (!line.isEmpty()) {
+            const QJsonObject logObject = sanitizedTrainerLogPayload(line, request_.taskId, requestedTrainingBackend(request_));
+            if (!logObject.isEmpty()) {
+                result->logs.append(logObject);
+                send(wp::event::log(), logObject);
+            }
+        }
+        delimiter = nextPythonOutputDelimiter(*buffer);
     }
 }
 
 bool WorkerSession::forwardPipelinePythonTrainerLine(const QByteArray& line, PipelineTrainResult* result, bool* terminalMessageSeen)
 {
-    QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(line, &parseError);
-    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-        QJsonObject payload;
-        payload.insert(QStringLiteral("taskId"), request_.taskId);
-        payload.insert(QStringLiteral("backend"), requestedTrainingBackend(request_));
-        payload.insert(QStringLiteral("message"), QString::fromUtf8(line));
-        result->logs.append(payload);
-        send(wp::event::log(), payload);
+    QJsonDocument document;
+    if (!parseTrainerJsonDocument(line, &document)) {
+        const QJsonObject payload = sanitizedTrainerLogPayload(line, request_.taskId, requestedTrainingBackend(request_));
+        if (!payload.isEmpty()) {
+            result->logs.append(payload);
+            send(wp::event::log(), payload);
+        }
         return true;
     }
 
     const QJsonObject object = document.object();
     const QString type = object.value(QStringLiteral("type")).toString();
     if (type.isEmpty()) {
-        QJsonObject payload;
-        payload.insert(QStringLiteral("taskId"), request_.taskId);
-        payload.insert(QStringLiteral("backend"), requestedTrainingBackend(request_));
-        payload.insert(QStringLiteral("message"), QString::fromUtf8(line));
-        result->logs.append(payload);
-        send(wp::event::log(), payload);
+        const QJsonObject payload = sanitizedTrainerLogPayload(line, request_.taskId, requestedTrainingBackend(request_));
+        if (!payload.isEmpty()) {
+            result->logs.append(payload);
+            send(wp::event::log(), payload);
+        }
         return true;
     }
 

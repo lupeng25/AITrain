@@ -2,7 +2,7 @@ param(
     [string]$WorkDir = ".deps\production-ocr-rec-experiments",
     [string]$DataDir = ".deps\production-ocr-data",
     [string]$Python = "",
-    [string]$PaddleOcrRepo = ".deps\PaddleOCR",
+    [string]$PaddleOcrRepo = ".deps\repos\PaddleOCR",
     [string]$ExperimentName = "",
     [int]$Epochs = 2,
     [int]$BatchSize = 32,
@@ -27,29 +27,20 @@ $ErrorActionPreference = "Stop"
 
 $script:Root = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $PSScriptRoot) "."))
 $script:StartedAt = [DateTime]::UtcNow
+. (Join-Path $PSScriptRoot "deps-layout.ps1")
 
 function Resolve-RepoPath {
     param([string]$Path)
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        return ""
-    }
-    if ([System.IO.Path]::IsPathRooted($Path)) {
-        return [System.IO.Path]::GetFullPath($Path)
-    }
-    return [System.IO.Path]::GetFullPath((Join-Path $script:Root $Path))
+    return Resolve-AITrainRepoPath -Root $script:Root -Path $Path
 }
 
 function Resolve-Python {
     if ($Python) {
         return Resolve-RepoPath $Python
     }
-    $candidates = @(
-        (Join-Path $script:Root ".deps\python-3.13.13-ocr-amd64\python.exe"),
-        (Join-Path $script:Root ".deps\python-3.13.13-embed-amd64\python.exe")
-    )
-    foreach ($candidate in $candidates) {
+    foreach ($candidate in (Get-AITrainPythonCandidates -Role Ocr -Root $script:Root)) {
         if (Test-Path -LiteralPath $candidate) {
-            return $candidate
+            return [System.IO.Path]::GetFullPath($candidate)
         }
     }
     $fromPath = Get-Command python -ErrorAction SilentlyContinue
@@ -176,7 +167,7 @@ except Exception as exc:
 
 $pythonExe = Resolve-Python
 $dataFull = Resolve-RepoPath $DataDir
-$repoFull = Resolve-RepoPath $PaddleOcrRepo
+$repoFull = Resolve-AITrainPaddleOcrRepo -Root $script:Root -RequestedPath $PaddleOcrRepo
 $recDataset = Join-Path $dataFull "rec_dataset"
 if (!(Test-Path -LiteralPath $recDataset)) {
     throw "Production OCR Rec dataset is missing: $recDataset"

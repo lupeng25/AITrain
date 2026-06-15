@@ -23,7 +23,34 @@ private slots:
     void handleSocketDisconnected();
 
 private:
+    struct CommandBinding {
+        QString command;
+        void (WorkerSession::*handler)(const QJsonObject&);
+    };
+
+    static QVector<CommandBinding> commandBindings();
+
     void handleMessage(const QString& type, const QJsonObject& payload);
+    void startTrainingCommand(const QJsonObject& payload);
+    void pauseCommand(const QJsonObject& payload);
+    void resumeCommand(const QJsonObject& payload);
+    void heartbeatCommand(const QJsonObject& payload);
+    void environmentCheckCommand(const QJsonObject& payload);
+    void validateDatasetCommand(const QJsonObject& payload);
+    void splitDatasetCommand(const QJsonObject& payload);
+    void convertDatasetCommand(const QJsonObject& payload);
+    void curateDatasetCommand(const QJsonObject& payload);
+    void createDatasetSnapshotCommand(const QJsonObject& payload);
+    void evaluateModelCommand(const QJsonObject& payload);
+    void benchmarkModelCommand(const QJsonObject& payload);
+    void runLocalPipelineCommand(const QJsonObject& payload);
+    void generateDeliveryReportCommand(const QJsonObject& payload);
+    void runCustomerOcrAcceptanceCommand(const QJsonObject& payload);
+    void collectDiagnosticsCommand(const QJsonObject& payload);
+    void validateDeploymentArtifactCommand(const QJsonObject& payload);
+    void exportModelCommand(const QJsonObject& payload);
+    void inferCommand(const QJsonObject& payload);
+    void cancelCommand(const QJsonObject& payload);
     void startTraining(const aitrain::TrainingRequest& request);
     void pauseTraining();
     void resumeTraining();
@@ -73,12 +100,25 @@ private:
         QJsonArray logs;
     };
 
+    struct OfficialYoloExportResult {
+        bool ok = false;
+        QString error;
+        QJsonObject modelExportPayload;
+    };
+
     PipelineTrainResult runPipelineTrainingStep(
         const QString& parentTaskId,
         const QString& outputPath,
         const QJsonObject& options,
         const QString& datasetPath,
         const QString& taskType);
+    OfficialYoloExportResult runOfficialYoloExport(
+        const QString& taskId,
+        const QString& sourcePath,
+        const QString& officialOutputPath,
+        const QString& productFormat,
+        const QJsonObject& exportOptions,
+        bool forwardExportEvents);
     void drainPipelinePythonTrainerOutput(QByteArray* buffer, PipelineTrainResult* result, bool* terminalMessageSeen);
     void drainPipelinePythonTrainerErrors(QByteArray* buffer, PipelineTrainResult* result);
     bool forwardPipelinePythonTrainerLine(const QByteArray& line, PipelineTrainResult* result, bool* terminalMessageSeen);

@@ -1,5 +1,6 @@
 ultralytics>=8.4,<9
 onnx>=1.16
+onnxslim>=0.1.71
 onnxruntime>=1.18
 numpy>=1.26
 Pillow>=10

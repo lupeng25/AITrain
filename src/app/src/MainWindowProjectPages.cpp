@@ -73,7 +73,7 @@ QWidget* MainWindow::buildDashboardPage()
     auto* bottom = new QSplitter(Qt::Horizontal);
 
     auto* workflowPanel = new InfoPanel(QStringLiteral("下一步"));
-    dashboardNextStepLabel_ = emptyStateLabel(QStringLiteral("打开项目后，按 数据集 -> 训练实验 -> 任务与产物 -> 模型导出 -> 推理验证 的顺序完成本机训练闭环。"));
+    dashboardNextStepLabel_ = emptyStateLabel(QStringLiteral("打开项目后，按 数据集 -> 训练实验 -> 任务与产物 -> 部署验证 的顺序完成本机训练闭环。"));
     allowLabelToShrink(dashboardNextStepLabel_);
     workflowPanel->bodyLayout()->addWidget(dashboardNextStepLabel_);
     auto* actionStrip = new QFrame;
@@ -86,13 +86,13 @@ QWidget* MainWindow::buildDashboardPage()
     auto* trainingButton = new QPushButton(QStringLiteral("启动训练实验"));
     auto* artifactButton = new QPushButton(QStringLiteral("查看任务与产物"));
     auto* modelRegistryButton = new QPushButton(QStringLiteral("模型库"));
-    auto* inferenceButton = new QPushButton(QStringLiteral("推理验证"));
+    auto* inferenceButton = new QPushButton(QStringLiteral("部署验证"));
     connect(projectButton, &QPushButton::clicked, this, [this]() { showPage(ProjectPage, uiText("项目")); });
     connect(datasetButton, &QPushButton::clicked, this, [this]() { showPage(DatasetPage, uiText("数据集")); });
     connect(trainingButton, &QPushButton::clicked, this, [this]() { showPage(TrainingPage, uiText("训练实验")); });
     connect(artifactButton, &QPushButton::clicked, this, [this]() { showPage(TaskQueuePage, uiText("任务与产物")); });
     connect(modelRegistryButton, &QPushButton::clicked, this, [this]() { showPage(ModelRegistryPage, uiText("模型库")); });
-    connect(inferenceButton, &QPushButton::clicked, this, [this]() { showPage(InferencePage, uiText("推理验证")); });
+    connect(inferenceButton, &QPushButton::clicked, this, [this]() { showPage(DeploymentPage, uiText("部署验证")); });
     actionLayout->addWidget(projectButton, 0, 0);
     actionLayout->addWidget(datasetButton, 0, 1);
     actionLayout->addWidget(trainingButton, 1, 0);

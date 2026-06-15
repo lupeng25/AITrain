@@ -55,18 +55,13 @@ QString MainWindow::pageCaption(int pageIndex) const
     switch (pageIndex) {
     case DashboardPage: return tr("本机项目、数据、训练、模型交付状态总览");
     case ProjectPage: return tr("创建或打开本地训练项目，统一管理数据、运行和模型产物");
-    case DatasetPage: return tr("管理数据集库，完成导入、校验、划分和样本预览");
-    case SampleReviewPage: return uiText("汇总质量报告、评估错误和低置信样本，生成 X-AnyLabeling 复核清单");
+    case DatasetPage: return uiText("导入、校验、转换、快照，并处理质量复核样本");
     case TrainingPage: return tr("启动官方后端优先的训练实验，并监控指标、日志和产物");
     case TaskQueuePage: return tr("追踪历史任务、指标、导出记录和所有 Worker 产物");
-    case ModelRegistryPage: return tr("管理模型版本、来源 lineage，以及导出、推理和流水线入口");
-    case EvaluationReportsPage: return tr("集中查看最近评估报告、任务类型、报告路径和详细可视化结果");
-    case ConversionPage: return tr("将训练产物导出为 ONNX 或外部 TensorRT 验收目标");
-    case InferencePage: return tr("选择模型与样本图，验证 detection、segmentation 或 OCR 推理结果");
-    case DeliveryAcceptancePage: return uiText("汇总本机、包体、TensorRT、客户域 OCR 和诊断包验收证据");
-    case PluginsPage: return tr("扫描和诊断模型插件");
-    case EnvironmentPage: return tr("检查 GPU、CUDA、TensorRT 和运行时依赖");
-    case SettingsPage: return uiText("集中管理界面语言、默认项目目录、授权状态和常用系统入口");
+    case ModelRegistryPage: return uiText("管理模型版本、评估报告、对比和流水线记录");
+    case DeploymentPage: return uiText("导出模型，运行推理验证，并查看部署验证状态");
+    case EnvironmentPage: return uiText("检查运行环境，并集中查看交付证据、诊断包和客户域 OCR 验收");
+    case SystemSettingsPage: return uiText("管理插件、界面语言、默认目录、授权状态和本地路径");
     default: return {};
     }
 }
@@ -83,17 +78,50 @@ void MainWindow::showPage(int pageIndex, const QString& title)
     if (pageIndex == ModelRegistryPage) {
         updateModelRegistry();
     }
-    if (pageIndex == EvaluationReportsPage) {
-        updateModelRegistry();
+    if (pageIndex == DatasetPage) {
+        if (!state_.dataset.sampleReviewSamples.isEmpty()) {
+            refreshSampleReviewTable();
+        }
     }
-    if (pageIndex == SampleReviewPage) {
-        refreshSampleReviewTable();
-    }
-    if (pageIndex == DeliveryAcceptancePage) {
+    if (pageIndex == EnvironmentPage) {
+        updateEnvironmentSummary();
         updateDeliveryAcceptanceSummary();
     }
-    if (pageIndex == SettingsPage) {
+    if (pageIndex == SystemSettingsPage) {
+        updatePluginSummary();
         updateSettingsSummary();
+    }
+}
+
+void MainWindow::showDatasetTab(int tabIndex)
+{
+    showPage(DatasetPage, uiText("数据集"));
+    if (datasetTabs_) {
+        datasetTabs_->setCurrentIndex(tabIndex);
+    }
+}
+
+void MainWindow::showModelWorkspaceTab(int tabIndex)
+{
+    showPage(ModelRegistryPage, uiText("模型库"));
+    if (modelWorkspaceTabs_) {
+        modelWorkspaceTabs_->setCurrentIndex(tabIndex);
+    }
+}
+
+void MainWindow::showDeploymentTab(int tabIndex)
+{
+    showPage(DeploymentPage, uiText("部署验证"));
+    if (deploymentTabs_) {
+        deploymentTabs_->setCurrentIndex(tabIndex);
+    }
+}
+
+void MainWindow::showSystemSettingsTab(int tabIndex)
+{
+    showPage(SystemSettingsPage, uiText("系统设置"));
+    if (systemSettingsTabs_) {
+        systemSettingsTabs_->setCurrentIndex(tabIndex);
     }
 }
 
@@ -499,9 +527,9 @@ void MainWindow::updateDashboardSummary()
         } else if (taskCount == 0) {
             nextStep = uiText("下一步：进入训练实验，选择已校验数据集。平台会按任务类型优先选择官方 YOLO / OCR 后端。");
         } else if (exportCount == 0) {
-            nextStep = uiText("下一步：在任务与产物中查看 checkpoint / report / ONNX，注册到模型库后再做评估、基准、导出或推理验证。");
+            nextStep = uiText("下一步：在任务与产物中查看 checkpoint / report / ONNX，注册到模型库后再进入部署验证。");
         } else {
-            nextStep = uiText("项目已具备可复验闭环：数据集、任务历史和模型导出均已记录。可继续运行推理验证或追加实验。");
+            nextStep = uiText("项目已具备可复验闭环：数据集、任务历史和模型导出均已记录。可继续进入部署验证或追加实验。");
         }
         dashboardNextStepLabel_->setText(nextStep);
     }
@@ -649,6 +677,12 @@ void MainWindow::refreshTrainingDefaults()
         QSignalBlocker block(trainingBackendCombo_);
         setComboCurrentData(trainingBackendCombo_, preferredBackend);
     }
-    modelPresetCombo_->setCurrentText(defaultModelForBackend(trainingBackendCombo_->currentData().toString()));
+    const QString backend = trainingBackendCombo_->currentData().toString();
+    {
+        QSignalBlocker block(modelPresetCombo_);
+        modelPresetCombo_->clear();
+        modelPresetCombo_->addItems(modelPresetItemsForBackend(backend));
+        modelPresetCombo_->setCurrentText(defaultModelForBackend(backend));
+    }
     updateTrainingSelectionSummary();
 }

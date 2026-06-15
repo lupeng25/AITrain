@@ -2,7 +2,7 @@ param(
     [string]$WorkDir = ".deps\production-ocr-official-chain",
     [string]$DataDir = ".deps\production-ocr-data",
     [string]$Python = "",
-    [string]$PaddleOcrRepo = ".deps\PaddleOCR",
+    [string]$PaddleOcrRepo = ".deps\repos\PaddleOCR",
     [string]$PaddleOcrRef = "",
     [int]$DetEpochs = 1,
     [int]$DetBatchSize = 1,
@@ -15,17 +15,21 @@ param(
     [int]$RecEvalEverySteps = 1000000,
     [int]$RecSubsetTrain = 256,
     [int]$RecSubsetVal = 64,
+    [ValidateSet("PP-OCRv4", "PP-OCRv5", "PP-OCRv6")]
+    [string]$OcrVersion = "PP-OCRv5",
+    [ValidateSet("tiny", "small", "medium")]
+    [string]$PPOCRv6Tier = "medium",
+    [string]$DetModelPreset = "",
+    [string]$RecModelPreset = "",
     [string]$RecOfficialConfig = "",
-    [string]$RecDictionaryFile = "dict.txt",
+    [string]$RecDictionaryFile = "",
     [string]$RecPretrainedModel = "",
     [switch]$UseGpu,
     [switch]$UseRecCpuSubset,
     [switch]$SkipDataPrep,
     [switch]$SkipExistingReports,
     [switch]$Force,
-    [switch]$AllowBlocked,
-    [switch]$RequireDetOnnxEvidence,
-    [string]$OcrDetOnnxSummary = ""
+    [switch]$AllowBlocked
 )
 
 Set-StrictMode -Version Latest
@@ -33,29 +37,20 @@ $ErrorActionPreference = "Stop"
 
 $script:Root = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $PSScriptRoot) "."))
 $script:StartedAt = [DateTime]::UtcNow
+. (Join-Path $PSScriptRoot "deps-layout.ps1")
 
 function Resolve-RepoPath {
     param([string]$Path)
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        return ""
-    }
-    if ([System.IO.Path]::IsPathRooted($Path)) {
-        return [System.IO.Path]::GetFullPath($Path)
-    }
-    return [System.IO.Path]::GetFullPath((Join-Path $script:Root $Path))
+    return Resolve-AITrainRepoPath -Root $script:Root -Path $Path
 }
 
 function Resolve-Python {
     if ($Python) {
         return Resolve-RepoPath $Python
     }
-    $candidates = @(
-        (Join-Path $script:Root ".deps\python-3.13.13-ocr-amd64\python.exe"),
-        (Join-Path $script:Root ".deps\python-3.13.13-embed-amd64\python.exe")
-    )
-    foreach ($candidate in $candidates) {
+    foreach ($candidate in (Get-AITrainPythonCandidates -Role Ocr -Root $script:Root)) {
         if (Test-Path -LiteralPath $candidate) {
-            return $candidate
+            return [System.IO.Path]::GetFullPath($candidate)
         }
     }
     $fromPath = Get-Command python -ErrorAction SilentlyContinue
@@ -130,7 +125,7 @@ function Invoke-AdapterIfNeeded {
 $pythonExe = Resolve-Python
 $dataFull = Resolve-RepoPath $DataDir
 $workFull = Resolve-RepoPath $WorkDir
-$repoFull = Resolve-RepoPath $PaddleOcrRepo
+$repoFull = Resolve-AITrainPaddleOcrRepo -Root $script:Root -RequestedPath $PaddleOcrRepo
 $requestsDir = Join-Path $workFull "requests"
 $reportsDir = Join-Path $workFull "reports"
 $acceptanceDir = Join-Path $workFull "acceptance"
@@ -152,6 +147,21 @@ $resolvedPaddleOcrRef = (& git -C $repoFull rev-parse HEAD 2>$null).Trim()
 if ($PaddleOcrRef -and $resolvedPaddleOcrRef -ne $PaddleOcrRef) {
     Write-Host "Requested PaddleOCR ref '$PaddleOcrRef', current checkout is '$resolvedPaddleOcrRef'. The script does not checkout refs automatically." -ForegroundColor Yellow
 }
+if ([string]::IsNullOrWhiteSpace($DetModelPreset)) {
+    $DetModelPreset = switch ($OcrVersion) {
+        "PP-OCRv6" { "PP-OCRv6_{0}_det" -f $PPOCRv6Tier }
+        "PP-OCRv5" { "PP-OCRv5_mobile_det" }
+        default { "PP-OCRv4_mobile_det" }
+    }
+}
+if ([string]::IsNullOrWhiteSpace($RecModelPreset)) {
+    $RecModelPreset = switch ($OcrVersion) {
+        "PP-OCRv6" { "PP-OCRv6_{0}_rec" -f $PPOCRv6Tier }
+        "PP-OCRv5" { "en_PP-OCRv5_mobile_rec" }
+        default { "PP-OCRv4_mobile_rec" }
+    }
+}
+Write-Host "Using production OCR presets: Det=$DetModelPreset Rec=$RecModelPreset OcrVersion=$OcrVersion PPOCRv6Tier=$PPOCRv6Tier UseGpu=$([bool]$UseGpu)" -ForegroundColor Cyan
 
 $detDataset = Join-Path $dataFull "det_dataset"
 $recDataset = Join-Path $dataFull "rec_dataset"
@@ -183,6 +193,7 @@ $detRequest = [ordered]@{
         paddleOcrRef = $resolvedPaddleOcrRef
         runOfficial = $true
         prepareOnly = $false
+        modelPreset = $DetModelPreset
         epochs = $DetEpochs
         batchSize = $DetBatchSize
         imageSize = $DetImageSize
@@ -216,6 +227,7 @@ $recRequest = [ordered]@{
         paddleOcrRef = $resolvedPaddleOcrRef
         runOfficial = $true
         prepareOnly = $false
+        modelPreset = $RecModelPreset
         epochs = $RecEpochs
         batchSize = $RecBatchSize
         imageWidth = $RecImageWidth
@@ -225,12 +237,14 @@ $recRequest = [ordered]@{
         useGpu = [bool]$UseGpu
         trainLabelFile = $recLabels.train
         valLabelFile = $recLabels.val
-        dictionaryFile = $RecDictionaryFile
         runInferenceAfterExport = $true
         inferenceImage = "images/test/totaltext_002700_img589_0.jpg"
         evalEverySteps = $RecEvalEverySteps
         acceptanceNote = $(if ($UseRecCpuSubset) { "CPU subset run from public Total-Text crops; not a production accuracy pass." } else { "Full public Total-Text Rec run; still not customer-domain production evidence." })
     }
+}
+if (-not [string]::IsNullOrWhiteSpace($RecDictionaryFile)) {
+    $recRequest.parameters.dictionaryFile = $RecDictionaryFile
 }
 if (-not [string]::IsNullOrWhiteSpace($RecOfficialConfig)) {
     $recRequest.parameters.officialConfig = $RecOfficialConfig
@@ -252,6 +266,9 @@ $systemRequest = [ordered]@{
         trainingBackend = "paddleocr_system_official"
         paddleOcrRepoPath = $repoFull
         paddleOcrRef = $resolvedPaddleOcrRef
+        detModelPreset = $DetModelPreset
+        recModelPreset = $RecModelPreset
+        recReportPath = $recReport
         detModelDir = (Join-Path $detOutput "official_inference")
         recModelDir = (Join-Path $recOutput "official_inference")
         dictionaryFile = (Join-Path $recOutput "official_data\dict.txt")
@@ -277,13 +294,6 @@ $acceptanceArgs = @(
     "-OfficialRecReport", $recReport,
     "-OfficialSystemReport", $systemReport
 )
-if ($OcrDetOnnxSummary) {
-    $acceptanceArgs += @("-OcrDetOnnxSummary", (Resolve-RepoPath $OcrDetOnnxSummary))
-}
-if ($RequireDetOnnxEvidence) {
-    $acceptanceArgs += "-RequireDetOnnxEvidence"
-}
-
 Write-Host "[production-ocr-acceptance] tools\production-ocr-acceptance.ps1 $($acceptanceArgs -join ' ')" -ForegroundColor Cyan
 $acceptanceCommand = @(
     "-NoProfile",
@@ -315,6 +325,10 @@ $chainSummary = [ordered]@{
     paddleOcrRepo = $repoFull
     paddleOcrRef = $resolvedPaddleOcrRef
     useGpu = [bool]$UseGpu
+    ocrVersion = $OcrVersion
+    ppocrv6Tier = $PPOCRv6Tier
+    detModelPreset = $DetModelPreset
+    recModelPreset = $RecModelPreset
     useRecCpuSubset = [bool]$UseRecCpuSubset
     steps = $steps
     requests = [ordered]@{

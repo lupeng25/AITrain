@@ -27,6 +27,7 @@ class EvaluationReportView;
 class PluginMarketplaceWidget;
 class TaskArtifactPanel;
 class QPushButton;
+class QTabWidget;
 class QToolButton;
 
 class MainWindow : public QMainWindow {
@@ -90,37 +91,38 @@ private:
         DashboardPage = 0,
         ProjectPage,
         DatasetPage,
-        SampleReviewPage,
         TrainingPage,
         TaskQueuePage,
         ModelRegistryPage,
-        EvaluationReportsPage,
-        ConversionPage,
-        InferencePage,
-        DeliveryAcceptancePage,
-        PluginsPage,
+        DeploymentPage,
         EnvironmentPage,
-        SettingsPage
+        SystemSettingsPage
     };
 
     QWidget* buildTopBar();
     QWidget* buildDashboardPage();
     QWidget* buildProjectPage();
     QWidget* buildDatasetPage();
-    QWidget* buildSampleReviewPage();
+    QWidget* buildSampleReviewPanel();
     QWidget* buildTrainingPage();
     QWidget* buildTaskQueuePage();
     QWidget* buildModelRegistryPage();
-    QWidget* buildEvaluationReportsPage();
-    QWidget* buildConversionPage();
-    QWidget* buildInferencePage();
-    QWidget* buildDeliveryAcceptancePage();
-    QWidget* buildPluginsPage();
+    QWidget* buildEvaluationReportsPanel();
+    QWidget* buildDeploymentPage();
+    QWidget* buildModelExportPanel();
+    QWidget* buildInferenceValidationPanel();
+    QWidget* buildDeliveryEvidencePanel();
+    QWidget* buildPluginsPanel();
     QWidget* buildEnvironmentPage();
-    QWidget* buildSettingsPage();
+    QWidget* buildSystemSettingsPage();
+    QWidget* buildApplicationSettingsPanel();
 
     InfoPanel* createMetricCard(const QString& label, const QString& value, const QString& caption);
     QString pageCaption(int pageIndex) const;
+    void showDatasetTab(int tabIndex);
+    void showModelWorkspaceTab(int tabIndex);
+    void showDeploymentTab(int tabIndex);
+    void showSystemSettingsTab(int tabIndex);
     QString workerExecutablePath() const;
     QStringList pluginSearchPaths() const;
     QString defaultProjectPath() const;
@@ -173,6 +175,7 @@ private:
     void refreshSampleReviewTable();
     QJsonArray filteredSampleReviewRows() const;
     void updateTrainingSelectionSummary();
+    void refreshModelExportFormatOptions();
     void refreshTrainingDefaults();
     void storeLanguagePreference(const QString& languageCode);
     void updateLanguageButtonState();
@@ -191,6 +194,7 @@ private:
     bool attachLatestSnapshotToRequest(aitrain::TrainingRequest& request, int datasetId, QString* error);
     int recordExperimentRunForRequest(const aitrain::TrainingRequest& request, int datasetId, QString* error);
     void updateExperimentRunSummary(const QString& taskId);
+    QLabel* trainingLiveValueLabel(const QString& objectName) const;
     void registerPipelineModelVersion(const QJsonObject& payload);
     QString createRepositoryTask(aitrain::TaskKind kind, const QString& taskType, const QString& pluginId, const QString& workDir, const QString& message, const QString& requestedTaskId = {});
     QString selectedTaskId() const;
@@ -209,6 +213,10 @@ private:
 
     Sidebar* sidebar_ = nullptr;
     QStackedWidget* stack_ = nullptr;
+    QTabWidget* datasetTabs_ = nullptr;
+    QTabWidget* modelWorkspaceTabs_ = nullptr;
+    QTabWidget* deploymentTabs_ = nullptr;
+    QTabWidget* systemSettingsTabs_ = nullptr;
     QLabel* pageTitle_ = nullptr;
     QLabel* pageCaption_ = nullptr;
     QLabel* headerProjectLabel_ = nullptr;
@@ -339,18 +347,25 @@ private:
     QLineEdit* customerOcrDetReportEdit_ = nullptr;
     QLineEdit* customerOcrRecReportEdit_ = nullptr;
     QLineEdit* customerOcrSystemReportEdit_ = nullptr;
-    QLineEdit* customerOcrDetOnnxEvidenceEdit_ = nullptr;
     QLineEdit* customerOcrOutputEdit_ = nullptr;
     QLineEdit* customerOcrMinAccEdit_ = nullptr;
     QLineEdit* customerOcrMaxCerEdit_ = nullptr;
     QCheckBox* customerOcrAllowPublicCheck_ = nullptr;
-    QCheckBox* customerOcrRequireDetOnnxCheck_ = nullptr;
     QLabel* customerOcrStatusLabel_ = nullptr;
     QLabel* diagnosticsStatusLabel_ = nullptr;
     QLabel* deliveryAcceptanceSummaryLabel_ = nullptr;
     QTableWidget* deliveryAcceptanceTable_ = nullptr;
     QProgressBar* progressBar_ = nullptr;
+    QLabel* trainingPhaseLabel_ = nullptr;
+    QLabel* trainingEpochValueLabel_ = nullptr;
+    QLabel* trainingBatchValueLabel_ = nullptr;
+    QLabel* trainingEtaValueLabel_ = nullptr;
+    QLabel* trainingDeviceValueLabel_ = nullptr;
+    QLabel* trainingLossValueLabel_ = nullptr;
+    QLabel* trainingMapValueLabel_ = nullptr;
     QLabel* latestCheckpointLabel_ = nullptr;
+    QLabel* latestOnnxLabel_ = nullptr;
+    QLabel* latestReportLabel_ = nullptr;
     QLabel* latestPreviewPathLabel_ = nullptr;
     QLabel* latestPreviewImageLabel_ = nullptr;
     QTextEdit* logEdit_ = nullptr;

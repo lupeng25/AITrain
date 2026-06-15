@@ -17,6 +17,8 @@ protected:
     void paintEvent(QPaintEvent* event) override;
 
 private:
+    QString groupForMetric(const QString& name) const;
+    QString labelForGroup(const QString& group) const;
     QMap<QString, QVector<double>> series_;
 };
 

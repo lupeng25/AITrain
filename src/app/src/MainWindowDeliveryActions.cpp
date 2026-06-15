@@ -302,12 +302,10 @@ void MainWindow::runCustomerOcrAcceptance()
     options.insert(QStringLiteral("detReportPath"), QDir::fromNativeSeparators(customerOcrDetReportEdit_ ? customerOcrDetReportEdit_->text().trimmed() : QString()));
     options.insert(QStringLiteral("recReportPath"), QDir::fromNativeSeparators(customerOcrRecReportEdit_ ? customerOcrRecReportEdit_->text().trimmed() : QString()));
     options.insert(QStringLiteral("systemReportPath"), QDir::fromNativeSeparators(customerOcrSystemReportEdit_ ? customerOcrSystemReportEdit_->text().trimmed() : QString()));
-    options.insert(QStringLiteral("detOnnxEvidencePath"), QDir::fromNativeSeparators(customerOcrDetOnnxEvidenceEdit_ ? customerOcrDetOnnxEvidenceEdit_->text().trimmed() : QString()));
     options.insert(QStringLiteral("minRecAccuracy"), customerOcrMinAccEdit_ ? customerOcrMinAccEdit_->text().toDouble() : 0.70);
     options.insert(QStringLiteral("maxRecCer"), customerOcrMaxCerEdit_ ? customerOcrMaxCerEdit_->text().toDouble() : 0.30);
     options.insert(QStringLiteral("requireFullDomainEvidence"), true);
     options.insert(QStringLiteral("allowPublicLikeData"), customerOcrAllowPublicCheck_ && customerOcrAllowPublicCheck_->isChecked());
-    options.insert(QStringLiteral("requireDetOnnxEvidence"), customerOcrRequireDetOnnxCheck_ && customerOcrRequireDetOnnxCheck_->isChecked());
     options.insert(QStringLiteral("minDetSamples"), 1);
     options.insert(QStringLiteral("minRecSamples"), 1);
     options.insert(QStringLiteral("minSystemImages"), 1);
