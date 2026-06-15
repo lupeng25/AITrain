@@ -57,7 +57,6 @@ $script:Pages = @(
     (New-UiLabel @(0x8BC4, 0x4F30, 0x62A5, 0x544A)),
     (New-UiLabel @(0x6A21, 0x578B, 0x5BFC, 0x51FA)),
     (New-UiLabel @(0x63A8, 0x7406, 0x9A8C, 0x8BC1)),
-    (New-UiLabel @(0x4EA4, 0x4ED8, 0x9A8C, 0x6536)),
     (New-UiLabel @(0x63D2, 0x4EF6)),
     (New-UiLabel @(0x73AF, 0x5883)),
     (New-UiLabel @(0x8BBE, 0x7F6E))
@@ -74,7 +73,6 @@ $script:EnglishPages = @(
     "Evaluation Reports",
     "Model Export",
     "Inference Check",
-    "Delivery Acceptance",
     "Plugins",
     "Environment",
     "Settings"
@@ -91,7 +89,6 @@ $script:EnglishMixedPages = @(
     "Evaluation Reports",
     "Model Export",
     "Inference Check",
-    (New-UiLabel @(0x4EA4, 0x4ED8, 0x9A8C, 0x6536)),
     "Plugins",
     "Environment",
     "Settings"

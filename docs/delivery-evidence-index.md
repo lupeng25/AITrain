@@ -18,11 +18,11 @@
 | Phase 45 YOLO11/YOLO12 matrix | 已通过 RTX validation lane | `docs\validation\rtx4090-validation-evidence-20260615.json`；复跑命令为 `.\tools\phase45-yolo-model-matrix-smoke.ps1` | 2026-06-05 修复后矩阵 `status=passed`、`ctestStatus=passed` 已归档；原始 `.deps` 产物目录已清理。验证 detection/segmentation 接线和产物，不是精度 benchmark。 |
 | Historical Phase 47 PaddleOCR Det ONNX | 历史 wiring 证据 | `docs\validation\rtx4090-validation-evidence-20260615.json` | 仅用于解释过去的 ONNX 转换和 C++ 后处理接线范围；当前 OCR 验收必须使用 PaddleOCR 官方 Det/Rec/System 报告。 |
 | Production OCR public workflow | 已通过 public workflow lane | `docs\validation\rtx4090-validation-evidence-20260615.json`；复跑环境通过 `.deps\envs\ocr-gpu` 暴露，旧 `.deps\rtx4090-validation\python-ocr-gpu` 为兼容 target | Public Total-Text 证据不能证明客户域生产精度。 |
-| Customer-domain OCR | 需要客户/目标域证据 | `.\tools\customer-ocr-validation.ps1`；交付验收页导入结果 | 只有真实客户/目标域数据和报告才能支撑生产声明。 |
+| Customer-domain OCR | 需要客户/目标域证据 | `.\tools\customer-ocr-validation.ps1`；`环境 > 交付证据` 导入结果 | 只有真实客户/目标域数据和报告才能支撑生产声明。 |
 | 数据集转换 GUI closeout | 已完成本地验证 | `.deps\UI-Walkthrough\dataset-conversion\walkthrough-summary.json` | 转换产物不自动注册为数据集。 |
 | GUI walkthrough | 已固化为本地 RC gate | `.\tools\ui-workbench-walkthrough.ps1`；`docs\validation\rtx4090-validation-evidence-20260615.json` | 2026-06-05 follow-up 固定 1280x820，覆盖 14 个主页面并生成截图；未被授权弹窗阻塞。 |
-| 诊断包 | GUI/Worker 能力已落地 | 交付验收页“一键诊断包”；Worker `collectDiagnostics` | 诊断包是只读证据，不修改全局环境。 |
-| 部署验证 | GUI/Worker 能力已落地 | 交付验收页“部署验证”；Worker `validateDeploymentArtifact` | ONNX 需要可运行推理；TensorRT 可返回 `hardware-blocked`；NCNN 在配置 SDK/runtime 和样本图时执行 YOLO 检测/分割 runtime inference。 |
+| 诊断包 | GUI/Worker 能力已落地 | `环境 > 交付证据` 的“一键诊断包”；Worker `collectDiagnostics` | 诊断包是只读证据，不修改全局环境。 |
+| 部署验证 | GUI/Worker 能力已落地 | `环境 > 交付证据` 汇总部署验证状态；Worker `validateDeploymentArtifact` | ONNX 需要可运行推理；TensorRT 可返回 `hardware-blocked`；NCNN 在配置 SDK/runtime 和样本图时执行 YOLO 检测/分割 runtime inference。 |
 | NCNN runtime smoke | 本机检测/分割 runtime 已有证据 | `.deps\github-ncnn-smoke\hyuto-yolov8\runtime-output`；`.deps\github-ncnn-smoke\nihui-yolov8n-seg-ncnn\runtime-output\deployment-validation` | Hyuto YOLOv8 detection ONNX -> NCNN passed，nihui 预转换 YOLOv8n-seg pnnx/DFL NCNN passed；YOLOv8-seg ONNX 若残留 unsupported `Shape` layer，则记录为 failed report。 |
 
 ## 证据分层
@@ -39,7 +39,7 @@
 - RTX 4090 D TensorRT 通过，不代表 clean Windows package acceptance 通过。
 - RTX 4090 D TensorRT 通过，不代表未来 package-root TensorRT rerun 自动通过。
 - Public Total-Text 或 generated smoke 通过，不代表客户域 OCR 生产精度通过。
-- GUI 交付验收页显示导入结果，不替代底层脚本、Worker、外部机器或客户数据证据。
+- GUI `环境 > 交付证据` 显示导入结果，不替代底层脚本、Worker、外部机器或客户数据证据。
 - NCNN 部署验证不再使用 artifact-only 通过条件；无 SDK/runtime 会失败，缺少样本图会阻塞，外部模型需要 sidecar 或显式 blob/decoder 配置。
 - NCNN failed report 必须带 `errorCode` / `failureCategory` / `nextAction` / `diagnosticHints`；当前分类为 `sdk_missing`、`sample_missing`、`sidecar_missing`、`unsupported_layer`、`runtime_failed`。
 - NCNN 分割 runtime 当前通过证据来自 nihui 预转换 pnnx/DFL artifact；不要把失败的 YOLOv8-seg ONNX -> `onnx2ncnn` `Shape` layer case 说成分割 runtime 通过。

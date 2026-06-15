@@ -97,7 +97,6 @@ private:
         EvaluationReportsPage,
         ConversionPage,
         InferencePage,
-        DeliveryAcceptancePage,
         PluginsPage,
         EnvironmentPage,
         SettingsPage
@@ -114,7 +113,7 @@ private:
     QWidget* buildEvaluationReportsPage();
     QWidget* buildConversionPage();
     QWidget* buildInferencePage();
-    QWidget* buildDeliveryAcceptancePage();
+    QWidget* buildDeliveryEvidencePanel();
     QWidget* buildPluginsPage();
     QWidget* buildEnvironmentPage();
     QWidget* buildSettingsPage();

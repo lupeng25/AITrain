@@ -557,7 +557,7 @@ QWidget* MainWindow::buildInferencePage()
     return page;
 }
 
-QWidget* MainWindow::buildDeliveryAcceptancePage()
+QWidget* MainWindow::buildDeliveryEvidencePanel()
 {
     auto* page = new QScrollArea;
     page->setWidgetResizable(true);
@@ -566,18 +566,8 @@ QWidget* MainWindow::buildDeliveryAcceptancePage()
 
     auto* content = new QWidget;
     auto* layout = new QVBoxLayout(content);
-    layout->setContentsMargins(18, 18, 18, 18);
+    layout->setContentsMargins(0, 12, 0, 0);
     layout->setSpacing(16);
-
-    auto* diagnosticsButton = primaryButton(uiText("生成诊断包"));
-    connect(diagnosticsButton, &QPushButton::clicked, this, &MainWindow::collectDiagnosticsBundle);
-    auto* header = createWorkbenchHeader(
-        QStringLiteral("DELIVERY ACCEPTANCE"),
-        uiText("交付验收"),
-        uiText("汇总本机 RC、clean Windows、TensorRT、客户域 OCR、包体完整性和诊断包证据，明确 passed / blocked / hardware-blocked。"),
-        diagnosticsButton,
-        QStringList() << QStringLiteral("RC") << QStringLiteral("TensorRT") << QStringLiteral("Customer OCR") << QStringLiteral("Diagnostics"));
-    layout->addWidget(header);
 
     auto* splitter = new QSplitter(Qt::Horizontal);
 
@@ -586,7 +576,7 @@ QWidget* MainWindow::buildDeliveryAcceptancePage()
     leftLayout->setContentsMargins(0, 0, 0, 0);
     leftLayout->setSpacing(16);
 
-    auto* summaryPanel = new InfoPanel(uiText("验收中心"));
+    auto* summaryPanel = new InfoPanel(uiText("验收证据"));
     deliveryAcceptanceSummaryLabel_ = inlineStatusLabel(uiText("等待导入或运行验收证据。"));
     summaryPanel->bodyLayout()->addWidget(deliveryAcceptanceSummaryLabel_);
     deliveryAcceptanceTable_ = new QTableWidget(0, 4);
@@ -606,33 +596,14 @@ QWidget* MainWindow::buildDeliveryAcceptancePage()
     connect(importButton, &QPushButton::clicked, this, &MainWindow::importAcceptanceEvidence);
     summaryPanel->bodyLayout()->addWidget(importButton, 0, Qt::AlignRight);
 
-    auto* firstRunPanel = new InfoPanel(uiText("首次运行向导"));
-    auto* firstRunGrid = new QGridLayout;
-    firstRunGrid->setHorizontalSpacing(10);
-    firstRunGrid->setVerticalSpacing(8);
-    const QStringList steps = {
-        uiText("1. 授权状态"),
-        uiText("2. YOLO profile"),
-        uiText("3. OCR profile"),
-        uiText("4. TensorRT profile"),
-        uiText("5. 示例数据 smoke"),
-        uiText("6. 训练/评估/导出/推理闭环")
-    };
-    for (int index = 0; index < steps.size(); ++index) {
-        firstRunGrid->addWidget(inlineStatusLabel(steps.at(index)), index / 2, index % 2);
-    }
-    firstRunPanel->bodyLayout()->addLayout(firstRunGrid);
-    firstRunPanel->bodyLayout()->addWidget(mutedLabel(uiText("向导只给出隔离环境和修复命令建议，不自动修改用户全局 Python / CUDA / driver 配置。")));
-
-    leftLayout->addWidget(summaryPanel, 3);
-    leftLayout->addWidget(firstRunPanel, 2);
+    leftLayout->addWidget(summaryPanel, 1);
 
     auto* rightStack = new QWidget;
     auto* rightLayout = new QVBoxLayout(rightStack);
     rightLayout->setContentsMargins(0, 0, 0, 0);
     rightLayout->setSpacing(16);
 
-    auto* ocrPanel = new InfoPanel(uiText("客户域 OCR 验收向导"));
+    auto* ocrPanel = new InfoPanel(uiText("客户域 OCR 验收"));
     const auto makePathRow = [this](QLineEdit** target, const QString& placeholder, bool directory) {
         auto* row = new QWidget;
         auto* rowLayout = new QHBoxLayout(row);
@@ -714,5 +685,6 @@ QWidget* MainWindow::buildDeliveryAcceptancePage()
 
     layout->addWidget(splitter, 1);
     page->setWidget(content);
+    updateDeliveryAcceptanceSummary();
     return page;
 }

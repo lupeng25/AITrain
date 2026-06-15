@@ -41,12 +41,12 @@ For YOLO model-family productization, use `docs\yolo-model-support-matrix.md`. P
 
 ## Phase 49 Lite: Delivery Closeout Workbench
 
-The GUI delivery-closeout pages aggregate evidence; they do not replace the scripts or Worker report commands. Use the workbench to display imported JSON/Markdown acceptance evidence, run report-only Worker commands, and review `passed` / `blocked` / `failed` / `hardware-blocked` status.
+The GUI delivery-closeout surfaces aggregate evidence; they do not replace the scripts or Worker report commands. Use the workbench to display imported JSON/Markdown acceptance evidence in `环境 > 交付证据`, run report-only Worker commands, and review `passed` / `blocked` / `failed` / `hardware-blocked` status.
 
 Current GUI surfaces:
 
 - `样本复核`: load `problem_samples.json`, `error_samples.json`, `rework_sample_set.json`, or evaluation reports; filter by source, reason, class, split, OCR edit distance / CER, or search text; export an X-AnyLabeling review list.
-- `交付验收`: summarize local RC, clean Windows, TensorRT, package integrity, customer OCR, diagnostics, and deployment validation evidence.
+- `环境 > 交付证据`: summarize local RC, clean Windows, TensorRT, package integrity, customer OCR, diagnostics, and deployment validation evidence.
 - Customer OCR acceptance wizard: collect Det dataset, Rec dataset, System images, official Det/Rec/System reports, and write customer OCR manifest/summary outputs.
 - Export post-validation: validate ONNX by runnable inference where possible; preserve TensorRT `hardware-blocked`; validate NCNN by runtime inference for YOLO detection/segmentation when NCNN SDK/runtime and a sample image are available, otherwise report failed/blocked explicitly.
 - Diagnostics bundle: collect Worker self-check, environment profile, GPU/runtime state, recent task logs/request snippets, artifact index, plugin state, and license summary.
@@ -387,7 +387,7 @@ These phases do not change TensorRT acceptance. They make the local RC easier to
 - Official OCR: `phase16-ocr-official-smoke.ps1` covers official Rec train, export, and recognition inference. `phase31-paddleocr-full-official-smoke.ps1` covers official Det + Rec train/export and official System inference.
 - Annotation: the dataset page launches X-AnyLabeling as the default external annotation tool, detects its local path, and provides a post-labeling refresh/revalidation action.
 - UX closeout: task history can be filtered by category, status, and search text; failed tasks show a short diagnostic next-step summary.
-- Delivery closeout: sample review, delivery acceptance, customer OCR validation, diagnostics, and deployment validation are available through the Phase 49 GUI pages and Worker report commands.
+- Delivery closeout: sample review, environment-page delivery evidence, customer OCR validation, diagnostics, and deployment validation are available through the Phase 49 GUI surfaces and Worker report commands.
 
 Suggested manual GUI walkthrough:
 
@@ -395,13 +395,13 @@ Suggested manual GUI walkthrough:
 .\tools\ui-workbench-walkthrough.ps1
 ```
 
-The RC walkthrough wrapper runs the 1280x820 non-fullscreen page set: `总览`, `项目`, `数据集`, `样本复核`, `训练实验`, `任务与产物`, `模型库`, `评估报告`, `模型导出`, `推理验证`, `交付验收`, `插件`, `环境`, and `设置`. It writes `ui_walkthrough_rc_summary.json` under `.deps\UI-Walkthrough\rc` by default and should be treated as the repeatable GUI usability gate.
+The RC walkthrough wrapper runs the 1280x820 non-fullscreen page set: `总览`, `项目`, `数据集`, `样本复核`, `训练实验`, `任务与产物`, `模型库`, `评估报告`, `模型导出`, `推理验证`, `插件`, `环境`, and `设置`. It writes `ui_walkthrough_rc_summary.json` under `.deps\UI-Walkthrough\rc` by default and should be treated as the repeatable GUI usability gate. The `环境 > 交付证据` tab is covered by QtTest because it is no longer a standalone main navigation page.
 
 If offline licensing stops startup at the registration dialog, the wrapper records `status=blocked` and `errorCode=license_required`. That is not a GUI layout pass; configure a valid license token and build-time public key, then rerun the wrapper.
 
 `tools\local-rc-closeout.ps1` runs this walkthrough by default after harness/package smoke. Use `-SkipGuiWalkthrough` only for intentionally headless environments, and record that omission in the handoff notes.
 
-For manual exploration beyond the automated pass, create or open a project, import generated detection, segmentation, OCR Rec, and OCR Det datasets, launch X-AnyLabeling from the dataset page, use post-labeling refresh/revalidation, validate and split each dataset, run one training/export/inference path, then confirm the task queue detail view lists report, checkpoint/model, ONNX, overlay, visualized OCR image, and prediction JSON/TXT artifacts. Also open `样本复核` and `交付验收` to confirm review-list export, diagnostics, customer OCR gate, and deployment validation entries are visible.
+For manual exploration beyond the automated pass, create or open a project, import generated detection, segmentation, OCR Rec, and OCR Det datasets, launch X-AnyLabeling from the dataset page, use post-labeling refresh/revalidation, validate and split each dataset, run one training/export/inference path, then confirm the task queue detail view lists report, checkpoint/model, ONNX, overlay, visualized OCR image, and prediction JSON/TXT artifacts. Also open `样本复核` and `环境 > 交付证据` to confirm review-list export, diagnostics, customer OCR gate, and deployment validation entries are visible.
 
 X-AnyLabeling is detected from `AITRAIN_XANYLABELING_EXE`, the app directory, `tools\x-anylabeling`, `.deps\annotation-tools\X-AnyLabeling`, or `PATH`. Keep downloaded binaries in `.deps\` unless a separate redistribution review is completed.
 

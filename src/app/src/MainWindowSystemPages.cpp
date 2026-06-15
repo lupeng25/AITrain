@@ -194,7 +194,7 @@ QWidget* MainWindow::buildEnvironmentPage()
     kicker->setObjectName(QStringLiteral("ExperimentKicker"));
     auto* title = new QLabel(QStringLiteral("运行时健康面板"));
     title->setObjectName(QStringLiteral("ExperimentTitle"));
-    auto* subtitle = new QLabel(QStringLiteral("检查 NVIDIA 驱动、CUDA、TensorRT、ONNX Runtime、Qt 插件和 Worker 可用性。"));
+    auto* subtitle = new QLabel(uiText("检查 NVIDIA 驱动、CUDA、TensorRT、ONNX Runtime、Qt 插件和 Worker 可用性，并集中查看交付证据、诊断包和客户域 OCR 验收。"));
     subtitle->setObjectName(QStringLiteral("ExperimentMeta"));
     subtitle->setWordWrap(true);
     allowLabelToShrink(subtitle);
@@ -258,10 +258,22 @@ QWidget* MainWindow::buildEnvironmentPage()
     }
     panel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("TensorRT 已有 RTX 4090 D 验收证据；不兼容 GPU/runtime 会记录为 hardware-blocked，包体或客户机验收需以实际环境证据为准。")));
     panel->bodyLayout()->addWidget(environmentTable_);
+    auto* runtimeTab = new QWidget;
+    auto* runtimeLayout = new QVBoxLayout(runtimeTab);
+    runtimeLayout->setContentsMargins(0, 0, 0, 0);
+    runtimeLayout->setSpacing(16);
+    runtimeLayout->addWidget(summaryStrip);
+    runtimeLayout->addWidget(panel, 1);
+
+    auto* tabs = new QTabWidget;
+    tabs->setObjectName(QStringLiteral("EnvironmentTabs"));
+    tabs->addTab(runtimeTab, uiText("运行环境"));
+    tabs->addTab(buildDeliveryEvidencePanel(), uiText("交付证据"));
+
     layout->addWidget(headerPanel);
-    layout->addWidget(summaryStrip);
-    layout->addWidget(panel, 1);
+    layout->addWidget(tabs, 1);
     updateEnvironmentSummary();
+    updateDeliveryAcceptanceSummary();
     return page;
 }
 

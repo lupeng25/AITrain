@@ -63,9 +63,8 @@ QString MainWindow::pageCaption(int pageIndex) const
     case EvaluationReportsPage: return tr("集中查看最近评估报告、任务类型、报告路径和详细可视化结果");
     case ConversionPage: return tr("将训练产物导出为 ONNX 或外部 TensorRT 验收目标");
     case InferencePage: return tr("选择模型与样本图，验证 detection、segmentation 或 OCR 推理结果");
-    case DeliveryAcceptancePage: return uiText("汇总本机、包体、TensorRT、客户域 OCR 和诊断包验收证据");
     case PluginsPage: return tr("扫描和诊断模型插件");
-    case EnvironmentPage: return tr("检查 GPU、CUDA、TensorRT 和运行时依赖");
+    case EnvironmentPage: return uiText("检查运行环境，并集中查看交付证据、诊断包和客户域 OCR 验收");
     case SettingsPage: return uiText("集中管理界面语言、默认项目目录、授权状态和常用系统入口");
     default: return {};
     }
@@ -89,7 +88,8 @@ void MainWindow::showPage(int pageIndex, const QString& title)
     if (pageIndex == SampleReviewPage) {
         refreshSampleReviewTable();
     }
-    if (pageIndex == DeliveryAcceptancePage) {
+    if (pageIndex == EnvironmentPage) {
+        updateEnvironmentSummary();
         updateDeliveryAcceptanceSummary();
     }
     if (pageIndex == SettingsPage) {

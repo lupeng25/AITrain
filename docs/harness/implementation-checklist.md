@@ -50,12 +50,12 @@ Get-Content -LiteralPath HARNESS.md -Encoding UTF8 -TotalCount 5
 git -c core.quotepath=false ls-files | Select-String -Pattern 'AITrainStudio'
 ```
 
-如果改动涉及当前项目状态、交付验收、客户域 OCR、部署验证或样本复核，需要同步检查 `docs/harness/current-status.md`、`docs/harness/project-context.md`、`docs/acceptance-runbook.md`、`docs/product-roadmap-local-training-platform.md` 和 `docs/user-guide.md` 是否一致。
+如果改动涉及当前项目状态、交付证据/验收、客户域 OCR、部署验证或样本复核，需要同步检查 `docs/harness/current-status.md`、`docs/harness/project-context.md`、`docs/acceptance-runbook.md`、`docs/product-roadmap-local-training-platform.md` 和 `docs/user-guide.md` 是否一致。
 
 如果修改 UI 布局，还需要至少执行一次非全屏 walkthrough：
 
 ```powershell
-$pages = @('总览','项目','数据集','样本复核','训练实验','任务与产物','模型库','评估报告','模型导出','推理验证','交付验收','插件','环境','设置')
+$pages = @('总览','项目','数据集','样本复核','训练实验','任务与产物','模型库','评估报告','模型导出','推理验证','插件','环境','设置')
 C:\Users\73200\.codex\skills\qt-gui-walkthrough\scripts\qt_walkthrough.ps1 `
   -AppPath .\build-vscode\bin\AITrainStudio.exe `
   -WorkingDirectory .\build-vscode\bin `

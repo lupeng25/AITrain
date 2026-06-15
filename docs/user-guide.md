@@ -21,7 +21,7 @@
   -> 导出模型
   -> 导出后验证
   -> 推理验证
-  -> 交付验收和诊断包
+  -> 环境 > 交付证据和诊断包
 ```
 
 重要边界：
@@ -309,7 +309,7 @@ NCNN 当前本机验证边界：检测模型已经通过 Hyuto YOLOv8 ONNX -> NC
 
 OCR 路线只依赖 PaddleOCR 官方实现。Det / Rec / System 的推理、评估和可视化结果应从官方 PaddleOCR 任务产物与报告中查看，不通过 AITrain C++ OCR ONNX 后处理作为产品路径。
 
-## 11. 样本复核、交付验收和诊断包
+## 11. 样本复核、环境页交付证据和诊断包
 
 ### 11.1 样本复核
 
@@ -322,9 +322,9 @@ OCR 路线只依赖 PaddleOCR 官方实现。Det / Rec / System 的推理、评�
 
 加载后可按来源、问题类型、类别、split、评估错误、OCR edit distance / CER、低置信信息筛选。点击“生成复核清单”会写出 X-AnyLabeling 可用的本地图片列表和 `rework_sample_set.json`。v1 不内嵌标注器，也不实现多人协作；标注完成后回到“数据集”页刷新、重新校验并创建快照。
 
-### 11.2 交付验收
+### 11.2 环境 > 交付证据
 
-“交付验收”页汇总以下状态：
+“环境”页中的“交付证据”分区汇总以下状态：
 
 - 本机 RC
 - clean Windows
@@ -334,11 +334,11 @@ OCR 路线只依赖 PaddleOCR 官方实现。Det / Rec / System 的推理、评�
 - 部署验证
 - 诊断包
 
-可以导入外部 JSON / Markdown 验收结果，状态会显示为 `passed`、`blocked`、`failed`、`hardware-blocked` 或 `not_run`。真实验收脚本仍以 `tools\local-rc-closeout.ps1`、`tools\release-freeze-handoff.ps1`、`tools\customer-ocr-validation.ps1` 为准；GUI 负责调度 Worker 或展示结果。
+可以导入外部 JSON / Markdown 验收结果，状态会显示为 `passed`、`blocked`、`failed`、`hardware-blocked` 或 `not_run`。真实验收脚本仍以 `tools\local-rc-closeout.ps1`、`tools\release-freeze-handoff.ps1`、`tools\customer-ocr-validation.ps1` 为准；GUI 负责调度 Worker 或展示结果，不替代 clean Windows、package-root TensorRT 或客户域 OCR 的真实返回证据。
 
 ### 11.3 客户域 OCR 验收
 
-在“交付验收”页填写客户域 Det 数据集、Rec 数据集、System 图片，以及 Det/Rec/System 官方报告。默认门槛为 Rec accuracy >= `0.70`、CER <= `0.30`，且必须不是 public/generated/smoke 数据。Total-Text、generated smoke 和 `.deps` 示例只能证明流程可跑，不能证明客户域 OCR 生产精度。
+在“环境 > 交付证据”中填写客户域 Det 数据集、Rec 数据集、System 图片，以及 Det/Rec/System 官方报告。默认门槛为 Rec accuracy >= `0.70`、CER <= `0.30`，且必须不是 public/generated/smoke 数据。Total-Text、generated smoke 和 `.deps` 示例只能证明流程可跑，不能证明客户域 OCR 生产精度。
 
 ### 11.4 一键诊断包
 

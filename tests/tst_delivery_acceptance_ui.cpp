@@ -5,56 +5,71 @@
 
 #include <QMetaObject>
 #include <QPushButton>
+#include <QTabWidget>
 #include <QTest>
 
-class DeliveryAcceptanceUiTests : public QObject {
+class EnvironmentDeliveryEvidenceUiTests : public QObject {
     Q_OBJECT
 
 private slots:
-    void switchingToDeliveryAcceptanceInitializesRows();
-    void clickingSidebarDeliveryAcceptanceSwitchesPage();
+    void switchingToEnvironmentShowsDeliveryEvidenceTab();
+    void clickingSidebarEnvironmentSwitchesPageWithoutDeliveryEntry();
 };
 
-void DeliveryAcceptanceUiTests::switchingToDeliveryAcceptanceInitializesRows()
+void EnvironmentDeliveryEvidenceUiTests::switchingToEnvironmentShowsDeliveryEvidenceTab()
 {
     MainWindow window(QStringLiteral("test-license"), QStringLiteral("2099-12-31"));
-    QVERIFY(window.deliveryAcceptanceTable_ != nullptr);
-    QCOMPARE(window.deliveryAcceptanceTable_->rowCount(), 0);
 
     const bool invoked = QMetaObject::invokeMethod(
         &window,
         "showPage",
         Qt::DirectConnection,
-        Q_ARG(int, MainWindow::DeliveryAcceptancePage),
-        Q_ARG(QString, QStringLiteral("交付验收")));
+        Q_ARG(int, MainWindow::EnvironmentPage),
+        Q_ARG(QString, QStringLiteral("环境")));
     QVERIFY(invoked);
 
-    QCOMPARE(window.stack_->currentIndex(), static_cast<int>(MainWindow::DeliveryAcceptancePage));
+    QCOMPARE(window.stack_->currentIndex(), static_cast<int>(MainWindow::EnvironmentPage));
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("EnvironmentTabs"));
+    QVERIFY(tabs != nullptr);
+    QCOMPARE(tabs->count(), 2);
+    QCOMPARE(tabs->tabText(0), QStringLiteral("运行环境"));
+    QCOMPARE(tabs->tabText(1), QStringLiteral("交付证据"));
+
+    tabs->setCurrentIndex(1);
+    QCoreApplication::processEvents();
+
     QVERIFY(window.deliveryAcceptanceTable_ != nullptr);
     QCOMPARE(window.deliveryAcceptanceTable_->rowCount(), 7);
     QVERIFY(window.deliveryAcceptanceSummaryLabel_ != nullptr);
     QVERIFY(window.deliveryAcceptanceSummaryLabel_->text().contains(QStringLiteral("not-run 7")));
 }
 
-void DeliveryAcceptanceUiTests::clickingSidebarDeliveryAcceptanceSwitchesPage()
+void EnvironmentDeliveryEvidenceUiTests::clickingSidebarEnvironmentSwitchesPageWithoutDeliveryEntry()
 {
     MainWindow window(QStringLiteral("test-license"), QStringLiteral("2099-12-31"));
     window.resize(1280, 820);
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
 
-    QPushButton* deliveryButton = qobject_cast<QPushButton*>(
-        window.sidebar_->buttons_.button(MainWindow::DeliveryAcceptancePage));
-    QVERIFY(deliveryButton != nullptr);
-    QVERIFY(deliveryButton->isVisible());
+    const auto sidebarButtons = window.sidebar_->findChildren<QPushButton*>();
+    for (QPushButton* button : sidebarButtons) {
+        QVERIFY(button->text() != QStringLiteral("交付验收"));
+    }
 
-    deliveryButton->click();
+    QPushButton* environmentButton = qobject_cast<QPushButton*>(
+        window.sidebar_->buttons_.button(MainWindow::EnvironmentPage));
+    QVERIFY(environmentButton != nullptr);
+    QVERIFY(environmentButton->isVisible());
+
+    environmentButton->click();
     QCoreApplication::processEvents();
 
-    QCOMPARE(window.stack_->currentIndex(), static_cast<int>(MainWindow::DeliveryAcceptancePage));
+    QCOMPARE(window.stack_->currentIndex(), static_cast<int>(MainWindow::EnvironmentPage));
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("EnvironmentTabs"));
+    QVERIFY(tabs != nullptr);
     QCOMPARE(window.deliveryAcceptanceTable_->rowCount(), 7);
     QVERIFY(window.deliveryAcceptanceSummaryLabel_->text().contains(QStringLiteral("not-run 7")));
 }
 
-QTEST_MAIN(DeliveryAcceptanceUiTests)
+QTEST_MAIN(EnvironmentDeliveryEvidenceUiTests)
 #include "tst_delivery_acceptance_ui.moc"

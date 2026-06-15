@@ -1,6 +1,6 @@
 # AITrain Studio Local RC Closeout
 
-This checklist is the local, non-external release-candidate closeout path after Phase 39B, Phase 39C, Phase 41 Lite, and Phase 49 Lite. It does not add new model backends. It exists to make the current detection, segmentation, OCR, pipeline, benchmark, model registry, delivery report, environment profile, sample review, deployment validation, diagnostics, and delivery acceptance loop repeatable on the development machine.
+This checklist is the local, non-external release-candidate closeout path after Phase 39B, Phase 39C, Phase 41 Lite, and Phase 49 Lite. It does not add new model backends. It exists to make the current detection, segmentation, OCR, pipeline, benchmark, model registry, delivery report, environment profile, sample review, deployment validation, diagnostics, and environment-page delivery evidence loop repeatable on the development machine.
 
 After this local gate passes, use `docs\external-acceptance-handoff.md` and `docs\acceptance-templates\` for the clean Windows package handoff and for any explicitly reopened package-root RTX / SM 75+ TensorRT rerun. The RTX 4090 D source-side TensorRT validation lane already has passing evidence archived in `docs\validation\rtx4090-validation-evidence-20260615.json`; do not weaken or overwrite that lane with package-root or clean-machine status.
 
@@ -62,7 +62,7 @@ The default RC command runs the fixed 1280x820 walkthrough wrapper:
 .\tools\ui-workbench-walkthrough.ps1
 ```
 
-It covers `总览`, `项目`, `数据集`, `样本复核`, `训练实验`, `任务与产物`, `模型库`, `评估报告`, `模型导出`, `推理验证`, `交付验收`, `插件`, `环境`, and `设置`, and writes `.deps\UI-Walkthrough\rc\ui_walkthrough_rc_summary.json`.
+It covers `总览`, `项目`, `数据集`, `样本复核`, `训练实验`, `任务与产物`, `模型库`, `评估报告`, `模型导出`, `推理验证`, `插件`, `环境`, and `设置`, and writes `.deps\UI-Walkthrough\rc\ui_walkthrough_rc_summary.json`. The `环境 > 交付证据` tab is covered by QtTest rather than the main-page walkthrough.
 
 If the app opens the offline registration dialog before the workbench, the wrapper writes a blocked summary with `errorCode=license_required`. Treat that as environment/configuration blocked evidence: configure a valid offline license token and build-time `AITRAIN_LICENSE_PUBLIC_KEY`, then rerun the walkthrough instead of marking the GUI gate passed.
 
@@ -80,7 +80,7 @@ For manual exploration beyond the automated gate, walk through these screens:
 | Evaluation / Benchmark | Run evaluation and benchmark from model artifacts when available; reports should be recorded as Worker artifacts. |
 | Model Registry | Registered model versions should show lineage, evaluation, benchmark, artifact, and limitation summaries. |
 | Delivery Report | Generate a delivery report and confirm HTML, model card, and artifact inventory are present and previewable. |
-| Delivery Acceptance | Open the delivery acceptance page; local RC, clean Windows, TensorRT, customer OCR, package integrity, diagnostics, and deployment validation states should render as `passed`, `blocked`, `failed`, `hardware-blocked`, or `not-run` without horizontal overflow. |
+| Delivery Evidence | Open `环境 > 交付证据`; local RC, clean Windows, TensorRT, customer OCR, package integrity, diagnostics, and deployment validation states should render as `passed`, `blocked`, `failed`, `hardware-blocked`, or `not-run` without horizontal overflow. |
 
 ## Boundary Wording Checklist
 
