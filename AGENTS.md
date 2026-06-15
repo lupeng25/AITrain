@@ -16,7 +16,7 @@ If the task is broad or implementation-heavy, also inspect:
 
 7. `docs/product-roadmap-local-training-platform.md`
 
-`AITrainStudio_后续实施方案.md` is a historical roadmap archive. Do not use it as the current implementation plan or phase status source unless the user explicitly asks for historical context.
+`docs/archive/AITrainStudio_后续实施方案.md` is a historical roadmap archive. Do not use it as the current implementation plan or phase status source unless the user explicitly asks for historical context.
 
 ## Operating Rules
 

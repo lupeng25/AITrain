@@ -1,7 +1,7 @@
 param(
     [string]$WorkDir = ".deps\phase-yolo26-model-matrix",
     [string]$PythonExe = "",
-    [string]$Yolo26PythonDir = ".deps\yolo26\env",
+    [string]$Yolo26PythonDir = ".deps\envs\yolo26",
     [string]$UltralyticsRequirement = "ultralytics",
     [string]$TorchIndexUrl = "https://download.pytorch.org/whl/cu128",
     [string]$BuildDir = "build-vscode",
@@ -25,6 +25,7 @@ $ErrorActionPreference = "Stop"
 
 $script:Root = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $PSScriptRoot) "."))
 $script:StartedAt = [DateTime]::UtcNow
+. (Join-Path $PSScriptRoot "deps-layout.ps1")
 . (Join-Path $PSScriptRoot "toolchain-env.ps1")
 Set-AITrainQtRuntimeEnvironment
 $env:YOLO_AUTOINSTALL = "false"
@@ -36,10 +37,7 @@ function Write-Step {
 
 function Resolve-RepoPath {
     param([string]$Path)
-    if ([System.IO.Path]::IsPathRooted($Path)) {
-        return [System.IO.Path]::GetFullPath($Path)
-    }
-    return [System.IO.Path]::GetFullPath((Join-Path $script:Root $Path))
+    return Resolve-AITrainRepoPath -Root $script:Root -Path $Path
 }
 
 function Test-DeviceRequiresCuda {
@@ -98,13 +96,7 @@ function Resolve-PythonExe {
         return Ensure-Yolo26Environment
     }
 
-    $candidates = @(
-        (Join-Path $script:Root ".deps\yolo26\env\Scripts\python.exe"),
-        (Join-Path $script:Root ".deps\rtx4090-validation\python-yolo-cuda\Scripts\python.exe"),
-        (Join-Path $script:Root ".deps\python-3.13.13-embed-amd64\python.exe"),
-        (Join-Path $script:Root ".deps\python-3.13.13-ocr-amd64\python.exe")
-    )
-    foreach ($candidate in $candidates) {
+    foreach ($candidate in (Get-AITrainPythonCandidates -Role Yolo -Root $script:Root)) {
         if (Test-Path $candidate) {
             return [System.IO.Path]::GetFullPath($candidate)
         }

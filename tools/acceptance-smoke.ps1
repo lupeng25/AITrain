@@ -24,6 +24,7 @@ $script:AcceptanceModes = @()
 $script:AcceptanceStatus = "running"
 $script:AcceptanceFailure = ""
 $script:AcceptanceHardwareBlocked = ""
+. (Join-Path $PSScriptRoot "deps-layout.ps1")
 . (Join-Path $PSScriptRoot "toolchain-env.ps1")
 Set-AITrainQtRuntimeEnvironment
 
@@ -34,10 +35,7 @@ function Write-Step {
 
 function Resolve-AcceptancePath {
     param([string]$Path)
-    if ([System.IO.Path]::IsPathRooted($Path)) {
-        return [System.IO.Path]::GetFullPath($Path)
-    }
-    return [System.IO.Path]::GetFullPath((Join-Path $script:Root $Path))
+    return Resolve-AITrainRepoPath -Root $script:Root -Path $Path
 }
 
 function Write-AcceptanceSummary {
@@ -148,11 +146,7 @@ function Resolve-PythonExe {
         }
         return $resolved
     }
-    $candidates = @(
-        (Join-Path $script:Root ".deps\python-3.13.13-embed-amd64\python.exe"),
-        (Join-Path $script:Root ".deps\python-3.13.13-ocr-amd64\python.exe")
-    )
-    foreach ($candidate in $candidates) {
+    foreach ($candidate in (Get-AITrainPythonCandidates -Role General -Root $script:Root)) {
         if (Test-Path $candidate) {
             return [System.IO.Path]::GetFullPath($candidate)
         }
@@ -167,13 +161,7 @@ function Resolve-PythonExe {
 function Resolve-OfficialOcrPythonExe {
     param([string]$FallbackPython)
 
-    $candidates = @(
-        (Join-Path $script:Root ".deps\python-3.13.13-ocr-amd64\Scripts\python.exe"),
-        (Join-Path $script:Root ".deps\python-3.13.13-ocr-amd64\python.exe"),
-        (Join-Path $script:Root ".deps\rtx4090-validation\python-ocr\Scripts\python.exe"),
-        $FallbackPython,
-        (Join-Path $script:Root ".deps\rtx4090-validation\python-ocr-gpu\Scripts\python.exe")
-    )
+    $candidates = @(Get-AITrainPythonCandidates -Role Ocr -Root $script:Root) + @($FallbackPython)
     foreach ($candidate in $candidates) {
         if ($candidate -and (Test-Path $candidate)) {
             return [System.IO.Path]::GetFullPath($candidate)

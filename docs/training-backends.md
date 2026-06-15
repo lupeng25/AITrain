@@ -88,9 +88,11 @@ python -m venv .venv-ocr
 Optional official PaddleOCR Det/Rec training and System inference require a PaddleOCR source checkout because the installed `paddleocr` package exposes inference pipelines, not the legacy `tools/train.py` training scripts:
 
 ```powershell
-git clone --depth 1 https://github.com/PaddlePaddle/PaddleOCR.git .deps\PaddleOCR
-$env:AITRAIN_PADDLEOCR_REPO = (Resolve-Path .deps\PaddleOCR).Path
+git clone --depth 1 https://github.com/PaddlePaddle/PaddleOCR.git .deps\repos\PaddleOCR
+$env:AITRAIN_PADDLEOCR_REPO = (Resolve-Path .deps\repos\PaddleOCR).Path
 ```
+
+Reusable Python environments, source checkouts, SDKs, and external tools should follow `docs/deps-layout.md`. The canonical OCR Python paths are `.deps\envs\ocr-cpu` and `.deps\envs\ocr-gpu`; legacy paths remain fallback-only for older local worktrees.
 
 The reproducible local smoke command is:
 
@@ -98,7 +100,7 @@ The reproducible local smoke command is:
 .\tools\phase16-ocr-official-smoke.ps1
 ```
 
-That script uses an isolated OCR Python embeddable environment under `.deps\python-3.13.13-ocr-amd64`, checks out a pinned PaddleOCR source ref, installs pinned OCR smoke constraints unless disabled, runs official PP-OCRv4 Rec training for 1 epoch on CPU, exports the official inference model, runs official recognition inference on one generated sample image, and checks the checkpoint, inference config, prediction report, resolved source ref, and metrics report.
+That script uses an isolated OCR Python embeddable environment under `.deps\envs\ocr-cpu`, checks out a pinned PaddleOCR source ref under `.deps\repos\PaddleOCR`, installs pinned OCR smoke constraints unless disabled, runs official PP-OCRv4 Rec training for 1 epoch on CPU, exports the official inference model, runs official recognition inference on one generated sample image, and checks the checkpoint, inference config, prediction report, resolved source ref, and metrics report.
 
 The full official PaddleOCR Det + Rec + System smoke is:
 
@@ -285,7 +287,7 @@ If public dataset materialization fails or requires external interaction, the ge
 
 ## Known Boundaries
 
-- TensorRT engine building has passing RTX 4090 D acceptance evidence under `.deps/rtx4090-validation/acceptance-tensorrt`; older unsupported GPUs should still report `hardware-blocked`.
+- TensorRT engine building has passing RTX 4090 D acceptance evidence archived in `docs/validation/rtx4090-validation-evidence-20260615.json`; older unsupported GPUs should still report `hardware-blocked`.
 - P1 covers YOLOv5u standard P5 detection plus YOLOv8 / YOLO11 / YOLO12 detection and instance-segmentation presets only; it does not productize YOLOv5 segmentation, YOLOv5 P6, semantic segmentation, tracking, classification, pose, OBB, anomaly, YOLO-World, or YOLOE.
 - YOLO12 segmentation `.pt` rows are currently blocked by missing upstream official `yolo12*-seg.pt` resolution in the recorded Ultralytics 8.3.171 environment. Keep YOLO12 segmentation `.yaml` and YOLO12 detection `.pt` evidence separate.
 - YOLO26 detection/segmentation is a separate compatibility phase. The shared Ultralytics 8.3.171 environment blocked/failed all 20 YOLO26 rows, but the isolated 2026-06-15 targeted full matrix passed 20/20 training, official ONNX export, AITrain C++ ONNX inference, and TensorRT validation. YOLO26 NCNN is removed from supported export/deployment targets.

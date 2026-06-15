@@ -25,7 +25,7 @@ Harness 的目标是让 AITrain Studio 更适合 vibe coding：每次改动都�
 
 - `docs/product-roadmap-local-training-platform.md`
 
-`AITrainStudio_后续实施方案.md` 只作为历史路线档案保留；不要把它作为当前下一步计划、当前阶段状态或验收口径来源，除非用户明确要求查历史背景。
+`docs/archive/AITrainStudio_后续实施方案.md` 只作为历史路线档案保留；不要把它作为当前下一步计划、当前阶段状态或验收口径来源，除非用户明确要求查历史背景。
 
 如果是 UI 任务，再读：
 

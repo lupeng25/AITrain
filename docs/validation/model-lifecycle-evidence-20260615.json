@@ -1,0 +1,2298 @@
+﻿{
+    "generatedAt":  "2026-06-15T16:16:54",
+    "scope":  "AITrain full model lifecycle evidence archive before .deps heavy artifact cleanup",
+    "sourceRoots":  {
+                        "fullModelLifecycle":  ".deps\\full-model-lifecycle",
+                        "ocrRerun5Epoch":  ".deps\\ocr-rerun-5epoch\\run-20260615-131044",
+                        "yolo26TargetedMatrix":  ".deps\\phase-yolo26-model-matrix"
+                    },
+    "fullModelLifecycle":  {
+                               "note":  "Top-level summary records a later controller_failed recovery command; row_summary.json files are used for per-row evidence.",
+                               "controllerSummaryStatus":  "controller_failed",
+                               "controllerSummaryMessage":  "Unsupported deployment target: onnx,tensorrt,ncnn",
+                               "counts":  {
+                                              "planned":  17,
+                                              "passed":  76,
+                                              "failed":  2,
+                                              "blocked":  25
+                                          },
+                               "totalRows":  120,
+                               "rows":  [
+                                            {
+                                                "name":  "en-ppocrv5-mobile-rec",
+                                                "model":  "en_PP-OCRv5_mobile_rec",
+                                                "task":  "ocr_recognition",
+                                                "status":  "planned",
+                                                "reason":  "dry run",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\ocr\\en-ppocrv5-mobile-rec\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "ppocrv4-mobile-det",
+                                                "model":  null,
+                                                "task":  "ocr_detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  ".deps\\full-model-lifecycle\\ocr\\ppocrv4-mobile-det\\official\\paddleocr_official_det_report.json",
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\ocr\\ppocrv4-mobile-det\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "ppocrv4-mobile-rec",
+                                                "model":  "PP-OCRv4_mobile_rec",
+                                                "task":  "ocr_recognition",
+                                                "status":  "planned",
+                                                "reason":  "dry run",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\ocr\\ppocrv4-mobile-rec\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "ppocrv5-mobile-det",
+                                                "model":  null,
+                                                "task":  "ocr_detection",
+                                                "status":  "failed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  ".deps\\full-model-lifecycle\\ocr\\ppocrv5-mobile-det\\official\\paddleocr_official_det_report.json",
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\ocr\\ppocrv5-mobile-det\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "ppocrv5-mobile-rec",
+                                                "model":  "PP-OCRv5_mobile_rec",
+                                                "task":  "ocr_recognition",
+                                                "status":  "planned",
+                                                "reason":  "dry run",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\ocr\\ppocrv5-mobile-rec\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "ppocrv5-server-det",
+                                                "model":  null,
+                                                "task":  "ocr_detection",
+                                                "status":  "failed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  ".deps\\full-model-lifecycle\\ocr\\ppocrv5-server-det\\official\\paddleocr_official_det_report.json",
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\ocr\\ppocrv5-server-det\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "ppocrv5-server-rec",
+                                                "model":  "PP-OCRv5_server_rec",
+                                                "task":  "ocr_recognition",
+                                                "status":  "planned",
+                                                "reason":  "dry run",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\ocr\\ppocrv5-server-rec\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "ppocrv6-medium-det",
+                                                "model":  "PP-OCRv6_medium_det",
+                                                "task":  "ocr_detection",
+                                                "status":  "planned",
+                                                "reason":  "dry run",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\ocr\\ppocrv6-medium-det\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "ppocrv6-medium-rec",
+                                                "model":  "PP-OCRv6_medium_rec",
+                                                "task":  "ocr_recognition",
+                                                "status":  "planned",
+                                                "reason":  "dry run",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\ocr\\ppocrv6-medium-rec\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "ppocrv6-small-det",
+                                                "model":  "PP-OCRv6_small_det",
+                                                "task":  "ocr_detection",
+                                                "status":  "planned",
+                                                "reason":  "dry run",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\ocr\\ppocrv6-small-det\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "ppocrv6-small-rec",
+                                                "model":  "PP-OCRv6_small_rec",
+                                                "task":  "ocr_recognition",
+                                                "status":  "planned",
+                                                "reason":  "dry run",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\ocr\\ppocrv6-small-rec\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "ppocrv6-tiny-det",
+                                                "model":  "PP-OCRv6_tiny_det",
+                                                "task":  "ocr_detection",
+                                                "status":  "planned",
+                                                "reason":  "dry run",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\ocr\\ppocrv6-tiny-det\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "ppocrv6-tiny-rec",
+                                                "model":  "PP-OCRv6_tiny_rec",
+                                                "task":  "ocr_recognition",
+                                                "status":  "planned",
+                                                "reason":  "dry run",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\ocr\\ppocrv6-tiny-rec\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "ppocrv4-mobile-system",
+                                                "model":  "PP-OCRv4_mobile_det+PP-OCRv4_mobile_rec",
+                                                "task":  "ocr",
+                                                "status":  "planned",
+                                                "reason":  "dry run",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\ocr-system\\ppocrv4-mobile-system\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "ppocrv5-mobile-en-system",
+                                                "model":  "PP-OCRv5_mobile_det+en_PP-OCRv5_mobile_rec",
+                                                "task":  "ocr",
+                                                "status":  "planned",
+                                                "reason":  "dry run",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\ocr-system\\ppocrv5-mobile-en-system\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "ppocrv5-mobile-system",
+                                                "model":  "PP-OCRv5_mobile_det+PP-OCRv5_mobile_rec",
+                                                "task":  "ocr",
+                                                "status":  "planned",
+                                                "reason":  "dry run",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\ocr-system\\ppocrv5-mobile-system\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "ppocrv5-server-system",
+                                                "model":  "PP-OCRv5_server_det+PP-OCRv5_server_rec",
+                                                "task":  "ocr",
+                                                "status":  "planned",
+                                                "reason":  "dry run",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\ocr-system\\ppocrv5-server-system\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "ppocrv6-medium-system",
+                                                "model":  "PP-OCRv6_medium_det+PP-OCRv6_medium_rec",
+                                                "task":  "ocr",
+                                                "status":  "planned",
+                                                "reason":  "dry run",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\ocr-system\\ppocrv6-medium-system\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "ppocrv6-small-system",
+                                                "model":  "PP-OCRv6_small_det+PP-OCRv6_small_rec",
+                                                "task":  "ocr",
+                                                "status":  "planned",
+                                                "reason":  "dry run",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\ocr-system\\ppocrv6-small-system\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "ppocrv6-tiny-system",
+                                                "model":  "PP-OCRv6_tiny_det+PP-OCRv6_tiny_rec",
+                                                "task":  "ocr",
+                                                "status":  "planned",
+                                                "reason":  "dry run",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\ocr-system\\ppocrv6-tiny-system\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo11l-detect-pt",
+                                                "model":  "yolo11l.pt",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo11l-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo11l-detect-yaml",
+                                                "model":  "yolo11l.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo11l-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo11l-segment-pt",
+                                                "model":  "yolo11l-seg.pt",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo11l-segment-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo11l-segment-yaml",
+                                                "model":  "yolo11l-seg.yaml",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo11l-segment-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo11m-detect-pt",
+                                                "model":  "yolo11m.pt",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo11m-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo11m-detect-yaml",
+                                                "model":  "yolo11m.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo11m-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo11m-segment-pt",
+                                                "model":  "yolo11m-seg.pt",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo11m-segment-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo11m-segment-yaml",
+                                                "model":  "yolo11m-seg.yaml",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo11m-segment-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo11n-detect-pt",
+                                                "model":  "yolo11n.pt",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo11n-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo11n-detect-yaml",
+                                                "model":  "yolo11n.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo11n-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo11n-segment-pt",
+                                                "model":  "yolo11n-seg.pt",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo11n-segment-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo11n-segment-yaml",
+                                                "model":  "yolo11n-seg.yaml",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo11n-segment-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo11s-detect-pt",
+                                                "model":  "yolo11s.pt",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo11s-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo11s-detect-yaml",
+                                                "model":  "yolo11s.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo11s-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo11s-segment-pt",
+                                                "model":  "yolo11s-seg.pt",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo11s-segment-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo11s-segment-yaml",
+                                                "model":  "yolo11s-seg.yaml",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo11s-segment-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo11x-detect-pt",
+                                                "model":  "yolo11x.pt",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo11x-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo11x-detect-yaml",
+                                                "model":  "yolo11x.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo11x-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo11x-segment-pt",
+                                                "model":  "yolo11x-seg.pt",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo11x-segment-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo11x-segment-yaml",
+                                                "model":  "yolo11x-seg.yaml",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo11x-segment-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo12l-detect-pt",
+                                                "model":  "yolo12l.pt",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo12l-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo12l-detect-yaml",
+                                                "model":  "yolo12l.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo12l-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo12l-segment-pt",
+                                                "model":  "yolo12l-seg.pt",
+                                                "task":  "segmentation",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_missing_official_weight: current official Ultralytics environment cannot resolve yolo12 segmentation .pt weights; keep YAML architecture evidence separate.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo12l-segment-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo12l-segment-yaml",
+                                                "model":  "yolo12l-seg.yaml",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo12l-segment-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo12m-detect-pt",
+                                                "model":  "yolo12m.pt",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo12m-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo12m-detect-yaml",
+                                                "model":  "yolo12m.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo12m-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo12m-segment-pt",
+                                                "model":  "yolo12m-seg.pt",
+                                                "task":  "segmentation",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_missing_official_weight: current official Ultralytics environment cannot resolve yolo12 segmentation .pt weights; keep YAML architecture evidence separate.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo12m-segment-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo12m-segment-yaml",
+                                                "model":  "yolo12m-seg.yaml",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo12m-segment-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo12n-detect-pt",
+                                                "model":  "yolo12n.pt",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo12n-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo12n-detect-yaml",
+                                                "model":  "yolo12n.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo12n-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo12n-segment-pt",
+                                                "model":  "yolo12n-seg.pt",
+                                                "task":  "segmentation",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_missing_official_weight: current official Ultralytics environment cannot resolve yolo12 segmentation .pt weights; keep YAML architecture evidence separate.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo12n-segment-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo12n-segment-yaml",
+                                                "model":  "yolo12n-seg.yaml",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo12n-segment-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo12s-detect-pt",
+                                                "model":  "yolo12s.pt",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo12s-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo12s-detect-yaml",
+                                                "model":  "yolo12s.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo12s-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo12s-segment-pt",
+                                                "model":  "yolo12s-seg.pt",
+                                                "task":  "segmentation",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_missing_official_weight: current official Ultralytics environment cannot resolve yolo12 segmentation .pt weights; keep YAML architecture evidence separate.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo12s-segment-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo12s-segment-yaml",
+                                                "model":  "yolo12s-seg.yaml",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo12s-segment-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo12x-detect-pt",
+                                                "model":  "yolo12x.pt",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo12x-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo12x-detect-yaml",
+                                                "model":  "yolo12x.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo12x-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo12x-segment-pt",
+                                                "model":  "yolo12x-seg.pt",
+                                                "task":  "segmentation",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_missing_official_weight: current official Ultralytics environment cannot resolve yolo12 segmentation .pt weights; keep YAML architecture evidence separate.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo12x-segment-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo12x-segment-yaml",
+                                                "model":  "yolo12x-seg.yaml",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo12x-segment-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo26l-detect-pt",
+                                                "model":  "yolo26l.pt",
+                                                "task":  "detection",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_ultralytics_incompatible: YOLO26 is deferred from the main lifecycle resume; run the targeted isolated YOLO26 matrix after OCR lifecycle completion.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo26l-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo26l-detect-yaml",
+                                                "model":  "yolo26l.yaml",
+                                                "task":  "detection",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_model_unavailable: YOLO26 is deferred from the main lifecycle resume; run the targeted isolated YOLO26 matrix after OCR lifecycle completion.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo26l-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo26l-segment-pt",
+                                                "model":  "yolo26l-seg.pt",
+                                                "task":  "segmentation",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_ultralytics_incompatible: YOLO26 is deferred from the main lifecycle resume; run the targeted isolated YOLO26 matrix after OCR lifecycle completion.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo26l-segment-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo26l-segment-yaml",
+                                                "model":  "yolo26l-seg.yaml",
+                                                "task":  "segmentation",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_model_unavailable: YOLO26 is deferred from the main lifecycle resume; run the targeted isolated YOLO26 matrix after OCR lifecycle completion.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo26l-segment-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo26m-detect-pt",
+                                                "model":  "yolo26m.pt",
+                                                "task":  "detection",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_ultralytics_incompatible: YOLO26 is deferred from the main lifecycle resume; run the targeted isolated YOLO26 matrix after OCR lifecycle completion.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo26m-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo26m-detect-yaml",
+                                                "model":  "yolo26m.yaml",
+                                                "task":  "detection",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_model_unavailable: YOLO26 is deferred from the main lifecycle resume; run the targeted isolated YOLO26 matrix after OCR lifecycle completion.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo26m-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo26m-segment-pt",
+                                                "model":  "yolo26m-seg.pt",
+                                                "task":  "segmentation",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_ultralytics_incompatible: YOLO26 is deferred from the main lifecycle resume; run the targeted isolated YOLO26 matrix after OCR lifecycle completion.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo26m-segment-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo26m-segment-yaml",
+                                                "model":  "yolo26m-seg.yaml",
+                                                "task":  "segmentation",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_model_unavailable: YOLO26 is deferred from the main lifecycle resume; run the targeted isolated YOLO26 matrix after OCR lifecycle completion.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo26m-segment-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo26n-detect-pt",
+                                                "model":  "yolo26n.pt",
+                                                "task":  "detection",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_ultralytics_incompatible: YOLO26 is deferred from the main lifecycle resume; run the targeted isolated YOLO26 matrix after OCR lifecycle completion.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo26n-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo26n-detect-yaml",
+                                                "model":  "yolo26n.yaml",
+                                                "task":  "detection",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_model_unavailable: YOLO26 is deferred from the main lifecycle resume; run the targeted isolated YOLO26 matrix after OCR lifecycle completion.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo26n-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo26n-segment-pt",
+                                                "model":  "yolo26n-seg.pt",
+                                                "task":  "segmentation",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_ultralytics_incompatible: YOLO26 is deferred from the main lifecycle resume; run the targeted isolated YOLO26 matrix after OCR lifecycle completion.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo26n-segment-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo26n-segment-yaml",
+                                                "model":  "yolo26n-seg.yaml",
+                                                "task":  "segmentation",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_model_unavailable: YOLO26 is deferred from the main lifecycle resume; run the targeted isolated YOLO26 matrix after OCR lifecycle completion.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo26n-segment-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo26s-detect-pt",
+                                                "model":  "yolo26s.pt",
+                                                "task":  "detection",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_ultralytics_incompatible: YOLO26 is deferred from the main lifecycle resume; run the targeted isolated YOLO26 matrix after OCR lifecycle completion.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo26s-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo26s-detect-yaml",
+                                                "model":  "yolo26s.yaml",
+                                                "task":  "detection",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_model_unavailable: YOLO26 is deferred from the main lifecycle resume; run the targeted isolated YOLO26 matrix after OCR lifecycle completion.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo26s-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo26s-segment-pt",
+                                                "model":  "yolo26s-seg.pt",
+                                                "task":  "segmentation",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_ultralytics_incompatible: YOLO26 is deferred from the main lifecycle resume; run the targeted isolated YOLO26 matrix after OCR lifecycle completion.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo26s-segment-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo26s-segment-yaml",
+                                                "model":  "yolo26s-seg.yaml",
+                                                "task":  "segmentation",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_model_unavailable: YOLO26 is deferred from the main lifecycle resume; run the targeted isolated YOLO26 matrix after OCR lifecycle completion.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo26s-segment-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo26x-detect-pt",
+                                                "model":  "yolo26x.pt",
+                                                "task":  "detection",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_ultralytics_incompatible: YOLO26 is deferred from the main lifecycle resume; run the targeted isolated YOLO26 matrix after OCR lifecycle completion.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo26x-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo26x-detect-yaml",
+                                                "model":  "yolo26x.yaml",
+                                                "task":  "detection",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_model_unavailable: YOLO26 is deferred from the main lifecycle resume; run the targeted isolated YOLO26 matrix after OCR lifecycle completion.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo26x-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo26x-segment-pt",
+                                                "model":  "yolo26x-seg.pt",
+                                                "task":  "segmentation",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_ultralytics_incompatible: YOLO26 is deferred from the main lifecycle resume; run the targeted isolated YOLO26 matrix after OCR lifecycle completion.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo26x-segment-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolo26x-segment-yaml",
+                                                "model":  "yolo26x-seg.yaml",
+                                                "task":  "segmentation",
+                                                "status":  "blocked",
+                                                "reason":  "blocked_model_unavailable: YOLO26 is deferred from the main lifecycle resume; run the targeted isolated YOLO26 matrix after OCR lifecycle completion.",
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolo26x-segment-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov5l-detect-yaml",
+                                                "model":  "yolov5l.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov5l-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov5lu-detect-pt",
+                                                "model":  "yolov5lu.pt",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov5lu-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov5m-detect-yaml",
+                                                "model":  "yolov5m.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov5m-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov5mu-detect-pt",
+                                                "model":  "yolov5mu.pt",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov5mu-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov5n-detect-yaml",
+                                                "model":  "yolov5n.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov5n-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov5nu-detect-pt",
+                                                "model":  "yolov5nu.pt",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov5nu-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov5s-detect-yaml",
+                                                "model":  "yolov5s.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov5s-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov5su-detect-pt",
+                                                "model":  "yolov5su.pt",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov5su-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov5x-detect-yaml",
+                                                "model":  "yolov5x.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov5x-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov5xu-detect-pt",
+                                                "model":  "yolov5xu.pt",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov5xu-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8l-detect-pt",
+                                                "model":  "yolov8l.pt",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8l-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8l-detect-yaml",
+                                                "model":  "yolov8l.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8l-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8l-p2-detect-yaml",
+                                                "model":  "yolov8l-p2.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8l-p2-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8l-p6-detect-yaml",
+                                                "model":  "yolov8l-p6.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8l-p6-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8l-segment-pt",
+                                                "model":  "yolov8l-seg.pt",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8l-segment-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8l-segment-yaml",
+                                                "model":  "yolov8l-seg.yaml",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8l-segment-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8m-detect-pt",
+                                                "model":  "yolov8m.pt",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8m-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8m-detect-yaml",
+                                                "model":  "yolov8m.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8m-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8m-p2-detect-yaml",
+                                                "model":  "yolov8m-p2.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8m-p2-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8m-p6-detect-yaml",
+                                                "model":  "yolov8m-p6.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8m-p6-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8m-segment-pt",
+                                                "model":  "yolov8m-seg.pt",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8m-segment-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8m-segment-yaml",
+                                                "model":  "yolov8m-seg.yaml",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8m-segment-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8n-detect-pt",
+                                                "model":  "yolov8n.pt",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8n-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8n-detect-yaml",
+                                                "model":  "yolov8n.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8n-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8n-p2-detect-yaml",
+                                                "model":  "yolov8n-p2.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8n-p2-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8n-p6-detect-yaml",
+                                                "model":  "yolov8n-p6.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8n-p6-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8n-segment-pt",
+                                                "model":  "yolov8n-seg.pt",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8n-segment-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8n-segment-yaml",
+                                                "model":  "yolov8n-seg.yaml",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8n-segment-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8s-detect-pt",
+                                                "model":  "yolov8s.pt",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8s-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8s-detect-yaml",
+                                                "model":  "yolov8s.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8s-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8s-p2-detect-yaml",
+                                                "model":  "yolov8s-p2.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8s-p2-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8s-p6-detect-yaml",
+                                                "model":  "yolov8s-p6.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8s-p6-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8s-segment-pt",
+                                                "model":  "yolov8s-seg.pt",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8s-segment-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8s-segment-yaml",
+                                                "model":  "yolov8s-seg.yaml",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8s-segment-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8x-detect-pt",
+                                                "model":  "yolov8x.pt",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8x-detect-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8x-detect-yaml",
+                                                "model":  "yolov8x.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8x-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8x-p2-detect-yaml",
+                                                "model":  "yolov8x-p2.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8x-p2-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8x-p6-detect-yaml",
+                                                "model":  "yolov8x-p6.yaml",
+                                                "task":  "detection",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8x-p6-detect-yaml\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8x-segment-pt",
+                                                "model":  "yolov8x-seg.pt",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8x-segment-pt\\row_summary.json"
+                                            },
+                                            {
+                                                "name":  "yolov8x-segment-yaml",
+                                                "model":  "yolov8x-seg.yaml",
+                                                "task":  "segmentation",
+                                                "status":  "passed",
+                                                "reason":  null,
+                                                "message":  null,
+                                                "reportPath":  null,
+                                                "rowSummaryPath":  ".deps\\full-model-lifecycle\\yolo\\yolov8x-segment-yaml\\row_summary.json"
+                                            }
+                                        ]
+                           },
+    "ocrRerun5Epoch":  {
+                           "runId":  "ocr5-continuation-run-20260615-131044",
+                           "status":  "completed",
+                           "epochs":  5,
+                           "counts":  {
+                                          "passed":  20
+                                      },
+                           "totalRows":  20,
+                           "rows":  [
+                                        {
+                                            "name":  "pp-ocrv4-mobile-det",
+                                            "taskType":  "ocr_detection",
+                                            "modelPreset":  "PP-OCRv4_mobile_det",
+                                            "recModelPreset":  null,
+                                            "status":  "passed",
+                                            "reason":  "restored_seed_report",
+                                            "reportPath":  ".deps\\ocr-rerun-10epoch\\run-20260615-124521\\ocr\\pp-ocrv4-mobile-det\\official\\paddleocr_official_det_report.json"
+                                        },
+                                        {
+                                            "name":  "pp-ocrv5-mobile-det",
+                                            "taskType":  "ocr_detection",
+                                            "modelPreset":  "PP-OCRv5_mobile_det",
+                                            "recModelPreset":  null,
+                                            "status":  "passed",
+                                            "reason":  null,
+                                            "reportPath":  ".deps\\ocr-rerun-5epoch\\run-20260615-131044\\ocr\\pp-ocrv5-mobile-det\\official\\paddleocr_official_det_report.json"
+                                        },
+                                        {
+                                            "name":  "pp-ocrv5-server-det",
+                                            "taskType":  "ocr_detection",
+                                            "modelPreset":  "PP-OCRv5_server_det",
+                                            "recModelPreset":  null,
+                                            "status":  "passed",
+                                            "reason":  null,
+                                            "reportPath":  ".deps\\ocr-rerun-5epoch\\run-20260615-131044\\ocr\\pp-ocrv5-server-det\\official\\paddleocr_official_det_report.json"
+                                        },
+                                        {
+                                            "name":  "pp-ocrv6-tiny-det",
+                                            "taskType":  "ocr_detection",
+                                            "modelPreset":  "PP-OCRv6_tiny_det",
+                                            "recModelPreset":  null,
+                                            "status":  "passed",
+                                            "reason":  null,
+                                            "reportPath":  ".deps\\ocr-rerun-5epoch\\run-20260615-131044\\ocr\\pp-ocrv6-tiny-det\\official\\paddleocr_official_det_report.json"
+                                        },
+                                        {
+                                            "name":  "pp-ocrv6-small-det",
+                                            "taskType":  "ocr_detection",
+                                            "modelPreset":  "PP-OCRv6_small_det",
+                                            "recModelPreset":  null,
+                                            "status":  "passed",
+                                            "reason":  null,
+                                            "reportPath":  ".deps\\ocr-rerun-5epoch\\run-20260615-131044\\ocr\\pp-ocrv6-small-det\\official\\paddleocr_official_det_report.json"
+                                        },
+                                        {
+                                            "name":  "pp-ocrv6-medium-det",
+                                            "taskType":  "ocr_detection",
+                                            "modelPreset":  "PP-OCRv6_medium_det",
+                                            "recModelPreset":  null,
+                                            "status":  "passed",
+                                            "reason":  null,
+                                            "reportPath":  ".deps\\ocr-rerun-5epoch\\run-20260615-131044\\ocr\\pp-ocrv6-medium-det\\official\\paddleocr_official_det_report.json"
+                                        },
+                                        {
+                                            "name":  "pp-ocrv4-mobile-rec",
+                                            "taskType":  "ocr_recognition",
+                                            "modelPreset":  "PP-OCRv4_mobile_rec",
+                                            "recModelPreset":  null,
+                                            "status":  "passed",
+                                            "reason":  null,
+                                            "reportPath":  ".deps\\ocr-rerun-5epoch\\run-20260615-131044\\ocr\\pp-ocrv4-mobile-rec\\official\\paddleocr_official_rec_report.json"
+                                        },
+                                        {
+                                            "name":  "pp-ocrv5-mobile-rec",
+                                            "taskType":  "ocr_recognition",
+                                            "modelPreset":  "PP-OCRv5_mobile_rec",
+                                            "recModelPreset":  null,
+                                            "status":  "passed",
+                                            "reason":  null,
+                                            "reportPath":  ".deps\\ocr-rerun-5epoch\\run-20260615-131044\\ocr\\pp-ocrv5-mobile-rec\\official\\paddleocr_official_rec_report.json"
+                                        },
+                                        {
+                                            "name":  "pp-ocrv5-server-rec",
+                                            "taskType":  "ocr_recognition",
+                                            "modelPreset":  "PP-OCRv5_server_rec",
+                                            "recModelPreset":  null,
+                                            "status":  "passed",
+                                            "reason":  null,
+                                            "reportPath":  ".deps\\ocr-rerun-5epoch\\run-20260615-131044\\ocr\\pp-ocrv5-server-rec\\official\\paddleocr_official_rec_report.json"
+                                        },
+                                        {
+                                            "name":  "en-pp-ocrv5-mobile-rec",
+                                            "taskType":  "ocr_recognition",
+                                            "modelPreset":  "en_PP-OCRv5_mobile_rec",
+                                            "recModelPreset":  null,
+                                            "status":  "passed",
+                                            "reason":  null,
+                                            "reportPath":  ".deps\\ocr-rerun-5epoch\\run-20260615-131044\\ocr\\en-pp-ocrv5-mobile-rec\\official\\paddleocr_official_rec_report.json"
+                                        },
+                                        {
+                                            "name":  "pp-ocrv6-tiny-rec",
+                                            "taskType":  "ocr_recognition",
+                                            "modelPreset":  "PP-OCRv6_tiny_rec",
+                                            "recModelPreset":  null,
+                                            "status":  "passed",
+                                            "reason":  null,
+                                            "reportPath":  ".deps\\ocr-rerun-5epoch\\run-20260615-131044\\ocr\\pp-ocrv6-tiny-rec\\official\\paddleocr_official_rec_report.json"
+                                        },
+                                        {
+                                            "name":  "pp-ocrv6-small-rec",
+                                            "taskType":  "ocr_recognition",
+                                            "modelPreset":  "PP-OCRv6_small_rec",
+                                            "recModelPreset":  null,
+                                            "status":  "passed",
+                                            "reason":  null,
+                                            "reportPath":  ".deps\\ocr-rerun-5epoch\\run-20260615-131044\\ocr\\pp-ocrv6-small-rec\\official\\paddleocr_official_rec_report.json"
+                                        },
+                                        {
+                                            "name":  "pp-ocrv6-medium-rec",
+                                            "taskType":  "ocr_recognition",
+                                            "modelPreset":  "PP-OCRv6_medium_rec",
+                                            "recModelPreset":  null,
+                                            "status":  "passed",
+                                            "reason":  null,
+                                            "reportPath":  ".deps\\ocr-rerun-5epoch\\run-20260615-131044\\ocr\\pp-ocrv6-medium-rec\\official\\paddleocr_official_rec_report.json"
+                                        },
+                                        {
+                                            "name":  "v4-mobile",
+                                            "taskType":  "ocr",
+                                            "modelPreset":  "PP-OCRv4_mobile_det",
+                                            "recModelPreset":  null,
+                                            "status":  "passed",
+                                            "reason":  null,
+                                            "reportPath":  ".deps\\ocr-rerun-5epoch\\run-20260615-131044\\ocr-system\\v4-mobile\\official\\paddleocr_official_system_report.json"
+                                        },
+                                        {
+                                            "name":  "v5-mobile",
+                                            "taskType":  "ocr",
+                                            "modelPreset":  "PP-OCRv5_mobile_det",
+                                            "recModelPreset":  null,
+                                            "status":  "passed",
+                                            "reason":  null,
+                                            "reportPath":  ".deps\\ocr-rerun-5epoch\\run-20260615-131044\\ocr-system\\v5-mobile\\official\\paddleocr_official_system_report.json"
+                                        },
+                                        {
+                                            "name":  "v5-server",
+                                            "taskType":  "ocr",
+                                            "modelPreset":  "PP-OCRv5_server_det",
+                                            "recModelPreset":  null,
+                                            "status":  "passed",
+                                            "reason":  null,
+                                            "reportPath":  ".deps\\ocr-rerun-5epoch\\run-20260615-131044\\ocr-system\\v5-server\\official\\paddleocr_official_system_report.json"
+                                        },
+                                        {
+                                            "name":  "v5-mobile-det-en-rec",
+                                            "taskType":  "ocr",
+                                            "modelPreset":  "PP-OCRv5_mobile_det",
+                                            "recModelPreset":  null,
+                                            "status":  "passed",
+                                            "reason":  null,
+                                            "reportPath":  ".deps\\ocr-rerun-5epoch\\run-20260615-131044\\ocr-system\\v5-mobile-det-en-rec\\official\\paddleocr_official_system_report.json"
+                                        },
+                                        {
+                                            "name":  "v6-tiny",
+                                            "taskType":  "ocr",
+                                            "modelPreset":  "PP-OCRv6_tiny_det",
+                                            "recModelPreset":  null,
+                                            "status":  "passed",
+                                            "reason":  null,
+                                            "reportPath":  ".deps\\ocr-rerun-5epoch\\run-20260615-131044\\ocr-system\\v6-tiny\\official\\paddleocr_official_system_report.json"
+                                        },
+                                        {
+                                            "name":  "v6-small",
+                                            "taskType":  "ocr",
+                                            "modelPreset":  "PP-OCRv6_small_det",
+                                            "recModelPreset":  null,
+                                            "status":  "passed",
+                                            "reason":  null,
+                                            "reportPath":  ".deps\\ocr-rerun-5epoch\\run-20260615-131044\\ocr-system\\v6-small\\official\\paddleocr_official_system_report.json"
+                                        },
+                                        {
+                                            "name":  "v6-medium",
+                                            "taskType":  "ocr",
+                                            "modelPreset":  "PP-OCRv6_medium_det",
+                                            "recModelPreset":  null,
+                                            "status":  "passed",
+                                            "reason":  null,
+                                            "reportPath":  ".deps\\ocr-rerun-5epoch\\run-20260615-131044\\ocr-system\\v6-medium\\official\\paddleocr_official_system_report.json"
+                                        }
+                                    ]
+                       },
+    "yolo26TargetedMatrix":  {
+                                 "status":  "passed",
+                                 "mode":  "full",
+                                 "epochs":  100,
+                                 "startedAt":  "2026-06-15T01:56:05.9895950Z",
+                                 "finishedAt":  "2026-06-15T03:21:11.6223081Z",
+                                 "elapsedSeconds":  5105.633,
+                                 "ultralyticsVersion":  "8.4.48",
+                                 "python":  "E:\\Anaconda\\python.exe",
+                                 "counts":  {
+                                                "passed":  20
+                                            },
+                                 "matrixCounts":  {
+                                                      "detection, yaml":  5,
+                                                      "segmentation, yaml":  5,
+                                                      "detection, pt":  5,
+                                                      "segmentation, pt":  5
+                                                  },
+                                 "deploymentCounts":  {
+                                                          "onnx, passed":  20,
+                                                          "tensorrt, passed":  20,
+                                                          "ncnn, failed":  20
+                                                      },
+                                 "rows":  [
+                                              {
+                                                  "name":  "yolo26n-detect-yaml",
+                                                  "task":  "detection",
+                                                  "model":  "yolo26n.yaml",
+                                                  "sourceType":  "yaml",
+                                                  "status":  "passed",
+                                                  "elapsedSeconds":  135.217,
+                                                  "predictionCount":  300,
+                                                  "onnx":  "passed",
+                                                  "tensorrt":  "passed",
+                                                  "ncnn":  "failed",
+                                                  "outputShapes":  {
+                                                                       "available":  true,
+                                                                       "inputs":  [
+                                                                                      {
+                                                                                          "name":  "images",
+                                                                                          "shape":  [
+                                                                                                        1,
+                                                                                                        3,
+                                                                                                        640,
+                                                                                                        640
+                                                                                                    ]
+                                                                                      }
+                                                                                  ],
+                                                                       "outputs":  [
+                                                                                       {
+                                                                                           "name":  "output0",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         300,
+                                                                                                         6
+                                                                                                     ]
+                                                                                       }
+                                                                                   ]
+                                                                   }
+                                              },
+                                              {
+                                                  "name":  "yolo26n-segment-yaml",
+                                                  "task":  "segmentation",
+                                                  "model":  "yolo26n-seg.yaml",
+                                                  "sourceType":  "yaml",
+                                                  "status":  "passed",
+                                                  "elapsedSeconds":  146.603,
+                                                  "predictionCount":  300,
+                                                  "onnx":  "passed",
+                                                  "tensorrt":  "passed",
+                                                  "ncnn":  "failed",
+                                                  "outputShapes":  {
+                                                                       "available":  true,
+                                                                       "inputs":  [
+                                                                                      {
+                                                                                          "name":  "images",
+                                                                                          "shape":  [
+                                                                                                        1,
+                                                                                                        3,
+                                                                                                        640,
+                                                                                                        640
+                                                                                                    ]
+                                                                                      }
+                                                                                  ],
+                                                                       "outputs":  [
+                                                                                       {
+                                                                                           "name":  "output0",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         300,
+                                                                                                         38
+                                                                                                     ]
+                                                                                       },
+                                                                                       {
+                                                                                           "name":  "output1",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         32,
+                                                                                                         160,
+                                                                                                         160
+                                                                                                     ]
+                                                                                       }
+                                                                                   ]
+                                                                   }
+                                              },
+                                              {
+                                                  "name":  "yolo26n-detect-pt",
+                                                  "task":  "detection",
+                                                  "model":  "yolo26n.pt",
+                                                  "sourceType":  "pt",
+                                                  "status":  "passed",
+                                                  "elapsedSeconds":  130.853,
+                                                  "predictionCount":  300,
+                                                  "onnx":  "passed",
+                                                  "tensorrt":  "passed",
+                                                  "ncnn":  "failed",
+                                                  "outputShapes":  {
+                                                                       "available":  true,
+                                                                       "inputs":  [
+                                                                                      {
+                                                                                          "name":  "images",
+                                                                                          "shape":  [
+                                                                                                        1,
+                                                                                                        3,
+                                                                                                        640,
+                                                                                                        640
+                                                                                                    ]
+                                                                                      }
+                                                                                  ],
+                                                                       "outputs":  [
+                                                                                       {
+                                                                                           "name":  "output0",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         300,
+                                                                                                         6
+                                                                                                     ]
+                                                                                       }
+                                                                                   ]
+                                                                   }
+                                              },
+                                              {
+                                                  "name":  "yolo26n-segment-pt",
+                                                  "task":  "segmentation",
+                                                  "model":  "yolo26n-seg.pt",
+                                                  "sourceType":  "pt",
+                                                  "status":  "passed",
+                                                  "elapsedSeconds":  142.629,
+                                                  "predictionCount":  300,
+                                                  "onnx":  "passed",
+                                                  "tensorrt":  "passed",
+                                                  "ncnn":  "failed",
+                                                  "outputShapes":  {
+                                                                       "available":  true,
+                                                                       "inputs":  [
+                                                                                      {
+                                                                                          "name":  "images",
+                                                                                          "shape":  [
+                                                                                                        1,
+                                                                                                        3,
+                                                                                                        640,
+                                                                                                        640
+                                                                                                    ]
+                                                                                      }
+                                                                                  ],
+                                                                       "outputs":  [
+                                                                                       {
+                                                                                           "name":  "output0",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         300,
+                                                                                                         38
+                                                                                                     ]
+                                                                                       },
+                                                                                       {
+                                                                                           "name":  "output1",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         32,
+                                                                                                         160,
+                                                                                                         160
+                                                                                                     ]
+                                                                                       }
+                                                                                   ]
+                                                                   }
+                                              },
+                                              {
+                                                  "name":  "yolo26s-detect-yaml",
+                                                  "task":  "detection",
+                                                  "model":  "yolo26s.yaml",
+                                                  "sourceType":  "yaml",
+                                                  "status":  "passed",
+                                                  "elapsedSeconds":  147.489,
+                                                  "predictionCount":  300,
+                                                  "onnx":  "passed",
+                                                  "tensorrt":  "passed",
+                                                  "ncnn":  "failed",
+                                                  "outputShapes":  {
+                                                                       "available":  true,
+                                                                       "inputs":  [
+                                                                                      {
+                                                                                          "name":  "images",
+                                                                                          "shape":  [
+                                                                                                        1,
+                                                                                                        3,
+                                                                                                        640,
+                                                                                                        640
+                                                                                                    ]
+                                                                                      }
+                                                                                  ],
+                                                                       "outputs":  [
+                                                                                       {
+                                                                                           "name":  "output0",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         300,
+                                                                                                         6
+                                                                                                     ]
+                                                                                       }
+                                                                                   ]
+                                                                   }
+                                              },
+                                              {
+                                                  "name":  "yolo26s-segment-yaml",
+                                                  "task":  "segmentation",
+                                                  "model":  "yolo26s-seg.yaml",
+                                                  "sourceType":  "yaml",
+                                                  "status":  "passed",
+                                                  "elapsedSeconds":  173.787,
+                                                  "predictionCount":  300,
+                                                  "onnx":  "passed",
+                                                  "tensorrt":  "passed",
+                                                  "ncnn":  "failed",
+                                                  "outputShapes":  {
+                                                                       "available":  true,
+                                                                       "inputs":  [
+                                                                                      {
+                                                                                          "name":  "images",
+                                                                                          "shape":  [
+                                                                                                        1,
+                                                                                                        3,
+                                                                                                        640,
+                                                                                                        640
+                                                                                                    ]
+                                                                                      }
+                                                                                  ],
+                                                                       "outputs":  [
+                                                                                       {
+                                                                                           "name":  "output0",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         300,
+                                                                                                         38
+                                                                                                     ]
+                                                                                       },
+                                                                                       {
+                                                                                           "name":  "output1",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         32,
+                                                                                                         160,
+                                                                                                         160
+                                                                                                     ]
+                                                                                       }
+                                                                                   ]
+                                                                   }
+                                              },
+                                              {
+                                                  "name":  "yolo26s-detect-pt",
+                                                  "task":  "detection",
+                                                  "model":  "yolo26s.pt",
+                                                  "sourceType":  "pt",
+                                                  "status":  "passed",
+                                                  "elapsedSeconds":  163.15,
+                                                  "predictionCount":  134,
+                                                  "onnx":  "passed",
+                                                  "tensorrt":  "passed",
+                                                  "ncnn":  "failed",
+                                                  "outputShapes":  {
+                                                                       "available":  true,
+                                                                       "inputs":  [
+                                                                                      {
+                                                                                          "name":  "images",
+                                                                                          "shape":  [
+                                                                                                        1,
+                                                                                                        3,
+                                                                                                        640,
+                                                                                                        640
+                                                                                                    ]
+                                                                                      }
+                                                                                  ],
+                                                                       "outputs":  [
+                                                                                       {
+                                                                                           "name":  "output0",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         300,
+                                                                                                         6
+                                                                                                     ]
+                                                                                       }
+                                                                                   ]
+                                                                   }
+                                              },
+                                              {
+                                                  "name":  "yolo26s-segment-pt",
+                                                  "task":  "segmentation",
+                                                  "model":  "yolo26s-seg.pt",
+                                                  "sourceType":  "pt",
+                                                  "status":  "passed",
+                                                  "elapsedSeconds":  205.514,
+                                                  "predictionCount":  300,
+                                                  "onnx":  "passed",
+                                                  "tensorrt":  "passed",
+                                                  "ncnn":  "failed",
+                                                  "outputShapes":  {
+                                                                       "available":  true,
+                                                                       "inputs":  [
+                                                                                      {
+                                                                                          "name":  "images",
+                                                                                          "shape":  [
+                                                                                                        1,
+                                                                                                        3,
+                                                                                                        640,
+                                                                                                        640
+                                                                                                    ]
+                                                                                      }
+                                                                                  ],
+                                                                       "outputs":  [
+                                                                                       {
+                                                                                           "name":  "output0",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         300,
+                                                                                                         38
+                                                                                                     ]
+                                                                                       },
+                                                                                       {
+                                                                                           "name":  "output1",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         32,
+                                                                                                         160,
+                                                                                                         160
+                                                                                                     ]
+                                                                                       }
+                                                                                   ]
+                                                                   }
+                                              },
+                                              {
+                                                  "name":  "yolo26m-detect-yaml",
+                                                  "task":  "detection",
+                                                  "model":  "yolo26m.yaml",
+                                                  "sourceType":  "yaml",
+                                                  "status":  "passed",
+                                                  "elapsedSeconds":  204.034,
+                                                  "predictionCount":  300,
+                                                  "onnx":  "passed",
+                                                  "tensorrt":  "passed",
+                                                  "ncnn":  "failed",
+                                                  "outputShapes":  {
+                                                                       "available":  true,
+                                                                       "inputs":  [
+                                                                                      {
+                                                                                          "name":  "images",
+                                                                                          "shape":  [
+                                                                                                        1,
+                                                                                                        3,
+                                                                                                        640,
+                                                                                                        640
+                                                                                                    ]
+                                                                                      }
+                                                                                  ],
+                                                                       "outputs":  [
+                                                                                       {
+                                                                                           "name":  "output0",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         300,
+                                                                                                         6
+                                                                                                     ]
+                                                                                       }
+                                                                                   ]
+                                                                   }
+                                              },
+                                              {
+                                                  "name":  "yolo26m-segment-yaml",
+                                                  "task":  "segmentation",
+                                                  "model":  "yolo26m-seg.yaml",
+                                                  "sourceType":  "yaml",
+                                                  "status":  "passed",
+                                                  "elapsedSeconds":  220.618,
+                                                  "predictionCount":  300,
+                                                  "onnx":  "passed",
+                                                  "tensorrt":  "passed",
+                                                  "ncnn":  "failed",
+                                                  "outputShapes":  {
+                                                                       "available":  true,
+                                                                       "inputs":  [
+                                                                                      {
+                                                                                          "name":  "images",
+                                                                                          "shape":  [
+                                                                                                        1,
+                                                                                                        3,
+                                                                                                        640,
+                                                                                                        640
+                                                                                                    ]
+                                                                                      }
+                                                                                  ],
+                                                                       "outputs":  [
+                                                                                       {
+                                                                                           "name":  "output0",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         300,
+                                                                                                         38
+                                                                                                     ]
+                                                                                       },
+                                                                                       {
+                                                                                           "name":  "output1",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         32,
+                                                                                                         160,
+                                                                                                         160
+                                                                                                     ]
+                                                                                       }
+                                                                                   ]
+                                                                   }
+                                              },
+                                              {
+                                                  "name":  "yolo26m-detect-pt",
+                                                  "task":  "detection",
+                                                  "model":  "yolo26m.pt",
+                                                  "sourceType":  "pt",
+                                                  "status":  "passed",
+                                                  "elapsedSeconds":  248.148,
+                                                  "predictionCount":  300,
+                                                  "onnx":  "passed",
+                                                  "tensorrt":  "passed",
+                                                  "ncnn":  "failed",
+                                                  "outputShapes":  {
+                                                                       "available":  true,
+                                                                       "inputs":  [
+                                                                                      {
+                                                                                          "name":  "images",
+                                                                                          "shape":  [
+                                                                                                        1,
+                                                                                                        3,
+                                                                                                        640,
+                                                                                                        640
+                                                                                                    ]
+                                                                                      }
+                                                                                  ],
+                                                                       "outputs":  [
+                                                                                       {
+                                                                                           "name":  "output0",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         300,
+                                                                                                         6
+                                                                                                     ]
+                                                                                       }
+                                                                                   ]
+                                                                   }
+                                              },
+                                              {
+                                                  "name":  "yolo26m-segment-pt",
+                                                  "task":  "segmentation",
+                                                  "model":  "yolo26m-seg.pt",
+                                                  "sourceType":  "pt",
+                                                  "status":  "passed",
+                                                  "elapsedSeconds":  308.019,
+                                                  "predictionCount":  300,
+                                                  "onnx":  "passed",
+                                                  "tensorrt":  "passed",
+                                                  "ncnn":  "failed",
+                                                  "outputShapes":  {
+                                                                       "available":  true,
+                                                                       "inputs":  [
+                                                                                      {
+                                                                                          "name":  "images",
+                                                                                          "shape":  [
+                                                                                                        1,
+                                                                                                        3,
+                                                                                                        640,
+                                                                                                        640
+                                                                                                    ]
+                                                                                      }
+                                                                                  ],
+                                                                       "outputs":  [
+                                                                                       {
+                                                                                           "name":  "output0",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         300,
+                                                                                                         38
+                                                                                                     ]
+                                                                                       },
+                                                                                       {
+                                                                                           "name":  "output1",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         32,
+                                                                                                         160,
+                                                                                                         160
+                                                                                                     ]
+                                                                                       }
+                                                                                   ]
+                                                                   }
+                                              },
+                                              {
+                                                  "name":  "yolo26l-detect-yaml",
+                                                  "task":  "detection",
+                                                  "model":  "yolo26l.yaml",
+                                                  "sourceType":  "yaml",
+                                                  "status":  "passed",
+                                                  "elapsedSeconds":  230.331,
+                                                  "predictionCount":  300,
+                                                  "onnx":  "passed",
+                                                  "tensorrt":  "passed",
+                                                  "ncnn":  "failed",
+                                                  "outputShapes":  {
+                                                                       "available":  true,
+                                                                       "inputs":  [
+                                                                                      {
+                                                                                          "name":  "images",
+                                                                                          "shape":  [
+                                                                                                        1,
+                                                                                                        3,
+                                                                                                        640,
+                                                                                                        640
+                                                                                                    ]
+                                                                                      }
+                                                                                  ],
+                                                                       "outputs":  [
+                                                                                       {
+                                                                                           "name":  "output0",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         300,
+                                                                                                         6
+                                                                                                     ]
+                                                                                       }
+                                                                                   ]
+                                                                   }
+                                              },
+                                              {
+                                                  "name":  "yolo26l-segment-yaml",
+                                                  "task":  "segmentation",
+                                                  "model":  "yolo26l-seg.yaml",
+                                                  "sourceType":  "yaml",
+                                                  "status":  "passed",
+                                                  "elapsedSeconds":  254.153,
+                                                  "predictionCount":  300,
+                                                  "onnx":  "passed",
+                                                  "tensorrt":  "passed",
+                                                  "ncnn":  "failed",
+                                                  "outputShapes":  {
+                                                                       "available":  true,
+                                                                       "inputs":  [
+                                                                                      {
+                                                                                          "name":  "images",
+                                                                                          "shape":  [
+                                                                                                        1,
+                                                                                                        3,
+                                                                                                        640,
+                                                                                                        640
+                                                                                                    ]
+                                                                                      }
+                                                                                  ],
+                                                                       "outputs":  [
+                                                                                       {
+                                                                                           "name":  "output0",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         300,
+                                                                                                         38
+                                                                                                     ]
+                                                                                       },
+                                                                                       {
+                                                                                           "name":  "output1",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         32,
+                                                                                                         160,
+                                                                                                         160
+                                                                                                     ]
+                                                                                       }
+                                                                                   ]
+                                                                   }
+                                              },
+                                              {
+                                                  "name":  "yolo26l-detect-pt",
+                                                  "task":  "detection",
+                                                  "model":  "yolo26l.pt",
+                                                  "sourceType":  "pt",
+                                                  "status":  "passed",
+                                                  "elapsedSeconds":  307.971,
+                                                  "predictionCount":  300,
+                                                  "onnx":  "passed",
+                                                  "tensorrt":  "passed",
+                                                  "ncnn":  "failed",
+                                                  "outputShapes":  {
+                                                                       "available":  true,
+                                                                       "inputs":  [
+                                                                                      {
+                                                                                          "name":  "images",
+                                                                                          "shape":  [
+                                                                                                        1,
+                                                                                                        3,
+                                                                                                        640,
+                                                                                                        640
+                                                                                                    ]
+                                                                                      }
+                                                                                  ],
+                                                                       "outputs":  [
+                                                                                       {
+                                                                                           "name":  "output0",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         300,
+                                                                                                         6
+                                                                                                     ]
+                                                                                       }
+                                                                                   ]
+                                                                   }
+                                              },
+                                              {
+                                                  "name":  "yolo26l-segment-pt",
+                                                  "task":  "segmentation",
+                                                  "model":  "yolo26l-seg.pt",
+                                                  "sourceType":  "pt",
+                                                  "status":  "passed",
+                                                  "elapsedSeconds":  307.958,
+                                                  "predictionCount":  300,
+                                                  "onnx":  "passed",
+                                                  "tensorrt":  "passed",
+                                                  "ncnn":  "failed",
+                                                  "outputShapes":  {
+                                                                       "available":  true,
+                                                                       "inputs":  [
+                                                                                      {
+                                                                                          "name":  "images",
+                                                                                          "shape":  [
+                                                                                                        1,
+                                                                                                        3,
+                                                                                                        640,
+                                                                                                        640
+                                                                                                    ]
+                                                                                      }
+                                                                                  ],
+                                                                       "outputs":  [
+                                                                                       {
+                                                                                           "name":  "output0",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         300,
+                                                                                                         38
+                                                                                                     ]
+                                                                                       },
+                                                                                       {
+                                                                                           "name":  "output1",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         32,
+                                                                                                         160,
+                                                                                                         160
+                                                                                                     ]
+                                                                                       }
+                                                                                   ]
+                                                                   }
+                                              },
+                                              {
+                                                  "name":  "yolo26x-detect-yaml",
+                                                  "task":  "detection",
+                                                  "model":  "yolo26x.yaml",
+                                                  "sourceType":  "yaml",
+                                                  "status":  "passed",
+                                                  "elapsedSeconds":  355.279,
+                                                  "predictionCount":  300,
+                                                  "onnx":  "passed",
+                                                  "tensorrt":  "passed",
+                                                  "ncnn":  "failed",
+                                                  "outputShapes":  {
+                                                                       "available":  true,
+                                                                       "inputs":  [
+                                                                                      {
+                                                                                          "name":  "images",
+                                                                                          "shape":  [
+                                                                                                        1,
+                                                                                                        3,
+                                                                                                        640,
+                                                                                                        640
+                                                                                                    ]
+                                                                                      }
+                                                                                  ],
+                                                                       "outputs":  [
+                                                                                       {
+                                                                                           "name":  "output0",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         300,
+                                                                                                         6
+                                                                                                     ]
+                                                                                       }
+                                                                                   ]
+                                                                   }
+                                              },
+                                              {
+                                                  "name":  "yolo26x-segment-yaml",
+                                                  "task":  "segmentation",
+                                                  "model":  "yolo26x-seg.yaml",
+                                                  "sourceType":  "yaml",
+                                                  "status":  "passed",
+                                                  "elapsedSeconds":  405.936,
+                                                  "predictionCount":  300,
+                                                  "onnx":  "passed",
+                                                  "tensorrt":  "passed",
+                                                  "ncnn":  "failed",
+                                                  "outputShapes":  {
+                                                                       "available":  true,
+                                                                       "inputs":  [
+                                                                                      {
+                                                                                          "name":  "images",
+                                                                                          "shape":  [
+                                                                                                        1,
+                                                                                                        3,
+                                                                                                        640,
+                                                                                                        640
+                                                                                                    ]
+                                                                                      }
+                                                                                  ],
+                                                                       "outputs":  [
+                                                                                       {
+                                                                                           "name":  "output0",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         300,
+                                                                                                         38
+                                                                                                     ]
+                                                                                       },
+                                                                                       {
+                                                                                           "name":  "output1",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         32,
+                                                                                                         160,
+                                                                                                         160
+                                                                                                     ]
+                                                                                       }
+                                                                                   ]
+                                                                   }
+                                              },
+                                              {
+                                                  "name":  "yolo26x-detect-pt",
+                                                  "task":  "detection",
+                                                  "model":  "yolo26x.pt",
+                                                  "sourceType":  "pt",
+                                                  "status":  "passed",
+                                                  "elapsedSeconds":  481.258,
+                                                  "predictionCount":  300,
+                                                  "onnx":  "passed",
+                                                  "tensorrt":  "passed",
+                                                  "ncnn":  "failed",
+                                                  "outputShapes":  {
+                                                                       "available":  true,
+                                                                       "inputs":  [
+                                                                                      {
+                                                                                          "name":  "images",
+                                                                                          "shape":  [
+                                                                                                        1,
+                                                                                                        3,
+                                                                                                        640,
+                                                                                                        640
+                                                                                                    ]
+                                                                                      }
+                                                                                  ],
+                                                                       "outputs":  [
+                                                                                       {
+                                                                                           "name":  "output0",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         300,
+                                                                                                         6
+                                                                                                     ]
+                                                                                       }
+                                                                                   ]
+                                                                   }
+                                              },
+                                              {
+                                                  "name":  "yolo26x-segment-pt",
+                                                  "task":  "segmentation",
+                                                  "model":  "yolo26x-seg.pt",
+                                                  "sourceType":  "pt",
+                                                  "status":  "passed",
+                                                  "elapsedSeconds":  517.411,
+                                                  "predictionCount":  300,
+                                                  "onnx":  "passed",
+                                                  "tensorrt":  "passed",
+                                                  "ncnn":  "failed",
+                                                  "outputShapes":  {
+                                                                       "available":  true,
+                                                                       "inputs":  [
+                                                                                      {
+                                                                                          "name":  "images",
+                                                                                          "shape":  [
+                                                                                                        1,
+                                                                                                        3,
+                                                                                                        640,
+                                                                                                        640
+                                                                                                    ]
+                                                                                      }
+                                                                                  ],
+                                                                       "outputs":  [
+                                                                                       {
+                                                                                           "name":  "output0",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         300,
+                                                                                                         38
+                                                                                                     ]
+                                                                                       },
+                                                                                       {
+                                                                                           "name":  "output1",
+                                                                                           "shape":  [
+                                                                                                         1,
+                                                                                                         32,
+                                                                                                         160,
+                                                                                                         160
+                                                                                                     ]
+                                                                                       }
+                                                                                   ]
+                                                                   }
+                                              }
+                                          ]
+                             },
+    "knownIssues":  [
+                        {
+                            "id":  "yolo12-seg-pt-weight",
+                            "status":  "open",
+                            "impact":  "YOLO12 segmentation .pt preset rows remain blocked because official yolo12*-seg.pt weights were not resolvable in the validation environment."
+                        },
+                        {
+                            "id":  "yolo26-ncnn",
+                            "status":  "mitigated_by_product_scope",
+                            "impact":  "YOLO26 NCNN failed 20/20 in targeted matrix; product must not expose NCNN for YOLO26. Use ONNX or TensorRT."
+                        },
+                        {
+                            "id":  "public-data-scope",
+                            "status":  "scope_note",
+                            "impact":  "COCO128, COCO128-seg, and Total-Text runs are engineering lifecycle evidence, not customer-domain production accuracy proof."
+                        },
+                        {
+                            "id":  "ocr-restored-seed-report",
+                            "status":  "caveat",
+                            "impact":  "OCR 5 epoch pp-ocrv4-mobile-det row was restored from an earlier report path; separate full-lifecycle ppocrv4-mobile-det row remains a passed evidence source."
+                        }
+                    ],
+    "cleanupPolicy":  {
+                          "preservedInDocs":  [
+                                                  "summary json",
+                                                  "row status",
+                                                  "environment/report paths",
+                                                  "known issue boundaries"
+                                              ],
+                          "safeToDeleteFromDeps":  [
+                                                       "*.pt",
+                                                       "*.onnx",
+                                                       "*.engine",
+                                                       "*.bin",
+                                                       "*.param",
+                                                       "official_model checkpoints",
+                                                       "Ultralytics weights",
+                                                       "NCNN/TensorRT intermediates",
+                                                       "large train logs after report/tail capture",
+                                                       "dataset archives/cache"
+                                                   ],
+                          "keepAsRuntimeDeps":  [
+                                                    ".deps/PaddleOCR",
+                                                    ".deps/onnxruntime-win-x64-1.24.3",
+                                                    ".deps/ncnn",
+                                                    ".deps/ncnn-20260526-windows-vs2022-tools"
+                                                ]
+                      }
+}

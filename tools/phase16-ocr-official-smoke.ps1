@@ -1,8 +1,8 @@
 param(
     [string]$WorkDir = ".deps\phase16-ocr-official-smoke",
     [string]$PythonExe = "",
-    [string]$PythonDir = ".deps\python-3.13.13-ocr-amd64",
-    [string]$PaddleOcrRepo = ".deps\PaddleOCR",
+    [string]$PythonDir = ".deps\envs\ocr-cpu",
+    [string]$PaddleOcrRepo = ".deps\repos\PaddleOCR",
     [string]$PaddleOcrRef = "f8b41a62bba991d35e578ffa712107a042b0c3b0",
     [string]$PaddlePaddleRequirement = "paddlepaddle==3.3.1",
     [switch]$DisablePinnedConstraints,
@@ -10,12 +10,11 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$script:Root = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $PSScriptRoot) "."))
+. (Join-Path $PSScriptRoot "deps-layout.ps1")
 
 function Resolve-RepoPath([string]$Path) {
-    if ([System.IO.Path]::IsPathRooted($Path)) {
-        return [System.IO.Path]::GetFullPath($Path)
-    }
-    return [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $Path))
+    return Resolve-AITrainRepoPath -Root $script:Root -Path $Path
 }
 
 $pythonDirFull = Resolve-RepoPath $PythonDir
@@ -27,7 +26,7 @@ if (Test-Path $venvPython) {
 if ($PythonExe) {
     $resolvedPythonExe = Resolve-RepoPath $PythonExe
 }
-$repoFull = Resolve-RepoPath $PaddleOcrRepo
+$repoFull = Resolve-AITrainPaddleOcrRepo -Root $script:Root -RequestedPath $PaddleOcrRepo
 $workFull = Resolve-RepoPath $WorkDir
 New-Item -ItemType Directory -Force $workFull | Out-Null
 
@@ -35,21 +34,23 @@ if (!(Test-Path $resolvedPythonExe)) {
     if ($PythonExe) {
         throw "Python executable was not found: $resolvedPythonExe"
     }
-    if (!(Test-Path ".deps\python-3.13.13-embed-amd64.zip")) {
-        throw "Missing .deps\python-3.13.13-embed-amd64.zip. Run the Phase 8 Python setup first."
+    $sourceZip = Resolve-AITrainFirstExistingPath -Candidates (Get-AITrainPortablePythonZipCandidates -Root $script:Root)
+    if ([string]::IsNullOrWhiteSpace($sourceZip)) {
+        throw "Missing portable Python zip. Expected .deps\archives\python-3.13.13-embed-amd64.zip or legacy .deps\python-3.13.13-embed-amd64.zip."
     }
     New-Item -ItemType Directory -Force $pythonDirFull | Out-Null
-    Expand-Archive -Path ".deps\python-3.13.13-embed-amd64.zip" -DestinationPath $pythonDirFull -Force
+    Expand-Archive -Path $sourceZip -DestinationPath $pythonDirFull -Force
     $pth = Join-Path $pythonDirFull "python313._pth"
     (Get-Content $pth) -replace "#import site", "import site" | Set-Content $pth -Encoding ASCII
 }
 
 $pipCheck = & $resolvedPythonExe -m pip --version 2>$null
 if ($LASTEXITCODE -ne 0) {
-    if (!(Test-Path ".deps\get-pip.py")) {
-        throw "Missing .deps\get-pip.py. Run the Phase 8 Python setup first."
+    $getPip = Resolve-AITrainFirstExistingPath -Candidates (Get-AITrainGetPipCandidates -Root $script:Root)
+    if ([string]::IsNullOrWhiteSpace($getPip)) {
+        throw "Missing get-pip.py. Expected .deps\archives\get-pip.py or legacy .deps\get-pip.py."
     }
-    & $resolvedPythonExe ".deps\get-pip.py"
+    & $resolvedPythonExe $getPip
 }
 
 if (!(Test-Path (Join-Path $repoFull "tools\train.py"))) {

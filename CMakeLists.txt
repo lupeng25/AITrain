@@ -29,6 +29,81 @@ set(AITRAIN_CUDA_ROOT "" CACHE PATH "Optional CUDA Toolkit root used for packagi
 set(AITRAIN_CUDNN_ROOT "" CACHE PATH "Optional cuDNN root used for packaging runtime DLLs")
 set(AITRAIN_TENSORRT_ROOT "" CACHE PATH "Optional TensorRT SDK root used for packaging runtime DLLs")
 set(AITRAIN_WINDEPLOYQT_EXECUTABLE "" CACHE FILEPATH "Optional path to windeployqt for Windows install packaging")
+set(AITRAIN_DEPS_ROOT "${CMAKE_SOURCE_DIR}/.deps" CACHE PATH "AITrain local dependency root")
+set(AITRAIN_DEPS_SDK_ROOT "${AITRAIN_DEPS_ROOT}/sdks" CACHE PATH "AITrain canonical SDK/runtime dependency root")
+file(TO_CMAKE_PATH "${AITRAIN_DEPS_ROOT}" AITRAIN_DEPS_ROOT_CMAKE_PATH)
+file(TO_CMAKE_PATH "${AITRAIN_DEPS_SDK_ROOT}" AITRAIN_DEPS_SDK_ROOT_CMAKE_PATH)
+
+function(aitrain_clear_missing_or_legacy_deps_cache_path variable_name)
+    if(NOT DEFINED ${variable_name} OR "${${variable_name}}" STREQUAL "")
+        return()
+    endif()
+    file(TO_CMAKE_PATH "${${variable_name}}" AITRAIN_CURRENT_CACHE_PATH)
+    string(FIND "${AITRAIN_CURRENT_CACHE_PATH}" "${AITRAIN_DEPS_ROOT_CMAKE_PATH}/" AITRAIN_DEPS_ROOT_INDEX)
+    string(FIND "${AITRAIN_CURRENT_CACHE_PATH}" "${AITRAIN_DEPS_SDK_ROOT_CMAKE_PATH}/" AITRAIN_DEPS_SDK_ROOT_INDEX)
+    if(NOT EXISTS "${${variable_name}}" OR (AITRAIN_DEPS_ROOT_INDEX EQUAL 0 AND NOT AITRAIN_DEPS_SDK_ROOT_INDEX EQUAL 0))
+        message(STATUS "Clearing stale dependency cache path ${variable_name}: ${${variable_name}}")
+        unset(${variable_name} CACHE)
+    endif()
+endfunction()
+
+foreach(AITRAIN_DISCOVERED_DEP_PATH
+        AITRAIN_CUDA_ROOT
+        AITRAIN_CUDNN_ROOT
+        AITRAIN_TENSORRT_ROOT
+        AITRAIN_ONNXRUNTIME_ROOT
+        AITRAIN_NCNN_ROOT
+        AITRAIN_CUDA_RUNTIME_DLL
+        AITRAIN_CUDA_INCLUDE_DIR
+        AITRAIN_CUDA_CRT_INCLUDE_DIR
+        AITRAIN_CUDNN_DLL
+        AITRAIN_TENSORRT_INCLUDE_DIR
+        AITRAIN_TENSORRT_INFER_DLL
+        AITRAIN_TENSORRT_PLUGIN_DLL
+        AITRAIN_TENSORRT_ONNX_PARSER_DLL
+        AITRAIN_ONNXRUNTIME_INCLUDE_DIR
+        AITRAIN_ONNXRUNTIME_LIBRARY
+        AITRAIN_ONNXRUNTIME_DLL
+        AITRAIN_ONNXRUNTIME_PROVIDERS_DLL
+        AITRAIN_NCNN_INCLUDE_DIR
+        AITRAIN_NCNN_LIBRARY
+        AITRAIN_NCNN_DLL
+        AITRAIN_NCNN_ONNX2NCNN
+        AITRAIN_NCNN_ONNX2NCNN_DISCOVERED
+        AITRAIN_NCNN_PNNX
+        AITRAIN_NCNN_PNNX_DISCOVERED)
+    aitrain_clear_missing_or_legacy_deps_cache_path(${AITRAIN_DISCOVERED_DEP_PATH})
+endforeach()
+
+if(NOT AITRAIN_ONNXRUNTIME_ROOT AND EXISTS "${AITRAIN_DEPS_SDK_ROOT}/onnxruntime")
+    set(AITRAIN_ONNXRUNTIME_ROOT "${AITRAIN_DEPS_SDK_ROOT}/onnxruntime" CACHE PATH "Optional ONNX Runtime SDK root containing include and lib directories" FORCE)
+endif()
+if(NOT AITRAIN_NCNN_ROOT AND EXISTS "${AITRAIN_DEPS_SDK_ROOT}/ncnn")
+    set(AITRAIN_NCNN_ROOT "${AITRAIN_DEPS_SDK_ROOT}/ncnn" CACHE PATH "Optional NCNN SDK root containing include, lib, bin, and tools directories" FORCE)
+endif()
+if(NOT AITRAIN_TENSORRT_ROOT AND EXISTS "${AITRAIN_DEPS_SDK_ROOT}/tensorrt-runtime")
+    set(AITRAIN_TENSORRT_ROOT "${AITRAIN_DEPS_SDK_ROOT}/tensorrt-runtime" CACHE PATH "Optional TensorRT SDK root used for packaging runtime DLLs" FORCE)
+endif()
+
+function(aitrain_clear_noncanonical_cache_path variable_name canonical_root)
+    if(NOT DEFINED ${variable_name} OR "${${variable_name}}" STREQUAL "" OR NOT EXISTS "${canonical_root}")
+        return()
+    endif()
+    file(TO_CMAKE_PATH "${${variable_name}}" AITRAIN_CURRENT_CACHE_PATH)
+    file(TO_CMAKE_PATH "${canonical_root}" AITRAIN_CANONICAL_ROOT_PATH)
+    string(FIND "${AITRAIN_CURRENT_CACHE_PATH}" "${AITRAIN_CANONICAL_ROOT_PATH}/" AITRAIN_CANONICAL_ROOT_INDEX)
+    if(NOT AITRAIN_CANONICAL_ROOT_INDEX EQUAL 0)
+        message(STATUS "Clearing non-canonical dependency cache path ${variable_name}: ${${variable_name}}")
+        unset(${variable_name} CACHE)
+    endif()
+endfunction()
+
+foreach(AITRAIN_TENSORRT_RUNTIME_CACHE_PATH
+        AITRAIN_TENSORRT_INFER_DLL
+        AITRAIN_TENSORRT_PLUGIN_DLL
+        AITRAIN_TENSORRT_ONNX_PARSER_DLL)
+    aitrain_clear_noncanonical_cache_path(${AITRAIN_TENSORRT_RUNTIME_CACHE_PATH} "${AITRAIN_DEPS_SDK_ROOT}/tensorrt-runtime")
+endforeach()
 
 if(MSVC)
     add_compile_options(/utf-8)
@@ -104,6 +179,7 @@ endif()
 find_file(AITRAIN_CUDA_RUNTIME_DLL
     NAMES cudart64_13.dll cudart64_12.dll cudart64_120.dll cudart64_110.dll
     HINTS
+        ${AITRAIN_DEPS_SDK_ROOT}/cuda-redist/cuda_cudart-windows-x86_64-13.0.96/cuda_cudart-windows-x86_64-13.0.96-archive/bin/x64
         ${CMAKE_SOURCE_DIR}/.deps/cuda-redist/cuda_cudart-windows-x86_64-13.0.96/cuda_cudart-windows-x86_64-13.0.96-archive/bin/x64
         ${AITRAIN_CUDA_ROOT}/bin
         $ENV{CUDA_PATH}/bin
@@ -111,6 +187,7 @@ find_file(AITRAIN_CUDA_RUNTIME_DLL
 find_path(AITRAIN_CUDA_INCLUDE_DIR
     NAMES cuda_runtime_api.h
     HINTS
+        ${AITRAIN_DEPS_SDK_ROOT}/cuda-redist/cuda_cudart-windows-x86_64-13.0.96/cuda_cudart-windows-x86_64-13.0.96-archive/include
         ${CMAKE_SOURCE_DIR}/.deps/cuda-redist/cuda_cudart-windows-x86_64-13.0.96/cuda_cudart-windows-x86_64-13.0.96-archive/include
         ${AITRAIN_CUDA_ROOT}/include
         $ENV{CUDA_PATH}/include
@@ -118,6 +195,7 @@ find_path(AITRAIN_CUDA_INCLUDE_DIR
 find_path(AITRAIN_CUDA_CRT_INCLUDE_DIR
     NAMES crt/host_defines.h
     HINTS
+        ${AITRAIN_DEPS_SDK_ROOT}/cuda-redist/cuda_crt-windows-x86_64-13.0.88/cuda_crt-windows-x86_64-13.0.88-archive/include
         ${CMAKE_SOURCE_DIR}/.deps/cuda-redist/cuda_crt-windows-x86_64-13.0.88/cuda_crt-windows-x86_64-13.0.88-archive/include
         ${AITRAIN_CUDA_ROOT}/include
         $ENV{CUDA_PATH}/include
@@ -125,6 +203,7 @@ find_path(AITRAIN_CUDA_CRT_INCLUDE_DIR
 find_file(AITRAIN_CUDNN_DLL
     NAMES cudnn64_9.dll cudnn64_8.dll
     HINTS
+        ${AITRAIN_DEPS_SDK_ROOT}/cudnn-redist/cudnn-windows-x86_64-9.21.1.3_cuda13/cudnn-windows-x86_64-9.21.1.3_cuda13-archive/bin/x64
         ${CMAKE_SOURCE_DIR}/.deps/cudnn-redist/cudnn-windows-x86_64-9.21.1.3_cuda13/cudnn-windows-x86_64-9.21.1.3_cuda13-archive/bin/x64
         ${AITRAIN_CUDNN_ROOT}/bin
         ${AITRAIN_CUDNN_ROOT}/lib
@@ -134,6 +213,7 @@ find_file(AITRAIN_CUDNN_DLL
         $ENV{CUDA_PATH}/bin
 )
 file(GLOB AITRAIN_CUDNN_RUNTIME_DLLS CONFIGURE_DEPENDS
+    "${AITRAIN_DEPS_SDK_ROOT}/cudnn-redist/cudnn-windows-x86_64-9.21.1.3_cuda13/cudnn-windows-x86_64-9.21.1.3_cuda13-archive/bin/x64/cudnn*.dll"
     "${CMAKE_SOURCE_DIR}/.deps/cudnn-redist/cudnn-windows-x86_64-9.21.1.3_cuda13/cudnn-windows-x86_64-9.21.1.3_cuda13-archive/bin/x64/cudnn*.dll"
     "${AITRAIN_CUDNN_ROOT}/bin/cudnn*.dll"
     "${AITRAIN_CUDNN_ROOT}/lib/cudnn*.dll"
@@ -141,14 +221,18 @@ file(GLOB AITRAIN_CUDNN_RUNTIME_DLLS CONFIGURE_DEPENDS
 find_path(AITRAIN_TENSORRT_INCLUDE_DIR
     NAMES NvInfer.h
     HINTS
+        ${AITRAIN_DEPS_SDK_ROOT}/tensorrt-oss/include
         ${CMAKE_SOURCE_DIR}/.deps/tensorrt-oss/include
         ${AITRAIN_TENSORRT_ROOT}/include
         $ENV{TENSORRT_ROOT}/include
         $ENV{TRT_ROOT}/include
 )
 find_file(AITRAIN_TENSORRT_INFER_DLL
-    NAMES nvinfer.dll nvinfer_10.dll nvinfer_8.dll
+    NAMES nvinfer_10.dll nvinfer.dll nvinfer_8.dll
     HINTS
+        ${AITRAIN_DEPS_SDK_ROOT}/tensorrt-runtime
+        ${AITRAIN_DEPS_SDK_ROOT}/tensorrt-runtime/bin
+        ${AITRAIN_DEPS_SDK_ROOT}/tensorrt-runtime/lib
         ${CMAKE_SOURCE_DIR}/.deps/tensorrt-pypi/extracted/tensorrt_cu13_libs-10.16.1.11-py3-none-win_amd64/tensorrt_libs
         ${AITRAIN_TENSORRT_ROOT}
         ${AITRAIN_TENSORRT_ROOT}/bin
@@ -162,8 +246,11 @@ find_file(AITRAIN_TENSORRT_INFER_DLL
         $ENV{TRT_ROOT}/lib/x64
 )
 find_file(AITRAIN_TENSORRT_PLUGIN_DLL
-    NAMES nvinfer_plugin.dll nvinfer_plugin_10.dll nvinfer_plugin_8.dll
+    NAMES nvinfer_plugin_10.dll nvinfer_plugin.dll nvinfer_plugin_8.dll
     HINTS
+        ${AITRAIN_DEPS_SDK_ROOT}/tensorrt-runtime
+        ${AITRAIN_DEPS_SDK_ROOT}/tensorrt-runtime/bin
+        ${AITRAIN_DEPS_SDK_ROOT}/tensorrt-runtime/lib
         ${CMAKE_SOURCE_DIR}/.deps/tensorrt-pypi/extracted/tensorrt_cu13_libs-10.16.1.11-py3-none-win_amd64/tensorrt_libs
         ${AITRAIN_TENSORRT_ROOT}
         ${AITRAIN_TENSORRT_ROOT}/bin
@@ -177,8 +264,11 @@ find_file(AITRAIN_TENSORRT_PLUGIN_DLL
         $ENV{TRT_ROOT}/lib/x64
 )
 find_file(AITRAIN_TENSORRT_ONNX_PARSER_DLL
-    NAMES nvonnxparser.dll nvonnxparser_10.dll nvonnxparser_8.dll
+    NAMES nvonnxparser_10.dll nvonnxparser.dll nvonnxparser_8.dll
     HINTS
+        ${AITRAIN_DEPS_SDK_ROOT}/tensorrt-runtime
+        ${AITRAIN_DEPS_SDK_ROOT}/tensorrt-runtime/bin
+        ${AITRAIN_DEPS_SDK_ROOT}/tensorrt-runtime/lib
         ${CMAKE_SOURCE_DIR}/.deps/tensorrt-pypi/extracted/tensorrt_cu13_libs-10.16.1.11-py3-none-win_amd64/tensorrt_libs
         ${AITRAIN_TENSORRT_ROOT}
         ${AITRAIN_TENSORRT_ROOT}/bin
@@ -192,6 +282,9 @@ find_file(AITRAIN_TENSORRT_ONNX_PARSER_DLL
         $ENV{TRT_ROOT}/lib/x64
 )
 file(GLOB AITRAIN_TENSORRT_BUILDER_RESOURCE_DLLS CONFIGURE_DEPENDS
+    "${AITRAIN_DEPS_SDK_ROOT}/tensorrt-runtime/nvinfer_builder_resource_*.dll"
+    "${AITRAIN_DEPS_SDK_ROOT}/tensorrt-runtime/bin/nvinfer_builder_resource_*.dll"
+    "${AITRAIN_DEPS_SDK_ROOT}/tensorrt-runtime/lib/nvinfer_builder_resource_*.dll"
     "${CMAKE_SOURCE_DIR}/.deps/tensorrt-pypi/extracted/tensorrt_cu13_libs-10.16.1.11-py3-none-win_amd64/tensorrt_libs/nvinfer_builder_resource_*.dll"
     "${AITRAIN_TENSORRT_ROOT}/nvinfer_builder_resource_*.dll"
     "${AITRAIN_TENSORRT_ROOT}/bin/nvinfer_builder_resource_*.dll"
@@ -210,6 +303,7 @@ if(AITRAIN_ENABLE_ONNXRUNTIME)
     find_path(AITRAIN_ONNXRUNTIME_INCLUDE_DIR
         NAMES onnxruntime_cxx_api.h
         HINTS
+            ${AITRAIN_DEPS_SDK_ROOT}/onnxruntime/include
             ${CMAKE_SOURCE_DIR}/.deps/onnxruntime-win-x64-1.24.3/include
             ${CMAKE_SOURCE_DIR}/.deps/onnxruntime/include
             ${AITRAIN_ONNXRUNTIME_ROOT}/include
@@ -219,6 +313,8 @@ if(AITRAIN_ENABLE_ONNXRUNTIME)
     find_library(AITRAIN_ONNXRUNTIME_LIBRARY
         NAMES onnxruntime
         HINTS
+            ${AITRAIN_DEPS_SDK_ROOT}/onnxruntime/lib
+            ${AITRAIN_DEPS_SDK_ROOT}/onnxruntime/lib/x64
             ${CMAKE_SOURCE_DIR}/.deps/onnxruntime-win-x64-1.24.3/lib
             ${CMAKE_SOURCE_DIR}/.deps/onnxruntime/lib
             ${AITRAIN_ONNXRUNTIME_ROOT}/lib
@@ -231,6 +327,8 @@ if(AITRAIN_ENABLE_ONNXRUNTIME)
     find_file(AITRAIN_ONNXRUNTIME_DLL
         NAMES onnxruntime.dll
         HINTS
+            ${AITRAIN_DEPS_SDK_ROOT}/onnxruntime/lib
+            ${AITRAIN_DEPS_SDK_ROOT}/onnxruntime/lib/x64
             ${AITRAIN_ONNXRUNTIME_ROOT}/lib
             ${AITRAIN_ONNXRUNTIME_ROOT}/lib/x64
             $ENV{ONNXRUNTIME_ROOT}/lib
@@ -244,6 +342,8 @@ if(AITRAIN_ENABLE_ONNXRUNTIME)
     find_file(AITRAIN_ONNXRUNTIME_PROVIDERS_DLL
         NAMES onnxruntime_providers_shared.dll
         HINTS
+            ${AITRAIN_DEPS_SDK_ROOT}/onnxruntime/lib
+            ${AITRAIN_DEPS_SDK_ROOT}/onnxruntime/lib/x64
             ${AITRAIN_ONNXRUNTIME_ROOT}/lib
             ${AITRAIN_ONNXRUNTIME_ROOT}/lib/x64
             $ENV{ONNXRUNTIME_ROOT}/lib
@@ -267,6 +367,10 @@ if(AITRAIN_ENABLE_NCNN)
     find_path(AITRAIN_NCNN_INCLUDE_DIR
         NAMES net.h
         HINTS
+            ${AITRAIN_DEPS_SDK_ROOT}/ncnn/include/ncnn
+            ${AITRAIN_DEPS_SDK_ROOT}/ncnn/include
+            ${AITRAIN_DEPS_SDK_ROOT}/ncnn/x64/include/ncnn
+            ${AITRAIN_DEPS_SDK_ROOT}/ncnn/x64/include
             ${CMAKE_SOURCE_DIR}/.deps/ncnn/include/ncnn
             ${CMAKE_SOURCE_DIR}/.deps/ncnn/include
             ${CMAKE_SOURCE_DIR}/.deps/ncnn/x64/include/ncnn
@@ -287,6 +391,10 @@ if(AITRAIN_ENABLE_NCNN)
     find_library(AITRAIN_NCNN_LIBRARY
         NAMES ncnn libncnn
         HINTS
+            ${AITRAIN_DEPS_SDK_ROOT}/ncnn/lib
+            ${AITRAIN_DEPS_SDK_ROOT}/ncnn/lib/x64
+            ${AITRAIN_DEPS_SDK_ROOT}/ncnn/lib64
+            ${AITRAIN_DEPS_SDK_ROOT}/ncnn/x64/lib
             ${CMAKE_SOURCE_DIR}/.deps/ncnn/lib
             ${CMAKE_SOURCE_DIR}/.deps/ncnn/lib/x64
             ${CMAKE_SOURCE_DIR}/.deps/ncnn/lib64
@@ -307,6 +415,10 @@ if(AITRAIN_ENABLE_NCNN)
     find_file(AITRAIN_NCNN_DLL
         NAMES ncnn.dll
         HINTS
+            ${AITRAIN_DEPS_SDK_ROOT}/ncnn/x64/bin
+            ${AITRAIN_DEPS_SDK_ROOT}/ncnn/bin
+            ${AITRAIN_DEPS_SDK_ROOT}/ncnn/lib
+            ${AITRAIN_DEPS_SDK_ROOT}/ncnn/lib/x64
             ${CMAKE_SOURCE_DIR}/.deps/ncnn/x64/bin
             ${AITRAIN_NCNN_ROOT}/bin
             ${AITRAIN_NCNN_ROOT}/x64/bin
@@ -329,6 +441,10 @@ if(AITRAIN_ENABLE_NCNN)
         find_program(AITRAIN_NCNN_ONNX2NCNN_DISCOVERED
             NAMES onnx2ncnn.exe onnx2ncnn
             HINTS
+                ${AITRAIN_DEPS_SDK_ROOT}/ncnn/x64/bin
+                ${AITRAIN_DEPS_SDK_ROOT}/ncnn/bin
+                ${AITRAIN_DEPS_SDK_ROOT}/ncnn/tools/onnx
+                ${AITRAIN_DEPS_SDK_ROOT}/ncnn/x64/tools/onnx
                 ${CMAKE_SOURCE_DIR}/.deps/ncnn/x64/bin
             ${AITRAIN_NCNN_ROOT}/bin
             ${AITRAIN_NCNN_ROOT}/tools/onnx
@@ -354,6 +470,10 @@ if(AITRAIN_ENABLE_NCNN)
         find_program(AITRAIN_NCNN_PNNX_DISCOVERED
             NAMES pnnx.exe pnnx
             HINTS
+                ${AITRAIN_DEPS_SDK_ROOT}/ncnn/x64/bin
+                ${AITRAIN_DEPS_SDK_ROOT}/ncnn/bin
+                ${AITRAIN_DEPS_SDK_ROOT}/pnnx/bin
+                ${AITRAIN_DEPS_SDK_ROOT}/pnnx/pnnx
                 ${CMAKE_SOURCE_DIR}/.deps/ncnn/x64/bin
                 ${AITRAIN_NCNN_ROOT}/bin
                 ${AITRAIN_NCNN_ROOT}/x64/bin
@@ -577,6 +697,7 @@ install(DIRECTORY examples DESTINATION .
     PATTERN "*.pyo" EXCLUDE)
 install(FILES
     docs/user-guide.md
+    docs/deps-layout.md
     docs/training-backends.md
     docs/hardware-compatibility.md
     docs/acceptance-runbook.md

@@ -135,7 +135,7 @@ Expected result:
 
 ## Phase 19: TensorRT Acceptance
 
-RTX 4090 D TensorRT acceptance has passed for the current validation lane, with evidence under `.deps\rtx4090-validation\acceptance-tensorrt`. Older GTX 1060 / SM 61 hardware remains `hardware-blocked` for TensorRT 10 and must not be treated as passing.
+RTX 4090 D TensorRT acceptance has passed for the current validation lane, with evidence archived in `docs\validation\rtx4090-validation-evidence-20260615.json`. Older GTX 1060 / SM 61 hardware remains `hardware-blocked` for TensorRT 10 and must not be treated as passing.
 
 To reproduce or refresh the evidence on an RTX / SM 75+ Windows machine or matching cloud GPU:
 
@@ -290,7 +290,7 @@ Historical artifacts may include:
 
 `tools\phase47-paddleocr-det-onnx-smoke.ps1` is now a compatibility boundary check only: it writes a blocked official-only summary and exits with code 11. It no longer runs Phase 31, Paddle2ONNX conversion, or Worker C++ OCR ONNX smoke.
 
-RTX 4090D historical Phase 47 evidence is archived under `.deps\rtx4090-validation\2026-06-05-122806-rtx4090d-followup-1-4\phase47-paddleocr-det-onnx`. Keep it as past wiring context only; do not use it as new OCR acceptance evidence.
+RTX 4090D historical Phase 47 evidence is archived in `docs\validation\rtx4090-validation-evidence-20260615.json`. Keep it as past wiring context only; do not use it as new OCR acceptance evidence.
 
 Current OCR acceptance requires PaddleOCR official Det/Rec/System reports and representative data.
 
@@ -324,7 +324,7 @@ The repeatable production chain supports PP-OCRv4, PP-OCRv5, and PP-OCRv6 preset
 
 PP-OCRv5 and PP-OCRv6 production-chain runs still use only PaddleOCR official Det, Rec, and System reports. They do not add a PaddleOCR C++ local OCR route and do not claim PP-StructureV3, PP-ChatOCR, PaddleOCR-VL, document orientation classification, document unwarping, or text-line orientation classification coverage. PP-OCRv6 tiny follows the official language-coverage limitation and remains workflow evidence unless customer-domain data is accepted.
 
-Current RTX 4090D validation note: the 2026-06-05 refresh/follow-up records passing evidence for LocalBaseline+Package, GUI walkthrough, TensorRT, CPUTrainingSmoke, Phase45, Phase47 Det ONNX+CTest, and public OCR GPU workflow. The follow-up summary is `.deps\rtx4090-validation\2026-06-05-122806-rtx4090d-followup-1-4\rtx4090d_followup_1_4_summary.json`. The public OCR GPU workflow remains public Total-Text workflow evidence only; the 2026-06-05 public rerun passed under the current `accuracy>0.70` Rec gate, while the 2026-05-13 closeout remains a historical higher-accuracy public baseline.
+Current RTX 4090D validation note: the 2026-06-05 refresh/follow-up records passing evidence for LocalBaseline+Package, GUI walkthrough, TensorRT, CPUTrainingSmoke, Phase45, Phase47 Det ONNX+CTest, and public OCR GPU workflow. The follow-up summary and related historical RTX4090 evidence are archived in `docs\validation\rtx4090-validation-evidence-20260615.json`. The public OCR GPU workflow remains public Total-Text workflow evidence only; the 2026-06-05 public rerun passed under the current `accuracy>0.70` Rec gate, while the 2026-05-13 closeout remains a historical higher-accuracy public baseline.
 
 Customer-domain production claims require customer/target-domain data and should use `tools\customer-ocr-validation.ps1` or the Phase 49 GUI customer OCR wizard. Public Total-Text, generated smoke data, and `.deps` samples can prove workflow execution only; they must remain `blocked` or smoke-only for production OCR readiness.
 
@@ -395,7 +395,7 @@ Suggested manual GUI walkthrough:
 .\tools\ui-workbench-walkthrough.ps1
 ```
 
-The RC walkthrough wrapper runs the 1280x820 non-fullscreen page set: `总览`, `项目`, `数据集`, `样本复核`, `训练实验`, `任务与产物`, `模型库`, `评估报告`, `模型导出`, `推理验证`, `交付验收`, `插件`, `环境`, and `设置`. It writes `ui_walkthrough_rc_summary.json` under `.deps\ui-walkthrough-rc` by default and should be treated as the repeatable GUI usability gate.
+The RC walkthrough wrapper runs the 1280x820 non-fullscreen page set: `总览`, `项目`, `数据集`, `样本复核`, `训练实验`, `任务与产物`, `模型库`, `评估报告`, `模型导出`, `推理验证`, `交付验收`, `插件`, `环境`, and `设置`. It writes `ui_walkthrough_rc_summary.json` under `.deps\UI-Walkthrough\rc` by default and should be treated as the repeatable GUI usability gate.
 
 If offline licensing stops startup at the registration dialog, the wrapper records `status=blocked` and `errorCode=license_required`. That is not a GUI layout pass; configure a valid license token and build-time public key, then rerun the wrapper.
 

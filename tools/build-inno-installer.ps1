@@ -18,14 +18,12 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "deps-layout.ps1")
 
 function Resolve-RepoPath {
     param([string]$Path)
 
-    if ([System.IO.Path]::IsPathRooted($Path)) {
-        return [System.IO.Path]::GetFullPath($Path)
-    }
-    return [System.IO.Path]::GetFullPath((Join-Path $root $Path))
+    return Resolve-AITrainRepoPath -Root $root -Path $Path
 }
 
 function Find-InnoCompiler {
@@ -88,8 +86,14 @@ function Resolve-PythonEnvSource {
         return $full
     }
 
+    $layout = Get-AITrainDepsLayout -Root $root
     $candidates = @(
         (Join-Path $BuildDir "python_env"),
+        $layout.YoloCudaEnv,
+        $layout.OcrGpuEnv,
+        $layout.OcrCpuEnv,
+        $layout.PythonEmbed,
+        $layout.Paddle2OnnxEnv,
         ".deps\aitrain-python-env",
         ".deps\python-3.13.13-ocr-amd64",
         ".deps\python-3.13.13-embed-amd64",
@@ -316,7 +320,7 @@ if ($PackageMode -eq "Split" -or $PackageMode -eq "PythonEnv") {
     $paddleOcrFull = if ($PaddleOcrSourceDir) {
         Resolve-OptionalExistingPath -Path $PaddleOcrSourceDir
     } else {
-        $candidate = Resolve-RepoPath ".deps\PaddleOCR"
+        $candidate = Resolve-AITrainPaddleOcrRepo -Root $root -RequestedPath ".deps\repos\PaddleOCR"
         if (Test-Path -LiteralPath (Join-Path $candidate "tools\train.py") -PathType Leaf) { $candidate } else { "" }
     }
     if (-not $SkipPythonEnvProbe) {

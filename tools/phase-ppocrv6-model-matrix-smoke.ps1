@@ -1,7 +1,7 @@
 param(
     [string]$WorkDir = ".deps\phase-ppocrv6-model-matrix-smoke",
-    [string]$PythonDir = ".deps\python-3.13.13-ocr-amd64",
-    [string]$PaddleOcrRepo = ".deps\PaddleOCR",
+    [string]$PythonDir = ".deps\envs\ocr-cpu",
+    [string]$PaddleOcrRepo = ".deps\repos\PaddleOCR",
     [string]$PaddleOcrRef = "v3.7.0",
     [string]$PaddlePaddleRequirement = "paddlepaddle==3.3.1",
     [switch]$DisablePinnedConstraints,
@@ -14,13 +14,11 @@ $ErrorActionPreference = "Stop"
 
 $script:Root = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $PSScriptRoot) "."))
 $script:StartedAt = [DateTime]::UtcNow
+. (Join-Path $PSScriptRoot "deps-layout.ps1")
 
 function Resolve-RepoPath {
     param([string]$Path)
-    if ([System.IO.Path]::IsPathRooted($Path)) {
-        return [System.IO.Path]::GetFullPath($Path)
-    }
-    return [System.IO.Path]::GetFullPath((Join-Path $script:Root $Path))
+    return Resolve-AITrainRepoPath -Root $script:Root -Path $Path
 }
 
 function Resolve-OcrPython {
@@ -122,7 +120,7 @@ function Invoke-AdapterRow {
 }
 
 $workFull = Resolve-RepoPath $WorkDir
-$repoFull = Resolve-RepoPath $PaddleOcrRepo
+$repoFull = Resolve-AITrainPaddleOcrRepo -Root $script:Root -RequestedPath $PaddleOcrRepo
 $fullChainWork = Join-Path $workFull "full-chain-tiny"
 $matrixData = Join-Path $workFull "matrix-data"
 $matrixRuns = Join-Path $workFull "matrix-runs"

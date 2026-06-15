@@ -820,6 +820,8 @@ bool paddleOcrOfficialRepoConfigured()
     const QStringList candidates = {
         QDir(appDir).absoluteFilePath(QStringLiteral("python_env/PaddleOCR")),
         QDir(appDir).absoluteFilePath(QStringLiteral("../python_env/PaddleOCR")),
+        QDir::current().absoluteFilePath(QStringLiteral(".deps/repos/PaddleOCR")),
+        QDir::current().absoluteFilePath(QStringLiteral(".deps/PaddleOCR")),
         QDir::current().absoluteFilePath(QStringLiteral("python_env/PaddleOCR"))
     };
     for (const QString& candidate : candidates) {
@@ -1136,6 +1138,7 @@ QStringList xAnyLabelingCandidates()
         QDir(appDir).filePath(QStringLiteral("X-AnyLabeling.exe")),
         QDir(appDir).filePath(QStringLiteral("xanylabeling.exe")),
         QDir(appDir).filePath(QStringLiteral("tools/x-anylabeling/X-AnyLabeling.exe")),
+        QDir(QDir::currentPath()).filePath(QStringLiteral(".deps/tools/annotation-tools/X-AnyLabeling/X-AnyLabeling.exe")),
         QDir(QDir::currentPath()).filePath(QStringLiteral(".deps/annotation-tools/X-AnyLabeling/X-AnyLabeling.exe")),
         QStringLiteral("xanylabeling"),
         QStringLiteral("X-AnyLabeling.exe")
@@ -1176,7 +1179,7 @@ QString xAnyLabelingStatusText()
 {
     const QString program = resolvedXAnyLabelingProgram();
     if (program.isEmpty()) {
-        return uiText("状态：未检测到 X-AnyLabeling。请检查 PATH、环境变量或 .deps/annotation-tools。");
+        return uiText("状态：未检测到 X-AnyLabeling。请检查 PATH、环境变量或 .deps/tools/annotation-tools。");
     }
     return uiText("状态：已安装 | %1").arg(compactPathForStatus(program, 72));
 }

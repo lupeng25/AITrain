@@ -1,7 +1,7 @@
 param(
     [string]$AppPath = ".\build-vscode\bin\AITrainStudio.exe",
     [string]$WorkingDirectory = ".\build-vscode\bin",
-    [string]$OutDir = ".deps\ui-walkthrough-rc",
+    [string]$OutDir = ".deps\UI-Walkthrough\rc",
     [int]$Width = 1280,
     [int]$Height = 820,
     [string]$WalkthroughScript = (Join-Path $env:USERPROFILE ".codex\skills\qt-gui-walkthrough\scripts\qt_walkthrough.ps1")

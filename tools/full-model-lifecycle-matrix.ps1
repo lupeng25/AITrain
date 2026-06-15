@@ -15,7 +15,7 @@ param(
     [string]$PythonExe = "",
     [string]$OcrPythonExe = "",
     [string]$OcrPythonDir = "",
-    [string]$PaddleOcrRepo = ".deps\PaddleOCR",
+    [string]$PaddleOcrRepo = ".deps\repos\PaddleOCR",
     [string]$PaddleOcrRef = "v3.7.0",
     [string]$PaddlePaddleRequirement = "paddlepaddle-gpu==3.3.1",
     [string]$BuildDir = "build-vscode",
@@ -39,6 +39,7 @@ $script:WorkRoot = ""
 $script:ControllerFailurePath = ""
 $script:YoloCudaAvailable = $false
 
+. (Join-Path $PSScriptRoot "deps-layout.ps1")
 . (Join-Path $PSScriptRoot "toolchain-env.ps1")
 Set-AITrainQtRuntimeEnvironment
 
@@ -49,13 +50,7 @@ function Write-Step {
 
 function Resolve-RepoPath {
     param([string]$Path)
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        return ""
-    }
-    if ([System.IO.Path]::IsPathRooted($Path)) {
-        return [System.IO.Path]::GetFullPath($Path)
-    }
-    return [System.IO.Path]::GetFullPath((Join-Path $script:Root $Path))
+    return Resolve-AITrainRepoPath -Root $script:Root -Path $Path
 }
 
 function New-Utf8NoBomEncoding {
@@ -298,12 +293,7 @@ function Resolve-PythonExe {
         }
         return $resolved
     }
-    $candidates = @(
-        (Join-Path $script:Root ".deps\python-3.13.13-embed-amd64\python.exe"),
-        (Join-Path $script:Root ".deps\rtx4090-validation\python-yolo-venv\Scripts\python.exe"),
-        (Join-Path $script:Root ".deps\python-3.13.13-ocr-amd64\python.exe")
-    )
-    foreach ($candidate in $candidates) {
+    foreach ($candidate in (Get-AITrainPythonCandidates -Role Yolo -Root $script:Root)) {
         if (Test-Path -LiteralPath $candidate) {
             return [System.IO.Path]::GetFullPath($candidate)
         }
@@ -346,15 +336,9 @@ function Resolve-OcrPythonExe {
         return $resolved
     }
 
-    $ocrDir = if ($OcrPythonDir) { Resolve-RepoPath $OcrPythonDir } else { Join-Path $WorkRoot "env\ocr" }
-    $candidates = @(
-        (Join-Path $script:Root ".deps\rtx4090-validation\python-ocr-gpu\Scripts\python.exe"),
-        (Join-Path $script:Root ".deps\rtx4090-validation\python-ocr\Scripts\python.exe"),
-        (Join-Path $script:Root ".deps\python-3.13.13-ocr-amd64\Scripts\python.exe"),
-        (Join-Path $script:Root ".deps\python-3.13.13-ocr-amd64\python.exe"),
-        (Join-Path $ocrDir "Scripts\python.exe"),
-        (Join-Path $ocrDir "python.exe")
-    )
+    $layout = Get-AITrainDepsLayout -Root $script:Root
+    $ocrDir = if ($OcrPythonDir) { Resolve-RepoPath $OcrPythonDir } else { $layout.OcrGpuEnv }
+    $candidates = @(Join-AITrainPythonExecutableCandidates -EnvironmentRoots @($ocrDir)) + @(Get-AITrainPythonCandidates -Role OcrGpu -Root $script:Root)
     foreach ($candidate in $candidates) {
         if (Test-Path -LiteralPath $candidate) {
             return [System.IO.Path]::GetFullPath($candidate)
@@ -365,9 +349,9 @@ function Resolve-OcrPythonExe {
         return ""
     }
 
-    $sourceZip = Join-Path $script:Root ".deps\python-3.13.13-embed-amd64.zip"
-    if (!(Test-Path -LiteralPath $sourceZip)) {
-        throw "OCR Python is missing and $sourceZip is unavailable. Run the Python setup first or pass -OcrPythonExe."
+    $sourceZip = Resolve-AITrainFirstExistingPath -Candidates (Get-AITrainPortablePythonZipCandidates -Root $script:Root)
+    if ([string]::IsNullOrWhiteSpace($sourceZip)) {
+        throw "OCR Python is missing and portable Python zip is unavailable. Expected .deps\archives\python-3.13.13-embed-amd64.zip or legacy .deps\python-3.13.13-embed-amd64.zip."
     }
     New-Item -ItemType Directory -Force $ocrDir | Out-Null
     Expand-Archive -Path $sourceZip -DestinationPath $ocrDir -Force
@@ -381,9 +365,9 @@ function Resolve-OcrPythonExe {
     }
     $pipCheck = Invoke-ProcessCapture -Name "ocr-pip-check" -FilePath $createdPython -Arguments @("-m", "pip", "--version") -AllowFailure
     if ($pipCheck.exitCode -ne 0) {
-        $getPip = Join-Path $script:Root ".deps\get-pip.py"
-        if (!(Test-Path -LiteralPath $getPip)) {
-            throw "OCR Python needs pip but $getPip is missing."
+        $getPip = Resolve-AITrainFirstExistingPath -Candidates (Get-AITrainGetPipCandidates -Root $script:Root)
+        if ([string]::IsNullOrWhiteSpace($getPip)) {
+            throw "OCR Python needs pip but get-pip.py is missing. Expected .deps\archives\get-pip.py or legacy .deps\get-pip.py."
         }
         Invoke-ProcessCapture -Name "ocr-get-pip" -FilePath $createdPython -Arguments @($getPip) | Out-Null
     }
@@ -427,7 +411,7 @@ function Ensure-OcrDependencies {
 
 function Ensure-PaddleOcrRepo {
     param([string]$Repo)
-    $repoFull = Resolve-RepoPath $Repo
+    $repoFull = Resolve-AITrainPaddleOcrRepo -Root $script:Root -RequestedPath $Repo
     if ($DryRun) {
         return $repoFull
     }

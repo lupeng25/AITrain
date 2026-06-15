@@ -764,7 +764,7 @@ void MainWindow::launchXAnyLabelingForQualityFix()
         updateAnnotationToolStatus();
         QMessageBox::warning(this,
             QStringLiteral("X-AnyLabeling"),
-            uiText("未找到 X-AnyLabeling。请确保 xanylabeling 在 PATH 中，或将 X-AnyLabeling.exe 放到程序目录 / tools/x-anylabeling / .deps/annotation-tools/X-AnyLabeling。"));
+            uiText("未找到 X-AnyLabeling。请确保 xanylabeling 在 PATH 中，或将 X-AnyLabeling.exe 放到程序目录 / tools/x-anylabeling / .deps/tools/annotation-tools/X-AnyLabeling。"));
         return;
     }
     QDesktopServices::openUrl(QUrl::fromLocalFile(datasetPath));
@@ -996,7 +996,7 @@ void MainWindow::launchXAnyLabelingForReview()
     const QString program = resolvedXAnyLabelingProgram();
     if (program.isEmpty()) {
         updateAnnotationToolStatus();
-        QMessageBox::warning(this, QStringLiteral("X-AnyLabeling"), uiText("未找到 X-AnyLabeling。请确保 xanylabeling 在 PATH 中，或放到程序目录 / tools/x-anylabeling / .deps/annotation-tools/X-AnyLabeling。"));
+        QMessageBox::warning(this, QStringLiteral("X-AnyLabeling"), uiText("未找到 X-AnyLabeling。请确保 xanylabeling 在 PATH 中，或放到程序目录 / tools/x-anylabeling / .deps/tools/annotation-tools/X-AnyLabeling。"));
         return;
     }
     QString targetDir = state_.dataset.currentPath;

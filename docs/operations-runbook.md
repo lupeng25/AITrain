@@ -76,7 +76,7 @@ Python AI 环境安装包应包含：
 - Ultralytics / Torch / ONNX / ONNX Runtime：用于官方 YOLO 训练、导出和 smoke。
 - PaddlePaddle / PaddleOCR / PaddleOCR 源码 checkout：用于官方 OCR 工具链。
 - CUDA / cuDNN / TensorRT：用于 TensorRT engine build 和推理验收。
-- NCNN 工具和 SDK/runtime：用于 NCNN `.param/.bin` 导出和部署验证；配置 NCNN SDK/runtime 后，部署验证可执行 YOLO 检测/分割 runtime 推理。本机验证根目录为 `.deps\ncnn`，交付机器应使用等价 SDK/runtime 路径。
+- NCNN 工具和 SDK/runtime：用于 NCNN `.param/.bin` 导出和部署验证；配置 NCNN SDK/runtime 后，部署验证可执行 YOLO 检测/分割 runtime 推理。本机验证根目录为 `.deps\sdks\ncnn`，交付机器应使用等价 SDK/runtime 路径。
 - X-AnyLabeling：作为外部标注工具。
 
 常见配置：

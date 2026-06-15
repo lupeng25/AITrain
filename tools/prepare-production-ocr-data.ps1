@@ -14,6 +14,7 @@ $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
 $scriptPath = Join-Path $root "tools\prepare_production_ocr_data.py"
+. (Join-Path $PSScriptRoot "deps-layout.ps1")
 
 function Resolve-Python {
     if ($Python) {
@@ -22,13 +23,9 @@ function Resolve-Python {
         }
         return [System.IO.Path]::GetFullPath((Join-Path $root $Python))
     }
-    $candidates = @(
-        (Join-Path $root ".deps\python-3.13.13-ocr-amd64\python.exe"),
-        (Join-Path $root ".deps\python-3.13.13-embed-amd64\python.exe")
-    )
-    foreach ($candidate in $candidates) {
+    foreach ($candidate in (Get-AITrainPythonCandidates -Role Ocr -Root $root)) {
         if (Test-Path -LiteralPath $candidate) {
-            return $candidate
+            return [System.IO.Path]::GetFullPath($candidate)
         }
     }
     $fromPath = Get-Command python -ErrorAction SilentlyContinue

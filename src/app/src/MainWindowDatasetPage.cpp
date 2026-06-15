@@ -348,7 +348,7 @@ QWidget* MainWindow::buildDatasetPage()
             updateAnnotationToolStatus();
             QMessageBox::warning(this,
                 QStringLiteral("X-AnyLabeling"),
-                uiText("未找到 X-AnyLabeling。请确保 xanylabeling 在 PATH 中，或将 X-AnyLabeling.exe 放到程序目录 / tools/x-anylabeling / .deps/annotation-tools/X-AnyLabeling。"));
+                uiText("未找到 X-AnyLabeling。请确保 xanylabeling 在 PATH 中，或将 X-AnyLabeling.exe 放到程序目录 / tools/x-anylabeling / .deps/tools/annotation-tools/X-AnyLabeling。"));
             return;
         }
         const QStringList arguments = {QStringLiteral("--filename"), datasetPath, QStringLiteral("--no-auto-update-check")};

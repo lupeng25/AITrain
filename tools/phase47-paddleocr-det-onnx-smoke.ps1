@@ -1,9 +1,9 @@
 param(
     [string]$WorkDir = ".deps\phase47-paddleocr-det-onnx-smoke",
     [string]$Phase31WorkDir = ".deps\phase31-paddleocr-full-official-smoke",
-    [string]$PythonDir = ".deps\python-3.13.13-ocr-amd64",
-    [string]$PaddleOcrRepo = ".deps\PaddleOCR",
-    [string]$ConversionPythonDir = ".deps\python-3.12.10-paddle2onnx-nightly-amd64",
+    [string]$PythonDir = ".deps\envs\ocr-cpu",
+    [string]$PaddleOcrRepo = ".deps\repos\PaddleOCR",
+    [string]$ConversionPythonDir = ".deps\envs\paddle2onnx",
     [string]$ConversionPythonUrl = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip",
     [string]$ConversionPythonZip = ".deps\python-3.12.10-embed-amd64.zip",
     [string]$PaddlePaddleRequirement = "paddlepaddle",

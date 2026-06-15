@@ -78,7 +78,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 - 旧 PaddlePaddle OCR Rec CTC 训练实现已物理删除；生产 OCR 训练和验收主线使用官方 PaddleOCR Det/Rec/System 工具链 smoke。
 - OCR 路线已收口为官方-only：训练、导出、推理、评估和客户验收使用 PaddleOCR Det/Rec/System 官方工具链和报告；Phase 46/47 的 C++ OCR ONNX 内容只作为历史 wiring 证据保留。PP-OCRv5/PP-OCRv6 仅覆盖这些官方 OCR preset，不扩展到 PP-StructureV3、PP-ChatOCR、PaddleOCR-VL、文档方向分类、图像矫正、文本行方向分类或 PaddleOCR C++ 本地部署。
 - TensorRT SDK-backed ONNX 到 engine 导出路径和 RTX 4090 D 验收证据；旧 GTX 1060 / SM 61 仍应为 `hardware-blocked`。当前 official-artifact smoke 使用官方 Ultralytics ONNX 产物，不再使用已删除的 tiny-detector TensorRT 推理 fixture。
-- 2026-06-05 RTX 4090D follow-up 证据根目录：`.deps\rtx4090-validation\2026-06-05-122806-rtx4090d-followup-1-4`。该目录记录 LocalBaseline+Package、GUI walkthrough 和历史 Phase47 Det ONNX+CTest 的刷新证据；CPUTrainingSmoke 和 Phase45 的修复后通过证据分别在 `.deps\fix-1-3-cpu-training-smoke-final` 与 `.deps\fix-1-3-phase45-yolo-matrix`。新 OCR 路线不再把 Phase47 作为产品验收要求。
+- 2026-06-05 RTX 4090D follow-up 证据已归档到 `docs\validation\rtx4090-validation-evidence-20260615.json`，记录 LocalBaseline+Package、GUI walkthrough、历史 Phase47 Det ONNX+CTest、CPUTrainingSmoke 和 Phase45 的修复后通过证据；原始 `.deps\fix-1-3-cpu-training-smoke-final` 与 `.deps\fix-1-3-phase45-yolo-matrix` 产物目录已清理。OCR GPU 复跑环境通过 `.deps\envs\ocr-gpu` 暴露；旧 `.deps\rtx4090-validation\python-ocr-gpu` 仅作为保留的兼容 target。新 OCR 路线不再把 Phase47 作为产品验收要求。
 - Windows 打包、package smoke、release freeze handoff、离线授权和注册码生成器。
 - 本地产品闭环：数据集质量报告、问题样本、X-AnyLabeling 复核清单、snapshot、训练 lineage、评估、benchmark、模型注册、pipeline、交付报告。
 - Phase 49 交付闭环：样本复核页、交付验收页、客户域 OCR 验收向导、一键诊断包和导出后部署验证。
@@ -134,6 +134,17 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 ```powershell
 .\tools\harness-check.ps1
 ```
+
+## `.deps` 环境布局
+
+可复用的本地环境统一放在 `.deps` 的固定子目录，避免把运行环境散落到历史验证输出目录：
+
+- Python 环境：`.deps\envs`，包括 `yolo-cuda`、`yolo26`、`ocr-cpu`、`ocr-gpu`、`python-embed-3.13.13` 和 `paddle2onnx`。
+- 源码 checkout：`.deps\repos`，PaddleOCR 默认是 `.deps\repos\PaddleOCR`。
+- SDK/runtime：`.deps\sdks`，包括 `onnxruntime`、`ncnn`、`tensorrt-oss` 和 `tensorrt-runtime`。
+- 外部工具：`.deps\tools`，X-AnyLabeling 默认查找 `.deps\tools\annotation-tools\X-AnyLabeling`。
+
+历史验证目录如 `.deps\rtx4090-validation`、`.deps\full-model-lifecycle`、`.deps\phase-yolo26-model-matrix` 只作为证据和 run 输出，不再作为新环境默认位置。详细约定见 `docs/deps-layout.md`；旧目录可通过 `.\tools\sync-deps-layout.ps1` 创建兼容 junction。
 
 ## 编码与终端约束
 

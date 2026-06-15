@@ -59,7 +59,7 @@ $pages = @('总览','项目','数据集','样本复核','训练实验','任务�
 C:\Users\73200\.codex\skills\qt-gui-walkthrough\scripts\qt_walkthrough.ps1 `
   -AppPath .\build-vscode\bin\AITrainStudio.exe `
   -WorkingDirectory .\build-vscode\bin `
-  -OutDir .\.deps\ui-walkthrough `
+  -OutDir .\.deps\UI-Walkthrough\manual `
   -PageNames $pages `
   -Width 1280 `
   -Height 820

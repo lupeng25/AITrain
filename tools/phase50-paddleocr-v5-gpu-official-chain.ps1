@@ -2,7 +2,7 @@ param(
     [string]$WorkDir = ".deps\phase50-paddleocr-v5-gpu-official-chain",
     [string]$DataDir = ".deps\production-ocr-data",
     [string]$Python = "",
-    [string]$PaddleOcrRepo = ".deps\PaddleOCR",
+    [string]$PaddleOcrRepo = ".deps\repos\PaddleOCR",
     [string]$PaddleOcrRef = "",
     [string]$DetModelPreset = "PP-OCRv5_mobile_det",
     [string]$RecModelPreset = "en_PP-OCRv5_mobile_rec",
@@ -15,30 +15,20 @@ $ErrorActionPreference = "Stop"
 
 $script:Root = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $PSScriptRoot) "."))
 $script:StartedAt = [DateTime]::UtcNow
+. (Join-Path $PSScriptRoot "deps-layout.ps1")
 
 function Resolve-RepoPath {
     param([string]$Path)
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        return ""
-    }
-    if ([System.IO.Path]::IsPathRooted($Path)) {
-        return [System.IO.Path]::GetFullPath($Path)
-    }
-    return [System.IO.Path]::GetFullPath((Join-Path $script:Root $Path))
+    return Resolve-AITrainRepoPath -Root $script:Root -Path $Path
 }
 
 function Resolve-Python {
     if ($Python) {
         return Resolve-RepoPath $Python
     }
-    $candidates = @(
-        (Join-Path $script:Root ".deps\rtx4090-validation\python-ocr-gpu\Scripts\python.exe"),
-        (Join-Path $script:Root ".deps\python-3.13.13-ocr-amd64\python.exe"),
-        (Join-Path $script:Root ".deps\python-3.13.13-embed-amd64\python.exe")
-    )
-    foreach ($candidate in $candidates) {
+    foreach ($candidate in (Get-AITrainPythonCandidates -Role OcrGpu -Root $script:Root)) {
         if (Test-Path -LiteralPath $candidate) {
-            return $candidate
+            return [System.IO.Path]::GetFullPath($candidate)
         }
     }
     $fromPath = Get-Command python -ErrorAction SilentlyContinue
@@ -86,7 +76,7 @@ function Write-BlockedSummary {
         workDir = Resolve-RepoPath $WorkDir
         dataDir = Resolve-RepoPath $DataDir
         python = $script:PythonExe
-        paddleOcrRepo = Resolve-RepoPath $PaddleOcrRepo
+        paddleOcrRepo = Resolve-AITrainPaddleOcrRepo -Root $script:Root -RequestedPath $PaddleOcrRepo
         detModelPreset = $DetModelPreset
         recModelPreset = $RecModelPreset
         useGpu = $script:UseGpuRequested
@@ -151,7 +141,7 @@ $chainArgs = @(
     "-WorkDir", $workFull,
     "-DataDir", (Resolve-RepoPath $DataDir),
     "-Python", $script:PythonExe,
-    "-PaddleOcrRepo", (Resolve-RepoPath $PaddleOcrRepo),
+    "-PaddleOcrRepo", (Resolve-AITrainPaddleOcrRepo -Root $script:Root -RequestedPath $PaddleOcrRepo),
     "-OcrVersion", "PP-OCRv5",
     "-DetModelPreset", $DetModelPreset,
     "-RecModelPreset", $RecModelPreset
@@ -211,7 +201,7 @@ $summary = [ordered]@{
     workDir = $workFull
     dataDir = Resolve-RepoPath $DataDir
     python = $script:PythonExe
-    paddleOcrRepo = Resolve-RepoPath $PaddleOcrRepo
+    paddleOcrRepo = Resolve-AITrainPaddleOcrRepo -Root $script:Root -RequestedPath $PaddleOcrRepo
     detModelPreset = $DetModelPreset
     recModelPreset = $RecModelPreset
     useGpu = $script:UseGpuRequested

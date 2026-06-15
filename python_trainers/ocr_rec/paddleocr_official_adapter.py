@@ -282,8 +282,11 @@ def find_repo(parameters: dict[str, Any]) -> Path | None:
     script = Path(__file__).resolve()
     candidates.extend(
         [
+            cwd / ".deps" / "repos" / "PaddleOCR",
             cwd / ".deps" / "PaddleOCR",
+            script.parents[3] / ".deps" / "repos" / "PaddleOCR" if len(script.parents) > 3 else script.parent,
             script.parents[3] / ".deps" / "PaddleOCR" if len(script.parents) > 3 else script.parent,
+            script.parents[2] / ".deps" / "repos" / "PaddleOCR" if len(script.parents) > 2 else script.parent,
             script.parents[2] / ".deps" / "PaddleOCR" if len(script.parents) > 2 else script.parent,
         ]
     )
