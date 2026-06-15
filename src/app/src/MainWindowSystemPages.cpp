@@ -38,11 +38,38 @@
 
 using namespace aitrain_app;
 
-QWidget* MainWindow::buildPluginsPage()
+QWidget* MainWindow::buildSystemSettingsPage()
 {
     auto* page = new QWidget;
     auto* layout = new QVBoxLayout(page);
     layout->setContentsMargins(18, 18, 18, 18);
+    layout->setSpacing(16);
+
+    layout->addWidget(createWorkbenchHeader(
+        QStringLiteral("SYSTEM SETTINGS"),
+        uiText("系统设置"),
+        uiText("管理插件、界面语言、默认目录、授权状态和本地路径。"),
+        nullptr,
+        QStringList()
+            << QStringLiteral("Plugins")
+            << QStringLiteral("Preferences")
+            << QStringLiteral("Local Paths")));
+
+    systemSettingsTabs_ = new QTabWidget;
+    systemSettingsTabs_->setObjectName(QStringLiteral("SystemSettingsTabs"));
+    systemSettingsTabs_->addTab(buildPluginsPanel(), uiText("插件"));
+    systemSettingsTabs_->addTab(buildApplicationSettingsPanel(), uiText("应用设置"));
+    layout->addWidget(systemSettingsTabs_, 1);
+    updatePluginSummary();
+    updateSettingsSummary();
+    return page;
+}
+
+QWidget* MainWindow::buildPluginsPanel()
+{
+    auto* page = new QWidget;
+    auto* layout = new QVBoxLayout(page);
+    layout->setContentsMargins(0, 12, 0, 0);
     layout->setSpacing(16);
 
     auto* refreshButton = primaryButton(QStringLiteral("重新扫描插件"));
@@ -277,7 +304,7 @@ QWidget* MainWindow::buildEnvironmentPage()
     return page;
 }
 
-QWidget* MainWindow::buildSettingsPage()
+QWidget* MainWindow::buildApplicationSettingsPanel()
 {
     auto* page = new QScrollArea;
     page->setWidgetResizable(true);
@@ -285,32 +312,8 @@ QWidget* MainWindow::buildSettingsPage()
 
     auto* content = new QWidget;
     auto* layout = new QVBoxLayout(content);
-    layout->setContentsMargins(18, 18, 18, 18);
+    layout->setContentsMargins(0, 12, 0, 0);
     layout->setSpacing(16);
-
-    auto* headerPanel = new QFrame;
-    headerPanel->setObjectName(QStringLiteral("ExperimentHeader"));
-    auto* headerRoot = new QVBoxLayout(headerPanel);
-    headerRoot->setContentsMargins(14, 12, 14, 12);
-    headerRoot->setSpacing(10);
-    auto* headerTop = new QHBoxLayout;
-    auto* titleBlock = new QWidget;
-    auto* titleLayout = new QVBoxLayout(titleBlock);
-    titleLayout->setContentsMargins(0, 0, 0, 0);
-    titleLayout->setSpacing(2);
-    auto* kicker = new QLabel(QStringLiteral("APPLICATION SETTINGS"));
-    kicker->setObjectName(QStringLiteral("ExperimentKicker"));
-    auto* title = new QLabel(uiText("系统设置"));
-    title->setObjectName(QStringLiteral("ExperimentTitle"));
-    auto* subtitle = new QLabel(uiText("集中管理轻量级应用偏好、授权状态和本地系统入口；训练、导出和推理仍由各自页面和 Worker 执行。"));
-    subtitle->setObjectName(QStringLiteral("ExperimentMeta"));
-    subtitle->setWordWrap(true);
-    allowLabelToShrink(subtitle);
-    titleLayout->addWidget(kicker);
-    titleLayout->addWidget(title);
-    titleLayout->addWidget(subtitle);
-    headerTop->addWidget(titleBlock, 1);
-    headerRoot->addLayout(headerTop);
 
     auto* languagePanel = new InfoPanel(uiText("界面语言"));
     auto* languageRow = new QFrame;
@@ -419,11 +422,11 @@ QWidget* MainWindow::buildSettingsPage()
     entryLayout->setHorizontalSpacing(10);
     entryLayout->setVerticalSpacing(10);
     auto* openProjectButton = primaryButton(uiText("打开项目页"));
-    auto* openPluginsButton = new QPushButton(uiText("打开插件页"));
+    auto* openPluginsButton = new QPushButton(uiText("打开插件设置"));
     auto* openEnvironmentButton = new QPushButton(uiText("打开环境页"));
     auto* runEnvironmentButton = new QPushButton(uiText("执行环境自检"));
     connect(openProjectButton, &QPushButton::clicked, this, [this]() { showPage(ProjectPage, uiText("项目")); });
-    connect(openPluginsButton, &QPushButton::clicked, this, [this]() { showPage(PluginsPage, uiText("插件")); });
+    connect(openPluginsButton, &QPushButton::clicked, this, [this]() { showSystemSettingsTab(0); });
     connect(openEnvironmentButton, &QPushButton::clicked, this, [this]() { showPage(EnvironmentPage, uiText("环境")); });
     connect(runEnvironmentButton, &QPushButton::clicked, this, [this]() {
         showPage(EnvironmentPage, uiText("环境"));
@@ -472,7 +475,6 @@ QWidget* MainWindow::buildSettingsPage()
     pathsGrid->setColumnStretch(1, 1);
     pathsPanel->bodyLayout()->addLayout(pathsGrid);
 
-    layout->addWidget(headerPanel);
     layout->addWidget(languagePanel);
     layout->addWidget(projectPathPanel);
     layout->addWidget(licensePanel);

@@ -163,7 +163,7 @@ Phase 40 的分类、姿态、OBB、异常检测等训练后端扩展后置；�
 
 已落地能力：
 
-- `样本复核`：读取 `problem_samples.json`、`error_samples.json`、`rework_sample_set.json`、`evaluation_report.json`，按来源、问题类型、类别、split、OCR edit distance / CER、搜索文本过滤，并导出 X-AnyLabeling 复核清单。
+- `数据集 > 质量与复核`：读取 `problem_samples.json`、`error_samples.json`、`rework_sample_set.json`、`evaluation_report.json`，按来源、问题类型、类别、split、OCR edit distance / CER、搜索文本过滤，并导出 X-AnyLabeling 复核清单。
 - `环境 > 交付证据`：汇总本机 RC、clean Windows、TensorRT、客户域 OCR、包体完整性、诊断包和部署验证状态，显示 `passed` / `blocked` / `failed` / `hardware-blocked`。
 - 客户域 OCR 验收：通过 Worker/core 生成客户 OCR manifest 和 summary；public/generated/smoke 数据只能作为流程 evidence，不能作为生产 OCR 精度证明。
 - 诊断包：收集 Worker self-check、环境 profile、GPU/runtime、最近任务日志、失败 request、artifact index、插件状态和授权摘要。
@@ -212,9 +212,9 @@ git diff --check
 手工 GUI 验收：
 
 - 导入 generated detection / segmentation / OCR Rec 数据集。
-- 运行质检、snapshot、训练、评估、benchmark、报告、样本复核、部署验证和诊断包。
+- 运行质检、snapshot、训练、评估、benchmark、报告、`数据集 > 质量与复核`、`部署验证` 和诊断包。
 - 在任务与产物页检查 JSON / CSV / image / HTML artifact。
-- 在模型库检查 evaluation / benchmark / pipeline 记录。
+- 在模型库检查模型版本、评估报告、模型对比、benchmark / pipeline 记录。
 - 在 `环境 > 交付证据` 确认客户 OCR gate、TensorRT `hardware-blocked` 和 NCNN SDK/runtime/sample-image 要求文案。
 - 确认 scaffold 和 TensorRT hardware-blocked 文案清晰。
 

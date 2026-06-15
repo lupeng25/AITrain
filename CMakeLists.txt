@@ -615,6 +615,7 @@ if(WIN32)
             list(REMOVE_DUPLICATES AITRAIN_QT_RUNTIME_DLLS)
         endif()
         file(GLOB AITRAIN_QT_PLATFORM_PLUGIN_DLLS CONFIGURE_DEPENDS
+            "${AITRAIN_QT_RUNTIME_ROOT_DIR}/plugins/platforms/qoffscreen*.dll"
             "${AITRAIN_QT_RUNTIME_ROOT_DIR}/plugins/platforms/qwindows*.dll"
         )
         file(GLOB AITRAIN_QT_SQL_PLUGIN_DLLS CONFIGURE_DEPENDS

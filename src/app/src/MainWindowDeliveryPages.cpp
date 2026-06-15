@@ -37,58 +37,38 @@
 
 using namespace aitrain_app;
 
-QWidget* MainWindow::buildConversionPage()
+QWidget* MainWindow::buildDeploymentPage()
 {
     auto* page = new QWidget;
     auto* layout = new QVBoxLayout(page);
     layout->setContentsMargins(18, 18, 18, 18);
     layout->setSpacing(16);
 
-    auto* headerExportButton = primaryButton(QStringLiteral("开始导出"));
+    layout->addWidget(createWorkbenchHeader(
+        QStringLiteral("DEPLOYMENT VALIDATION"),
+        uiText("部署验证"),
+        uiText("导出模型，运行推理验证，并查看部署验证状态。"),
+        nullptr,
+        QStringList()
+            << QStringLiteral("ONNX")
+            << QStringLiteral("NCNN")
+            << QStringLiteral("TensorRT")
+            << QStringLiteral("Inference")));
 
-    auto* headerPanel = new QFrame;
-    headerPanel->setObjectName(QStringLiteral("ExperimentHeader"));
-    auto* headerRoot = new QVBoxLayout(headerPanel);
-    headerRoot->setContentsMargins(14, 12, 14, 12);
-    headerRoot->setSpacing(10);
-    auto* headerTop = new QHBoxLayout;
-    auto* titleBlock = new QWidget;
-    auto* titleLayout = new QVBoxLayout(titleBlock);
-    titleLayout->setContentsMargins(0, 0, 0, 0);
-    titleLayout->setSpacing(2);
-    auto* kicker = new QLabel(QStringLiteral("MODEL DELIVERY WORKBENCH"));
-    kicker->setObjectName(QStringLiteral("ExperimentKicker"));
-    auto* title = new QLabel(QStringLiteral("模型导出"));
-    title->setObjectName(QStringLiteral("ExperimentTitle"));
-    auto* subtitle = new QLabel(QStringLiteral("从训练产物生成 ONNX、NCNN、TensorRT 或诊断 JSON，并把报告写入任务与产物。"));
-    subtitle->setObjectName(QStringLiteral("ExperimentMeta"));
-    subtitle->setWordWrap(true);
-    allowLabelToShrink(subtitle);
-    titleLayout->addWidget(kicker);
-    titleLayout->addWidget(title);
-    titleLayout->addWidget(subtitle);
-    headerTop->addWidget(titleBlock, 1);
-    headerTop->addWidget(headerExportButton);
-    headerRoot->addLayout(headerTop);
+    deploymentTabs_ = new QTabWidget;
+    deploymentTabs_->setObjectName(QStringLiteral("DeploymentTabs"));
+    deploymentTabs_->addTab(buildModelExportPanel(), uiText("模型导出"));
+    deploymentTabs_->addTab(buildInferenceValidationPanel(), uiText("推理验证"));
+    layout->addWidget(deploymentTabs_, 1);
+    return page;
+}
 
-    auto* headerGrid = new QGridLayout;
-    headerGrid->setHorizontalSpacing(12);
-    headerGrid->setVerticalSpacing(8);
-    auto* sourceLabel = new QLabel(QStringLiteral("输入"));
-    sourceLabel->setObjectName(QStringLiteral("ExperimentMeta"));
-    auto* policyLabel = new QLabel(QStringLiteral("策略"));
-    policyLabel->setObjectName(QStringLiteral("ExperimentMeta"));
-    auto* sourceStatus = inlineStatusLabel(QStringLiteral("优先从“任务与产物”选择 checkpoint、ONNX 或官方训练产物。"));
-    sourceStatus->setObjectName(QStringLiteral("DarkInlineStatus"));
-    auto* policyStatus = inlineStatusLabel(QStringLiteral("导出只通过 Worker 执行；TensorRT 仍需 RTX / SM 75+ 外部验收。"));
-    policyStatus->setObjectName(QStringLiteral("DarkInlineStatus"));
-    allowLabelToShrink(sourceStatus);
-    allowLabelToShrink(policyStatus);
-    headerGrid->addWidget(sourceLabel, 0, 0);
-    headerGrid->addWidget(sourceStatus, 0, 1);
-    headerGrid->addWidget(policyLabel, 1, 0);
-    headerGrid->addWidget(policyStatus, 1, 1);
-    headerRoot->addLayout(headerGrid);
+QWidget* MainWindow::buildModelExportPanel()
+{
+    auto* page = new QWidget;
+    auto* layout = new QVBoxLayout(page);
+    layout->setContentsMargins(0, 12, 0, 0);
+    layout->setSpacing(16);
 
     auto* mainSplitter = new QSplitter(Qt::Horizontal);
 
@@ -142,7 +122,6 @@ QWidget* MainWindow::buildConversionPage()
     });
     auto* exportButton = primaryButton(QStringLiteral("开始导出"));
     auto* validateExportButton = new QPushButton(uiText("验证导出产物"));
-    connect(headerExportButton, &QPushButton::clicked, this, &MainWindow::startModelExport);
     connect(exportButton, &QPushButton::clicked, this, &MainWindow::startModelExport);
     connect(validateExportButton, &QPushButton::clicked, this, &MainWindow::validateDeploymentArtifact);
 
@@ -306,12 +285,11 @@ QWidget* MainWindow::buildConversionPage()
     mainSplitter->setStretchFactor(1, 4);
     mainSplitter->setSizes(QList<int>() << 520 << 680);
 
-    layout->addWidget(headerPanel);
     layout->addWidget(mainSplitter, 1);
     return page;
 }
 
-QWidget* MainWindow::buildInferencePage()
+QWidget* MainWindow::buildInferenceValidationPanel()
 {
     auto* page = new QScrollArea;
     page->setWidgetResizable(true);
@@ -320,67 +298,8 @@ QWidget* MainWindow::buildInferencePage()
 
     auto* content = new QWidget;
     auto* layout = new QVBoxLayout(content);
-    layout->setContentsMargins(18, 18, 18, 18);
+    layout->setContentsMargins(0, 12, 0, 0);
     layout->setSpacing(16);
-
-    auto* headerInferButton = primaryButton(QStringLiteral("开始推理"));
-
-    auto* headerPanel = new QFrame;
-    headerPanel->setObjectName(QStringLiteral("InferenceHeader"));
-    auto* headerRoot = new QVBoxLayout(headerPanel);
-    headerRoot->setContentsMargins(16, 14, 16, 14);
-    headerRoot->setSpacing(11);
-
-    auto* headerTop = new QHBoxLayout;
-    headerTop->setSpacing(14);
-    auto* titleBlock = new QWidget;
-    auto* titleLayout = new QVBoxLayout(titleBlock);
-    titleLayout->setContentsMargins(0, 0, 0, 0);
-    titleLayout->setSpacing(4);
-    auto* kicker = new QLabel(QStringLiteral("INFERENCE VALIDATION"));
-    kicker->setObjectName(QStringLiteral("InferenceKicker"));
-    auto* title = new QLabel(QStringLiteral("推理验证工作台"));
-    title->setObjectName(QStringLiteral("InferenceTitle"));
-    auto* subtitle = new QLabel(QStringLiteral("选择模型和图片，运行 Worker 推理并查看 prediction JSON 与 overlay。这里不直接承载模型后处理逻辑。"));
-    subtitle->setObjectName(QStringLiteral("InferenceMeta"));
-    subtitle->setWordWrap(true);
-    allowLabelToShrink(subtitle);
-    auto* badgeRow = new QWidget;
-    auto* badgeLayout = new QHBoxLayout(badgeRow);
-    badgeLayout->setContentsMargins(0, 4, 0, 0);
-    badgeLayout->setSpacing(7);
-    badgeLayout->addWidget(inferenceBadge(QStringLiteral("ONNX Runtime")));
-    badgeLayout->addWidget(inferenceBadge(QStringLiteral("Worker")));
-    badgeLayout->addWidget(inferenceBadge(QStringLiteral("Prediction JSON")));
-    badgeLayout->addWidget(inferenceBadge(QStringLiteral("Overlay")));
-    badgeLayout->addStretch();
-    titleLayout->addWidget(kicker);
-    titleLayout->addWidget(title);
-    titleLayout->addWidget(subtitle);
-    titleLayout->addWidget(badgeRow);
-    headerTop->addWidget(titleBlock, 1);
-    headerTop->addWidget(headerInferButton, 0, Qt::AlignTop);
-    headerRoot->addLayout(headerTop);
-
-    auto* headerGrid = new QGridLayout;
-    headerGrid->setHorizontalSpacing(12);
-    headerGrid->setVerticalSpacing(8);
-    auto* executionLabel = new QLabel(QStringLiteral("执行"));
-    executionLabel->setObjectName(QStringLiteral("InferenceMeta"));
-    auto* boundaryLabel = new QLabel(QStringLiteral("边界"));
-    boundaryLabel->setObjectName(QStringLiteral("InferenceMeta"));
-    auto* executionStatus = inlineStatusLabel(QStringLiteral("Worker 隔离执行推理；任务、产物和失败原因写入任务历史。"));
-    executionStatus->setObjectName(QStringLiteral("DarkInlineStatus"));
-    auto* boundaryStatus = inlineStatusLabel(QStringLiteral("C++ ONNX / NCNN 仅支持 YOLO detection / segmentation；TensorRT engine 使用部署验证；OCR 只查看 PaddleOCR 官方工具链产物。"));
-    boundaryStatus->setObjectName(QStringLiteral("DarkInlineStatus"));
-    allowLabelToShrink(executionStatus);
-    allowLabelToShrink(boundaryStatus);
-    headerGrid->addWidget(executionLabel, 0, 0);
-    headerGrid->addWidget(executionStatus, 0, 1);
-    headerGrid->addWidget(boundaryLabel, 1, 0);
-    headerGrid->addWidget(boundaryStatus, 1, 1);
-    headerGrid->setColumnStretch(1, 1);
-    headerRoot->addLayout(headerGrid);
 
     auto* mainSplitter = new QSplitter(Qt::Horizontal);
 
@@ -549,9 +468,6 @@ QWidget* MainWindow::buildInferencePage()
     mainSplitter->setStretchFactor(1, 5);
     mainSplitter->setSizes(QList<int>() << 460 << 760);
 
-    connect(headerInferButton, &QPushButton::clicked, this, &MainWindow::startInference);
-
-    layout->addWidget(headerPanel);
     layout->addWidget(mainSplitter);
     page->setWidget(content);
     return page;

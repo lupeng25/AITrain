@@ -780,7 +780,7 @@ void MainWindow::useSelectedComparisonForInference()
     if (inferenceCheckpointEdit_) {
         inferenceCheckpointEdit_->setText(QDir::toNativeSeparators(modelPath));
     }
-    showPage(InferencePage, uiText("推理验证"));
+    showDeploymentTab(1);
 }
 
 void MainWindow::useSelectedComparisonForExport()
@@ -793,7 +793,7 @@ void MainWindow::useSelectedComparisonForExport()
     if (conversionCheckpointEdit_) {
         conversionCheckpointEdit_->setText(QDir::toNativeSeparators(modelPath));
     }
-    showPage(ConversionPage, uiText("模型导出"));
+    showDeploymentTab(0);
 }
 
 void MainWindow::openSelectedComparisonReport()

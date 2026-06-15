@@ -27,6 +27,7 @@ class EvaluationReportView;
 class PluginMarketplaceWidget;
 class TaskArtifactPanel;
 class QPushButton;
+class QTabWidget;
 class QToolButton;
 
 class MainWindow : public QMainWindow {
@@ -90,36 +91,38 @@ private:
         DashboardPage = 0,
         ProjectPage,
         DatasetPage,
-        SampleReviewPage,
         TrainingPage,
         TaskQueuePage,
         ModelRegistryPage,
-        EvaluationReportsPage,
-        ConversionPage,
-        InferencePage,
-        PluginsPage,
+        DeploymentPage,
         EnvironmentPage,
-        SettingsPage
+        SystemSettingsPage
     };
 
     QWidget* buildTopBar();
     QWidget* buildDashboardPage();
     QWidget* buildProjectPage();
     QWidget* buildDatasetPage();
-    QWidget* buildSampleReviewPage();
+    QWidget* buildSampleReviewPanel();
     QWidget* buildTrainingPage();
     QWidget* buildTaskQueuePage();
     QWidget* buildModelRegistryPage();
-    QWidget* buildEvaluationReportsPage();
-    QWidget* buildConversionPage();
-    QWidget* buildInferencePage();
+    QWidget* buildEvaluationReportsPanel();
+    QWidget* buildDeploymentPage();
+    QWidget* buildModelExportPanel();
+    QWidget* buildInferenceValidationPanel();
     QWidget* buildDeliveryEvidencePanel();
-    QWidget* buildPluginsPage();
+    QWidget* buildPluginsPanel();
     QWidget* buildEnvironmentPage();
-    QWidget* buildSettingsPage();
+    QWidget* buildSystemSettingsPage();
+    QWidget* buildApplicationSettingsPanel();
 
     InfoPanel* createMetricCard(const QString& label, const QString& value, const QString& caption);
     QString pageCaption(int pageIndex) const;
+    void showDatasetTab(int tabIndex);
+    void showModelWorkspaceTab(int tabIndex);
+    void showDeploymentTab(int tabIndex);
+    void showSystemSettingsTab(int tabIndex);
     QString workerExecutablePath() const;
     QStringList pluginSearchPaths() const;
     QString defaultProjectPath() const;
@@ -210,6 +213,10 @@ private:
 
     Sidebar* sidebar_ = nullptr;
     QStackedWidget* stack_ = nullptr;
+    QTabWidget* datasetTabs_ = nullptr;
+    QTabWidget* modelWorkspaceTabs_ = nullptr;
+    QTabWidget* deploymentTabs_ = nullptr;
+    QTabWidget* systemSettingsTabs_ = nullptr;
     QLabel* pageTitle_ = nullptr;
     QLabel* pageCaption_ = nullptr;
     QLabel* headerProjectLabel_ = nullptr;

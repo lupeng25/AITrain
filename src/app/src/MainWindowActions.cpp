@@ -54,7 +54,7 @@ using namespace aitrain_app;
 
 void MainWindow::openEvaluationReportsPage()
 {
-    showPage(EvaluationReportsPage, uiText("评估报告"));
+    showModelWorkspaceTab(1);
 }
 
 void MainWindow::createProject()

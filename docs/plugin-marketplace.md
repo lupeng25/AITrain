@@ -14,7 +14,7 @@ The marketplace does not add accounts, ratings, payment, remote code execution, 
 
 ## User Flow
 
-1. Open the Plugins page.
+1. Open `System Settings > Plugins`.
 2. Use `Load Index` to read `plugins/marketplace/marketplace.json` or a local/static index path.
 3. Use `Import Plugin Package` to select a `.aitrain-plugin.zip` file.
 4. The marketplace validates `plugin.json`, package layout, hashes, compatibility, and Qt plugin identity.
@@ -69,4 +69,4 @@ For GUI validation, generate a disposable marketplace index and real zip package
 .\tools\create-plugin-marketplace-demo.ps1 -Force
 ```
 
-Then load `.deps\plugin-marketplace-demo\marketplace.json` from the Plugins page. This demo package reuses the built-in `com.aitrain.plugins.dataset_interop` id and DLL name, so use it only in development or disposable validation layouts.
+Then load `.deps\plugin-marketplace-demo\marketplace.json` from `System Settings > Plugins`. This demo package reuses the built-in `com.aitrain.plugins.dataset_interop` id and DLL name, so use it only in development or disposable validation layouts.

@@ -163,7 +163,7 @@ void MainWindow::useSelectedArtifactForInference()
     const QString path = selectedArtifactPath();
     if (!path.isEmpty() && inferenceCheckpointEdit_) {
         inferenceCheckpointEdit_->setText(QDir::toNativeSeparators(path));
-        showPage(InferencePage, tr("推理验证"));
+        showDeploymentTab(1);
     }
 }
 
@@ -172,7 +172,7 @@ void MainWindow::useSelectedArtifactForExport()
     const QString path = selectedArtifactPath();
     if (!path.isEmpty() && conversionCheckpointEdit_) {
         conversionCheckpointEdit_->setText(QDir::toNativeSeparators(path));
-        showPage(ConversionPage, tr("模型导出"));
+        showDeploymentTab(0);
     }
 }
 

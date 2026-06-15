@@ -80,7 +80,7 @@ QWidget* MainWindow::buildModelRegistryPage()
         if (inferenceCheckpointEdit_) {
             inferenceCheckpointEdit_->setText(QDir::toNativeSeparators(path));
         }
-        showPage(InferencePage, uiText("推理验证"));
+        showDeploymentTab(1);
     });
     connect(exportButton, &QPushButton::clicked, this, [this]() {
         if (!modelVersionTable_ || modelVersionTable_->selectedItems().isEmpty()) {
@@ -99,7 +99,7 @@ QWidget* MainWindow::buildModelRegistryPage()
         if (conversionCheckpointEdit_) {
             conversionCheckpointEdit_->setText(QDir::toNativeSeparators(path));
         }
-        showPage(ConversionPage, uiText("模型导出"));
+        showDeploymentTab(0);
     });
     connect(pipelineButton, &QPushButton::clicked, this, &MainWindow::runLocalPipelinePlanFromCurrentDataset);
     connect(reportsButton, &QPushButton::clicked, this, &MainWindow::openEvaluationReportsPage);
@@ -117,12 +117,10 @@ QWidget* MainWindow::buildModelRegistryPage()
     for (int column = 0; column < 3; ++column) {
         actionGrid->setColumnStretch(column, 1);
     }
-    modelRegistrySummaryLabel_ = mutedLabel(QStringLiteral("训练产物可从“任务与产物”注册为模型版本；评估报告已拆分到独立页面，模型库聚焦版本管理、导出和推理入口。"));
+    modelRegistrySummaryLabel_ = mutedLabel(QStringLiteral("训练产物可从“任务与产物”注册为模型版本；评估报告、模型对比和流水线记录集中在当前模型库工作区。"));
     allowLabelToShrink(modelRegistrySummaryLabel_);
     toolbar->bodyLayout()->addWidget(actionStrip);
     toolbar->bodyLayout()->addWidget(modelRegistrySummaryLabel_);
-
-    auto* splitter = new QSplitter(Qt::Vertical);
 
     auto* modelPanel = new InfoPanel(QStringLiteral("模型版本"));
     modelVersionTable_ = new QTableWidget(0, 8);
@@ -195,41 +193,34 @@ QWidget* MainWindow::buildModelRegistryPage()
     pipelineRunTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
     pipelineRunTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
     pipelinePanel->bodyLayout()->addWidget(pipelineRunTable_);
-    auto* modelDetailTabs = new QTabWidget;
-    modelDetailTabs->setObjectName(QStringLiteral("ModelDetailTabs"));
-    modelDetailTabs->addTab(comparisonPanel, uiText("模型对比"));
-    modelDetailTabs->addTab(pipelinePanel, uiText("流水线记录"));
-    splitter->addWidget(modelPanel);
-    splitter->addWidget(modelDetailTabs);
-    splitter->setChildrenCollapsible(false);
-    splitter->setStretchFactor(0, 4);
-    splitter->setStretchFactor(1, 2);
-    splitter->setSizes(QList<int>() << 520 << 260);
+    modelWorkspaceTabs_ = new QTabWidget;
+    modelWorkspaceTabs_->setObjectName(QStringLiteral("ModelWorkspaceTabs"));
+    modelWorkspaceTabs_->addTab(modelPanel, uiText("模型版本"));
+    modelWorkspaceTabs_->addTab(buildEvaluationReportsPanel(), uiText("评估报告"));
+    modelWorkspaceTabs_->addTab(comparisonPanel, uiText("模型对比"));
+    modelWorkspaceTabs_->addTab(pipelinePanel, uiText("流水线记录"));
 
     layout->addWidget(createWorkbenchHeader(
         QStringLiteral("MODEL REGISTRY"),
         QStringLiteral("模型库工作台"),
-        QStringLiteral("管理训练产物注册后的模型版本、来源 lineage、交付摘要和本地流水线入口。"),
+        QStringLiteral("管理模型版本、评估报告、对比和流水线记录。"),
         headerRefreshButton,
         QStringList()
             << QStringLiteral("Versioned Models")
-            << QStringLiteral("Lineage")
-            << QStringLiteral("Export")
-            << QStringLiteral("Inference")));
+            << QStringLiteral("Evaluation Reports")
+            << QStringLiteral("Model Comparison")
+            << QStringLiteral("Pipeline Runs")));
     layout->addWidget(toolbar);
-    layout->addWidget(splitter, 1);
+    layout->addWidget(modelWorkspaceTabs_, 1);
     return page;
 }
 
-QWidget* MainWindow::buildEvaluationReportsPage()
+QWidget* MainWindow::buildEvaluationReportsPanel()
 {
     auto* page = new QWidget;
     auto* layout = new QVBoxLayout(page);
-    layout->setContentsMargins(18, 18, 18, 18);
+    layout->setContentsMargins(0, 12, 0, 0);
     layout->setSpacing(16);
-
-    auto* headerRefreshButton = primaryButton(QStringLiteral("刷新评估报告"));
-    connect(headerRefreshButton, &QPushButton::clicked, this, &MainWindow::refreshModelRegistry);
 
     auto* toolbar = new InfoPanel(QStringLiteral("评估报告"));
     auto* actionStrip = new QFrame;
@@ -241,7 +232,7 @@ QWidget* MainWindow::buildEvaluationReportsPage()
     auto* backToModelsButton = new QPushButton(QStringLiteral("查看模型库"));
     connect(refreshButton, &QPushButton::clicked, this, &MainWindow::refreshModelRegistry);
     connect(backToModelsButton, &QPushButton::clicked, this, [this]() {
-        showPage(ModelRegistryPage, uiText("模型库"));
+        showModelWorkspaceTab(0);
     });
     row->addWidget(refreshButton);
     row->addWidget(backToModelsButton);
@@ -289,16 +280,6 @@ QWidget* MainWindow::buildEvaluationReportsPage()
     splitter->setStretchFactor(1, 3);
     splitter->setSizes(QList<int>() << 260 << 560);
 
-    layout->addWidget(createWorkbenchHeader(
-        QStringLiteral("EVALUATION REPORTS"),
-        QStringLiteral("评估报告工作台"),
-        QStringLiteral("集中查看模型评估摘要、关键指标、分类别表现、混淆矩阵、错误样本和 overlay 详情。"),
-        headerRefreshButton,
-        QStringList()
-            << QStringLiteral("Metrics")
-            << QStringLiteral("Per-class")
-            << QStringLiteral("Confusion Matrix")
-            << QStringLiteral("Error Overlay")));
     layout->addWidget(toolbar);
     layout->addWidget(splitter, 1);
     return page;

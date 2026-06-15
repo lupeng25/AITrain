@@ -70,18 +70,14 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     sidebar_->addItem(tr("项目"), ProjectPage);
     sidebar_->addSection(tr("数据与训练"));
     sidebar_->addItem(tr("数据集"), DatasetPage);
-    sidebar_->addItem(uiText("样本复核"), SampleReviewPage);
     sidebar_->addItem(tr("训练实验"), TrainingPage);
     sidebar_->addItem(tr("任务与产物"), TaskQueuePage);
-    sidebar_->addSection(tr("模型交付"));
+    sidebar_->addSection(uiText("模型与部署"));
     sidebar_->addItem(tr("模型库"), ModelRegistryPage);
-    sidebar_->addItem(tr("评估报告"), EvaluationReportsPage);
-    sidebar_->addItem(tr("模型导出"), ConversionPage);
-    sidebar_->addItem(tr("推理验证"), InferencePage);
+    sidebar_->addItem(uiText("部署验证"), DeploymentPage);
     sidebar_->addSection(tr("系统"));
-    sidebar_->addItem(tr("插件"), PluginsPage);
     sidebar_->addItem(tr("环境"), EnvironmentPage);
-    sidebar_->addItem(uiText("设置"), SettingsPage);
+    sidebar_->addItem(uiText("系统设置"), SystemSettingsPage);
     rootLayout->addWidget(sidebar_);
 
     auto* content = new QWidget;
@@ -94,16 +90,12 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     stack_->addWidget(buildDashboardPage());
     stack_->addWidget(buildProjectPage());
     stack_->addWidget(buildDatasetPage());
-    stack_->addWidget(buildSampleReviewPage());
     stack_->addWidget(buildTrainingPage());
     stack_->addWidget(buildTaskQueuePage());
     stack_->addWidget(buildModelRegistryPage());
-    stack_->addWidget(buildEvaluationReportsPage());
-    stack_->addWidget(buildConversionPage());
-    stack_->addWidget(buildInferencePage());
-    stack_->addWidget(buildPluginsPage());
+    stack_->addWidget(buildDeploymentPage());
     stack_->addWidget(buildEnvironmentPage());
-    stack_->addWidget(buildSettingsPage());
+    stack_->addWidget(buildSystemSettingsPage());
     contentLayout->addWidget(stack_, 1);
 
     rootLayout->addWidget(content, 1);
@@ -174,6 +166,7 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     showPage(DashboardPage, tr("总览"));
     updateHeaderState();
     updateDashboardSummary();
+    updateLanguageButtonState();
 }
 
 QString MainWindow::workerExecutablePath() const
@@ -247,35 +240,50 @@ void MainWindow::appendLog(const QString& text)
 void MainWindow::loadPluginCombos()
 {
     const QString currentPlugin = pluginCombo_ ? pluginCombo_->currentData().toString() : QString();
-    if (pluginCombo_) {
-        pluginCombo_->clear();
-    }
-    if (datasetFormatCombo_) {
-        datasetFormatCombo_->clear();
-    }
+    const QString previousDatasetFormat = datasetFormatCombo_ ? comboCurrentDataOrText(datasetFormatCombo_) : QString();
 
     QStringList formats;
-    for (auto* plugin : pluginManager_.plugins()) {
-        const aitrain::PluginManifest manifest = plugin->manifest();
-        if (pluginCombo_) {
+    if (pluginCombo_) {
+        const QSignalBlocker blocker(pluginCombo_);
+        pluginCombo_->clear();
+        for (auto* plugin : pluginManager_.plugins()) {
+            const aitrain::PluginManifest manifest = plugin->manifest();
             pluginCombo_->addItem(manifest.name, manifest.id);
+            for (const QString& format : manifest.datasetFormats) {
+                if (!formats.contains(format)) {
+                    formats.append(format);
+                }
+            }
         }
-        for (const QString& format : manifest.datasetFormats) {
-            if (!formats.contains(format)) {
-                formats.append(format);
+        if (!currentPlugin.isEmpty()) {
+            const int index = pluginCombo_->findData(currentPlugin);
+            if (index >= 0) {
+                pluginCombo_->setCurrentIndex(index);
+            }
+        }
+    } else {
+        for (auto* plugin : pluginManager_.plugins()) {
+            const aitrain::PluginManifest manifest = plugin->manifest();
+            for (const QString& format : manifest.datasetFormats) {
+                if (!formats.contains(format)) {
+                    formats.append(format);
+                }
             }
         }
     }
     if (datasetFormatCombo_) {
+        const QSignalBlocker blocker(datasetFormatCombo_);
+        datasetFormatCombo_->clear();
         for (const QString& format : formats) {
             datasetFormatCombo_->addItem(datasetFormatLabel(format), format);
         }
-    }
-    if (pluginCombo_ && !currentPlugin.isEmpty()) {
-        const int index = pluginCombo_->findData(currentPlugin);
-        if (index >= 0) {
-            pluginCombo_->setCurrentIndex(index);
+        const int restoredIndex = previousDatasetFormat.isEmpty() ? -1 : datasetFormatCombo_->findData(previousDatasetFormat);
+        if (restoredIndex >= 0) {
+            datasetFormatCombo_->setCurrentIndex(restoredIndex);
+        } else if (datasetFormatCombo_->count() > 0) {
+            datasetFormatCombo_->setCurrentIndex(0);
         }
+        state_.dataset.currentFormat = currentDatasetFormat();
     }
     refreshTrainingDefaults();
 }

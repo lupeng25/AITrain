@@ -17,9 +17,9 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 - 训练 YOLO 风格分割模型。
 - 训练 PaddleOCR Det / Rec 官方模型，并通过 PaddleOCR System 做端到端 OCR 推理验收。
 - 管理数据集。
-- 转换模型格式。
+- 转换模型格式并做部署验证。
 - 做推理验证。
-- 做样本复核、评估、模型库、交付报告、部署验证、诊断包和客户域 OCR 验收。
+- 做数据集质量复核、评估、模型库、交付报告、部署验证、诊断包和客户域 OCR 验收。
 
 训练实现方向：
 
@@ -36,7 +36,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 
 阶段状态以 `docs/harness/current-status.md` 为准。不要只根据长期路线图末尾的历史“下一步建议”判断当前阶段。
 
-截至 2026-06-06，官方 YOLO 检测/分割训练与 ONNX 导出、PaddleOCR Det/Rec/System 官方工具链、PP-OCRv4/v5/v6 official adapter preset、YOLO C++ ONNX Runtime 推理、RTX 4090D TensorRT 验收证据、本地插件 marketplace、环境 profile、数据集质量/快照、数据集格式转换 GUI、评估、benchmark、模型库、交付报告、样本复核、部署验证、诊断包和环境页交付证据 GUI 闭环都已落地到当前本地代码。2026-06-05 RTX 4090D follow-up 刷新记录 local baseline/package acceptance、GUI walkthrough、历史 Phase 47 Det ONNX+CTest、CPU training smoke、Phase 45 YOLO matrix、TensorRT 和 public OCR GPU workflow 均有通过证据；准确阶段边界仍以 `docs/harness/current-status.md` 为准。
+截至 2026-06-06，官方 YOLO 检测/分割训练与 ONNX 导出、PaddleOCR Det/Rec/System 官方工具链、PP-OCRv4/v5/v6 official adapter preset、YOLO C++ ONNX Runtime 推理、RTX 4090D TensorRT 验收证据、本地插件 marketplace、环境 profile、数据集质量/快照、数据集格式转换 GUI、评估、benchmark、模型库、交付报告、样本复核、部署验证、诊断包和环境页交付证据 GUI 闭环都已落地到当前本地代码。当前主导航收敛为 9 个对象型工作区：`总览`、`项目`、`数据集`、`训练实验`、`任务与产物`、`模型库`、`部署验证`、`环境`、`系统设置`；样本复核、评估报告、模型导出、推理验证、插件和应用设置作为对应工作区 tab 呈现。2026-06-05 RTX 4090D follow-up 刷新记录 local baseline/package acceptance、GUI walkthrough、历史 Phase 47 Det ONNX+CTest、CPU training smoke、Phase 45 YOLO matrix、TensorRT 和 public OCR GPU workflow 均有通过证据；准确阶段边界仍以 `docs/harness/current-status.md` 为准。
 
 2026-06-14/15 全量模型生命周期验证暴露了当前软件影响项：Ultralytics 8.3.171 无法解析 YOLO12 分割 `.pt` 权重 `yolo12n-seg.pt`，这类行应记录为上游权重 blocker；共享 Ultralytics 8.3.171 环境下 YOLO26 20 行全部失败，原因是 `.yaml` 配置不存在、官方权重不可解析或 nano `.pt` 权重与包代码不兼容；进度页面可能把历史 `row_summary.json` 失败计入当前 failed 数；GPU YOLO 训练必须使用 CUDA PyTorch 环境。随后隔离 YOLO26 targeted matrix 在 2026-06-15 取得 `-Full -Epochs 100` 20/20 训练、官方 ONNX、AITrain C++ ONNX 推理和 TensorRT 通过证据。YOLO26 NCNN 历史尝试 20/20 failed，当前产品移除 YOLO26 NCNN 选项并拒绝 `format=ncnn`。详细边界见 `docs/harness/current-status.md` 和 `docs/yolo-model-support-matrix.md`。
 
@@ -81,7 +81,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 - 2026-06-05 RTX 4090D follow-up 证据已归档到 `docs\validation\rtx4090-validation-evidence-20260615.json`，记录 LocalBaseline+Package、GUI walkthrough、历史 Phase47 Det ONNX+CTest、CPUTrainingSmoke 和 Phase45 的修复后通过证据；原始 `.deps\fix-1-3-cpu-training-smoke-final` 与 `.deps\fix-1-3-phase45-yolo-matrix` 产物目录已清理。OCR GPU 复跑环境通过 `.deps\envs\ocr-gpu` 暴露；旧 `.deps\rtx4090-validation\python-ocr-gpu` 仅作为保留的兼容 target。新 OCR 路线不再把 Phase47 作为产品验收要求。
 - Windows 打包、package smoke、release freeze handoff、离线授权和注册码生成器。
 - 本地产品闭环：数据集质量报告、问题样本、X-AnyLabeling 复核清单、snapshot、训练 lineage、评估、benchmark、模型注册、pipeline、交付报告。
-- Phase 49 交付闭环：样本复核页、环境页交付证据区、客户域 OCR 验收向导、一键诊断包和导出后部署验证。
+- Phase 49 交付闭环：`数据集 > 质量与复核`、`环境 > 交付证据`、客户域 OCR 验收向导、一键诊断包和导出后部署验证。
 
 未完成：
 

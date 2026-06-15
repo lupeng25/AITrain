@@ -45,7 +45,10 @@ The GUI delivery-closeout surfaces aggregate evidence; they do not replace the s
 
 Current GUI surfaces:
 
-- `样本复核`: load `problem_samples.json`, `error_samples.json`, `rework_sample_set.json`, or evaluation reports; filter by source, reason, class, split, OCR edit distance / CER, or search text; export an X-AnyLabeling review list.
+- `数据集 > 质量与复核`: load `problem_samples.json`, `error_samples.json`, `rework_sample_set.json`, or evaluation reports; filter by source, reason, class, split, OCR edit distance / CER, or search text; export an X-AnyLabeling review list.
+- `模型库 > 评估报告`: review model evaluation report records and visualized report details.
+- `部署验证 > 模型导出 / 推理验证`: export deployable artifacts, run export post-validation, and run single-image inference validation.
+- `系统设置 > 插件`: review loaded plugin capabilities and local marketplace plugin state.
 - `环境 > 交付证据`: summarize local RC, clean Windows, TensorRT, package integrity, customer OCR, diagnostics, and deployment validation evidence.
 - Customer OCR acceptance wizard: collect Det dataset, Rec dataset, System images, official Det/Rec/System reports, and write customer OCR manifest/summary outputs.
 - Export post-validation: validate ONNX by runnable inference where possible; preserve TensorRT `hardware-blocked`; validate NCNN by runtime inference for YOLO detection/segmentation when NCNN SDK/runtime and a sample image are available, otherwise report failed/blocked explicitly.
@@ -395,13 +398,13 @@ Suggested manual GUI walkthrough:
 .\tools\ui-workbench-walkthrough.ps1
 ```
 
-The RC walkthrough wrapper runs the 1280x820 non-fullscreen page set: `总览`, `项目`, `数据集`, `样本复核`, `训练实验`, `任务与产物`, `模型库`, `评估报告`, `模型导出`, `推理验证`, `插件`, `环境`, and `设置`. It writes `ui_walkthrough_rc_summary.json` under `.deps\UI-Walkthrough\rc` by default and should be treated as the repeatable GUI usability gate. The `环境 > 交付证据` tab is covered by QtTest because it is no longer a standalone main navigation page.
+The RC walkthrough wrapper runs the 1280x820 non-fullscreen main page set: `总览`, `项目`, `数据集`, `训练实验`, `任务与产物`, `模型库`, `部署验证`, `环境`, and `系统设置`. It writes `ui_walkthrough_rc_summary.json` under `.deps\UI-Walkthrough\rc` by default and should be treated as the repeatable GUI usability gate. Tab-level coverage for `数据集 > 质量与复核`, `模型库 > 评估报告`, `部署验证 > 模型导出 / 推理验证`, `系统设置 > 插件 / 应用设置`, and `环境 > 交付证据` is handled by QtTest.
 
 If offline licensing stops startup at the registration dialog, the wrapper records `status=blocked` and `errorCode=license_required`. That is not a GUI layout pass; configure a valid license token and build-time public key, then rerun the wrapper.
 
 `tools\local-rc-closeout.ps1` runs this walkthrough by default after harness/package smoke. Use `-SkipGuiWalkthrough` only for intentionally headless environments, and record that omission in the handoff notes.
 
-For manual exploration beyond the automated pass, create or open a project, import generated detection, segmentation, OCR Rec, and OCR Det datasets, launch X-AnyLabeling from the dataset page, use post-labeling refresh/revalidation, validate and split each dataset, run one training/export/inference path, then confirm the task queue detail view lists report, checkpoint/model, ONNX, overlay, visualized OCR image, and prediction JSON/TXT artifacts. Also open `样本复核` and `环境 > 交付证据` to confirm review-list export, diagnostics, customer OCR gate, and deployment validation entries are visible.
+For manual exploration beyond the automated pass, create or open a project, import generated detection, segmentation, OCR Rec, and OCR Det datasets, launch X-AnyLabeling from the dataset page, use post-labeling refresh/revalidation, validate and split each dataset, run one training/export/inference path, then confirm the task queue detail view lists report, checkpoint/model, ONNX, overlay, visualized OCR image, and prediction JSON/TXT artifacts. Also open `数据集 > 质量与复核`, `部署验证`, `系统设置 > 插件`, and `环境 > 交付证据` to confirm review-list export, export/inference validation, plugin state, diagnostics, customer OCR gate, and deployment validation entries are visible.
 
 X-AnyLabeling is detected from `AITRAIN_XANYLABELING_EXE`, the app directory, `tools\x-anylabeling`, `.deps\annotation-tools\X-AnyLabeling`, or `PATH`. Keep downloaded binaries in `.deps\` unless a separate redistribution review is completed.
 

@@ -924,22 +924,14 @@ void MainWindow::registerPipelineModelVersion(const QJsonObject& payload)
 void MainWindow::updateModelRegistry()
 {
     if (!repository_.isOpen()) {
-        if (modelVersionTable_) {
-            modelVersionTable_->setRowCount(0);
-            modelVersionTable_->insertRow(0);
-            modelVersionTable_->setItem(0, 0, new QTableWidgetItem(uiText("请先打开项目")));
-        }
-        if (evaluationReportTable_) {
-            evaluationReportTable_->setRowCount(0);
-        }
-        if (pipelineRunTable_) {
-            pipelineRunTable_->setRowCount(0);
-        }
-        if (modelComparisonTable_) {
-            modelComparisonTable_->setRowCount(0);
+        if (modelRegistrySummaryLabel_) {
+            modelRegistrySummaryLabel_->setText(uiText("请先打开项目。模型版本、评估报告、对比和流水线记录会在项目打开后显示。"));
         }
         if (modelComparisonSummaryLabel_) {
             modelComparisonSummaryLabel_->setText(uiText("请先打开项目。"));
+        }
+        if (evaluationReportView_) {
+            evaluationReportView_->clear();
         }
         return;
     }
