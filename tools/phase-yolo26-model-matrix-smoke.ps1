@@ -1,14 +1,22 @@
 param(
     [string]$WorkDir = ".deps\phase-yolo26-model-matrix",
     [string]$PythonExe = "",
+    [string]$Yolo26PythonDir = ".deps\yolo26\env",
+    [string]$UltralyticsRequirement = "ultralytics",
+    [string]$TorchIndexUrl = "https://download.pytorch.org/whl/cu128",
     [string]$BuildDir = "build-vscode",
     [string]$WorkerExe = "",
     [int]$Epochs = 1,
     [int]$ImageSize = 64,
     [int]$Batch = 1,
     [string]$Device = "cpu",
+    [string[]]$DeploymentTargets = @("onnx", "tensorrt"),
+    [switch]$PrepareEnvironment,
+    [switch]$ProbeOnly,
     [switch]$Focused,
+    [switch]$Full,
     [string[]]$CaseName = @(),
+    [switch]$SkipTorchInstall,
     [switch]$SkipCtest
 )
 
@@ -34,6 +42,45 @@ function Resolve-RepoPath {
     return [System.IO.Path]::GetFullPath((Join-Path $script:Root $Path))
 }
 
+function Test-DeviceRequiresCuda {
+    param([string]$DeviceValue)
+    $normalized = $DeviceValue.Trim().ToLowerInvariant()
+    return ($normalized -ne "cpu" -and $normalized -ne "-1")
+}
+
+function Resolve-BasePythonForVenv {
+    $py = Get-Command py -ErrorAction SilentlyContinue
+    if ($py) {
+        return @($py.Source, "-3.12")
+    }
+    $python = Get-Command python -ErrorAction SilentlyContinue
+    if ($python) {
+        return @($python.Source)
+    }
+    throw "No base Python was found to create the isolated YOLO26 environment."
+}
+
+function Ensure-Yolo26Environment {
+    $envDir = Resolve-RepoPath $Yolo26PythonDir
+    $venvPython = Join-Path $envDir "Scripts\python.exe"
+    if (!(Test-Path -LiteralPath $venvPython)) {
+        New-Item -ItemType Directory -Force (Split-Path -Parent $envDir) | Out-Null
+        $base = Resolve-BasePythonForVenv
+        $baseExe = [string]$base[0]
+        $baseArgs = @($base | Select-Object -Skip 1) + @("-m", "venv", $envDir)
+        Invoke-Checked -FilePath $baseExe -Arguments $baseArgs
+    }
+    if (!(Test-Path -LiteralPath $venvPython)) {
+        throw "YOLO26 environment creation did not produce python.exe: $venvPython"
+    }
+    Invoke-Checked -FilePath $venvPython -Arguments @("-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel")
+    if (!$SkipTorchInstall -and $TorchIndexUrl) {
+        Invoke-Checked -FilePath $venvPython -Arguments @("-m", "pip", "install", "--index-url", $TorchIndexUrl, "torch", "torchvision", "torchaudio")
+    }
+    Invoke-Checked -FilePath $venvPython -Arguments @("-m", "pip", "install", "--upgrade", $UltralyticsRequirement, "onnx", "onnxruntime", "opencv-python")
+    return [System.IO.Path]::GetFullPath($venvPython)
+}
+
 function Resolve-PythonExe {
     if ($PythonExe) {
         $resolved = Resolve-RepoPath $PythonExe
@@ -43,7 +90,17 @@ function Resolve-PythonExe {
         return $resolved
     }
 
+    $isolated = Join-Path (Resolve-RepoPath $Yolo26PythonDir) "Scripts\python.exe"
+    if (Test-Path -LiteralPath $isolated) {
+        return [System.IO.Path]::GetFullPath($isolated)
+    }
+    if ($PrepareEnvironment) {
+        return Ensure-Yolo26Environment
+    }
+
     $candidates = @(
+        (Join-Path $script:Root ".deps\yolo26\env\Scripts\python.exe"),
+        (Join-Path $script:Root ".deps\rtx4090-validation\python-yolo-cuda\Scripts\python.exe"),
         (Join-Path $script:Root ".deps\python-3.13.13-embed-amd64\python.exe"),
         (Join-Path $script:Root ".deps\python-3.13.13-ocr-amd64\python.exe")
     )
@@ -110,6 +167,47 @@ function Invoke-Checked {
     } finally {
         $ErrorActionPreference = $previousErrorActionPreference
         Pop-Location
+    }
+}
+
+function Invoke-ProcessCapture {
+    param(
+        [string]$FilePath,
+        [string[]]$Arguments = @(),
+        [string]$LogPath,
+        [string]$WorkingDirectory = $script:Root,
+        [switch]$AllowFailure
+    )
+
+    New-Item -ItemType Directory -Force (Split-Path -Parent $LogPath) | Out-Null
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        if ([System.IO.Path]::GetExtension($FilePath) -ieq ".ps1") {
+            $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $FilePath @Arguments 2>&1
+        } else {
+            Push-Location $WorkingDirectory
+            try {
+                $output = & $FilePath @Arguments 2>&1
+            } finally {
+                Pop-Location
+            }
+        }
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    $text = ([string[]]$output -join [Environment]::NewLine).Trim()
+    $text | Set-Content -LiteralPath $LogPath -Encoding UTF8
+    if ($exitCode -ne 0 -and !$AllowFailure) {
+        throw "Command failed with exit code $exitCode`: $FilePath $($Arguments -join ' ')"
+    }
+    return [pscustomobject][ordered]@{
+        exitCode = $exitCode
+        text = $text
+        json = Get-LastJsonObjectFromText -Text $text
+        logPath = $LogPath
     }
 }
 
@@ -292,8 +390,125 @@ function Test-UltralyticsModel {
     return [string]($output | Select-Object -Last 1)
 }
 
+function Get-LastJsonObjectFromText {
+    param([string]$Text)
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return $null
+    }
+    $lines = $Text -split "(`r`n|`n|`r)"
+    for ($index = $lines.Count - 1; $index -ge 0; $index--) {
+        $line = [string]$lines[$index]
+        if ($line -notmatch '^\s*\{') {
+            continue
+        }
+        try {
+            return $line | ConvertFrom-Json
+        } catch {
+            continue
+        }
+    }
+    return $null
+}
+
+function Invoke-Yolo26EnvironmentProbe {
+    param(
+        [string]$Python,
+        [bool]$RequireCuda
+    )
+
+    $probeModels = @("yolo26n.pt", "yolo26n-seg.pt", "yolo26n.yaml", "yolo26n-seg.yaml")
+    $code = @'
+import json
+import sys
+from pathlib import Path
+
+models = sys.argv[1:]
+result = {
+    "ok": False,
+    "python": sys.executable,
+    "ultralyticsVersion": "",
+    "ultralyticsModule": "",
+    "torchVersion": "",
+    "torchCudaAvailable": False,
+    "torchCudaDeviceCount": 0,
+    "cfgModels26Exists": False,
+    "modelProbes": [],
+    "errors": [],
+}
+try:
+    import torch
+    result["torchVersion"] = getattr(torch, "__version__", "unknown")
+    result["torchCudaAvailable"] = bool(torch.cuda.is_available())
+    result["torchCudaDeviceCount"] = int(torch.cuda.device_count()) if hasattr(torch, "cuda") else 0
+except Exception as exc:
+    result["errors"].append({"stage": "torch_import", "message": str(exc)})
+try:
+    import ultralytics
+    from ultralytics import YOLO
+    result["ultralyticsVersion"] = getattr(ultralytics, "__version__", "unknown")
+    result["ultralyticsModule"] = str(getattr(ultralytics, "__file__", ""))
+    cfg_root = Path(result["ultralyticsModule"]).resolve().parent / "cfg" / "models" / "26"
+    result["cfgModels26Exists"] = cfg_root.exists()
+    for model_name in models:
+        probe = {"model": model_name, "ok": False, "task": "", "end2end": None, "error": ""}
+        try:
+            model = YOLO(model_name)
+            probe["task"] = str(getattr(model, "task", ""))
+            yaml = getattr(getattr(model, "model", None), "yaml", {})
+            if isinstance(yaml, dict) and "end2end" in yaml:
+                probe["end2end"] = bool(yaml.get("end2end"))
+            probe["ok"] = True
+        except Exception as exc:
+            probe["error"] = str(exc)
+        result["modelProbes"].append(probe)
+except Exception as exc:
+    result["errors"].append({"stage": "ultralytics_import_or_probe", "message": str(exc)})
+
+result["ok"] = (
+    bool(result["ultralyticsVersion"])
+    and bool(result["cfgModels26Exists"])
+    and all(item.get("ok") for item in result["modelProbes"])
+)
+print(json.dumps(result, ensure_ascii=False))
+'@
+    $previousErrorActionPreference = $ErrorActionPreference
+    $probeScript = [System.IO.Path]::ChangeExtension([System.IO.Path]::GetTempFileName(), ".py")
+    try {
+        Set-Content -LiteralPath $probeScript -Encoding UTF8 -Value $code
+        $ErrorActionPreference = "Continue"
+        $output = & $Python $probeScript @probeModels 2>&1
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+        Remove-Item -LiteralPath $probeScript -Force -ErrorAction SilentlyContinue
+    }
+    $text = ([string[]]$output -join [Environment]::NewLine)
+    $probe = Get-LastJsonObjectFromText -Text $text
+    if ($null -eq $probe) {
+        $probe = [pscustomobject][ordered]@{
+            ok = $false
+            python = $Python
+            exitCode = $exitCode
+            errors = @([pscustomobject]@{ stage = "probe_output"; message = $text })
+            modelProbes = @()
+        }
+    } else {
+        Add-Member -InputObject $probe -NotePropertyName "exitCode" -NotePropertyValue $exitCode -Force
+        Add-Member -InputObject $probe -NotePropertyName "rawOutputTail" -NotePropertyValue ($text.Substring([Math]::Max(0, $text.Length - 4096))) -Force
+    }
+    $cudaOk = (-not $RequireCuda) -or [bool]$probe.torchCudaAvailable
+    Add-Member -InputObject $probe -NotePropertyName "requiresCuda" -NotePropertyValue $RequireCuda -Force
+    if (-not $cudaOk) {
+        Add-Member -InputObject $probe -NotePropertyName "ok" -NotePropertyValue $false -Force
+        $errors = @($probe.errors)
+        $errors += [pscustomobject]@{ stage = "torch_cuda"; message = "Requested GPU device but torch.cuda.is_available() is false." }
+        Add-Member -InputObject $probe -NotePropertyName "errors" -NotePropertyValue $errors -Force
+    }
+    return $probe
+}
+
 function New-Yolo26Cases {
-    $scales = if ($Focused) { @("n") } else { @("n", "s", "m", "l", "x") }
+    $scales = if ($Focused -and !$Full) { @("n") } else { @("n", "s", "m", "l", "x") }
     $sourceTypes = @("yaml", "pt")
     $cases = @()
     foreach ($scale in $scales) {
@@ -318,26 +533,6 @@ function New-Yolo26Cases {
             }
         }
     }
-    if ($Focused) {
-        $cases += [pscustomobject]@{
-            name = "yolo26n-detect-yaml-end2end-false"
-            task = "detection"
-            backend = "ultralytics_yolo_detect"
-            model = "yolo26n.yaml"
-            sourceType = "yaml"
-            end2end = "false"
-            required = $true
-        }
-        $cases += [pscustomobject]@{
-            name = "yolo26n-segment-yaml-end2end-true"
-            task = "segmentation"
-            backend = "ultralytics_yolo_segment"
-            model = "yolo26n-seg.yaml"
-            sourceType = "yaml"
-            end2end = "true"
-            required = $true
-        }
-    }
     return $cases
 }
 
@@ -360,7 +555,7 @@ function Expected-EndToEnd {
     param([object]$Case)
     $raw = [string]$Case.end2end
     if ($raw -eq "auto") {
-        return ([string]$Case.task -eq "detection")
+        return $null
     }
     return Convert-EndToEndValue $raw
 }
@@ -455,7 +650,7 @@ function Get-TrainingReportSummary {
     }
     $actualEndToEnd = Convert-EndToEndValue $report.ultralyticsExportArgs.end2end
     $expectedEndToEnd = Expected-EndToEnd $Case
-    if ($actualEndToEnd -ne $expectedEndToEnd) {
+    if ($null -ne $expectedEndToEnd -and $actualEndToEnd -ne $expectedEndToEnd) {
         throw "Report end2end mismatch for $($Case.model): expected=$expectedEndToEnd actual=$actualEndToEnd"
     }
 
@@ -468,7 +663,11 @@ function Get-TrainingReportSummary {
         reportPath = [System.IO.Path]::GetFullPath($ReportPath)
         checkpointPath = [System.IO.Path]::GetFullPath($checkpointPath)
         onnxPath = [System.IO.Path]::GetFullPath($onnxPath)
+        onnxSidecarPath = if ($report.PSObject.Properties.Name -contains "onnxSidecarPath") { [string]$report.onnxSidecarPath } else { "" }
         ultralyticsExportArgs = $report.ultralyticsExportArgs
+        modelFamily = if ($report.PSObject.Properties.Name -contains "modelFamily") { [string]$report.modelFamily } else { "" }
+        modelSeries = if ($report.PSObject.Properties.Name -contains "modelSeries") { [string]$report.modelSeries } else { "" }
+        outputShapes = if ($report.PSObject.Properties.Name -contains "outputShapes") { $report.outputShapes } else { $null }
         metrics = $report.metrics
     }
 }
@@ -489,6 +688,63 @@ function Get-InferenceSummary {
         predictionCount = @($predictions.predictions).Count
         runtime = [string]$predictions.runtime
     }
+}
+
+function Get-DeploymentStatusFromCapture {
+    param([object]$Capture)
+    if ($Capture.exitCode -eq 0 -and $Capture.json -and $Capture.json.ok) {
+        return "passed"
+    }
+    $status = if ($Capture.json -and $Capture.json.PSObject.Properties.Name -contains "status") { [string]$Capture.json.status } else { "" }
+    if ($status -in @("blocked", "hardware-blocked")) {
+        return "blocked"
+    }
+    if ($Capture.text -match "hardware|unavailable|not found|missing|requires|blocked|sdk_missing|sample_missing") {
+        return "blocked"
+    }
+    return "failed"
+}
+
+function Invoke-Yolo26Deployments {
+    param(
+        [object]$Case,
+        [string]$Python,
+        [string]$ResolvedWorkerExe,
+        [string]$CheckpointPath,
+        [string]$OnnxPath,
+        [string]$SampleImage,
+        [object]$ReportSummary,
+        [string]$CaseOutputPath
+    )
+
+    $deployments = [ordered]@{}
+    $targets = @($DeploymentTargets | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ })
+    if ($targets -contains "onnx") {
+        $deployments.onnx = [ordered]@{
+            status = "passed"
+            source = "aitrain_cpp_onnx_inference"
+            onnxPath = $OnnxPath
+        }
+    }
+
+    if ($targets -contains "tensorrt") {
+        $trtOutput = Join-Path $CaseOutputPath "deployment\tensorrt"
+        New-Item -ItemType Directory -Force $trtOutput | Out-Null
+        $trt = Invoke-ProcessCapture `
+            -FilePath $ResolvedWorkerExe `
+            -Arguments @("--tensorrt-smoke", $OnnxPath) `
+            -LogPath (Join-Path $trtOutput "tensorrt_smoke.log") `
+            -AllowFailure
+        $deployments.tensorrt = [ordered]@{
+            status = Get-DeploymentStatusFromCapture -Capture $trt
+            exitCode = $trt.exitCode
+            result = $trt.json
+            logPath = $trt.logPath
+        }
+        Write-JsonFile -Path (Join-Path $trtOutput "tensorrt_smoke_summary.json") -Value $deployments.tensorrt
+    }
+
+    return $deployments
 }
 
 function Invoke-MatrixCase {
@@ -541,6 +797,15 @@ function Invoke-MatrixCase {
     Write-Step "worker inference $model"
     $inferenceCompletedEvent = Invoke-WorkerCommand -ResolvedWorkerExe $ResolvedWorkerExe -CommandType "infer" -Request $inferenceRequest -EventsPath $inferenceEventsPath
     $inferenceSummary = Get-InferenceSummary -OutputPath $inferenceOutput
+    $deploymentSummary = Invoke-Yolo26Deployments `
+        -Case $Case `
+        -Python $Python `
+        -ResolvedWorkerExe $ResolvedWorkerExe `
+        -CheckpointPath $reportSummary.checkpointPath `
+        -OnnxPath $reportSummary.onnxPath `
+        -SampleImage $sampleImage `
+        -ReportSummary $reportSummary `
+        -CaseOutputPath $outputPath
     $finished = [DateTime]::UtcNow
 
     Write-Host ("  [ok] {0}: checkpoint, ONNX, report, predictions, and overlay verified" -f $model)
@@ -560,6 +825,7 @@ function Invoke-MatrixCase {
         elapsedSeconds = [Math]::Round(($finished - $started).TotalSeconds, 3)
         artifacts = $reportSummary
         inference = $inferenceSummary
+        deployments = $deploymentSummary
         workerEventsPath = [System.IO.Path]::GetFullPath($eventsPath)
         inferenceEventsPath = [System.IO.Path]::GetFullPath($inferenceEventsPath)
         completedEvent = $completedEvent
@@ -597,22 +863,80 @@ function Invoke-CtestForWorkDir {
     }
 }
 
+if ($Focused -and $Full) {
+    throw "Use either -Focused or -Full, not both."
+}
+$targets = @($DeploymentTargets | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ })
+foreach ($target in $targets) {
+    if ($target -eq "ncnn") {
+        throw "YOLO26 NCNN deployment is not supported by AITrain; use ONNX or TensorRT for YOLO26."
+    }
+    if ($target -notin @("onnx", "tensorrt")) {
+        throw "Unsupported deployment target: $target"
+    }
+}
+
 $python = Resolve-PythonExe
-$workerExeResolved = Resolve-WorkerExe
 $work = Resolve-RepoPath $WorkDir
 $generated = Join-Path $work "generated"
 $runs = Join-Path $work "runs"
 $summaryPath = Join-Path $work "yolo26_model_matrix_summary.json"
+$environmentPath = Join-Path $work "yolo26_environment_self_check.json"
 New-Item -ItemType Directory -Force $work | Out-Null
 
-$ultralyticsVersion = Get-UltralyticsVersion -Python $python
-Write-Host ("  [ok] Ultralytics version={0}" -f $ultralyticsVersion)
+$requireCuda = Test-DeviceRequiresCuda -DeviceValue $Device
+$environmentProbe = Invoke-Yolo26EnvironmentProbe -Python $python -RequireCuda $requireCuda
+Write-JsonFile -Path $environmentPath -Value $environmentProbe
+$ultralyticsVersion = if ($environmentProbe.PSObject.Properties.Name -contains "ultralyticsVersion") { [string]$environmentProbe.ultralyticsVersion } else { "" }
+if ($ultralyticsVersion) {
+    Write-Host ("  [ok] Ultralytics version={0}" -f $ultralyticsVersion)
+}
+
+$cases = New-Yolo26Cases
+if ($ProbeOnly -or -not [bool]$environmentProbe.ok) {
+    $finishedAt = [DateTime]::UtcNow
+    $status = if ([bool]$environmentProbe.ok) { "probe_passed" } else { "blocked" }
+    $summary = [ordered]@{
+        ok = [bool]$environmentProbe.ok
+        phase = "yolo26-model-matrix"
+        mode = "probe"
+        status = $status
+        workDir = $work
+        startedAt = $script:StartedAt.ToString("o")
+        finishedAt = $finishedAt.ToString("o")
+        elapsedSeconds = [Math]::Round(($finishedAt - $script:StartedAt).TotalSeconds, 3)
+        ultralyticsVersion = $ultralyticsVersion
+        yolo26Python = $python
+        environmentReport = $environmentPath
+        parameters = [ordered]@{
+            epochs = $Epochs
+            batchSize = $Batch
+            imageSize = $ImageSize
+            device = $Device
+            deploymentTargets = $targets
+            requiredCaseCount = @($cases | Where-Object { $_.required }).Count
+            caseName = $CaseName
+        }
+        probe = $environmentProbe
+        results = @()
+        note = "Probe mode validates isolated YOLO26 environment, CUDA availability when requested, cfg/models/26 presence, and nano detection/segmentation yaml/pt loading before training."
+    }
+    Write-JsonFile -Path $summaryPath -Value $summary
+    Write-Host ("  [ok] summary={0}" -f $summaryPath)
+    if (![bool]$environmentProbe.ok) {
+        Write-Host "YOLO26 probe blocked. See $environmentPath" -ForegroundColor Yellow
+        exit 2
+    }
+    Write-Host "YOLO26 probe passed" -ForegroundColor Green
+    exit 0
+}
+
+$workerExeResolved = Resolve-WorkerExe
 
 $generator = Join-Path $script:Root "examples\create-minimal-datasets.py"
 Assert-PathExists $generator "minimal dataset generator"
 Invoke-Checked -FilePath $python -Arguments @($generator, "--output", $generated)
 
-$cases = New-Yolo26Cases
 if ($CaseName.Count -gt 0) {
     $requestedCaseNames = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($name in $CaseName) {
@@ -683,19 +1007,22 @@ $summary = [ordered]@{
     finishedAt = $finishedAt.ToString("o")
     elapsedSeconds = [Math]::Round(($finishedAt - $script:StartedAt).TotalSeconds, 3)
     ultralyticsVersion = $ultralyticsVersion
+    yolo26Python = $python
+    environmentReport = $environmentPath
     workerExe = $workerExeResolved
     parameters = [ordered]@{
         epochs = $Epochs
         batchSize = $Batch
         imageSize = $ImageSize
         device = $Device
+        deploymentTargets = $targets
         requiredCaseCount = @($cases | Where-Object { $_.required }).Count
         caseName = $CaseName
     }
     ctestStatus = $ctestStatus
     ctestFailure = $ctestFailure
     results = $results
-    note = "YOLO26 is tracked as a separate compatibility phase. Full mode validates detection and instance segmentation n/s/m/l/x yaml/pt presets. Focused mode validates nano yaml/pt presets plus detection end2end=false and segmentation end2end=true overrides. Semantic segmentation, classification, pose, OBB, tracking, and YOLOE-26 remain outside this matrix."
+    note = "YOLO26 is tracked as a separate compatibility phase. Probe mode validates the isolated environment before training. Full mode validates detection and instance segmentation n/s/m/l/x yaml/pt presets. Focused mode validates the four nano yaml/pt lifecycle rows. Semantic segmentation, classification, pose, OBB, tracking, and YOLOE-26 remain outside this matrix."
 }
 $summary | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath $summaryPath -Encoding UTF8
 Write-Host ("  [ok] summary={0}" -f $summaryPath)

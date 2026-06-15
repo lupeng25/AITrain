@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -146,6 +147,28 @@ def bool_param(parameters: dict[str, Any], key: str, default: bool) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on"}
     return bool(value)
+
+
+def int_param(parameters: dict[str, Any], key: str, default: int, minimum: int = 0) -> int:
+    try:
+        return max(minimum, int(parameters.get(key, default)))
+    except (TypeError, ValueError):
+        return max(minimum, default)
+
+
+def official_log_options(parameters: dict[str, Any]) -> tuple[str, int, int]:
+    verbosity = str(parameters.get("officialLogVerbosity") or "summary").strip().lower()
+    if verbosity not in {"summary", "full", "quiet"}:
+        verbosity = "summary"
+    interval_seconds = int_param(parameters, "officialLogEventIntervalSeconds", 30, 1)
+    tail_lines = int_param(parameters, "officialLogTailLines", 200, 1)
+    return verbosity, interval_seconds, tail_lines
+
+
+def is_important_official_line(line: str) -> bool:
+    lower = line.lower()
+    important_tokens = ("traceback", "error", "exception", "failed", "warning", "fatal")
+    return any(token in lower for token in important_tokens)
 
 
 def resolve_preset(parameters: dict[str, Any]) -> dict[str, Any]:
@@ -394,6 +417,8 @@ def build_config(
     max_text_length = max(1, int(parameters.get("maxTextLength", 25)))
     eval_every_steps = max(1, int(parameters.get("evalEverySteps", 1000000)))
     use_gpu = bool_param(parameters, "useGpu", False)
+    print_batch_step = int_param(parameters, "officialPrintBatchStep", 20, 1)
+    save_epoch_step = min(epochs, int_param(parameters, "officialSaveEpochStep", 10, 1))
     save_model_dir = output_path / "official_model"
     save_inference_dir = output_path / "official_inference"
 
@@ -402,9 +427,9 @@ def build_config(
         {
             "use_gpu": use_gpu,
             "epoch_num": epochs,
-            "print_batch_step": 1,
+            "print_batch_step": print_batch_step,
             "save_model_dir": str(save_model_dir),
-            "save_epoch_step": 1,
+            "save_epoch_step": save_epoch_step,
             "eval_batch_step": [0, eval_every_steps],
             "pretrained_model": parameters.get("pretrainedModel") or None,
             "checkpoints": parameters.get("resumeCheckpoint") or None,
@@ -487,9 +512,10 @@ def read_existing_train_metrics(log_path: Path) -> dict[str, float]:
     metrics: dict[str, float] = {}
     if not log_path.exists():
         return metrics
-    for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
-        if "best metric" in line or "cur metric" in line:
-            parse_metrics_line(line, metrics)
+    with log_path.open("r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            if "best metric" in line or "cur metric" in line:
+                parse_metrics_line(line, metrics)
     return metrics
 
 
@@ -498,10 +524,12 @@ def run_process(
     command: list[str],
     cwd: Path,
     env: dict[str, str],
+    parameters: dict[str, Any],
     metrics: dict[str, float] | None = None,
     log_path: Path | None = None,
 ) -> tuple[int, list[str]]:
     emit(backend, "log", level="info", message=f"Running official PaddleOCR command: {' '.join(command)}")
+    verbosity, interval_seconds, tail_lines = official_log_options(parameters)
     process = subprocess.Popen(
         command,
         cwd=str(cwd),
@@ -513,19 +541,62 @@ def run_process(
         errors="replace",
     )
     assert process.stdout is not None
-    lines: list[str] = []
-    for line in process.stdout:
-        if line.strip():
-            stripped = line.rstrip()
-            lines.append(stripped)
-            emit(backend, "log", level="info", message=stripped)
-            if metrics is not None:
-                parse_official_metrics(backend, stripped, metrics)
-    exit_code = process.wait()
+    tail: deque[str] = deque(maxlen=tail_lines)
+    line_count = 0
+    last_event_at = time.monotonic()
+    handle = None
     if log_path is not None:
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return exit_code, lines
+        handle = log_path.open("w", encoding="utf-8")
+    try:
+        for line in process.stdout:
+            if not line.strip():
+                continue
+            stripped = line.rstrip()
+            line_count += 1
+            if handle is not None:
+                handle.write(stripped + "\n")
+                handle.flush()
+            tail.append(stripped)
+            if metrics is not None:
+                parse_official_metrics(backend, stripped, metrics)
+            now = time.monotonic()
+            if verbosity == "full" or is_important_official_line(stripped):
+                emit(backend, "log", level="info", message=stripped[:2000])
+                last_event_at = now
+            elif verbosity == "summary" and now - last_event_at >= interval_seconds:
+                emit(backend, "log", level="info", message=f"Official PaddleOCR command still running; lines={line_count}; latest={stripped[:500]}")
+                last_event_at = now
+    finally:
+        if handle is not None:
+            handle.close()
+    exit_code = process.wait()
+    if verbosity != "full":
+        emit(
+            backend,
+            "log",
+            level="info" if exit_code == 0 else "error",
+            message=f"Official PaddleOCR command finished with exitCode={exit_code}; logPath={log_path or ''}; tailLines={len(tail)}",
+        )
+    return exit_code, list(tail)
+
+
+def prune_intermediate_checkpoints(output_path: Path, parameters: dict[str, Any]) -> int:
+    retention = str(parameters.get("checkpointRetention") or "").strip().lower()
+    if retention not in {"latest_best_inference", "latest-best-inference"}:
+        return 0
+    model_dir = output_path / "official_model"
+    if not model_dir.exists():
+        return 0
+    removed = 0
+    for path in model_dir.glob("iter_epoch_*"):
+        try:
+            if path.is_file():
+                path.unlink()
+                removed += 1
+        except OSError:
+            continue
+    return removed
 
 
 def git_head(repo: Path | None) -> str:
@@ -725,7 +796,7 @@ def run(request: dict[str, Any]) -> int:
         env["PYTHONPATH"] = str(repo) + os.pathsep + env.get("PYTHONPATH", "")
         official_metrics: dict[str, float] = {}
         if not export_only:
-            train_exit, _ = run_process(backend, train_command, repo, env, official_metrics, train_log_path)
+            train_exit, _ = run_process(backend, train_command, repo, env, parameters, official_metrics, train_log_path)
             report["metrics"] = official_metrics
             report["trainExitCode"] = train_exit
             if train_exit != 0:
@@ -733,7 +804,7 @@ def run(request: dict[str, Any]) -> int:
                 report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
                 emit(backend, "artifact", name="paddleocr_official_rec_report.json", path=str(report_path), kind="report")
                 return fail(backend, "Official PaddleOCR training failed.", "official_train_failed", {"exitCode": train_exit, "logPath": str(train_log_path)})
-        export_exit, _ = run_process(backend, export_command, repo, env, log_path=export_log_path)
+        export_exit, _ = run_process(backend, export_command, repo, env, parameters, log_path=export_log_path)
         report["exportExitCode"] = export_exit
         if export_exit != 0:
             report["ok"] = False
@@ -742,11 +813,14 @@ def run(request: dict[str, Any]) -> int:
             return fail(backend, "Official PaddleOCR export failed.", "official_export_failed", {"exitCode": export_exit, "logPath": str(export_log_path)})
         report["checkpointPath"] = str(checkpoint_file_from_base(export_checkpoint_base))
         report["inferenceModelDir"] = str(output_path / "official_inference")
+        pruned_count = prune_intermediate_checkpoints(output_path, parameters)
+        report["checkpointRetention"] = str(parameters.get("checkpointRetention") or "")
+        report["prunedCheckpointCount"] = pruned_count
         emit(backend, "artifact", name="official_model", path=str(output_path / "official_model"), kind="checkpoint_dir")
         emit(backend, "artifact", name="official_inference", path=str(output_path / "official_inference"), kind="model_dir")
         if run_inference_after_export:
             prepare_predict_model_dir(output_path / "official_inference", predict_model_dir)
-            predict_exit, predict_lines = run_process(backend, predict_command, repo, env, log_path=predict_log_path)
+            predict_exit, predict_lines = run_process(backend, predict_command, repo, env, parameters, log_path=predict_log_path)
             prediction_path = output_path / "official_prediction.json"
             prediction_payload = {
                 "ok": predict_exit == 0,

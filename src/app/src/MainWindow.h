@@ -173,6 +173,7 @@ private:
     void refreshSampleReviewTable();
     QJsonArray filteredSampleReviewRows() const;
     void updateTrainingSelectionSummary();
+    void refreshModelExportFormatOptions();
     void refreshTrainingDefaults();
     void storeLanguagePreference(const QString& languageCode);
     void updateLanguageButtonState();

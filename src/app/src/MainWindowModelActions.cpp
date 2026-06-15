@@ -270,7 +270,106 @@ QJsonObject yoloModelExportArgsFromUi(const QWidget* root, const QString& format
     }
     return args;
 }
+
+bool jsonLooksYolo26(const QJsonObject& object)
+{
+    const QStringList keys = {
+        QStringLiteral("modelSeries"),
+        QStringLiteral("model"),
+        QStringLiteral("modelName"),
+        QStringLiteral("sourceCheckpoint"),
+        QStringLiteral("sourceOnnx")
+    };
+    for (const QString& key : keys) {
+        const QString value = object.value(key).toString().trimmed().toLower();
+        if (value.contains(QStringLiteral("yolo26"))) {
+            return true;
+        }
+    }
+    const QJsonObject trainingReport = object.value(QStringLiteral("trainingReport")).toObject();
+    if (!trainingReport.isEmpty() && jsonLooksYolo26(trainingReport)) {
+        return true;
+    }
+    const QJsonObject ncnn = object.value(QStringLiteral("ncnn")).toObject();
+    return !ncnn.isEmpty() && jsonLooksYolo26(ncnn);
+}
+
+QJsonObject readJsonObjectFile(const QString& path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return {};
+    }
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+    return document.isObject() ? document.object() : QJsonObject();
+}
+
+bool modelExportSourceLooksYolo26(const QString& path)
+{
+    const QString normalized = QDir::fromNativeSeparators(path.trimmed());
+    if (normalized.isEmpty()) {
+        return false;
+    }
+    if (normalized.toLower().contains(QStringLiteral("yolo26"))) {
+        return true;
+    }
+
+    const QFileInfo info(normalized);
+    const QString suffix = info.suffix().toLower();
+    if ((suffix == QStringLiteral("json") || suffix == QStringLiteral("aitrain"))
+        && jsonLooksYolo26(readJsonObjectFile(normalized))) {
+        return true;
+    }
+
+    const QString sidecarPath = info.dir().filePath(info.completeBaseName() + QStringLiteral(".aitrain-export.json"));
+    if (QFileInfo::exists(sidecarPath) && jsonLooksYolo26(readJsonObjectFile(sidecarPath))) {
+        return true;
+    }
+
+    const QString siblingReport = info.dir().filePath(QStringLiteral("ultralytics_training_report.json"));
+    if (QFileInfo::exists(siblingReport) && jsonLooksYolo26(readJsonObjectFile(siblingReport))) {
+        return true;
+    }
+
+    const QString parentReport = QFileInfo(info.dir().absolutePath()).dir().filePath(QStringLiteral("ultralytics_training_report.json"));
+    return QFileInfo::exists(parentReport) && jsonLooksYolo26(readJsonObjectFile(parentReport));
+}
 } // namespace
+
+void MainWindow::refreshModelExportFormatOptions()
+{
+    if (!conversionFormatCombo_) {
+        return;
+    }
+
+    const QString inputPath = conversionCheckpointEdit_ ? conversionCheckpointEdit_->text().trimmed() : QString();
+    const bool yolo26 = modelExportSourceLooksYolo26(inputPath);
+    const QString currentFormat = conversionFormatCombo_->currentData().toString();
+    QSignalBlocker blocker(conversionFormatCombo_);
+
+    const int ncnnIndex = conversionFormatCombo_->findData(QStringLiteral("ncnn"));
+    if (yolo26 && ncnnIndex >= 0) {
+        conversionFormatCombo_->removeItem(ncnnIndex);
+    } else if (!yolo26 && ncnnIndex < 0) {
+        const int insertAt = qMin(1, conversionFormatCombo_->count());
+        conversionFormatCombo_->insertItem(insertAt, exportComboLabel(QStringLiteral("ncnn")), QStringLiteral("ncnn"));
+    }
+
+    if (yolo26 && currentFormat == QStringLiteral("ncnn")) {
+        setComboCurrentData(conversionFormatCombo_, QStringLiteral("onnx"));
+        if (conversionOutputEdit_) {
+            const QString outputSuffix = QFileInfo(conversionOutputEdit_->text().trimmed()).suffix().toLower();
+            if (outputSuffix == QStringLiteral("param") || outputSuffix == QStringLiteral("bin")) {
+                conversionOutputEdit_->clear();
+            }
+        }
+    } else if (!currentFormat.isEmpty()) {
+        setComboCurrentData(conversionFormatCombo_, currentFormat);
+    }
+    conversionFormatCombo_->setToolTip(yolo26
+        ? uiText("YOLO26 不支持导出为 NCNN；请使用 ONNX 或 TensorRT。")
+        : QString());
+}
 
 void MainWindow::startModelExport()
 {
@@ -286,6 +385,14 @@ void MainWindow::startModelExport()
     const QString format = conversionFormatCombo_
         ? conversionFormatCombo_->currentData().toString()
         : QStringLiteral("onnx");
+    if (format == QStringLiteral("ncnn") && modelExportSourceLooksYolo26(checkpointPath)) {
+        QMessageBox::warning(
+            this,
+            uiText("模型导出"),
+            uiText("YOLO26 不支持导出为 NCNN；请使用 ONNX 或 TensorRT。"));
+        refreshModelExportFormatOptions();
+        return;
+    }
     QString outputPath = QDir::fromNativeSeparators(conversionOutputEdit_ ? conversionOutputEdit_->text().trimmed() : QString());
     if (outputPath.isEmpty()) {
         const QString outputDir = !currentProjectPath_.isEmpty()
@@ -473,6 +580,11 @@ void MainWindow::startTraining()
         return;
     }
     parameters.insert(QStringLiteral("trainingBackend"), backendForRequest);
+    const QString yolo26PythonExecutable = QDir::fromNativeSeparators(
+        preflight.value(QStringLiteral("yolo26PythonExecutable")).toString().trimmed());
+    if (!yolo26PythonExecutable.isEmpty()) {
+        parameters.insert(QStringLiteral("pythonExecutable"), yolo26PythonExecutable);
+    }
     if (backendForRequest.startsWith(QStringLiteral("ultralytics_yolo"))) {
         QJsonObject yoloArgs = yoloTrainArgsFromUi(this);
         if ((horizontalFlipCheck_ && horizontalFlipCheck_->isChecked()) && !yoloArgs.contains(QStringLiteral("fliplr"))) {

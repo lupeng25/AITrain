@@ -107,6 +107,9 @@ QWidget* MainWindow::buildConversionPage()
     conversionFormatCombo_->addItem(exportComboLabel(QStringLiteral("onnx")), QStringLiteral("onnx"));
     conversionFormatCombo_->addItem(exportComboLabel(QStringLiteral("ncnn")), QStringLiteral("ncnn"));
     conversionFormatCombo_->addItem(exportComboLabel(QStringLiteral("tensorrt")), QStringLiteral("tensorrt"));
+    connect(conversionCheckpointEdit_, &QLineEdit::textChanged, this, [this]() {
+        refreshModelExportFormatOptions();
+    });
 
     conversionOutputEdit_ = new QLineEdit;
     conversionOutputEdit_->setPlaceholderText(QStringLiteral("留空则输出到项目 models/exported；未打开项目时使用输入同目录"));

@@ -7,6 +7,7 @@ import argparse
 import json
 import math
 import os
+import re
 import shutil
 import sys
 import time
@@ -251,6 +252,7 @@ def normalize_end2end(
     product_format: str,
     model_name: str,
     model_family: str,
+    auto_end2end: bool | None = None,
 ) -> tuple[bool, bool]:
     parsed = parse_end2end("end2end", raw_value)
     explicitly_requested = parsed is not None
@@ -262,9 +264,84 @@ def normalize_end2end(
     if parsed is not None:
         return parsed, explicitly_requested
 
+    if auto_end2end is not None:
+        return auto_end2end, explicitly_requested
+
     if is_yolo26_model_name(model_name) and model_family == "yolo_detection":
         return True, explicitly_requested
     return False, explicitly_requested
+
+
+def model_end2end_default(model: Any | None) -> bool | None:
+    if model is None:
+        return None
+    candidates: list[Any] = [
+        model,
+        getattr(model, "model", None),
+        getattr(getattr(model, "model", None), "model", None),
+    ]
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        if hasattr(candidate, "end2end"):
+            try:
+                return parse_end2end("end2end", getattr(candidate, "end2end"))
+            except ValueError:
+                pass
+        for attr_name in ("yaml", "args", "overrides"):
+            container = getattr(candidate, attr_name, None)
+            if isinstance(container, dict) and "end2end" in container:
+                try:
+                    return parse_end2end("end2end", container.get("end2end"))
+                except ValueError:
+                    pass
+    return None
+
+
+def model_series_from_name(value: Any) -> str:
+    name = Path(str(value or "").replace("\\", "/")).name.lower()
+    match = re.search(r"(yolo26|yolo12|yolo11|yolov8|yolov5u?|pp-ocrv\d+)", name)
+    return match.group(1) if match else ""
+
+
+def task_from_model_family(model_family: str) -> str:
+    if model_family == "yolo_segmentation":
+        return "segmentation"
+    if model_family == "yolo_detection":
+        return "detection"
+    return ""
+
+
+def tensor_shape_from_value_info(value_info: Any) -> dict[str, Any]:
+    shape: list[Any] = []
+    tensor_type = getattr(getattr(value_info, "type", None), "tensor_type", None)
+    for dim in getattr(getattr(tensor_type, "shape", None), "dim", []):
+        if getattr(dim, "dim_value", 0):
+            shape.append(int(dim.dim_value))
+        elif getattr(dim, "dim_param", ""):
+            shape.append(str(dim.dim_param))
+        else:
+            shape.append(None)
+    return {"name": str(getattr(value_info, "name", "")), "shape": shape}
+
+
+def inspect_onnx_io_shapes(path: Path) -> dict[str, Any]:
+    if path.suffix.lower() != ".onnx" or not path.exists():
+        return {"available": False, "reason": "not_onnx"}
+    try:
+        import onnx  # type: ignore
+    except Exception as exc:
+        return {"available": False, "reason": "onnx_python_missing", "error": str(exc)}
+    try:
+        model = onnx.load(str(path))
+        graph = model.graph
+        return {
+            "available": True,
+            "inputs": [tensor_shape_from_value_info(value) for value in graph.input],
+            "outputs": [tensor_shape_from_value_info(value) for value in graph.output],
+        }
+    except Exception as exc:
+        return {"available": False, "reason": "onnx_shape_inspection_failed", "error": str(exc)}
 
 
 def export_report_path(export_path: Path) -> Path:
@@ -280,6 +357,7 @@ def build_export_plan(
     data_yaml: str | Path | None = None,
     model_name: str | Path | None = None,
     model_family: str | None = None,
+    auto_end2end: bool | None = None,
 ) -> dict[str, Any]:
     parameters = parameters or {}
     raw_args = parameters.get("ultralyticsExportArgs")
@@ -295,6 +373,8 @@ def build_export_plan(
     product_format = normalize_product_format(raw_args.get("format", default_format), default_format)
     model_hint = model_name_hint(parameters, model_name)
     family_hint = model_family_hint(parameters, model_family, model_hint)
+    if product_format == "ncnn" and is_yolo26_model_name(model_hint):
+        raise ValueError("YOLO26 NCNN export is not supported by AITrain; use ONNX or TensorRT for YOLO26 deployment.")
     dynamic = parse_bool("dynamic", raw_args.get("dynamic", False))
     half = parse_bool("half", raw_args.get("half", False))
     int8 = parse_bool("int8", raw_args.get("int8", False))
@@ -303,6 +383,7 @@ def build_export_plan(
         product_format=product_format,
         model_name=model_hint,
         model_family=family_hint,
+        auto_end2end=auto_end2end,
     )
 
     if product_format == "onnx" and int8:
@@ -329,7 +410,7 @@ def build_export_plan(
         "half": half,
         "int8": int8,
     }
-    if is_yolo26_model_name(model_hint) or explicit_end2end:
+    if is_yolo26_model_name(model_hint) or explicit_end2end or auto_end2end is True:
         kwargs["end2end"] = end2end
     if imgsz not in {None, ""}:
         normalized["imgsz"] = parse_int("imgsz", imgsz, 32)
@@ -353,6 +434,8 @@ def build_export_plan(
         "officialFormat": kwargs["format"],
         "modelName": model_hint,
         "modelFamily": family_hint,
+        "modelSeries": model_series_from_name(model_hint),
+        "task": task_from_model_family(family_hint),
         "normalized": normalized,
         "kwargs": kwargs,
     }
@@ -422,6 +505,7 @@ def run_official_export(request: dict[str, Any]) -> int:
             default_format=product_format,
             model_name=model_hint,
             model_family=model_family,
+            auto_end2end=model_end2end_default(model),
         )
     except ValueError as exc:
         return fail(str(exc), "ultralytics_export_args_invalid")
@@ -449,6 +533,8 @@ def run_official_export(request: dict[str, Any]) -> int:
         "format": plan["productFormat"],
         "officialFormat": plan["officialFormat"],
         "modelFamily": model_family,
+        "modelSeries": plan["modelSeries"] or model_series_from_name(model_hint),
+        "task": plan["task"],
         "sourceTrainingBackend": str(source_report.get("backend") or ""),
         "sourceTrainingReport": str(source_report_path) if source_report_path else "",
         "sourceCheckpoint": str(model_path),
@@ -456,6 +542,7 @@ def run_official_export(request: dict[str, Any]) -> int:
         "exportPath": str(final_path),
         "ultralyticsVersion": getattr(ultralytics, "__version__", "unknown"),
         "ultralyticsExportArgs": plan["normalized"],
+        "outputShapes": inspect_onnx_io_shapes(final_path),
         "exportedAt": now_iso(),
         "licenseNote": LICENSE_NOTE,
     }

@@ -24,7 +24,16 @@ if str(TRAINER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRAINER_ROOT))
 
 from trainer_protocol import configure_stdio, emit_failed, exception_details, unhandled_failure  # noqa: E402
-from yolo.ultralytics_exporter import LICENSE_NOTE, apply_cpu_device_environment, build_export_plan, onnx_kwargs_from_plan  # noqa: E402
+from yolo.ultralytics_exporter import (  # noqa: E402
+    LICENSE_NOTE,
+    apply_cpu_device_environment,
+    build_export_plan,
+    export_report_path,
+    inspect_onnx_io_shapes,
+    model_end2end_default,
+    model_series_from_name,
+    onnx_kwargs_from_plan,
+)
 
 
 BACKEND_ID = "ultralytics_yolo_detect"
@@ -880,20 +889,6 @@ def run(request: dict[str, Any]) -> int:
     run_name = str(train_kwargs.get("name") or f"aitrain-{int(time.time())}")
     export_onnx = as_bool(parameters.get("exportOnnx"), True)
     compact_events = as_bool(parameters.get("compactEvents"), False)
-    try:
-        export_plan = build_export_plan(
-            parameters,
-            default_format="onnx",
-            default_imgsz=image_size,
-            default_batch=1,
-            default_device=device,
-            data_yaml=data_yaml,
-            model_name=model_name,
-            model_family="yolo_segmentation" if BACKEND_ID == "ultralytics_yolo_segment" else "yolo_detection",
-        )
-    except ValueError as exc:
-        return fail(str(exc), "ultralytics_export_args_invalid")
-
     emit(
         "log",
         backend=BACKEND_ID,
@@ -917,6 +912,26 @@ def run(request: dict[str, Any]) -> int:
 
     try:
         model = YOLO(model_name)
+    except Exception as exc:
+        return fail("Ultralytics model load failed.", "ultralytics_model_load_failed", {"exception": str(exc)})
+
+    model_family = "yolo_segmentation" if BACKEND_ID == "ultralytics_yolo_segment" else "yolo_detection"
+    try:
+        export_plan = build_export_plan(
+            parameters,
+            default_format="onnx",
+            default_imgsz=image_size,
+            default_batch=1,
+            default_device=device,
+            data_yaml=data_yaml,
+            model_name=model_name,
+            model_family=model_family,
+            auto_end2end=model_end2end_default(model),
+        )
+    except ValueError as exc:
+        return fail(str(exc), "ultralytics_export_args_invalid")
+
+    try:
         callback_state = register_training_callbacks(model, epochs, device)
         train_result = model.train(**train_kwargs)
     except Exception as exc:
@@ -1008,23 +1023,54 @@ def run(request: dict[str, Any]) -> int:
             return fail("Ultralytics TensorRT export failed.", "tensorrt_export_failed", {"exception": str(exc)})
 
     report_path = output_path / "ultralytics_training_report.json"
+    onnx_sidecar_path = export_report_path(onnx_path) if onnx_path else None
+    output_shapes = inspect_onnx_io_shapes(onnx_path) if onnx_path else {"available": False, "reason": "onnx_missing"}
     report = {
         "ok": True,
         "backend": BACKEND_ID,
         "model": model_name,
+        "modelFamily": model_family,
+        "modelSeries": model_series_from_name(model_name),
+        "task": "segmentation" if BACKEND_ID == "ultralytics_yolo_segment" else "detection",
         "datasetPath": str(dataset_path),
         "dataYaml": str(data_yaml),
         "saveDir": str(save_dir),
         "checkpointPath": str(best_path if best_path.exists() else last_path),
         "onnxPath": str(onnx_path) if onnx_path else "",
+        "onnxSidecarPath": str(onnx_sidecar_path) if onnx_sidecar_path else "",
         "tensorrtPath": str(tensorrt_path) if tensorrt_path else "",
         "metrics": metrics,
         "ultralyticsTrainArgs": {key: value for key, value in train_kwargs.items() if key not in {"data", "project", "name"}},
         "ultralyticsExportArgs": export_plan["normalized"],
+        "outputShapes": output_shapes,
+        "ultralyticsVersion": getattr(ultralytics, "__version__", "unknown"),
         "licenseNote": LICENSE_NOTE,
     }
     write_report(report_path, report)
+    if onnx_path and onnx_sidecar_path:
+        sidecar = {
+            "ok": True,
+            "backend": BACKEND_ID,
+            "format": "onnx",
+            "officialFormat": "onnx",
+            "modelFamily": model_family,
+            "modelSeries": report["modelSeries"],
+            "task": report["task"],
+            "sourceTrainingBackend": BACKEND_ID,
+            "sourceTrainingReport": str(report_path),
+            "sourceCheckpoint": report["checkpointPath"],
+            "officialExportPath": str(onnx_path),
+            "exportPath": str(onnx_path),
+            "ultralyticsVersion": report["ultralyticsVersion"],
+            "ultralyticsExportArgs": export_plan["normalized"],
+            "outputShapes": output_shapes,
+            "exportedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "licenseNote": LICENSE_NOTE,
+        }
+        write_report(onnx_sidecar_path, sidecar)
     emit_training_artifacts(save_dir, best_path, last_path, onnx_path, tensorrt_path, report_path, emitted_artifacts)
+    if onnx_sidecar_path:
+        emit_artifact_once(emitted_artifacts, "model.aitrain-export.json", onnx_sidecar_path, "export_sidecar")
     emit(
         "progress",
         backend=BACKEND_ID,

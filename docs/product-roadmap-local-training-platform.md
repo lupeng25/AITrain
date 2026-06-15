@@ -31,6 +31,8 @@ AITrain Studio 已完成 Worker、SQLite、任务记录、artifact 浏览、YOLO
 
 Phase 40 的分类、姿态、OBB、异常检测等训练后端扩展后置；在现有闭环足够硬之前，不作为主线推进。
 
+2026-06-14/15 全量模型生命周期运行中的新增边界：共享 Ultralytics 8.3.171 环境下 YOLO26 检测/实例分割 20 行全部失败，原因是官方模型配置/权重不可用或包代码不兼容。YOLO26 随后在隔离 targeted matrix 中完成 `phase-yolo26-model-matrix-smoke.ps1 -Full -Epochs 100 -Device 0`，20/20 行通过训练、官方 ONNX、AITrain C++ ONNX 推理和 TensorRT 验证；YOLO26 NCNN 历史尝试 20/20 failed，当前产品不提供 YOLO26 NCNN 导出/转换，客户预检只放行 YOLO26 训练/ONNX/TensorRT 证据。
+
 ## 2. 架构约束
 
 - GUI 只做交互、调度和展示。

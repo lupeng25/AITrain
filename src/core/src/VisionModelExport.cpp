@@ -369,6 +369,35 @@ int yoloNcnnInputSize(const QString& sourceOnnxPath, const NcnnExportParamMetada
     return size > 0 ? size : 640;
 }
 
+QString yoloModelSeriesForOnnx(const QString& sourceOnnxPath)
+{
+    const QJsonObject exportSidecar = loadOnnxExportConfig(sourceOnnxPath);
+    QJsonObject report = exportSidecar.value(QStringLiteral("trainingReport")).toObject();
+    if (report.isEmpty()) {
+        report = loadUltralyticsTrainingReport(sourceOnnxPath);
+    }
+
+    QString modelSeries = exportSidecar.value(QStringLiteral("modelSeries")).toString().trimmed().toLower();
+    if (modelSeries.isEmpty()) {
+        modelSeries = report.value(QStringLiteral("modelSeries")).toString().trimmed().toLower();
+    }
+    if (modelSeries.isEmpty()) {
+        const QString modelName = report.value(QStringLiteral("model")).toString().trimmed().toLower();
+        if (modelName.contains(QStringLiteral("yolo26"))) {
+            modelSeries = QStringLiteral("yolo26");
+        }
+    }
+    if (modelSeries.isEmpty() && QFileInfo(sourceOnnxPath).absoluteFilePath().toLower().contains(QStringLiteral("yolo26"))) {
+        modelSeries = QStringLiteral("yolo26");
+    }
+    return modelSeries;
+}
+
+bool isYolo26OnnxSource(const QString& sourceOnnxPath)
+{
+    return yoloModelSeriesForOnnx(sourceOnnxPath) == QStringLiteral("yolo26");
+}
+
 bool runProcessWithCancellation(
     QProcess* process,
     const CancellationCallback& shouldCancel,
@@ -673,7 +702,7 @@ QJsonObject yoloOnnxExportConfig(const QString& sourceOnnxPath, const QString& e
     const bool segmentation = configuredFamily == QStringLiteral("yolo_segmentation")
         || configuredBackend == QStringLiteral("ultralytics_yolo_segment")
         || reportBackend == QStringLiteral("ultralytics_yolo_segment");
-    return QJsonObject{
+    QJsonObject config{
         {QStringLiteral("format"), format},
         {QStringLiteral("backend"), segmentation ? QStringLiteral("ultralytics_yolo_segment") : QStringLiteral("ultralytics_yolo_detect")},
         {QStringLiteral("modelFamily"), segmentation ? QStringLiteral("yolo_segmentation") : QStringLiteral("yolo_detection")},
@@ -689,6 +718,41 @@ QJsonObject yoloOnnxExportConfig(const QString& sourceOnnxPath, const QString& e
             {QStringLiteral("coordinates"), QStringLiteral("letterbox_to_original_image")}
         }}
     };
+    QJsonObject exportArgs = exportSidecar.value(QStringLiteral("ultralyticsExportArgs")).toObject();
+    if (exportArgs.isEmpty()) {
+        exportArgs = report.value(QStringLiteral("ultralyticsExportArgs")).toObject();
+    }
+    if (!exportArgs.isEmpty()) {
+        config.insert(QStringLiteral("ultralyticsExportArgs"), exportArgs);
+    }
+
+    const QString modelSeries = yoloModelSeriesForOnnx(sourceOnnxPath);
+    if (!modelSeries.isEmpty()) {
+        config.insert(QStringLiteral("modelSeries"), modelSeries);
+    }
+
+    QString task = exportSidecar.value(QStringLiteral("task")).toString();
+    if (task.isEmpty()) {
+        task = report.value(QStringLiteral("task")).toString();
+    }
+    if (task.isEmpty()) {
+        task = segmentation ? QStringLiteral("segmentation") : QStringLiteral("detection");
+    }
+    config.insert(QStringLiteral("task"), task);
+
+    QJsonObject outputShapes = exportSidecar.value(QStringLiteral("outputShapes")).toObject();
+    if (outputShapes.isEmpty()) {
+        outputShapes = report.value(QStringLiteral("outputShapes")).toObject();
+    }
+    if (!outputShapes.isEmpty()) {
+        config.insert(QStringLiteral("outputShapes"), outputShapes);
+    }
+
+    const QString sourceTrainingReport = exportSidecar.value(QStringLiteral("sourceTrainingReport")).toString();
+    if (!sourceTrainingReport.isEmpty()) {
+        config.insert(QStringLiteral("sourceTrainingReport"), sourceTrainingReport);
+    }
+    return config;
 }
 
 DetectionExportResult exportDetectionCheckpoint(
@@ -783,6 +847,10 @@ DetectionExportResult exportDetectionCheckpoint(
         }
 
         if (ncnnFormat) {
+            if (isYolo26OnnxSource(effectiveCheckpointPath)) {
+                result.error = QStringLiteral("YOLO26 NCNN export is not supported by AITrain; use ONNX or TensorRT for YOLO26 deployment.");
+                return result;
+            }
             const QString binPath = ncnnBinPathForParam(finalOutputPath);
             QString converterPath;
             const QString modelFamily = inferOnnxModelFamily(effectiveCheckpointPath);

@@ -237,7 +237,12 @@ void MainWindow::ensureProjectSubdirs(const QString& rootPath)
 void MainWindow::appendLog(const QString& text)
 {
     if (logEdit_) {
-        logEdit_->append(QStringLiteral("[%1] %2").arg(QTime::currentTime().toString(QStringLiteral("HH:mm:ss")), text));
+        QString line = text;
+        constexpr int maxLogLineChars = 8000;
+        if (line.size() > maxLogLineChars) {
+            line = line.left(maxLogLineChars) + QStringLiteral(" ... [log_truncated]");
+        }
+        logEdit_->append(QStringLiteral("[%1] %2").arg(QTime::currentTime().toString(QStringLiteral("HH:mm:ss")), line));
     }
 }
 

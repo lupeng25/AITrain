@@ -28,6 +28,21 @@ using namespace worker_support;
 namespace wp = aitrain::worker_protocol;
 namespace wr = aitrain::worker_requests;
 
+namespace {
+constexpr int kMaxPipelineTrainerBufferBytes = 4 * 1024 * 1024;
+constexpr int kMaxPipelineTrainerLineBytes = 256 * 1024;
+
+QByteArray boundedPipelineTrainerLine(const QByteArray& line)
+{
+    if (line.size() <= kMaxPipelineTrainerLineBytes) {
+        return line;
+    }
+    QByteArray bounded = line.left(kMaxPipelineTrainerLineBytes);
+    bounded.append(" ... [log_truncated: single Python trainer line exceeded limit]");
+    return bounded;
+}
+} // namespace
+
 void WorkerSession::runLocalPipeline(const QJsonObject& payload)
 {
     const wr::LocalPipelineRequest request = wr::parseLocalPipelineRequest(payload);
@@ -387,13 +402,13 @@ WorkerSession::PipelineTrainResult WorkerSession::runPipelineTrainingStep(
     interceptPythonTrainerMessages_ = false;
 
     if (!stdoutBuffer.trimmed().isEmpty()) {
-        forwardPipelinePythonTrainerLine(stdoutBuffer.trimmed(), &result, &terminalMessageSeen);
+        forwardPipelinePythonTrainerLine(boundedPipelineTrainerLine(stdoutBuffer.trimmed()), &result, &terminalMessageSeen);
     }
     if (!stderrBuffer.trimmed().isEmpty()) {
         QJsonObject logObject;
         logObject.insert(QStringLiteral("taskId"), request_.taskId);
         logObject.insert(QStringLiteral("backend"), backend);
-        logObject.insert(QStringLiteral("message"), QString::fromUtf8(stderrBuffer.trimmed()));
+        logObject.insert(QStringLiteral("message"), QString::fromUtf8(boundedPipelineTrainerLine(stderrBuffer.trimmed())));
         result.logs.append(logObject);
         send(wp::event::log(), logObject);
     }
@@ -413,9 +428,18 @@ WorkerSession::PipelineTrainResult WorkerSession::runPipelineTrainingStep(
 void WorkerSession::drainPipelinePythonTrainerOutput(QByteArray* buffer, PipelineTrainResult* result, bool* terminalMessageSeen)
 {
     buffer->append(pythonTrainerProcess_.readAllStandardOutput());
+    if (buffer->size() > kMaxPipelineTrainerBufferBytes) {
+        *buffer = buffer->right(kMaxPipelineTrainerLineBytes);
+        const QByteArray message("Pipeline Python trainer stdout buffer exceeded limit before a line delimiter; keeping bounded tail only. [log_truncated]");
+        const QJsonObject payload = sanitizedTrainerLogPayload(message, request_.taskId, requestedTrainingBackend(request_));
+        if (!payload.isEmpty()) {
+            result->logs.append(payload);
+            send(wp::event::log(), payload);
+        }
+    }
     int delimiter = nextPythonOutputDelimiter(*buffer);
     while (delimiter >= 0) {
-        const QByteArray line = buffer->left(delimiter).trimmed();
+        const QByteArray line = boundedPipelineTrainerLine(buffer->left(delimiter).trimmed());
         int removeCount = delimiter + 1;
         while (removeCount < buffer->size()
             && (buffer->at(removeCount) == '\n' || buffer->at(removeCount) == '\r')) {
@@ -432,9 +456,18 @@ void WorkerSession::drainPipelinePythonTrainerOutput(QByteArray* buffer, Pipelin
 void WorkerSession::drainPipelinePythonTrainerErrors(QByteArray* buffer, PipelineTrainResult* result)
 {
     buffer->append(pythonTrainerProcess_.readAllStandardError());
+    if (buffer->size() > kMaxPipelineTrainerBufferBytes) {
+        *buffer = buffer->right(kMaxPipelineTrainerLineBytes);
+        const QByteArray message("Pipeline Python trainer stderr buffer exceeded limit before a line delimiter; keeping bounded tail only. [log_truncated]");
+        const QJsonObject payload = sanitizedTrainerLogPayload(message, request_.taskId, requestedTrainingBackend(request_));
+        if (!payload.isEmpty()) {
+            result->logs.append(payload);
+            send(wp::event::log(), payload);
+        }
+    }
     int delimiter = nextPythonOutputDelimiter(*buffer);
     while (delimiter >= 0) {
-        const QByteArray line = buffer->left(delimiter).trimmed();
+        const QByteArray line = boundedPipelineTrainerLine(buffer->left(delimiter).trimmed());
         int removeCount = delimiter + 1;
         while (removeCount < buffer->size()
             && (buffer->at(removeCount) == '\n' || buffer->at(removeCount) == '\r')) {

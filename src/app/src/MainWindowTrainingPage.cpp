@@ -30,6 +30,7 @@
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QTableWidget>
+#include <QTextDocument>
 #include <QTextEdit>
 #include <QToolButton>
 #include <QUrl>
@@ -466,6 +467,7 @@ QWidget* MainWindow::buildTrainingPage()
     logEdit_->setObjectName(QStringLiteral("LogView"));
     logEdit_->setReadOnly(true);
     logEdit_->setLineWrapMode(QTextEdit::WidgetWidth);
+    logEdit_->document()->setMaximumBlockCount(2000);
     logEdit_->setMinimumWidth(0);
     logEdit_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
     logPanel->bodyLayout()->addWidget(logEdit_);

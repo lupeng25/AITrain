@@ -177,7 +177,10 @@ package-root TensorRT rerun：
 | 现象 | 优先检查 |
 |---|---|
 | 只能看到注册窗口 | 机器码和注册码是否匹配；公钥是否正确编译进主程序。 |
-| YOLO 后端启动失败 | Python 环境、Ultralytics、Torch、ONNX、ONNX Runtime。 |
+| YOLO 后端启动失败 | Python 环境、Ultralytics、Torch、ONNX、ONNX Runtime。若使用 `device=0`，确认该 Python 安装的是 CUDA 版 PyTorch；CPU-only 环境只能用 `device=cpu`。 |
+| YOLO12 分割 `.pt` 训练立即失败 | 当前记录的 Ultralytics 8.3.171 环境无法解析 `yolo12n-seg.pt`，按 `blocked_missing_official_weight` 处理；改用 YOLO12 `-seg.yaml` 架构训练，或等待上游官方 `yolo12*-seg.pt` 权重可解析。 |
+| YOLO26 共享环境失败，targeted 已过 | 共享 Ultralytics 8.3.171 环境没有可用的 YOLO26 configs/assets，且 nano `.pt` 权重与包代码不兼容；按 `blocked_model_unavailable` / `blocked_ultralytics_incompatible` 处理。隔离 targeted full 已在 2026-06-15 生成 20/20 训练、官方 ONNX、AITrain C++ ONNX 推理和 TensorRT 通过证据；YOLO26 NCNN 历史尝试 20/20 failed，当前产品不提供 YOLO26 NCNN 导出/转换。客户预检只能按 targeted summary 放行 YOLO26 训练/ONNX/TensorRT。 |
+| 浏览器进度页 failed 数和历史失败数不一致 | 进度页按当前 `runId` 统计主 failed/planned/passed，并把旧 `row_summary.json` 计入 `historicalRowCount` / `historicalByStatus`。排查时先确认页面顶部 `runId`，不要把历史 failed 当成当前 run 失败。 |
 | OCR 后端启动失败 | PaddlePaddle、PaddleOCR、源码 checkout、Python 环境隔离。 |
 | TensorRT 为 `hardware-blocked` | GPU compute capability、驱动、CUDA、TensorRT runtime。旧 GPU 不应强行通过。 |
 | NCNN 导出失败 | `AITRAIN_NCNN_ONNX2NCNN` 或 `AITRAIN_NCNN_ROOT` 是否指向有效工具。 |

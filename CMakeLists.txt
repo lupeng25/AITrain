@@ -609,6 +609,9 @@ install(FILES
     tools/ui-workbench-walkthrough.ps1
     tools/phase45-yolo-model-matrix-smoke.ps1
     tools/phase-p1-yolo-full-matrix-smoke.ps1
+    tools/phase-yolo26-model-matrix-smoke.ps1
+    tools/full-model-lifecycle-matrix.ps1
+    tools/full-model-lifecycle-progress-server.py
     tools/phase-ncnn-runtime-smoke.ps1
     tools/local-rc-closeout.ps1
     tools/release-freeze-handoff.ps1

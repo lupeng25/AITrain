@@ -38,6 +38,8 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 
 截至 2026-06-06，官方 YOLO 检测/分割训练与 ONNX 导出、PaddleOCR Det/Rec/System 官方工具链、PP-OCRv4/v5/v6 official adapter preset、YOLO C++ ONNX Runtime 推理、RTX 4090D TensorRT 验收证据、本地插件 marketplace、环境 profile、数据集质量/快照、数据集格式转换 GUI、评估、benchmark、模型库、交付报告、样本复核、部署验证、诊断包和交付验收 GUI 闭环都已落地到当前本地代码。2026-06-05 RTX 4090D follow-up 刷新记录 local baseline/package acceptance、GUI walkthrough、历史 Phase 47 Det ONNX+CTest、CPU training smoke、Phase 45 YOLO matrix、TensorRT 和 public OCR GPU workflow 均有通过证据；准确阶段边界仍以 `docs/harness/current-status.md` 为准。
 
+2026-06-14/15 全量模型生命周期验证暴露了当前软件影响项：Ultralytics 8.3.171 无法解析 YOLO12 分割 `.pt` 权重 `yolo12n-seg.pt`，这类行应记录为上游权重 blocker；共享 Ultralytics 8.3.171 环境下 YOLO26 20 行全部失败，原因是 `.yaml` 配置不存在、官方权重不可解析或 nano `.pt` 权重与包代码不兼容；进度页面可能把历史 `row_summary.json` 失败计入当前 failed 数；GPU YOLO 训练必须使用 CUDA PyTorch 环境。随后隔离 YOLO26 targeted matrix 在 2026-06-15 取得 `-Full -Epochs 100` 20/20 训练、官方 ONNX、AITrain C++ ONNX 推理和 TensorRT 通过证据。YOLO26 NCNN 历史尝试 20/20 failed，当前产品移除 YOLO26 NCNN 选项并拒绝 `format=ncnn`。详细边界见 `docs/harness/current-status.md` 和 `docs/yolo-model-support-matrix.md`。
+
 已完成：
 
 - `AITrainStudio.exe` Qt GUI。

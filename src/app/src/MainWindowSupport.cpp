@@ -682,6 +682,94 @@ bool yoloModelPresetMatchesBackend(const QString& modelPreset, const QString& ba
     return true;
 }
 
+struct Yolo26TargetedMatrixStatus {
+    bool trainingAccepted = false;
+    bool ncnnUnsupported = true;
+    QString summaryPath;
+    QString pythonExecutable;
+};
+
+bool deploymentStatusIsExplicit(const QString& status)
+{
+    return status == QStringLiteral("passed")
+        || status == QStringLiteral("blocked")
+        || status == QStringLiteral("failed")
+        || status == QStringLiteral("hardware-blocked");
+}
+
+Yolo26TargetedMatrixStatus yolo26TargetedMatrixStatus()
+{
+    Yolo26TargetedMatrixStatus accepted;
+    QStringList candidates;
+    const QString envPath = QString::fromLocal8Bit(qgetenv("AITRAIN_YOLO26_MATRIX_SUMMARY")).trimmed();
+    if (!envPath.isEmpty()) {
+        candidates.append(envPath);
+    }
+    candidates.append(QDir(QDir::currentPath()).filePath(QStringLiteral(".deps/phase-yolo26-model-matrix/yolo26_model_matrix_summary.json")));
+    candidates.append(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../.deps/phase-yolo26-model-matrix/yolo26_model_matrix_summary.json")));
+
+    for (const QString& candidate : candidates) {
+        const QJsonObject summary = readJsonObjectFile(QDir::cleanPath(candidate));
+        if (summary.isEmpty()
+            || !summary.value(QStringLiteral("ok")).toBool()
+            || summary.value(QStringLiteral("status")).toString() != QStringLiteral("passed")
+            || summary.value(QStringLiteral("mode")).toString() != QStringLiteral("full")) {
+            continue;
+        }
+        const QJsonArray results = summary.value(QStringLiteral("results")).toArray();
+        int requiredCount = 0;
+        bool allRequiredPassed = true;
+        bool allOnnxPassed = true;
+        bool allTensorRtExplicit = true;
+        for (const QJsonValue& value : results) {
+            const QJsonObject result = value.toObject();
+            if (!result.value(QStringLiteral("required")).toBool()) {
+                continue;
+            }
+            ++requiredCount;
+            if (result.value(QStringLiteral("status")).toString() != QStringLiteral("passed")) {
+                allRequiredPassed = false;
+                break;
+            }
+            const QJsonObject deployments = result.value(QStringLiteral("deployments")).toObject();
+            const QString onnxStatus = deployments.value(QStringLiteral("onnx")).toObject().value(QStringLiteral("status")).toString();
+            if (onnxStatus != QStringLiteral("passed")) {
+                allOnnxPassed = false;
+                break;
+            }
+
+            const QString tensorrtStatus = deployments.value(QStringLiteral("tensorrt")).toObject().value(QStringLiteral("status")).toString();
+            if (!deploymentStatusIsExplicit(tensorrtStatus)) {
+                allTensorRtExplicit = false;
+                break;
+            }
+            if (!allRequiredPassed) {
+                break;
+            }
+        }
+        QString pythonExecutable = QDir::fromNativeSeparators(summary.value(QStringLiteral("yolo26Python")).toString().trimmed());
+        if (!pythonExecutable.isEmpty() && QFileInfo(pythonExecutable).isRelative()) {
+            pythonExecutable = QFileInfo(candidate).absoluteDir().filePath(pythonExecutable);
+        }
+        pythonExecutable = QDir::cleanPath(pythonExecutable);
+        if (pythonExecutable.isEmpty() || !QFileInfo::exists(pythonExecutable)) {
+            continue;
+        }
+
+        if (requiredCount >= 20
+            && allRequiredPassed
+            && allOnnxPassed
+            && allTensorRtExplicit) {
+            accepted.trainingAccepted = true;
+            accepted.ncnnUnsupported = true;
+            accepted.summaryPath = QDir::cleanPath(candidate);
+            accepted.pythonExecutable = pythonExecutable;
+            return accepted;
+        }
+    }
+    return accepted;
+}
+
 QString defaultModelForBackend(const QString& backend)
 {
     if (backend == QStringLiteral("ultralytics_yolo_segment")) {
@@ -819,6 +907,27 @@ QJsonObject trainingPreflightReport(
         blockers.append(QStringLiteral("yolo_model_backend_mismatch"));
         nextActions.append(QStringLiteral("select_matching_yolo_model_preset"));
     }
+    const QString normalizedBackend = backend.trimmed().toLower();
+    const QString normalizedModel = modelPreset.trimmed().toLower();
+    const Yolo26TargetedMatrixStatus yolo26Status = yolo26TargetedMatrixStatus();
+    const bool yolo26Model = normalizedBackend.startsWith(QStringLiteral("ultralytics_yolo"))
+        && normalizedModel.startsWith(QStringLiteral("yolo26"));
+    if (yolo26Model && !yolo26Status.trainingAccepted) {
+        blockers.append(QStringLiteral("yolo26_requires_targeted_compatibility_validation"));
+        nextActions.append(QStringLiteral("run_yolo26_targeted_matrix_after_full_lifecycle"));
+    }
+    if (yolo26Model
+        && yolo26Status.trainingAccepted
+        && yolo26Status.ncnnUnsupported) {
+        warnings.append(QStringLiteral("yolo26_ncnn_export_unsupported"));
+        nextActions.append(QStringLiteral("use_yolo26_onnx_or_tensorrt"));
+    }
+    if (normalizedBackend == QStringLiteral("ultralytics_yolo_segment")
+        && normalizedModel.startsWith(QStringLiteral("yolo12"))
+        && normalizedModel.endsWith(QStringLiteral("-seg.pt"))) {
+        blockers.append(QStringLiteral("yolo12_seg_pt_missing_official_weight"));
+        nextActions.append(QStringLiteral("use_yolo12_seg_yaml_or_wait_for_official_weight"));
+    }
     if ((backend == QStringLiteral("paddleocr_det_official")
             || backend == QStringLiteral("paddleocr_rec_official")
             || backend == QStringLiteral("paddleocr_ppocrv4_rec"))
@@ -864,6 +973,10 @@ QJsonObject trainingPreflightReport(
     preflight.insert(QStringLiteral("expectedTaskType"), expectedTask);
     preflight.insert(QStringLiteral("trainingBackend"), backend);
     preflight.insert(QStringLiteral("modelPreset"), modelPreset);
+    if (yolo26Model && yolo26Status.trainingAccepted) {
+        preflight.insert(QStringLiteral("yolo26MatrixSummary"), yolo26Status.summaryPath);
+        preflight.insert(QStringLiteral("yolo26PythonExecutable"), yolo26Status.pythonExecutable);
+    }
     preflight.insert(QStringLiteral("epochs"), epochs);
     preflight.insert(QStringLiteral("batchSize"), batchSize);
     preflight.insert(QStringLiteral("imageSize"), imageSize);

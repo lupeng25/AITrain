@@ -14,18 +14,24 @@ P1 expands the GUI and acceptance matrix from nano-only entries to full YOLOv8 /
 | YOLOv8 | Detection | `.yaml`, `.pt` | `n`, `s`, `m`, `l`, `x` | `ultralytics_yolo_detect` | P1 full matrix required |
 | YOLO11 | Detection | `.yaml`, `.pt` | `n`, `s`, `m`, `l`, `x` | `ultralytics_yolo_detect` | P1 full matrix required |
 | YOLO12 | Detection | `.yaml`, `.pt` | `n`, `s`, `m`, `l`, `x` | `ultralytics_yolo_detect` | P1 full matrix required |
-| YOLO26 | Detection | `.yaml`, `.pt` | `n`, `s`, `m`, `l`, `x` | `ultralytics_yolo_detect` | YOLO26 compatibility matrix required |
+| YOLO26 | Detection | `.yaml`, `.pt` | `n`, `s`, `m`, `l`, `x` | `ultralytics_yolo_detect` | Separate targeted matrix passed training/ONNX/TensorRT; NCNN is not a supported target |
 | YOLOv8 | Segmentation | `.yaml`, `.pt` | `n`, `s`, `m`, `l`, `x` | `ultralytics_yolo_segment` | P1 full matrix required |
 | YOLO11 | Segmentation | `.yaml`, `.pt` | `n`, `s`, `m`, `l`, `x` | `ultralytics_yolo_segment` | P1 full matrix required |
-| YOLO12 | Segmentation | `.yaml`, `.pt` | `n`, `s`, `m`, `l`, `x` | `ultralytics_yolo_segment` | P1 full matrix required |
-| YOLO26 | Segmentation | `.yaml`, `.pt` | `n`, `s`, `m`, `l`, `x` | `ultralytics_yolo_segment` | YOLO26 compatibility matrix required |
+| YOLO12 | Segmentation | `.yaml`; `.pt` currently blocked unless official `yolo12*-seg.pt` resolves | `n`, `s`, `m`, `l`, `x` | `ultralytics_yolo_segment` | P1 `.yaml` matrix required; `.pt` rows require upstream official weights |
+| YOLO26 | Segmentation | `.yaml`, `.pt` | `n`, `s`, `m`, `l`, `x` | `ultralytics_yolo_segment` | Separate targeted matrix passed training/ONNX/TensorRT; NCNN is not a supported target |
 | YOLOv8 P2/P6 | Detection architecture only | `.yaml` | `n`, `s`, `m`, `l`, `x` | `ultralytics_yolo_detect` | P1 full matrix required |
 
 The GUI remains editable, so operators may type an official model name that is not listed here. Such runs are accepted only when the installed Ultralytics package resolves the model and the backend/task pairing is valid. They are not counted as P1 matrix evidence unless added to the matrix script.
 
 YOLOv5 support follows the Ultralytics 8 YOLOv5u detection route. The P1 matrix uses `yolov5n.yaml` / `yolov5s.yaml` / `yolov5m.yaml` / `yolov5l.yaml` / `yolov5x.yaml` architecture entries and `yolov5nu.pt` / `yolov5su.pt` / `yolov5mu.pt` / `yolov5lu.pt` / `yolov5xu.pt` pretrained entries. Original `ultralytics/yolov5` repository weights are not an AITrain compatibility promise.
 
-YOLO26 support follows the Ultralytics YOLO26 detection and instance-segmentation routes. The compatibility matrix uses `yolo26n/s/m/l/x.yaml`, `yolo26n/s/m/l/x.pt`, `yolo26n/s/m/l/x-seg.yaml`, and `yolo26n/s/m/l/x-seg.pt`. It does not include semantic segmentation, classification, pose, OBB, tracking, YOLOE-26, or other YOLO26 task variants.
+2026-06-14 full lifecycle finding: in the current validation environment with Ultralytics 8.3.171, `yolo12n-seg.pt` failed before training because the official package could not resolve `yolo12n-seg.pt`. The package asset stems expose YOLO12 detection weights but not `yolo12*-seg` weights. Treat YOLO12 segmentation `.pt` rows as `blocked_missing_official_weight` until official Ultralytics resolves those weights. YOLO12 segmentation `.yaml` architecture rows and YOLO12 detection `.pt` rows are separate routes and may still pass.
+
+YOLO26 support is intended to follow official Ultralytics YOLO26 detection and instance-segmentation routes when the installed package supports them. The compatibility matrix uses `yolo26n/s/m/l/x.yaml`, `yolo26n/s/m/l/x.pt`, `yolo26n/s/m/l/x-seg.yaml`, and `yolo26n/s/m/l/x-seg.pt`. It does not include semantic segmentation, classification, pose, OBB, tracking, YOLOE-26, or other YOLO26 task variants.
+
+2026-06-15 full lifecycle finding: all 20 YOLO26 rows failed in the shared validation environment with Ultralytics 8.3.171. `GITHUB_ASSETS_STEMS` contains no `yolo26n/s/m/l/x` or `yolo26*-seg` stems. The `.yaml` rows fail because files such as `yolo26n.yaml` and `yolo26x-seg.yaml` do not exist; most `.pt` rows fail because weights such as `yolo26x.pt` or `yolo26x-seg.pt` cannot be resolved; nano `.pt` rows expose package/code incompatibility (`SPPF.__init__()` argument mismatch and missing `Segment26`).
+
+The isolated YOLO26 targeted environment then passed `tools\phase-yolo26-model-matrix-smoke.ps1 -Full -Epochs 100 -Device 0` on 2026-06-15 with 20/20 required rows passing training, official ONNX export, AITrain C++ ONNX inference, and TensorRT deployment validation. The historical YOLO26 NCNN attempt failed 20/20, so AITrain no longer offers or runs YOLO26 NCNN export/conversion; use ONNX or TensorRT for YOLO26 deployment.
 
 ## Export Parameters
 
@@ -47,11 +53,12 @@ YOLO official export arguments are recorded under `ultralyticsExportArgs`:
 - Training still creates an ONNX artifact by default.
 - `dynamic` and `half` are passed to official ONNX export.
 - `int8=true` is treated as TensorRT engine export and requires calibration data from the normalized YOLO `data.yaml`.
-- `end2end` accepts `auto`, `true`, or `false`; normalized reports store the final boolean value. `auto` resolves to `true` for YOLO26 detection, `false` for YOLO26 segmentation, and `false` for non-YOLO26 models.
+- AITrain metadata accepts `end2end` as `auto`, `true`, or `false`; normalized reports store the final boolean value. `auto` now uses the loaded Ultralytics model config when it exposes an `end2end` default, then falls back to the historical rule of YOLO26 detection=true and other models=false.
+- Pass `end2end` to official Ultralytics export only when the installed package/model exposes support or the user explicitly requests it. The 2026-06-14 full lifecycle run showed Ultralytics 8.3.171 rejects unsupported `end2end` arguments on generic ONNX export, so unsupported combinations must be recorded as failed or blocked.
 - Model export requests may include optional `data` for `.pt -> TensorRT INT8` calibration.
 - Existing `.onnx` inputs continue through AITrain C++ copy / NCNN conversion and TensorRT export/deployment validation paths.
 - `.pt -> onnx` and `.pt -> tensorrt` run official Ultralytics Python export through Worker.
-- `.pt -> ncnn` first runs a static FP32 traditional official ONNX export, then uses the existing `onnx2ncnn` path.
+- `.pt -> ncnn` first runs a static FP32 traditional official ONNX export, then uses the existing `onnx2ncnn` path. This excludes YOLO26, where NCNN export/conversion is rejected as unsupported.
 - NCNN rejects `dynamic`, `half`, `int8`, and `end2end=true`; ONNX rejects `int8`.
 
 ## Acceptance Command
@@ -62,7 +69,7 @@ Run the full P1 matrix:
 .\tools\phase-p1-yolo-full-matrix-smoke.ps1
 ```
 
-The script writes `p1_yolo_full_matrix_summary.json` under `.deps\phase-p1-yolo-full-matrix` by default. A pass requires all 80 rows to produce:
+The script writes `p1_yolo_full_matrix_summary.json` under `.deps\phase-p1-yolo-full-matrix` by default. In environments where every listed official asset resolves, a pass requires all required rows to produce the artifacts below. If an official upstream asset cannot be resolved, the row must be reported as `blocked_missing_official_weight` or an equivalent explicit blocker and must not be counted as passed; in the recorded Ultralytics 8.3.171 environment this applies to YOLO12 segmentation `.pt` rows.
 
 - `best.pt`
 - `best.onnx` or the official ONNX export path
@@ -80,17 +87,21 @@ Run the separate YOLO26 compatibility matrix:
 
 ```powershell
 .\tools\phase-yolo26-model-matrix-smoke.ps1
-.\tools\phase-yolo26-model-matrix-smoke.ps1 -Focused
+.\tools\phase-yolo26-model-matrix-smoke.ps1 -PrepareEnvironment -ProbeOnly -Device 0
+.\tools\phase-yolo26-model-matrix-smoke.ps1 -Focused -Epochs 1 -Device 0
+.\tools\phase-yolo26-model-matrix-smoke.ps1 -Full -Epochs 100 -Device 0
 ```
 
-The full YOLO26 script writes `yolo26_model_matrix_summary.json` under `.deps\phase-yolo26-model-matrix` by default. Full mode has 20 required rows covering detection and instance segmentation `n/s/m/l/x` `.yaml` and `.pt` presets. Focused mode covers nano detection/segmentation `.yaml` and `.pt`, plus detection `end2end=false` and segmentation `end2end=true` override rows. Each passed row must produce `best.pt`, ONNX, `ultralytics_training_report.json`, AITrain inference JSON, and overlay output.
+The YOLO26 script writes `yolo26_model_matrix_summary.json` and `yolo26_environment_self_check.json` under `.deps\phase-yolo26-model-matrix` by default. Probe mode validates the isolated Python environment, CUDA Torch when `-Device 0` is requested, `cfg/models/26`, and nano `.yaml` / `.pt` model loading before any training. Full mode has 20 rows covering detection and instance segmentation `n/s/m/l/x` `.yaml` and `.pt` presets. Focused mode covers the four nano lifecycle rows: `yolo26n.yaml`, `yolo26n.pt`, `yolo26n-seg.yaml`, and `yolo26n-seg.pt`. In an environment where official YOLO26 assets resolve, each passed row must produce `best.pt`, ONNX, `ultralytics_training_report.json`, AITrain inference JSON, overlay output, and deployment statuses for ONNX and TensorRT. `ncnn` is not an accepted YOLO26 deployment target.
 
 ## Boundaries
 
 - This matrix covers detection and instance segmentation only.
 - YOLOv5u is detection-only in this matrix; YOLOv5 segmentation and YOLOv5 P6 variants remain outside P1.
-- YOLO26 remains outside P1 and is accepted only through `tools\phase-yolo26-model-matrix-smoke.ps1`.
+- YOLO26 remains outside P1. The 2026-06-15 targeted full summary accepts YOLO26 training, official ONNX, AITrain C++ ONNX inference, and TensorRT evidence for the 20 required detection/instance-segmentation rows; YOLO26 NCNN is not a supported export or deployment target.
 - Semantic segmentation, tracking, YOLOE-26, YOLO-World, classification, pose, OBB, and anomaly remain unsupported.
 - Full matrix acceptance is a wiring/artifact/productization gate, not an accuracy benchmark.
 - `.pt` weights are not bundled with AITrain Studio; official Ultralytics may download them into the user environment.
+- YOLO12 segmentation `.pt` rows currently depend on official `yolo12*-seg.pt` weights that are not resolvable in the recorded Ultralytics 8.3.171 validation environment; record these as blocked instead of productized passes.
+- Shared Ultralytics 8.3.171 environments must still record YOLO26 as `blocked_model_unavailable` / `blocked_ultralytics_incompatible`; customer preflight may only rely on the isolated targeted summary for training/ONNX/TensorRT and must not offer YOLO26 NCNN.
 - Ultralytics licensing must be reviewed before redistribution of official backend dependencies or weights.

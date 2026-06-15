@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,28 @@ def bool_param(parameters: dict[str, Any], key: str, default: bool) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on"}
     return bool(value)
+
+
+def int_param(parameters: dict[str, Any], key: str, default: int, minimum: int = 0) -> int:
+    try:
+        return max(minimum, int(parameters.get(key, default)))
+    except (TypeError, ValueError):
+        return max(minimum, default)
+
+
+def official_log_options(parameters: dict[str, Any]) -> tuple[str, int, int]:
+    verbosity = str(parameters.get("officialLogVerbosity") or "summary").strip().lower()
+    if verbosity not in {"summary", "full", "quiet"}:
+        verbosity = "summary"
+    interval_seconds = int_param(parameters, "officialLogEventIntervalSeconds", 30, 1)
+    tail_lines = int_param(parameters, "officialLogTailLines", 200, 1)
+    return verbosity, interval_seconds, tail_lines
+
+
+def is_important_official_line(line: str) -> bool:
+    lower = line.lower()
+    important_tokens = ("traceback", "error", "exception", "failed", "warning", "fatal")
+    return any(token in lower for token in important_tokens)
 
 
 def find_repo(parameters: dict[str, Any]) -> Path | None:
@@ -222,8 +245,9 @@ def module_version(module_name: str) -> str:
         return ""
 
 
-def run_process(command: list[str], cwd: Path, env: dict[str, str], log_path: Path) -> tuple[int, list[str]]:
+def run_process(command: list[str], cwd: Path, env: dict[str, str], log_path: Path, parameters: dict[str, Any]) -> tuple[int, list[str]]:
     emit("log", level="info", message=f"Running official PaddleOCR command: {' '.join(command)}")
+    verbosity, interval_seconds, tail_lines = official_log_options(parameters)
     process = subprocess.Popen(
         command,
         cwd=str(cwd),
@@ -235,15 +259,34 @@ def run_process(command: list[str], cwd: Path, env: dict[str, str], log_path: Pa
         errors="replace",
     )
     assert process.stdout is not None
-    lines: list[str] = []
-    for line in process.stdout:
-        stripped = line.rstrip()
-        if stripped:
-            lines.append(stripped)
-            emit("log", level="info", message=stripped)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    tail: deque[str] = deque(maxlen=tail_lines)
+    line_count = 0
+    last_event_at = time.monotonic()
+    with log_path.open("w", encoding="utf-8") as log_file:
+        for line in process.stdout:
+            stripped = line.rstrip()
+            if not stripped:
+                continue
+            line_count += 1
+            log_file.write(stripped + "\n")
+            log_file.flush()
+            tail.append(stripped)
+            now = time.monotonic()
+            if verbosity == "full" or is_important_official_line(stripped):
+                emit("log", level="info", message=stripped[:2000])
+                last_event_at = now
+            elif verbosity == "summary" and now - last_event_at >= interval_seconds:
+                emit("log", level="info", message=f"Official PaddleOCR command still running; lines={line_count}; latest={stripped[:500]}")
+                last_event_at = now
     exit_code = process.wait()
-    log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return exit_code, lines
+    if verbosity != "full":
+        emit(
+            "log",
+            level="info" if exit_code == 0 else "error",
+            message=f"Official PaddleOCR command finished with exitCode={exit_code}; logPath={log_path}; tailLines={len(tail)}",
+        )
+    return exit_code, list(tail)
 
 
 def parse_system_results(path: Path) -> list[dict[str, Any]]:
@@ -363,7 +406,7 @@ def run(request: dict[str, Any]) -> int:
         env = os.environ.copy()
         env["PYTHONPATH"] = str(repo) + os.pathsep + env.get("PYTHONPATH", "")
         draw_dir.mkdir(parents=True, exist_ok=True)
-        exit_code, lines = run_process(command, repo, env, log_path)
+        exit_code, lines = run_process(command, repo, env, log_path, parameters)
         report["predictExitCode"] = exit_code
         results_path = draw_dir / "system_results.txt"
         predictions = parse_system_results(results_path)

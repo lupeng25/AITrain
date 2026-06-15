@@ -29,6 +29,19 @@ namespace wp = aitrain::worker_protocol;
 namespace wr = aitrain::worker_requests;
 
 namespace {
+constexpr int kMaxExporterBufferBytes = 4 * 1024 * 1024;
+constexpr int kMaxExporterLineBytes = 256 * 1024;
+
+QByteArray boundedExporterLine(const QByteArray& line)
+{
+    if (line.size() <= kMaxExporterLineBytes) {
+        return line;
+    }
+    QByteArray bounded = line.left(kMaxExporterLineBytes);
+    bounded.append(" ... [log_truncated: single Python exporter line exceeded limit]");
+    return bounded;
+}
+
 bool jsonBool(const QJsonObject& object, const QString& key)
 {
     const QJsonValue value = object.value(key);
@@ -107,6 +120,57 @@ QJsonObject readJsonObjectFile(const QString& path)
     }
     const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
     return document.isObject() ? document.object() : QJsonObject();
+}
+
+bool jsonLooksYolo26(const QJsonObject& object)
+{
+    const QStringList keys = {
+        QStringLiteral("modelSeries"),
+        QStringLiteral("model"),
+        QStringLiteral("modelName"),
+        QStringLiteral("sourceCheckpoint"),
+        QStringLiteral("sourceOnnx")
+    };
+    for (const QString& key : keys) {
+        const QString value = object.value(key).toString().trimmed().toLower();
+        if (value.contains(QStringLiteral("yolo26"))) {
+            return true;
+        }
+    }
+    const QJsonObject trainingReport = object.value(QStringLiteral("trainingReport")).toObject();
+    if (!trainingReport.isEmpty() && jsonLooksYolo26(trainingReport)) {
+        return true;
+    }
+    const QJsonObject ncnn = object.value(QStringLiteral("ncnn")).toObject();
+    return !ncnn.isEmpty() && jsonLooksYolo26(ncnn);
+}
+
+bool modelArtifactLooksYolo26(const QString& path)
+{
+    const QString normalized = QDir::fromNativeSeparators(path.trimmed());
+    if (normalized.toLower().contains(QStringLiteral("yolo26"))) {
+        return true;
+    }
+
+    const QFileInfo info(normalized);
+    const QString suffix = info.suffix().toLower();
+    if ((suffix == QStringLiteral("json") || suffix == QStringLiteral("aitrain"))
+        && jsonLooksYolo26(readJsonObjectFile(normalized))) {
+        return true;
+    }
+
+    const QString sidecarPath = info.dir().filePath(info.completeBaseName() + QStringLiteral(".aitrain-export.json"));
+    if (QFileInfo::exists(sidecarPath) && jsonLooksYolo26(readJsonObjectFile(sidecarPath))) {
+        return true;
+    }
+
+    const QString siblingReport = info.dir().filePath(QStringLiteral("ultralytics_training_report.json"));
+    if (QFileInfo::exists(siblingReport) && jsonLooksYolo26(readJsonObjectFile(siblingReport))) {
+        return true;
+    }
+
+    const QString parentReport = QFileInfo(info.dir().absolutePath()).dir().filePath(QStringLiteral("ultralytics_training_report.json"));
+    return QFileInfo::exists(parentReport) && jsonLooksYolo26(readJsonObjectFile(parentReport));
 }
 
 QString resolveModelArtifactPath(QString path)
@@ -235,9 +299,19 @@ WorkerSession::OfficialYoloExportResult WorkerSession::runOfficialYoloExport(
     };
     const auto drainStdout = [&]() {
         stdoutBuffer.append(process.readAllStandardOutput());
+        if (stdoutBuffer.size() > kMaxExporterBufferBytes) {
+            stdoutBuffer = stdoutBuffer.right(kMaxExporterLineBytes);
+            const QJsonObject logPayload = sanitizedTrainerLogPayload(
+                QByteArray("Python exporter stdout buffer exceeded limit before a line delimiter; keeping bounded tail only. [log_truncated]"),
+                taskId,
+                QStringLiteral("ultralytics_yolo_export"));
+            if (!logPayload.isEmpty()) {
+                send(wp::event::log(), logPayload);
+            }
+        }
         int delimiter = nextPythonOutputDelimiter(stdoutBuffer);
         while (delimiter >= 0) {
-            const QByteArray line = stdoutBuffer.left(delimiter).trimmed();
+            const QByteArray line = boundedExporterLine(stdoutBuffer.left(delimiter).trimmed());
             int removeCount = delimiter + 1;
             while (removeCount < stdoutBuffer.size()
                 && (stdoutBuffer.at(removeCount) == '\n' || stdoutBuffer.at(removeCount) == '\r')) {
@@ -250,9 +324,19 @@ WorkerSession::OfficialYoloExportResult WorkerSession::runOfficialYoloExport(
     };
     const auto drainStderr = [&]() {
         stderrBuffer.append(process.readAllStandardError());
+        if (stderrBuffer.size() > kMaxExporterBufferBytes) {
+            stderrBuffer = stderrBuffer.right(kMaxExporterLineBytes);
+            const QJsonObject logPayload = sanitizedTrainerLogPayload(
+                QByteArray("Python exporter stderr buffer exceeded limit before a line delimiter; keeping bounded tail only. [log_truncated]"),
+                taskId,
+                QStringLiteral("ultralytics_yolo_export"));
+            if (!logPayload.isEmpty()) {
+                send(wp::event::log(), logPayload);
+            }
+        }
         int delimiter = nextPythonOutputDelimiter(stderrBuffer);
         while (delimiter >= 0) {
-            const QByteArray line = stderrBuffer.left(delimiter).trimmed();
+            const QByteArray line = boundedExporterLine(stderrBuffer.left(delimiter).trimmed());
             int removeCount = delimiter + 1;
             while (removeCount < stderrBuffer.size()
                 && (stderrBuffer.at(removeCount) == '\n' || stderrBuffer.at(removeCount) == '\r')) {
@@ -284,10 +368,10 @@ WorkerSession::OfficialYoloExportResult WorkerSession::runOfficialYoloExport(
     drainStdout();
     drainStderr();
     if (!stdoutBuffer.trimmed().isEmpty()) {
-        handleStdoutLine(stdoutBuffer.trimmed());
+        handleStdoutLine(boundedExporterLine(stdoutBuffer.trimmed()));
     }
     if (!stderrBuffer.trimmed().isEmpty()) {
-        const QJsonObject logPayload = sanitizedTrainerLogPayload(stderrBuffer.trimmed(), taskId, QStringLiteral("ultralytics_yolo_export"));
+        const QJsonObject logPayload = sanitizedTrainerLogPayload(boundedExporterLine(stderrBuffer.trimmed()), taskId, QStringLiteral("ultralytics_yolo_export"));
         if (!logPayload.isEmpty()) {
             send(wp::event::log(), logPayload);
         }
@@ -789,6 +873,7 @@ void WorkerSession::exportModel(const QJsonObject& payload)
     activeTaskId_ = taskId;
     canceled_ = false;
     running_ = true;
+    const QString requestedCheckpointPath = QDir::fromNativeSeparators(request.checkpointPath.trimmed());
     QString checkpointPath = resolveModelArtifactPath(request.checkpointPath);
     QString outputPath = request.outputPath;
     const QString format = request.format.isEmpty() ? QStringLiteral("onnx") : request.format;
@@ -802,6 +887,19 @@ void WorkerSession::exportModel(const QJsonObject& payload)
     send(wp::event::progress(), startProgress);
     if (pollPendingCancel()) {
         sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
+        return;
+    }
+
+    if (format == QStringLiteral("ncnn")
+        && (modelArtifactLooksYolo26(requestedCheckpointPath) || modelArtifactLooksYolo26(checkpointPath))) {
+        running_ = false;
+        failWithDetails(
+            QStringLiteral("YOLO26 NCNN export is not supported by AITrain; use ONNX or TensorRT for YOLO26 deployment."),
+            QStringLiteral("unsupported_yolo26_ncnn"),
+            QJsonObject{
+                {QStringLiteral("format"), format},
+                {QStringLiteral("checkpointPath"), checkpointPath},
+                {QStringLiteral("outputPath"), outputPath}});
         return;
     }
 

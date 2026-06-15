@@ -246,6 +246,32 @@ def test_yolo26_segmentation_auto_end2end_defaults_false() -> None:
     assert plan["kwargs"]["end2end"] is False
 
 
+def test_yolo26_segmentation_auto_uses_model_end2end_hint() -> None:
+    plan = exporter.build_export_plan(
+        {"ultralyticsExportArgs": {"format": "onnx", "end2end": "auto"}},
+        model_name="yolo26n-seg.yaml",
+        model_family="yolo_segmentation",
+        auto_end2end=True,
+    )
+
+    assert plan["normalized"]["end2end"] is True
+    assert plan["kwargs"]["end2end"] is True
+    assert plan["modelSeries"] == "yolo26"
+    assert plan["task"] == "segmentation"
+
+
+def test_non_yolo26_auto_false_does_not_emit_end2end_kwarg() -> None:
+    plan = exporter.build_export_plan(
+        {"ultralyticsExportArgs": {"format": "onnx", "end2end": "auto"}},
+        model_name="yolov8n.yaml",
+        model_family="yolo_detection",
+        auto_end2end=False,
+    )
+
+    assert plan["normalized"]["end2end"] is False
+    assert "end2end" not in plan["kwargs"]
+
+
 def test_ultralytics_export_args_accept_bool_end2end_override() -> None:
     plan = exporter.build_export_plan(
         {"ultralyticsExportArgs": {"format": "onnx", "end2end": True}},
@@ -257,16 +283,17 @@ def test_ultralytics_export_args_accept_bool_end2end_override() -> None:
     assert plan["kwargs"]["end2end"] is True
 
 
-def test_yolo26_ncnn_auto_forces_traditional_end2end_false() -> None:
-    plan = exporter.build_export_plan(
-        {"ultralyticsExportArgs": {"format": "ncnn", "end2end": "auto"}},
-        model_name="yolo26n.yaml",
-        model_family="yolo_detection",
-    )
-
-    assert plan["productFormat"] == "ncnn"
-    assert plan["normalized"]["end2end"] is False
-    assert plan["kwargs"]["end2end"] is False
+def test_yolo26_ncnn_export_is_rejected() -> None:
+    try:
+        exporter.build_export_plan(
+            {"ultralyticsExportArgs": {"format": "ncnn", "end2end": "auto"}},
+            model_name="yolo26n.yaml",
+            model_family="yolo_detection",
+        )
+    except ValueError as exc:
+        assert "YOLO26 NCNN export is not supported" in str(exc)
+    else:
+        raise AssertionError("YOLO26 NCNN export was accepted")
 
 
 def test_ultralytics_export_args_reject_unknown_keys() -> None:
@@ -347,8 +374,10 @@ if __name__ == "__main__":
     test_cpu_device_environment_uses_default_cpu()
     test_yolo26_detection_auto_end2end_defaults_true()
     test_yolo26_segmentation_auto_end2end_defaults_false()
+    test_yolo26_segmentation_auto_uses_model_end2end_hint()
+    test_non_yolo26_auto_false_does_not_emit_end2end_kwarg()
     test_ultralytics_export_args_accept_bool_end2end_override()
-    test_yolo26_ncnn_auto_forces_traditional_end2end_false()
+    test_yolo26_ncnn_export_is_rejected()
     test_ultralytics_export_args_reject_unknown_keys()
     test_ultralytics_export_args_reject_unsupported_combinations()
     test_ultralytics_export_args_accept_tensorrt_int8_with_data()

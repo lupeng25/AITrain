@@ -131,6 +131,7 @@ QString fallbackEnglishTranslation(const QString& source)
         {QStringLiteral("主交付格式，可继续进入推理验证。"), QStringLiteral("Primary delivery format; can continue to inference validation.")},
         {QStringLiteral("需要配置 onnx2ncnn，输出 param/bin；部署验证需要 NCNN SDK/runtime 和样本图。"), QStringLiteral("Requires onnx2ncnn; outputs param/bin. Deployment validation needs an NCNN SDK/runtime and a sample image.")},
         {QStringLiteral("需要 RTX / SM 75+ 真机外部验收。"), QStringLiteral("Requires external validation on real RTX / SM 75+ hardware.")},
+        {QStringLiteral("YOLO26 不支持导出为 NCNN；请使用 ONNX 或 TensorRT。"), QStringLiteral("YOLO26 cannot be exported to NCNN; use ONNX or TensorRT.")},
         {QStringLiteral("暂无"), QStringLiteral("None")},
         {QStringLiteral("%1 等 %2 项"), QStringLiteral("%1 and %2 items")},
         {QStringLiteral("状态：未检测到 X-AnyLabeling。可放到 .deps/annotation-tools/X-AnyLabeling，或设置 AITRAIN_XANYLABELING_EXE。"), QStringLiteral("Status: X-AnyLabeling was not detected. Place it under .deps/annotation-tools/X-AnyLabeling or set AITRAIN_XANYLABELING_EXE.")},

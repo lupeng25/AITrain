@@ -35,6 +35,15 @@ private slots:
         sidecar.insert(QStringLiteral("format"), QStringLiteral("onnx"));
         sidecar.insert(QStringLiteral("backend"), QStringLiteral("ultralytics_yolo_detect"));
         sidecar.insert(QStringLiteral("modelFamily"), QStringLiteral("yolo_detection"));
+        sidecar.insert(QStringLiteral("modelSeries"), QStringLiteral("yolo26"));
+        sidecar.insert(QStringLiteral("task"), QStringLiteral("detection"));
+        sidecar.insert(QStringLiteral("ultralyticsExportArgs"), QJsonObject{
+            {QStringLiteral("format"), QStringLiteral("onnx")},
+            {QStringLiteral("end2end"), true}
+        });
+        sidecar.insert(QStringLiteral("outputShapes"), QJsonObject{
+            {QStringLiteral("available"), true}
+        });
         sidecar.insert(QStringLiteral("scaffold"), false);
         sidecar.insert(QStringLiteral("classNames"), QJsonArray{QStringLiteral("item")});
         QFile sidecarFile(dir.filePath(QStringLiteral("source.aitrain-export.json")));
@@ -57,6 +66,10 @@ private slots:
         QVERIFY(QFileInfo::exists(exported.reportPath));
         QCOMPARE(exported.config.value(QStringLiteral("backend")).toString(), QStringLiteral("ultralytics_yolo_detect"));
         QCOMPARE(exported.config.value(QStringLiteral("modelFamily")).toString(), QStringLiteral("yolo_detection"));
+        QCOMPARE(exported.config.value(QStringLiteral("modelSeries")).toString(), QStringLiteral("yolo26"));
+        QCOMPARE(exported.config.value(QStringLiteral("task")).toString(), QStringLiteral("detection"));
+        QVERIFY(exported.config.value(QStringLiteral("ultralyticsExportArgs")).toObject().value(QStringLiteral("end2end")).toBool());
+        QVERIFY(exported.config.value(QStringLiteral("outputShapes")).toObject().value(QStringLiteral("available")).toBool());
         QVERIFY(!exported.config.value(QStringLiteral("scaffold")).toBool(true));
     }
 
@@ -197,6 +210,32 @@ private slots:
         QCOMPARE(ncnn.value(QStringLiteral("outputBlobs")).toArray().first().toString(), QStringLiteral("out0"));
         QCOMPARE(ncnn.value(QStringLiteral("inputSize")).toInt(), 128);
         QCOMPARE(exported.config.value(QStringLiteral("classNames")).toArray().size(), 2);
+    }
+
+    void ncnnExportRejectsYolo26Onnx()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString sourceOnnx = dir.filePath(QStringLiteral("runs/weights/best.onnx"));
+        writeTextFile(sourceOnnx, QStringLiteral("fake yolo26 official onnx\n"));
+
+        QJsonObject sidecar;
+        sidecar.insert(QStringLiteral("format"), QStringLiteral("onnx"));
+        sidecar.insert(QStringLiteral("backend"), QStringLiteral("ultralytics_yolo_detect"));
+        sidecar.insert(QStringLiteral("modelFamily"), QStringLiteral("yolo_detection"));
+        sidecar.insert(QStringLiteral("modelSeries"), QStringLiteral("yolo26"));
+        sidecar.insert(QStringLiteral("scaffold"), false);
+        writeTextFile(
+            dir.filePath(QStringLiteral("runs/weights/best.aitrain-export.json")),
+            QString::fromUtf8(QJsonDocument(sidecar).toJson(QJsonDocument::Indented)));
+
+        const aitrain::DetectionExportResult exported = aitrain::exportDetectionCheckpoint(
+            sourceOnnx,
+            dir.filePath(QStringLiteral("export/model.param")),
+            QStringLiteral("ncnn"));
+
+        QVERIFY(!exported.ok);
+        QVERIFY(exported.error.contains(QStringLiteral("YOLO26 NCNN export is not supported")));
     }
 
     void onnxExportUsesOfficialSiblingFromYoloCheckpoint()

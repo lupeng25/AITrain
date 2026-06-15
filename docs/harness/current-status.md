@@ -1,6 +1,6 @@
 ﻿# Current Project Status
 
-Last updated: 2026-06-06
+Last updated: 2026-06-15
 
 This file is the source of truth for phase status in new AI coding conversations. Use `docs/product-roadmap-local-training-platform.md` for current broad direction after reading this file. `AITrainStudio_后续实施方案.md` is historical roadmap background only and may contain superseded phase descriptions.
 
@@ -100,6 +100,20 @@ Recorded NCNN runtime validation refresh on 2026-05-16:
 - nihui `ncnn-android-yolov8` preconverted `yolov8n_seg.ncnn.param/.bin` passed the NCNN DFL segmentation runtime path after providing an AITrain sidecar with `inputBlob=in0`, `outputBlobs=["out0","out1","out2"]`, `decoder=dfl`, `inputSize=640`, `strides=[8,16,32]`, and `regMax=16`. Evidence is under `.deps\github-ncnn-smoke\nihui-yolov8n-seg-ncnn\runtime-output\deployment-validation` and reported `predictionCount=100`.
 - New Worker CLI helper `aitrain_worker.exe --ncnn-param-smoke <model.param> --image <sample.png> --output <dir> --task-type detection|segmentation` validates existing external `.param/.bin` artifacts with sidecar/config, without forcing a fresh ONNX export.
 - Deployment reports distinguish NCNN `sdk_missing`, `sample_missing`, `sidecar_missing`, `unsupported_layer`, and `runtime_failed`. Unsupported layers such as `Shape` must remain failed compatibility evidence with a report and next action, not a runtime pass.
+
+## Full Model Lifecycle Findings
+
+Recorded during the `.deps\full-model-lifecycle` validation lane on 2026-06-14. These are software-impacting findings from the in-progress full lifecycle run, not a final all-matrix pass/fail summary:
+
+- `yolo12n-segment-pt` failed before training because official Ultralytics 8.3.171 could not resolve `yolo12n-seg.pt`. Treat YOLO12 segmentation `.pt` rows as `blocked_missing_official_weight` until upstream official `yolo12*-seg.pt` weights resolve. Keep YOLO12 segmentation `.yaml` architecture evidence and YOLO12 detection `.pt` evidence separate.
+- The main full lifecycle run found all 20 YOLO26 rows blocked/failed in the shared Ultralytics 8.3.171 YOLO Python environment because `cfg/models/26` configs, official `yolo26*` weights, or matching package code were unavailable. The isolated YOLO26 targeted lane then passed `tools\phase-yolo26-model-matrix-smoke.ps1 -Full -Epochs 100 -Device 0` on 2026-06-15 with 20/20 required rows passing training, official ONNX export, AITrain C++ ONNX inference, and TensorRT deployment validation.
+- YOLO26 NCNN is no longer a supported target: the 2026-06-15 targeted lane recorded NCNN `failed` for 20/20 YOLO26 rows, even after forcing an `end2end=false` NCNN intermediate ONNX. The product now removes the YOLO26 NCNN option and rejects `format=ncnn` for YOLO26; use ONNX or TensorRT for YOLO26 deployment evidence.
+- The progress server/browser view now uses the current `runId` for primary row counts and exposes historical rows separately through `historicalRowCount` / `historicalByStatus`. If old failures are still visible, treat them as historical evidence rather than current-run failures and check the displayed `runId`.
+- GPU YOLO training with `device=0` requires a CUDA-enabled PyTorch environment. CPU-only YOLO Python environments must use `device=cpu`; otherwise Ultralytics fails before training with an invalid CUDA device error. Use training parameter `pythonExecutable` or `AITRAIN_PYTHON_EXECUTABLE` to select the validated CUDA YOLO Python.
+- `end2end` is an AITrain export metadata/compatibility option, but the installed Ultralytics package may reject it for generic ONNX export. `end2end=auto` now reads the loaded model config when possible; NCNN intermediate ONNX export forces `end2end=false`; unsupported combinations must be recorded as failed or blocked.
+- Worker self-check records `LibTorch` as missing when `torch_cpu` DLLs cannot be loaded. This does not block the current official Python YOLO and PaddleOCR workflows, but it must remain visible and must not be used to claim C++ LibTorch training readiness.
+- TensorRT evidence in the current build covers engine export and deployment validation status for official ONNX artifacts. Single-image TensorRT runtime decoding is not enabled in the GUI/runtime path and must not be claimed as a passed inference route.
+- Public COCO128, COCO128-seg, and Total-Text lifecycle metrics are engineering wiring/artifact evidence only. They are not production accuracy benchmarks and do not replace customer-domain OCR or customer-domain vision validation.
 
 ## Current Next Task
 
