@@ -196,6 +196,9 @@ QString pythonTrainerScriptFileForBackend(const QString& backend)
     if (normalized == QStringLiteral("ultralytics_yolo_segment")) {
         return QStringLiteral("python_trainers/segmentation/ultralytics_trainer.py");
     }
+    if (normalized == QStringLiteral("smp_semantic_segmentation")) {
+        return QStringLiteral("python_trainers/semantic_segmentation/smp_trainer.py");
+    }
     if (normalized == QStringLiteral("paddleocr_rec_official") || normalized == QStringLiteral("paddleocr_ppocrv4_rec")) {
         return QStringLiteral("python_trainers/ocr_rec/paddleocr_official_adapter.py");
     }
@@ -289,6 +292,9 @@ QString officialTrainingBackendForTask(const QString& taskType)
     if (normalized == QStringLiteral("segmentation")) {
         return QStringLiteral("ultralytics_yolo_segment");
     }
+    if (normalized == QStringLiteral("semantic_segmentation")) {
+        return QStringLiteral("smp_semantic_segmentation");
+    }
     if (normalized == QStringLiteral("ocr_detection")) {
         return QStringLiteral("paddleocr_det_official");
     }
@@ -308,6 +314,9 @@ bool isTrainingBackendCompatibleWithTask(const QString& taskType, const QString&
     }
     if (normalizedTask == QStringLiteral("segmentation")) {
         return normalizedBackend == QStringLiteral("ultralytics_yolo_segment");
+    }
+    if (normalizedTask == QStringLiteral("semantic_segmentation")) {
+        return normalizedBackend == QStringLiteral("smp_semantic_segmentation");
     }
     if (normalizedTask == QStringLiteral("ocr_detection")) {
         return normalizedBackend == QStringLiteral("paddleocr_det_official");
@@ -333,6 +342,9 @@ QString datasetFormatForTrainingTask(const QString& taskType)
     }
     if (normalized == QStringLiteral("segmentation")) {
         return QStringLiteral("yolo_segmentation");
+    }
+    if (normalized == QStringLiteral("semantic_segmentation")) {
+        return QStringLiteral("semantic_segmentation_mask");
     }
     if (normalized == QStringLiteral("ocr_detection")) {
         return QStringLiteral("paddleocr_det");
@@ -439,6 +451,7 @@ bool isOfficialWorkerBackendId(const QString& normalized)
     return normalized == QStringLiteral("ultralytics_yolo")
         || normalized == QStringLiteral("ultralytics_yolo_detect")
         || normalized == QStringLiteral("ultralytics_yolo_segment")
+        || normalized == QStringLiteral("smp_semantic_segmentation")
         || normalized == QStringLiteral("paddleocr_det_official")
         || normalized == QStringLiteral("paddleocr_rec_official")
         || normalized == QStringLiteral("paddleocr_ppocrv4_rec");
@@ -772,6 +785,62 @@ QJsonObject yoloEnvironmentProfile(const QString& pythonExecutable)
     repairHints.append(QStringLiteral("Keep official YOLO training in Worker-managed Python subprocesses; avoid GUI-embedded Python."));
 
     return makeProfile(QStringLiteral("yolo"), QStringLiteral("YOLO Profile"), checks, repairHints);
+}
+
+QJsonObject smpEnvironmentProfile(const QString& pythonExecutable)
+{
+    QJsonArray checks;
+    QJsonArray repairHints;
+
+    if (pythonExecutable.isEmpty()) {
+        checks.append(profileCheck(
+            QStringLiteral("pythonExecutable"),
+            QStringLiteral("missing"),
+            QStringLiteral("No usable Python executable was found for SMP semantic segmentation.")));
+        repairHints.append(QStringLiteral("Set training parameter `pythonExecutable` or AITRAIN_PYTHON_EXECUTABLE to a valid Python path."));
+    } else {
+        checks.append(profileCheck(
+            QStringLiteral("pythonExecutable"),
+            QStringLiteral("ok"),
+            QStringLiteral("Python executable is available."),
+            QJsonObject{{QStringLiteral("path"), pythonExecutable}}));
+    }
+
+    checks.append(runModuleProbe(
+        pythonExecutable,
+        QStringLiteral("segmentation_models_pytorch"),
+        QStringLiteral("segmentation_models_pytorch"),
+        QStringLiteral("segmentation-models-pytorch is missing; SMP semantic segmentation training will be unavailable.")));
+    checks.append(runModuleProbe(
+        pythonExecutable,
+        QStringLiteral("torch"),
+        QStringLiteral("torch"),
+        QStringLiteral("PyTorch is missing; SMP training requires torch.")));
+    checks.append(runModuleProbe(
+        pythonExecutable,
+        QStringLiteral("torchvision"),
+        QStringLiteral("torchvision"),
+        QStringLiteral("torchvision is missing; SMP training uses torchvision transforms/runtime helpers.")));
+    checks.append(runModuleProbe(
+        pythonExecutable,
+        QStringLiteral("timm"),
+        QStringLiteral("timm"),
+        QStringLiteral("timm is missing; SMP SegFormer/timm encoders require timm.")));
+    checks.append(runModuleProbe(
+        pythonExecutable,
+        QStringLiteral("onnx"),
+        QStringLiteral("onnx"),
+        QStringLiteral("onnx package is missing; SMP ONNX export validation may fail.")));
+    checks.append(runModuleProbe(
+        pythonExecutable,
+        QStringLiteral("onnxruntime"),
+        QStringLiteral("onnxruntime"),
+        QStringLiteral("onnxruntime package is missing; SMP evaluator/runtime smoke checks may fail.")));
+
+    repairHints.append(QStringLiteral("Install SMP profile packages: `pip install -r python_trainers/requirements-smp.txt`."));
+    repairHints.append(QStringLiteral("SMP supports ONNX Runtime inference/deployment validation only; NCNN/TensorRT export is not part of the SMP capability scope."));
+
+    return makeProfile(QStringLiteral("smp_semantic_segmentation"), QStringLiteral("SMP Semantic Segmentation Profile"), checks, repairHints);
 }
 
 QJsonObject ocrEnvironmentProfile(const QString& pythonExecutable)

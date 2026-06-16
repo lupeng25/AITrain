@@ -10,16 +10,16 @@ This repository implements the first usable platform layer from the requested pl
 - Isolated `aitrain_worker` process using JSON Lines over `QLocalSocket`.
 - SQLite-backed project/task/artifact metadata with task detail queries for artifacts, metrics, exports, and dataset versions.
 - Qt plugin interfaces for model, dataset, training, validation, export, and inference extensions.
-- Built-in plugin manifests for YOLO-style detection/segmentation, PaddleOCR-style recognition, dataset interop, and the local/offline-first plugin marketplace.
-- Dataset validation and split helpers for YOLO detection, YOLO segmentation, PaddleOCR Det, and PaddleOCR Rec label files.
+- Built-in plugin manifests for YOLO-style detection/segmentation, dedicated semantic segmentation, PaddleOCR-style recognition, dataset interop, and the local/offline-first plugin marketplace.
+- Dataset validation and split helpers for YOLO detection, YOLO segmentation, semantic segmentation Mask PNG, PaddleOCR Det, and PaddleOCR Rec label files.
 - Worker-backed dataset conversion GUI for the implemented COCO / Pascal VOC / YOLO detection / YOLO segmentation conversion matrix.
 - External annotation workflow entrypoint for X-AnyLabeling, with local tool detection and a post-labeling refresh/revalidation path.
 - Segmentation dataset admission with dataset loading, polygon-to-mask conversion, overlay preview, and Worker metrics; model training is routed through the official Ultralytics segmentation backend.
-- Worker-managed Python trainer adapters for official Ultralytics YOLO detection, official Ultralytics YOLO segmentation, and official PaddleOCR Det/Rec train/export/inference orchestration.
+- Worker-managed Python trainer adapters for official Ultralytics YOLO detection, official Ultralytics YOLO segmentation, SMP semantic segmentation, and official PaddleOCR Det/Rec train/export/inference orchestration.
 - Delivery-closeout workbench surfaces for sample review, delivery acceptance, customer OCR validation, diagnostics, deployment validation, and model-card/report generation.
 - QtTest coverage for JSONL protocol, project repository behavior, detection workflow, and segmentation admission behavior.
 
-Production training is routed through Worker-managed official Python trainer subprocesses: Ultralytics for YOLO detection/segmentation and PaddleOCR official adapters for Det/Rec. The legacy tiny detector, small PaddleOCR CTC trainer, C++ segmentation/OCR training scaffolds, and shipped `python_mock` trainer have been physically removed from the product path. RTX 4090 D TensorRT acceptance has passing evidence for the current validation lane; clean Windows package acceptance and any package-root TensorRT rerun still require returned external evidence before they can be marked passed.
+Production training is routed through Worker-managed Python trainer subprocesses: Ultralytics for YOLO detection/segmentation, SMP for dedicated semantic segmentation, and PaddleOCR official adapters for Det/Rec. The legacy tiny detector, small PaddleOCR CTC trainer, C++ segmentation/OCR training scaffolds, and shipped `python_mock` trainer have been physically removed from the product path. RTX 4090 D TensorRT acceptance has passing evidence for the current validation lane; clean Windows package acceptance and any package-root TensorRT rerun still require returned external evidence before they can be marked passed.
 
 ## Build
 
@@ -147,7 +147,7 @@ TensorRT acceptance must be run on an RTX / SM 75+ machine. The RTX 4090 D valid
 
 Environment and backend notes are documented in `docs/training-backends.md`.
 
-Production training entry points expose only official backends: Ultralytics for YOLO detection/segmentation and PaddleOCR official adapters for Det/Rec. Legacy diagnostic training implementations have been removed instead of hidden behind user-facing switches. `paddleocr_rec` remains only a dataset format; production OCR Rec training uses `paddleocr_rec_official` or `paddleocr_ppocrv4_rec`.
+Production training entry points expose Worker-managed official/upstream adapters: Ultralytics for YOLO detection/segmentation, SMP for dedicated semantic segmentation, and PaddleOCR official adapters for Det/Rec. Legacy diagnostic training implementations have been removed instead of hidden behind user-facing switches. `paddleocr_rec` remains only a dataset format; production OCR Rec training uses `paddleocr_rec_official` or `paddleocr_ppocrv4_rec`.
 
 Minimal sample datasets can be generated with:
 

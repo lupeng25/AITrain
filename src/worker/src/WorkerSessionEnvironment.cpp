@@ -51,6 +51,11 @@ void WorkerSession::runEnvironmentCheck(const QJsonObject& payload)
         QStringLiteral("Ultralytics is not installed. The official YOLO detection/segmentation trainer backend will be unavailable.")));
     checks.append(pythonModuleCheck(
         pythonExecutable,
+        QStringLiteral("Segmentation Models PyTorch"),
+        QStringLiteral("segmentation_models_pytorch"),
+        QStringLiteral("segmentation-models-pytorch is not installed. The SMP semantic segmentation trainer backend will be unavailable.")));
+    checks.append(pythonModuleCheck(
+        pythonExecutable,
         QStringLiteral("PaddleOCR"),
         QStringLiteral("paddleocr"),
         QStringLiteral("PaddleOCR is not installed. Official OCR detection, recognition, and system adapters will be unavailable.")));
@@ -63,6 +68,7 @@ void WorkerSession::runEnvironmentCheck(const QJsonObject& payload)
 
     QJsonObject profiles;
     profiles.insert(QStringLiteral("yolo"), yoloEnvironmentProfile(pythonExecutable));
+    profiles.insert(QStringLiteral("smp_semantic_segmentation"), smpEnvironmentProfile(pythonExecutable));
     profiles.insert(QStringLiteral("ocr"), ocrEnvironmentProfile(pythonExecutable));
     profiles.insert(QStringLiteral("tensorrt"), tensorRtEnvironmentProfile(checks));
 

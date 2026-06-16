@@ -72,6 +72,7 @@ private:
     void runInference(const QJsonObject& payload);
     void runDetectionTraining();
     void runSegmentationTraining();
+    void runSemanticSegmentationTraining();
     void runOcrRecTraining();
     bool shouldUsePythonTrainer() const;
     void runPythonTrainer();

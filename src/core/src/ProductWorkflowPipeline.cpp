@@ -426,7 +426,14 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
         QString inferenceTaskType = QStringLiteral("detection");
         if (suffix == QStringLiteral("onnx")) {
             const QString family = inferOnnxModelFamily(candidateModel);
-            if (family == QStringLiteral("yolo_segmentation")) {
+            if (family == QStringLiteral("semantic_segmentation")) {
+                inferenceTaskType = QStringLiteral("semantic_segmentation");
+                const SemanticSegmentationPrediction prediction = predictSemanticSegmentationOnnxRuntime(candidateModel, imagePath, &error);
+                if (error.isEmpty()) {
+                    predictions.append(semanticSegmentationPredictionToJson(prediction));
+                    overlay = renderSemanticSegmentationPrediction(imagePath, prediction, &error);
+                }
+            } else if (family == QStringLiteral("yolo_segmentation")) {
                 inferenceTaskType = QStringLiteral("segmentation");
                 DetectionInferenceOptions inferenceOptions;
                 const QVector<SegmentationPrediction> segPredictions = predictSegmentationOnnxRuntime(candidateModel, imagePath, inferenceOptions, &error);

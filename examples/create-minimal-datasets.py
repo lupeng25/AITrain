@@ -35,6 +35,19 @@ def write_png(path: Path, width: int, height: int, rect: tuple[int, int, int, in
     path.write_bytes(data)
 
 
+def write_mask_png(path: Path, width: int, height: int, rect: tuple[int, int, int, int], class_id: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pixels = bytearray()
+    x0, y0, x1, y1 = rect
+    for y in range(height):
+        pixels.append(0)
+        for x in range(width):
+            pixels.append(class_id if x0 <= x < x1 and y0 <= y < y1 else 0)
+    payload = struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0)
+    data = b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", payload) + _chunk(b"IDAT", zlib.compress(bytes(pixels), 9)) + _chunk(b"IEND", b"")
+    path.write_bytes(data)
+
+
 def write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -62,6 +75,14 @@ def make_yolo_segmentation(root: Path) -> None:
         root / "data.yaml",
         "path: .\ntrain: images/train\nval: images/val\nnc: 1\nnames: [part]\n",
     )
+
+
+def make_semantic_segmentation(root: Path) -> None:
+    write_png(root / "images/train/a.png", 64, 64, (20, 20, 44, 44), (15, 174, 102))
+    write_png(root / "images/val/b.png", 64, 64, (18, 18, 46, 46), (180, 92, 220))
+    write_mask_png(root / "masks/train/a.png", 64, 64, (20, 20, 44, 44), 1)
+    write_mask_png(root / "masks/val/b.png", 64, 64, (18, 18, 46, 46), 2)
+    write_text(root / "classes.txt", "background\npart\nscratch\n")
 
 
 def make_ocr_rec(root: Path) -> None:
@@ -142,6 +163,24 @@ def make_yolo_segmentation_cpu_smoke(root: Path) -> None:
     )
 
 
+def make_semantic_segmentation_cpu_smoke(root: Path) -> None:
+    width = 128
+    height = 128
+    class_colors = [(15, 174, 102), (180, 92, 220)]
+    for split, count, offset in (("train", 24, 0), ("val", 8, 80)):
+        for index in range(count):
+            class_id = 1 + (index % 2)
+            box_width = 28 + ((index + offset) % 5) * 5
+            box_height = 26 + ((index * 2 + offset) % 4) * 7
+            x0 = 9 + ((index * 13 + offset) % (width - box_width - 18))
+            y0 = 11 + ((index * 9 + offset) % (height - box_height - 20))
+            rect = (x0, y0, x0 + box_width, y0 + box_height)
+            stem = f"{split}_{index:02d}"
+            write_png(root / f"images/{split}/{stem}.png", width, height, rect, class_colors[class_id - 1])
+            write_mask_png(root / f"masks/{split}/{stem}.png", width, height, rect, class_id)
+    write_text(root / "classes.txt", "background\npart\nscratch\n")
+
+
 def make_ocr_rec_cpu_smoke(root: Path) -> None:
     chars = "ab12cd34"
     labels = []
@@ -181,6 +220,18 @@ def make_requests(root: Path, profile: str = "minimal") -> None:
             "runName": "cpu-yolo-segment",
             "compactEvents": True,
         }
+        semantic_parameters = {
+            "trainingBackend": "smp_semantic_segmentation",
+            "datasetFormat": "semantic_segmentation_mask",
+            "model": "smp_unet_resnet34",
+            "epochs": 3,
+            "batchSize": 2,
+            "imageSize": 128,
+            "device": "cpu",
+            "workers": 0,
+            "learningRate": 0.001,
+            "encoderWeights": "none",
+        }
         ocr_parameters = {
             "epochs": 8,
             "batchSize": 8,
@@ -192,6 +243,18 @@ def make_requests(root: Path, profile: str = "minimal") -> None:
     else:
         detect_parameters = {"model": "yolov8n.yaml", "epochs": 1, "batchSize": 1, "imageSize": 64, "device": "cpu", "workers": 0}
         segment_parameters = {"model": "yolov8n-seg.yaml", "epochs": 1, "batchSize": 1, "imageSize": 64, "device": "cpu", "workers": 0}
+        semantic_parameters = {
+            "trainingBackend": "smp_semantic_segmentation",
+            "datasetFormat": "semantic_segmentation_mask",
+            "model": "smp_unet_resnet34",
+            "epochs": 1,
+            "batchSize": 1,
+            "imageSize": 64,
+            "device": "cpu",
+            "workers": 0,
+            "learningRate": 0.001,
+            "encoderWeights": "none",
+        }
         ocr_parameters = {"epochs": 1, "batchSize": 2, "imageWidth": 96, "imageHeight": 32, "maxTextLength": 8, "learningRate": 0.01}
 
     requests = {
@@ -212,6 +275,15 @@ def make_requests(root: Path, profile: str = "minimal") -> None:
             "outputPath": str(root / "runs/yolo_segment"),
             "backend": "ultralytics_yolo_segment",
             "parameters": segment_parameters,
+        },
+        "smp_semantic_request.json": {
+            "protocolVersion": 1,
+            "taskId": "example-smp-semantic",
+            "taskType": "semantic_segmentation",
+            "datasetPath": str(root / "semantic_mask"),
+            "outputPath": str(root / "runs/smp_semantic"),
+            "backend": "smp_semantic_segmentation",
+            "parameters": semantic_parameters,
         },
         "paddleocr_rec_official_request.json": {
             "protocolVersion": 1,
@@ -268,10 +340,12 @@ def main() -> int:
     if args.profile == "cpu-smoke":
         make_yolo_detection_cpu_smoke(root / "yolo_detect")
         make_yolo_segmentation_cpu_smoke(root / "yolo_segment")
+        make_semantic_segmentation_cpu_smoke(root / "semantic_mask")
         make_ocr_rec_cpu_smoke(root / "paddleocr_rec")
     else:
         make_yolo_detection(root / "yolo_detect")
         make_yolo_segmentation(root / "yolo_segment")
+        make_semantic_segmentation(root / "semantic_mask")
         make_ocr_rec(root / "paddleocr_rec")
     make_ocr_det(root / "paddleocr_det")
     make_requests(root, args.profile)

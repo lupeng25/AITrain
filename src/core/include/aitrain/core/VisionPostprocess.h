@@ -7,6 +7,7 @@
 #include <QPointF>
 #include <QSize>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 namespace aitrain {
@@ -29,6 +30,14 @@ struct SegmentationPrediction {
     QImage mask;
     double maskArea = 0.0;
     double maskThreshold = 0.5;
+};
+
+struct SemanticSegmentationPrediction {
+    QImage mask;
+    QStringList classNames;
+    QJsonObject pixelCounts;
+    QSize sourceSize;
+    QSize modelSize;
 };
 
 struct OcrRecPrediction {
@@ -65,6 +74,7 @@ QVector<OcrDetPrediction> postProcessPaddleOcrDetDbMap(
 
 QJsonObject detectionPredictionToJson(const DetectionPrediction& prediction);
 QJsonObject segmentationPredictionToJson(const SegmentationPrediction& prediction);
+QJsonObject semanticSegmentationPredictionToJson(const SemanticSegmentationPrediction& prediction);
 QJsonObject ocrRecPredictionToJson(const OcrRecPrediction& prediction);
 QJsonObject ocrDetPredictionToJson(const OcrDetPrediction& prediction);
 
@@ -76,6 +86,11 @@ QImage renderDetectionPredictions(
 QImage renderSegmentationPredictions(
     const QString& imagePath,
     const QVector<SegmentationPrediction>& predictions,
+    QString* error = nullptr);
+
+QImage renderSemanticSegmentationPrediction(
+    const QString& imagePath,
+    const SemanticSegmentationPrediction& prediction,
     QString* error = nullptr);
 
 QImage renderOcrRecPrediction(

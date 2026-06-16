@@ -53,6 +53,21 @@ QJsonObject segmentationPredictionToJson(const SegmentationPrediction& predictio
     return object;
 }
 
+QJsonObject semanticSegmentationPredictionToJson(const SemanticSegmentationPrediction& prediction)
+{
+    QJsonObject object;
+    object.insert(QStringLiteral("taskType"), QStringLiteral("semantic_segmentation"));
+    object.insert(QStringLiteral("width"), prediction.mask.width());
+    object.insert(QStringLiteral("height"), prediction.mask.height());
+    object.insert(QStringLiteral("modelWidth"), prediction.modelSize.width());
+    object.insert(QStringLiteral("modelHeight"), prediction.modelSize.height());
+    object.insert(QStringLiteral("sourceWidth"), prediction.sourceSize.width());
+    object.insert(QStringLiteral("sourceHeight"), prediction.sourceSize.height());
+    object.insert(QStringLiteral("classNames"), QJsonArray::fromStringList(prediction.classNames));
+    object.insert(QStringLiteral("pixelCounts"), prediction.pixelCounts);
+    return object;
+}
+
 QJsonObject ocrRecPredictionToJson(const OcrRecPrediction& prediction)
 {
     QJsonArray tokens;
@@ -180,6 +195,44 @@ QImage renderSegmentationPredictions(
         painter.setPen(QPen(overlayColorForClass(prediction.detection.box.classId, 230), qMax(2, output.width() / 240)));
         painter.setBrush(Qt::NoBrush);
         painter.drawRect(rect);
+    }
+    painter.end();
+    return output;
+}
+
+QImage renderSemanticSegmentationPrediction(
+    const QString& imagePath,
+    const SemanticSegmentationPrediction& prediction,
+    QString* error)
+{
+    QImage image(imagePath);
+    if (image.isNull()) {
+        if (error) {
+            *error = QStringLiteral("Cannot render semantic segmentation prediction image: %1").arg(imagePath);
+        }
+        return {};
+    }
+    if (prediction.mask.isNull()) {
+        if (error) {
+            *error = QStringLiteral("Cannot render semantic segmentation prediction because mask is empty.");
+        }
+        return {};
+    }
+
+    QImage output = image.convertToFormat(QImage::Format_ARGB32);
+    QImage mask = prediction.mask;
+    if (mask.size() != output.size()) {
+        mask = mask.scaled(output.size(), Qt::IgnoreAspectRatio, Qt::FastTransformation);
+    }
+    QPainter painter(&output);
+    for (int y = 0; y < output.height(); ++y) {
+        for (int x = 0; x < output.width(); ++x) {
+            const int classId = qGray(mask.pixel(x, y));
+            if (classId <= 0) {
+                continue;
+            }
+            painter.fillRect(QRect(x, y, 1, 1), overlayColorForClass(classId, 95));
+        }
     }
     painter.end();
     return output;

@@ -1,6 +1,6 @@
 ﻿# AITrain Studio Acceptance Runbook
 
-This runbook is the Phase 17-50 plus P1 acceptance path, with YOLO26 tracked as a separate compatibility phase. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, records a traceable release-freeze package identity, validates newer YOLO detection/segmentation model-family candidates, documents the delivery-closeout workbench, adds the PP-OCRv5 GPU official-chain gate, defines the P1 full YOLO preset/export-argument matrix, adds the independent YOLO26 detection/instance-segmentation matrix, and adds PP-OCRv6 Det/Rec/System official-chain acceptance. OCR acceptance is official-only through PaddleOCR Det/Rec/System reports. RTX 4090 D TensorRT smoke evidence is recorded under `.deps\\rtx4090-validation\\acceptance-tensorrt`; clean Windows and customer-domain OCR production evidence still require returned external/customer data.
+This runbook is the Phase 17-50 plus P1 acceptance path, with YOLO26 tracked as a separate compatibility phase and SMP tracked as the first dedicated semantic segmentation route. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, records a traceable release-freeze package identity, validates newer YOLO detection/segmentation model-family candidates, documents the delivery-closeout workbench, adds the PP-OCRv5 GPU official-chain gate, defines the P1 full YOLO preset/export-argument matrix, adds the independent YOLO26 detection/instance-segmentation matrix, adds PP-OCRv6 Det/Rec/System official-chain acceptance, and adds an SMP semantic segmentation smoke. OCR acceptance is official-only through PaddleOCR Det/Rec/System reports. RTX 4090 D TensorRT smoke evidence is recorded under `.deps\\rtx4090-validation\\acceptance-tensorrt`; clean Windows and customer-domain OCR production evidence still require returned external/customer data.
 
 ## Acceptance Modes
 
@@ -16,6 +16,8 @@ Run the unified smoke script from the repository root:
 .\tools\phase-p1-yolo-full-matrix-smoke.ps1
 .\tools\phase-yolo26-model-matrix-smoke.ps1
 .\tools\phase-ppocrv6-model-matrix-smoke.ps1
+.\tools\phase-smp-semantic-segmentation-smoke.ps1
+.\tools\phase-smp-4090d-gpu-realtest.ps1
 .\tools\acceptance-smoke.ps1 -TensorRT
 .\tools\customer-ocr-validation.ps1
 ```
@@ -37,7 +39,18 @@ For external handoff, use `docs\external-acceptance-handoff.md` and the result t
 
 For release-freeze package identity, use `docs\release-freeze-handoff.md` and `tools\release-freeze-handoff.ps1`. This generates the CPack ZIP, SHA256 hashes, and a handoff manifest without marking external acceptance as passed.
 
-For YOLO model-family productization, use `docs\yolo-model-support-matrix.md`. Phase 45 validates newer Ultralytics detection/segmentation nano model names only. P1 validates YOLOv5u standard P5 detection, YOLOv8 / YOLO11 / YOLO12 detection, YOLOv8 / YOLO11 instance segmentation, YOLO12 instance-segmentation `.yaml`, `.yaml` and `.pt` source types where the official asset resolves, YOLOv8 P2/P6 detection YAML architectures, and the official export-argument protocol. YOLO12 segmentation `.pt` rows are blocked in the recorded Ultralytics 8.3.171 environment because `yolo12n-seg.pt` cannot be resolved, so they must not be counted as passed until upstream official `yolo12*-seg.pt` weights resolve. YOLO26 is validated by `tools\phase-yolo26-model-matrix-smoke.ps1` as a separate compatibility phase for detection and instance segmentation only. The shared Ultralytics 8.3.171 lifecycle lane blocked/failed all 20 YOLO26 rows, but the isolated 2026-06-15 targeted full lane passed 20/20 rows for training, official ONNX, AITrain C++ ONNX inference, and TensorRT. YOLO26 NCNN is not a supported export/deployment target. These paths do not expand scope to YOLOv5 segmentation, YOLOv5 P6, semantic segmentation, classification, pose, OBB, anomaly, YOLO-World, YOLOE-26, tracking, or other tasks.
+For YOLO model-family productization, use `docs\yolo-model-support-matrix.md`. Phase 45 validates newer Ultralytics detection/segmentation nano model names only. P1 validates YOLOv5u standard P5 detection, YOLOv8 / YOLO11 / YOLO12 detection, YOLOv8 / YOLO11 instance segmentation, YOLO12 instance-segmentation `.yaml`, `.yaml` and `.pt` source types where the official asset resolves, YOLOv8 P2/P6 detection YAML architectures, and the official export-argument protocol. YOLO12 segmentation `.pt` rows are blocked in the recorded Ultralytics 8.3.171 environment because `yolo12n-seg.pt` cannot be resolved, so they must not be counted as passed until upstream official `yolo12*-seg.pt` weights resolve. YOLO26 is validated by `tools\phase-yolo26-model-matrix-smoke.ps1` as a separate compatibility phase for detection and instance segmentation only. The shared Ultralytics 8.3.171 lifecycle lane blocked/failed all 20 YOLO26 rows, but the isolated 2026-06-15 targeted full lane passed 20/20 rows for training, official ONNX, AITrain C++ ONNX inference, and TensorRT. YOLO26 NCNN is not a supported export/deployment target. These YOLO paths do not expand scope to YOLOv5 segmentation, YOLOv5 P6, classification, pose, OBB, anomaly, YOLO-World, YOLOE-26, tracking, or other tasks. Dedicated semantic segmentation is validated separately through SMP and is not a YOLO instance-segmentation capability.
+
+For SMP semantic segmentation, use:
+
+```powershell
+.\tools\phase-smp-semantic-segmentation-smoke.ps1
+.\tools\phase-smp-4090d-gpu-realtest.ps1
+```
+
+`phase-smp-semantic-segmentation-smoke.ps1` remains the minimal adapter smoke: it generates a tiny Mask PNG semantic dataset, compiles the SMP trainer/evaluator, checks `segmentation_models_pytorch`, Torch, timm, ONNX, ONNX Runtime, Pillow, NumPy, and PyYAML, trains only when dependencies are available, exports `best.onnx`, runs evaluation, and verifies overlays. If dependencies are absent, use `-SkipTraining` for package/layout validation or treat the smoke summary as `blocked`, not passed.
+
+`phase-smp-4090d-gpu-realtest.ps1` is the RTX 4090D validation lane. It creates or repairs `.deps\envs\smp-gpu`, requires CUDA PyTorch, runs `smp_unet_resnet34` as the 20-epoch GPU mainline, runs the remaining public SMP presets as short GPU matrix rows, evaluates the exported ONNX, and calls `aitrain_worker.exe --semantic-onnx-smoke` to prove AITrain C++ ONNX Runtime inference, overlay, benchmark, and deployment validation. CPU fallback is not counted as a pass for this lane. The generated synthetic data validates engineering lifecycle only, not industrial accuracy.
 
 ## Phase 49 Lite: Delivery Closeout Workbench
 
@@ -132,7 +145,7 @@ From a packaged build directory, validate the already-installed layout with:
 Expected result:
 
 - `AITrainStudio.exe` and `aitrain_worker.exe` exist.
-- The three built-in plugins load through `aitrain_worker.exe --plugin-smoke`.
+- The four built-in plugins load through `aitrain_worker.exe --plugin-smoke`.
 - Runtime folders, docs, examples, Python trainers, requirements, and this acceptance script are present.
 - Worker self-check emits JSON and reports missing optional runtimes clearly.
 
@@ -427,6 +440,7 @@ Then check:
 - `docs\yolo-model-support-matrix.md` remains the source of truth for productized YOLO model-family status.
 - Phase 7 / Phase 10 TensorRT RTX 4090 D acceptance passed unless RTX / SM 75+ smoke passed.
 - Third-party backend license notes remain visible, especially Ultralytics AGPL / Enterprise constraints.
+- SMP semantic segmentation license/dependency notes remain visible; SMP acceptance is ONNX Runtime only, and NCNN/TensorRT export must not be required for SMP.
 - Legacy C++ tiny detector, segmentation baseline, OCR baseline, small OCR CTC, and shipped Python mock trainer implementations remain removed from the product training path.
 - Historical Phase 46/47 OCR ONNX wiring evidence remains archived, but current OCR acceptance is official-only through PaddleOCR Det/Rec/System reports and customer-domain data.
 - PP-OCRv5/PP-OCRv6 support is scoped to official Det/Rec/System presets and reports. It does not add PP-StructureV3, PP-ChatOCR, PaddleOCR-VL, document direction classification, image correction, text-line direction classification, or PaddleOCR C++ local deployment to the accepted product route.

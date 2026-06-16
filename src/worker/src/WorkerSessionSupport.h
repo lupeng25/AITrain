@@ -44,6 +44,7 @@ QJsonObject profileCheck(const QString& name, const QString& status, const QStri
 QJsonObject makeProfile(const QString& id, const QString& title, const QJsonArray& checks, const QJsonArray& repairHints);
 QJsonObject runModuleProbe(const QString& pythonExecutable, const QString& checkName, const QString& moduleName, const QString& hint);
 QJsonObject yoloEnvironmentProfile(const QString& pythonExecutable);
+QJsonObject smpEnvironmentProfile(const QString& pythonExecutable);
 QJsonObject ocrEnvironmentProfile(const QString& pythonExecutable);
 QJsonObject tensorRtEnvironmentProfile(const QJsonArray& baseChecks);
 

@@ -589,6 +589,15 @@ void MainWindow::updateTrainingSelectionSummary()
     if (trainingBackendHintLabel_ && trainingBackendCombo_) {
         trainingBackendHintLabel_->setText(trainingBackendDescription(trainingBackendCombo_->currentData().toString()));
     }
+    const QString visibleBackend = trainingBackendCombo_
+        ? trainingBackendCombo_->currentData().toString().trimmed().toLower()
+        : QString();
+    if (auto* yoloPanel = findChild<QWidget*>(QStringLiteral("YoloOfficialArgsGroup"))) {
+        yoloPanel->setVisible(visibleBackend.startsWith(QStringLiteral("ultralytics_yolo")));
+    }
+    if (auto* smpPanel = findChild<QWidget*>(QStringLiteral("SmpSemanticArgsGroup"))) {
+        smpPanel->setVisible(visibleBackend == QStringLiteral("smp_semantic_segmentation"));
+    }
     if (trainingRunSummaryLabel_) {
         const QString backend = trainingBackendCombo_
             ? trainingBackendCombo_->currentData().toString()
@@ -638,6 +647,10 @@ void MainWindow::refreshTrainingDefaults()
         preferredPlugin = QStringLiteral("com.aitrain.plugins.yolo_native");
         preferredTask = QStringLiteral("segmentation");
         preferredBackend = QStringLiteral("ultralytics_yolo_segment");
+    } else if (datasetFormat == QStringLiteral("semantic_segmentation_mask")) {
+        preferredPlugin = QStringLiteral("com.aitrain.plugins.semantic_segmentation");
+        preferredTask = QStringLiteral("semantic_segmentation");
+        preferredBackend = QStringLiteral("smp_semantic_segmentation");
     } else if (datasetFormat == QStringLiteral("paddleocr_det")) {
         preferredPlugin = QStringLiteral("com.aitrain.plugins.ocr_rec_native");
         preferredTask = QStringLiteral("ocr_detection");

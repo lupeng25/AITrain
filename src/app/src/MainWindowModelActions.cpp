@@ -61,6 +61,11 @@ QString yoloArgObjectName(const QString& key)
     return QStringLiteral("YoloTrainArg_%1").arg(key);
 }
 
+QString smpArgObjectName(const QString& key)
+{
+    return QStringLiteral("SmpTrainArg_%1").arg(key);
+}
+
 QString yoloExportArgObjectName(const QString& prefix, const QString& key)
 {
     return QStringLiteral("%1_%2").arg(prefix, key);
@@ -75,6 +80,21 @@ QString yoloTrainArgText(const QWidget* root, const QString& key)
         return edit->text().trimmed();
     }
     if (const auto* combo = root->findChild<QComboBox*>(yoloArgObjectName(key))) {
+        const QString value = combo->currentData().toString().trimmed();
+        return value.isEmpty() ? combo->currentText().trimmed() : value;
+    }
+    return {};
+}
+
+QString smpTrainArgText(const QWidget* root, const QString& key)
+{
+    if (!root) {
+        return {};
+    }
+    if (const auto* edit = root->findChild<QLineEdit*>(smpArgObjectName(key))) {
+        return edit->text().trimmed();
+    }
+    if (const auto* combo = root->findChild<QComboBox*>(smpArgObjectName(key))) {
         const QString value = combo->currentData().toString().trimmed();
         return value.isEmpty() ? combo->currentText().trimmed() : value;
     }
@@ -206,6 +226,48 @@ QJsonObject yoloTrainArgsFromUi(const QWidget* root)
     for (const QString& key : keys) {
         const QString text = yoloTrainArgText(root, key);
         const QJsonValue value = yoloTrainArgJsonValue(key, text);
+        if (!value.isUndefined() && !value.isNull()) {
+            args.insert(key, value);
+        }
+    }
+    return args;
+}
+
+QJsonValue smpTrainArgJsonValue(const QString& key, const QString& text)
+{
+    const QString normalized = text.trimmed();
+    if (normalized.isEmpty()) {
+        return QJsonValue();
+    }
+    const QSet<QString> intKeys = {
+        QStringLiteral("seed"),
+        QStringLiteral("workers"),
+        QStringLiteral("ignoreIndex")
+    };
+    if (intKeys.contains(key) && isIntegerLike(normalized)) {
+        return normalized.toInt();
+    }
+    if (key == QStringLiteral("learningRate") && isNumberLike(normalized)) {
+        return normalized.toDouble();
+    }
+    return normalized;
+}
+
+QJsonObject smpTrainArgsFromUi(const QWidget* root)
+{
+    const QStringList keys = {
+        QStringLiteral("seed"),
+        QStringLiteral("device"),
+        QStringLiteral("workers"),
+        QStringLiteral("learningRate"),
+        QStringLiteral("optimizer"),
+        QStringLiteral("loss"),
+        QStringLiteral("encoderWeights"),
+        QStringLiteral("ignoreIndex")
+    };
+    QJsonObject args;
+    for (const QString& key : keys) {
+        const QJsonValue value = smpTrainArgJsonValue(key, smpTrainArgText(root, key));
         if (!value.isUndefined() && !value.isNull()) {
             args.insert(key, value);
         }
@@ -539,16 +601,20 @@ void MainWindow::startTraining()
     parameters.insert(QStringLiteral("imageSize"), imageSizeEdit_->text().toInt());
     parameters.insert(QStringLiteral("gridSize"), gridSizeEdit_->text().toInt());
     parameters.insert(QStringLiteral("datasetFormat"), datasetFormat);
-    const QString yoloSeedText = yoloTrainArgText(this, QStringLiteral("seed"));
-    parameters.insert(QStringLiteral("seed"), yoloSeedText.isEmpty() ? 42 : yoloSeedText.toInt());
-    parameters.insert(QStringLiteral("resumeCheckpointPath"), QDir::fromNativeSeparators(resumeCheckpointEdit_->text().trimmed()));
-    parameters.insert(QStringLiteral("horizontalFlip"), horizontalFlipCheck_ && horizontalFlipCheck_->isChecked());
-    parameters.insert(QStringLiteral("colorJitter"), colorJitterCheck_ && colorJitterCheck_->isChecked());
     const QString trainingBackend = trainingBackendCombo_
         ? trainingBackendCombo_->currentData().toString().trimmed()
         : defaultBackendForTask(currentTaskType());
     const QString backendForRequest = trainingBackend.isEmpty() ? defaultBackendForTask(currentTaskType()) : trainingBackend;
     const QString modelPreset = modelPresetCombo_ ? modelPresetCombo_->currentText().trimmed() : QString();
+    const QString seedText = backendForRequest == QStringLiteral("smp_semantic_segmentation")
+        ? smpTrainArgText(this, QStringLiteral("seed"))
+        : yoloTrainArgText(this, QStringLiteral("seed"));
+    bool seedOk = false;
+    const int seed = seedText.toInt(&seedOk);
+    parameters.insert(QStringLiteral("seed"), seedOk ? seed : 42);
+    parameters.insert(QStringLiteral("resumeCheckpointPath"), QDir::fromNativeSeparators(resumeCheckpointEdit_->text().trimmed()));
+    parameters.insert(QStringLiteral("horizontalFlip"), horizontalFlipCheck_ && horizontalFlipCheck_->isChecked());
+    parameters.insert(QStringLiteral("colorJitter"), colorJitterCheck_ && colorJitterCheck_->isChecked());
     QString latestSnapshotManifest;
     if (repository_.isOpen()) {
         QString snapshotError;
@@ -596,6 +662,15 @@ void MainWindow::startTraining()
         parameters.insert(QStringLiteral("ultralyticsExportArgs"), yoloTrainingExportArgsFromUi(
             this,
             imageSizeEdit_ ? imageSizeEdit_->text().toInt() : 640));
+    }
+    if (backendForRequest == QStringLiteral("smp_semantic_segmentation")) {
+        const QJsonObject smpArgs = smpTrainArgsFromUi(this);
+        for (auto it = smpArgs.constBegin(); it != smpArgs.constEnd(); ++it) {
+            parameters.insert(it.key(), it.value());
+        }
+        parameters.insert(QStringLiteral("modelFamily"), QStringLiteral("semantic_segmentation"));
+        parameters.insert(QStringLiteral("taskType"), QStringLiteral("semantic_segmentation"));
+        parameters.insert(QStringLiteral("exportOnnx"), true);
     }
     if (backendForRequest == QStringLiteral("paddleocr_det_official")
         || backendForRequest == QStringLiteral("paddleocr_rec_official")

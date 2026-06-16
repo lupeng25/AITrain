@@ -4,12 +4,13 @@ AITrain Studio keeps training out of the GUI process. Real training is launched 
 
 ## Backend Summary
 
-Production training is official-backend only. The GUI training page and Worker production whitelist expose these training backends:
+Production training is limited to Worker-managed official or upstream-maintained adapters. The GUI training page and Worker production whitelist expose these training backends:
 
 | Backend | Task | Status | Notes |
 |---|---|---|---|
 | `ultralytics_yolo_detect` | Detection | Official Ultralytics adapter | Uses Ultralytics YOLO detection training and official export. P1 exposes YOLOv5u standard P5 detection presets, YOLOv8 / YOLO11 / YOLO12 `n/s/m/l/x` `.yaml` and `.pt` presets, plus YOLOv8 P2/P6 detection YAML architectures. YOLO26 detection `n/s/m/l/x` `.yaml` and `.pt` presets are tracked in the separate YOLO26 compatibility matrix; the 2026-06-15 isolated targeted full matrix passed training/ONNX/TensorRT, and NCNN is not offered for YOLO26. Product evaluation uses Ultralytics official `val()`; product inference, benchmark, and deployment validation run against official artifacts through the AITrain C++ runtime. Review AGPL-3.0 / Enterprise license before redistribution. |
 | `ultralytics_yolo_segment` | Segmentation | Official Ultralytics adapter | Uses Ultralytics YOLO instance-segmentation training and official export. P1 exposes YOLOv8 / YOLO11 `n/s/m/l/x` `-seg.yaml` and `-seg.pt` presets, plus YOLO12 `n/s/m/l/x` `-seg.yaml` presets. YOLO12 `-seg.pt` depends on upstream official weights and is currently blocked in the recorded Ultralytics 8.3.171 lifecycle run because `yolo12n-seg.pt` could not be resolved. YOLO26 instance-segmentation `n/s/m/l/x-seg` `.yaml` and `.pt` presets are tracked in the separate YOLO26 compatibility matrix; the 2026-06-15 isolated targeted full matrix passed training/ONNX/TensorRT, and NCNN is not offered for YOLO26. Product evaluation uses Ultralytics official `val()`; product inference, benchmark, and deployment validation run against official artifacts through the AITrain C++ runtime, including mask postprocess and overlays. |
+| `smp_semantic_segmentation` | Semantic segmentation | SMP adapter | Uses `segmentation_models.pytorch` for dedicated per-pixel semantic segmentation, separate from YOLO instance segmentation. The public presets are `smp_unet_resnet34`, `smp_unetplusplus_resnet34`, `smp_fpn_resnet34`, `smp_deeplabv3plus_resnet50`, and `smp_segformer_mit_b0`. Datasets use `classes.txt` plus `images/{train,val,test}` and `masks/{train,val,test}` single-channel PNG class-id masks. Training exports `best.pt`, `best.onnx`, `smp_training_report.json`, and `semantic_segmentation_sidecar.json`; evaluation reports mIoU, mean Dice, pixel accuracy, per-class metrics, confusion matrix, low-quality samples, and overlays. Product inference, overlay, benchmark, and deployment validation are ONNX Runtime only; NCNN/TensorRT export is not part of the SMP capability scope and is not required for SMP acceptance. Review SMP, Torch, timm, ONNX, and ONNX Runtime licenses before redistribution. |
 | `paddleocr_det_official` | OCR detection | Official PaddleOCR adapter | Generates PP-OCRv4, PP-OCRv5, or PP-OCRv6 detection configs from PaddleOCR Det data and can run official PaddleOCR `tools/train.py` and `tools/export_model.py`. The default preset remains `PP-OCRv5_mobile_det`; `PP-OCRv4_mobile_det`, `PP-OCRv5_server_det`, and PP-OCRv6 `tiny/small/medium` Det presets are selectable. |
 | `paddleocr_rec_official` / `paddleocr_ppocrv4_rec` | OCR recognition | Official PaddleOCR adapter | Generates PP-OCRv4, PP-OCRv5, or PP-OCRv6 recognition configs from AITrain PaddleOCR-style Rec data and runs official PaddleOCR `tools/train.py`, `tools/export_model.py`, and optional `tools/infer/predict_rec.py` when `runOfficial=true` and `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` points to a checkout. The default preset remains `PP-OCRv5_mobile_rec`; PP-OCRv6 `tiny/small/medium` Rec presets are selectable. |
 
@@ -27,7 +28,7 @@ AITrain no longer computes local YOLO AP/mAP, mask IoU, TP/FP/FN, local evaluati
 
 Use an isolated Python environment. The local development machine used Python 3.13 embeddable under `.deps`, but a regular venv is preferred for users.
 
-Detection and segmentation:
+YOLO detection and instance segmentation:
 
 ```powershell
 python -m venv .venv-yolo
@@ -56,6 +57,22 @@ The previous Phase 45 matrix remains useful as a faster YOLO11/YOLO12 nano wirin
 ```
 
 The P1 matrix does not productize YOLOv5 segmentation, YOLOv5 P6, YOLO26, semantic segmentation, tracking, classification, pose, OBB, anomaly, YOLO-World, or YOLOE. YOLO26 support is accepted only by a passing `phase-yolo26-model-matrix-smoke.ps1 -Full` summary and does not include semantic segmentation, classification, pose, OBB, tracking, or YOLOE-26.
+
+Dedicated semantic segmentation is a separate SMP route, not part of the YOLO P1/YOLO26 matrix:
+
+```powershell
+python -m venv .venv-smp
+.\.venv-smp\Scripts\python.exe -m pip install -r python_trainers\requirements-smp.txt
+.\tools\phase-smp-semantic-segmentation-smoke.ps1 -Python .\.venv-smp\Scripts\python.exe
+.\tools\phase-smp-4090d-gpu-realtest.ps1
+.\tools\phase-smp-oxford-pets-quality-matrix.ps1
+```
+
+Use `phase-smp-semantic-segmentation-smoke.ps1 -SkipTraining` when only verifying package layout and Python script compilation. A passing minimal smoke must produce `best.pt`, `best.onnx`, `smp_training_report.json`, `semantic_segmentation_sidecar.json`, `evaluation_report.json`, and non-empty overlay output. If SMP dependencies are missing, the smoke writes a blocked summary instead of treating generated data as product evidence.
+
+On an RTX 4090D validation machine, use `phase-smp-4090d-gpu-realtest.ps1` as the main SMP evidence lane. It creates or repairs `.deps\envs\smp-gpu`, requires CUDA PyTorch, trains `smp_unet_resnet34` on GPU for the main 20-epoch pass, runs the remaining public presets as short GPU matrix rows, evaluates the exported ONNX, and calls `aitrain_worker.exe --semantic-onnx-smoke` to prove AITrain C++ ONNX Runtime inference, overlay, timed benchmark, and deployment validation. CPU fallback is not accepted for this GPU lane.
+
+Use `phase-smp-oxford-pets-quality-matrix.ps1` for a script-first public-dataset quality comparison across all five SMP presets. It materializes the official Oxford-IIIT Pet `images.tar.gz` and `annotations.tar.gz`, converts trimaps into AITrain `semantic_segmentation_mask` format with `classes.txt = background, pet` and `ignoreIndex=255`, trains each preset, exports ONNX, evaluates val/test splits, runs AITrain C++ ONNX Runtime smoke on fixed test samples, and writes `smp_oxford_pets_quality_matrix_summary.json`, `smp_oxford_pets_model_comparison.csv`, `smp_oxford_pets_model_comparison.md`, and `overlays\contact_sheet.png`. The default uses ImageNet encoder weights; if weight downloads fail the row is blocked rather than silently falling back. Use `-NoPretrained` for explicit offline runs. Oxford Pets is public quality-comparison evidence, not industrial defect/customer-domain production precision evidence.
 
 Current YOLO26 status: the 2026-06-14/15 shared lifecycle run showed all YOLO26 detection and instance-segmentation rows fail in Ultralytics 8.3.171 before useful training starts. `.yaml` entries report missing files, most `.pt` entries report missing official weights, and nano `.pt` entries expose package/code incompatibility. The isolated 2026-06-15 targeted full matrix passed 20/20 rows for training, official ONNX, AITrain C++ ONNX inference, and TensorRT validation. YOLO26 NCNN remains removed from supported export/deployment targets.
 
@@ -288,13 +305,13 @@ If public dataset materialization fails or requires external interaction, the ge
 ## Known Boundaries
 
 - TensorRT engine building has passing RTX 4090 D acceptance evidence archived in `docs/validation/rtx4090-validation-evidence-20260615.json`; older unsupported GPUs should still report `hardware-blocked`.
-- P1 covers YOLOv5u standard P5 detection plus YOLOv8 / YOLO11 / YOLO12 detection and instance-segmentation presets only; it does not productize YOLOv5 segmentation, YOLOv5 P6, semantic segmentation, tracking, classification, pose, OBB, anomaly, YOLO-World, or YOLOE.
+- P1 covers YOLOv5u standard P5 detection plus YOLOv8 / YOLO11 / YOLO12 detection and instance-segmentation presets only; it does not productize YOLOv5 segmentation, YOLOv5 P6, tracking, classification, pose, OBB, anomaly, YOLO-World, or YOLOE. Dedicated semantic segmentation is covered separately by the SMP route and remains ONNX Runtime-only in this first version.
 - YOLO12 segmentation `.pt` rows are currently blocked by missing upstream official `yolo12*-seg.pt` resolution in the recorded Ultralytics 8.3.171 environment. Keep YOLO12 segmentation `.yaml` and YOLO12 detection `.pt` evidence separate.
 - YOLO26 detection/segmentation is a separate compatibility phase. The shared Ultralytics 8.3.171 environment blocked/failed all 20 YOLO26 rows, but the isolated 2026-06-15 targeted full matrix passed 20/20 training, official ONNX export, AITrain C++ ONNX inference, and TensorRT validation. YOLO26 NCNN is removed from supported export/deployment targets.
 - Progress dashboards that aggregate existing `row_summary.json` files can show historical failures from previous runs. Operators must filter by the current run start time or run id before interpreting failed counts as live failures.
 - Historical GTX 1060 / SM 61 machines can run CPU training smoke and ONNX Runtime checks, but they cannot validate TensorRT 10 engine building and must not override RTX 4090 acceptance evidence.
 - The Worker self-check may report `LibTorch` missing when `torch_cpu` DLLs are not installed. That does not block the current official Python YOLO/PaddleOCR routes, but it must remain visible and must not be used to claim C++ LibTorch training readiness.
-- C++ segmentation mask ONNX postprocess is available for YOLO segmentation smoke models.
+- C++ segmentation mask ONNX postprocess is available for YOLO instance-segmentation smoke models and for SMP semantic segmentation ONNX argmax masks.
 - OCR product inference, benchmark, evaluation, and acceptance are official-only. Historical C++ OCR ONNX wiring evidence must not be used as a current production OCR route.
 - PP-OCRv5 and PP-OCRv6 support in this phase covers official Det/Rec/System OCR only. It does not productize PP-StructureV3, PP-ChatOCR, PaddleOCR-VL, document orientation classification, document unwarping, text-line orientation classification, or PaddleOCR C++ local deployment. PP-OCRv6 tiny follows the official language-coverage limitation and is not a customer-domain production claim.
 - Official third-party backend licensing must be reviewed before commercial redistribution.

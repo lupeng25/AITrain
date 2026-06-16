@@ -65,6 +65,84 @@ QSize yoloInputSizeFromShape(const std::vector<int64_t>& inputShape, const QJson
     return QSize(width, height);
 }
 
+QVector<double> doubleVectorFromArray(const QJsonArray& array, const QVector<double>& fallback)
+{
+    if (array.isEmpty()) {
+        return fallback;
+    }
+    QVector<double> values;
+    values.reserve(array.size());
+    for (const QJsonValue& value : array) {
+        values.append(value.toDouble());
+    }
+    return values.isEmpty() ? fallback : values;
+}
+
+QSize semanticInputSizeFromShape(const std::vector<int64_t>& inputShape, const QJsonObject& config)
+{
+    if (inputShape.size() != 4) {
+        return {};
+    }
+    int height = static_cast<int>(inputShape.at(2));
+    int width = static_cast<int>(inputShape.at(3));
+    if (height <= 0) {
+        height = config.value(QStringLiteral("inputHeight")).toInt(config.value(QStringLiteral("imageSize")).toInt(256));
+    }
+    if (width <= 0) {
+        width = config.value(QStringLiteral("inputWidth")).toInt(config.value(QStringLiteral("imageSize")).toInt(height));
+    }
+    return height > 0 && width > 0 ? QSize(width, height) : QSize();
+}
+
+QVector<float> semanticImageTensor(const QImage& image, const QSize& inputSize, const QJsonObject& config)
+{
+    const QJsonObject normalization = config.value(QStringLiteral("normalization")).toObject();
+    const QVector<double> mean = doubleVectorFromArray(normalization.value(QStringLiteral("mean")).toArray(), {0.485, 0.456, 0.406});
+    const QVector<double> std = doubleVectorFromArray(normalization.value(QStringLiteral("std")).toArray(), {0.229, 0.224, 0.225});
+    const double scale = normalization.value(QStringLiteral("scale")).toDouble(1.0 / 255.0);
+    const QImage resized = image.convertToFormat(QImage::Format_RGB888).scaled(inputSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    QVector<float> tensor;
+    tensor.resize(3 * inputSize.width() * inputSize.height());
+    const int planeSize = inputSize.width() * inputSize.height();
+    for (int y = 0; y < inputSize.height(); ++y) {
+        const uchar* line = resized.constScanLine(y);
+        for (int x = 0; x < inputSize.width(); ++x) {
+            const int pixelIndex = y * inputSize.width() + x;
+            const int byteIndex = x * 3;
+            const double red = static_cast<double>(line[byteIndex]) * scale;
+            const double green = static_cast<double>(line[byteIndex + 1]) * scale;
+            const double blue = static_cast<double>(line[byteIndex + 2]) * scale;
+            tensor[pixelIndex] = static_cast<float>((red - mean.value(0, 0.485)) / std.value(0, 0.229));
+            tensor[planeSize + pixelIndex] = static_cast<float>((green - mean.value(1, 0.456)) / std.value(1, 0.224));
+            tensor[2 * planeSize + pixelIndex] = static_cast<float>((blue - mean.value(2, 0.406)) / std.value(2, 0.225));
+        }
+    }
+    return tensor;
+}
+
+QVector<QRgb> grayscaleColorTable()
+{
+    QVector<QRgb> table;
+    table.reserve(256);
+    for (int index = 0; index < 256; ++index) {
+        table.append(qRgb(index, index, index));
+    }
+    return table;
+}
+
+QJsonObject pixelCountsForMask(const QImage& mask)
+{
+    QJsonObject counts;
+    for (int y = 0; y < mask.height(); ++y) {
+        for (int x = 0; x < mask.width(); ++x) {
+            const int classId = qGray(mask.pixel(x, y));
+            const QString key = QString::number(classId);
+            counts.insert(key, counts.value(key).toDouble() + 1.0);
+        }
+    }
+    return counts;
+}
+
 bool jsonBoolValue(const QJsonValue& value, bool defaultValue = false)
 {
     if (value.isBool()) {
@@ -132,6 +210,10 @@ QString inferOnnxModelFamily(const QString& onnxPath, QString* warning)
     const QJsonObject config = loadOnnxExportConfig(onnxPath);
     const QString configuredFamily = config.value(QStringLiteral("modelFamily")).toString();
     const QString configuredBackend = config.value(QStringLiteral("backend")).toString();
+    if (configuredFamily == QStringLiteral("semantic_segmentation")
+        || configuredBackend == QStringLiteral("smp_semantic_segmentation")) {
+        return QStringLiteral("semantic_segmentation");
+    }
     if (configuredFamily == QStringLiteral("yolo_segmentation")
         || configuredBackend == QStringLiteral("ultralytics_yolo_segment")) {
         return QStringLiteral("yolo_segmentation");
@@ -489,6 +571,164 @@ QVector<SegmentationPrediction> predictSegmentationOnnxRuntime(
     } catch (const std::exception& exception) {
         if (error) {
             *error = QStringLiteral("ONNX segmentation inference failed: %1").arg(QString::fromUtf8(exception.what()));
+        }
+        return {};
+    }
+#endif
+}
+
+SemanticSegmentationPrediction predictSemanticSegmentationOnnxRuntime(
+    const QString& onnxPath,
+    const QString& imagePath,
+    QString* error)
+{
+#ifndef AITRAIN_WITH_ONNXRUNTIME
+    Q_UNUSED(onnxPath)
+    Q_UNUSED(imagePath)
+    if (error) {
+        *error = QStringLiteral("ONNX Runtime inference is not enabled. Configure AITRAIN_ONNXRUNTIME_ROOT with an ONNX Runtime SDK to enable .onnx inference.");
+    }
+    return {};
+#else
+    if (!QFileInfo::exists(onnxPath)) {
+        if (error) {
+            *error = QStringLiteral("ONNX semantic segmentation model does not exist: %1").arg(onnxPath);
+        }
+        return {};
+    }
+    QImage image(imagePath);
+    if (image.isNull()) {
+        if (error) {
+            *error = QStringLiteral("Cannot read image for ONNX semantic segmentation prediction: %1").arg(imagePath);
+        }
+        return {};
+    }
+
+    try {
+        const QJsonObject exportConfig = loadOnnxExportConfig(onnxPath);
+        Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "aitrain");
+        Ort::SessionOptions sessionOptions;
+        sessionOptions.SetIntraOpNumThreads(1);
+        sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
+#ifdef Q_OS_WIN
+        const std::wstring modelPath = QDir::toNativeSeparators(onnxPath).toStdWString();
+        Ort::Session session(env, modelPath.c_str(), sessionOptions);
+#else
+        const QByteArray modelPath = QFile::encodeName(onnxPath);
+        Ort::Session session(env, modelPath.constData(), sessionOptions);
+#endif
+        Ort::AllocatorWithDefaultOptions allocator;
+        if (session.GetInputCount() != 1 || session.GetOutputCount() < 1) {
+            if (error) {
+                *error = QStringLiteral("Semantic segmentation ONNX expects one input and at least one output.");
+            }
+            return {};
+        }
+        const std::vector<int64_t> inputShape = session.GetInputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape();
+        const QSize inputSize = semanticInputSizeFromShape(inputShape, exportConfig);
+        if (inputShape.size() != 4 || inputShape.at(1) != 3 || inputSize.isEmpty()) {
+            if (error) {
+                *error = QStringLiteral("Semantic segmentation ONNX input shape must be [1, 3, height, width].");
+            }
+            return {};
+        }
+
+        QVector<float> input = semanticImageTensor(image, inputSize, exportConfig);
+        std::vector<int64_t> tensorShape = {1, 3, inputSize.height(), inputSize.width()};
+        Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+        Ort::Value inputTensor = Ort::Value::CreateTensor<float>(
+            memoryInfo,
+            input.data(),
+            static_cast<size_t>(input.size()),
+            tensorShape.data(),
+            tensorShape.size());
+
+        auto inputName = session.GetInputNameAllocated(0, allocator);
+        std::vector<Ort::AllocatedStringPtr> outputNameHolders;
+        std::vector<const char*> outputNames;
+        const size_t outputCount = session.GetOutputCount();
+        outputNameHolders.reserve(outputCount);
+        outputNames.reserve(outputCount);
+        for (size_t outputIndex = 0; outputIndex < outputCount; ++outputIndex) {
+            outputNameHolders.emplace_back(session.GetOutputNameAllocated(outputIndex, allocator));
+            outputNames.push_back(outputNameHolders.back().get());
+        }
+        const char* inputNames[] = { inputName.get() };
+        std::vector<Ort::Value> outputs = session.Run(
+            Ort::RunOptions{nullptr},
+            inputNames,
+            &inputTensor,
+            1,
+            outputNames.data(),
+            outputNames.size());
+        if (outputs.empty()) {
+            if (error) {
+                *error = QStringLiteral("Semantic segmentation ONNX did not return outputs.");
+            }
+            return {};
+        }
+
+        const std::vector<int64_t> outputShape = outputs.front().GetTensorTypeAndShapeInfo().GetShape();
+        if (outputShape.size() != 4 || outputShape.at(0) != 1 || outputShape.at(1) <= 0 || outputShape.at(2) <= 0 || outputShape.at(3) <= 0) {
+            if (error) {
+                *error = QStringLiteral("Semantic segmentation ONNX output must be logits shaped [1, classes, height, width].");
+            }
+            return {};
+        }
+        const int classCount = static_cast<int>(outputShape.at(1));
+        const int outputHeight = static_cast<int>(outputShape.at(2));
+        const int outputWidth = static_cast<int>(outputShape.at(3));
+        if (classCount > 255) {
+            if (error) {
+                *error = QStringLiteral("Semantic segmentation class count exceeds 255; Mask PNG runtime supports one-byte class ids.");
+            }
+            return {};
+        }
+
+        QStringList classNames = stringListFromArray(exportConfig.value(QStringLiteral("classNames")).toArray());
+        while (classNames.size() < classCount) {
+            classNames.append(QStringLiteral("class_%1").arg(classNames.size()));
+        }
+
+        const float* logits = outputs.front().GetTensorData<float>();
+        QImage mask(outputWidth, outputHeight, QImage::Format_Indexed8);
+        mask.setColorTable(grayscaleColorTable());
+        for (int y = 0; y < outputHeight; ++y) {
+            uchar* line = mask.scanLine(y);
+            for (int x = 0; x < outputWidth; ++x) {
+                int bestClass = 0;
+                float bestValue = logits[y * outputWidth + x];
+                for (int classId = 1; classId < classCount; ++classId) {
+                    const float value = logits[classId * outputHeight * outputWidth + y * outputWidth + x];
+                    if (value > bestValue) {
+                        bestValue = value;
+                        bestClass = classId;
+                    }
+                }
+                line[x] = static_cast<uchar>(qBound(0, bestClass, 255));
+            }
+        }
+        QImage sourceMask = mask.scaled(image.size(), Qt::IgnoreAspectRatio, Qt::FastTransformation);
+        if (sourceMask.format() != QImage::Format_Indexed8) {
+            sourceMask = sourceMask.convertToFormat(QImage::Format_Indexed8);
+            sourceMask.setColorTable(grayscaleColorTable());
+        }
+
+        SemanticSegmentationPrediction prediction;
+        prediction.mask = sourceMask;
+        prediction.classNames = classNames;
+        prediction.pixelCounts = pixelCountsForMask(sourceMask);
+        prediction.sourceSize = image.size();
+        prediction.modelSize = QSize(outputWidth, outputHeight);
+        return prediction;
+    } catch (const Ort::Exception& exception) {
+        if (error) {
+            *error = QStringLiteral("ONNX Runtime semantic segmentation inference failed: %1").arg(QString::fromUtf8(exception.what()));
+        }
+        return {};
+    } catch (const std::exception& exception) {
+        if (error) {
+            *error = QStringLiteral("ONNX semantic segmentation inference failed: %1").arg(QString::fromUtf8(exception.what()));
         }
         return {};
     }

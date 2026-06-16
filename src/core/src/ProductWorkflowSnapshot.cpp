@@ -15,6 +15,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QImage>
 #include <QImageReader>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -33,10 +34,14 @@ QString snapshotFileRole(const QString& relativePath, const QFileInfo& fileInfo)
     const QString path = QDir::fromNativeSeparators(relativePath).toLower();
     const QString name = fileInfo.fileName().toLower();
     const QString suffix = fileInfo.suffix().toLower();
+    if ((path.startsWith(QStringLiteral("masks/")) || path.contains(QStringLiteral("/masks/"))) && suffix == QStringLiteral("png")) {
+        return QStringLiteral("mask");
+    }
     if (isImageFile(suffix)) {
         return QStringLiteral("image");
     }
-    if (name == QStringLiteral("data.yaml") || name == QStringLiteral("data.yml") || suffix == QStringLiteral("yaml") || suffix == QStringLiteral("yml")) {
+    if (name == QStringLiteral("classes.txt")
+        || name == QStringLiteral("data.yaml") || name == QStringLiteral("data.yml") || suffix == QStringLiteral("yaml") || suffix == QStringLiteral("yml")) {
         return QStringLiteral("config");
     }
     if (name == QStringLiteral("dict.txt")) {
@@ -124,6 +129,53 @@ QJsonObject countImageSplits(const QString& datasetPath)
     return splits;
 }
 
+QJsonObject countSemanticImageSplits(const QString& datasetPath)
+{
+    QJsonObject splits;
+    const QDir root(datasetPath);
+    for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
+        const QDir imageDir(root.filePath(QStringLiteral("images/%1").arg(split)));
+        int count = 0;
+        if (imageDir.exists()) {
+            for (const QString& filter : imageNameFilters()) {
+                count += imageDir.entryInfoList({filter}, QDir::Files).size();
+            }
+        }
+        splits.insert(split, count);
+    }
+    return splits;
+}
+
+QJsonObject countSemanticClassPixels(const QString& datasetPath, int ignoreIndex)
+{
+    QJsonObject counts;
+    const QDir root(datasetPath);
+    for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
+        const QDir maskDir(root.filePath(QStringLiteral("masks/%1").arg(split)));
+        if (!maskDir.exists()) {
+            continue;
+        }
+        const QFileInfoList masks = maskDir.entryInfoList({QStringLiteral("*.png")}, QDir::Files, QDir::Name);
+        for (const QFileInfo& maskInfo : masks) {
+            const QImage mask(maskInfo.absoluteFilePath());
+            if (mask.isNull()) {
+                continue;
+            }
+            for (int y = 0; y < mask.height(); ++y) {
+                for (int x = 0; x < mask.width(); ++x) {
+                    const int classId = qGray(mask.pixel(x, y));
+                    if (classId == ignoreIndex) {
+                        continue;
+                    }
+                    const QString key = QString::number(classId);
+                    counts.insert(key, counts.value(key).toDouble() + 1.0);
+                }
+            }
+        }
+    }
+    return counts;
+}
+
 QString classDistributionCsv(const QJsonObject& counts)
 {
     QString csv = QStringLiteral("class,count\n");
@@ -206,14 +258,19 @@ WorkflowResult createDatasetSnapshotReport(
     manifest.insert(QStringLiteral("fileCount"), files.size());
     manifest.insert(QStringLiteral("totalBytes"), QString::number(totalBytes));
     manifest.insert(QStringLiteral("contentHash"), QString::fromLatin1(manifestHash.result().toHex()));
-    manifest.insert(QStringLiteral("splits"), countImageSplits(datasetPath));
+    manifest.insert(QStringLiteral("splits"), format == QStringLiteral("semantic_segmentation_mask")
+        ? countSemanticImageSplits(datasetPath)
+        : countImageSplits(datasetPath));
     if (format == QStringLiteral("yolo_detection") || format == QStringLiteral("yolo_segmentation")) {
         manifest.insert(QStringLiteral("classCounts"), countYoloClasses(datasetPath));
+    } else if (format == QStringLiteral("semantic_segmentation_mask")) {
+        manifest.insert(QStringLiteral("classPixelCounts"), countSemanticClassPixels(datasetPath, options.value(QStringLiteral("ignoreIndex")).toInt(255)));
     }
     manifest.insert(QStringLiteral("roleCounts"), roleCounts);
     manifest.insert(QStringLiteral("keyFiles"), keyFileArray);
     manifest.insert(QStringLiteral("imageCount"), roleCounts.value(QStringLiteral("image")).toInt());
     manifest.insert(QStringLiteral("labelCount"), roleCounts.value(QStringLiteral("label")).toInt());
+    manifest.insert(QStringLiteral("maskCount"), roleCounts.value(QStringLiteral("mask")).toInt());
     manifest.insert(QStringLiteral("files"), fileArray);
 
     const QString reportPath = QDir(outputPath).filePath(QStringLiteral("dataset_snapshot_manifest.json"));

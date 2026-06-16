@@ -166,4 +166,10 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(aitrain_yolo_telemetry_python_tests PROPERTIES
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     )
+    add_test(NAME aitrain_smp_semantic_python_tests
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_smp_semantic_segmentation.py"
+    )
+    set_tests_properties(aitrain_smp_semantic_python_tests PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    )
 endif()

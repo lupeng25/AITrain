@@ -215,6 +215,7 @@ images/sample.png<TAB>[{"transcription":"text","points":[[1,1],[30,1],[30,20],[1
 |---|---|---|---|
 | YOLO 检测 | `ultralytics_yolo_detect` | 默认 `yolov8n.yaml`；可选 YOLOv5u 标准 P5 检测、YOLOv8 / YOLO11 / YOLO12 `n/s/m/l/x` `.yaml`、`.pt`，以及 YOLOv8 P2/P6 `.yaml`；YOLO26 检测按独立 targeted matrix 证据放行训练/ONNX/TensorRT，NCNN 不作为可选目标 | 官方 Ultralytics 检测训练、ONNX 导出和 `val()` 评估；推理、benchmark、部署验证走 AITrain C++ runtime |
 | YOLO 分割 | `ultralytics_yolo_segment` | 默认 `yolov8n-seg.yaml`；可选 YOLOv8 / YOLO11 `n/s/m/l/x` `-seg.yaml`、`-seg.pt`，YOLO12 `n/s/m/l/x` `-seg.yaml`；YOLO12 `-seg.pt` 按上游权重 blocker 处理，YOLO26 分割按独立 targeted matrix 证据放行训练/ONNX/TensorRT，NCNN 不作为可选目标 | 官方 Ultralytics 分割训练、ONNX 导出和 `val()` 评估；mask 后处理、推理、benchmark、部署验证走 AITrain C++ runtime |
+| 语义分割 Mask PNG | `smp_semantic_segmentation` | 默认 `smp_unet_resnet34`；可选 `smp_unetplusplus_resnet34`、`smp_fpn_resnet34`、`smp_deeplabv3plus_resnet50`、`smp_segformer_mit_b0` | SMP 专用语义分割，要求 `classes.txt` 和单通道 PNG class-id mask；训练导出 `best.pt`、`best.onnx` 和 SMP 报告；推理、overlay、benchmark 和部署验证只承诺 ONNX Runtime；SMP 不需要 NCNN/TensorRT 导出 |
 | PaddleOCR Det | `paddleocr_det_official` | 默认 `PP-OCRv5_mobile_det`；可选 `PP-OCRv4_mobile_det`、`PP-OCRv5_server_det`、`PP-OCRv6_tiny/small/medium_det` | 官方 PaddleOCR 检测工具链，建议使用隔离 OCR 环境；PP-OCRv5/v6 preset 需要 PaddleOCR 源码 checkout |
 | PaddleOCR Rec | `paddleocr_rec_official` | 默认 `PP-OCRv5_mobile_rec`；可选 `PP-OCRv4_mobile_rec`、`PP-OCRv5_server_rec`、`en_PP-OCRv5_mobile_rec`、`PP-OCRv6_tiny/small/medium_rec` | 官方 PaddleOCR Rec adapter，可运行 train/export/predict；`paddleocr_rec` 仅作为数据集格式保留 |
 
@@ -222,7 +223,7 @@ images/sample.png<TAB>[{"transcription":"text","points":[[1,1],[30,1],[30,20],[1
 
 旧的 `tiny_linear_detector`、小型 `paddleocr_rec` CTC trainer、`python_mock` 和 C++ 分割/OCR 训练 scaffold 已物理删除，不会出现在用户训练后端列表中，也不会作为主验收 passed 依据。`paddleocr_rec` 仅作为数据集格式保留。
 
-YOLO 与 OCR 的产品边界不同：YOLO 的训练、ONNX 导出和检测/分割评估来自官方 Ultralytics；后续单图推理、benchmark 和部署验证默认使用 AITrain C++ ONNX Runtime / NCNN runtime，TensorRT 当前用于 engine 导出和部署验证状态记录。OCR 则只接受 PaddleOCR 官方 Det / Rec / System 报告作为当前产品证据。PP-OCRv5/PP-OCRv6 支持只增加 Det / Rec / System 官方链路，不表示已经覆盖 PP-StructureV3、PP-ChatOCR、PaddleOCR-VL、文档方向分类、图像矫正、文本行方向分类或 PaddleOCR C++ 本地部署。PP-OCRv6 tiny 的语言覆盖按 PaddleOCR 官方限制处理，客户域生产声明仍需客户数据验收。
+YOLO、SMP 与 OCR 的产品边界不同：YOLO 的训练、ONNX 导出和检测/实例分割评估来自官方 Ultralytics；后续单图推理、benchmark 和部署验证默认使用 AITrain C++ ONNX Runtime / NCNN runtime，TensorRT 当前用于 engine 导出和部署验证状态记录。SMP 是专用语义分割路线，不复用 YOLO instance segmentation 的 task/backend/export 语义；SMP 只承诺 ONNX Runtime 推理、overlay、benchmark 和部署验证，NCNN/TensorRT 导出不属于 SMP 能力范围，也不是 SMP 验收要求。OCR 则只接受 PaddleOCR 官方 Det / Rec / System 报告作为当前产品证据。PP-OCRv5/PP-OCRv6 支持只增加 Det / Rec / System 官方链路，不表示已经覆盖 PP-StructureV3、PP-ChatOCR、PaddleOCR-VL、文档方向分类、图像矫正、文本行方向分类或 PaddleOCR C++ 本地部署。PP-OCRv6 tiny 的语言覆盖按 PaddleOCR 官方限制处理，客户域生产声明仍需客户数据验收。
 
 YOLO 模型预设下拉是完整产品化入口，但仍允许手动输入官方 Ultralytics 可解析的模型名。训练页会做任务匹配预检：检测后端不能选择 `-seg` 模型，分割后端必须选择 `-seg` 模型。YOLOv5 支持按 Ultralytics YOLOv5u 检测路线处理，预设包含 `yolov5n/s/m/l/x.yaml` 和 `yolov5nu/su/mu/lu/xu.pt`；不承诺兼容原始 `ultralytics/yolov5` 仓库旧权重，也不把 YOLOv5 segmentation 或 P6 纳入当前产品矩阵。YOLO12 分割 `.yaml` 是当前可验证路线；YOLO12 分割 `.pt` 只有在安装的 Ultralytics 能解析官方 `yolo12*-seg.pt` 权重时才能运行，当前记录为 `blocked_missing_official_weight`。YOLO26 作为独立兼容阶段跟踪 detection 和 instance segmentation 标准 `n/s/m/l/x` `.yaml`、`.pt` 预设；共享 Ultralytics 8.3.171 环境下仍应记录为 `blocked_model_unavailable` / `blocked_ultralytics_incompatible`，隔离 targeted full 证据仅支持训练、官方 ONNX、AITrain C++ ONNX 推理和 TensorRT。YOLO26 NCNN 不作为客户可用部署目标，“部署验证 > 模型导出”会移除该选项，Worker 会拒绝 `format=ncnn`。YOLO26 不支持 semantic segmentation、classification、pose、OBB、tracking 或 YOLOE-26。`.pt` 权重不随 AITrain 包分发，首次使用时可能由官方 Ultralytics 包下载到用户环境。
 
@@ -251,9 +252,10 @@ YOLO 模型预设下拉是完整产品化入口，但仍允许手动输入官方
 
 - YOLO 检测：通过 Ultralytics 官方 `val()` 输出 precision、recall、mAP50、mAP50-95、per-class maps、官方 confusion/PR/F1/P/R plots 和 predictions JSON（取决于官方版本和参数）。
 - YOLO 分割：通过 Ultralytics 官方 `val()` 输出 box/mask precision、recall、maskMap50、mask mAP50-95、per-class mask maps、官方 confusion/PR/F1/P/R plots 和 predictions JSON（取决于官方版本和参数）。
+- 语义分割：通过 SMP evaluator 输出 mIoU、meanDice、pixelAccuracy、per-class IoU/Dice、confusion matrix、低质量样本和 overlay。
 - OCR Rec：通过 PaddleOCR 官方 Rec/System 报告和客户域 OCR 验收查看；AITrain 不用 C++ OCR ONNX 后处理生成当前产品评估证据。
 
-评估依赖模型格式、数据集格式和可用 Python/Ultralytics 环境。YOLO 检测和分割评估完全使用 Ultralytics 官方 `YOLO(...).val()`；AITrain 只保留 `evaluation_report.json` 外壳和任务产物记录，不再计算本地 AP/mAP、mask IoU、TP/FP/FN、错误样本或本地 overlay。OCR 评估通过官方 PaddleOCR 报告查看。
+评估依赖模型格式、数据集格式和可用 Python 环境。YOLO 检测和实例分割评估完全使用 Ultralytics 官方 `YOLO(...).val()`；AITrain 只保留 `evaluation_report.json` 外壳和任务产物记录，不再计算本地 AP/mAP、mask IoU、TP/FP/FN、错误样本或本地 overlay。SMP 语义分割评估使用 SMP/ONNX evaluator 计算像素级指标和 overlay。OCR 评估通过官方 PaddleOCR 报告查看。
 
 “模型库 > 模型版本”用于管理已注册的模型版本。建议注册时关联：
 

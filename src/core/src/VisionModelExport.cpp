@@ -803,6 +803,7 @@ DetectionExportResult exportDetectionCheckpoint(
     const QString effectiveCheckpointPath = siblingOnnxPath.isEmpty() ? checkpointPath : siblingOnnxPath;
     const bool sourceIsOnnx = QFileInfo(effectiveCheckpointPath).suffix().toLower() == QStringLiteral("onnx");
     if (sourceIsOnnx) {
+        const QString sourceModelFamily = inferOnnxModelFamily(effectiveCheckpointPath);
         QString finalOutputPath = outputPath;
         if (finalOutputPath.isEmpty()) {
             finalOutputPath = ncnnFormat
@@ -835,7 +836,19 @@ DetectionExportResult exportDetectionCheckpoint(
                 }
             }
             const QString reportPath = onnxExportReportPath(finalOutputPath);
-            QJsonObject config = yoloOnnxExportConfig(effectiveCheckpointPath, finalOutputPath, normalizedFormat);
+            QJsonObject config;
+            if (sourceModelFamily == QStringLiteral("semantic_segmentation")) {
+                config = loadOnnxExportConfig(effectiveCheckpointPath);
+                config.insert(QStringLiteral("format"), QStringLiteral("onnx"));
+                config.insert(QStringLiteral("backend"), QStringLiteral("smp_semantic_segmentation"));
+                config.insert(QStringLiteral("modelFamily"), QStringLiteral("semantic_segmentation"));
+                config.insert(QStringLiteral("taskType"), QStringLiteral("semantic_segmentation"));
+                config.insert(QStringLiteral("datasetFormat"), QStringLiteral("semantic_segmentation_mask"));
+                config.insert(QStringLiteral("sourceOnnx"), effectiveCheckpointPath);
+                config.insert(QStringLiteral("exportPath"), finalOutputPath);
+            } else {
+                config = yoloOnnxExportConfig(effectiveCheckpointPath, finalOutputPath, normalizedFormat);
+            }
             if (!siblingOnnxPath.isEmpty()) {
                 config.insert(QStringLiteral("sourceCheckpoint"), checkpointPath);
                 config.insert(QStringLiteral("sourceOnnx"), effectiveCheckpointPath);
@@ -855,13 +868,17 @@ DetectionExportResult exportDetectionCheckpoint(
         }
 
         if (ncnnFormat) {
+            if (sourceModelFamily == QStringLiteral("semantic_segmentation")) {
+                result.error = QStringLiteral("SMP semantic segmentation uses ONNX Runtime deployment; NCNN export is not part of the SMP capability scope.");
+                return result;
+            }
             if (isYolo26OnnxSource(effectiveCheckpointPath)) {
                 result.error = QStringLiteral("YOLO26 NCNN export is not supported by AITrain; use ONNX or TensorRT for YOLO26 deployment.");
                 return result;
             }
             const QString binPath = ncnnBinPathForParam(finalOutputPath);
             QString converterPath;
-            const QString modelFamily = inferOnnxModelFamily(effectiveCheckpointPath);
+            const QString modelFamily = sourceModelFamily;
             QString pnnxError;
             const bool preferPnnx = modelFamily == QStringLiteral("yolo_detection") || modelFamily == QStringLiteral("yolo_segmentation");
             bool converted = false;
@@ -899,6 +916,10 @@ DetectionExportResult exportDetectionCheckpoint(
         }
 
         if (tensorRtFormat) {
+            if (sourceModelFamily == QStringLiteral("semantic_segmentation")) {
+                result.error = QStringLiteral("SMP semantic segmentation uses ONNX Runtime deployment; TensorRT export is not part of the SMP capability scope.");
+                return result;
+            }
 #ifndef AITRAIN_WITH_TENSORRT_SDK
             result.error = QStringLiteral("TensorRT export is not available: %1").arg(tensorRtBackendStatus().message);
             return result;

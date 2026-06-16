@@ -673,6 +673,7 @@ add_subdirectory(src/app)
 add_subdirectory(src/worker)
 add_subdirectory(src/plugins/dataset_interop)
 add_subdirectory(src/plugins/yolo_native)
+add_subdirectory(src/plugins/semantic_segmentation)
 add_subdirectory(src/plugins/ocr_rec)
 
 add_custom_target(aitrain_python_trainers_copy ALL
@@ -732,6 +733,9 @@ install(FILES
     tools/phase45-yolo-model-matrix-smoke.ps1
     tools/phase-p1-yolo-full-matrix-smoke.ps1
     tools/phase-yolo26-model-matrix-smoke.ps1
+    tools/phase-smp-semantic-segmentation-smoke.ps1
+    tools/phase-smp-4090d-gpu-realtest.ps1
+    tools/phase-smp-oxford-pets-quality-matrix.ps1
     tools/full-model-lifecycle-matrix.ps1
     tools/full-model-lifecycle-progress-server.py
     tools/phase-ncnn-runtime-smoke.ps1
@@ -740,6 +744,7 @@ install(FILES
     tools/create-plugin-package.ps1
     tools/create-plugin-marketplace-demo.ps1
     tools/materialize-ultralytics-dataset.py
+    tools/materialize-oxford-pets-semantic.py
     tools/phase16-ocr-official-smoke.ps1
     tools/phase31-paddleocr-full-official-smoke.ps1
     tools/phase-ppocrv6-model-matrix-smoke.ps1

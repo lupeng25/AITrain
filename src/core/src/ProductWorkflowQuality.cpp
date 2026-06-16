@@ -15,6 +15,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QImage>
 #include <QImageReader>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -133,6 +134,7 @@ bool isSupportedQualityFormat(const QString& format)
     return format == QStringLiteral("yolo_detection")
         || format == QStringLiteral("yolo_txt")
         || format == QStringLiteral("yolo_segmentation")
+        || format == QStringLiteral("semantic_segmentation_mask")
         || format == QStringLiteral("paddleocr_det")
         || format == QStringLiteral("paddleocr_rec");
 }
@@ -590,6 +592,100 @@ void scanYoloQuality(DatasetQualityContext& context, bool segmentation)
                     issue.xAnyLabelingSupported = false;
                     addQualityIssue(context, issue);
                 }
+            }
+        }
+    }
+}
+
+QStringList readSemanticClassNames(const QString& datasetPath)
+{
+    QStringList classNames;
+    QFile file(QDir(datasetPath).filePath(QStringLiteral("classes.txt")));
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return classNames;
+    }
+    while (!file.atEnd()) {
+        const QString line = QString::fromUtf8(file.readLine()).trimmed();
+        if (!line.isEmpty()) {
+            classNames.append(line);
+        }
+    }
+    return classNames;
+}
+
+void scanSemanticMaskQuality(DatasetQualityContext& context, const QJsonObject& options)
+{
+    const int ignoreIndex = options.value(QStringLiteral("ignoreIndex")).toInt(255);
+    context.classNames = readSemanticClassNames(context.datasetPath);
+    const QDir root(context.datasetPath);
+    for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
+        if (qualityCanceled(context)) {
+            return;
+        }
+        const QDir imageDir(root.filePath(QStringLiteral("images/%1").arg(split)));
+        const QDir maskDir(root.filePath(QStringLiteral("masks/%1").arg(split)));
+        const QFileInfoList images = imageDir.exists() ? qualityImageFiles(imageDir) : QFileInfoList();
+        for (const QFileInfo& imageInfo : images) {
+            if (qualityCanceled(context)) {
+                return;
+            }
+            if (scanLimitReached(context, imageInfo.absoluteFilePath())) {
+                return;
+            }
+            const QString maskPath = maskDir.filePath(imageInfo.completeBaseName() + QStringLiteral(".png"));
+            inspectQualityImage(context, imageInfo.absoluteFilePath(), split, maskPath);
+            QFileInfo maskInfo(maskPath);
+            if (!maskInfo.exists()) {
+                QualityIssue issue;
+                issue.severity = QStringLiteral("error");
+                issue.code = QStringLiteral("missing_mask");
+                issue.filePath = maskPath;
+                issue.imagePath = imageInfo.absoluteFilePath();
+                issue.labelPath = maskPath;
+                issue.split = split;
+                issue.message = QStringLiteral("Image is missing its matching semantic mask PNG.");
+                issue.repairHint = QStringLiteral("Create masks/<split>/<stem>.png or remove the sample from the split.");
+                issue.xAnyLabelingSupported = false;
+                addQualityIssue(context, issue);
+                continue;
+            }
+            context.splits[split].labelCount += 1;
+            const QImage mask(maskInfo.absoluteFilePath());
+            if (mask.isNull()) {
+                QualityIssue issue;
+                issue.severity = QStringLiteral("error");
+                issue.code = QStringLiteral("invalid_mask");
+                issue.filePath = maskInfo.absoluteFilePath();
+                issue.imagePath = imageInfo.absoluteFilePath();
+                issue.labelPath = maskInfo.absoluteFilePath();
+                issue.split = split;
+                issue.message = QStringLiteral("Semantic mask cannot be decoded.");
+                issue.repairHint = QStringLiteral("Re-export the mask as single-channel PNG.");
+                addQualityIssue(context, issue);
+                continue;
+            }
+            QSet<int> classesInMask;
+            for (int y = 0; y < mask.height(); ++y) {
+                for (int x = 0; x < mask.width(); ++x) {
+                    const int classId = qGray(mask.pixel(x, y));
+                    if (classId == ignoreIndex) {
+                        continue;
+                    }
+                    context.splits[split].classCounts[classId] += 1;
+                    classesInMask.insert(classId);
+                }
+            }
+            if (classesInMask.size() <= 1) {
+                QualityIssue issue;
+                issue.severity = QStringLiteral("warning");
+                issue.code = QStringLiteral("single_class_mask");
+                issue.filePath = maskInfo.absoluteFilePath();
+                issue.imagePath = imageInfo.absoluteFilePath();
+                issue.labelPath = maskInfo.absoluteFilePath();
+                issue.split = split;
+                issue.message = QStringLiteral("Semantic mask contains one class after ignore pixels.");
+                issue.repairHint = QStringLiteral("Confirm this is intentional before training.");
+                addQualityIssue(context, issue);
             }
         }
     }
@@ -1270,6 +1366,8 @@ WorkflowResult curateDatasetQualityReport(
         scanYoloQuality(context, false);
     } else if (format == QStringLiteral("yolo_segmentation")) {
         scanYoloQuality(context, true);
+    } else if (format == QStringLiteral("semantic_segmentation_mask")) {
+        scanSemanticMaskQuality(context, options);
     } else if (format == QStringLiteral("paddleocr_rec")) {
         scanOcrRecQuality(context, options);
     } else if (format == QStringLiteral("paddleocr_det")) {

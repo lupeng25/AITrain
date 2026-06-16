@@ -1,0 +1,9 @@
+segmentation-models-pytorch>=0.5,<0.6
+torch
+torchvision
+timm
+numpy
+Pillow
+PyYAML
+onnx
+onnxruntime

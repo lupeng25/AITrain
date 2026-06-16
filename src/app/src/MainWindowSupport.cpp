@@ -111,6 +111,9 @@ QString taskTypeLabel(const QString& taskType)
     if (taskType == QStringLiteral("segmentation")) {
         return uiText("分割");
     }
+    if (taskType == QStringLiteral("semantic_segmentation")) {
+        return uiText("语义分割");
+    }
     if (taskType == QStringLiteral("ocr_detection")) {
         return uiText("OCR 检测");
     }
@@ -138,6 +141,9 @@ QString backendLabel(const QString& backend)
     }
     if (backend == QStringLiteral("ultralytics_yolo_segment")) {
         return uiText("Ultralytics YOLO 分割（官方）");
+    }
+    if (backend == QStringLiteral("smp_semantic_segmentation")) {
+        return uiText("SMP 语义分割（官方）");
     }
     if (backend == QStringLiteral("paddleocr_det_official")) {
         return uiText("PaddleOCR Det（官方/隔离环境）");
@@ -507,6 +513,9 @@ QString inferenceTaskTypeLabel(const QString& taskType)
     if (taskType == QStringLiteral("segmentation")) {
         return uiText("分割");
     }
+    if (taskType == QStringLiteral("semantic_segmentation")) {
+        return uiText("语义分割");
+    }
     if (taskType == QStringLiteral("ocr_detection")) {
         return uiText("OCR 检测");
     }
@@ -526,6 +535,9 @@ QString datasetFormatLabel(const QString& format)
     }
     if (format == QStringLiteral("yolo_segmentation")) {
         return uiText("YOLO 分割");
+    }
+    if (format == QStringLiteral("semantic_segmentation_mask")) {
+        return uiText("语义分割 Mask PNG");
     }
     if (format == QStringLiteral("paddleocr_det")) {
         return QStringLiteral("PaddleOCR Det");
@@ -552,6 +564,9 @@ QString defaultBackendForTask(const QString& taskType)
     }
     if (taskType == QStringLiteral("segmentation")) {
         return QStringLiteral("ultralytics_yolo_segment");
+    }
+    if (taskType == QStringLiteral("semantic_segmentation")) {
+        return QStringLiteral("smp_semantic_segmentation");
     }
     if (taskType == QStringLiteral("ocr_detection")) {
         return QStringLiteral("paddleocr_det_official");
@@ -602,6 +617,17 @@ QStringList yoloModelPresetsForTask(bool segmentation)
     }
     return presets;
 }
+
+QStringList smpSemanticModelPresets()
+{
+    return {
+        QStringLiteral("smp_unet_resnet34"),
+        QStringLiteral("smp_unetplusplus_resnet34"),
+        QStringLiteral("smp_fpn_resnet34"),
+        QStringLiteral("smp_deeplabv3plus_resnet50"),
+        QStringLiteral("smp_segformer_mit_b0")
+    };
+}
 } // namespace
 
 QStringList yoloModelPresetItems()
@@ -621,6 +647,9 @@ QStringList modelPresetItemsForBackend(const QString& backend)
     }
     if (normalized == QStringLiteral("ultralytics_yolo_segment")) {
         return yoloModelPresetsForTask(true);
+    }
+    if (normalized == QStringLiteral("smp_semantic_segmentation")) {
+        return smpSemanticModelPresets();
     }
     if (normalized == QStringLiteral("paddleocr_det_official")) {
         return {
@@ -646,7 +675,8 @@ QStringList modelPresetItemsForBackend(const QString& backend)
     }
 
     QStringList presets = yoloModelPresetItems();
-    presets << QStringLiteral("PP-OCRv5_mobile_det")
+    presets << smpSemanticModelPresets()
+            << QStringLiteral("PP-OCRv5_mobile_det")
             << QStringLiteral("PP-OCRv5_server_det")
             << QStringLiteral("PP-OCRv6_tiny_det")
             << QStringLiteral("PP-OCRv6_small_det")
@@ -772,6 +802,9 @@ Yolo26TargetedMatrixStatus yolo26TargetedMatrixStatus()
 
 QString defaultModelForBackend(const QString& backend)
 {
+    if (backend == QStringLiteral("smp_semantic_segmentation")) {
+        return QStringLiteral("smp_unet_resnet34");
+    }
     if (backend == QStringLiteral("ultralytics_yolo_segment")) {
         return QStringLiteral("yolov8n-seg.yaml");
     }
@@ -794,6 +827,9 @@ QString trainingBackendDescription(const QString& backend)
     }
     if (backend == QStringLiteral("ultralytics_yolo_segment")) {
         return uiText("当前模型能力：官方 Ultralytics YOLO segmentation。适合 YOLO polygon 数据，输出 mask 指标、best.pt、ONNX，并可生成 mask prediction JSON 与 overlay。");
+    }
+    if (backend == QStringLiteral("smp_semantic_segmentation")) {
+        return uiText("当前模型能力：SMP 专用语义分割。适合 Mask PNG class-id 数据，输出 best.pt、best.onnx、训练/评估报告，并支持 ONNX Runtime 单图 mask overlay 和 benchmark；SMP 不需要 NCNN/TensorRT 导出。");
     }
     if (backend == QStringLiteral("paddleocr_rec_official") || backend == QStringLiteral("paddleocr_ppocrv4_rec")) {
         return uiText("当前模型能力：官方 PaddleOCR PP-OCRv4/v5/v6 Rec 适配器。通过模型预设选择版本，适合隔离 OCR Python 环境，记录 train/export/predict 命令、checkpoint、inference model 和官方预测报告。");
@@ -840,6 +876,9 @@ QString expectedTrainingTaskForDatasetFormat(const QString& format)
     if (format == QStringLiteral("yolo_segmentation")) {
         return QStringLiteral("segmentation");
     }
+    if (format == QStringLiteral("semantic_segmentation_mask")) {
+        return QStringLiteral("semantic_segmentation");
+    }
     if (format == QStringLiteral("paddleocr_det")) {
         return QStringLiteral("ocr_detection");
     }
@@ -858,6 +897,9 @@ bool isTrainingBackendCompatible(const QString& format, const QString& backend)
     }
     if (format == QStringLiteral("yolo_segmentation")) {
         return normalized == QStringLiteral("ultralytics_yolo_segment");
+    }
+    if (format == QStringLiteral("semantic_segmentation_mask")) {
+        return normalized == QStringLiteral("smp_semantic_segmentation");
     }
     if (format == QStringLiteral("paddleocr_det")) {
         return normalized == QStringLiteral("paddleocr_det_official");
@@ -1197,6 +1239,13 @@ QString detectDatasetFormatFromPath(const QString& path)
             return QStringLiteral("paddleocr_rec");
         }
     }
+    if (QFileInfo::exists(root.filePath(QStringLiteral("classes.txt")))
+        && QDir(root.filePath(QStringLiteral("images/train"))).exists()
+        && QDir(root.filePath(QStringLiteral("images/val"))).exists()
+        && QDir(root.filePath(QStringLiteral("masks/train"))).exists()
+        && QDir(root.filePath(QStringLiteral("masks/val"))).exists()) {
+        return QStringLiteral("semantic_segmentation_mask");
+    }
 
     if (!QFileInfo::exists(root.filePath(QStringLiteral("data.yaml")))) {
         return QString();
@@ -1290,10 +1339,45 @@ QString inferenceSummaryFromPredictions(const QString& predictionsPath, const QJ
         fallback.value(QStringLiteral("taskType")).toString(QStringLiteral("detection")));
     const QJsonArray predictions = root.value(QStringLiteral("predictions")).toArray();
     const int elapsedMs = root.value(QStringLiteral("elapsedMs")).toInt(fallback.value(QStringLiteral("elapsedMs")).toInt());
+    int resultCount = predictions.size();
     QString detail;
     if (!predictions.isEmpty()) {
         const QJsonObject first = predictions.at(0).toObject();
-        if (taskType == QStringLiteral("ocr_recognition")) {
+        if (taskType == QStringLiteral("semantic_segmentation")) {
+            const QJsonObject pixelCounts = first.value(QStringLiteral("pixelCounts")).toObject();
+            const QJsonArray classNames = first.value(QStringLiteral("classNames")).toArray();
+            double totalPixels = 0.0;
+            double foregroundPixels = 0.0;
+            int activeClasses = 0;
+            QStringList classParts;
+            for (auto it = pixelCounts.constBegin(); it != pixelCounts.constEnd(); ++it) {
+                const double count = it.value().toDouble();
+                totalPixels += count;
+                bool classOk = false;
+                const int classId = it.key().toInt(&classOk);
+                if (count <= 0.0 || it.key() == QStringLiteral("0")) {
+                    continue;
+                }
+                foregroundPixels += count;
+                ++activeClasses;
+                if (classParts.size() < 3) {
+                    QString className = classOk && classId >= 0 && classId < classNames.size()
+                        ? classNames.at(classId).toString()
+                        : QStringLiteral("class %1").arg(it.key());
+                    if (className.trimmed().isEmpty()) {
+                        className = QStringLiteral("class %1").arg(it.key());
+                    }
+                    classParts.append(QStringLiteral("%1 %2 px").arg(className).arg(static_cast<qint64>(count)));
+                }
+            }
+            resultCount = activeClasses;
+            detail = uiText("前景 %1 px / 总像素 %2")
+                .arg(static_cast<qint64>(foregroundPixels))
+                .arg(static_cast<qint64>(totalPixels));
+            if (!classParts.isEmpty()) {
+                detail.append(QStringLiteral("，%1").arg(classParts.join(QStringLiteral(", "))));
+            }
+        } else if (taskType == QStringLiteral("ocr_recognition")) {
             const QString text = first.value(QStringLiteral("text")).toString();
             detail = text.isEmpty()
                 ? uiText("未识别出文本")
@@ -1317,7 +1401,7 @@ QString inferenceSummaryFromPredictions(const QString& predictionsPath, const QJ
 
     return uiText("%1：%2 个结果，%3，%4 ms\n结果文件：%5")
         .arg(inferenceTaskTypeLabel(taskType))
-        .arg(predictions.size())
+        .arg(resultCount)
         .arg(detail)
         .arg(elapsedMs)
         .arg(nativePath);

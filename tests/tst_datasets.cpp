@@ -363,6 +363,78 @@ private slots:
         QVERIFY(!invalid.ok);
     }
 
+    void semanticMaskDatasetValidation()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("semantic"));
+        writeTinySemanticMaskDataset(root);
+
+        const aitrain::DatasetValidationResult valid = aitrain::validateSemanticSegmentationMaskDataset(root);
+        QVERIFY2(valid.ok, qPrintable(valid.errors.join(QStringLiteral("\n"))));
+        QCOMPARE(valid.sampleCount, 2);
+        QVERIFY(!valid.previewSamples.isEmpty());
+
+        QFile::remove(QDir(root).filePath(QStringLiteral("masks/val/b.png")));
+        const aitrain::DatasetValidationResult missing = aitrain::validateSemanticSegmentationMaskDataset(root);
+        QVERIFY(!missing.ok);
+        QVERIFY(jsonArrayContainsCode(missing.toJson().value(QStringLiteral("issues")).toArray(), QStringLiteral("missing_mask")));
+    }
+
+    void semanticMaskDatasetRejectsBadMasks()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        const QString sizeRoot = dir.filePath(QStringLiteral("semantic-size"));
+        writeTinySemanticMaskDataset(sizeRoot);
+        writeTinyMaskPng(QDir(sizeRoot).filePath(QStringLiteral("masks/train/a.png")), 4, 4, 1);
+        const aitrain::DatasetValidationResult sizeMismatch = aitrain::validateSemanticSegmentationMaskDataset(sizeRoot);
+        QVERIFY(!sizeMismatch.ok);
+        QVERIFY(jsonArrayContainsCode(sizeMismatch.toJson().value(QStringLiteral("issues")).toArray(), QStringLiteral("mask_size_mismatch")));
+
+        const QString classRoot = dir.filePath(QStringLiteral("semantic-class"));
+        writeTinySemanticMaskDataset(classRoot);
+        writeTinyMaskPng(QDir(classRoot).filePath(QStringLiteral("masks/train/a.png")), 8, 8, 9);
+        const aitrain::DatasetValidationResult classRange = aitrain::validateSemanticSegmentationMaskDataset(classRoot);
+        QVERIFY(!classRange.ok);
+        QVERIFY(jsonArrayContainsCode(classRange.toJson().value(QStringLiteral("issues")).toArray(), QStringLiteral("class_id_out_of_range")));
+
+        const QString ignoreRoot = dir.filePath(QStringLiteral("semantic-ignore"));
+        writeTinySemanticMaskDataset(ignoreRoot);
+        QImage ignoreMask(8, 8, QImage::Format_Grayscale8);
+        ignoreMask.fill(255);
+        QVERIFY(ignoreMask.save(QDir(ignoreRoot).filePath(QStringLiteral("masks/train/a.png"))));
+        const aitrain::DatasetValidationResult ignoreValid = aitrain::validateSemanticSegmentationMaskDataset(ignoreRoot);
+        QVERIFY2(ignoreValid.ok, qPrintable(ignoreValid.errors.join(QStringLiteral("\n"))));
+        QVERIFY(jsonArrayContainsCode(ignoreValid.toJson().value(QStringLiteral("issues")).toArray(), QStringLiteral("empty_mask")));
+    }
+
+    void semanticMaskDatasetSplit()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("semantic-source"));
+        writeTinySemanticMaskDataset(root);
+
+        QJsonObject options;
+        options.insert(QStringLiteral("trainRatio"), 0.5);
+        options.insert(QStringLiteral("valRatio"), 0.5);
+        options.insert(QStringLiteral("testRatio"), 0.0);
+        options.insert(QStringLiteral("seed"), 5);
+        const QString output = dir.filePath(QStringLiteral("semantic-normalized"));
+        const aitrain::DatasetSplitResult split = aitrain::splitSemanticSegmentationMaskDataset(root, output, options);
+        QVERIFY2(split.ok, qPrintable(split.errors.join(QStringLiteral("\n"))));
+        QCOMPARE(split.trainCount, 1);
+        QCOMPARE(split.valCount, 1);
+        QVERIFY(QFileInfo::exists(QDir(output).filePath(QStringLiteral("classes.txt"))));
+        QVERIFY(QFileInfo::exists(QDir(output).filePath(QStringLiteral("split_report.json"))));
+        QCOMPARE(QDir(QDir(output).filePath(QStringLiteral("images/train"))).entryInfoList(QStringList() << QStringLiteral("*.png"), QDir::Files).size(), 1);
+        QCOMPARE(QDir(QDir(output).filePath(QStringLiteral("masks/train"))).entryInfoList(QStringList() << QStringLiteral("*.png"), QDir::Files).size(), 1);
+        const aitrain::DatasetValidationResult normalized = aitrain::validateSemanticSegmentationMaskDataset(output);
+        QVERIFY2(normalized.ok, qPrintable(normalized.errors.join(QStringLiteral("\n"))));
+    }
+
     void ocrRecDatasetLoadsDictionaryAndLabels()
     {
         QTemporaryDir dir;

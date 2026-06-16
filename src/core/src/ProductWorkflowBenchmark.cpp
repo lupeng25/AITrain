@@ -159,7 +159,16 @@ WorkflowResult benchmarkModelReport(
                 }
                 QElapsedTimer timer;
                 timer.start();
-                if (modelFamily == QStringLiteral("yolo_segmentation")) {
+                if (modelFamily == QStringLiteral("semantic_segmentation")) {
+                    const SemanticSegmentationPrediction prediction = predictSemanticSegmentationOnnxRuntime(modelPath, sampleImagePath, &inferenceError);
+                    outputCount = 0;
+                    const QStringList keys = prediction.pixelCounts.keys();
+                    for (const QString& key : keys) {
+                        if (key != QStringLiteral("0") && prediction.pixelCounts.value(key).toDouble() > 0.0) {
+                            ++outputCount;
+                        }
+                    }
+                } else if (modelFamily == QStringLiteral("yolo_segmentation")) {
                     const QVector<SegmentationPrediction> predictions = predictSegmentationOnnxRuntime(modelPath, sampleImagePath, inferenceOptions, &inferenceError);
                     outputCount = predictions.size();
                 } else {

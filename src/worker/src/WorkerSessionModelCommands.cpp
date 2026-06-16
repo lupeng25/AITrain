@@ -173,6 +173,77 @@ bool modelArtifactLooksYolo26(const QString& path)
     return QFileInfo::exists(parentReport) && jsonLooksYolo26(readJsonObjectFile(parentReport));
 }
 
+bool jsonLooksSemanticSmp(const QJsonObject& object)
+{
+    if (object.value(QStringLiteral("modelFamily")).toString() == QStringLiteral("semantic_segmentation")
+        || object.value(QStringLiteral("taskType")).toString() == QStringLiteral("semantic_segmentation")
+        || object.value(QStringLiteral("backend")).toString() == QStringLiteral("smp_semantic_segmentation")
+        || object.value(QStringLiteral("trainingBackend")).toString() == QStringLiteral("smp_semantic_segmentation")) {
+        return true;
+    }
+    const QJsonObject trainingReport = object.value(QStringLiteral("trainingReport")).toObject();
+    return !trainingReport.isEmpty() && jsonLooksSemanticSmp(trainingReport);
+}
+
+bool modelArtifactLooksSemanticSmp(const QString& path)
+{
+    const QString normalized = QDir::fromNativeSeparators(path.trimmed());
+    const QFileInfo info(normalized);
+    const QString suffix = info.suffix().toLower();
+    if ((suffix == QStringLiteral("json") || suffix == QStringLiteral("aitrain"))
+        && jsonLooksSemanticSmp(readJsonObjectFile(normalized))) {
+        return true;
+    }
+
+    const QString sidecarPath = info.dir().filePath(info.completeBaseName() + QStringLiteral(".aitrain-export.json"));
+    if (QFileInfo::exists(sidecarPath) && jsonLooksSemanticSmp(readJsonObjectFile(sidecarPath))) {
+        return true;
+    }
+    const QString semanticSidecar = info.dir().filePath(QStringLiteral("semantic_segmentation_sidecar.json"));
+    if (QFileInfo::exists(semanticSidecar) && jsonLooksSemanticSmp(readJsonObjectFile(semanticSidecar))) {
+        return true;
+    }
+    const QString report = info.dir().filePath(QStringLiteral("smp_training_report.json"));
+    if (QFileInfo::exists(report) && jsonLooksSemanticSmp(readJsonObjectFile(report))) {
+        return true;
+    }
+    return normalized.toLower().contains(QStringLiteral("smp"))
+        && normalized.toLower().contains(QStringLiteral("semantic"));
+}
+
+QString resolveSemanticSmpOnnxPath(const QString& checkpointPath)
+{
+    const QFileInfo info(checkpointPath);
+    if (info.suffix().compare(QStringLiteral("onnx"), Qt::CaseInsensitive) == 0 && info.exists()) {
+        return info.absoluteFilePath();
+    }
+    const QString sameStem = info.dir().filePath(info.completeBaseName() + QStringLiteral(".onnx"));
+    if (QFileInfo::exists(sameStem)) {
+        return QFileInfo(sameStem).absoluteFilePath();
+    }
+    const QString bestOnnx = info.dir().filePath(QStringLiteral("best.onnx"));
+    if (QFileInfo::exists(bestOnnx)) {
+        return QFileInfo(bestOnnx).absoluteFilePath();
+    }
+    for (const QString& jsonPath : {
+             info.dir().filePath(QStringLiteral("semantic_segmentation_sidecar.json")),
+             info.dir().filePath(QStringLiteral("smp_training_report.json")),
+             info.dir().filePath(info.completeBaseName() + QStringLiteral(".aitrain-export.json"))}) {
+        const QJsonObject object = readJsonObjectFile(jsonPath);
+        if (object.isEmpty()) {
+            continue;
+        }
+        const QStringList keys = {QStringLiteral("exportPath"), QStringLiteral("onnxPath"), QStringLiteral("sourceOnnx")};
+        for (const QString& key : keys) {
+            const QString candidate = absoluteSidecarPath(object, jsonPath, key);
+            if (QFileInfo::exists(candidate)) {
+                return QFileInfo(candidate).absoluteFilePath();
+            }
+        }
+    }
+    return {};
+}
+
 QString resolveModelArtifactPath(QString path)
 {
     path = QDir::fromNativeSeparators(path.trimmed());
@@ -904,6 +975,133 @@ void WorkerSession::exportModel(const QJsonObject& payload)
     }
 
     const QString checkpointSuffix = QFileInfo(checkpointPath).suffix().toLower();
+    if (modelArtifactLooksSemanticSmp(requestedCheckpointPath) || modelArtifactLooksSemanticSmp(checkpointPath)) {
+        const QString normalizedFormat = format.trimmed().toLower();
+        if (normalizedFormat != QStringLiteral("onnx")) {
+            running_ = false;
+            failWithDetails(
+                QStringLiteral("SMP semantic segmentation export supports ONNX only. NCNN/TensorRT export is not part of the SMP capability scope."),
+                QStringLiteral("unsupported_semantic_segmentation_export_format"),
+                QJsonObject{
+                    {QStringLiteral("format"), format},
+                    {QStringLiteral("checkpointPath"), checkpointPath},
+                    {QStringLiteral("outputPath"), outputPath},
+                    {QStringLiteral("modelFamily"), QStringLiteral("semantic_segmentation")}});
+            return;
+        }
+        const QString sourceOnnx = resolveSemanticSmpOnnxPath(checkpointPath);
+        if (sourceOnnx.isEmpty()) {
+            running_ = false;
+            failWithDetails(
+                QStringLiteral("SMP semantic segmentation checkpoint does not have a sibling ONNX export. Re-run training or export from the SMP trainer output directory."),
+                QStringLiteral("semantic_segmentation_onnx_missing"),
+                QJsonObject{{QStringLiteral("checkpointPath"), checkpointPath}, {QStringLiteral("outputPath"), outputPath}});
+            return;
+        }
+        if (!QDir().mkpath(QFileInfo(outputPath).absolutePath())) {
+            running_ = false;
+            failWithDetails(
+                QStringLiteral("Cannot create semantic segmentation export directory: %1").arg(QFileInfo(outputPath).absolutePath()),
+                QStringLiteral("output_create_failed"),
+                QJsonObject{{QStringLiteral("outputPath"), outputPath}});
+            return;
+        }
+        const QString normalizedSource = QFileInfo(sourceOnnx).absoluteFilePath();
+        const QString normalizedOutput = QFileInfo(outputPath).absoluteFilePath();
+        if (normalizedSource.compare(normalizedOutput, Qt::CaseInsensitive) != 0) {
+            if (QFileInfo::exists(outputPath) && !QFile::remove(outputPath)) {
+                running_ = false;
+                fail(QStringLiteral("Cannot overwrite export path: %1").arg(outputPath));
+                return;
+            }
+            if (!QFile::copy(sourceOnnx, outputPath)) {
+                running_ = false;
+                fail(QStringLiteral("Cannot copy SMP ONNX export: %1 -> %2").arg(sourceOnnx, outputPath));
+                return;
+            }
+        }
+
+        const QFileInfo outputInfo(outputPath);
+        const QString sourceSidecar = QFileInfo(sourceOnnx).dir().filePath(QFileInfo(sourceOnnx).completeBaseName() + QStringLiteral(".aitrain-export.json"));
+        QJsonObject config = readJsonObjectFile(sourceSidecar);
+        if (config.isEmpty()) {
+            config = readJsonObjectFile(QFileInfo(sourceOnnx).dir().filePath(QStringLiteral("semantic_segmentation_sidecar.json")));
+        }
+        config.insert(QStringLiteral("schemaVersion"), 1);
+        config.insert(QStringLiteral("backend"), QStringLiteral("smp_semantic_segmentation"));
+        config.insert(QStringLiteral("modelFamily"), QStringLiteral("semantic_segmentation"));
+        config.insert(QStringLiteral("taskType"), QStringLiteral("semantic_segmentation"));
+        config.insert(QStringLiteral("datasetFormat"), QStringLiteral("semantic_segmentation_mask"));
+        config.insert(QStringLiteral("exportPath"), outputInfo.absoluteFilePath());
+        config.insert(QStringLiteral("sourceOnnx"), normalizedSource);
+        const QString outputSidecar = outputInfo.dir().filePath(outputInfo.completeBaseName() + QStringLiteral(".aitrain-export.json"));
+        QString writeError;
+        if (!writeJsonFile(outputSidecar, config, &writeError)) {
+            running_ = false;
+            fail(writeError);
+            return;
+        }
+
+        QJsonObject report;
+        report.insert(QStringLiteral("ok"), true);
+        report.insert(QStringLiteral("kind"), QStringLiteral("model_export_report"));
+        report.insert(QStringLiteral("format"), QStringLiteral("onnx"));
+        report.insert(QStringLiteral("backend"), QStringLiteral("smp_semantic_segmentation"));
+        report.insert(QStringLiteral("modelFamily"), QStringLiteral("semantic_segmentation"));
+        report.insert(QStringLiteral("checkpointPath"), checkpointPath);
+        report.insert(QStringLiteral("sourceOnnx"), normalizedSource);
+        report.insert(QStringLiteral("exportPath"), outputInfo.absoluteFilePath());
+        report.insert(QStringLiteral("sidecarPath"), outputSidecar);
+        report.insert(QStringLiteral("exportedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+        report.insert(QStringLiteral("note"), QStringLiteral("SMP semantic segmentation export copies the trainer-produced ONNX and sidecar. NCNN/TensorRT exports are not required for SMP."));
+        const QString reportPath = outputInfo.dir().filePath(QStringLiteral("model_export_report.json"));
+        if (!writeJsonFile(reportPath, report, &writeError)) {
+            running_ = false;
+            fail(writeError);
+            return;
+        }
+
+        QJsonObject progressPayload;
+        progressPayload.insert(QStringLiteral("percent"), 100);
+        progressPayload.insert(QStringLiteral("message"), QStringLiteral("模型导出完成。"));
+        send(wp::event::progress(), progressPayload);
+
+        QJsonObject artifact;
+        artifact.insert(QStringLiteral("taskId"), taskId);
+        artifact.insert(QStringLiteral("kind"), QStringLiteral("export"));
+        artifact.insert(QStringLiteral("path"), outputInfo.absoluteFilePath());
+        artifact.insert(QStringLiteral("message"), QStringLiteral("SMP semantic segmentation ONNX export"));
+        send(wp::event::artifact(), artifact);
+        QJsonObject sidecarArtifact;
+        sidecarArtifact.insert(QStringLiteral("taskId"), taskId);
+        sidecarArtifact.insert(QStringLiteral("kind"), QStringLiteral("export_sidecar"));
+        sidecarArtifact.insert(QStringLiteral("path"), outputSidecar);
+        sidecarArtifact.insert(QStringLiteral("message"), QStringLiteral("SMP semantic segmentation sidecar"));
+        send(wp::event::artifact(), sidecarArtifact);
+
+        QJsonObject response;
+        response.insert(QStringLiteral("ok"), true);
+        response.insert(QStringLiteral("format"), QStringLiteral("onnx"));
+        response.insert(QStringLiteral("taskId"), taskId);
+        response.insert(QStringLiteral("checkpointPath"), checkpointPath);
+        response.insert(QStringLiteral("exportPath"), outputInfo.absoluteFilePath());
+        response.insert(QStringLiteral("reportPath"), reportPath);
+        response.insert(QStringLiteral("config"), config);
+        response.insert(QStringLiteral("exportedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+        send(wp::event::modelExport(), response);
+
+        QJsonObject completed;
+        completed.insert(QStringLiteral("message"), QStringLiteral("Model export completed"));
+        completed.insert(QStringLiteral("taskId"), taskId);
+        completed.insert(QStringLiteral("command"), activeCommand_);
+        completed.insert(QStringLiteral("status"), QStringLiteral("completed"));
+        completed.insert(QStringLiteral("exportPath"), outputInfo.absoluteFilePath());
+        completed.insert(QStringLiteral("reportPath"), reportPath);
+        running_ = false;
+        send(wp::event::completed(), completed);
+        finishSession();
+        return;
+    }
     const QString unsupportedOptions = unsupportedOfficialExportOptionsError(format, checkpointSuffix, options);
     if (!unsupportedOptions.isEmpty()) {
         running_ = false;
@@ -1094,7 +1292,23 @@ void WorkerSession::runInference(const QJsonObject& payload)
             fail(QStringLiteral("OCR inference is official-only. Use the PaddleOCR official Det/Rec/System adapter artifacts instead of AITrain C++ ONNX OCR postprocess."));
             return;
         }
-        if (modelFamily == QStringLiteral("yolo_segmentation")) {
+        if (modelFamily == QStringLiteral("semantic_segmentation")) {
+            taskType = QStringLiteral("semantic_segmentation");
+            const aitrain::SemanticSegmentationPrediction prediction = aitrain::predictSemanticSegmentationOnnxRuntime(checkpointPath, imagePath, &error);
+            if (!error.isEmpty()) {
+                fail(error);
+                return;
+            }
+            predictionArray.append(aitrain::semanticSegmentationPredictionToJson(prediction));
+            overlay = aitrain::renderSemanticSegmentationPrediction(imagePath, prediction, &error);
+            predictionCount = 0;
+            const QStringList keys = prediction.pixelCounts.keys();
+            for (const QString& key : keys) {
+                if (key != QStringLiteral("0") && prediction.pixelCounts.value(key).toDouble() > 0.0) {
+                    ++predictionCount;
+                }
+            }
+        } else if (modelFamily == QStringLiteral("yolo_segmentation")) {
             taskType = QStringLiteral("segmentation");
             const QVector<aitrain::SegmentationPrediction> predictions = aitrain::predictSegmentationOnnxRuntime(checkpointPath, imagePath, options, &error);
             if (!error.isEmpty()) {

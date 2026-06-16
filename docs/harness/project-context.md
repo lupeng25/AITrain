@@ -82,6 +82,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 - Windows 打包、package smoke、release freeze handoff、离线授权和注册码生成器。
 - 本地产品闭环：数据集质量报告、问题样本、X-AnyLabeling 复核清单、snapshot、训练 lineage、评估、benchmark、模型注册、pipeline、交付报告。
 - Phase 49 交付闭环：`数据集 > 质量与复核`、`环境 > 交付证据`、客户域 OCR 验收向导、一键诊断包和导出后部署验证。
+- 下一阶段开发方向已重新确认：补充工业视觉检测中的异常检测/定位、OBB 和专用语义分割能力；其中专用语义分割首版已通过 SMP 路线落地，并已有 RTX 4090D GPU realtest 证据；异常检测/定位和 OBB 仍需实现和验证。
 
 未完成：
 
@@ -89,8 +90,9 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 - package-root TensorRT rerun 只有在重新打开外部验收时才执行；旧 GPU 的正确状态仍是 `hardware-blocked`。
 - 客户域 OCR 生产声明必须使用真实客户/目标域数据和官方报告；public Total-Text、generated smoke、`.deps` 示例只能证明流程。
 - NCNN runtime validation 已替代 artifact-only：有 NCNN SDK/runtime 和样本图时验证 YOLO 检测/分割推理；无 SDK/runtime 时必须明确 failed/blocked。本机 2026-05-16 证据覆盖 Hyuto YOLOv8 detection ONNX -> NCNN 和 nihui 预转换 YOLOv8n-seg pnnx/DFL NCNN；YOLOv8-seg ONNX 若经 `onnx2ncnn` 后仍包含 unsupported `Shape` layer，当前是失败报告而不是通过项。
+- 工业异常检测/定位和 OBB 是下一阶段批准方向但当前仍未实现；专用语义分割已有 SMP 首版闭环和本机 RTX 4090D GPU 实测，但不能把现有 YOLO 检测/实例分割能力描述成语义分割、异常检测或 OBB。
 - 插件签名、远程 marketplace、账号、支付、云调度和多人协作后置。
-- 分类、姿态、OBB、异常检测、YOLO-World、YOLOE 等新算法后端后置。
+- 分类、姿态/关键点、YOLO-World、YOLOE、3D/RGB-D、视频/时序等新算法后端仍后置，除非再次明确调整优先级。
 
 ## 源码地图
 

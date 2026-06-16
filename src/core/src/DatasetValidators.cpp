@@ -5,10 +5,12 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QImage>
 #include <QImageReader>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonParseError>
+#include <QMap>
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSize>
@@ -39,6 +41,14 @@ struct OcrDetSample {
     QString relativeImagePath;
     QString labelJson;
     QString fileName;
+};
+
+struct SemanticMaskSample {
+    QString imagePath;
+    QString maskPath;
+    QString fileName;
+    QString baseName;
+    QString split;
 };
 
 void addIssue(DatasetValidationResult& result,
@@ -158,6 +168,78 @@ bool validateReadableImageFile(
         return false;
     }
     return true;
+}
+
+QStringList readClassesTxt(const QString& classesPath, DatasetValidationResult& result)
+{
+    QStringList classes;
+    QFile file(classesPath);
+    if (!file.exists()) {
+        addIssue(result, QStringLiteral("error"), QStringLiteral("missing_classes_txt"), classesPath, 0,
+            QStringLiteral("语义分割 Mask PNG 数据集缺少 classes.txt。"));
+        return classes;
+    }
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        addIssue(result, QStringLiteral("error"), QStringLiteral("classes_txt_unreadable"), classesPath, 0,
+            QStringLiteral("无法读取 classes.txt。"));
+        return classes;
+    }
+    int lineNumber = 0;
+    while (!file.atEnd()) {
+        ++lineNumber;
+        const QString line = QString::fromUtf8(file.readLine()).trimmed();
+        if (line.isEmpty()) {
+            addIssue(result, QStringLiteral("warning"), QStringLiteral("empty_class_name"), classesPath, lineNumber,
+                QStringLiteral("classes.txt 包含空类别名，已忽略该行。"));
+            continue;
+        }
+        classes.append(line);
+    }
+    if (classes.isEmpty()) {
+        addIssue(result, QStringLiteral("error"), QStringLiteral("empty_classes_txt"), classesPath, 0,
+            QStringLiteral("classes.txt 至少需要一个类别名，0 默认作为背景类别。"));
+    }
+    return classes;
+}
+
+bool semanticMaskFormatAcceptable(const QImage& mask)
+{
+    return mask.format() == QImage::Format_Grayscale8
+#if QT_VERSION >= QT_VERSION_CHECK(5, 13, 0)
+        || mask.format() == QImage::Format_Alpha8
+#endif
+        || mask.format() == QImage::Format_Indexed8
+        || mask.allGray();
+}
+
+QJsonObject semanticClassPixelCounts(const QString& datasetPath, int classCount, int ignoreIndex)
+{
+    QJsonObject counts;
+    const QDir root(datasetPath);
+    for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
+        const QDir maskDir(root.filePath(QStringLiteral("masks/%1").arg(split)));
+        if (!maskDir.exists()) {
+            continue;
+        }
+        const QFileInfoList masks = maskDir.entryInfoList({QStringLiteral("*.png")}, QDir::Files, QDir::Name);
+        for (const QFileInfo& maskInfo : masks) {
+            const QImage mask(maskInfo.absoluteFilePath());
+            if (mask.isNull()) {
+                continue;
+            }
+            for (int y = 0; y < mask.height(); ++y) {
+                for (int x = 0; x < mask.width(); ++x) {
+                    const int classId = qGray(mask.pixel(x, y));
+                    if (classId == ignoreIndex || classId < 0 || (classCount > 0 && classId >= classCount)) {
+                        continue;
+                    }
+                    const QString key = QString::number(classId);
+                    counts.insert(key, counts.value(key).toDouble() + 1.0);
+                }
+            }
+        }
+    }
+    return counts;
 }
 
 int parseClassCount(const QString& yamlPath, DatasetValidationResult& result)
@@ -590,6 +672,46 @@ QVector<OcrDetSample> collectOcrDetSamples(const QString& datasetPath, const QSt
     return samples;
 }
 
+QVector<SemanticMaskSample> collectSemanticMaskSamples(const QString& datasetPath, DatasetSplitResult& result)
+{
+    QVector<SemanticMaskSample> samples;
+    const QDir root(datasetPath);
+    QSet<QString> seenImages;
+    bool duplicateIgnored = false;
+    for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
+        const QDir imageDir(root.filePath(QStringLiteral("images/%1").arg(split)));
+        const QDir maskDir(root.filePath(QStringLiteral("masks/%1").arg(split)));
+        if (!imageDir.exists() || !maskDir.exists()) {
+            continue;
+        }
+        for (const QFileInfo& imageInfo : imageFiles(imageDir)) {
+            const QString imageKey = canonicalImageKey(imageInfo);
+            if (seenImages.contains(imageKey)) {
+                duplicateIgnored = true;
+                continue;
+            }
+            seenImages.insert(imageKey);
+            const QFileInfo maskInfo(maskDir.filePath(imageInfo.completeBaseName() + QStringLiteral(".png")));
+            if (!maskInfo.exists()) {
+                result.ok = false;
+                result.errors.append(QStringLiteral("缺少语义分割 mask：%1").arg(maskInfo.absoluteFilePath()));
+                continue;
+            }
+            SemanticMaskSample sample;
+            sample.imagePath = imageInfo.absoluteFilePath();
+            sample.maskPath = maskInfo.absoluteFilePath();
+            sample.fileName = imageInfo.fileName();
+            sample.baseName = imageInfo.completeBaseName();
+            sample.split = split;
+            samples.append(sample);
+        }
+    }
+    if (duplicateIgnored) {
+        result.warnings.append(QStringLiteral("Duplicate semantic segmentation images were ignored while collecting split samples."));
+    }
+    return samples;
+}
+
 void shuffleSamples(QVector<YoloSample>& samples, quint32 seed)
 {
     QRandomGenerator rng(seed);
@@ -600,6 +722,15 @@ void shuffleSamples(QVector<YoloSample>& samples, quint32 seed)
 }
 
 void shuffleSamples(QVector<OcrDetSample>& samples, quint32 seed)
+{
+    QRandomGenerator rng(seed);
+    for (int index = samples.size() - 1; index > 0; --index) {
+        const int swapIndex = static_cast<int>(rng.bounded(static_cast<quint32>(index + 1)));
+        qSwap(samples[index], samples[swapIndex]);
+    }
+}
+
+void shuffleSamples(QVector<SemanticMaskSample>& samples, quint32 seed)
 {
     QRandomGenerator rng(seed);
     for (int index = samples.size() - 1; index > 0; --index) {
@@ -760,6 +891,160 @@ DatasetSplitResult splitYoloDataset(const QString& datasetPath,
     return result;
 }
 
+DatasetValidationResult validateSemanticMaskDataset(const QString& datasetPath, const QJsonObject& options)
+{
+    DatasetValidationResult result;
+    const int maxIssues = options.value(QStringLiteral("maxIssues")).toInt(kDefaultMaxIssues);
+    const int maxFiles = options.value(QStringLiteral("maxFiles")).toInt(kDefaultMaxFiles);
+    const int ignoreIndex = options.value(QStringLiteral("ignoreIndex")).toInt(255);
+    const QDir root(datasetPath);
+
+    if (!root.exists()) {
+        addIssue(result, QStringLiteral("error"), QStringLiteral("dataset_missing"), datasetPath, 0,
+            QStringLiteral("数据集目录不存在。"));
+        return result;
+    }
+    if (ignoreIndex < 0 || ignoreIndex > 255) {
+        addIssue(result, QStringLiteral("error"), QStringLiteral("invalid_ignore_index"), datasetPath, 0,
+            QStringLiteral("ignoreIndex 必须在 0..255 范围内。"));
+        return result;
+    }
+
+    const QString classesPath = root.filePath(QStringLiteral("classes.txt"));
+    const QStringList classNames = readClassesTxt(classesPath, result);
+    const int classCount = classNames.size();
+
+    int inspectedFiles = 0;
+    QMap<int, qint64> totalClassPixels;
+    QJsonObject splitCounts;
+    const QStringList requiredSplits = {QStringLiteral("train"), QStringLiteral("val")};
+    const QStringList allSplits = {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")};
+    for (const QString& split : allSplits) {
+        const bool required = requiredSplits.contains(split);
+        const QDir imageDir(root.filePath(QStringLiteral("images/%1").arg(split)));
+        const QDir maskDir(root.filePath(QStringLiteral("masks/%1").arg(split)));
+        if (!imageDir.exists() || !maskDir.exists()) {
+            if (required) {
+                addIssue(result, QStringLiteral("error"), QStringLiteral("missing_semantic_split"), root.path(), 0,
+                    QStringLiteral("语义分割数据集必须包含 images/%1 和 masks/%1。").arg(split));
+            }
+            continue;
+        }
+
+        const QFileInfoList images = imageFiles(imageDir);
+        if (required && images.isEmpty()) {
+            addIssue(result, QStringLiteral("error"), QStringLiteral("empty_image_split"), imageDir.path(), 0,
+                QStringLiteral("图片目录为空。"));
+        }
+        int splitSampleCount = 0;
+        for (const QFileInfo& imageInfo : images) {
+            if (++inspectedFiles > maxFiles) {
+                addIssue(result, QStringLiteral("warning"), QStringLiteral("file_limit"), datasetPath, 0,
+                    QStringLiteral("数据集较大，已在 %1 个样本后截断校验。").arg(maxFiles));
+                return result;
+            }
+            ++result.sampleCount;
+            ++splitSampleCount;
+            validateReadableImageFile(imageInfo.absoluteFilePath(), result, QStringLiteral("invalid_image"), QStringLiteral("Semantic segmentation "));
+            QImageReader imageReader(imageInfo.absoluteFilePath());
+            imageReader.setAutoTransform(true);
+            const QSize imageSize = imageReader.size();
+
+            const QString maskPath = maskDir.filePath(imageInfo.completeBaseName() + QStringLiteral(".png"));
+            const QFileInfo maskInfo(maskPath);
+            if (result.previewSamples.size() < 20) {
+                result.previewSamples.append(QStringLiteral("%1\tmask=%2").arg(imageInfo.absoluteFilePath(), maskPath));
+            }
+            if (!maskInfo.exists()) {
+                addIssue(result, QStringLiteral("error"), QStringLiteral("missing_mask"), maskPath, 0,
+                    QStringLiteral("图片缺少同 stem 的单通道 PNG mask：%1。").arg(imageInfo.fileName()));
+                if (issueLimitReached(result, maxIssues)) return result;
+                continue;
+            }
+            if (maskInfo.suffix().compare(QStringLiteral("png"), Qt::CaseInsensitive) != 0) {
+                addIssue(result, QStringLiteral("error"), QStringLiteral("mask_not_png"), maskInfo.absoluteFilePath(), 0,
+                    QStringLiteral("语义分割 mask 必须是 PNG 文件。"));
+                if (issueLimitReached(result, maxIssues)) return result;
+            }
+            if (maskInfo.size() <= 0) {
+                addIssue(result, QStringLiteral("error"), QStringLiteral("empty_mask_file"), maskInfo.absoluteFilePath(), 0,
+                    QStringLiteral("mask 文件为空。"));
+                if (issueLimitReached(result, maxIssues)) return result;
+                continue;
+            }
+
+            QImageReader maskReader(maskInfo.absoluteFilePath());
+            const QSize maskSize = maskReader.size();
+            QImage mask(maskInfo.absoluteFilePath());
+            if (mask.isNull() || !maskSize.isValid() || maskSize.isEmpty()) {
+                addIssue(result, QStringLiteral("error"), QStringLiteral("invalid_mask"), maskInfo.absoluteFilePath(), 0,
+                    QStringLiteral("mask 无法解码或尺寸无效。"));
+                if (issueLimitReached(result, maxIssues)) return result;
+                continue;
+            }
+            if (imageSize.isValid() && !imageSize.isEmpty() && maskSize != imageSize) {
+                addIssue(result, QStringLiteral("error"), QStringLiteral("mask_size_mismatch"), maskInfo.absoluteFilePath(), 0,
+                    QStringLiteral("mask 尺寸必须与图片一致。"));
+                if (issueLimitReached(result, maxIssues)) return result;
+            }
+            if (!semanticMaskFormatAcceptable(mask)) {
+                addIssue(result, QStringLiteral("error"), QStringLiteral("mask_not_single_channel"), maskInfo.absoluteFilePath(), 0,
+                    QStringLiteral("mask 必须是单通道或灰度 PNG，像素值表示 class id。"));
+                if (issueLimitReached(result, maxIssues)) return result;
+            }
+
+            QSet<int> presentClasses;
+            int foregroundPixels = 0;
+            for (int y = 0; y < mask.height(); ++y) {
+                for (int x = 0; x < mask.width(); ++x) {
+                    const int classId = qGray(mask.pixel(x, y));
+                    if (classId == ignoreIndex) {
+                        continue;
+                    }
+                    if (classId < 0 || (classCount > 0 && classId >= classCount)) {
+                        addIssue(result, QStringLiteral("error"), QStringLiteral("class_id_out_of_range"), maskInfo.absoluteFilePath(), 0,
+                            QStringLiteral("mask 像素 class id=%1 超出 classes.txt 类别范围。").arg(classId));
+                        if (issueLimitReached(result, maxIssues)) return result;
+                        x = mask.width();
+                        y = mask.height();
+                        break;
+                    }
+                    presentClasses.insert(classId);
+                    totalClassPixels[classId] += 1;
+                    if (classId > 0) {
+                        ++foregroundPixels;
+                    }
+                }
+            }
+            if (foregroundPixels == 0) {
+                addIssue(result, QStringLiteral("warning"), QStringLiteral("empty_mask"), maskInfo.absoluteFilePath(), 0,
+                    QStringLiteral("mask 没有前景类别像素，仅包含背景或 ignore。"));
+            }
+            if (presentClasses.size() <= 1) {
+                addIssue(result, QStringLiteral("warning"), QStringLiteral("single_class_coverage"), maskInfo.absoluteFilePath(), 0,
+                    QStringLiteral("mask 只覆盖单一类别，训练前请确认这不是误标。"));
+            }
+            if (issueLimitReached(result, maxIssues)) {
+                return result;
+            }
+        }
+        splitCounts.insert(split, splitSampleCount);
+    }
+
+    if (result.sampleCount == 0) {
+        addIssue(result, QStringLiteral("error"), QStringLiteral("no_samples"), datasetPath, 0,
+            QStringLiteral("未找到语义分割 Mask PNG 样本。"));
+    }
+    for (int classId = 0; classId < classCount; ++classId) {
+        if (!totalClassPixels.contains(classId)) {
+            addIssue(result, QStringLiteral("warning"), QStringLiteral("missing_class_pixels"), classesPath, classId + 1,
+                QStringLiteral("类别 %1 (%2) 没有出现在任何 mask 像素中。").arg(classId).arg(classNames.value(classId)));
+        }
+    }
+    Q_UNUSED(splitCounts)
+    return result;
+}
+
 } // namespace
 
 QJsonObject DatasetSplitResult::toJson() const
@@ -783,6 +1068,11 @@ DatasetValidationResult validateYoloDetectionDataset(const QString& datasetPath,
 DatasetValidationResult validateYoloSegmentationDataset(const QString& datasetPath, const QJsonObject& options)
 {
     return validateYoloDataset(datasetPath, options, true);
+}
+
+DatasetValidationResult validateSemanticSegmentationMaskDataset(const QString& datasetPath, const QJsonObject& options)
+{
+    return validateSemanticMaskDataset(datasetPath, options);
 }
 
 DatasetValidationResult validatePaddleOcrDetDataset(const QString& datasetPath, const QJsonObject& options)
@@ -1037,6 +1327,78 @@ DatasetSplitResult splitYoloDetectionDataset(const QString& datasetPath, const Q
 DatasetSplitResult splitYoloSegmentationDataset(const QString& datasetPath, const QString& outputPath, const QJsonObject& options)
 {
     return splitYoloDataset(datasetPath, outputPath, options, true);
+}
+
+DatasetSplitResult splitSemanticSegmentationMaskDataset(const QString& datasetPath, const QString& outputPath, const QJsonObject& options)
+{
+    DatasetSplitResult result;
+    result.outputPath = outputPath;
+
+    const DatasetValidationResult validation = validateSemanticSegmentationMaskDataset(datasetPath, options);
+    if (!validation.ok) {
+        result.ok = false;
+        result.errors.append(QStringLiteral("源数据集未通过语义分割 Mask PNG 校验，已取消划分。"));
+        result.errors.append(validation.errors);
+        return result;
+    }
+
+    const double trainRatio = options.value(QStringLiteral("trainRatio")).toDouble(0.8);
+    const double valRatio = options.value(QStringLiteral("valRatio")).toDouble(0.2);
+    const double testRatio = options.value(QStringLiteral("testRatio")).toDouble(0.0);
+    if (!validateSplitRatios(trainRatio, valRatio, testRatio, result)) {
+        return result;
+    }
+
+    QVector<SemanticMaskSample> samples = collectSemanticMaskSamples(datasetPath, result);
+    if (!result.ok) {
+        return result;
+    }
+    if (samples.isEmpty()) {
+        result.ok = false;
+        result.errors.append(QStringLiteral("没有可划分的语义分割 Mask PNG 样本。"));
+        return result;
+    }
+
+    const quint32 seed = static_cast<quint32>(options.value(QStringLiteral("seed")).toInt(42));
+    shuffleSamples(samples, seed);
+    calculateSplitCounts(samples.size(), trainRatio, valRatio, testRatio, &result.trainCount, &result.valCount, &result.testCount);
+
+    const QDir outputRoot(outputPath);
+    QDir().mkpath(outputRoot.path());
+    for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
+        QDir().mkpath(outputRoot.filePath(QStringLiteral("images/%1").arg(split)));
+        QDir().mkpath(outputRoot.filePath(QStringLiteral("masks/%1").arg(split)));
+    }
+
+    for (int index = 0; index < samples.size(); ++index) {
+        const QString split = splitNameForIndex(index, result.trainCount, result.valCount);
+        const SemanticMaskSample& sample = samples.at(index);
+        const QString imageTarget = outputRoot.filePath(QStringLiteral("images/%1/%2").arg(split, sample.fileName));
+        const QString maskTarget = outputRoot.filePath(QStringLiteral("masks/%1/%2.png").arg(split, sample.baseName));
+        copyFileReplacing(sample.imagePath, imageTarget, result.errors);
+        copyFileReplacing(sample.maskPath, maskTarget, result.errors);
+    }
+    copyFileReplacing(QDir(datasetPath).filePath(QStringLiteral("classes.txt")), outputRoot.filePath(QStringLiteral("classes.txt")), result.errors);
+
+    if (!result.errors.isEmpty()) {
+        result.ok = false;
+    }
+
+    QJsonObject report = result.toJson();
+    report.insert(QStringLiteral("sourcePath"), datasetPath);
+    report.insert(QStringLiteral("format"), QStringLiteral("semantic_segmentation_mask"));
+    report.insert(QStringLiteral("seed"), static_cast<int>(seed));
+    report.insert(QStringLiteral("trainRatio"), trainRatio);
+    report.insert(QStringLiteral("valRatio"), valRatio);
+    report.insert(QStringLiteral("testRatio"), testRatio);
+    QFile reportFile(outputRoot.filePath(QStringLiteral("split_report.json")));
+    if (reportFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        reportFile.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+    } else {
+        result.warnings.append(QStringLiteral("无法写入 split_report.json。"));
+    }
+
+    return result;
 }
 
 DatasetSplitResult splitPaddleOcrDetDataset(const QString& datasetPath, const QString& outputPath, const QJsonObject& options)

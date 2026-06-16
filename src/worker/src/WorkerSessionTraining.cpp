@@ -135,6 +135,10 @@ void WorkerSession::startTraining(const aitrain::TrainingRequest& request)
         runSegmentationTraining();
         return;
     }
+    if (request_.taskType.compare(QStringLiteral("semantic_segmentation"), Qt::CaseInsensitive) == 0) {
+        runSemanticSegmentationTraining();
+        return;
+    }
     if (request_.taskType.compare(QStringLiteral("ocr_recognition"), Qt::CaseInsensitive) == 0
         || request_.taskType.compare(QStringLiteral("ocr_detection"), Qt::CaseInsensitive) == 0
         || request_.taskType.compare(QStringLiteral("ocr"), Qt::CaseInsensitive) == 0) {
@@ -199,6 +203,18 @@ void WorkerSession::runSegmentationTraining()
     }
     failWithDetails(
         QStringLiteral("Segmentation training requires an official Python backend. Use ultralytics_yolo_segment."),
+        QStringLiteral("unsupported_training_backend"),
+        QJsonObject{{QStringLiteral("taskType"), request_.taskType}, {QStringLiteral("outputPath"), request_.outputPath}});
+}
+
+void WorkerSession::runSemanticSegmentationTraining()
+{
+    if (shouldUsePythonTrainer()) {
+        runPythonTrainer();
+        return;
+    }
+    failWithDetails(
+        QStringLiteral("Semantic segmentation training requires the SMP Python backend. Use smp_semantic_segmentation."),
         QStringLiteral("unsupported_training_backend"),
         QJsonObject{{QStringLiteral("taskType"), request_.taskType}, {QStringLiteral("outputPath"), request_.outputPath}});
 }

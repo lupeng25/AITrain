@@ -92,6 +92,20 @@ void writeTinyPng(const QString& path)
     QVERIFY(image.save(path));
 }
 
+void writeTinyMaskPng(const QString& path, int width = 8, int height = 8, int foregroundClass = 1)
+{
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QImage mask(width, height, QImage::Format_Grayscale8);
+    mask.fill(0);
+    for (int y = 2; y < height - 2; ++y) {
+        uchar* line = mask.scanLine(y);
+        for (int x = 2; x < width - 2; ++x) {
+            line[x] = static_cast<uchar>(foregroundClass);
+        }
+    }
+    QVERIFY(mask.save(path));
+}
+
 void writeTinyDetectionDataset(const QString& root)
 {
     writeTextFile(QDir(root).filePath(QStringLiteral("data.yaml")), QStringLiteral("nc: 1\nnames: [item]\n"));
@@ -108,6 +122,15 @@ void writeTinySegmentationDataset(const QString& root)
     writeTinyPng(QDir(root).filePath(QStringLiteral("images/val/a.png")));
     writeTextFile(QDir(root).filePath(QStringLiteral("labels/train/a.txt")), QStringLiteral("0 0.125 0.125 0.875 0.125 0.875 0.875 0.125 0.875\n"));
     writeTextFile(QDir(root).filePath(QStringLiteral("labels/val/a.txt")), QStringLiteral("0 0.125 0.125 0.875 0.125 0.875 0.875 0.125 0.875\n"));
+}
+
+void writeTinySemanticMaskDataset(const QString& root)
+{
+    writeTextFile(QDir(root).filePath(QStringLiteral("classes.txt")), QStringLiteral("background\npart\nscratch\n"));
+    writeTinyPng(QDir(root).filePath(QStringLiteral("images/train/a.png")));
+    writeTinyPng(QDir(root).filePath(QStringLiteral("images/val/b.png")));
+    writeTinyMaskPng(QDir(root).filePath(QStringLiteral("masks/train/a.png")), 8, 8, 1);
+    writeTinyMaskPng(QDir(root).filePath(QStringLiteral("masks/val/b.png")), 8, 8, 2);
 }
 
 void writeTinyOcrRecDataset(const QString& root)

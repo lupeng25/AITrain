@@ -45,6 +45,11 @@ QString yoloArgObjectName(const QString& key)
     return QStringLiteral("YoloTrainArg_%1").arg(key);
 }
 
+QString smpArgObjectName(const QString& key)
+{
+    return QStringLiteral("SmpTrainArg_%1").arg(key);
+}
+
 QLineEdit* yoloArgLineEdit(const QString& key, const QString& placeholder = QString(), const QString& value = QString())
 {
     auto* edit = new QLineEdit(value);
@@ -61,6 +66,29 @@ QComboBox* yoloArgComboBox(const QString& key, const QVector<QPair<QString, QStr
     combo->addItem(QStringLiteral("默认"), QString());
     for (const auto& item : items) {
         combo->addItem(item.first, item.second);
+    }
+    return combo;
+}
+
+QLineEdit* smpArgLineEdit(const QString& key, const QString& placeholder = QString(), const QString& value = QString())
+{
+    auto* edit = new QLineEdit(value);
+    edit->setObjectName(smpArgObjectName(key));
+    edit->setPlaceholderText(placeholder);
+    edit->setMinimumWidth(0);
+    return edit;
+}
+
+QComboBox* smpArgComboBox(const QString& key, const QVector<QPair<QString, QString>>& items, const QString& defaultValue)
+{
+    auto* combo = new QComboBox;
+    combo->setObjectName(smpArgObjectName(key));
+    for (const auto& item : items) {
+        combo->addItem(item.first, item.second);
+    }
+    const int index = combo->findData(defaultValue);
+    if (index >= 0) {
+        combo->setCurrentIndex(index);
     }
     return combo;
 }
@@ -95,6 +123,13 @@ QGroupBox* yoloArgGroup(const QString& title)
 }
 
 void addYoloRow(QGroupBox* group, const QString& label, QWidget* field)
+{
+    if (auto* form = qobject_cast<QFormLayout*>(group->layout())) {
+        form->addRow(label, field);
+    }
+}
+
+void addSmpRow(QGroupBox* group, const QString& label, QWidget* field)
 {
     if (auto* form = qobject_cast<QFormLayout*>(group->layout())) {
         form->addRow(label, field);
@@ -201,6 +236,37 @@ QWidget* buildYoloOfficialArgsPanel()
     root->addWidget(validationGroup);
     return container;
 }
+
+QWidget* buildSmpArgsPanel()
+{
+    auto* container = new QWidget;
+    auto* root = new QVBoxLayout(container);
+    root->setContentsMargins(0, 0, 0, 0);
+    root->setSpacing(10);
+
+    auto* trainGroup = yoloArgGroup(QStringLiteral("训练参数"));
+    addSmpRow(trainGroup, QStringLiteral("seed"), smpArgLineEdit(QStringLiteral("seed"), QStringLiteral("42"), QStringLiteral("42")));
+    addSmpRow(trainGroup, QStringLiteral("device"), smpArgLineEdit(QStringLiteral("device"), QStringLiteral("cpu / cuda / 0"), QStringLiteral("cpu")));
+    addSmpRow(trainGroup, QStringLiteral("workers"), smpArgLineEdit(QStringLiteral("workers"), QStringLiteral("0"), QStringLiteral("0")));
+    addSmpRow(trainGroup, QStringLiteral("learningRate"), smpArgLineEdit(QStringLiteral("learningRate"), QStringLiteral("0.0003"), QStringLiteral("0.0003")));
+    addSmpRow(trainGroup, QStringLiteral("optimizer"), smpArgComboBox(QStringLiteral("optimizer"), {
+        {QStringLiteral("adamw"), QStringLiteral("adamw")}
+    }, QStringLiteral("adamw")));
+    addSmpRow(trainGroup, QStringLiteral("loss"), smpArgComboBox(QStringLiteral("loss"), {
+        {QStringLiteral("dice_ce"), QStringLiteral("dice_ce")}
+    }, QStringLiteral("dice_ce")));
+
+    auto* dataGroup = yoloArgGroup(QStringLiteral("Mask 与 encoder"));
+    addSmpRow(dataGroup, QStringLiteral("encoderWeights"), smpArgComboBox(QStringLiteral("encoderWeights"), {
+        {QStringLiteral("none"), QStringLiteral("none")},
+        {QStringLiteral("imagenet"), QStringLiteral("imagenet")}
+    }, QStringLiteral("none")));
+    addSmpRow(dataGroup, QStringLiteral("ignoreIndex"), smpArgLineEdit(QStringLiteral("ignoreIndex"), QStringLiteral("255"), QStringLiteral("255")));
+
+    root->addWidget(trainGroup);
+    root->addWidget(dataGroup);
+    return container;
+}
 } // namespace
 
 QLabel* MainWindow::trainingLiveValueLabel(const QString& objectName) const
@@ -220,6 +286,7 @@ QWidget* MainWindow::buildTrainingPage()
     trainingBackendCombo_ = new QComboBox;
     trainingBackendCombo_->addItem(backendLabel(QStringLiteral("ultralytics_yolo_detect")), QStringLiteral("ultralytics_yolo_detect"));
     trainingBackendCombo_->addItem(backendLabel(QStringLiteral("ultralytics_yolo_segment")), QStringLiteral("ultralytics_yolo_segment"));
+    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("smp_semantic_segmentation")), QStringLiteral("smp_semantic_segmentation"));
     trainingBackendCombo_->addItem(backendLabel(QStringLiteral("paddleocr_det_official")), QStringLiteral("paddleocr_det_official"));
     trainingBackendCombo_->addItem(backendLabel(QStringLiteral("paddleocr_rec_official")), QStringLiteral("paddleocr_rec_official"));
     modelPresetCombo_ = new QComboBox;
@@ -251,6 +318,13 @@ QWidget* MainWindow::buildTrainingPage()
                 modelPresetCombo_->addItems(modelPresetItemsForBackend(backend));
                 modelPresetCombo_->setCurrentText(defaultModelForBackend(backend));
             }
+        }
+        const QString normalized = trainingBackendCombo_ ? trainingBackendCombo_->currentData().toString().trimmed().toLower() : QString();
+        if (auto* yoloPanel = findChild<QWidget*>(QStringLiteral("YoloOfficialArgsGroup"))) {
+            yoloPanel->setVisible(normalized.startsWith(QStringLiteral("ultralytics_yolo")));
+        }
+        if (auto* smpPanel = findChild<QWidget*>(QStringLiteral("SmpSemanticArgsGroup"))) {
+            smpPanel->setVisible(normalized == QStringLiteral("smp_semantic_segmentation"));
         }
         updateTrainingSelectionSummary();
     });
@@ -343,11 +417,22 @@ QWidget* MainWindow::buildTrainingPage()
     form->addRow(QStringLiteral("Image Size"), imageSizeEdit_);
     setupPanel->bodyLayout()->addLayout(form);
     auto* yoloOfficialArgsGroup = new QGroupBox(QStringLiteral("YOLO 官方高级参数"));
+    yoloOfficialArgsGroup->setObjectName(QStringLiteral("YoloOfficialArgsGroup"));
     auto* yoloOfficialArgsLayout = new QVBoxLayout(yoloOfficialArgsGroup);
     yoloOfficialArgsLayout->setContentsMargins(10, 8, 10, 8);
     yoloOfficialArgsLayout->setSpacing(8);
     yoloOfficialArgsLayout->addWidget(buildYoloOfficialArgsPanel());
     setupPanel->bodyLayout()->addWidget(yoloOfficialArgsGroup);
+    auto* smpArgsGroup = new QGroupBox(QStringLiteral("SMP 语义分割参数"));
+    smpArgsGroup->setObjectName(QStringLiteral("SmpSemanticArgsGroup"));
+    auto* smpArgsLayout = new QVBoxLayout(smpArgsGroup);
+    smpArgsLayout->setContentsMargins(10, 8, 10, 8);
+    smpArgsLayout->setSpacing(8);
+    smpArgsLayout->addWidget(buildSmpArgsPanel());
+    setupPanel->bodyLayout()->addWidget(smpArgsGroup);
+    const QString normalizedBackend = trainingBackendCombo_ ? trainingBackendCombo_->currentData().toString().trimmed().toLower() : QString();
+    yoloOfficialArgsGroup->setVisible(normalizedBackend.startsWith(QStringLiteral("ultralytics_yolo")));
+    smpArgsGroup->setVisible(normalizedBackend == QStringLiteral("smp_semantic_segmentation"));
     setupPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("当前模型能力说明")));
     setupPanel->bodyLayout()->addWidget(trainingBackendHintLabel_);
 

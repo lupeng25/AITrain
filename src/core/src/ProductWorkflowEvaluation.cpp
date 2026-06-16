@@ -235,6 +235,33 @@ QString officialYoloEvaluatorScriptPath(const QJsonObject& options)
     return candidates.first();
 }
 
+QString smpEvaluatorScriptPath(const QJsonObject& options)
+{
+    const QString requested = options.value(QStringLiteral("smpEvaluatorScript")).toString().trimmed();
+    if (!requested.isEmpty() && QFileInfo::exists(requested)) {
+        return QFileInfo(requested).absoluteFilePath();
+    }
+    const QString envRequested = QString::fromLocal8Bit(qgetenv("AITRAIN_SMP_EVALUATOR_SCRIPT")).trimmed();
+    if (!envRequested.isEmpty() && QFileInfo::exists(envRequested)) {
+        return QFileInfo(envRequested).absoluteFilePath();
+    }
+
+    const QString script = QStringLiteral("python_trainers/semantic_segmentation/smp_evaluator.py");
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        QDir(appDir).absoluteFilePath(script),
+        QDir(appDir).absoluteFilePath(QStringLiteral("../%1").arg(script)),
+        QDir(appDir).absoluteFilePath(QStringLiteral("../../%1").arg(script)),
+        QDir::current().absoluteFilePath(script)
+    };
+    for (const QString& candidate : candidates) {
+        if (QFileInfo::exists(candidate)) {
+            return QFileInfo(candidate).absoluteFilePath();
+        }
+    }
+    return candidates.first();
+}
+
 WorkflowResult officialYoloEvaluationFailure(
     const QString& outputPath,
     const QString& modelPath,
@@ -272,6 +299,147 @@ WorkflowResult officialYoloEvaluationFailure(
     result.error = message;
     result.reportPath = reportPath;
     result.payload = report;
+    return result;
+}
+
+WorkflowResult smpEvaluationFailure(
+    const QString& outputPath,
+    const QString& modelPath,
+    const QString& datasetPath,
+    const QString& message,
+    const QString& errorCode)
+{
+    QJsonObject report;
+    report.insert(QStringLiteral("ok"), false);
+    report.insert(QStringLiteral("status"), QStringLiteral("failed"));
+    report.insert(QStringLiteral("failureCategory"), QStringLiteral("smp-evaluation"));
+    report.insert(QStringLiteral("errorCode"), errorCode);
+    report.insert(QStringLiteral("message"), message);
+    report.insert(QStringLiteral("kind"), QStringLiteral("evaluation_report"));
+    report.insert(QStringLiteral("createdAt"), nowIso());
+    report.insert(QStringLiteral("modelPath"), modelPath);
+    report.insert(QStringLiteral("datasetPath"), datasetPath);
+    report.insert(QStringLiteral("taskType"), QStringLiteral("semantic_segmentation"));
+    report.insert(QStringLiteral("datasetFormat"), QStringLiteral("semantic_segmentation_mask"));
+    report.insert(QStringLiteral("runtime"), QStringLiteral("smp_onnxruntime"));
+    report.insert(QStringLiteral("scaffold"), false);
+    report.insert(QStringLiteral("metrics"), QJsonObject{});
+    report.insert(QStringLiteral("perClass"), QJsonArray{});
+    report.insert(QStringLiteral("errorSamples"), QJsonArray{});
+
+    const QString reportPath = QDir(outputPath).filePath(QStringLiteral("evaluation_report.json"));
+    QString writeError;
+    writeJsonFile(reportPath, report, &writeError);
+
+    WorkflowResult result;
+    result.ok = false;
+    result.error = message;
+    result.reportPath = reportPath;
+    result.payload = report;
+    return result;
+}
+
+WorkflowResult runSmpSemanticEvaluation(
+    const QString& modelPath,
+    const QString& datasetPath,
+    const QString& outputPath,
+    const QJsonObject& options,
+    const CancellationCallback& shouldCancel)
+{
+    QDir().mkpath(outputPath);
+    const QString python = officialYoloEvaluationPython(options);
+    if (python.isEmpty()) {
+        return smpEvaluationFailure(
+            outputPath,
+            modelPath,
+            datasetPath,
+            QStringLiteral("Python executable is required for SMP semantic segmentation evaluation. Set pythonExecutable or AITRAIN_PYTHON_EXECUTABLE."),
+            QStringLiteral("python_missing"));
+    }
+    const QString evaluatorScript = smpEvaluatorScriptPath(options);
+    if (!QFileInfo::exists(evaluatorScript)) {
+        return smpEvaluationFailure(
+            outputPath,
+            modelPath,
+            datasetPath,
+            QStringLiteral("SMP evaluator script not found: %1").arg(evaluatorScript),
+            QStringLiteral("smp_evaluator_script_missing"));
+    }
+
+    QJsonObject request;
+    request.insert(QStringLiteral("protocolVersion"), 1);
+    request.insert(QStringLiteral("modelPath"), modelPath);
+    request.insert(QStringLiteral("datasetPath"), datasetPath);
+    request.insert(QStringLiteral("outputPath"), outputPath);
+    request.insert(QStringLiteral("taskType"), QStringLiteral("semantic_segmentation"));
+    request.insert(QStringLiteral("options"), options);
+
+    const QString requestPath = QDir(outputPath).filePath(QStringLiteral("smp_evaluation_request.json"));
+    QString error;
+    if (!writeJsonFile(requestPath, request, &error)) {
+        return failedResult(error);
+    }
+
+    QProcess process;
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
+    environment.insert(QStringLiteral("PYTHONIOENCODING"), QStringLiteral("utf-8"));
+    configurePackagedPythonEnvironment(&environment);
+    process.setProcessEnvironment(environment);
+    process.setProgram(python);
+    process.setArguments(QStringList() << QStringLiteral("-u") << evaluatorScript << QStringLiteral("--request") << requestPath);
+    process.setProcessChannelMode(QProcess::MergedChannels);
+    process.start();
+    if (!process.waitForStarted(5000)) {
+        return smpEvaluationFailure(
+            outputPath,
+            modelPath,
+            datasetPath,
+            QStringLiteral("Cannot start SMP evaluator: %1").arg(process.errorString()),
+            QStringLiteral("smp_evaluator_start_failed"));
+    }
+
+    QByteArray output;
+    while (!process.waitForFinished(100)) {
+        output.append(process.readAll());
+        if (isCancellationRequested(shouldCancel)) {
+            process.kill();
+            process.waitForFinished(1500);
+            return canceledResult();
+        }
+    }
+    output.append(process.readAll());
+    const QString logPath = QDir(outputPath).filePath(QStringLiteral("smp_evaluation.log"));
+    writeTextFile(logPath, QString::fromUtf8(output), &error);
+
+    const QString reportPath = QDir(outputPath).filePath(QStringLiteral("evaluation_report.json"));
+    QJsonObject report;
+    if (!readJsonFile(reportPath, &report, &error)) {
+        const QString processError = process.exitStatus() == QProcess::NormalExit
+            ? QStringLiteral("SMP evaluator exited with code %1.").arg(process.exitCode())
+            : QStringLiteral("SMP evaluator crashed.");
+        return smpEvaluationFailure(
+            outputPath,
+            modelPath,
+            datasetPath,
+            QStringLiteral("%1 Report was not readable: %2").arg(processError, error),
+            QStringLiteral("smp_evaluation_report_missing"));
+    }
+
+    report.insert(QStringLiteral("evaluationLogPath"), logPath);
+    if (!writeJsonFile(reportPath, report, &error)) {
+        return failedResult(error);
+    }
+
+    WorkflowResult result;
+    result.ok = process.exitStatus() == QProcess::NormalExit
+        && process.exitCode() == 0
+        && report.value(QStringLiteral("ok")).toBool(false);
+    result.reportPath = reportPath;
+    result.payload = report;
+    if (!result.ok) {
+        result.error = report.value(QStringLiteral("message")).toString(QStringLiteral("SMP semantic segmentation evaluation failed."));
+    }
     return result;
 }
 
@@ -409,6 +577,10 @@ WorkflowResult evaluateModelReport(
     const QDir datasetRoot(datasetPath);
     if (!datasetRoot.exists()) {
         return failedResult(QStringLiteral("Dataset directory does not exist: %1").arg(datasetPath));
+    }
+
+    if (taskType == QStringLiteral("semantic_segmentation")) {
+        return runSmpSemanticEvaluation(modelPath, datasetPath, outputPath, options, shouldCancel);
     }
 
     if (taskType == QStringLiteral("detection")

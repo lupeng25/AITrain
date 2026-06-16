@@ -1010,7 +1010,15 @@ WorkflowResult validateDeploymentArtifactReport(
             const QString family = onnxFamily;
             QElapsedTimer timer;
             timer.start();
-            if (family == QStringLiteral("yolo_segmentation")) {
+            if (family == QStringLiteral("semantic_segmentation")) {
+                taskType = QStringLiteral("semantic_segmentation");
+                const SemanticSegmentationPrediction prediction =
+                    predictSemanticSegmentationOnnxRuntime(normalizedModelPath, sampleImagePath, &error);
+                if (error.isEmpty()) {
+                    predictionArray.append(semanticSegmentationPredictionToJson(prediction));
+                    overlay = renderSemanticSegmentationPrediction(sampleImagePath, prediction, &error);
+                }
+            } else if (family == QStringLiteral("yolo_segmentation")) {
                 taskType = QStringLiteral("segmentation");
                 DetectionInferenceOptions inferenceOptions;
                 const QVector<SegmentationPrediction> predictions =
