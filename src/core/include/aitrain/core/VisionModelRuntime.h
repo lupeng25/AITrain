@@ -48,6 +48,12 @@ QVector<SegmentationPrediction> predictSegmentationOnnxRuntime(
     const DetectionInferenceOptions& options,
     QString* error = nullptr);
 
+QVector<ObbPrediction> predictObbOnnxRuntime(
+    const QString& onnxPath,
+    const QString& imagePath,
+    const DetectionInferenceOptions& options,
+    QString* error = nullptr);
+
 SemanticSegmentationPrediction predictSemanticSegmentationOnnxRuntime(
     const QString& onnxPath,
     const QString& imagePath,

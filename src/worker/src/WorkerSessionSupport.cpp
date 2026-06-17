@@ -196,6 +196,9 @@ QString pythonTrainerScriptFileForBackend(const QString& backend)
     if (normalized == QStringLiteral("ultralytics_yolo_segment")) {
         return QStringLiteral("python_trainers/segmentation/ultralytics_trainer.py");
     }
+    if (normalized == QStringLiteral("ultralytics_yolo_obb")) {
+        return QStringLiteral("python_trainers/obb/ultralytics_trainer.py");
+    }
     if (normalized == QStringLiteral("smp_semantic_segmentation")) {
         return QStringLiteral("python_trainers/semantic_segmentation/smp_trainer.py");
     }
@@ -292,6 +295,9 @@ QString officialTrainingBackendForTask(const QString& taskType)
     if (normalized == QStringLiteral("segmentation")) {
         return QStringLiteral("ultralytics_yolo_segment");
     }
+    if (normalized == QStringLiteral("obb_detection") || normalized == QStringLiteral("obb")) {
+        return QStringLiteral("ultralytics_yolo_obb");
+    }
     if (normalized == QStringLiteral("semantic_segmentation")) {
         return QStringLiteral("smp_semantic_segmentation");
     }
@@ -314,6 +320,9 @@ bool isTrainingBackendCompatibleWithTask(const QString& taskType, const QString&
     }
     if (normalizedTask == QStringLiteral("segmentation")) {
         return normalizedBackend == QStringLiteral("ultralytics_yolo_segment");
+    }
+    if (normalizedTask == QStringLiteral("obb_detection") || normalizedTask == QStringLiteral("obb")) {
+        return normalizedBackend == QStringLiteral("ultralytics_yolo_obb");
     }
     if (normalizedTask == QStringLiteral("semantic_segmentation")) {
         return normalizedBackend == QStringLiteral("smp_semantic_segmentation");
@@ -342,6 +351,9 @@ QString datasetFormatForTrainingTask(const QString& taskType)
     }
     if (normalized == QStringLiteral("segmentation")) {
         return QStringLiteral("yolo_segmentation");
+    }
+    if (normalized == QStringLiteral("obb_detection") || normalized == QStringLiteral("obb")) {
+        return QStringLiteral("yolo_obb");
     }
     if (normalized == QStringLiteral("semantic_segmentation")) {
         return QStringLiteral("semantic_segmentation_mask");
@@ -451,6 +463,7 @@ bool isOfficialWorkerBackendId(const QString& normalized)
     return normalized == QStringLiteral("ultralytics_yolo")
         || normalized == QStringLiteral("ultralytics_yolo_detect")
         || normalized == QStringLiteral("ultralytics_yolo_segment")
+        || normalized == QStringLiteral("ultralytics_yolo_obb")
         || normalized == QStringLiteral("smp_semantic_segmentation")
         || normalized == QStringLiteral("paddleocr_det_official")
         || normalized == QStringLiteral("paddleocr_rec_official")
@@ -764,7 +777,7 @@ QJsonObject yoloEnvironmentProfile(const QString& pythonExecutable)
         pythonExecutable,
         QStringLiteral("ultralytics"),
         QStringLiteral("ultralytics"),
-        QStringLiteral("Ultralytics is missing; official YOLO detection/segmentation training will be unavailable.")));
+        QStringLiteral("Ultralytics is missing; official YOLO detection/segmentation/OBB training will be unavailable.")));
     checks.append(runModuleProbe(
         pythonExecutable,
         QStringLiteral("torch"),

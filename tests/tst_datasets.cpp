@@ -28,6 +28,98 @@ private slots:
         QCOMPARE(invalid.issues.first().line, 1);
     }
 
+    void yoloObbDatasetValidation()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.path();
+        writeTextFile(QDir(root).filePath(QStringLiteral("data.yaml")), QStringLiteral("task: obb\nnc: 2\nnames: [ship, plane]\n"));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("images/train/a.jpg")));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("images/val/b.jpg")));
+        writeTextFile(QDir(root).filePath(QStringLiteral("labels/train/a.txt")),
+            QStringLiteral("0 0.20 0.20 0.80 0.20 0.80 0.70 0.20 0.70\n"));
+        writeTextFile(QDir(root).filePath(QStringLiteral("labels/val/b.txt")),
+            QStringLiteral("1 0.30 0.30 0.70 0.30 0.70 0.60 0.30 0.60\n"));
+
+        const aitrain::DatasetValidationResult valid = aitrain::validateYoloObbDataset(root);
+        QVERIFY2(valid.ok, qPrintable(valid.errors.join(QStringLiteral("\n"))));
+        QCOMPARE(valid.sampleCount, 2);
+        QVERIFY(!valid.previewSamples.isEmpty());
+        QVERIFY(valid.previewSamples.first().contains(QStringLiteral("obb=")));
+
+        struct Case {
+            QString line;
+            QString code;
+        };
+        const QVector<Case> cases = {
+            {QStringLiteral("0 0.20 0.20 0.80 0.20 0.80 0.70\n"), QStringLiteral("invalid_yolo_obb_row")},
+            {QStringLiteral("0 0.20 0.20 0.80 0.20 0.80 0.70 0.20 0.70 0.30\n"), QStringLiteral("invalid_yolo_obb_row")},
+            {QStringLiteral("3 0.20 0.20 0.80 0.20 0.80 0.70 0.20 0.70\n"), QStringLiteral("class_id_out_of_range")},
+            {QStringLiteral("0 0.20 0.20 1.20 0.20 0.80 0.70 0.20 0.70\n"), QStringLiteral("coordinate_out_of_range")},
+            {QStringLiteral("0 0.20 0.20 0.20 0.20 0.20 0.20 0.20 0.20\n"), QStringLiteral("obb_degenerate_quad")}
+        };
+        for (const Case& item : cases) {
+            writeTextFile(QDir(root).filePath(QStringLiteral("labels/train/a.txt")), item.line);
+            const aitrain::DatasetValidationResult invalid = aitrain::validateYoloObbDataset(root);
+            QVERIFY(!invalid.ok);
+            QVERIFY2(jsonArrayContainsCode(invalid.toJson().value(QStringLiteral("issues")).toArray(), item.code),
+                qPrintable(QString::fromUtf8(QJsonDocument(invalid.toJson()).toJson(QJsonDocument::Compact))));
+        }
+    }
+
+    void yoloSegmentationFourPointPolygonWarnsAmbiguousObb()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.path();
+        writeTextFile(QDir(root).filePath(QStringLiteral("data.yaml")), QStringLiteral("nc: 1\nnames: [ship]\n"));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("images/train/a.jpg")));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("images/val/b.jpg")));
+        writeTextFile(QDir(root).filePath(QStringLiteral("labels/train/a.txt")),
+            QStringLiteral("0 0.20 0.20 0.80 0.20 0.80 0.70 0.20 0.70\n"));
+        writeTextFile(QDir(root).filePath(QStringLiteral("labels/val/b.txt")),
+            QStringLiteral("0 0.30 0.30 0.70 0.30 0.70 0.60 0.30 0.60\n"));
+
+        const aitrain::DatasetValidationResult valid = aitrain::validateYoloSegmentationDataset(root);
+        QVERIFY2(valid.ok, qPrintable(valid.errors.join(QStringLiteral("\n"))));
+        QVERIFY(jsonArrayContainsCode(valid.toJson().value(QStringLiteral("issues")).toArray(), QStringLiteral("ambiguous_four_point_polygon")));
+    }
+
+    void yoloObbDatasetSplit()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("obb-source"));
+        writeTextFile(QDir(root).filePath(QStringLiteral("data.yaml")), QStringLiteral("task: obb\nnc: 1\nnames: [ship]\n"));
+        for (int index = 0; index < 4; ++index) {
+            const QString split = index < 3 ? QStringLiteral("train") : QStringLiteral("val");
+            const QString name = QStringLiteral("sample_%1").arg(index);
+            writeTinyPng(QDir(root).filePath(QStringLiteral("images/%1/%2.jpg").arg(split, name)));
+            writeTextFile(QDir(root).filePath(QStringLiteral("labels/%1/%2.txt").arg(split, name)),
+                QStringLiteral("0 0.20 0.20 0.80 0.20 0.80 0.70 0.20 0.70\n"));
+        }
+
+        QJsonObject options;
+        options.insert(QStringLiteral("trainRatio"), 0.5);
+        options.insert(QStringLiteral("valRatio"), 0.25);
+        options.insert(QStringLiteral("testRatio"), 0.25);
+        options.insert(QStringLiteral("seed"), 7);
+        const QString output = dir.filePath(QStringLiteral("obb-normalized"));
+        const aitrain::DatasetSplitResult result = aitrain::splitYoloObbDataset(root, output, options);
+        QVERIFY2(result.ok, qPrintable(result.errors.join(QStringLiteral("\n"))));
+        QCOMPARE(result.trainCount, 2);
+        QCOMPARE(result.valCount, 1);
+        QCOMPARE(result.testCount, 1);
+        QVERIFY(QFileInfo::exists(QDir(output).filePath(QStringLiteral("data.yaml"))));
+        QVERIFY(QFileInfo::exists(QDir(output).filePath(QStringLiteral("split_report.json"))));
+        QCOMPARE(QDir(QDir(output).filePath(QStringLiteral("labels/train"))).entryInfoList(QStringList() << QStringLiteral("*.txt"), QDir::Files).size(), 2);
+
+        QFile reportFile(QDir(output).filePath(QStringLiteral("split_report.json")));
+        QVERIFY(reportFile.open(QIODevice::ReadOnly | QIODevice::Text));
+        const QJsonObject report = QJsonDocument::fromJson(reportFile.readAll()).object();
+        QCOMPARE(report.value(QStringLiteral("format")).toString(), QStringLiteral("yolo_obb"));
+    }
+
     void datasetValidationRejectsUnreadableImages()
     {
         QTemporaryDir dir;

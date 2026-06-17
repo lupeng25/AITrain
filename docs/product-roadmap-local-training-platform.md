@@ -29,12 +29,12 @@ AITrain Studio 已完成 Worker、SQLite、任务记录、artifact 浏览、YOLO
 3. 用客户域数据执行 OCR 验收；public Total-Text / generated smoke 不能作为生产证明。
 4. 下一阶段重新打开工业模型扩展，但只覆盖异常检测/定位、OBB、专用语义分割；专用语义分割首版已选择 SMP 落地。
 
-Phase 40 backlog 的优先级已重新确认：异常检测/定位、OBB、专用语义分割作为下一阶段开发方向；其中专用语义分割已先落地 SMP 首版闭环，并通过本机 RTX 4090D GPU realtest。图像分类、姿态/关键点、YOLO-World、YOLOE、3D/RGB-D、视频/时序等仍后置，除非再次明确调整优先级。
+Phase 40 backlog 的优先级已重新确认：异常检测/定位、OBB、专用语义分割作为下一阶段开发方向；其中专用语义分割已先落地 SMP 首版闭环，并通过本机 RTX 4090D GPU realtest；OBB v1 走官方 Ultralytics OBB + AITrain ONNX Runtime 旋转框部署路径，仍需 smoke/质量矩阵证据才能声明产品就绪。图像分类、姿态/关键点、YOLO-World、YOLOE、3D/RGB-D、视频/时序等仍后置，除非再次明确调整优先级。
 
 下一阶段目标不是堆 demo 后端，而是把工业检测常见任务纳入现有闭环：
 
 - 异常检测/定位：优先考虑 PatchCore / EfficientAD / PaDiM / FastFlow 等 Anomalib 或同等级维护良好的 Python adapter 路径，支持仅良品训练、异常分数、热力图、阈值、OK/NG、mask/overlay、评估和交付报告。
-- OBB：优先基于官方 Ultralytics OBB 能力，补齐旋转框数据集校验、训练、导出、评估、ONNX/TensorRT 可行性验证、结果预览和交付报告；不要把普通 YOLO bbox 结果伪装成 OBB。
+- OBB：基于官方 Ultralytics OBB 能力，补齐旋转框数据集校验、训练、ONNX 导出、官方 `val()` 评估、AITrain C++ ONNX Runtime 旋转框推理/overlay/benchmark/部署验证、GUI 入口和脚本闭环；NCNN 不纳入 OBB v1，TensorRT engine export 只记录可选状态，不作为必过项。不要把普通 YOLO bbox 结果伪装成 OBB。
 - 专用语义分割：面向像素级工业缺陷/区域分割，首版使用 `segmentation_models.pytorch`，与现有 YOLO 实例分割区分，输出 per-pixel mask、面积/类别像素统计、overlay、评估和部署限制；当前已有 RTX 4090D GPU realtest 证据，Mask2Former 等路线仍可作为后续扩展候选。
 
 2026-06-14/15 全量模型生命周期运行中的新增边界：共享 Ultralytics 8.3.171 环境下 YOLO26 检测/实例分割 20 行全部失败，原因是官方模型配置/权重不可用或包代码不兼容。YOLO26 随后在隔离 targeted matrix 中完成 `phase-yolo26-model-matrix-smoke.ps1 -Full -Epochs 100 -Device 0`，20/20 行通过训练、官方 ONNX、AITrain C++ ONNX 推理和 TensorRT 验证；YOLO26 NCNN 历史尝试 20/20 failed，当前产品不提供 YOLO26 NCNN 导出/转换，客户预检只放行 YOLO26 训练/ONNX/TensorRT 证据。
@@ -187,7 +187,7 @@ Phase 40 backlog 的优先级已重新确认：异常检测/定位、OBB、专�
 下一阶段开发方向：
 
 - 异常检测/定位：新增工业 anomaly detection / localization 工作流，优先走 Worker-managed Python adapter，不在 GUI 进程内训练。首批能力应覆盖数据集结构、正常样本训练、异常分数、热力图、阈值选择、OK/NG 分类、mask/overlay 产物、评估报告、benchmark 和交付限制。
-- OBB：新增旋转框数据集、训练、评估、导出和结果展示闭环。首选官方 Ultralytics OBB 路径；报告必须记录官方来源、模型 preset、输入格式、评估指标、ONNX/TensorRT/NCNN 支持边界和失败原因。
+- OBB：新增旋转框数据集、训练、评估、导出和结果展示闭环。首选官方 Ultralytics OBB 路径；报告必须记录官方来源、模型 preset、输入格式、评估指标、ONNX Runtime 部署证据、TensorRT 可选状态、NCNN v1 不支持边界和失败原因。
 - 专用语义分割：新增区别于 YOLO 实例分割的 semantic segmentation 路线，用于裂纹、污渍、涂层、焊缝、气孔等像素级区域检测。首批实现已选择 SMP，覆盖 Mask PNG 校验/划分、SMP 训练、评估、ONNX 导出、ONNX Runtime 推理/overlay、benchmark、GUI 入口和 package smoke；NCNN/TensorRT 导出不属于 SMP 能力范围，也不是 SMP 验收要求。
 
 实现约束：

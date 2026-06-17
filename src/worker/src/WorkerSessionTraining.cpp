@@ -135,6 +135,11 @@ void WorkerSession::startTraining(const aitrain::TrainingRequest& request)
         runSegmentationTraining();
         return;
     }
+    if (request_.taskType.compare(QStringLiteral("obb_detection"), Qt::CaseInsensitive) == 0
+        || request_.taskType.compare(QStringLiteral("obb"), Qt::CaseInsensitive) == 0) {
+        runDetectionTraining();
+        return;
+    }
     if (request_.taskType.compare(QStringLiteral("semantic_segmentation"), Qt::CaseInsensitive) == 0) {
         runSemanticSegmentationTraining();
         return;

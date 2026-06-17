@@ -915,7 +915,11 @@ def run(request: dict[str, Any]) -> int:
     except Exception as exc:
         return fail("Ultralytics model load failed.", "ultralytics_model_load_failed", {"exception": str(exc)})
 
-    model_family = "yolo_segmentation" if BACKEND_ID == "ultralytics_yolo_segment" else "yolo_detection"
+    model_family = (
+        "yolo_segmentation"
+        if BACKEND_ID == "ultralytics_yolo_segment"
+        else ("yolo_obb" if BACKEND_ID == "ultralytics_yolo_obb" else "yolo_detection")
+    )
     try:
         export_plan = build_export_plan(
             parameters,
@@ -1031,7 +1035,11 @@ def run(request: dict[str, Any]) -> int:
         "model": model_name,
         "modelFamily": model_family,
         "modelSeries": model_series_from_name(model_name),
-        "task": "segmentation" if BACKEND_ID == "ultralytics_yolo_segment" else "detection",
+        "task": (
+            "segmentation"
+            if BACKEND_ID == "ultralytics_yolo_segment"
+            else ("obb" if BACKEND_ID == "ultralytics_yolo_obb" else "detection")
+        ),
         "datasetPath": str(dataset_path),
         "dataYaml": str(data_yaml),
         "saveDir": str(save_dir),

@@ -607,9 +607,10 @@ void MainWindow::splitDataset()
     }
     if (format != QStringLiteral("yolo_detection") && format != QStringLiteral("yolo_txt")
         && format != QStringLiteral("yolo_segmentation")
+        && format != QStringLiteral("yolo_obb")
         && format != QStringLiteral("paddleocr_det")
         && format != QStringLiteral("paddleocr_rec")) {
-        QMessageBox::warning(this, uiText("数据集划分"), uiText("当前划分支持 YOLO 检测、YOLO 分割、PaddleOCR Det 和 PaddleOCR Rec 格式。"));
+        QMessageBox::warning(this, uiText("数据集划分"), uiText("当前划分支持 YOLO 检测、YOLO 分割、YOLO OBB、PaddleOCR Det 和 PaddleOCR Rec 格式。"));
         return;
     }
 

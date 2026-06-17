@@ -32,6 +32,16 @@ struct SegmentationPrediction {
     double maskThreshold = 0.5;
 };
 
+struct ObbPrediction {
+    DetectionPrediction detection;
+    double xCenter = 0.0;
+    double yCenter = 0.0;
+    double width = 0.0;
+    double height = 0.0;
+    double rotation = 0.0;
+    QVector<QPointF> points;
+};
+
 struct SemanticSegmentationPrediction {
     QImage mask;
     QStringList classNames;
@@ -74,6 +84,7 @@ QVector<OcrDetPrediction> postProcessPaddleOcrDetDbMap(
 
 QJsonObject detectionPredictionToJson(const DetectionPrediction& prediction);
 QJsonObject segmentationPredictionToJson(const SegmentationPrediction& prediction);
+QJsonObject obbPredictionToJson(const ObbPrediction& prediction);
 QJsonObject semanticSegmentationPredictionToJson(const SemanticSegmentationPrediction& prediction);
 QJsonObject ocrRecPredictionToJson(const OcrRecPrediction& prediction);
 QJsonObject ocrDetPredictionToJson(const OcrDetPrediction& prediction);
@@ -86,6 +97,11 @@ QImage renderDetectionPredictions(
 QImage renderSegmentationPredictions(
     const QString& imagePath,
     const QVector<SegmentationPrediction>& predictions,
+    QString* error = nullptr);
+
+QImage renderObbPredictions(
+    const QString& imagePath,
+    const QVector<ObbPrediction>& predictions,
     QString* error = nullptr);
 
 QImage renderSemanticSegmentationPrediction(

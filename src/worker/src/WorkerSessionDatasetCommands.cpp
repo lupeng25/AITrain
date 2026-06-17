@@ -58,6 +58,8 @@ void WorkerSession::validateDataset(const QJsonObject& payload)
         result = aitrain::validateYoloDetectionDataset(datasetPath, options);
     } else if (format == QStringLiteral("yolo_segmentation")) {
         result = aitrain::validateYoloSegmentationDataset(datasetPath, options);
+    } else if (format == QStringLiteral("yolo_obb")) {
+        result = aitrain::validateYoloObbDataset(datasetPath, options);
     } else if (format == QStringLiteral("semantic_segmentation_mask")) {
         result = aitrain::validateSemanticSegmentationMaskDataset(datasetPath, options);
     } else if (format == QStringLiteral("paddleocr_det")) {
@@ -144,6 +146,8 @@ void WorkerSession::splitDataset(const QJsonObject& payload)
         result = aitrain::splitYoloDetectionDataset(datasetPath, outputPath, options);
     } else if (format == QStringLiteral("yolo_segmentation")) {
         result = aitrain::splitYoloSegmentationDataset(datasetPath, outputPath, options);
+    } else if (format == QStringLiteral("yolo_obb")) {
+        result = aitrain::splitYoloObbDataset(datasetPath, outputPath, options);
     } else if (format == QStringLiteral("semantic_segmentation_mask")) {
         result = aitrain::splitSemanticSegmentationMaskDataset(datasetPath, outputPath, options);
     } else if (format == QStringLiteral("paddleocr_det")) {
@@ -153,7 +157,7 @@ void WorkerSession::splitDataset(const QJsonObject& payload)
     } else {
         result.ok = false;
         result.outputPath = outputPath;
-        result.errors.append(QStringLiteral("当前仅支持 YOLO 检测、YOLO 分割、语义分割 Mask PNG、PaddleOCR Det 和 PaddleOCR Rec 数据集划分。"));
+        result.errors.append(QStringLiteral("当前仅支持 YOLO 检测、YOLO 分割、YOLO OBB、语义分割 Mask PNG、PaddleOCR Det 和 PaddleOCR Rec 数据集划分。"));
     }
 
     QJsonObject progressPayload;

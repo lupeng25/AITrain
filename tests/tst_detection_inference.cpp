@@ -2,6 +2,8 @@
 
 #include "../src/core/src/DetectionTrainerInternal.h"
 
+#include "aitrain/core/VisionPostprocess.h"
+
 #include <QtMath>
 
 class DetectionInferenceTests : public QObject {
@@ -149,6 +151,49 @@ private slots:
         QCOMPARE(postprocess.value(QStringLiteral("decoder")).toString(), QStringLiteral("yolo_v8_segmentation"));
     }
 
+    void onnxExportKeepsOfficialObbMetadata()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString sourceOnnx = dir.filePath(QStringLiteral("runs/weights/best.onnx"));
+        const QString reportPath = dir.filePath(QStringLiteral("runs/ultralytics_training_report.json"));
+        writeTextFile(sourceOnnx, QStringLiteral("fake official obb onnx\n"));
+
+        QJsonObject trainingReport;
+        trainingReport.insert(QStringLiteral("backend"), QStringLiteral("ultralytics_yolo_obb"));
+        trainingReport.insert(QStringLiteral("task"), QStringLiteral("obb"));
+        writeTextFile(reportPath, QString::fromUtf8(QJsonDocument(trainingReport).toJson(QJsonDocument::Indented)));
+
+        QJsonObject sidecar;
+        sidecar.insert(QStringLiteral("format"), QStringLiteral("onnx"));
+        sidecar.insert(QStringLiteral("backend"), QStringLiteral("ultralytics_yolo_obb"));
+        sidecar.insert(QStringLiteral("modelFamily"), QStringLiteral("yolo_obb"));
+        sidecar.insert(QStringLiteral("task"), QStringLiteral("obb"));
+        sidecar.insert(QStringLiteral("scaffold"), false);
+        sidecar.insert(QStringLiteral("sourceTrainingReport"), reportPath);
+        sidecar.insert(QStringLiteral("classNames"), QJsonArray{QStringLiteral("ship"), QStringLiteral("plane")});
+        writeTextFile(
+            dir.filePath(QStringLiteral("runs/weights/best.aitrain-export.json")),
+            QString::fromUtf8(QJsonDocument(sidecar).toJson(QJsonDocument::Indented)));
+
+        QCOMPARE(aitrain::inferOnnxModelFamily(sourceOnnx), QStringLiteral("yolo_obb"));
+
+        const QString outputOnnx = dir.filePath(QStringLiteral("export/model.onnx"));
+        const aitrain::DetectionExportResult exported = aitrain::exportDetectionCheckpoint(
+            sourceOnnx,
+            outputOnnx,
+            QStringLiteral("onnx"));
+
+        QVERIFY2(exported.ok, qPrintable(exported.error));
+        QCOMPARE(exported.config.value(QStringLiteral("backend")).toString(), QStringLiteral("ultralytics_yolo_obb"));
+        QCOMPARE(exported.config.value(QStringLiteral("modelFamily")).toString(), QStringLiteral("yolo_obb"));
+        QCOMPARE(exported.config.value(QStringLiteral("task")).toString(), QStringLiteral("obb"));
+        QCOMPARE(exported.config.value(QStringLiteral("classNames")).toArray().size(), 2);
+        const QJsonObject postprocess = exported.config.value(QStringLiteral("postprocess")).toObject();
+        QCOMPARE(postprocess.value(QStringLiteral("decoder")).toString(), QStringLiteral("yolo_obb"));
+        QVERIFY(postprocess.value(QStringLiteral("nms")).toString().contains(QStringLiteral("rotated")));
+    }
+
     void ncnnExportUsesPnnxForYoloOnnxAndKeepsInputSize()
     {
         QTemporaryDir dir;
@@ -236,6 +281,32 @@ private slots:
 
         QVERIFY(!exported.ok);
         QVERIFY(exported.error.contains(QStringLiteral("YOLO26 NCNN export is not supported")));
+    }
+
+    void ncnnExportRejectsYoloObbOnnx()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString sourceOnnx = dir.filePath(QStringLiteral("runs/weights/best.onnx"));
+        writeTextFile(sourceOnnx, QStringLiteral("fake yolo obb official onnx\n"));
+
+        QJsonObject sidecar;
+        sidecar.insert(QStringLiteral("format"), QStringLiteral("onnx"));
+        sidecar.insert(QStringLiteral("backend"), QStringLiteral("ultralytics_yolo_obb"));
+        sidecar.insert(QStringLiteral("modelFamily"), QStringLiteral("yolo_obb"));
+        sidecar.insert(QStringLiteral("task"), QStringLiteral("obb"));
+        sidecar.insert(QStringLiteral("scaffold"), false);
+        writeTextFile(
+            dir.filePath(QStringLiteral("runs/weights/best.aitrain-export.json")),
+            QString::fromUtf8(QJsonDocument(sidecar).toJson(QJsonDocument::Indented)));
+
+        const aitrain::DetectionExportResult exported = aitrain::exportDetectionCheckpoint(
+            sourceOnnx,
+            dir.filePath(QStringLiteral("export/model.param")),
+            QStringLiteral("ncnn"));
+
+        QVERIFY(!exported.ok);
+        QVERIFY(exported.error.contains(QStringLiteral("OBB NCNN export is not supported")));
     }
 
     void onnxExportUsesOfficialSiblingFromYoloCheckpoint()
@@ -450,6 +521,97 @@ private slots:
 
         QVERIFY(predictions.isEmpty());
         QVERIFY(error.contains(QStringLiteral("outputs must be")));
+    }
+
+    void yoloObbPostprocessOutputsRotatedJsonAndOverlay()
+    {
+        const std::vector<float> output = {
+            50.0f, 50.0f, 40.0f, 20.0f, 0.90f, 0.10f, 0.0f,
+            51.0f, 50.0f, 40.0f, 20.0f, 0.80f, 0.20f, 0.0f,
+        };
+        const std::vector<int64_t> shape = {1, 2, 7};
+
+        aitrain::LetterboxTransform transform;
+        transform.sourceSize = QSize(100, 100);
+        transform.targetSize = QSize(100, 100);
+        transform.scale = 1.0;
+
+        aitrain::DetectionInferenceOptions options;
+        options.confidenceThreshold = 0.25;
+        options.iouThreshold = 0.01;
+        options.maxDetections = 100;
+        QString error;
+        const QVector<aitrain::ObbPrediction> predictions =
+            aitrain::detection_detail::yoloObbPredictionsFromOutput(
+                output.data(),
+                shape,
+                QStringList{QStringLiteral("ship"), QStringLiteral("plane")},
+                QSize(100, 100),
+                transform,
+                options,
+                &error);
+
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(predictions.size(), 1);
+        QCOMPARE(predictions.first().detection.className, QStringLiteral("ship"));
+        QCOMPARE(predictions.first().points.size(), 4);
+        QVERIFY(qAbs(predictions.first().detection.confidence - 0.90) < 1.0e-6);
+
+        const QJsonObject json = aitrain::obbPredictionToJson(predictions.first());
+        QCOMPARE(json.value(QStringLiteral("taskType")).toString(), QStringLiteral("obb_detection"));
+        QCOMPARE(json.value(QStringLiteral("xywhr")).toArray().size(), 5);
+        QCOMPARE(json.value(QStringLiteral("points")).toArray().size(), 4);
+        QVERIFY(json.value(QStringLiteral("bbox")).isObject());
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString imagePath = dir.filePath(QStringLiteral("sample.png"));
+        QImage image(100, 100, QImage::Format_RGB888);
+        image.fill(Qt::white);
+        QVERIFY(image.save(imagePath));
+        const QImage overlay = aitrain::renderObbPredictions(imagePath, predictions, &error);
+        QVERIFY2(!overlay.isNull(), qPrintable(error));
+        QCOMPARE(overlay.size(), QSize(100, 100));
+    }
+
+    void yoloObbPostprocessHandlesAnchorsFirstWhenBothDimsLookValid()
+    {
+        std::vector<float> output;
+        output.reserve(8 * 7);
+        output.insert(output.end(), {60.0f, 40.0f, 20.0f, 10.0f, 0.91f, 0.05f, 0.0f});
+        for (int anchor = 1; anchor < 8; ++anchor) {
+            output.insert(output.end(), {10.0f, 10.0f, 1.0f, 1.0f, 0.02f, 0.01f, 0.0f});
+        }
+        const std::vector<int64_t> shape = {1, 8, 7};
+
+        aitrain::LetterboxTransform transform;
+        transform.sourceSize = QSize(100, 100);
+        transform.targetSize = QSize(100, 100);
+        transform.scale = 1.0;
+
+        aitrain::DetectionInferenceOptions options;
+        options.confidenceThreshold = 0.25;
+        options.iouThreshold = 0.45;
+        options.maxDetections = 100;
+        QString error;
+        const QVector<aitrain::ObbPrediction> predictions =
+            aitrain::detection_detail::yoloObbPredictionsFromOutput(
+                output.data(),
+                shape,
+                QStringList{QStringLiteral("ship"), QStringLiteral("plane")},
+                QSize(100, 100),
+                transform,
+                options,
+                &error);
+
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(predictions.size(), 1);
+        QCOMPARE(predictions.first().detection.className, QStringLiteral("ship"));
+        QVERIFY(qAbs(predictions.first().detection.confidence - 0.91) < 1.0e-6);
+        QVERIFY(qAbs(predictions.first().detection.box.xCenter - 0.60) < 1.0e-6);
+        QVERIFY(qAbs(predictions.first().detection.box.yCenter - 0.40) < 1.0e-6);
+        QVERIFY(qAbs(predictions.first().detection.box.width - 0.20) < 1.0e-6);
+        QVERIFY(qAbs(predictions.first().detection.box.height - 0.10) < 1.0e-6);
     }
 
     void inferenceOptionsUseProductionConfidenceDefault()

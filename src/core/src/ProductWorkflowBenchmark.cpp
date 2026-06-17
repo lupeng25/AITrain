@@ -171,6 +171,9 @@ WorkflowResult benchmarkModelReport(
                 } else if (modelFamily == QStringLiteral("yolo_segmentation")) {
                     const QVector<SegmentationPrediction> predictions = predictSegmentationOnnxRuntime(modelPath, sampleImagePath, inferenceOptions, &inferenceError);
                     outputCount = predictions.size();
+                } else if (modelFamily == QStringLiteral("yolo_obb")) {
+                    const QVector<ObbPrediction> predictions = predictObbOnnxRuntime(modelPath, sampleImagePath, inferenceOptions, &inferenceError);
+                    outputCount = predictions.size();
                 } else {
                     const QVector<DetectionPrediction> predictions = predictDetectionOnnxRuntime(modelPath, sampleImagePath, inferenceOptions, &inferenceError);
                     outputCount = predictions.size();

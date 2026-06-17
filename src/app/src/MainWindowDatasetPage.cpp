@@ -395,7 +395,7 @@ QWidget* MainWindow::buildDatasetPage()
     auto* samplePreviewLayout = new QVBoxLayout(samplePreviewTab);
     samplePreviewLayout->setContentsMargins(0, 0, 0, 0);
     samplePreviewLayout->setSpacing(10);
-    auto* samplePreviewHint = mutedLabel(QStringLiteral("划分会复制到新目录，不修改原始数据；支持 YOLO 检测、YOLO 分割、语义分割 Mask PNG、PaddleOCR Det 和 PaddleOCR Rec。"));
+    auto* samplePreviewHint = mutedLabel(QStringLiteral("划分会复制到新目录，不修改原始数据；支持 YOLO 检测、YOLO 分割、YOLO OBB、语义分割 Mask PNG、PaddleOCR Det 和 PaddleOCR Rec。"));
     allowLabelToShrink(samplePreviewHint);
     samplePreviewLayout->addWidget(datasetPreviewTable_, 1);
     samplePreviewLayout->addWidget(samplePreviewHint);

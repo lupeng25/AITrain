@@ -111,6 +111,9 @@ QString taskTypeLabel(const QString& taskType)
     if (taskType == QStringLiteral("segmentation")) {
         return uiText("分割");
     }
+    if (taskType == QStringLiteral("obb_detection") || taskType == QStringLiteral("obb")) {
+        return uiText("OBB 旋转框检测");
+    }
     if (taskType == QStringLiteral("semantic_segmentation")) {
         return uiText("语义分割");
     }
@@ -141,6 +144,9 @@ QString backendLabel(const QString& backend)
     }
     if (backend == QStringLiteral("ultralytics_yolo_segment")) {
         return uiText("Ultralytics YOLO 分割（官方）");
+    }
+    if (backend == QStringLiteral("ultralytics_yolo_obb")) {
+        return uiText("Ultralytics YOLO OBB（官方）");
     }
     if (backend == QStringLiteral("smp_semantic_segmentation")) {
         return uiText("SMP 语义分割（官方）");
@@ -513,6 +519,9 @@ QString inferenceTaskTypeLabel(const QString& taskType)
     if (taskType == QStringLiteral("segmentation")) {
         return uiText("分割");
     }
+    if (taskType == QStringLiteral("obb_detection") || taskType == QStringLiteral("obb")) {
+        return uiText("OBB 旋转框检测");
+    }
     if (taskType == QStringLiteral("semantic_segmentation")) {
         return uiText("语义分割");
     }
@@ -535,6 +544,9 @@ QString datasetFormatLabel(const QString& format)
     }
     if (format == QStringLiteral("yolo_segmentation")) {
         return uiText("YOLO 分割");
+    }
+    if (format == QStringLiteral("yolo_obb")) {
+        return uiText("YOLO OBB 旋转框");
     }
     if (format == QStringLiteral("semantic_segmentation_mask")) {
         return uiText("语义分割 Mask PNG");
@@ -564,6 +576,9 @@ QString defaultBackendForTask(const QString& taskType)
     }
     if (taskType == QStringLiteral("segmentation")) {
         return QStringLiteral("ultralytics_yolo_segment");
+    }
+    if (taskType == QStringLiteral("obb_detection") || taskType == QStringLiteral("obb")) {
+        return QStringLiteral("ultralytics_yolo_obb");
     }
     if (taskType == QStringLiteral("semantic_segmentation")) {
         return QStringLiteral("smp_semantic_segmentation");
@@ -628,13 +643,33 @@ QStringList smpSemanticModelPresets()
         QStringLiteral("smp_segformer_mit_b0")
     };
 }
+
+QStringList yoloObbModelPresets()
+{
+    QStringList presets;
+    const QStringList scales = {
+        QStringLiteral("n"),
+        QStringLiteral("s"),
+        QStringLiteral("m"),
+        QStringLiteral("l"),
+        QStringLiteral("x")
+    };
+    for (const QString& scale : scales) {
+        presets << QStringLiteral("yolo11%1-obb.pt").arg(scale);
+    }
+    for (const QString& scale : scales) {
+        presets << QStringLiteral("yolo11%1-obb.yaml").arg(scale);
+    }
+    return presets;
+}
 } // namespace
 
 QStringList yoloModelPresetItems()
 {
     QStringList presets;
     presets << yoloModelPresetsForTask(false)
-            << yoloModelPresetsForTask(true);
+            << yoloModelPresetsForTask(true)
+            << yoloObbModelPresets();
     return presets;
 }
 
@@ -647,6 +682,9 @@ QStringList modelPresetItemsForBackend(const QString& backend)
     }
     if (normalized == QStringLiteral("ultralytics_yolo_segment")) {
         return yoloModelPresetsForTask(true);
+    }
+    if (normalized == QStringLiteral("ultralytics_yolo_obb")) {
+        return yoloObbModelPresets();
     }
     if (normalized == QStringLiteral("smp_semantic_segmentation")) {
         return smpSemanticModelPresets();
@@ -702,12 +740,19 @@ bool yoloModelPresetMatchesBackend(const QString& modelPreset, const QString& ba
     }
 
     const bool modelLooksSegment = model.contains(QStringLiteral("-seg."));
+    const bool modelLooksObb = model.contains(QStringLiteral("-obb."));
+    if (normalizedBackend == QStringLiteral("ultralytics_yolo_obb")) {
+        if (modelLooksObb || model.contains(QStringLiteral("-obb"))) {
+            return true;
+        }
+        return !modelLooksSegment && !model.contains(QStringLiteral("yolo"));
+    }
     if (normalizedBackend == QStringLiteral("ultralytics_yolo_segment")) {
-        return modelLooksSegment;
+        return modelLooksSegment && !modelLooksObb;
     }
     if (normalizedBackend == QStringLiteral("ultralytics_yolo_detect")
         || normalizedBackend == QStringLiteral("ultralytics_yolo")) {
-        return !modelLooksSegment;
+        return !modelLooksSegment && !modelLooksObb;
     }
     return true;
 }
@@ -808,6 +853,9 @@ QString defaultModelForBackend(const QString& backend)
     if (backend == QStringLiteral("ultralytics_yolo_segment")) {
         return QStringLiteral("yolov8n-seg.yaml");
     }
+    if (backend == QStringLiteral("ultralytics_yolo_obb")) {
+        return QStringLiteral("yolo11n-obb.pt");
+    }
     if (backend == QStringLiteral("ultralytics_yolo_detect") || backend == QStringLiteral("ultralytics_yolo")) {
         return QStringLiteral("yolov8n.yaml");
     }
@@ -827,6 +875,9 @@ QString trainingBackendDescription(const QString& backend)
     }
     if (backend == QStringLiteral("ultralytics_yolo_segment")) {
         return uiText("当前模型能力：官方 Ultralytics YOLO segmentation。适合 YOLO polygon 数据，输出 mask 指标、best.pt、ONNX，并可生成 mask prediction JSON 与 overlay。");
+    }
+    if (backend == QStringLiteral("ultralytics_yolo_obb")) {
+        return uiText("当前模型能力：官方 Ultralytics YOLO OBB 旋转框检测。适合 9 列四点 YOLO OBB 数据，输出 best.pt、ONNX、官方 val 指标，并支持 ONNX Runtime 旋转框 JSON、overlay、benchmark 与部署验证；NCNN 不属于 OBB v1。");
     }
     if (backend == QStringLiteral("smp_semantic_segmentation")) {
         return uiText("当前模型能力：SMP 专用语义分割。适合 Mask PNG class-id 数据，输出 best.pt、best.onnx、训练/评估报告，并支持 ONNX Runtime 单图 mask overlay 和 benchmark；SMP 不需要 NCNN/TensorRT 导出。");
@@ -876,6 +927,9 @@ QString expectedTrainingTaskForDatasetFormat(const QString& format)
     if (format == QStringLiteral("yolo_segmentation")) {
         return QStringLiteral("segmentation");
     }
+    if (format == QStringLiteral("yolo_obb")) {
+        return QStringLiteral("obb_detection");
+    }
     if (format == QStringLiteral("semantic_segmentation_mask")) {
         return QStringLiteral("semantic_segmentation");
     }
@@ -897,6 +951,9 @@ bool isTrainingBackendCompatible(const QString& format, const QString& backend)
     }
     if (format == QStringLiteral("yolo_segmentation")) {
         return normalized == QStringLiteral("ultralytics_yolo_segment");
+    }
+    if (format == QStringLiteral("yolo_obb")) {
+        return normalized == QStringLiteral("ultralytics_yolo_obb");
     }
     if (format == QStringLiteral("semantic_segmentation_mask")) {
         return normalized == QStringLiteral("smp_semantic_segmentation");
@@ -1250,6 +1307,15 @@ QString detectDatasetFormatFromPath(const QString& path)
     if (!QFileInfo::exists(root.filePath(QStringLiteral("data.yaml")))) {
         return QString();
     }
+    bool yamlTaskObb = false;
+    QFile yamlFile(root.filePath(QStringLiteral("data.yaml")));
+    if (yamlFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        const QString yamlText = QString::fromUtf8(yamlFile.readAll()).toLower();
+        yamlTaskObb = yamlText.contains(QRegularExpression(QStringLiteral("(?m)^\\s*task\\s*:\\s*obb\\b")));
+    }
+    const QString normalizedPath = QDir::fromNativeSeparators(QFileInfo(path).absoluteFilePath()).toLower();
+    const bool pathSuggestsObb = normalizedPath.contains(QStringLiteral("obb")) || normalizedPath.contains(QStringLiteral("dota"));
+
     for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
         const QDir imageDir(root.filePath(QStringLiteral("images/%1").arg(split)));
         const QDir labelDir(root.filePath(QStringLiteral("labels/%1").arg(split)));
@@ -1276,6 +1342,9 @@ QString detectDatasetFormatFromPath(const QString& path)
                 );
                 if (parts.size() == 5) {
                     return QStringLiteral("yolo_detection");
+                }
+                if (parts.size() == 9) {
+                    return (yamlTaskObb || pathSuggestsObb) ? QStringLiteral("yolo_obb") : QString();
                 }
                 if (parts.size() >= 7 && parts.size() % 2 == 1) {
                     return QStringLiteral("yolo_segmentation");

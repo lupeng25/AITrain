@@ -707,13 +707,16 @@ QJsonObject yoloOnnxExportConfig(const QString& sourceOnnxPath, const QString& e
     const QString configuredFamily = exportSidecar.value(QStringLiteral("modelFamily")).toString();
     const QString configuredBackend = exportSidecar.value(QStringLiteral("backend")).toString();
     const QString reportBackend = report.value(QStringLiteral("backend")).toString();
+    const bool obb = configuredFamily == QStringLiteral("yolo_obb")
+        || configuredBackend == QStringLiteral("ultralytics_yolo_obb")
+        || reportBackend == QStringLiteral("ultralytics_yolo_obb");
     const bool segmentation = configuredFamily == QStringLiteral("yolo_segmentation")
         || configuredBackend == QStringLiteral("ultralytics_yolo_segment")
         || reportBackend == QStringLiteral("ultralytics_yolo_segment");
     QJsonObject config{
         {QStringLiteral("format"), format},
-        {QStringLiteral("backend"), segmentation ? QStringLiteral("ultralytics_yolo_segment") : QStringLiteral("ultralytics_yolo_detect")},
-        {QStringLiteral("modelFamily"), segmentation ? QStringLiteral("yolo_segmentation") : QStringLiteral("yolo_detection")},
+        {QStringLiteral("backend"), obb ? QStringLiteral("ultralytics_yolo_obb") : (segmentation ? QStringLiteral("ultralytics_yolo_segment") : QStringLiteral("ultralytics_yolo_detect"))},
+        {QStringLiteral("modelFamily"), obb ? QStringLiteral("yolo_obb") : (segmentation ? QStringLiteral("yolo_segmentation") : QStringLiteral("yolo_detection"))},
         {QStringLiteral("scaffold"), false},
         {QStringLiteral("sourceCheckpoint"), sourceOnnxPath},
         {QStringLiteral("sourceOnnx"), sourceOnnxPath},
@@ -721,8 +724,8 @@ QJsonObject yoloOnnxExportConfig(const QString& sourceOnnxPath, const QString& e
         {QStringLiteral("classNames"), QJsonArray::fromStringList(classNames)},
         {QStringLiteral("trainingReport"), report},
         {QStringLiteral("postprocess"), QJsonObject{
-            {QStringLiteral("decoder"), segmentation ? QStringLiteral("yolo_v8_segmentation") : QStringLiteral("yolo_v8_detection")},
-            {QStringLiteral("nms"), QStringLiteral("AITrain runtime")},
+            {QStringLiteral("decoder"), obb ? QStringLiteral("yolo_obb") : (segmentation ? QStringLiteral("yolo_v8_segmentation") : QStringLiteral("yolo_v8_detection"))},
+            {QStringLiteral("nms"), obb ? QStringLiteral("AITrain rotated polygon IoU") : QStringLiteral("AITrain runtime")},
             {QStringLiteral("coordinates"), QStringLiteral("letterbox_to_original_image")}
         }}
     };
@@ -744,7 +747,7 @@ QJsonObject yoloOnnxExportConfig(const QString& sourceOnnxPath, const QString& e
         task = report.value(QStringLiteral("task")).toString();
     }
     if (task.isEmpty()) {
-        task = segmentation ? QStringLiteral("segmentation") : QStringLiteral("detection");
+        task = obb ? QStringLiteral("obb") : (segmentation ? QStringLiteral("segmentation") : QStringLiteral("detection"));
     }
     config.insert(QStringLiteral("task"), task);
 
@@ -872,6 +875,10 @@ DetectionExportResult exportDetectionCheckpoint(
                 result.error = QStringLiteral("SMP semantic segmentation uses ONNX Runtime deployment; NCNN export is not part of the SMP capability scope.");
                 return result;
             }
+            if (sourceModelFamily == QStringLiteral("yolo_obb")) {
+                result.error = QStringLiteral("OBB NCNN export is not supported in AITrain v1; use ONNX Runtime for OBB deployment.");
+                return result;
+            }
             if (isYolo26OnnxSource(effectiveCheckpointPath)) {
                 result.error = QStringLiteral("YOLO26 NCNN export is not supported by AITrain; use ONNX or TensorRT for YOLO26 deployment.");
                 return result;
@@ -940,10 +947,12 @@ DetectionExportResult exportDetectionCheckpoint(
             }
             const QString reportPath = onnxExportReportPath(finalOutputPath);
             QJsonObject config = yoloOnnxExportConfig(effectiveCheckpointPath, finalOutputPath, normalizedFormat);
-            const bool segmentation = config.value(QStringLiteral("modelFamily")).toString() == QStringLiteral("yolo_segmentation");
+            const QString family = config.value(QStringLiteral("modelFamily")).toString();
+            const bool segmentation = family == QStringLiteral("yolo_segmentation");
+            const bool obb = family == QStringLiteral("yolo_obb");
             config.insert(
                 QStringLiteral("backend"),
-                segmentation ? QStringLiteral("tensorrt_ultralytics_yolo_segment") : QStringLiteral("tensorrt_ultralytics_yolo_detect"));
+                obb ? QStringLiteral("tensorrt_ultralytics_yolo_obb") : (segmentation ? QStringLiteral("tensorrt_ultralytics_yolo_segment") : QStringLiteral("tensorrt_ultralytics_yolo_detect")));
             config.insert(QStringLiteral("tensorRt"), QJsonObject{
                 {QStringLiteral("precision"), fp16 ? QStringLiteral("fp16") : QStringLiteral("fp32")},
                 {QStringLiteral("workspaceBytes"), static_cast<double>(size_t{1} << 30)},

@@ -1018,6 +1018,17 @@ WorkflowResult validateDeploymentArtifactReport(
                     predictionArray.append(semanticSegmentationPredictionToJson(prediction));
                     overlay = renderSemanticSegmentationPrediction(sampleImagePath, prediction, &error);
                 }
+            } else if (family == QStringLiteral("yolo_obb")) {
+                taskType = QStringLiteral("obb_detection");
+                DetectionInferenceOptions inferenceOptions;
+                const QVector<ObbPrediction> predictions =
+                    predictObbOnnxRuntime(normalizedModelPath, sampleImagePath, inferenceOptions, &error);
+                for (const ObbPrediction& prediction : predictions) {
+                    predictionArray.append(obbPredictionToJson(prediction));
+                }
+                if (error.isEmpty()) {
+                    overlay = renderObbPredictions(sampleImagePath, predictions, &error);
+                }
             } else if (family == QStringLiteral("yolo_segmentation")) {
                 taskType = QStringLiteral("segmentation");
                 DetectionInferenceOptions inferenceOptions;

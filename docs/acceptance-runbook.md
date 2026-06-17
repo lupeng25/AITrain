@@ -1,6 +1,6 @@
 ﻿# AITrain Studio Acceptance Runbook
 
-This runbook is the Phase 17-50 plus P1 acceptance path, with YOLO26 tracked as a separate compatibility phase and SMP tracked as the first dedicated semantic segmentation route. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, records a traceable release-freeze package identity, validates newer YOLO detection/segmentation model-family candidates, documents the delivery-closeout workbench, adds the PP-OCRv5 GPU official-chain gate, defines the P1 full YOLO preset/export-argument matrix, adds the independent YOLO26 detection/instance-segmentation matrix, adds PP-OCRv6 Det/Rec/System official-chain acceptance, and adds an SMP semantic segmentation smoke. OCR acceptance is official-only through PaddleOCR Det/Rec/System reports. RTX 4090 D TensorRT smoke evidence is recorded under `.deps\\rtx4090-validation\\acceptance-tensorrt`; clean Windows and customer-domain OCR production evidence still require returned external/customer data.
+This runbook is the Phase 17-50 plus P1 acceptance path, with YOLO26 tracked as a separate compatibility phase, SMP tracked as the first dedicated semantic segmentation route, and OBB tracked as an Ultralytics official OBB + AITrain ONNX Runtime route. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, records a traceable release-freeze package identity, validates newer YOLO detection/segmentation model-family candidates, documents the delivery-closeout workbench, adds the PP-OCRv5 GPU official-chain gate, defines the P1 full YOLO preset/export-argument matrix, adds the independent YOLO26 detection/instance-segmentation matrix, adds PP-OCRv6 Det/Rec/System official-chain acceptance, adds an SMP semantic segmentation smoke, and adds an OBB smoke/matrix path. OCR acceptance is official-only through PaddleOCR Det/Rec/System reports. RTX 4090 D TensorRT smoke evidence is recorded under `.deps\\rtx4090-validation\\acceptance-tensorrt`; clean Windows and customer-domain OCR production evidence still require returned external/customer data.
 
 ## Acceptance Modes
 
@@ -18,6 +18,8 @@ Run the unified smoke script from the repository root:
 .\tools\phase-ppocrv6-model-matrix-smoke.ps1
 .\tools\phase-smp-semantic-segmentation-smoke.ps1
 .\tools\phase-smp-4090d-gpu-realtest.ps1
+.\tools\phase-obb-ultralytics-smoke.ps1 -Epochs 1 -ImageSize 640 -BatchSize 2 -Device cpu
+.\tools\phase-obb-dota-quality-matrix.ps1 -Dataset DOTA8 -Epochs 30 -Device 0
 .\tools\acceptance-smoke.ps1 -TensorRT
 .\tools\customer-ocr-validation.ps1
 ```
@@ -51,6 +53,16 @@ For SMP semantic segmentation, use:
 `phase-smp-semantic-segmentation-smoke.ps1` remains the minimal adapter smoke: it generates a tiny Mask PNG semantic dataset, compiles the SMP trainer/evaluator, checks `segmentation_models_pytorch`, Torch, timm, ONNX, ONNX Runtime, Pillow, NumPy, and PyYAML, trains only when dependencies are available, exports `best.onnx`, runs evaluation, and verifies overlays. If dependencies are absent, use `-SkipTraining` for package/layout validation or treat the smoke summary as `blocked`, not passed.
 
 `phase-smp-4090d-gpu-realtest.ps1` is the RTX 4090D validation lane. It creates or repairs `.deps\envs\smp-gpu`, requires CUDA PyTorch, runs `smp_unet_resnet34` as the 20-epoch GPU mainline, runs the remaining public SMP presets as short GPU matrix rows, evaluates the exported ONNX, and calls `aitrain_worker.exe --semantic-onnx-smoke` to prove AITrain C++ ONNX Runtime inference, overlay, benchmark, and deployment validation. CPU fallback is not counted as a pass for this lane. The generated synthetic data validates engineering lifecycle only, not industrial accuracy.
+
+For OBB rotated-box detection, use:
+
+```powershell
+.\tools\phase-obb-ultralytics-smoke.ps1 -Epochs 1 -ImageSize 640 -BatchSize 2 -Device cpu
+.\tools\phase-obb-ultralytics-smoke.ps1 -Epochs 20 -Device 0
+.\tools\phase-obb-dota-quality-matrix.ps1 -Dataset DOTA8 -Epochs 30 -Device 0
+```
+
+OBB v1 accepts `taskType=obb_detection`, `datasetFormat=yolo_obb`, `trainingBackend=ultralytics_yolo_obb`, and `modelFamily=yolo_obb`. Training, first ONNX export, and evaluation are official Ultralytics OBB operations. Packaged inference, overlay, benchmark, and deployment validation use AITrain C++ ONNX Runtime with rotated quadrilateral output. NCNN is not an OBB v1 deployment target and must be reported as unsupported/rejected, not failed acceptance. TensorRT engine export is optional status evidence only. Public DOTA/DOTA-subset matrix results are workflow/benchmark evidence and must not be represented as customer-domain industrial precision.
 
 ## Phase 49 Lite: Delivery Closeout Workbench
 

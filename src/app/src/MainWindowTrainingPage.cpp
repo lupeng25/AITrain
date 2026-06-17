@@ -286,6 +286,7 @@ QWidget* MainWindow::buildTrainingPage()
     trainingBackendCombo_ = new QComboBox;
     trainingBackendCombo_->addItem(backendLabel(QStringLiteral("ultralytics_yolo_detect")), QStringLiteral("ultralytics_yolo_detect"));
     trainingBackendCombo_->addItem(backendLabel(QStringLiteral("ultralytics_yolo_segment")), QStringLiteral("ultralytics_yolo_segment"));
+    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("ultralytics_yolo_obb")), QStringLiteral("ultralytics_yolo_obb"));
     trainingBackendCombo_->addItem(backendLabel(QStringLiteral("smp_semantic_segmentation")), QStringLiteral("smp_semantic_segmentation"));
     trainingBackendCombo_->addItem(backendLabel(QStringLiteral("paddleocr_det_official")), QStringLiteral("paddleocr_det_official"));
     trainingBackendCombo_->addItem(backendLabel(QStringLiteral("paddleocr_rec_official")), QStringLiteral("paddleocr_rec_official"));

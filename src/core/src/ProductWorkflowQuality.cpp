@@ -134,6 +134,7 @@ bool isSupportedQualityFormat(const QString& format)
     return format == QStringLiteral("yolo_detection")
         || format == QStringLiteral("yolo_txt")
         || format == QStringLiteral("yolo_segmentation")
+        || format == QStringLiteral("yolo_obb")
         || format == QStringLiteral("semantic_segmentation_mask")
         || format == QStringLiteral("paddleocr_det")
         || format == QStringLiteral("paddleocr_rec");
@@ -1365,6 +1366,8 @@ WorkflowResult curateDatasetQualityReport(
     if (format == QStringLiteral("yolo_detection") || format == QStringLiteral("yolo_txt")) {
         scanYoloQuality(context, false);
     } else if (format == QStringLiteral("yolo_segmentation")) {
+        scanYoloQuality(context, true);
+    } else if (format == QStringLiteral("yolo_obb")) {
         scanYoloQuality(context, true);
     } else if (format == QStringLiteral("semantic_segmentation_mask")) {
         scanSemanticMaskQuality(context, options);

@@ -137,6 +137,34 @@ def test_ultralytics_segment_args_allow_mask_parameters() -> None:
     assert kwargs["mask_ratio"] == 4
 
 
+def test_ultralytics_obb_args_use_official_backend_without_mask_parameters() -> None:
+    kwargs = trainer.build_ultralytics_train_kwargs(
+        {
+            "trainingBackend": "ultralytics_yolo_obb",
+            "model": "yolo11n-obb.pt",
+            "epochs": 2,
+            "batchSize": 4,
+            "imageSize": 640,
+            "device": "cpu",
+            "ultralyticsTrainArgs": {
+                "degrees": "15",
+                "copy_paste": "0.5",
+            },
+        },
+        Path("data.yaml"),
+        Path("runs"),
+        "ultralytics_yolo_obb",
+    )
+
+    assert kwargs["epochs"] == 2
+    assert kwargs["batch"] == 4
+    assert kwargs["imgsz"] == 640
+    assert kwargs["device"] == "cpu"
+    assert kwargs["modelName"] == "yolo11n-obb.pt"
+    assert kwargs["degrees"] == 15.0
+    assert "copy_paste" not in kwargs
+
+
 def test_ultralytics_train_args_reject_unknown_keys() -> None:
     try:
         trainer.build_ultralytics_train_kwargs(
@@ -170,6 +198,22 @@ def test_official_val_metric_extraction_detection_and_segmentation() -> None:
     assert detection["mAP50_95"] == 0.5
     assert segmentation["maskMap50"] == 0.35
     assert segmentation["maskMap50_95"] == 0.25
+
+
+def test_official_val_metric_extraction_obb_uses_box_metrics() -> None:
+    raw = {
+        "metrics/precision(B)": 0.9,
+        "metrics/recall(B)": 0.8,
+        "metrics/mAP50(B)": 0.7,
+        "metrics/mAP50-95(B)": 0.6,
+    }
+
+    obb = evaluator.extract_metrics(raw, "obb")
+
+    assert obb["precision"] == 0.9
+    assert obb["recall"] == 0.8
+    assert obb["mAP50"] == 0.7
+    assert obb["mAP50_95"] == 0.6
 
 
 def test_ultralytics_export_args_are_sanitized() -> None:
@@ -296,6 +340,35 @@ def test_yolo26_ncnn_export_is_rejected() -> None:
         raise AssertionError("YOLO26 NCNN export was accepted")
 
 
+def test_yolo_obb_export_defaults_to_obb_task_and_onnx() -> None:
+    plan = exporter.build_export_plan(
+        {"model": "yolo11n-obb.pt"},
+        default_format="onnx",
+        default_imgsz=640,
+        default_batch=1,
+        default_device="cpu",
+    )
+
+    assert plan["productFormat"] == "onnx"
+    assert plan["officialFormat"] == "onnx"
+    assert plan["modelFamily"] == "yolo_obb"
+    assert plan["task"] == "obb"
+    assert plan["kwargs"]["imgsz"] == 640
+    assert plan["kwargs"]["batch"] == 1
+
+
+def test_yolo_obb_ncnn_export_is_rejected() -> None:
+    try:
+        exporter.build_export_plan(
+            {"ultralyticsExportArgs": {"format": "ncnn"}, "model": "yolo11n-obb.pt"},
+            model_family="yolo_obb",
+        )
+    except ValueError as exc:
+        assert "OBB NCNN export is not supported" in str(exc)
+    else:
+        raise AssertionError("YOLO OBB NCNN export was accepted")
+
+
 def test_ultralytics_export_args_reject_unknown_keys() -> None:
     try:
         exporter.build_export_plan({"ultralyticsExportArgs": {"unknown": 1}})
@@ -362,13 +435,35 @@ def test_exporter_infers_segmentation_family_from_training_report() -> None:
     assert report["backend"] == "ultralytics_yolo_segment"
 
 
+def test_exporter_infers_obb_family_from_training_report() -> None:
+    with tempfile.TemporaryDirectory() as raw_dir:
+        root = Path(raw_dir)
+        weights_dir = root / "ultralytics_runs" / "aitrain-yolo-obb" / "weights"
+        weights_dir.mkdir(parents=True)
+        best_pt = weights_dir / "best.pt"
+        best_pt.write_text("fake checkpoint\n", encoding="utf-8")
+        report_path = root / "ultralytics_training_report.json"
+        report_path.write_text(
+            json.dumps({"backend": "ultralytics_yolo_obb", "model": "yolo11n-obb.pt"}),
+            encoding="utf-8",
+        )
+
+        family, found_report, report = exporter.infer_model_family(best_pt, None, {})
+
+    assert family == "yolo_obb"
+    assert found_report == report_path
+    assert report["backend"] == "ultralytics_yolo_obb"
+
+
 if __name__ == "__main__":
     test_sanitize_log_line_removes_ansi_tqdm_noise()
     test_yolo_callbacks_emit_structured_progress_and_epoch_metrics()
     test_ultralytics_train_args_are_sanitized_and_merged()
     test_ultralytics_segment_args_allow_mask_parameters()
+    test_ultralytics_obb_args_use_official_backend_without_mask_parameters()
     test_ultralytics_train_args_reject_unknown_keys()
     test_official_val_metric_extraction_detection_and_segmentation()
+    test_official_val_metric_extraction_obb_uses_box_metrics()
     test_ultralytics_export_args_are_sanitized()
     test_training_export_defaults_to_single_image_batch()
     test_cpu_device_environment_uses_default_cpu()
@@ -378,7 +473,10 @@ if __name__ == "__main__":
     test_non_yolo26_auto_false_does_not_emit_end2end_kwarg()
     test_ultralytics_export_args_accept_bool_end2end_override()
     test_yolo26_ncnn_export_is_rejected()
+    test_yolo_obb_export_defaults_to_obb_task_and_onnx()
+    test_yolo_obb_ncnn_export_is_rejected()
     test_ultralytics_export_args_reject_unknown_keys()
     test_ultralytics_export_args_reject_unsupported_combinations()
     test_ultralytics_export_args_accept_tensorrt_int8_with_data()
     test_exporter_infers_segmentation_family_from_training_report()
+    test_exporter_infers_obb_family_from_training_report()

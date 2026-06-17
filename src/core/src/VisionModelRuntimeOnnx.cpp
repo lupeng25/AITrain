@@ -214,6 +214,10 @@ QString inferOnnxModelFamily(const QString& onnxPath, QString* warning)
         || configuredBackend == QStringLiteral("smp_semantic_segmentation")) {
         return QStringLiteral("semantic_segmentation");
     }
+    if (configuredFamily == QStringLiteral("yolo_obb")
+        || configuredBackend == QStringLiteral("ultralytics_yolo_obb")) {
+        return QStringLiteral("yolo_obb");
+    }
     if (configuredFamily == QStringLiteral("yolo_segmentation")
         || configuredBackend == QStringLiteral("ultralytics_yolo_segment")) {
         return QStringLiteral("yolo_segmentation");
@@ -241,6 +245,9 @@ QString inferOnnxModelFamily(const QString& onnxPath, QString* warning)
         return QStringLiteral("ocr_recognition");
     }
     const QJsonObject yoloReport = loadUltralyticsTrainingReport(onnxPath);
+    if (yoloReport.value(QStringLiteral("backend")).toString() == QStringLiteral("ultralytics_yolo_obb")) {
+        return QStringLiteral("yolo_obb");
+    }
     if (yoloReport.value(QStringLiteral("backend")).toString() == QStringLiteral("ultralytics_yolo_segment")) {
         return QStringLiteral("yolo_segmentation");
     }
@@ -436,6 +443,126 @@ QVector<DetectionPrediction> predictDetectionOnnxRuntime(
     } catch (const std::exception& exception) {
         if (error) {
             *error = QStringLiteral("ONNX inference failed: %1").arg(QString::fromUtf8(exception.what()));
+        }
+        return {};
+    }
+#endif
+}
+
+QVector<ObbPrediction> predictObbOnnxRuntime(
+    const QString& onnxPath,
+    const QString& imagePath,
+    const DetectionInferenceOptions& options,
+    QString* error)
+{
+#ifndef AITRAIN_WITH_ONNXRUNTIME
+    Q_UNUSED(onnxPath)
+    Q_UNUSED(imagePath)
+    Q_UNUSED(options)
+    if (error) {
+        *error = QStringLiteral("ONNX Runtime inference is not enabled. Configure AITRAIN_ONNXRUNTIME_ROOT with an ONNX Runtime SDK to enable .onnx inference.");
+    }
+    return {};
+#else
+    if (!QFileInfo::exists(onnxPath)) {
+        if (error) {
+            *error = QStringLiteral("ONNX OBB model does not exist: %1").arg(onnxPath);
+        }
+        return {};
+    }
+
+    QImage image(imagePath);
+    if (image.isNull()) {
+        if (error) {
+            *error = QStringLiteral("Cannot read image for ONNX OBB prediction: %1").arg(imagePath);
+        }
+        return {};
+    }
+
+    try {
+        const QJsonObject exportConfig = loadOnnxExportConfig(onnxPath);
+        Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "aitrain");
+        Ort::SessionOptions sessionOptions;
+        sessionOptions.SetIntraOpNumThreads(1);
+        sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
+#ifdef Q_OS_WIN
+        const std::wstring modelPath = QDir::toNativeSeparators(onnxPath).toStdWString();
+        Ort::Session session(env, modelPath.c_str(), sessionOptions);
+#else
+        const QByteArray modelPath = QFile::encodeName(onnxPath);
+        Ort::Session session(env, modelPath.constData(), sessionOptions);
+#endif
+        Ort::AllocatorWithDefaultOptions allocator;
+
+        if (session.GetInputCount() != 1 || session.GetOutputCount() < 1) {
+            if (error) {
+                *error = QStringLiteral("YOLO OBB ONNX expects one input and at least one output");
+            }
+            return {};
+        }
+        const std::vector<int64_t> inputShape = session.GetInputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape();
+        const QSize inputSize = yoloInputSizeFromShape(inputShape, exportConfig);
+        if (inputShape.size() != 4 || inputShape.at(1) != 3 || inputSize.isEmpty()) {
+            if (error) {
+                *error = QStringLiteral("YOLO OBB ONNX input shape must be [1, 3, height, width]");
+            }
+            return {};
+        }
+
+        LetterboxTransform transform;
+        QVector<float> input = yoloImageTensorFromLetterbox(image, inputSize, &transform);
+        std::vector<int64_t> tensorShape = {1, 3, inputSize.height(), inputSize.width()};
+        Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+        Ort::Value inputTensor = Ort::Value::CreateTensor<float>(
+            memoryInfo,
+            input.data(),
+            static_cast<size_t>(input.size()),
+            tensorShape.data(),
+            tensorShape.size());
+
+        auto inputName = session.GetInputNameAllocated(0, allocator);
+        std::vector<Ort::AllocatedStringPtr> outputNameHolders;
+        std::vector<const char*> outputNames;
+        const size_t outputCount = session.GetOutputCount();
+        outputNameHolders.reserve(outputCount);
+        outputNames.reserve(outputCount);
+        for (size_t outputIndex = 0; outputIndex < outputCount; ++outputIndex) {
+            outputNameHolders.emplace_back(session.GetOutputNameAllocated(outputIndex, allocator));
+            outputNames.push_back(outputNameHolders.back().get());
+        }
+        const char* inputNames[] = { inputName.get() };
+        std::vector<Ort::Value> outputs = session.Run(
+            Ort::RunOptions{nullptr},
+            inputNames,
+            &inputTensor,
+            1,
+            outputNames.data(),
+            outputNames.size());
+        if (outputs.empty()) {
+            if (error) {
+                *error = QStringLiteral("YOLO OBB ONNX model returned no outputs");
+            }
+            return {};
+        }
+
+        const QStringList classNames = ultralyticsClassNames(onnxPath);
+        const std::vector<int64_t> outputShape = outputs.front().GetTensorTypeAndShapeInfo().GetShape();
+        return yoloObbPredictionsFromOutput(
+            outputs.front().GetTensorData<float>(),
+            outputShape,
+            classNames,
+            inputSize,
+            transform,
+            options,
+            error);
+    } catch (const Ort::Exception& exception) {
+        if (error) {
+            *error = QStringLiteral("ONNX Runtime OBB inference failed: %1").arg(QString::fromUtf8(exception.what()));
+        }
+        return {};
+    } catch (const std::exception& exception) {
+        if (error) {
+            *error = QStringLiteral("ONNX OBB inference failed: %1").arg(QString::fromUtf8(exception.what()));
         }
         return {};
     }

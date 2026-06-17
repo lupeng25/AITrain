@@ -370,7 +370,7 @@ def write_failure_report(output_path: Path, request: dict[str, Any], message: st
         "perClass": [],
         "errorSamples": [],
         "lowConfidenceSamples": [],
-        "limitations": "YOLO detection/segmentation evaluation is official-only. This report is failed because Ultralytics val() could not complete; AITrain local AP/mAP fallback is disabled.",
+        "limitations": "YOLO detection/segmentation/OBB evaluation is official-only. This report is failed because Ultralytics val() could not complete; AITrain local AP/mAP fallback is disabled.",
     }
     write_json(report_path, report)
     return report_path
@@ -385,6 +385,8 @@ def run(request: dict[str, Any]) -> int:
         task_type = "detection"
     if task_type in {"yolo_segmentation", "segment"}:
         task_type = "segmentation"
+    if task_type in {"obb_detection", "yolo_obb", "obb"}:
+        task_type = "obb"
     options = request.get("options")
     if not isinstance(options, dict):
         options = {}
@@ -485,7 +487,7 @@ def run(request: dict[str, Any]) -> int:
         "parameters": {key: to_jsonable(value) for key, value in val_kwargs.items() if key not in {"data", "project", "name"}},
         "decisionSummary": decision_summary(task_type, metrics, sample_count),
         "errorTaxonomy": empty_error_taxonomy(task_type),
-        "limitations": "YOLO detection/segmentation evaluation metrics are produced exclusively by Ultralytics official val(). AITrain local AP/mAP, mask IoU, TP/FP/FN, local error samples, and local overlays are disabled for this report.",
+        "limitations": "YOLO detection/segmentation/OBB evaluation metrics are produced exclusively by Ultralytics official val(). AITrain local AP/mAP, mask IoU, rotated AP, TP/FP/FN, local error samples, and local overlays are disabled for this report.",
     }
 
     report_path = output_path / "evaluation_report.json"

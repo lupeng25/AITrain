@@ -114,7 +114,7 @@ def find_ultralytics_training_report(model_path: Path) -> tuple[Path | None, dic
         candidate = directory / "ultralytics_training_report.json"
         report = read_json_object(candidate)
         backend = str(report.get("backend") or "")
-        if backend in {"ultralytics_yolo_detect", "ultralytics_yolo_segment"}:
+        if backend in {"ultralytics_yolo_detect", "ultralytics_yolo_segment", "ultralytics_yolo_obb"}:
             return candidate, report
     return None, {}
 
@@ -123,6 +123,8 @@ def model_family_from_text(value: Any) -> str:
     text = str(value or "").strip().lower()
     if text in {"segmentation", "segment", "yolo_segmentation", "ultralytics_yolo_segment"}:
         return "yolo_segmentation"
+    if text in {"obb", "obb_detection", "yolo_obb", "ultralytics_yolo_obb"}:
+        return "yolo_obb"
     if text in {"detection", "detect", "yolo_detection", "ultralytics_yolo_detect", "ultralytics_yolo"}:
         return "yolo_detection"
     return ""
@@ -150,6 +152,8 @@ def infer_model_family(model_path: Path, model: Any | None, request: dict[str, A
     if family:
         return family, report_path, report
     report_model = str(report.get("model") or "")
+    if "-obb" in report_model.lower():
+        return "yolo_obb", report_path, report
     if "-seg" in report_model.lower():
         return "yolo_segmentation", report_path, report
 
@@ -162,7 +166,10 @@ def infer_model_family(model_path: Path, model: Any | None, request: dict[str, A
         if family:
             return family, report_path, report
 
-    return ("yolo_segmentation" if "-seg" in model_path.stem.lower() else "yolo_detection"), report_path, report
+    stem = model_path.stem.lower()
+    if "-obb" in stem:
+        return "yolo_obb", report_path, report
+    return ("yolo_segmentation" if "-seg" in stem else "yolo_detection"), report_path, report
 
 
 def parse_bool(name: str, value: Any) -> bool:
@@ -243,7 +250,10 @@ def model_family_hint(parameters: dict[str, Any], explicit: str | None, model_na
         family = model_family_from_text(parameters.get(key))
         if family:
             return family
-    return "yolo_segmentation" if "-seg" in model_name.lower() else "yolo_detection"
+    lower_name = model_name.lower()
+    if "-obb" in lower_name:
+        return "yolo_obb"
+    return "yolo_segmentation" if "-seg" in lower_name else "yolo_detection"
 
 
 def normalize_end2end(
@@ -307,6 +317,8 @@ def model_series_from_name(value: Any) -> str:
 def task_from_model_family(model_family: str) -> str:
     if model_family == "yolo_segmentation":
         return "segmentation"
+    if model_family == "yolo_obb":
+        return "obb"
     if model_family == "yolo_detection":
         return "detection"
     return ""
@@ -373,6 +385,8 @@ def build_export_plan(
     product_format = normalize_product_format(raw_args.get("format", default_format), default_format)
     model_hint = model_name_hint(parameters, model_name)
     family_hint = model_family_hint(parameters, model_family, model_hint)
+    if product_format == "ncnn" and family_hint == "yolo_obb":
+        raise ValueError("OBB NCNN export is not supported in AITrain v1; use ONNX Runtime for OBB deployment.")
     if product_format == "ncnn" and is_yolo26_model_name(model_hint):
         raise ValueError("YOLO26 NCNN export is not supported by AITrain; use ONNX or TensorRT for YOLO26 deployment.")
     dynamic = parse_bool("dynamic", raw_args.get("dynamic", False))

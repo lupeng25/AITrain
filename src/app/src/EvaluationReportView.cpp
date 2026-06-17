@@ -595,7 +595,7 @@ void EvaluationReportView::populateSamples(const QJsonObject& report)
                 ? uiText("官方 YOLO 评估不生成本地 overlay。")
                 : uiText("该报告没有记录本地 overlay。"));
         detailText_->setPlainText(officialYolo
-                ? uiText("YOLO 检测/分割指标来自 Ultralytics official val()。AITrain 不再生成本地 AP/mAP、mask IoU、混淆矩阵、错误样本或 overlay。")
+                ? uiText("YOLO 检测/分割/OBB 指标来自 Ultralytics official val()。AITrain 不再生成本地 AP/mAP、mask IoU、混淆矩阵、错误样本或 overlay。")
                 : uiText("该报告没有本地样本预览；请查看上方指标、官方产物和报告详情。"));
         return;
     }

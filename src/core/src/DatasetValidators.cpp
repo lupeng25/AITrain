@@ -11,11 +11,13 @@
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QMap>
+#include <QPointF>
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSize>
 #include <QSet>
 #include <QTextStream>
+#include <QtMath>
 
 namespace aitrain {
 namespace {
@@ -49,6 +51,12 @@ struct SemanticMaskSample {
     QString fileName;
     QString baseName;
     QString split;
+};
+
+enum class YoloAnnotationKind {
+    Detection,
+    Segmentation,
+    Obb
 };
 
 void addIssue(DatasetValidationResult& result,
@@ -340,9 +348,60 @@ double polygonArea(const QVector<double>& coordinates)
     return qAbs(area) * 0.5;
 }
 
+bool finiteNormalizedCoordinates(const QVector<double>& coordinates)
+{
+    for (double value : coordinates) {
+        if (!qIsFinite(value) || value < 0.0 || value > 1.0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool likelyRectangleObb(const QVector<double>& coordinates)
+{
+    if (coordinates.size() != 8 || !finiteNormalizedCoordinates(coordinates)) {
+        return false;
+    }
+    const QPointF p0(coordinates.at(0), coordinates.at(1));
+    const QPointF p1(coordinates.at(2), coordinates.at(3));
+    const QPointF p2(coordinates.at(4), coordinates.at(5));
+    const QPointF p3(coordinates.at(6), coordinates.at(7));
+    const QVector<QPointF> points = {p0, p1, p2, p3};
+    QVector<double> sideLengths;
+    sideLengths.reserve(4);
+    for (int index = 0; index < 4; ++index) {
+        const QPointF a = points.at(index);
+        const QPointF b = points.at((index + 1) % 4);
+        sideLengths.append(qSqrt(qPow(a.x() - b.x(), 2.0) + qPow(a.y() - b.y(), 2.0)));
+    }
+    for (double length : sideLengths) {
+        if (length <= 1.0e-6) {
+            return false;
+        }
+    }
+    auto dot = [&points](int corner) {
+        const QPointF previous = points.at((corner + 3) % 4);
+        const QPointF current = points.at(corner);
+        const QPointF next = points.at((corner + 1) % 4);
+        const QPointF a(previous.x() - current.x(), previous.y() - current.y());
+        const QPointF b(next.x() - current.x(), next.y() - current.y());
+        const double denominator = qSqrt(a.x() * a.x() + a.y() * a.y()) * qSqrt(b.x() * b.x() + b.y() * b.y());
+        return denominator > 0.0 ? qAbs((a.x() * b.x() + a.y() * b.y()) / denominator) : 1.0;
+    };
+    for (int corner = 0; corner < 4; ++corner) {
+        if (dot(corner) > 0.15) {
+            return false;
+        }
+    }
+    const double oppositeA = qAbs(sideLengths.at(0) - sideLengths.at(2)) / qMax(sideLengths.at(0), sideLengths.at(2));
+    const double oppositeB = qAbs(sideLengths.at(1) - sideLengths.at(3)) / qMax(sideLengths.at(1), sideLengths.at(3));
+    return oppositeA <= 0.25 && oppositeB <= 0.25;
+}
+
 void validateLabelFile(const QFileInfo& labelInfo,
     int classCount,
-    bool segmentation,
+    YoloAnnotationKind kind,
     bool allowEmptyLabels,
     DatasetValidationResult& result,
     int maxIssues)
@@ -364,15 +423,21 @@ void validateLabelFile(const QFileInfo& labelInfo,
         }
         hasRows = true;
         const QStringList parts = splitFields(line);
-        if (!segmentation && parts.size() != 5) {
+        if (kind == YoloAnnotationKind::Detection && parts.size() != 5) {
             addIssue(result, QStringLiteral("error"), QStringLiteral("invalid_yolo_detection_row"), labelInfo.absoluteFilePath(), lineNumber,
                 QStringLiteral("YOLO 检测标注必须是 5 列：class x_center y_center width height。"));
             if (issueLimitReached(result, maxIssues)) return;
             continue;
         }
-        if (segmentation && (parts.size() < 7 || parts.size() % 2 == 0)) {
+        if (kind == YoloAnnotationKind::Segmentation && (parts.size() < 7 || parts.size() % 2 == 0)) {
             addIssue(result, QStringLiteral("error"), QStringLiteral("invalid_yolo_segmentation_row"), labelInfo.absoluteFilePath(), lineNumber,
                 QStringLiteral("YOLO 分割标注必须是 class 后接至少 3 个 polygon 点，坐标数量为偶数。"));
+            if (issueLimitReached(result, maxIssues)) return;
+            continue;
+        }
+        if (kind == YoloAnnotationKind::Obb && parts.size() != 9) {
+            addIssue(result, QStringLiteral("error"), QStringLiteral("invalid_yolo_obb_row"), labelInfo.absoluteFilePath(), lineNumber,
+                QStringLiteral("YOLO OBB 标注必须是 9 列：class x1 y1 x2 y2 x3 y3 x4 y4。"));
             if (issueLimitReached(result, maxIssues)) return;
             continue;
         }
@@ -388,13 +453,26 @@ void validateLabelFile(const QFileInfo& labelInfo,
             }
             coordinates.append(value);
         }
-        if (!segmentation && coordinates.size() == 4 && (coordinates.at(2) <= 0.0 || coordinates.at(3) <= 0.0)) {
+        if (kind == YoloAnnotationKind::Detection && coordinates.size() == 4 && (coordinates.at(2) <= 0.0 || coordinates.at(3) <= 0.0)) {
             addIssue(result, QStringLiteral("error"), QStringLiteral("invalid_bbox_size"), labelInfo.absoluteFilePath(), lineNumber,
                 QStringLiteral("bbox 宽高必须大于 0。"));
         }
-        if (segmentation && coordinates.size() >= 6 && polygonArea(coordinates) < 0.000001) {
+        if (kind == YoloAnnotationKind::Segmentation && coordinates.size() >= 6 && polygonArea(coordinates) < 0.000001) {
             addIssue(result, QStringLiteral("error"), QStringLiteral("polygon_too_small"), labelInfo.absoluteFilePath(), lineNumber,
                 QStringLiteral("polygon 面积过小。"));
+        }
+        if (kind == YoloAnnotationKind::Segmentation && coordinates.size() == 8) {
+            addIssue(result, QStringLiteral("warning"), QStringLiteral("ambiguous_four_point_polygon"), labelInfo.absoluteFilePath(), lineNumber,
+                QStringLiteral("该 YOLO segmentation 行正好是 4 点 polygon，可能是 OBB 标注；如需旋转框检测请手选 yolo_obb。"));
+        }
+        if (kind == YoloAnnotationKind::Obb && coordinates.size() == 8) {
+            if (polygonArea(coordinates) < 0.000001) {
+                addIssue(result, QStringLiteral("error"), QStringLiteral("obb_degenerate_quad"), labelInfo.absoluteFilePath(), lineNumber,
+                    QStringLiteral("OBB 四边形面积过小或退化。"));
+            } else if (!likelyRectangleObb(coordinates)) {
+                addIssue(result, QStringLiteral("warning"), QStringLiteral("obb_suspicious_non_rectangle"), labelInfo.absoluteFilePath(), lineNumber,
+                    QStringLiteral("OBB 四点看起来不是规则旋转矩形，请复核标注顺序和几何形状。"));
+            }
         }
         if (issueLimitReached(result, maxIssues)) {
             return;
@@ -407,7 +485,7 @@ void validateLabelFile(const QFileInfo& labelInfo,
     }
 }
 
-QString yoloLabelSummary(const QString& labelPath, bool segmentation)
+QString yoloLabelSummary(const QString& labelPath, YoloAnnotationKind kind)
 {
     QFile file(labelPath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
@@ -433,7 +511,7 @@ QString yoloLabelSummary(const QString& labelPath, bool segmentation)
             minClass = minClass < 0 ? classId : qMin(minClass, classId);
             maxClass = maxClass < 0 ? classId : qMax(maxClass, classId);
         }
-        if (segmentation && parts.size() > 1) {
+        if ((kind == YoloAnnotationKind::Segmentation || kind == YoloAnnotationKind::Obb) && parts.size() > 1) {
             maxPoints = qMax(maxPoints, (parts.size() - 1) / 2);
         }
         ++rows;
@@ -444,12 +522,15 @@ QString yoloLabelSummary(const QString& labelPath, bool segmentation)
     const QString classText = minClass == maxClass
         ? QStringLiteral("class=%1").arg(minClass)
         : QStringLiteral("class=%1..%2").arg(minClass).arg(maxClass);
-    return segmentation
+    if (kind == YoloAnnotationKind::Obb) {
+        return QStringLiteral("obb=%1, points=%2, %3").arg(rows).arg(maxPoints).arg(classText);
+    }
+    return kind == YoloAnnotationKind::Segmentation
         ? QStringLiteral("polygon=%1, maxPoints=%2, %3").arg(rows).arg(maxPoints).arg(classText)
         : QStringLiteral("bbox=%1, %2").arg(rows).arg(classText);
 }
 
-DatasetValidationResult validateYoloDataset(const QString& datasetPath, const QJsonObject& options, bool segmentation)
+DatasetValidationResult validateYoloDataset(const QString& datasetPath, const QJsonObject& options, YoloAnnotationKind kind)
 {
     DatasetValidationResult result;
     const int maxIssues = options.value(QStringLiteral("maxIssues")).toInt(kDefaultMaxIssues);
@@ -521,7 +602,7 @@ DatasetValidationResult validateYoloDataset(const QString& datasetPath, const QJ
             const QFileInfo labelInfo(labelPath);
             if (result.previewSamples.size() < 20) {
                 result.previewSamples.append(QStringLiteral("%1\t%2").arg(imageInfo.absoluteFilePath(), labelInfo.exists()
-                    ? yoloLabelSummary(labelInfo.absoluteFilePath(), segmentation)
+                    ? yoloLabelSummary(labelInfo.absoluteFilePath(), kind)
                     : QStringLiteral("缺少标注文件")));
             }
             if (!labelInfo.exists()) {
@@ -530,7 +611,7 @@ DatasetValidationResult validateYoloDataset(const QString& datasetPath, const QJ
                 if (issueLimitReached(result, maxIssues)) return result;
                 continue;
             }
-            validateLabelFile(labelInfo, classCount, segmentation, allowEmptyLabels, result, maxIssues);
+            validateLabelFile(labelInfo, classCount, kind, allowEmptyLabels, result, maxIssues);
             if (issueLimitReached(result, maxIssues)) {
                 return result;
             }
@@ -806,19 +887,28 @@ bool validateSplitRatios(double trainRatio, double valRatio, double testRatio, D
 DatasetSplitResult splitYoloDataset(const QString& datasetPath,
     const QString& outputPath,
     const QJsonObject& options,
-    bool segmentation)
+    YoloAnnotationKind kind)
 {
     DatasetSplitResult result;
     result.outputPath = outputPath;
 
-    const DatasetValidationResult validation = segmentation
-        ? validateYoloSegmentationDataset(datasetPath, options)
-        : validateYoloDetectionDataset(datasetPath, options);
+    DatasetValidationResult validation;
+    if (kind == YoloAnnotationKind::Segmentation) {
+        validation = validateYoloSegmentationDataset(datasetPath, options);
+    } else if (kind == YoloAnnotationKind::Obb) {
+        validation = validateYoloObbDataset(datasetPath, options);
+    } else {
+        validation = validateYoloDetectionDataset(datasetPath, options);
+    }
     if (!validation.ok) {
         result.ok = false;
-        result.errors.append(segmentation
-            ? QStringLiteral("源数据集未通过 YOLO 分割校验，已取消划分。")
-            : QStringLiteral("源数据集未通过 YOLO 检测校验，已取消划分。"));
+        if (kind == YoloAnnotationKind::Segmentation) {
+            result.errors.append(QStringLiteral("源数据集未通过 YOLO 分割校验，已取消划分。"));
+        } else if (kind == YoloAnnotationKind::Obb) {
+            result.errors.append(QStringLiteral("源数据集未通过 YOLO OBB 校验，已取消划分。"));
+        } else {
+            result.errors.append(QStringLiteral("源数据集未通过 YOLO 检测校验，已取消划分。"));
+        }
         result.errors.append(validation.errors);
         return result;
     }
@@ -836,9 +926,13 @@ DatasetSplitResult splitYoloDataset(const QString& datasetPath,
     }
     if (samples.isEmpty()) {
         result.ok = false;
-        result.errors.append(segmentation
-            ? QStringLiteral("没有可划分的 YOLO 分割样本。")
-            : QStringLiteral("没有可划分的 YOLO 检测样本。"));
+        if (kind == YoloAnnotationKind::Segmentation) {
+            result.errors.append(QStringLiteral("没有可划分的 YOLO 分割样本。"));
+        } else if (kind == YoloAnnotationKind::Obb) {
+            result.errors.append(QStringLiteral("没有可划分的 YOLO OBB 样本。"));
+        } else {
+            result.errors.append(QStringLiteral("没有可划分的 YOLO 检测样本。"));
+        }
         return result;
     }
 
@@ -876,7 +970,9 @@ DatasetSplitResult splitYoloDataset(const QString& datasetPath,
 
     QJsonObject report = result.toJson();
     report.insert(QStringLiteral("sourcePath"), datasetPath);
-    report.insert(QStringLiteral("format"), segmentation ? QStringLiteral("yolo_segmentation") : QStringLiteral("yolo_detection"));
+    report.insert(QStringLiteral("format"), kind == YoloAnnotationKind::Obb
+        ? QStringLiteral("yolo_obb")
+        : (kind == YoloAnnotationKind::Segmentation ? QStringLiteral("yolo_segmentation") : QStringLiteral("yolo_detection")));
     report.insert(QStringLiteral("seed"), static_cast<int>(seed));
     report.insert(QStringLiteral("trainRatio"), trainRatio);
     report.insert(QStringLiteral("valRatio"), valRatio);
@@ -1062,12 +1158,17 @@ QJsonObject DatasetSplitResult::toJson() const
 
 DatasetValidationResult validateYoloDetectionDataset(const QString& datasetPath, const QJsonObject& options)
 {
-    return validateYoloDataset(datasetPath, options, false);
+    return validateYoloDataset(datasetPath, options, YoloAnnotationKind::Detection);
 }
 
 DatasetValidationResult validateYoloSegmentationDataset(const QString& datasetPath, const QJsonObject& options)
 {
-    return validateYoloDataset(datasetPath, options, true);
+    return validateYoloDataset(datasetPath, options, YoloAnnotationKind::Segmentation);
+}
+
+DatasetValidationResult validateYoloObbDataset(const QString& datasetPath, const QJsonObject& options)
+{
+    return validateYoloDataset(datasetPath, options, YoloAnnotationKind::Obb);
 }
 
 DatasetValidationResult validateSemanticSegmentationMaskDataset(const QString& datasetPath, const QJsonObject& options)
@@ -1321,12 +1422,17 @@ DatasetValidationResult validatePaddleOcrRecDataset(const QString& datasetPath, 
 
 DatasetSplitResult splitYoloDetectionDataset(const QString& datasetPath, const QString& outputPath, const QJsonObject& options)
 {
-    return splitYoloDataset(datasetPath, outputPath, options, false);
+    return splitYoloDataset(datasetPath, outputPath, options, YoloAnnotationKind::Detection);
 }
 
 DatasetSplitResult splitYoloSegmentationDataset(const QString& datasetPath, const QString& outputPath, const QJsonObject& options)
 {
-    return splitYoloDataset(datasetPath, outputPath, options, true);
+    return splitYoloDataset(datasetPath, outputPath, options, YoloAnnotationKind::Segmentation);
+}
+
+DatasetSplitResult splitYoloObbDataset(const QString& datasetPath, const QString& outputPath, const QJsonObject& options)
+{
+    return splitYoloDataset(datasetPath, outputPath, options, YoloAnnotationKind::Obb);
 }
 
 DatasetSplitResult splitSemanticSegmentationMaskDataset(const QString& datasetPath, const QString& outputPath, const QJsonObject& options)

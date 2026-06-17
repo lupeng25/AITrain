@@ -15,6 +15,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 
 - 训练 YOLO 风格检测模型。
 - 训练 YOLO 风格分割模型。
+- 训练 YOLO OBB 旋转框检测模型。
 - 训练 PaddleOCR Det / Rec 官方模型，并通过 PaddleOCR System 做端到端 OCR 推理验收。
 - 管理数据集。
 - 转换模型格式并做部署验证。
@@ -25,10 +26,10 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 
 - 真实模型训练优先通过 Worker 启动独立 Python 子进程实现。
 - 若官方 Python 实现可用，优先适配官方实现，而不是自研训练框架。
-- 检测和分割优先评估 Ultralytics YOLO；OCR Det / Rec / System 优先评估 PaddleOCR / PaddlePaddle 官方工具链。
+- 检测、分割和 OBB 优先评估 Ultralytics YOLO；OCR Det / Rec / System 优先评估 PaddleOCR / PaddlePaddle 官方工具链。
 - 官方后端必须显式记录来源、版本和许可证约束。
 - C++ 侧继续负责 GUI、Worker 编排、数据集校验、SQLite、ONNX Runtime/TensorRT 推理、打包和部署。
-- YOLO 检测/分割的产品边界是“官方 Ultralytics 训练/ONNX 导出/`val()` 评估 + AITrain C++ runtime 推理/benchmark/部署验证”，不是 OCR 那种端到端 official-only。
+- YOLO 检测/分割/OBB 的产品边界是“官方 Ultralytics 训练/ONNX 导出/`val()` 评估 + AITrain C++ runtime 推理/benchmark/部署验证”，不是 OCR 那种端到端 official-only。OBB v1 的部署路径是 ONNX Runtime；NCNN 不纳入 OBB v1。
 - 不把 Python 嵌入 `MainWindow` 或 GUI 进程。
 - 旧的 C++ tiny/scaffold 训练实现已物理删除；生产训练只通过官方后端。
 
@@ -36,7 +37,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 
 阶段状态以 `docs/harness/current-status.md` 为准。不要只根据长期路线图末尾的历史“下一步建议”判断当前阶段。
 
-截至 2026-06-06，官方 YOLO 检测/分割训练与 ONNX 导出、PaddleOCR Det/Rec/System 官方工具链、PP-OCRv4/v5/v6 official adapter preset、YOLO C++ ONNX Runtime 推理、RTX 4090D TensorRT 验收证据、本地插件 marketplace、环境 profile、数据集质量/快照、数据集格式转换 GUI、评估、benchmark、模型库、交付报告、样本复核、部署验证、诊断包和环境页交付证据 GUI 闭环都已落地到当前本地代码。当前主导航收敛为 9 个对象型工作区：`总览`、`项目`、`数据集`、`训练实验`、`任务与产物`、`模型库`、`部署验证`、`环境`、`系统设置`；样本复核、评估报告、模型导出、推理验证、插件和应用设置作为对应工作区 tab 呈现。2026-06-05 RTX 4090D follow-up 刷新记录 local baseline/package acceptance、GUI walkthrough、历史 Phase 47 Det ONNX+CTest、CPU training smoke、Phase 45 YOLO matrix、TensorRT 和 public OCR GPU workflow 均有通过证据；准确阶段边界仍以 `docs/harness/current-status.md` 为准。
+截至 2026-06-16，官方 YOLO 检测/分割/OBB 训练与 ONNX 导出、PaddleOCR Det/Rec/System 官方工具链、PP-OCRv4/v5/v6 official adapter preset、YOLO C++ ONNX Runtime 推理、RTX 4090D TensorRT 验收证据、本地插件 marketplace、环境 profile、数据集质量/快照、数据集格式转换 GUI、评估、benchmark、模型库、交付报告、样本复核、部署验证、诊断包和环境页交付证据 GUI 闭环都已落地到当前本地代码。当前主导航收敛为 9 个对象型工作区：`总览`、`项目`、`数据集`、`训练实验`、`任务与产物`、`模型库`、`部署验证`、`环境`、`系统设置`；样本复核、评估报告、模型导出、推理验证、插件和应用设置作为对应工作区 tab 呈现。2026-06-05 RTX 4090D follow-up 刷新记录 local baseline/package acceptance、GUI walkthrough、历史 Phase 47 Det ONNX+CTest、CPU training smoke、Phase 45 YOLO matrix、TensorRT 和 public OCR GPU workflow 均有通过证据；OBB v1 仍需 smoke/质量矩阵证据后才能声明产品就绪。准确阶段边界仍以 `docs/harness/current-status.md` 为准。
 
 2026-06-14/15 全量模型生命周期验证暴露了当前软件影响项：Ultralytics 8.3.171 无法解析 YOLO12 分割 `.pt` 权重 `yolo12n-seg.pt`，这类行应记录为上游权重 blocker；共享 Ultralytics 8.3.171 环境下 YOLO26 20 行全部失败，原因是 `.yaml` 配置不存在、官方权重不可解析或 nano `.pt` 权重与包代码不兼容；进度页面可能把历史 `row_summary.json` 失败计入当前 failed 数；GPU YOLO 训练必须使用 CUDA PyTorch 环境。随后隔离 YOLO26 targeted matrix 在 2026-06-15 取得 `-Full -Epochs 100` 20/20 训练、官方 ONNX、AITrain C++ ONNX 推理和 TensorRT 通过证据。YOLO26 NCNN 历史尝试 20/20 failed，当前产品移除 YOLO26 NCNN 选项并拒绝 `format=ncnn`。详细边界见 `docs/harness/current-status.md` 和 `docs/yolo-model-support-matrix.md`。
 
@@ -74,7 +75,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 - VSCode 构建、运行、调试配置。
 - QtTest 基础覆盖。
 - Worker-managed Python Trainer Adapter；协议测试使用临时 Python trainer fixture，仓库不再提供 shipped `python_mock`。
-- 官方 Ultralytics YOLO detection / segmentation 训练、导出，以及 AITrain C++ ONNX Runtime 推理 smoke。
+- 官方 Ultralytics YOLO detection / segmentation / OBB 训练、导出，以及 AITrain C++ ONNX Runtime 推理 smoke。
 - 旧 PaddlePaddle OCR Rec CTC 训练实现已物理删除；生产 OCR 训练和验收主线使用官方 PaddleOCR Det/Rec/System 工具链 smoke。
 - OCR 路线已收口为官方-only：训练、导出、推理、评估和客户验收使用 PaddleOCR Det/Rec/System 官方工具链和报告；Phase 46/47 的 C++ OCR ONNX 内容只作为历史 wiring 证据保留。PP-OCRv5/PP-OCRv6 仅覆盖这些官方 OCR preset，不扩展到 PP-StructureV3、PP-ChatOCR、PaddleOCR-VL、文档方向分类、图像矫正、文本行方向分类或 PaddleOCR C++ 本地部署。
 - TensorRT SDK-backed ONNX 到 engine 导出路径和 RTX 4090 D 验收证据；旧 GTX 1060 / SM 61 仍应为 `hardware-blocked`。当前 official-artifact smoke 使用官方 Ultralytics ONNX 产物，不再使用已删除的 tiny-detector TensorRT 推理 fixture。
@@ -82,7 +83,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 - Windows 打包、package smoke、release freeze handoff、离线授权和注册码生成器。
 - 本地产品闭环：数据集质量报告、问题样本、X-AnyLabeling 复核清单、snapshot、训练 lineage、评估、benchmark、模型注册、pipeline、交付报告。
 - Phase 49 交付闭环：`数据集 > 质量与复核`、`环境 > 交付证据`、客户域 OCR 验收向导、一键诊断包和导出后部署验证。
-- 下一阶段开发方向已重新确认：补充工业视觉检测中的异常检测/定位、OBB 和专用语义分割能力；其中专用语义分割首版已通过 SMP 路线落地，并已有 RTX 4090D GPU realtest 证据；异常检测/定位和 OBB 仍需实现和验证。
+- 下一阶段开发方向已重新确认：补充工业视觉检测中的异常检测/定位、OBB 和专用语义分割能力；其中专用语义分割首版已通过 SMP 路线落地，并已有 RTX 4090D GPU realtest 证据；OBB v1 已接入官方 Ultralytics OBB 和 AITrain ONNX Runtime 旋转框部署路径，但仍需 smoke/质量矩阵证据；异常检测/定位仍需实现和验证。
 
 未完成：
 
@@ -90,7 +91,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 - package-root TensorRT rerun 只有在重新打开外部验收时才执行；旧 GPU 的正确状态仍是 `hardware-blocked`。
 - 客户域 OCR 生产声明必须使用真实客户/目标域数据和官方报告；public Total-Text、generated smoke、`.deps` 示例只能证明流程。
 - NCNN runtime validation 已替代 artifact-only：有 NCNN SDK/runtime 和样本图时验证 YOLO 检测/分割推理；无 SDK/runtime 时必须明确 failed/blocked。本机 2026-05-16 证据覆盖 Hyuto YOLOv8 detection ONNX -> NCNN 和 nihui 预转换 YOLOv8n-seg pnnx/DFL NCNN；YOLOv8-seg ONNX 若经 `onnx2ncnn` 后仍包含 unsupported `Shape` layer，当前是失败报告而不是通过项。
-- 工业异常检测/定位和 OBB 是下一阶段批准方向但当前仍未实现；专用语义分割已有 SMP 首版闭环和本机 RTX 4090D GPU 实测，但不能把现有 YOLO 检测/实例分割能力描述成语义分割、异常检测或 OBB。
+- 工业异常检测/定位是下一阶段批准方向但当前仍未实现；OBB v1 已接入但未完成正式质量证据；专用语义分割已有 SMP 首版闭环和本机 RTX 4090D GPU 实测，但不能把现有 YOLO 检测/实例分割能力描述成语义分割、异常检测或 OBB。
 - 插件签名、远程 marketplace、账号、支付、云调度和多人协作后置。
 - 分类、姿态/关键点、YOLO-World、YOLOE、3D/RGB-D、视频/时序等新算法后端仍后置，除非再次明确调整优先级。
 

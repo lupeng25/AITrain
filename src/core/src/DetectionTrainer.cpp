@@ -65,7 +65,8 @@ QJsonObject detectionTrainingBackendStatus()
         QStringLiteral("Production detection training uses the official Ultralytics Worker adapter. Legacy C++ diagnostic training has been removed."));
     status.insert(QStringLiteral("productionBackends"), QJsonArray{
         QStringLiteral("ultralytics_yolo_detect"),
-        QStringLiteral("ultralytics_yolo_segment")});
+        QStringLiteral("ultralytics_yolo_segment"),
+        QStringLiteral("ultralytics_yolo_obb")});
     return status;
 }
 

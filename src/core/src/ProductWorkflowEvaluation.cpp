@@ -288,7 +288,7 @@ WorkflowResult officialYoloEvaluationFailure(
     report.insert(QStringLiteral("perClass"), QJsonArray{});
     report.insert(QStringLiteral("errorSamples"), QJsonArray{});
     report.insert(QStringLiteral("lowConfidenceSamples"), QJsonArray{});
-    report.insert(QStringLiteral("limitations"), QStringLiteral("YOLO detection/segmentation evaluation is official-only. AITrain local AP/mAP fallback is disabled."));
+    report.insert(QStringLiteral("limitations"), QStringLiteral("YOLO detection/segmentation/OBB evaluation is official-only. AITrain local AP/mAP fallback is disabled."));
 
     const QString reportPath = QDir(outputPath).filePath(QStringLiteral("evaluation_report.json"));
     QString writeError;
@@ -478,7 +478,13 @@ WorkflowResult runOfficialYoloEvaluation(
     request.insert(QStringLiteral("modelPath"), modelPath);
     request.insert(QStringLiteral("datasetPath"), datasetPath);
     request.insert(QStringLiteral("outputPath"), outputPath);
-    request.insert(QStringLiteral("taskType"), taskType == QStringLiteral("yolo_segmentation") ? QStringLiteral("segmentation") : taskType);
+    QString normalizedTaskType = taskType;
+    if (normalizedTaskType == QStringLiteral("yolo_segmentation")) {
+        normalizedTaskType = QStringLiteral("segmentation");
+    } else if (normalizedTaskType == QStringLiteral("yolo_obb") || normalizedTaskType == QStringLiteral("obb_detection")) {
+        normalizedTaskType = QStringLiteral("obb");
+    }
+    request.insert(QStringLiteral("taskType"), normalizedTaskType);
     request.insert(QStringLiteral("options"), options);
 
     const QString requestPath = QDir(outputPath).filePath(QStringLiteral("ultralytics_evaluation_request.json"));
@@ -586,7 +592,10 @@ WorkflowResult evaluateModelReport(
     if (taskType == QStringLiteral("detection")
         || taskType == QStringLiteral("yolo_detection")
         || taskType == QStringLiteral("segmentation")
-        || taskType == QStringLiteral("yolo_segmentation")) {
+        || taskType == QStringLiteral("yolo_segmentation")
+        || taskType == QStringLiteral("obb_detection")
+        || taskType == QStringLiteral("yolo_obb")
+        || taskType == QStringLiteral("obb")) {
         return runOfficialYoloEvaluation(modelPath, datasetPath, outputPath, taskType, options, shouldCancel);
     }
 
@@ -648,7 +657,7 @@ WorkflowResult evaluateModelReport(
     summary.insert(QStringLiteral("datasetSnapshotHash"), options.value(QStringLiteral("datasetSnapshotHash")).toString());
     summary.insert(QStringLiteral("datasetSnapshotManifest"), options.value(QStringLiteral("datasetSnapshotManifest")).toString());
     summary.insert(QStringLiteral("scaffold"), true);
-    summary.insert(QStringLiteral("note"), QStringLiteral("YOLO detection/segmentation evaluation is implemented through Ultralytics official val(). OCR evaluation is official-only and must use PaddleOCR official reports."));
+    summary.insert(QStringLiteral("note"), QStringLiteral("YOLO detection/segmentation/OBB evaluation is implemented through Ultralytics official val(). OCR evaluation is official-only and must use PaddleOCR official reports."));
 
     QJsonObject metrics;
     if (taskType == QStringLiteral("ocr_recognition") || taskType == QStringLiteral("ocr")) {

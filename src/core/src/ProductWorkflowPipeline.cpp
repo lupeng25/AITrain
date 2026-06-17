@@ -37,6 +37,9 @@ QString officialTrainingBackendForPipelineTask(const QString& taskType)
     if (normalized == QStringLiteral("segmentation")) {
         return QStringLiteral("ultralytics_yolo_segment");
     }
+    if (normalized == QStringLiteral("obb_detection") || normalized == QStringLiteral("obb")) {
+        return QStringLiteral("ultralytics_yolo_obb");
+    }
     if (normalized == QStringLiteral("ocr_detection")) {
         return QStringLiteral("paddleocr_det_official");
     }
@@ -441,6 +444,14 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
                     predictions.append(segmentationPredictionToJson(prediction));
                 }
                 overlay = renderSegmentationPredictions(imagePath, segPredictions, &error);
+            } else if (family == QStringLiteral("yolo_obb")) {
+                inferenceTaskType = QStringLiteral("obb_detection");
+                DetectionInferenceOptions inferenceOptions;
+                const QVector<ObbPrediction> obbPredictions = predictObbOnnxRuntime(candidateModel, imagePath, inferenceOptions, &error);
+                for (const ObbPrediction& prediction : obbPredictions) {
+                    predictions.append(obbPredictionToJson(prediction));
+                }
+                overlay = renderObbPredictions(imagePath, obbPredictions, &error);
             } else if (family == QStringLiteral("ocr_recognition")) {
                 appendStep(QStringLiteral("infer"),
                     QStringLiteral("skipped"),

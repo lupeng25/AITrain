@@ -1320,6 +1320,18 @@ void WorkerSession::runInference(const QJsonObject& payload)
             }
             overlay = aitrain::renderSegmentationPredictions(imagePath, predictions, &error);
             predictionCount = predictions.size();
+        } else if (modelFamily == QStringLiteral("yolo_obb")) {
+            taskType = QStringLiteral("obb_detection");
+            const QVector<aitrain::ObbPrediction> predictions = aitrain::predictObbOnnxRuntime(checkpointPath, imagePath, options, &error);
+            if (!error.isEmpty()) {
+                fail(error);
+                return;
+            }
+            for (const aitrain::ObbPrediction& prediction : predictions) {
+                predictionArray.append(aitrain::obbPredictionToJson(prediction));
+            }
+            overlay = aitrain::renderObbPredictions(imagePath, predictions, &error);
+            predictionCount = predictions.size();
         } else {
             const QVector<aitrain::DetectionPrediction> predictions = aitrain::predictDetectionOnnxRuntime(checkpointPath, imagePath, options, &error);
             if (!error.isEmpty()) {

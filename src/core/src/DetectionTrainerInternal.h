@@ -65,6 +65,14 @@ QVector<DetectionPrediction> yoloEndToEndPredictionsFromOutput(
     const LetterboxTransform& transform,
     const DetectionInferenceOptions& options,
     QString* error);
+QVector<ObbPrediction> yoloObbPredictionsFromOutput(
+    const float* output,
+    const std::vector<int64_t>& shape,
+    const QStringList& classNames,
+    const QSize& inputSize,
+    const LetterboxTransform& transform,
+    const DetectionInferenceOptions& options,
+    QString* error);
 QColor overlayColorForClass(int classId, int alpha);
 QImage maskFromPrototype(
     const QVector<float>& coefficients,

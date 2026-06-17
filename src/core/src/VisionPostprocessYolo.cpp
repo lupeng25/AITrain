@@ -14,6 +14,7 @@
 #include <QLibrary>
 #include <QMap>
 #include <QPainter>
+#include <QPointF>
 #include <QQueue>
 #include <QProcess>
 #include <QRegularExpression>
@@ -83,6 +84,48 @@ QStringList classNamesFromYoloDataYaml(const QString& yamlPath)
     return names;
 }
 
+struct YoloOutputLayout {
+    int anchorCount = 0;
+    int attributeCount = 0;
+    bool attributesFirst = false;
+};
+
+bool selectYoloOutputLayout(const std::vector<int64_t>& shape, int minimumAttributeCount, YoloOutputLayout* layout)
+{
+    if (!layout || shape.size() != 3 || shape.at(0) != 1 || minimumAttributeCount <= 0) {
+        return false;
+    }
+
+    const int64_t first = shape.at(1);
+    const int64_t second = shape.at(2);
+    if (first <= 0 || second <= 0
+        || first > std::numeric_limits<int>::max()
+        || second > std::numeric_limits<int>::max()) {
+        return false;
+    }
+
+    const int64_t minimum = static_cast<int64_t>(minimumAttributeCount);
+    const bool firstCanBeAttributes = first >= minimum;
+    const bool secondCanBeAttributes = second >= minimum;
+    if (!firstCanBeAttributes && !secondCanBeAttributes) {
+        return false;
+    }
+
+    bool useFirstAsAttributes = firstCanBeAttributes;
+    if (firstCanBeAttributes && secondCanBeAttributes) {
+        const int64_t firstDistance = first - minimum;
+        const int64_t secondDistance = second - minimum;
+        useFirstAsAttributes = firstDistance == secondDistance
+            ? first <= second
+            : firstDistance < secondDistance;
+    }
+
+    layout->attributesFirst = useFirstAsAttributes;
+    layout->attributeCount = static_cast<int>(useFirstAsAttributes ? first : second);
+    layout->anchorCount = static_cast<int>(useFirstAsAttributes ? second : first);
+    return true;
+}
+
 QJsonObject loadUltralyticsTrainingReport(const QString& onnxPath)
 {
     const QFileInfo onnxInfo(onnxPath);
@@ -103,7 +146,8 @@ QJsonObject loadUltralyticsTrainingReport(const QString& onnxPath)
         if (document.isObject()) {
             const QString backend = document.object().value(QStringLiteral("backend")).toString();
             if (backend == QStringLiteral("ultralytics_yolo_detect")
-                || backend == QStringLiteral("ultralytics_yolo_segment")) {
+                || backend == QStringLiteral("ultralytics_yolo_segment")
+                || backend == QStringLiteral("ultralytics_yolo_obb")) {
                 return document.object();
             }
         }
@@ -128,7 +172,8 @@ QJsonObject loadUltralyticsTrainingReportFile(const QString& reportPath, const Q
     const QJsonObject report = document.object();
     const QString backend = report.value(QStringLiteral("backend")).toString();
     if (backend != QStringLiteral("ultralytics_yolo_detect")
-        && backend != QStringLiteral("ultralytics_yolo_segment")) {
+        && backend != QStringLiteral("ultralytics_yolo_segment")
+        && backend != QStringLiteral("ultralytics_yolo_obb")) {
         return {};
     }
     return report;
@@ -277,23 +322,16 @@ QVector<DetectionPrediction> yoloPredictionsFromOutput(
     }
 
     const int classCount = qMax(1, classNames.size());
-    int anchorCount = 0;
-    int attributeCount = 0;
-    bool attributesFirst = false;
-    if (shape.at(1) >= 4 + classCount && shape.at(2) > 0) {
-        attributesFirst = true;
-        attributeCount = static_cast<int>(shape.at(1));
-        anchorCount = static_cast<int>(shape.at(2));
-    } else if (shape.at(2) >= 4 + classCount && shape.at(1) > 0) {
-        attributesFirst = false;
-        anchorCount = static_cast<int>(shape.at(1));
-        attributeCount = static_cast<int>(shape.at(2));
-    } else {
+    YoloOutputLayout layout;
+    if (!selectYoloOutputLayout(shape, 4 + classCount, &layout)) {
         if (error) {
             *error = QStringLiteral("YOLO detection ONNX output does not contain box and class attributes");
         }
         return {};
     }
+    const int anchorCount = layout.anchorCount;
+    const int attributeCount = layout.attributeCount;
+    const bool attributesFirst = layout.attributesFirst;
 
     auto valueAt = [output, anchorCount, attributeCount, attributesFirst](int anchor, int attribute) -> float {
         return attributesFirst
@@ -338,6 +376,277 @@ QVector<DetectionPrediction> yoloPredictionsFromOutput(
         predictions.append(prediction);
     }
     return postProcessDetectionPredictions(predictions, options);
+}
+
+double signedPolygonArea(const QVector<QPointF>& polygon)
+{
+    if (polygon.size() < 3) {
+        return 0.0;
+    }
+    double area = 0.0;
+    for (int index = 0; index < polygon.size(); ++index) {
+        const QPointF& current = polygon.at(index);
+        const QPointF& next = polygon.at((index + 1) % polygon.size());
+        area += current.x() * next.y() - next.x() * current.y();
+    }
+    return area * 0.5;
+}
+
+double polygonAreaPixels(const QVector<QPointF>& polygon)
+{
+    return qAbs(signedPolygonArea(polygon));
+}
+
+double crossProduct(const QPointF& a, const QPointF& b, const QPointF& c)
+{
+    return (b.x() - a.x()) * (c.y() - a.y()) - (b.y() - a.y()) * (c.x() - a.x());
+}
+
+QPointF lineIntersection(const QPointF& p1, const QPointF& p2, const QPointF& q1, const QPointF& q2)
+{
+    const double a1 = p2.y() - p1.y();
+    const double b1 = p1.x() - p2.x();
+    const double c1 = a1 * p1.x() + b1 * p1.y();
+    const double a2 = q2.y() - q1.y();
+    const double b2 = q1.x() - q2.x();
+    const double c2 = a2 * q1.x() + b2 * q1.y();
+    const double determinant = a1 * b2 - a2 * b1;
+    if (qAbs(determinant) < 1.0e-12) {
+        return p2;
+    }
+    return QPointF((b2 * c1 - b1 * c2) / determinant, (a1 * c2 - a2 * c1) / determinant);
+}
+
+QVector<QPointF> clipConvexPolygon(const QVector<QPointF>& subject, const QVector<QPointF>& clipper)
+{
+    QVector<QPointF> output = subject;
+    if (subject.size() < 3 || clipper.size() < 3) {
+        return {};
+    }
+    const bool clipperCcw = signedPolygonArea(clipper) >= 0.0;
+    for (int edge = 0; edge < clipper.size(); ++edge) {
+        const QPointF a = clipper.at(edge);
+        const QPointF b = clipper.at((edge + 1) % clipper.size());
+        const QVector<QPointF> input = output;
+        output.clear();
+        if (input.isEmpty()) {
+            break;
+        }
+
+        auto inside = [&](const QPointF& point) {
+            const double cross = crossProduct(a, b, point);
+            return clipperCcw ? cross >= -1.0e-9 : cross <= 1.0e-9;
+        };
+
+        QPointF previous = input.last();
+        bool previousInside = inside(previous);
+        for (const QPointF& current : input) {
+            const bool currentInside = inside(current);
+            if (currentInside) {
+                if (!previousInside) {
+                    output.append(lineIntersection(previous, current, a, b));
+                }
+                output.append(current);
+            } else if (previousInside) {
+                output.append(lineIntersection(previous, current, a, b));
+            }
+            previous = current;
+            previousInside = currentInside;
+        }
+    }
+    return output;
+}
+
+double polygonIou(const QVector<QPointF>& left, const QVector<QPointF>& right)
+{
+    const double leftArea = polygonAreaPixels(left);
+    const double rightArea = polygonAreaPixels(right);
+    if (leftArea <= 0.0 || rightArea <= 0.0) {
+        return 0.0;
+    }
+    const QVector<QPointF> intersection = clipConvexPolygon(left, right);
+    const double intersectionArea = polygonAreaPixels(intersection);
+    const double unionArea = leftArea + rightArea - intersectionArea;
+    return unionArea > 0.0 ? intersectionArea / unionArea : 0.0;
+}
+
+DetectionBox boundingBoxForPoints(const QVector<QPointF>& points, int classId, const QSize& sourceSize)
+{
+    const double sourceWidth = qMax(1, sourceSize.width());
+    const double sourceHeight = qMax(1, sourceSize.height());
+    double left = sourceWidth;
+    double top = sourceHeight;
+    double right = 0.0;
+    double bottom = 0.0;
+    for (const QPointF& point : points) {
+        left = qMin(left, qBound(0.0, point.x(), sourceWidth));
+        top = qMin(top, qBound(0.0, point.y(), sourceHeight));
+        right = qMax(right, qBound(0.0, point.x(), sourceWidth));
+        bottom = qMax(bottom, qBound(0.0, point.y(), sourceHeight));
+    }
+    DetectionBox box;
+    box.classId = classId;
+    box.xCenter = clamp01((left + right) / 2.0 / sourceWidth);
+    box.yCenter = clamp01((top + bottom) / 2.0 / sourceHeight);
+    box.width = qBound(1.0e-6, (right - left) / sourceWidth, 1.0);
+    box.height = qBound(1.0e-6, (bottom - top) / sourceHeight, 1.0);
+    return box;
+}
+
+QVector<QPointF> obbPointsFromInputPixels(
+    double xCenter,
+    double yCenter,
+    double width,
+    double height,
+    double rotation,
+    const LetterboxTransform& transform)
+{
+    const double scale = qMax(1.0e-12, transform.scale);
+    const double cosValue = qCos(rotation);
+    const double sinValue = qSin(rotation);
+    const double halfWidth = width / 2.0;
+    const double halfHeight = height / 2.0;
+    const QVector<QPointF> local = {
+        QPointF(-halfWidth, -halfHeight),
+        QPointF(halfWidth, -halfHeight),
+        QPointF(halfWidth, halfHeight),
+        QPointF(-halfWidth, halfHeight)
+    };
+    QVector<QPointF> points;
+    points.reserve(4);
+    const double sourceWidth = qMax(1, transform.sourceSize.width());
+    const double sourceHeight = qMax(1, transform.sourceSize.height());
+    for (const QPointF& point : local) {
+        const double inputX = xCenter + point.x() * cosValue - point.y() * sinValue;
+        const double inputY = yCenter + point.x() * sinValue + point.y() * cosValue;
+        const double sourceX = (inputX - transform.padX) / scale;
+        const double sourceY = (inputY - transform.padY) / scale;
+        points.append(QPointF(qBound(0.0, sourceX, sourceWidth), qBound(0.0, sourceY, sourceHeight)));
+    }
+    return points;
+}
+
+QVector<ObbPrediction> postProcessObbPredictions(QVector<ObbPrediction> candidates, const DetectionInferenceOptions& options)
+{
+    candidates.erase(std::remove_if(candidates.begin(), candidates.end(), [options](const ObbPrediction& candidate) {
+        return candidate.detection.confidence < options.confidenceThreshold || candidate.points.size() < 4;
+    }), candidates.end());
+    std::sort(candidates.begin(), candidates.end(), [](const ObbPrediction& left, const ObbPrediction& right) {
+        return left.detection.confidence > right.detection.confidence;
+    });
+
+    QVector<ObbPrediction> selected;
+    for (const ObbPrediction& candidate : candidates) {
+        bool suppress = false;
+        for (const ObbPrediction& accepted : selected) {
+            if (candidate.detection.box.classId == accepted.detection.box.classId
+                && polygonIou(candidate.points, accepted.points) > options.iouThreshold) {
+                suppress = true;
+                break;
+            }
+        }
+        if (!suppress) {
+            selected.append(candidate);
+            if (selected.size() >= options.maxDetections) {
+                break;
+            }
+        }
+    }
+    return selected;
+}
+
+QVector<ObbPrediction> yoloObbPredictionsFromOutput(
+    const float* output,
+    const std::vector<int64_t>& shape,
+    const QStringList& classNames,
+    const QSize& inputSize,
+    const LetterboxTransform& transform,
+    const DetectionInferenceOptions& options,
+    QString* error)
+{
+    if (shape.size() != 3 || shape.at(0) != 1) {
+        if (error) {
+            *error = QStringLiteral("YOLO OBB ONNX output shape must be [1, attributes, anchors] or [1, anchors, attributes]");
+        }
+        return {};
+    }
+
+    const int classCount = qMax(1, classNames.size());
+    YoloOutputLayout layout;
+    if (!selectYoloOutputLayout(shape, 5 + classCount, &layout)) {
+        if (error) {
+            *error = QStringLiteral("YOLO OBB ONNX output does not contain xywh, class scores, and angle attributes");
+        }
+        return {};
+    }
+    const int anchorCount = layout.anchorCount;
+    const int attributeCount = layout.attributeCount;
+    const bool attributesFirst = layout.attributesFirst;
+
+    const int usableClassCount = qMin(classCount, qMax(0, attributeCount - 5));
+    if (usableClassCount <= 0) {
+        if (error) {
+            *error = QStringLiteral("YOLO OBB ONNX output does not contain class scores");
+        }
+        return {};
+    }
+    const int angleIndex = 4 + usableClassCount;
+
+    auto valueAt = [output, anchorCount, attributeCount, attributesFirst](int anchor, int attribute) -> float {
+        return attributesFirst
+            ? output[attribute * anchorCount + anchor]
+            : output[anchor * attributeCount + attribute];
+    };
+
+    QVector<ObbPrediction> candidates;
+    candidates.reserve(anchorCount);
+    const double sourceWidth = qMax(1, transform.sourceSize.width());
+    const double sourceHeight = qMax(1, transform.sourceSize.height());
+    const double scale = qMax(1.0e-12, transform.scale);
+    for (int anchor = 0; anchor < anchorCount; ++anchor) {
+        int bestClassIndex = 0;
+        double bestClassScore = static_cast<double>(valueAt(anchor, 4));
+        for (int classIndex = 1; classIndex < usableClassCount; ++classIndex) {
+            const double score = static_cast<double>(valueAt(anchor, 4 + classIndex));
+            if (score > bestClassScore) {
+                bestClassScore = score;
+                bestClassIndex = classIndex;
+            }
+        }
+        const double confidence = qBound(0.0, bestClassScore, 1.0);
+        if (confidence < options.confidenceThreshold) {
+            continue;
+        }
+
+        const double inputX = static_cast<double>(valueAt(anchor, 0));
+        const double inputY = static_cast<double>(valueAt(anchor, 1));
+        const double inputWidth = qMax(0.0, static_cast<double>(valueAt(anchor, 2)));
+        const double inputHeight = qMax(0.0, static_cast<double>(valueAt(anchor, 3)));
+        if (inputWidth <= 0.0 || inputHeight <= 0.0) {
+            continue;
+        }
+        const double rotation = static_cast<double>(valueAt(anchor, angleIndex));
+        QVector<QPointF> points = obbPointsFromInputPixels(inputX, inputY, inputWidth, inputHeight, rotation, transform);
+        if (polygonAreaPixels(points) <= 1.0e-6) {
+            continue;
+        }
+
+        ObbPrediction prediction;
+        prediction.detection.box = boundingBoxForPoints(points, bestClassIndex, transform.sourceSize);
+        prediction.detection.className = bestClassIndex >= 0 && bestClassIndex < classNames.size()
+            ? classNames.at(bestClassIndex)
+            : QStringLiteral("class_%1").arg(bestClassIndex);
+        prediction.detection.objectness = 1.0;
+        prediction.detection.confidence = confidence;
+        prediction.xCenter = qBound(0.0, (inputX - transform.padX) / scale, sourceWidth);
+        prediction.yCenter = qBound(0.0, (inputY - transform.padY) / scale, sourceHeight);
+        prediction.width = qMax(1.0e-6, inputWidth / scale);
+        prediction.height = qMax(1.0e-6, inputHeight / scale);
+        prediction.rotation = rotation;
+        prediction.points = points;
+        candidates.append(prediction);
+    }
+    return postProcessObbPredictions(candidates, options);
 }
 
 QVector<DetectionPrediction> yoloEndToEndPredictionsFromOutput(
@@ -531,23 +840,16 @@ QVector<SegmentationPrediction> yoloSegmentationPredictionsFromOutputs(
     }
 
     const int maskDim = static_cast<int>(prototypeShape.at(1));
-    int anchorCount = 0;
-    int attributeCount = 0;
-    bool attributesFirst = false;
-    if (boxesShape.at(1) >= 4 + maskDim && boxesShape.at(2) > 0) {
-        attributesFirst = true;
-        attributeCount = static_cast<int>(boxesShape.at(1));
-        anchorCount = static_cast<int>(boxesShape.at(2));
-    } else if (boxesShape.at(2) >= 4 + maskDim && boxesShape.at(1) > 0) {
-        attributesFirst = false;
-        anchorCount = static_cast<int>(boxesShape.at(1));
-        attributeCount = static_cast<int>(boxesShape.at(2));
-    } else {
+    YoloOutputLayout layout;
+    if (!selectYoloOutputLayout(boxesShape, 4 + maskDim + 1, &layout)) {
         if (error) {
             *error = QStringLiteral("YOLO segmentation ONNX output does not contain box and mask attributes");
         }
         return {};
     }
+    const int anchorCount = layout.anchorCount;
+    const int attributeCount = layout.attributeCount;
+    const bool attributesFirst = layout.attributesFirst;
 
     int classCount = attributeCount - 4 - maskDim;
     if (!classNames.isEmpty()) {

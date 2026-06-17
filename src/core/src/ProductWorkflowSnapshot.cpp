@@ -261,7 +261,7 @@ WorkflowResult createDatasetSnapshotReport(
     manifest.insert(QStringLiteral("splits"), format == QStringLiteral("semantic_segmentation_mask")
         ? countSemanticImageSplits(datasetPath)
         : countImageSplits(datasetPath));
-    if (format == QStringLiteral("yolo_detection") || format == QStringLiteral("yolo_segmentation")) {
+    if (format == QStringLiteral("yolo_detection") || format == QStringLiteral("yolo_segmentation") || format == QStringLiteral("yolo_obb")) {
         manifest.insert(QStringLiteral("classCounts"), countYoloClasses(datasetPath));
     } else if (format == QStringLiteral("semantic_segmentation_mask")) {
         manifest.insert(QStringLiteral("classPixelCounts"), countSemanticClassPixels(datasetPath, options.value(QStringLiteral("ignoreIndex")).toInt(255)));

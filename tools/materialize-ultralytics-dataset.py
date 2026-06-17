@@ -109,6 +109,8 @@ def materialize(args: argparse.Namespace) -> dict[str, Any]:
         f"train: {quote_yaml(data.get('train', 'images/train'))}",
         f"val: {quote_yaml(data.get('val', 'images/val'))}",
     ]
+    if "task" in data:
+        lines.append(f"task: {quote_yaml(data.get('task'))}")
     if "test" in data:
         lines.append(f"test: {quote_yaml(data.get('test'))}")
     lines.extend([

@@ -463,6 +463,179 @@ int runSemanticOnnxSmoke(
     return ok ? 0 : 18;
 }
 
+int runObbOnnxSmoke(
+    const QString& onnxPath,
+    const QString& imagePath,
+    const QString& outputDirectory)
+{
+    const QString modelPath = QFileInfo(onnxPath).absoluteFilePath();
+    const QString samplePath = QFileInfo(imagePath).absoluteFilePath();
+    const QString outputPath = QFileInfo(outputDirectory.isEmpty()
+        ? QFileInfo(modelPath).absoluteDir().filePath(QStringLiteral("aitrain_obb_onnx_smoke"))
+        : outputDirectory).absoluteFilePath();
+    const QString inferencePath = QDir(outputPath).filePath(QStringLiteral("inference"));
+    const QString benchmarkPath = QDir(outputPath).filePath(QStringLiteral("benchmark"));
+    const QString deploymentPath = QDir(outputPath).filePath(QStringLiteral("deployment-validation"));
+
+    if (!QFileInfo::exists(modelPath) || QFileInfo(modelPath).suffix().compare(QStringLiteral("onnx"), Qt::CaseInsensitive) != 0) {
+        writeJsonLine(QJsonObject{
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("stage"), QStringLiteral("input")},
+            {QStringLiteral("status"), QStringLiteral("blocked")},
+            {QStringLiteral("error"), QStringLiteral("OBB ONNX smoke requires an existing .onnx model: %1").arg(modelPath)}
+        });
+        return 19;
+    }
+    if (samplePath.isEmpty() || !QFileInfo::exists(samplePath)) {
+        writeJsonLine(QJsonObject{
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("stage"), QStringLiteral("input")},
+            {QStringLiteral("status"), QStringLiteral("blocked")},
+            {QStringLiteral("error"), QStringLiteral("OBB ONNX smoke requires an existing sample image: %1").arg(samplePath)}
+        });
+        return 19;
+    }
+
+    QString familyWarning;
+    const QString modelFamily = aitrain::inferOnnxModelFamily(modelPath, &familyWarning);
+    if (modelFamily != QStringLiteral("yolo_obb")) {
+        QJsonObject result{
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("stage"), QStringLiteral("model-family")},
+            {QStringLiteral("status"), QStringLiteral("failed")},
+            {QStringLiteral("onnxPath"), modelPath},
+            {QStringLiteral("modelFamily"), modelFamily},
+            {QStringLiteral("error"), QStringLiteral("OBB ONNX smoke requires modelFamily=yolo_obb from sidecar or training report.")}
+        };
+        if (!familyWarning.isEmpty()) {
+            result.insert(QStringLiteral("modelFamilyWarning"), familyWarning);
+        }
+        writeJsonLine(result);
+        return 20;
+    }
+
+    if (!QDir().mkpath(inferencePath)) {
+        writeJsonLine(QJsonObject{
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("stage"), QStringLiteral("output")},
+            {QStringLiteral("status"), QStringLiteral("failed")},
+            {QStringLiteral("error"), QStringLiteral("Cannot create OBB ONNX smoke output directory: %1").arg(inferencePath)}
+        });
+        return 21;
+    }
+
+    QElapsedTimer timer;
+    timer.start();
+    QString error;
+    aitrain::DetectionInferenceOptions options;
+    const QVector<aitrain::ObbPrediction> predictions =
+        aitrain::predictObbOnnxRuntime(modelPath, samplePath, options, &error);
+    QImage overlay;
+    if (error.isEmpty()) {
+        overlay = aitrain::renderObbPredictions(samplePath, predictions, &error);
+    }
+    const int elapsedMs = static_cast<int>(timer.elapsed());
+    if (!error.isEmpty()) {
+        writeJsonLine(QJsonObject{
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("stage"), QStringLiteral("inference")},
+            {QStringLiteral("status"), QStringLiteral("failed")},
+            {QStringLiteral("onnxPath"), modelPath},
+            {QStringLiteral("imagePath"), samplePath},
+            {QStringLiteral("error"), error}
+        });
+        return 22;
+    }
+
+    const QString predictionsPath = QDir(inferencePath).filePath(QStringLiteral("inference_predictions.json"));
+    const QString overlayPath = QDir(inferencePath).filePath(QStringLiteral("inference_overlay.png"));
+    QJsonArray predictionArray;
+    for (const aitrain::ObbPrediction& prediction : predictions) {
+        predictionArray.append(aitrain::obbPredictionToJson(prediction));
+    }
+    QJsonObject predictionsDocument{
+        {QStringLiteral("ok"), true},
+        {QStringLiteral("checkpointPath"), modelPath},
+        {QStringLiteral("imagePath"), samplePath},
+        {QStringLiteral("taskType"), QStringLiteral("obb_detection")},
+        {QStringLiteral("runtime"), QStringLiteral("onnxruntime")},
+        {QStringLiteral("elapsedMs"), elapsedMs},
+        {QStringLiteral("predictions"), predictionArray}
+    };
+    if (!familyWarning.isEmpty()) {
+        predictionsDocument.insert(QStringLiteral("modelFamilyWarning"), familyWarning);
+    }
+    if (!writeJsonFile(predictionsPath, predictionsDocument, &error)) {
+        writeJsonLine(QJsonObject{
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("stage"), QStringLiteral("inference-output")},
+            {QStringLiteral("status"), QStringLiteral("failed")},
+            {QStringLiteral("error"), error}
+        });
+        return 23;
+    }
+    if (overlay.isNull() || !overlay.save(overlayPath)) {
+        writeJsonLine(QJsonObject{
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("stage"), QStringLiteral("overlay")},
+            {QStringLiteral("status"), QStringLiteral("failed")},
+            {QStringLiteral("error"), QStringLiteral("Cannot write OBB ONNX overlay: %1").arg(overlayPath)}
+        });
+        return 24;
+    }
+
+    QJsonObject benchmarkOptions{
+        {QStringLiteral("runtime"), QStringLiteral("onnxruntime")},
+        {QStringLiteral("sampleImagePath"), samplePath},
+        {QStringLiteral("warmupIterations"), 2},
+        {QStringLiteral("iterations"), 10},
+        {QStringLiteral("device"), QStringLiteral("cpu")}
+    };
+    const aitrain::WorkflowResult benchmark =
+        aitrain::benchmarkModelReport(modelPath, benchmarkPath, benchmarkOptions);
+
+    QJsonObject deploymentOptions{
+        {QStringLiteral("sampleImagePath"), samplePath},
+        {QStringLiteral("modelFamily"), QStringLiteral("yolo_obb")}
+    };
+    const aitrain::WorkflowResult deployment =
+        aitrain::validateDeploymentArtifactReport(modelPath, deploymentPath, QStringLiteral("onnx"), deploymentOptions);
+
+    const bool benchmarkUsable = benchmark.ok
+        && benchmark.payload.value(QStringLiteral("runtimeUsable")).toBool(false)
+        && benchmark.payload.value(QStringLiteral("timedInference")).toBool(false);
+    const QString deploymentStatus = deployment.payload.value(QStringLiteral("status")).toString(QStringLiteral("failed"));
+    const bool deploymentOk = deployment.ok && deploymentStatus == QStringLiteral("passed");
+    const bool ok = benchmarkUsable && deploymentOk;
+    const QString summaryPath = QDir(outputPath).filePath(QStringLiteral("obb_onnx_smoke_summary.json"));
+    QJsonObject summary{
+        {QStringLiteral("ok"), ok},
+        {QStringLiteral("stage"), ok ? QStringLiteral("completed") : QStringLiteral("validation")},
+        {QStringLiteral("status"), ok ? QStringLiteral("passed") : QStringLiteral("failed")},
+        {QStringLiteral("onnxPath"), modelPath},
+        {QStringLiteral("imagePath"), samplePath},
+        {QStringLiteral("modelFamily"), modelFamily},
+        {QStringLiteral("predictionsPath"), predictionsPath},
+        {QStringLiteral("overlayPath"), overlayPath},
+        {QStringLiteral("predictionCount"), predictionArray.size()},
+        {QStringLiteral("benchmarkReportPath"), benchmark.reportPath},
+        {QStringLiteral("deploymentReportPath"), deployment.reportPath},
+        {QStringLiteral("benchmark"), benchmark.payload},
+        {QStringLiteral("deployment"), deployment.payload}
+    };
+    if (!familyWarning.isEmpty()) {
+        summary.insert(QStringLiteral("modelFamilyWarning"), familyWarning);
+    }
+    QString summaryError;
+    if (!writeJsonFile(summaryPath, summary, &summaryError)) {
+        summary.insert(QStringLiteral("summaryWriteError"), summaryError);
+    } else {
+        summary.insert(QStringLiteral("summaryPath"), summaryPath);
+    }
+    writeJsonLine(summary);
+    return ok ? 0 : 25;
+}
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -479,6 +652,7 @@ int main(int argc, char* argv[])
     QCommandLineOption ncnnSmokeOption(QStringLiteral("ncnn-smoke"), QStringLiteral("Run NCNN export and deployment validation smoke and print JSON."), QStringLiteral("onnx"));
     QCommandLineOption ncnnParamSmokeOption(QStringLiteral("ncnn-param-smoke"), QStringLiteral("Run NCNN deployment validation smoke for an existing .param/.bin artifact and print JSON."), QStringLiteral("param"));
     QCommandLineOption semanticOnnxSmokeOption(QStringLiteral("semantic-onnx-smoke"), QStringLiteral("Run semantic segmentation ONNX Runtime inference, benchmark, and deployment validation smoke and print JSON."), QStringLiteral("onnx"));
+    QCommandLineOption obbOnnxSmokeOption(QStringLiteral("obb-onnx-smoke"), QStringLiteral("Run OBB ONNX Runtime inference, overlay, benchmark, and deployment validation smoke and print JSON."), QStringLiteral("onnx"));
     QCommandLineOption ocrDetOnnxSmokeOption(QStringLiteral("ocr-det-onnx-smoke"), QStringLiteral("Deprecated: OCR is official-only; use PaddleOCR official Det/Rec/System reports instead."), QStringLiteral("onnx"));
     QCommandLineOption imageOption(QStringLiteral("image"), QStringLiteral("Image path for smoke checks."), QStringLiteral("path"));
     QCommandLineOption outputOption(QStringLiteral("output"), QStringLiteral("Output directory for smoke artifacts."), QStringLiteral("directory"));
@@ -494,6 +668,7 @@ int main(int argc, char* argv[])
     parser.addOption(ncnnSmokeOption);
     parser.addOption(ncnnParamSmokeOption);
     parser.addOption(semanticOnnxSmokeOption);
+    parser.addOption(obbOnnxSmokeOption);
     parser.addOption(ocrDetOnnxSmokeOption);
     parser.addOption(imageOption);
     parser.addOption(outputOption);
@@ -530,6 +705,12 @@ int main(int argc, char* argv[])
     if (parser.isSet(semanticOnnxSmokeOption)) {
         return runSemanticOnnxSmoke(
             parser.value(semanticOnnxSmokeOption),
+            parser.value(imageOption),
+            parser.value(outputOption));
+    }
+    if (parser.isSet(obbOnnxSmokeOption)) {
+        return runObbOnnxSmoke(
+            parser.value(obbOnnxSmokeOption),
             parser.value(imageOption),
             parser.value(outputOption));
     }

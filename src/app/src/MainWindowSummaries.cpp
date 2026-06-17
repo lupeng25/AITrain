@@ -647,6 +647,10 @@ void MainWindow::refreshTrainingDefaults()
         preferredPlugin = QStringLiteral("com.aitrain.plugins.yolo_native");
         preferredTask = QStringLiteral("segmentation");
         preferredBackend = QStringLiteral("ultralytics_yolo_segment");
+    } else if (datasetFormat == QStringLiteral("yolo_obb")) {
+        preferredPlugin = QStringLiteral("com.aitrain.plugins.yolo_native");
+        preferredTask = QStringLiteral("obb_detection");
+        preferredBackend = QStringLiteral("ultralytics_yolo_obb");
     } else if (datasetFormat == QStringLiteral("semantic_segmentation_mask")) {
         preferredPlugin = QStringLiteral("com.aitrain.plugins.semantic_segmentation");
         preferredTask = QStringLiteral("semantic_segmentation");

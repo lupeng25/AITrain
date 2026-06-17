@@ -392,7 +392,7 @@ QWidget* MainWindow::buildInferenceValidationPanel()
     toolbar->bodyLayout()->addStretch();
 
     auto* capabilityPanel = new InfoPanel(QStringLiteral("可解析结果"));
-    auto* capabilityHint = mutedLabel(QStringLiteral("推理验证解析 YOLO ONNX / NCNN param 产物；TensorRT engine 当前仅做部署验证状态记录；OCR 端到端结果通过 PaddleOCR 官方任务产物查看。"));
+    auto* capabilityHint = mutedLabel(QStringLiteral("推理验证解析 YOLO ONNX / NCNN param 产物；OBB 使用 ONNX Runtime 旋转框后处理；TensorRT engine 当前仅做部署验证状态记录；OCR 端到端结果通过 PaddleOCR 官方任务产物查看。"));
     allowLabelToShrink(capabilityHint);
     capabilityPanel->bodyLayout()->addWidget(capabilityHint);
     auto* capabilityGrid = new QGridLayout;
@@ -400,7 +400,8 @@ QWidget* MainWindow::buildInferenceValidationPanel()
     capabilityGrid->setVerticalSpacing(10);
     capabilityGrid->addWidget(createInferenceCapability(QStringLiteral("YOLO 检测"), QStringLiteral("box、类别、置信度、NMS 与 overlay。")), 0, 0);
     capabilityGrid->addWidget(createInferenceCapability(QStringLiteral("YOLO 分割"), QStringLiteral("box、mask、mask area 与半透明 overlay。")), 0, 1);
-    capabilityGrid->addWidget(createInferenceCapability(QStringLiteral("PaddleOCR 官方"), QStringLiteral("Det / Rec / System 结果通过官方报告和可视化产物查看。")), 1, 0, 1, 2);
+    capabilityGrid->addWidget(createInferenceCapability(QStringLiteral("YOLO OBB"), QStringLiteral("旋转四边形、xywhr、外接 bbox 与 overlay。")), 1, 0);
+    capabilityGrid->addWidget(createInferenceCapability(QStringLiteral("PaddleOCR 官方"), QStringLiteral("Det / Rec / System 结果通过官方报告和可视化产物查看。")), 1, 1);
     capabilityGrid->setColumnStretch(0, 1);
     capabilityGrid->setColumnStretch(1, 1);
     capabilityPanel->bodyLayout()->addLayout(capabilityGrid);

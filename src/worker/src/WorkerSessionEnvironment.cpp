@@ -48,7 +48,7 @@ void WorkerSession::runEnvironmentCheck(const QJsonObject& payload)
         pythonExecutable,
         QStringLiteral("Ultralytics YOLO"),
         QStringLiteral("ultralytics"),
-        QStringLiteral("Ultralytics is not installed. The official YOLO detection/segmentation trainer backend will be unavailable.")));
+        QStringLiteral("Ultralytics is not installed. The official YOLO detection/segmentation/OBB trainer backends will be unavailable.")));
     checks.append(pythonModuleCheck(
         pythonExecutable,
         QStringLiteral("Segmentation Models PyTorch"),

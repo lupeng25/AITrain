@@ -19,9 +19,13 @@ public:
 
     aitrain::DatasetValidationResult validateDataset(const QString& datasetPath, const QJsonObject& options) override
     {
-        return formatId_ == QStringLiteral("yolo_segmentation")
-            ? aitrain::validateYoloSegmentationDataset(datasetPath, options)
-            : aitrain::validateYoloDetectionDataset(datasetPath, options);
+        if (formatId_ == QStringLiteral("yolo_segmentation")) {
+            return aitrain::validateYoloSegmentationDataset(datasetPath, options);
+        }
+        if (formatId_ == QStringLiteral("yolo_obb")) {
+            return aitrain::validateYoloObbDataset(datasetPath, options);
+        }
+        return aitrain::validateYoloDetectionDataset(datasetPath, options);
     }
 
 private:
@@ -59,6 +63,7 @@ public:
     YoloNativePlugin()
         : detectionAdapter_(QStringLiteral("yolo_detection"))
         , segmentationAdapter_(QStringLiteral("yolo_segmentation"))
+        , obbAdapter_(QStringLiteral("yolo_obb"))
     {
     }
 
@@ -68,9 +73,9 @@ public:
         manifest.id = QStringLiteral("com.aitrain.plugins.yolo_native");
         manifest.name = QStringLiteral("YOLO Native");
         manifest.version = QStringLiteral("0.1.0");
-        manifest.description = QStringLiteral("C++ native YOLO-style detection and segmentation plugin scaffold.");
-        manifest.taskTypes = QStringList() << QStringLiteral("detection") << QStringLiteral("segmentation");
-        manifest.datasetFormats = QStringList() << QStringLiteral("yolo_detection") << QStringLiteral("yolo_segmentation");
+        manifest.description = QStringLiteral("Official Ultralytics YOLO detection, segmentation, and OBB plugin.");
+        manifest.taskTypes = QStringList() << QStringLiteral("detection") << QStringLiteral("segmentation") << QStringLiteral("obb_detection");
+        manifest.datasetFormats = QStringList() << QStringLiteral("yolo_detection") << QStringLiteral("yolo_segmentation") << QStringLiteral("yolo_obb");
         manifest.exportFormats = exporter_.supportedFormats();
         manifest.requiresGpu = true;
 
@@ -93,6 +98,7 @@ public:
     {
         if (formatId == detectionAdapter_.formatId() || formatId == QStringLiteral("yolo_txt")) return &detectionAdapter_;
         if (formatId == segmentationAdapter_.formatId()) return &segmentationAdapter_;
+        if (formatId == obbAdapter_.formatId()) return &obbAdapter_;
         return nullptr;
     }
 
@@ -104,6 +110,7 @@ public:
 private:
     YoloDatasetAdapter detectionAdapter_;
     YoloDatasetAdapter segmentationAdapter_;
+    YoloDatasetAdapter obbAdapter_;
     NativeTrainer trainer_;
     NativeValidator validator_;
     NativeExporter exporter_;

@@ -10,6 +10,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QPainter>
+#include <QPolygonF>
 #include <QProcess>
 #include <QQueue>
 #include <QStandardPaths>
@@ -50,6 +51,35 @@ QJsonObject segmentationPredictionToJson(const SegmentationPrediction& predictio
     object.insert(QStringLiteral("maskArea"), prediction.maskArea);
     object.insert(QStringLiteral("maskThreshold"), prediction.maskThreshold);
     object.insert(QStringLiteral("hasMask"), !prediction.mask.isNull());
+    return object;
+}
+
+QJsonObject obbPredictionToJson(const ObbPrediction& prediction)
+{
+    QJsonArray xywhr;
+    xywhr.append(prediction.xCenter);
+    xywhr.append(prediction.yCenter);
+    xywhr.append(prediction.width);
+    xywhr.append(prediction.height);
+    xywhr.append(prediction.rotation);
+
+    QJsonArray points;
+    for (const QPointF& point : prediction.points) {
+        QJsonArray item;
+        item.append(point.x());
+        item.append(point.y());
+        points.append(item);
+    }
+
+    QJsonObject object;
+    object.insert(QStringLiteral("taskType"), QStringLiteral("obb_detection"));
+    object.insert(QStringLiteral("classId"), prediction.detection.box.classId);
+    object.insert(QStringLiteral("className"), prediction.detection.className);
+    object.insert(QStringLiteral("confidence"), prediction.detection.confidence);
+    object.insert(QStringLiteral("objectness"), prediction.detection.objectness);
+    object.insert(QStringLiteral("xywhr"), xywhr);
+    object.insert(QStringLiteral("points"), points);
+    object.insert(QStringLiteral("bbox"), boxObject(prediction.detection.box));
     return object;
 }
 
@@ -195,6 +225,39 @@ QImage renderSegmentationPredictions(
         painter.setPen(QPen(overlayColorForClass(prediction.detection.box.classId, 230), qMax(2, output.width() / 240)));
         painter.setBrush(Qt::NoBrush);
         painter.drawRect(rect);
+    }
+    painter.end();
+    return output;
+}
+
+QImage renderObbPredictions(
+    const QString& imagePath,
+    const QVector<ObbPrediction>& predictions,
+    QString* error)
+{
+    QImage image(imagePath);
+    if (image.isNull()) {
+        if (error) {
+            *error = QStringLiteral("Cannot render OBB prediction image: %1").arg(imagePath);
+        }
+        return {};
+    }
+
+    QImage output = image.convertToFormat(QImage::Format_ARGB32);
+    QPainter painter(&output);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    const int thickness = qMax(2, output.width() / 240);
+    for (const ObbPrediction& prediction : predictions) {
+        if (prediction.points.size() < 4) {
+            continue;
+        }
+        QPolygonF polygon;
+        for (const QPointF& point : prediction.points) {
+            polygon << point;
+        }
+        painter.setPen(QPen(overlayColorForClass(prediction.detection.box.classId, 235), thickness));
+        painter.setBrush(overlayColorForClass(prediction.detection.box.classId, 45));
+        painter.drawPolygon(polygon);
     }
     painter.end();
     return output;
