@@ -119,6 +119,15 @@ QString artifactDisplayName(const QString& path)
     const QString fileName = QFileInfo(path).fileName();
     return fileName.isEmpty() ? compactPathForStatus(path, 44) : fileName;
 }
+
+QStringList stringListFromJsonArray(const QJsonArray& array)
+{
+    QStringList values;
+    for (const QJsonValue& value : array) {
+        values.append(value.toString());
+    }
+    return values;
+}
 } // namespace
 
 void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& payload)
@@ -141,6 +150,10 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
         updateDatasetConversionResult(payload);
     } else if (type == wp::event::datasetQuality()) {
         handleDatasetQualityMessage(payload);
+    } else if (type == wp::event::annotationSession()) {
+        handleAnnotationSessionMessage(payload);
+    } else if (type == wp::event::annotationSync()) {
+        handleAnnotationSyncMessage(payload);
     } else if (type == wp::event::datasetSnapshot()) {
         handleDatasetSnapshotMessage(payload);
     } else if (type == wp::event::evaluationReport()) {
@@ -474,6 +487,93 @@ void MainWindow::handleDatasetQualityMessage(const QJsonObject& payload)
         repository_.upsertDatasetValidation(dataset, &error);
         updateDatasetList();
     }
+}
+
+void MainWindow::handleAnnotationSessionMessage(const QJsonObject& payload)
+{
+    state_.dataset.latestAnnotationSessionManifestPath = payload.value(QStringLiteral("manifestPath")).toString(
+        payload.value(QStringLiteral("reportPath")).toString());
+    state_.dataset.latestAnnotationLaunchRequestPath = payload.value(QStringLiteral("launchRequestPath")).toString();
+    const QString status = payload.value(QStringLiteral("status")).toString();
+    const QString executable = payload.value(QStringLiteral("xAnyLabelingExecutable")).toString();
+    const int reviewCount = payload.value(QStringLiteral("reviewSampleCount")).toInt();
+
+    if (datasetDetailLabel_) {
+        datasetDetailLabel_->setText(uiText("X-AnyLabeling 会话：%1 | 复核样本 %2 | manifest %3")
+            .arg(status.isEmpty() ? uiText("已准备") : status)
+            .arg(reviewCount)
+            .arg(QDir::toNativeSeparators(state_.dataset.latestAnnotationSessionManifestPath)));
+    }
+
+    QVector<QStringList> rows;
+    rows.append(QStringList()
+        << uiText("会话准备")
+        << (executable.isEmpty() ? uiText("缺少工具") : uiText("已完成"))
+        << QDir::toNativeSeparators(state_.dataset.latestAnnotationSessionManifestPath));
+    rows.append(QStringList()
+        << uiText("外部修复")
+        << (executable.isEmpty() ? uiText("阻塞") : uiText("已启动"))
+        << (executable.isEmpty()
+            ? uiText("配置 AITRAIN_XANYLABELING_EXE 或 .deps/tools/annotation-tools 后重新准备。")
+            : uiText("按问题清单修复样本，保存后回到 AITrain。")));
+    rows.append(QStringList()
+        << uiText("同步复检")
+        << uiText("等待")
+        << uiText("标注完成后点击“同步标注会话”。"));
+    setDatasetRepairLoopRows(
+        executable.isEmpty()
+            ? uiText("修复闭环：会话已生成，但未检测到 X-AnyLabeling。")
+            : uiText("修复闭环：X-AnyLabeling 会话已准备。"),
+        rows);
+
+    if (executable.isEmpty()) {
+        updateAnnotationToolStatus();
+        statusBar()->showMessage(uiText("X-AnyLabeling 会话已生成，但未找到本地工具。"), 6000);
+        return;
+    }
+
+    QFile file(state_.dataset.latestAnnotationLaunchRequestPath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        statusBar()->showMessage(uiText("X-AnyLabeling 会话已生成，但 launch_request 无法读取。"), 6000);
+        return;
+    }
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+    const QJsonObject launchRequest = document.object();
+    const QString launchExecutable = launchRequest.value(QStringLiteral("executable")).toString(executable);
+    const QStringList arguments = stringListFromJsonArray(launchRequest.value(QStringLiteral("arguments")).toArray());
+    const QString workingDirectory = launchRequest.value(QStringLiteral("workingDirectory")).toString();
+    if (QProcess::startDetached(launchExecutable, arguments, workingDirectory)) {
+        updateAnnotationToolStatus();
+        statusBar()->showMessage(uiText("已启动 X-AnyLabeling 修复会话。"), 5000);
+    } else {
+        QMessageBox::warning(this,
+            QStringLiteral("X-AnyLabeling"),
+            uiText("X-AnyLabeling 启动失败：%1").arg(QDir::toNativeSeparators(launchExecutable)));
+    }
+}
+
+void MainWindow::handleAnnotationSyncMessage(const QJsonObject& payload)
+{
+    state_.dataset.latestAnnotationSyncReportPath = payload.value(QStringLiteral("reportPath")).toString();
+    const int scannedCount = payload.value(QStringLiteral("scannedLabelCount")).toInt();
+    const int modifiedCount = payload.value(QStringLiteral("modifiedLabelCount")).toInt();
+    if (datasetDetailLabel_) {
+        datasetDetailLabel_->setText(uiText("X-AnyLabeling 同步：扫描标签 %1，疑似修改 %2；报告 %3")
+            .arg(scannedCount)
+            .arg(modifiedCount)
+            .arg(QDir::toNativeSeparators(state_.dataset.latestAnnotationSyncReportPath)));
+    }
+    if (validationOutput_) {
+        validationOutput_->setPlainText(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Indented)));
+    }
+    setDatasetRepairLoopRows(
+        uiText("修复闭环：标注同步完成，请重新校验。"),
+        QVector<QStringList>{
+            QStringList() << uiText("外部修复") << uiText("已保存") << uiText("同步扫描了 %1 个标签文件。").arg(scannedCount),
+            QStringList() << uiText("同步") << uiText("完成") << uiText("疑似修改 %1 个标签文件；报告 %2").arg(modifiedCount).arg(QDir::toNativeSeparators(state_.dataset.latestAnnotationSyncReportPath)),
+            QStringList() << uiText("复检") << uiText("待执行") << uiText("点击“标注后刷新 / 重新校验”重新生成质量报告或校验报告。")
+        });
+    statusBar()->showMessage(uiText("X-AnyLabeling 标注同步完成"), 5000);
 }
 
 void MainWindow::handleDatasetSnapshotMessage(const QJsonObject& payload)

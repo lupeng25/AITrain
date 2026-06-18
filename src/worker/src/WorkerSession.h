@@ -40,6 +40,8 @@ private:
     void splitDatasetCommand(const QJsonObject& payload);
     void convertDatasetCommand(const QJsonObject& payload);
     void curateDatasetCommand(const QJsonObject& payload);
+    void prepareAnnotationSessionCommand(const QJsonObject& payload);
+    void syncAnnotationSessionCommand(const QJsonObject& payload);
     void createDatasetSnapshotCommand(const QJsonObject& payload);
     void evaluateModelCommand(const QJsonObject& payload);
     void benchmarkModelCommand(const QJsonObject& payload);
@@ -60,6 +62,8 @@ private:
     void splitDataset(const QJsonObject& payload);
     void convertDataset(const QJsonObject& payload);
     void curateDataset(const QJsonObject& payload);
+    void prepareAnnotationSession(const QJsonObject& payload);
+    void syncAnnotationSession(const QJsonObject& payload);
     void createDatasetSnapshot(const QJsonObject& payload);
     void evaluateModel(const QJsonObject& payload);
     void benchmarkModel(const QJsonObject& payload);
@@ -82,6 +86,7 @@ private:
     bool forwardPythonTrainerLine(const QByteArray& line, bool* terminalMessageSeen);
     void send(const QString& type, const QJsonObject& payload);
     aitrain::CancellationCallback cancellationCallback();
+    aitrain::CancellationCallback pollingCancellationCallback(int timeoutMs = 0);
     void shutdownPythonTrainer(const QString& reason, bool notifyClient);
     bool pollPendingCancel(int timeoutMs = 100);
     void sendCanceledAndFinish(const QString& taskId, const QString& message);

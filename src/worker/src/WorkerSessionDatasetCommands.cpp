@@ -1,6 +1,7 @@
 #include "WorkerSession.h"
 #include "WorkerSessionSupport.h"
 
+#include "aitrain/core/AnnotationIntegration.h"
 #include "aitrain/core/DatasetConversion.h"
 #include "aitrain/core/DatasetValidators.h"
 #include "aitrain/core/Deployment.h"
@@ -234,13 +235,18 @@ void WorkerSession::convertDataset(const QJsonObject& payload)
         return;
     }
 
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request, cancellationCallback());
+    const bool usesXAnyLabelingCli =
+        request.options.value(QStringLiteral("conversionEngine")).toString() == QStringLiteral("xanylabeling_cli");
+    const aitrain::DatasetConversionResult result = aitrain::convertDataset(
+        request,
+        usesXAnyLabelingCli ? pollingCancellationCallback(20) : cancellationCallback());
     running_ = false;
-    if (canceled_) {
-        return;
-    }
     if (!result.ok && result.errorCode == QStringLiteral("canceled")) {
         sendCanceledAndFinish(taskId, result.errorMessage);
+        return;
+    }
+    if (canceled_) {
+        sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
         return;
     }
 
@@ -380,6 +386,165 @@ void WorkerSession::curateDataset(const QJsonObject& payload)
     QJsonObject completed;
     completed.insert(QStringLiteral("taskId"), taskId);
     completed.insert(QStringLiteral("message"), QStringLiteral("Dataset quality report completed"));
+    send(wp::event::completed(), completed);
+    finishSession();
+}
+
+void WorkerSession::prepareAnnotationSession(const QJsonObject& payload)
+{
+    const wr::AnnotationSessionRequest request = wr::parseAnnotationSessionRequest(payload);
+    const QString taskId = request.taskId;
+    activeTaskId_ = taskId;
+    canceled_ = false;
+    running_ = true;
+    const QString datasetPath = request.datasetPath;
+    const QString format = request.format;
+    QString outputPath = request.outputPath;
+    QJsonObject options = request.options;
+    if (outputPath.isEmpty()) {
+        outputPath = defaultTaskOutputPath(QFileInfo(datasetPath).absoluteDir().absolutePath(), taskId);
+    }
+    activeOutputPath_ = outputPath;
+
+    QJsonObject progress;
+    progress.insert(QStringLiteral("taskId"), taskId);
+    progress.insert(QStringLiteral("percent"), 0);
+    progress.insert(QStringLiteral("message"), QStringLiteral("开始准备 X-AnyLabeling 标注会话。"));
+    send(wp::event::progress(), progress);
+    if (pollPendingCancel()) {
+        sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
+        return;
+    }
+
+    const aitrain::WorkflowResult result = aitrain::prepareAnnotationSession(datasetPath, outputPath, format, options, cancellationCallback());
+    running_ = false;
+    if (canceled_) {
+        return;
+    }
+    if (!result.ok) {
+        fail(QStringLiteral("X-AnyLabeling annotation session preparation failed: %1").arg(result.error));
+        return;
+    }
+
+    QJsonObject payloadOut = result.payload;
+    payloadOut.insert(QStringLiteral("taskId"), taskId);
+    payloadOut.insert(QStringLiteral("datasetPath"), datasetPath);
+    payloadOut.insert(QStringLiteral("format"), format);
+    payloadOut.insert(QStringLiteral("outputPath"), outputPath);
+    payloadOut.insert(QStringLiteral("reportPath"), result.reportPath);
+
+    QJsonObject artifact;
+    artifact.insert(QStringLiteral("taskId"), taskId);
+    artifact.insert(QStringLiteral("kind"), QStringLiteral("xanylabeling_session_manifest"));
+    artifact.insert(QStringLiteral("path"), result.reportPath);
+    artifact.insert(QStringLiteral("message"), QStringLiteral("X-AnyLabeling annotation session manifest"));
+    send(wp::event::artifact(), artifact);
+    const QString launchRequestPath = payloadOut.value(QStringLiteral("launchRequestPath")).toString();
+    if (!launchRequestPath.isEmpty()) {
+        QJsonObject launchArtifact;
+        launchArtifact.insert(QStringLiteral("taskId"), taskId);
+        launchArtifact.insert(QStringLiteral("kind"), QStringLiteral("xanylabeling_launch_request"));
+        launchArtifact.insert(QStringLiteral("path"), launchRequestPath);
+        launchArtifact.insert(QStringLiteral("message"), QStringLiteral("X-AnyLabeling launch request"));
+        send(wp::event::artifact(), launchArtifact);
+    }
+    const QString reviewSamplesPath = payloadOut.value(QStringLiteral("reviewSamplesPath")).toString();
+    if (!reviewSamplesPath.isEmpty()) {
+        QJsonObject reviewArtifact;
+        reviewArtifact.insert(QStringLiteral("taskId"), taskId);
+        reviewArtifact.insert(QStringLiteral("kind"), QStringLiteral("xanylabeling_review_samples"));
+        reviewArtifact.insert(QStringLiteral("path"), reviewSamplesPath);
+        reviewArtifact.insert(QStringLiteral("message"), QStringLiteral("X-AnyLabeling review samples"));
+        send(wp::event::artifact(), reviewArtifact);
+    }
+
+    QJsonObject doneProgress;
+    doneProgress.insert(QStringLiteral("taskId"), taskId);
+    doneProgress.insert(QStringLiteral("percent"), 100);
+    doneProgress.insert(QStringLiteral("message"), QStringLiteral("X-AnyLabeling 标注会话已准备。"));
+    send(wp::event::progress(), doneProgress);
+    send(wp::event::annotationSession(), payloadOut);
+
+    QJsonObject completed;
+    completed.insert(QStringLiteral("taskId"), taskId);
+    completed.insert(QStringLiteral("command"), activeCommand_);
+    completed.insert(QStringLiteral("status"), QStringLiteral("completed"));
+    completed.insert(QStringLiteral("reportPath"), result.reportPath);
+    completed.insert(QStringLiteral("outputPath"), outputPath);
+    completed.insert(QStringLiteral("message"), QStringLiteral("X-AnyLabeling annotation session prepared"));
+    send(wp::event::completed(), completed);
+    finishSession();
+}
+
+void WorkerSession::syncAnnotationSession(const QJsonObject& payload)
+{
+    const wr::AnnotationSyncRequest request = wr::parseAnnotationSyncRequest(payload);
+    const QString taskId = request.taskId;
+    activeTaskId_ = taskId;
+    canceled_ = false;
+    running_ = true;
+    const QString datasetPath = request.datasetPath;
+    const QString format = request.format;
+    QString outputPath = request.outputPath;
+    if (outputPath.isEmpty()) {
+        outputPath = defaultTaskOutputPath(QFileInfo(datasetPath).absoluteDir().absolutePath(), taskId);
+    }
+    activeOutputPath_ = outputPath;
+
+    QJsonObject progress;
+    progress.insert(QStringLiteral("taskId"), taskId);
+    progress.insert(QStringLiteral("percent"), 0);
+    progress.insert(QStringLiteral("message"), QStringLiteral("开始同步 X-AnyLabeling 标注会话。"));
+    send(wp::event::progress(), progress);
+    if (pollPendingCancel()) {
+        sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
+        return;
+    }
+
+    const aitrain::WorkflowResult result = aitrain::syncAnnotationSession(
+        request.sessionManifestPath,
+        datasetPath,
+        outputPath,
+        format,
+        request.options,
+        cancellationCallback());
+    running_ = false;
+    if (canceled_) {
+        return;
+    }
+    if (!result.ok) {
+        fail(QStringLiteral("X-AnyLabeling annotation sync failed: %1").arg(result.error));
+        return;
+    }
+
+    QJsonObject payloadOut = result.payload;
+    payloadOut.insert(QStringLiteral("taskId"), taskId);
+    payloadOut.insert(QStringLiteral("datasetPath"), datasetPath);
+    payloadOut.insert(QStringLiteral("format"), format);
+    payloadOut.insert(QStringLiteral("outputPath"), outputPath);
+    payloadOut.insert(QStringLiteral("reportPath"), result.reportPath);
+
+    QJsonObject artifact;
+    artifact.insert(QStringLiteral("taskId"), taskId);
+    artifact.insert(QStringLiteral("kind"), QStringLiteral("annotation_sync_report"));
+    artifact.insert(QStringLiteral("path"), result.reportPath);
+    artifact.insert(QStringLiteral("message"), QStringLiteral("Annotation sync report"));
+    send(wp::event::artifact(), artifact);
+
+    QJsonObject doneProgress;
+    doneProgress.insert(QStringLiteral("taskId"), taskId);
+    doneProgress.insert(QStringLiteral("percent"), 100);
+    doneProgress.insert(QStringLiteral("message"), QStringLiteral("X-AnyLabeling 标注同步完成。"));
+    send(wp::event::progress(), doneProgress);
+    send(wp::event::annotationSync(), payloadOut);
+
+    QJsonObject completed;
+    completed.insert(QStringLiteral("taskId"), taskId);
+    completed.insert(QStringLiteral("command"), activeCommand_);
+    completed.insert(QStringLiteral("status"), QStringLiteral("completed"));
+    completed.insert(QStringLiteral("reportPath"), result.reportPath);
+    completed.insert(QStringLiteral("outputPath"), outputPath);
+    completed.insert(QStringLiteral("message"), QStringLiteral("X-AnyLabeling annotation sync completed"));
     send(wp::event::completed(), completed);
     finishSession();
 }

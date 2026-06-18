@@ -511,6 +511,12 @@ void MainWindow::startDatasetConversion()
     QJsonObject options;
     options.insert(QStringLiteral("copyImages"), true);
     options.insert(QStringLiteral("maxIssues"), 200);
+    if (form.sourceFormat == QStringLiteral("xanylabeling_xlabel")
+        || form.targetFormat == QStringLiteral("xanylabeling_xlabel")
+        || form.sourceFormat == QStringLiteral("yolo_obb")
+        || form.targetFormat == QStringLiteral("yolo_obb")) {
+        options.insert(QStringLiteral("conversionEngine"), QStringLiteral("xanylabeling_cli"));
+    }
 
     if (datasetConversionProgressBar_) {
         datasetConversionProgressBar_->setValue(0);
@@ -806,6 +812,139 @@ void MainWindow::launchXAnyLabelingForQualityFix()
     }
 }
 
+void MainWindow::prepareXAnyLabelingAnnotationSession()
+{
+    if (worker_.isRunning()) {
+        QMessageBox::warning(this, uiText("X-AnyLabeling 会话"), uiText("Worker 正在执行任务，稍后再准备标注会话。"));
+        return;
+    }
+
+    const QString datasetPath = QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
+    const QString format = currentDatasetFormat();
+    if (datasetPath.isEmpty() || format.isEmpty()) {
+        QMessageBox::information(this, uiText("X-AnyLabeling 会话"), uiText("请先选择数据集目录和格式。"));
+        return;
+    }
+
+    QString taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const QString outputRoot = currentProjectPath_.isEmpty()
+        ? QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation)).filePath(QStringLiteral("AITrain/runs"))
+        : QDir(currentProjectPath_).filePath(QStringLiteral("runs"));
+    const QString outputPath = QDir(outputRoot).filePath(taskId);
+    if (repository_.isOpen()) {
+        taskId = createRepositoryTask(
+            aitrain::TaskKind::Curate,
+            QStringLiteral("xanylabeling_annotation_session"),
+            QStringLiteral("com.aitrain.plugins.dataset_interop"),
+            outputPath,
+            uiText("X-AnyLabeling 标注会话准备中。"),
+            taskId);
+        if (taskId.isEmpty()) {
+            return;
+        }
+    } else {
+        state_.training.currentTaskId = taskId;
+    }
+
+    QJsonObject options;
+    options.insert(QStringLiteral("mode"), QStringLiteral("quality_fix"));
+    if (!state_.dataset.latestQualityFixManifestPath.isEmpty()) {
+        options.insert(QStringLiteral("xAnyLabelingFixManifestPath"), state_.dataset.latestQualityFixManifestPath);
+    }
+    if (!state_.dataset.latestReviewManifestPath.isEmpty()) {
+        options.insert(QStringLiteral("reviewSourcePath"), state_.dataset.latestReviewManifestPath);
+    }
+    if (!state_.dataset.latestReviewListPath.isEmpty()) {
+        options.insert(QStringLiteral("reviewListPath"), state_.dataset.latestReviewListPath);
+    }
+
+    QString error;
+    if (!worker_.requestAnnotationSession(workerExecutablePath(), datasetPath, outputPath, format, options, &error, taskId)) {
+        if (!taskId.isEmpty() && repository_.isOpen()) {
+            QString taskError;
+            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
+            updateRecentTasks();
+        }
+        state_.training.currentTaskId.clear();
+        QMessageBox::critical(this, uiText("X-AnyLabeling 会话"), error);
+        return;
+    }
+
+    workerPill_->setStatus(uiText("标注会话准备中"), StatusPill::Tone::Info);
+    setDatasetRepairLoopRows(
+        uiText("修复闭环：正在准备 X-AnyLabeling 会话。"),
+        QVector<QStringList>{
+            QStringList() << uiText("会话准备") << uiText("运行中") << uiText("Worker 正在生成 manifest、classes 和 launch_request。"),
+            QStringList() << uiText("外部修复") << uiText("等待") << uiText("会话准备完成后会启动本地 X-AnyLabeling。"),
+            QStringList() << uiText("同步复检") << uiText("等待") << uiText("标注完成后点击“同步标注会话”。")
+        });
+}
+
+void MainWindow::syncXAnyLabelingAnnotationSession()
+{
+    if (worker_.isRunning()) {
+        QMessageBox::warning(this, uiText("X-AnyLabeling 同步"), uiText("Worker 正在执行任务，稍后再同步标注会话。"));
+        return;
+    }
+
+    const QString datasetPath = QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
+    const QString format = currentDatasetFormat();
+    if (datasetPath.isEmpty() || format.isEmpty()) {
+        QMessageBox::information(this, uiText("X-AnyLabeling 同步"), uiText("请先选择数据集目录和格式。"));
+        return;
+    }
+
+    const QString manifestPath = QDir::fromNativeSeparators(state_.dataset.latestAnnotationSessionManifestPath);
+    if (manifestPath.isEmpty() || !QFileInfo::exists(manifestPath)) {
+        QMessageBox::information(this, uiText("X-AnyLabeling 同步"), uiText("请先准备 X-AnyLabeling 修复会话。"));
+        return;
+    }
+
+    QString taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const QString outputRoot = currentProjectPath_.isEmpty()
+        ? QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation)).filePath(QStringLiteral("AITrain/runs"))
+        : QDir(currentProjectPath_).filePath(QStringLiteral("runs"));
+    const QString outputPath = QDir(outputRoot).filePath(taskId);
+    if (repository_.isOpen()) {
+        taskId = createRepositoryTask(
+            aitrain::TaskKind::Curate,
+            QStringLiteral("xanylabeling_annotation_sync"),
+            QStringLiteral("com.aitrain.plugins.dataset_interop"),
+            outputPath,
+            uiText("X-AnyLabeling 标注同步中。"),
+            taskId);
+        if (taskId.isEmpty()) {
+            return;
+        }
+    } else {
+        state_.training.currentTaskId = taskId;
+    }
+
+    QJsonObject options;
+    options.insert(QStringLiteral("sessionManifestPath"), manifestPath);
+
+    QString error;
+    if (!worker_.requestAnnotationSync(workerExecutablePath(), manifestPath, datasetPath, outputPath, format, options, &error, taskId)) {
+        if (!taskId.isEmpty() && repository_.isOpen()) {
+            QString taskError;
+            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
+            updateRecentTasks();
+        }
+        state_.training.currentTaskId.clear();
+        QMessageBox::critical(this, uiText("X-AnyLabeling 同步"), error);
+        return;
+    }
+
+    workerPill_->setStatus(uiText("标注同步中"), StatusPill::Tone::Info);
+    setDatasetRepairLoopRows(
+        uiText("修复闭环：正在同步 X-AnyLabeling 标注会话。"),
+        QVector<QStringList>{
+            QStringList() << uiText("外部修复") << uiText("已返回") << QDir::toNativeSeparators(manifestPath),
+            QStringList() << uiText("同步") << uiText("运行中") << uiText("Worker 正在扫描修复后的标签文件。"),
+            QStringList() << uiText("复检") << uiText("等待") << uiText("同步完成后点击“标注后刷新 / 重新校验”。")
+        });
+}
+
 void MainWindow::browseSampleReviewFile()
 {
     const QString file = QFileDialog::getOpenFileName(
@@ -869,6 +1008,7 @@ void MainWindow::loadSampleReviewFile()
         reviewReasonFilterCombo_->addItem(reason, reason);
     }
     state_.dataset.latestReviewListPath.clear();
+    state_.dataset.latestReviewManifestPath.clear();
     refreshSampleReviewTable();
     statusBar()->showMessage(uiText("已加载复核样本：%1 条").arg(state_.dataset.sampleReviewSamples.size()), 4000);
 }
@@ -998,6 +1138,7 @@ void MainWindow::generateFilteredReviewList()
     manifestFile.close();
 
     state_.dataset.latestReviewListPath = listPath;
+    state_.dataset.latestReviewManifestPath = manifestPath;
     refreshSampleReviewTable();
     statusBar()->showMessage(uiText("复核清单已生成：%1").arg(QDir::toNativeSeparators(listPath)), 5000);
 }

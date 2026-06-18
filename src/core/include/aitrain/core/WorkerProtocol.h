@@ -18,6 +18,8 @@ QString validateDataset();
 QString splitDataset();
 QString convertDataset();
 QString curateDataset();
+QString prepareAnnotationSession();
+QString syncAnnotationSession();
 QString createDatasetSnapshot();
 QString evaluateModel();
 QString benchmarkModel();
@@ -48,6 +50,8 @@ QString datasetValidation();
 QString datasetSplit();
 QString datasetConversion();
 QString datasetQuality();
+QString annotationSession();
+QString annotationSync();
 QString datasetSnapshot();
 QString evaluationReport();
 QString benchmarkReport();
@@ -82,6 +86,7 @@ QString options();
 QString context();
 QString reportPath();
 QString bundlePath();
+QString sessionManifestPath();
 } // namespace field
 
 bool isControlCommand(const QString& type);
@@ -110,6 +115,19 @@ QJsonObject datasetConversionRequest(
     const QJsonObject& options);
 QJsonObject datasetCurationRequest(
     const QString& taskId,
+    const QString& datasetPath,
+    const QString& outputPath,
+    const QString& format,
+    const QJsonObject& options);
+QJsonObject annotationSessionRequest(
+    const QString& taskId,
+    const QString& datasetPath,
+    const QString& outputPath,
+    const QString& format,
+    const QJsonObject& options);
+QJsonObject annotationSyncRequest(
+    const QString& taskId,
+    const QString& sessionManifestPath,
     const QString& datasetPath,
     const QString& outputPath,
     const QString& format,

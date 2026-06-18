@@ -142,6 +142,16 @@ void WorkerSession::curateDatasetCommand(const QJsonObject& payload)
     curateDataset(payload);
 }
 
+void WorkerSession::prepareAnnotationSessionCommand(const QJsonObject& payload)
+{
+    prepareAnnotationSession(payload);
+}
+
+void WorkerSession::syncAnnotationSessionCommand(const QJsonObject& payload)
+{
+    syncAnnotationSession(payload);
+}
+
 void WorkerSession::createDatasetSnapshotCommand(const QJsonObject& payload)
 {
     createDatasetSnapshot(payload);
@@ -238,6 +248,13 @@ aitrain::CancellationCallback WorkerSession::cancellationCallback()
 {
     return [this]() {
         return canceled_;
+    };
+}
+
+aitrain::CancellationCallback WorkerSession::pollingCancellationCallback(int timeoutMs)
+{
+    return [this, timeoutMs]() {
+        return canceled_ || pollPendingCancel(timeoutMs);
     };
 }
 

@@ -14,14 +14,18 @@ struct DatasetConversionPair {
 
 const char* const cocoTargets[] = {"yolo_detection", "yolo_segmentation"};
 const char* const vocTargets[] = {"yolo_detection"};
-const char* const yoloDetectionTargets[] = {"coco_json", "voc_xml"};
-const char* const yoloSegmentationTargets[] = {"coco_json"};
+const char* const yoloDetectionTargets[] = {"coco_json", "voc_xml", "xanylabeling_xlabel"};
+const char* const yoloSegmentationTargets[] = {"coco_json", "xanylabeling_xlabel"};
+const char* const yoloObbTargets[] = {"xanylabeling_xlabel"};
+const char* const xAnyLabelingXLabelTargets[] = {"yolo_detection", "yolo_segmentation", "yolo_obb"};
 
 const DatasetConversionPair conversionMatrix[] = {
     {"coco_json", cocoTargets, 2},
     {"voc_xml", vocTargets, 1},
-    {"yolo_detection", yoloDetectionTargets, 2},
-    {"yolo_segmentation", yoloSegmentationTargets, 1},
+    {"yolo_detection", yoloDetectionTargets, 3},
+    {"yolo_segmentation", yoloSegmentationTargets, 2},
+    {"yolo_obb", yoloObbTargets, 1},
+    {"xanylabeling_xlabel", xAnyLabelingXLabelTargets, 3},
 };
 
 void appendIfPresent(QStringList* messages, const QString& message)
@@ -65,6 +69,12 @@ QString datasetConversionFormatLabel(const QString& format)
     if (format == QStringLiteral("yolo_segmentation")) {
         return QStringLiteral("YOLO Segmentation");
     }
+    if (format == QStringLiteral("yolo_obb")) {
+        return QStringLiteral("YOLO OBB");
+    }
+    if (format == QStringLiteral("xanylabeling_xlabel")) {
+        return QStringLiteral("X-AnyLabeling XLABEL");
+    }
     return format;
 }
 
@@ -73,7 +83,9 @@ QStringList supportedDatasetConversionSourceFormats()
     return QStringList({QStringLiteral("coco_json"),
         QStringLiteral("voc_xml"),
         QStringLiteral("yolo_detection"),
-        QStringLiteral("yolo_segmentation")});
+        QStringLiteral("yolo_segmentation"),
+        QStringLiteral("yolo_obb"),
+        QStringLiteral("xanylabeling_xlabel")});
 }
 
 QStringList supportedDatasetConversionTargets(const QString& sourceFormat)

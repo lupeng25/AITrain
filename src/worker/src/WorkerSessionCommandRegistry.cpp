@@ -18,6 +18,8 @@ QVector<WorkerSession::CommandBinding> WorkerSession::commandBindings()
         {wp::command::splitDataset(), &WorkerSession::splitDatasetCommand},
         {wp::command::convertDataset(), &WorkerSession::convertDatasetCommand},
         {wp::command::curateDataset(), &WorkerSession::curateDatasetCommand},
+        {wp::command::prepareAnnotationSession(), &WorkerSession::prepareAnnotationSessionCommand},
+        {wp::command::syncAnnotationSession(), &WorkerSession::syncAnnotationSessionCommand},
         {wp::command::createDatasetSnapshot(), &WorkerSession::createDatasetSnapshotCommand},
         {wp::command::evaluateModel(), &WorkerSession::evaluateModelCommand},
         {wp::command::benchmarkModel(), &WorkerSession::benchmarkModelCommand},

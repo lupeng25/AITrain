@@ -74,10 +74,13 @@
 - 环境变量 `AITRAIN_XANYLABELING_EXE`
 - 程序目录
 - `tools/x-anylabeling`
+- `.deps/tools/annotation-tools/X-AnyLabeling`
 - `.deps/annotation-tools/X-AnyLabeling`
 - `PATH`
 
-在“数据集”页选择数据集目录后，可以点击“启动 X-AnyLabeling”打开标注工具。标注完成后回到 AITrain Studio，点击“标注后刷新 / 重新校验”。
+在“数据集”页选择数据集目录后，可以点击“启动 X-AnyLabeling”直接打开标注工具，也可以点击“准备修复会话”。准备会话由 Worker 生成 `xany_session_manifest.json`、`classes.txt`、`review_samples.json` 和 `launch_request.json`，随后以外部进程启动本地 X-AnyLabeling。标注完成后回到 AITrain Studio，先点击“同步标注会话”生成 `annotation_sync_report.json`，再点击“标注后刷新 / 重新校验”重新生成校验或质量报告。
+
+AITrain Studio 不内嵌 X-AnyLabeling GUI / PyQt 进程，也不打包 X-AnyLabeling Server。X-AnyLabeling 保持本地外部依赖；如需随产品分发，需要单独完成第三方许可证和包体评审。
 
 ### 4.2 YOLO 检测数据集
 
@@ -198,7 +201,7 @@ images/sample.png<TAB>[{"transcription":"text","points":[[1,1],[30,1],[30,20],[1
 
 ### 5.1 数据集格式转换
 
-“数据集格式转换”用于把已有 COCO、Pascal VOC 或 YOLO 标注转换为当前训练流程可用的布局。当前 GUI 暴露的是已实现的 COCO / Pascal VOC / YOLO 检测 / YOLO 分割转换矩阵；不在下拉框或报告中标记为 supported 的组合不能当作已实现能力。
+“数据集格式转换”用于把已有 COCO、Pascal VOC 或 YOLO 标注转换为当前训练流程可用的布局。当前 GUI 暴露的是已实现的 COCO / Pascal VOC / YOLO 检测 / YOLO 分割原生转换矩阵，以及通过本地 X-AnyLabeling CLI 执行的 YOLO Detection / YOLO Segmentation / YOLO OBB 与 XLABEL 互转。不在下拉框或报告中标记为 supported 的组合不能当作已实现能力。
 
 转换步骤：
 

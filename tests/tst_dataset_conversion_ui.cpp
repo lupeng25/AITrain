@@ -27,7 +27,9 @@ void DatasetConversionUiTests::sourceFormatsAreFixed()
     QCOMPARE(formats, QStringList({QStringLiteral("coco_json"),
                           QStringLiteral("voc_xml"),
                           QStringLiteral("yolo_detection"),
-                          QStringLiteral("yolo_segmentation")}));
+                          QStringLiteral("yolo_segmentation"),
+                          QStringLiteral("yolo_obb"),
+                          QStringLiteral("xanylabeling_xlabel")}));
 }
 
 void DatasetConversionUiTests::targetFormatsFollowConversionMatrix()
@@ -37,9 +39,13 @@ void DatasetConversionUiTests::targetFormatsFollowConversionMatrix()
     QCOMPARE(aitrain_app::supportedDatasetConversionTargets(QStringLiteral("voc_xml")),
         QStringList({QStringLiteral("yolo_detection")}));
     QCOMPARE(aitrain_app::supportedDatasetConversionTargets(QStringLiteral("yolo_detection")),
-        QStringList({QStringLiteral("coco_json"), QStringLiteral("voc_xml")}));
+        QStringList({QStringLiteral("coco_json"), QStringLiteral("voc_xml"), QStringLiteral("xanylabeling_xlabel")}));
     QCOMPARE(aitrain_app::supportedDatasetConversionTargets(QStringLiteral("yolo_segmentation")),
-        QStringList({QStringLiteral("coco_json")}));
+        QStringList({QStringLiteral("coco_json"), QStringLiteral("xanylabeling_xlabel")}));
+    QCOMPARE(aitrain_app::supportedDatasetConversionTargets(QStringLiteral("yolo_obb")),
+        QStringList({QStringLiteral("xanylabeling_xlabel")}));
+    QCOMPARE(aitrain_app::supportedDatasetConversionTargets(QStringLiteral("xanylabeling_xlabel")),
+        QStringList({QStringLiteral("yolo_detection"), QStringLiteral("yolo_segmentation"), QStringLiteral("yolo_obb")}));
 }
 
 void DatasetConversionUiTests::unsupportedSourceHasNoTargets()

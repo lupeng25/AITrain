@@ -1,5 +1,6 @@
 #include "aitrain/core/DatasetConversion.h"
 
+#include "aitrain/core/AnnotationIntegration.h"
 #include "DatasetConversionInternal.h"
 
 #include <QDir>
@@ -24,8 +25,12 @@ DatasetConversionResult convertDataset(const DatasetConversionRequest& request, 
 
     const QString sourceFormat = normalizedFormat(request.sourceFormat);
     const QString targetFormat = normalizedFormat(request.targetFormat);
+    const QString conversionEngine = request.options.value(QStringLiteral("conversionEngine")).toString(QStringLiteral("aitrain_native")).trimmed();
     if (conversionCanceled(shouldCancel)) {
         return canceledConversionResult(request);
+    }
+    if (conversionEngine == QStringLiteral("xanylabeling_cli")) {
+        return convertDatasetWithXAnyLabelingCli(request, shouldCancel);
     }
 
     if (sourceFormat != QStringLiteral("coco_json")

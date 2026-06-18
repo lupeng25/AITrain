@@ -25,6 +25,15 @@ struct DatasetConversionRequest {
     QJsonObject options;
 };
 
+struct AnnotationSyncRequest {
+    QString taskId;
+    QString sessionManifestPath;
+    QString datasetPath;
+    QString outputPath;
+    QString format;
+    QJsonObject options;
+};
+
 struct ModelEvaluationRequest {
     QString taskId;
     QString modelPath;
@@ -87,6 +96,7 @@ struct InferenceRequest {
 using DatasetValidationRequest = DatasetPathRequest;
 using DatasetSplitRequest = DatasetPathRequest;
 using DatasetCurationRequest = DatasetPathRequest;
+using AnnotationSessionRequest = DatasetPathRequest;
 using DatasetSnapshotRequest = DatasetPathRequest;
 using DeliveryReportRequest = ContextReportRequest;
 using DiagnosticsBundleRequest = ContextReportRequest;
@@ -96,6 +106,8 @@ DatasetValidationRequest parseDatasetValidationRequest(const QJsonObject& object
 DatasetSplitRequest parseDatasetSplitRequest(const QJsonObject& object);
 DatasetConversionRequest parseDatasetConversionRequest(const QJsonObject& object);
 DatasetCurationRequest parseDatasetCurationRequest(const QJsonObject& object);
+AnnotationSessionRequest parseAnnotationSessionRequest(const QJsonObject& object);
+AnnotationSyncRequest parseAnnotationSyncRequest(const QJsonObject& object);
 DatasetSnapshotRequest parseDatasetSnapshotRequest(const QJsonObject& object);
 ModelEvaluationRequest parseModelEvaluationRequest(const QJsonObject& object);
 ModelBenchmarkRequest parseModelBenchmarkRequest(const QJsonObject& object);

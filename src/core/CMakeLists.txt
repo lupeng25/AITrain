@@ -1,5 +1,6 @@
 add_library(aitrain_core STATIC
     include/aitrain/core/PluginInterfaces.h
+    include/aitrain/core/AnnotationIntegration.h
     include/aitrain/core/Cancellation.h
     include/aitrain/core/Deployment.h
     include/aitrain/core/DatasetConversion.h
@@ -21,6 +22,7 @@ add_library(aitrain_core STATIC
     include/aitrain/core/WorkerProtocol.h
     include/aitrain/core/WorkerRequests.h
     src/JsonProtocol.cpp
+    src/AnnotationIntegration.cpp
     src/LicenseManager.cpp
     src/Deployment.cpp
     src/DatasetConversion.cpp

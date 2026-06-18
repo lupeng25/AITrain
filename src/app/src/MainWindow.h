@@ -51,6 +51,8 @@ private slots:
     void openDatasetQualityReport();
     void openDatasetQualityFixList();
     void launchXAnyLabelingForQualityFix();
+    void prepareXAnyLabelingAnnotationSession();
+    void syncXAnyLabelingAnnotationSession();
     void browseSampleReviewFile();
     void loadSampleReviewFile();
     void generateFilteredReviewList();
@@ -139,6 +141,8 @@ private:
     void handleArtifactMessage(const QJsonObject& payload);
     void handleTaskStateMessage(const QString& type, const QJsonObject& payload);
     void handleDatasetQualityMessage(const QJsonObject& payload);
+    void handleAnnotationSessionMessage(const QJsonObject& payload);
+    void handleAnnotationSyncMessage(const QJsonObject& payload);
     void handleDatasetSnapshotMessage(const QJsonObject& payload);
     void handleEvaluationReportMessage(const QJsonObject& payload);
     void handlePipelinePlanMessage(const QJsonObject& payload);

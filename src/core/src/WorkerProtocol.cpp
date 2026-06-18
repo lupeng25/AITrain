@@ -13,6 +13,8 @@ QString validateDataset() { return QStringLiteral("validateDataset"); }
 QString splitDataset() { return QStringLiteral("splitDataset"); }
 QString convertDataset() { return QStringLiteral("convertDataset"); }
 QString curateDataset() { return QStringLiteral("curateDataset"); }
+QString prepareAnnotationSession() { return QStringLiteral("prepareAnnotationSession"); }
+QString syncAnnotationSession() { return QStringLiteral("syncAnnotationSession"); }
 QString createDatasetSnapshot() { return QStringLiteral("createDatasetSnapshot"); }
 QString evaluateModel() { return QStringLiteral("evaluateModel"); }
 QString benchmarkModel() { return QStringLiteral("benchmarkModel"); }
@@ -43,6 +45,8 @@ QString datasetValidation() { return QStringLiteral("datasetValidation"); }
 QString datasetSplit() { return QStringLiteral("datasetSplit"); }
 QString datasetConversion() { return QStringLiteral("datasetConversion"); }
 QString datasetQuality() { return QStringLiteral("datasetQuality"); }
+QString annotationSession() { return QStringLiteral("annotationSession"); }
+QString annotationSync() { return QStringLiteral("annotationSync"); }
 QString datasetSnapshot() { return QStringLiteral("datasetSnapshot"); }
 QString evaluationReport() { return QStringLiteral("evaluationReport"); }
 QString benchmarkReport() { return QStringLiteral("benchmarkReport"); }
@@ -77,6 +81,7 @@ QString options() { return QStringLiteral("options"); }
 QString context() { return QStringLiteral("context"); }
 QString reportPath() { return QStringLiteral("reportPath"); }
 QString bundlePath() { return QStringLiteral("bundlePath"); }
+QString sessionManifestPath() { return QStringLiteral("sessionManifestPath"); }
 } // namespace field
 
 bool isControlCommand(const QString& type)
@@ -179,6 +184,29 @@ QJsonObject datasetCurationRequest(
     const QJsonObject& options)
 {
     return datasetSplitRequest(taskId, datasetPath, outputPath, format, options);
+}
+
+QJsonObject annotationSessionRequest(
+    const QString& taskId,
+    const QString& datasetPath,
+    const QString& outputPath,
+    const QString& format,
+    const QJsonObject& options)
+{
+    return datasetSplitRequest(taskId, datasetPath, outputPath, format, options);
+}
+
+QJsonObject annotationSyncRequest(
+    const QString& taskId,
+    const QString& sessionManifestPath,
+    const QString& datasetPath,
+    const QString& outputPath,
+    const QString& format,
+    const QJsonObject& options)
+{
+    QJsonObject payload = datasetSplitRequest(taskId, datasetPath, outputPath, format, options);
+    payload.insert(field::sessionManifestPath(), sessionManifestPath);
+    return payload;
 }
 
 QJsonObject datasetSnapshotRequest(

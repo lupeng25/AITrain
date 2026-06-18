@@ -96,6 +96,24 @@ bool WorkerClient::requestDatasetCuration(const QString& workerProgram, const QS
         error);
 }
 
+bool WorkerClient::requestAnnotationSession(const QString& workerProgram, const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId)
+{
+    return startWorkerCommand(
+        workerProgram,
+        wp::command::prepareAnnotationSession(),
+        wp::annotationSessionRequest(taskId, datasetPath, outputPath, format, options),
+        error);
+}
+
+bool WorkerClient::requestAnnotationSync(const QString& workerProgram, const QString& sessionManifestPath, const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId)
+{
+    return startWorkerCommand(
+        workerProgram,
+        wp::command::syncAnnotationSession(),
+        wp::annotationSyncRequest(taskId, sessionManifestPath, datasetPath, outputPath, format, options),
+        error);
+}
+
 bool WorkerClient::requestDatasetSnapshot(const QString& workerProgram, const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId)
 {
     return startWorkerCommand(

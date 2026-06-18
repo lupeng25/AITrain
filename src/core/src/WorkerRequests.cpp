@@ -49,6 +49,23 @@ DatasetCurationRequest parseDatasetCurationRequest(const QJsonObject& object)
     return parseDatasetPathRequest(object);
 }
 
+AnnotationSessionRequest parseAnnotationSessionRequest(const QJsonObject& object)
+{
+    return parseDatasetPathRequest(object);
+}
+
+AnnotationSyncRequest parseAnnotationSyncRequest(const QJsonObject& object)
+{
+    AnnotationSyncRequest request;
+    request.taskId = object.value(wp::field::taskId()).toString();
+    request.sessionManifestPath = object.value(wp::field::sessionManifestPath()).toString();
+    request.datasetPath = object.value(wp::field::datasetPath()).toString();
+    request.outputPath = object.value(wp::field::outputPath()).toString();
+    request.format = object.value(wp::field::format()).toString();
+    request.options = object.value(wp::field::options()).toObject();
+    return request;
+}
+
 DatasetSnapshotRequest parseDatasetSnapshotRequest(const QJsonObject& object)
 {
     return parseDatasetPathRequest(object);

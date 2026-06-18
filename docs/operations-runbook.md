@@ -77,13 +77,15 @@ Python AI 环境安装包应包含：
 - PaddlePaddle / PaddleOCR / PaddleOCR 源码 checkout：用于官方 OCR 工具链。
 - CUDA / cuDNN / TensorRT：用于 TensorRT engine build 和推理验收。
 - NCNN 工具和 SDK/runtime：用于 NCNN `.param/.bin` 导出和部署验证；配置 NCNN SDK/runtime 后，部署验证可执行 YOLO 检测/分割 runtime 推理。本机验证根目录为 `.deps\sdks\ncnn`，交付机器应使用等价 SDK/runtime 路径。
-- X-AnyLabeling：作为外部标注工具。
+- X-AnyLabeling：作为外部标注工具和可选 CLI 转换工具，本地查找 `AITRAIN_XANYLABELING_EXE`、程序目录、`tools\x-anylabeling`、`.deps\tools\annotation-tools\X-AnyLabeling`、旧 `.deps\annotation-tools\X-AnyLabeling` 和 `PATH`。
 
 常见配置：
 
 - `AITRAIN_XANYLABELING_EXE`：指定 X-AnyLabeling 可执行文件。
 - `AITRAIN_NCNN_ONNX2NCNN` 或 `AITRAIN_NCNN_ROOT`：指定 NCNN 转换工具；`AITRAIN_NCNN_ROOT` 同时用于启用 C++ NCNN runtime。
 - Python、CUDA、TensorRT、PaddleOCR 等路径优先通过“环境”页自检和修复建议确认。
+
+X-AnyLabeling 默认不进入产品本体包。若现场需要预装或随包分发，应先完成第三方许可证、体积和更新策略评审；当前 AITrain 只按本地外部依赖探测和调用。
 
 ## 验收命令
 

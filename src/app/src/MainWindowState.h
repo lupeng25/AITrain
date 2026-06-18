@@ -22,6 +22,10 @@ struct DatasetWorkbenchState {
     QString latestQualityFixManifestPath;
     QString latestQualityReportPath;
     QString latestReviewListPath;
+    QString latestReviewManifestPath;
+    QString latestAnnotationSessionManifestPath;
+    QString latestAnnotationLaunchRequestPath;
+    QString latestAnnotationSyncReportPath;
     bool currentValid = false;
     QJsonArray sampleReviewSamples;
 };

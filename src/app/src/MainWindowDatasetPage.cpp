@@ -329,11 +329,15 @@ QWidget* MainWindow::buildDatasetPage()
     annotationToolStatusLabel_->setMinimumHeight(28);
     annotationToolStatusLabel_->setToolTip(QDir::toNativeSeparators(resolvedXAnyLabelingProgram()));
     auto* launchAnnotationToolButton = new QPushButton(QStringLiteral("启动 X-AnyLabeling"));
+    auto* prepareAnnotationSessionButton = new QPushButton(QStringLiteral("准备修复会话"));
+    auto* syncAnnotationSessionButton = new QPushButton(QStringLiteral("同步标注会话"));
     auto* refreshAnnotationStatusButton = new QPushButton(QStringLiteral("检测状态"));
     auto* refreshDatasetAfterAnnotationButton = new QPushButton(QStringLiteral("标注后刷新 / 重新校验"));
     auto* openDatasetDirButton = new QPushButton(QStringLiteral("打开数据目录"));
     connect(refreshAnnotationStatusButton, &QPushButton::clicked, this, &MainWindow::updateAnnotationToolStatus);
     connect(refreshDatasetAfterAnnotationButton, &QPushButton::clicked, this, &MainWindow::refreshAfterAnnotation);
+    connect(prepareAnnotationSessionButton, &QPushButton::clicked, this, &MainWindow::prepareXAnyLabelingAnnotationSession);
+    connect(syncAnnotationSessionButton, &QPushButton::clicked, this, &MainWindow::syncXAnyLabelingAnnotationSession);
     connect(openDatasetDirButton, &QPushButton::clicked, this, [this]() {
         const QString datasetPath = QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
         if (datasetPath.isEmpty()) {
@@ -370,12 +374,14 @@ QWidget* MainWindow::buildDatasetPage()
     auto* annotationActionGrid = new QGridLayout(annotationActionRow);
     annotationActionGrid->setContentsMargins(0, 0, 0, 0);
     annotationActionGrid->setHorizontalSpacing(10);
-    annotationActionGrid->setVerticalSpacing(0);
+    annotationActionGrid->setVerticalSpacing(8);
     annotationActionGrid->addWidget(launchAnnotationToolButton, 0, 0);
-    annotationActionGrid->addWidget(refreshAnnotationStatusButton, 0, 1);
-    annotationActionGrid->addWidget(refreshDatasetAfterAnnotationButton, 0, 2);
-    annotationActionGrid->addWidget(openDatasetDirButton, 0, 3);
-    for (int column = 0; column < 4; ++column) {
+    annotationActionGrid->addWidget(prepareAnnotationSessionButton, 0, 1);
+    annotationActionGrid->addWidget(syncAnnotationSessionButton, 0, 2);
+    annotationActionGrid->addWidget(refreshAnnotationStatusButton, 1, 0);
+    annotationActionGrid->addWidget(refreshDatasetAfterAnnotationButton, 1, 1);
+    annotationActionGrid->addWidget(openDatasetDirButton, 1, 2);
+    for (int column = 0; column < 3; ++column) {
         annotationActionGrid->setColumnStretch(column, 1);
     }
     annotationLayout->addWidget(annotationSummary);

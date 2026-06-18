@@ -443,7 +443,7 @@ If offline licensing stops startup at the registration dialog, the wrapper recor
 
 For manual exploration beyond the automated pass, create or open a project, import generated detection, segmentation, OCR Rec, and OCR Det datasets, launch X-AnyLabeling from the dataset page, use post-labeling refresh/revalidation, validate and split each dataset, run one training/export/inference path, then confirm the task queue detail view lists report, checkpoint/model, ONNX, overlay, visualized OCR image, and prediction JSON/TXT artifacts. Also open `数据集 > 质量与复核`, `部署验证`, `系统设置 > 插件`, and `环境 > 交付证据` to confirm review-list export, export/inference validation, plugin state, diagnostics, customer OCR gate, and deployment validation entries are visible.
 
-X-AnyLabeling is detected from `AITRAIN_XANYLABELING_EXE`, the app directory, `tools\x-anylabeling`, `.deps\annotation-tools\X-AnyLabeling`, or `PATH`. Keep downloaded binaries in `.deps\` unless a separate redistribution review is completed.
+X-AnyLabeling is detected from `AITRAIN_XANYLABELING_EXE`, the app directory, `tools\x-anylabeling`, `.deps\tools\annotation-tools\X-AnyLabeling`, legacy `.deps\annotation-tools\X-AnyLabeling`, or `PATH`. Keep downloaded binaries in `.deps\` unless a separate redistribution review is completed.
 
 ## Phase 21: Release Closeout
 
