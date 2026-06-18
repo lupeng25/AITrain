@@ -1,5 +1,7 @@
 #include "aitrain/core/AnnotationIntegration.h"
 
+#include "TestSupport.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileDevice>
@@ -9,21 +11,32 @@
 #include <QJsonObject>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTimer>
+#include <QVector>
 
 class AnnotationIntegrationTests : public QObject {
     Q_OBJECT
 
 private slots:
     void missingExecutableWritesEnvironmentReport();
+    void environmentPrefersExplicitExecutableOverEnv();
     void prepareSessionWritesManifestAndLaunchRequest();
     void prepareSessionUsesReviewSourceManifest();
+    void syncSessionFailsForMissingManifest();
+    void syncSessionFailsForInvalidManifest();
     void syncSessionReportsModifiedLabels();
     void syncSessionReportsSessionOutputLabels();
     void xAnyCliMissingConversionFailsWithReport();
     void xAnyCliYoloCustomSplitPathsUseFlatStaging();
+    void xAnyCliYoloDuplicateBasenamesAcrossSplitsUseDistinctStaging();
+    void xAnyCliYoloMissingLabelsStageAsEmptyFiles();
+    void xAnyCliYoloStagingStripsBomFromLabels();
     void xAnyCliXLabelToYoloPassesImagesPath();
     void xAnyCliXLabelToYoloFallsBackToImagesSubdirForBasenameImagePath();
+    void xAnyCliXLabelToYoloHandlesUnicodeSpacePaths();
     void xAnyCliCancellationReturnsCanceled();
+    void workerDatasetConversionCancelEmitsCanceledAndIdle();
+    void workerAnnotationSessionEmitsArtifactsAndCompleted();
 };
 
 namespace {
@@ -34,6 +47,14 @@ void writeTextFileForAnnotationTest(const QString& path, const QString& text)
     QFile file(path);
     QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text));
     file.write(text.toUtf8());
+}
+
+void writeBinaryFileForAnnotationTest(const QString& path, const QByteArray& bytes)
+{
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    file.write(bytes);
 }
 
 QJsonObject readJsonObjectForAnnotationTest(const QString& path)
@@ -126,6 +147,92 @@ QString writeFakeXAnyExecutable(const QDir& root, bool writeXLabelJson = false)
     return QFileInfo(scriptPath).absoluteFilePath();
 }
 
+QString writeLabelEchoXAnyExecutable(const QDir& root)
+{
+#ifdef Q_OS_WIN
+    const QString scriptPath = root.filePath(QStringLiteral("fake_xany_label_echo.cmd"));
+    writeTextFileForAnnotationTest(scriptPath,
+        QStringLiteral("@echo off\r\n"
+                       "setlocal enabledelayedexpansion\r\n"
+                       "set \"IMAGES=\"\r\n"
+                       "set \"LABELS=\"\r\n"
+                       "set \"OUTPUT=\"\r\n"
+                       ":parse\r\n"
+                       "if \"%~1\"==\"\" goto write\r\n"
+                       "if \"%~1\"==\"--images\" (\r\n"
+                       "  set \"IMAGES=%~2\"\r\n"
+                       "  shift\r\n"
+                       "  shift\r\n"
+                       "  goto parse\r\n"
+                       ")\r\n"
+                       "if \"%~1\"==\"--labels\" (\r\n"
+                       "  set \"LABELS=%~2\"\r\n"
+                       "  shift\r\n"
+                       "  shift\r\n"
+                       "  goto parse\r\n"
+                       ")\r\n"
+                       "if \"%~1\"==\"--output\" (\r\n"
+                       "  set \"OUTPUT=%~2\"\r\n"
+                       "  shift\r\n"
+                       "  shift\r\n"
+                       "  goto parse\r\n"
+                       ")\r\n"
+                       "shift\r\n"
+                       "goto parse\r\n"
+                       ":write\r\n"
+                       "if \"%IMAGES%\"==\"\" exit /b 2\r\n"
+                       "if \"%LABELS%\"==\"\" exit /b 2\r\n"
+                       "if \"%OUTPUT%\"==\"\" exit /b 2\r\n"
+                       "if not exist \"%OUTPUT%\" mkdir \"%OUTPUT%\"\r\n"
+                       "for %%L in (\"%LABELS%\\*.txt\") do (\r\n"
+                       "  copy /Y \"%%~fL\" \"%OUTPUT%\\observed_label.txt\" >nul\r\n"
+                       "  goto copied\r\n"
+                       ")\r\n"
+                       ":copied\r\n"
+                       "pushd \"%IMAGES%\" || exit /b 3\r\n"
+                       "for %%F in (*) do (\r\n"
+                       "  set \"BASE=%%~nxF\"\r\n"
+                       "  set \"NAME=%%~nF\"\r\n"
+                       "  >\"%OUTPUT%\\!NAME!.json\" echo {\"imagePath\":\"!BASE!\",\"shapes\":[]}\r\n"
+                       ")\r\n"
+                       "popd\r\n"
+                       "exit /b 0\r\n"));
+#else
+    const QString scriptPath = root.filePath(QStringLiteral("fake_xany_label_echo.sh"));
+    writeTextFileForAnnotationTest(scriptPath,
+        QStringLiteral("#!/bin/sh\n"
+                       "images=\"\"\n"
+                       "labels=\"\"\n"
+                       "output=\"\"\n"
+                       "while [ \"$#\" -gt 0 ]; do\n"
+                       "  case \"$1\" in\n"
+                       "    --images) images=\"$2\"; shift 2 ;;\n"
+                       "    --labels) labels=\"$2\"; shift 2 ;;\n"
+                       "    --output) output=\"$2\"; shift 2 ;;\n"
+                       "    *) shift ;;\n"
+                       "  esac\n"
+                       "done\n"
+                       "[ -n \"$images\" ] || exit 2\n"
+                       "[ -n \"$labels\" ] || exit 2\n"
+                       "[ -n \"$output\" ] || exit 2\n"
+                       "mkdir -p \"$output\"\n"
+                       "for label in \"$labels\"/*.txt; do\n"
+                       "  [ -f \"$label\" ] || continue\n"
+                       "  cp \"$label\" \"$output/observed_label.txt\"\n"
+                       "  break\n"
+                       "done\n"
+                       "for file in \"$images\"/*; do\n"
+                       "  [ -f \"$file\" ] || continue\n"
+                       "  base=$(basename \"$file\")\n"
+                       "  name=${base%.*}\n"
+                       "  printf '{\"imagePath\":\"%s\",\"shapes\":[]}\\n' \"$base\" > \"$output/$name.json\"\n"
+                       "done\n"
+                       "exit 0\n"));
+    QFile::setPermissions(scriptPath, QFile::permissions(scriptPath) | QFileDevice::ExeOwner | QFileDevice::ExeUser);
+#endif
+    return QFileInfo(scriptPath).absoluteFilePath();
+}
+
 QString writeSlowFakeXAnyExecutable(const QDir& root)
 {
 #ifdef Q_OS_WIN
@@ -176,6 +283,32 @@ void AnnotationIntegrationTests::missingExecutableWritesEnvironmentReport()
     QVERIFY(QFileInfo::exists(result.reportPath));
     QCOMPARE(result.payload.value(QStringLiteral("status")).toString(), QStringLiteral("missing"));
     QCOMPARE(result.payload.value(QStringLiteral("kind")).toString(), QStringLiteral("xanylabeling_environment_report"));
+}
+
+void AnnotationIntegrationTests::environmentPrefersExplicitExecutableOverEnv()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QDir root(temp.path());
+    const QString envExecutable = writeFakeXAnyExecutable(QDir(root.filePath(QStringLiteral("env_tool"))));
+    const QString requestedExecutable = writeFakeXAnyExecutable(QDir(root.filePath(QStringLiteral("requested_tool"))));
+    ScopedEnvVar env("AITRAIN_XANYLABELING_EXE", envExecutable.toLocal8Bit());
+
+    QJsonObject options;
+    options.insert(QStringLiteral("xAnyLabelingExecutable"), requestedExecutable);
+    options.insert(QStringLiteral("disableXAnyLabelingAutoDiscovery"), true);
+
+    const aitrain::WorkflowResult result =
+        aitrain::inspectXAnyLabelingEnvironment(root.filePath(QStringLiteral("environment")), options);
+    QVERIFY2(result.ok, qPrintable(result.error));
+    QCOMPARE(QDir::cleanPath(result.payload.value(QStringLiteral("executable")).toString()),
+        QDir::cleanPath(requestedExecutable));
+
+    const QStringList candidates = stringListFromJsonArrayForAnnotationTest(
+        result.payload.value(QStringLiteral("candidates")).toArray());
+    QVERIFY(!candidates.isEmpty());
+    QCOMPARE(QDir::cleanPath(candidates.first()), QDir::cleanPath(requestedExecutable));
+    QVERIFY(candidates.contains(envExecutable));
 }
 
 void AnnotationIntegrationTests::prepareSessionWritesManifestAndLaunchRequest()
@@ -234,6 +367,55 @@ void AnnotationIntegrationTests::prepareSessionUsesReviewSourceManifest()
     QCOMPARE(reviewSamples.value(QStringLiteral("samples")).toArray().size(), 1);
     QCOMPARE(reviewSamples.value(QStringLiteral("samples")).toArray().first().toObject().value(QStringLiteral("source")).toString(),
         QStringLiteral("filtered"));
+}
+
+void AnnotationIntegrationTests::syncSessionFailsForMissingManifest()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QDir root(temp.path());
+    const QString datasetPath = root.filePath(QStringLiteral("dataset"));
+    const QString outputPath = root.filePath(QStringLiteral("sync"));
+    const QString manifestPath = root.filePath(QStringLiteral("missing_manifest.json"));
+
+    const aitrain::WorkflowResult result = aitrain::syncAnnotationSession(
+        manifestPath,
+        datasetPath,
+        outputPath,
+        QStringLiteral("yolo_detection"));
+
+    QVERIFY(!result.ok);
+    QVERIFY(result.error.contains(QStringLiteral("does not exist")));
+    QVERIFY(QFileInfo::exists(result.reportPath));
+    QCOMPARE(result.payload.value(QStringLiteral("kind")).toString(), QStringLiteral("annotation_sync_report"));
+    QCOMPARE(result.payload.value(QStringLiteral("status")).toString(), QStringLiteral("failed"));
+    QCOMPARE(result.payload.value(QStringLiteral("sessionLoaded")).toBool(true), false);
+    QVERIFY(!result.payload.value(QStringLiteral("sessionReadError")).toString().isEmpty());
+}
+
+void AnnotationIntegrationTests::syncSessionFailsForInvalidManifest()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QDir root(temp.path());
+    const QString datasetPath = root.filePath(QStringLiteral("dataset"));
+    const QString outputPath = root.filePath(QStringLiteral("sync"));
+    const QString manifestPath = root.filePath(QStringLiteral("broken_manifest.json"));
+    writeTextFileForAnnotationTest(manifestPath, QStringLiteral("{\"createdAt\":\n"));
+
+    const aitrain::WorkflowResult result = aitrain::syncAnnotationSession(
+        manifestPath,
+        datasetPath,
+        outputPath,
+        QStringLiteral("yolo_detection"));
+
+    QVERIFY(!result.ok);
+    QVERIFY(!result.error.isEmpty());
+    QVERIFY(QFileInfo::exists(result.reportPath));
+    QCOMPARE(result.payload.value(QStringLiteral("kind")).toString(), QStringLiteral("annotation_sync_report"));
+    QCOMPARE(result.payload.value(QStringLiteral("status")).toString(), QStringLiteral("failed"));
+    QCOMPARE(result.payload.value(QStringLiteral("sessionLoaded")).toBool(true), false);
+    QVERIFY(!result.payload.value(QStringLiteral("sessionReadError")).toString().isEmpty());
 }
 
 void AnnotationIntegrationTests::syncSessionReportsModifiedLabels()
@@ -374,6 +556,116 @@ void AnnotationIntegrationTests::xAnyCliYoloCustomSplitPathsUseFlatStaging()
     QCOMPARE(valLabel.value(QStringLiteral("imagePath")).toString(), QStringLiteral("images/val__b.jpg"));
 }
 
+void AnnotationIntegrationTests::xAnyCliYoloDuplicateBasenamesAcrossSplitsUseDistinctStaging()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QDir root(temp.path());
+    const QString datasetPath = root.filePath(QStringLiteral("dataset"));
+    for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
+        writeTextFileForAnnotationTest(QDir(datasetPath).filePath(QStringLiteral("images/%1/a.jpg").arg(split)),
+            QStringLiteral("fake image\n"));
+        writeTextFileForAnnotationTest(QDir(datasetPath).filePath(QStringLiteral("labels/%1/a.txt").arg(split)),
+            QStringLiteral("0 0.5 0.5 0.25 0.25\n"));
+    }
+    writeTextFileForAnnotationTest(QDir(datasetPath).filePath(QStringLiteral("data.yaml")),
+        QStringLiteral("path: .\ntrain: images/train\nval: images/val\ntest: images/test\nnc: 1\nnames: [widget]\n"));
+
+    aitrain::DatasetConversionRequest request;
+    request.sourcePath = datasetPath;
+    request.sourceFormat = QStringLiteral("yolo_detection");
+    request.targetFormat = QStringLiteral("xanylabeling_xlabel");
+    request.outputPath = root.filePath(QStringLiteral("converted"));
+    request.options.insert(QStringLiteral("xAnyLabelingExecutable"), writeFakeXAnyExecutable(root, true));
+    request.options.insert(QStringLiteral("disableXAnyLabelingAutoDiscovery"), true);
+
+    const aitrain::DatasetConversionResult result =
+        aitrain::convertDatasetWithXAnyLabelingCli(request);
+    QVERIFY2(result.ok, qPrintable(result.errorMessage));
+
+    const QJsonObject report = readJsonObjectForAnnotationTest(result.reportPath);
+    QCOMPARE(report.value(QStringLiteral("stagedImageCount")).toInt(), 3);
+    QCOMPARE(report.value(QStringLiteral("stagedLabelCount")).toInt(), 3);
+    QCOMPARE(report.value(QStringLiteral("persistedImageCount")).toInt(), 3);
+    QCOMPARE(report.value(QStringLiteral("rewrittenXLabelCount")).toInt(), 3);
+    for (const QString& stagedName : {QStringLiteral("train__a"), QStringLiteral("val__a"), QStringLiteral("test__a")}) {
+        QVERIFY(QFileInfo::exists(QDir(request.outputPath).filePath(QStringLiteral("images/%1.jpg").arg(stagedName))));
+        const QJsonObject label = readJsonObjectForAnnotationTest(
+            QDir(request.outputPath).filePath(QStringLiteral("%1.json").arg(stagedName)));
+        QCOMPARE(label.value(QStringLiteral("imagePath")).toString(), QStringLiteral("images/%1.jpg").arg(stagedName));
+    }
+}
+
+void AnnotationIntegrationTests::xAnyCliYoloMissingLabelsStageAsEmptyFiles()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QDir root(temp.path());
+    const QString datasetPath = root.filePath(QStringLiteral("dataset"));
+    writeTextFileForAnnotationTest(QDir(datasetPath).filePath(QStringLiteral("images/train/negative.jpg")),
+        QStringLiteral("fake image\n"));
+    writeTextFileForAnnotationTest(QDir(datasetPath).filePath(QStringLiteral("data.yaml")),
+        QStringLiteral("path: .\ntrain: images/train\nval: images/train\nnc: 1\nnames: [widget]\n"));
+
+    aitrain::DatasetConversionRequest request;
+    request.sourcePath = datasetPath;
+    request.sourceFormat = QStringLiteral("yolo_detection");
+    request.targetFormat = QStringLiteral("xanylabeling_xlabel");
+    request.outputPath = root.filePath(QStringLiteral("converted"));
+    request.options.insert(QStringLiteral("xAnyLabelingExecutable"), writeLabelEchoXAnyExecutable(root));
+    request.options.insert(QStringLiteral("disableXAnyLabelingAutoDiscovery"), true);
+
+    const aitrain::DatasetConversionResult result =
+        aitrain::convertDatasetWithXAnyLabelingCli(request);
+    QVERIFY2(result.ok, qPrintable(result.errorMessage));
+
+    const QJsonObject report = readJsonObjectForAnnotationTest(result.reportPath);
+    QCOMPARE(report.value(QStringLiteral("stagedImageCount")).toInt(), 1);
+    QCOMPARE(report.value(QStringLiteral("stagedLabelCount")).toInt(), 0);
+    QCOMPARE(report.value(QStringLiteral("emptyLabelCount")).toInt(), 1);
+    QFile observed(QDir(request.outputPath).filePath(QStringLiteral("observed_label.txt")));
+    QVERIFY(observed.open(QIODevice::ReadOnly));
+    QCOMPARE(observed.readAll(), QByteArray());
+}
+
+void AnnotationIntegrationTests::xAnyCliYoloStagingStripsBomFromLabels()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QDir root(temp.path());
+    const QString datasetPath = root.filePath(QStringLiteral("dataset"));
+    QVERIFY(QDir().mkpath(QDir(datasetPath).filePath(QStringLiteral("images/train"))));
+    QVERIFY(QDir().mkpath(QDir(datasetPath).filePath(QStringLiteral("labels/train"))));
+    writeTextFileForAnnotationTest(QDir(datasetPath).filePath(QStringLiteral("images/train/a.jpg")),
+        QStringLiteral("fake image\n"));
+    QByteArray label;
+    label.append(char(0xEF));
+    label.append(char(0xBB));
+    label.append(char(0xBF));
+    label.append("0 0.5 0.5 0.25 0.25\n");
+    writeBinaryFileForAnnotationTest(QDir(datasetPath).filePath(QStringLiteral("labels/train/a.txt")), label);
+    writeTextFileForAnnotationTest(QDir(datasetPath).filePath(QStringLiteral("data.yaml")),
+        QStringLiteral("path: .\ntrain: images/train\nval: images/train\nnc: 1\nnames: [widget]\n"));
+
+    aitrain::DatasetConversionRequest request;
+    request.sourcePath = datasetPath;
+    request.sourceFormat = QStringLiteral("yolo_detection");
+    request.targetFormat = QStringLiteral("xanylabeling_xlabel");
+    request.outputPath = root.filePath(QStringLiteral("converted"));
+    request.options.insert(QStringLiteral("xAnyLabelingExecutable"), writeLabelEchoXAnyExecutable(root));
+    request.options.insert(QStringLiteral("disableXAnyLabelingAutoDiscovery"), true);
+
+    const aitrain::DatasetConversionResult result =
+        aitrain::convertDatasetWithXAnyLabelingCli(request);
+    QVERIFY2(result.ok, qPrintable(result.errorMessage));
+
+    QFile observed(QDir(request.outputPath).filePath(QStringLiteral("observed_label.txt")));
+    QVERIFY(observed.open(QIODevice::ReadOnly));
+    const QByteArray observedBytes = observed.readAll();
+    QVERIFY(!observedBytes.startsWith(QByteArray::fromHex("efbbbf")));
+    QVERIFY(observedBytes.startsWith("0 "));
+}
+
 void AnnotationIntegrationTests::xAnyCliXLabelToYoloPassesImagesPath()
 {
     QTemporaryDir temp;
@@ -444,6 +736,42 @@ void AnnotationIntegrationTests::xAnyCliXLabelToYoloFallsBackToImagesSubdirForBa
         QDir::cleanPath(QDir(sourcePath).filePath(QStringLiteral("images"))));
 }
 
+void AnnotationIntegrationTests::xAnyCliXLabelToYoloHandlesUnicodeSpacePaths()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QDir root(temp.path());
+    const QString sourcePath = root.filePath(QStringLiteral("xlabel 中文 空格"));
+    const QString imagePath = QDir(sourcePath).filePath(QStringLiteral("images/样本 1.jpg"));
+    writeTextFileForAnnotationTest(imagePath, QStringLiteral("fake image\n"));
+    writeTextFileForAnnotationTest(QDir(sourcePath).filePath(QStringLiteral("sample.json")),
+        QStringLiteral("{\"imagePath\":\"images/样本 1.jpg\",\"imageHeight\":10,\"imageWidth\":10,\"shapes\":[]}\n"));
+    writeTextFileForAnnotationTest(QDir(sourcePath).filePath(QStringLiteral("classes.txt")),
+        QStringLiteral("widget\n"));
+
+    aitrain::DatasetConversionRequest request;
+    request.sourcePath = sourcePath;
+    request.sourceFormat = QStringLiteral("xanylabeling_xlabel");
+    request.targetFormat = QStringLiteral("yolo_detection");
+    request.outputPath = root.filePath(QStringLiteral("converted yolo 中文"));
+    request.options.insert(QStringLiteral("xAnyLabelingExecutable"), writeFakeXAnyExecutable(root));
+    request.options.insert(QStringLiteral("disableXAnyLabelingAutoDiscovery"), true);
+
+    const aitrain::DatasetConversionResult result =
+        aitrain::convertDatasetWithXAnyLabelingCli(request);
+    QVERIFY2(result.ok, qPrintable(result.errorMessage));
+
+    const QJsonObject report = readJsonObjectForAnnotationTest(result.reportPath);
+    const QStringList arguments = stringListFromJsonArrayForAnnotationTest(
+        report.value(QStringLiteral("command")).toObject().value(QStringLiteral("arguments")).toArray());
+    QCOMPARE(QDir::cleanPath(argumentValueForAnnotationTest(arguments, QStringLiteral("--images"))),
+        QDir::cleanPath(QDir(sourcePath).filePath(QStringLiteral("images"))));
+    QCOMPARE(QDir::cleanPath(argumentValueForAnnotationTest(arguments, QStringLiteral("--labels"))),
+        QDir::cleanPath(sourcePath));
+    QCOMPARE(QDir::cleanPath(report.value(QStringLiteral("resolvedImagesPath")).toString()),
+        QDir::cleanPath(QDir(sourcePath).filePath(QStringLiteral("images"))));
+}
+
 void AnnotationIntegrationTests::xAnyCliCancellationReturnsCanceled()
 {
     QTemporaryDir temp;
@@ -479,6 +807,149 @@ void AnnotationIntegrationTests::xAnyCliCancellationReturnsCanceled()
     const QJsonObject report = readJsonObjectForAnnotationTest(result.reportPath);
     QCOMPARE(report.value(QStringLiteral("process")).toObject().value(QStringLiteral("status")).toString(),
         QStringLiteral("canceled"));
+}
+
+void AnnotationIntegrationTests::workerDatasetConversionCancelEmitsCanceledAndIdle()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QDir root(temp.path());
+    const QString sourcePath = root.filePath(QStringLiteral("xlabel"));
+    writeTextFileForAnnotationTest(QDir(sourcePath).filePath(QStringLiteral("images/sample.jpg")),
+        QStringLiteral("fake image\n"));
+    writeTextFileForAnnotationTest(QDir(sourcePath).filePath(QStringLiteral("sample.json")),
+        QStringLiteral("{\"imagePath\":\"images/sample.jpg\",\"imageHeight\":10,\"imageWidth\":10,\"shapes\":[]}\n"));
+    writeTextFileForAnnotationTest(QDir(sourcePath).filePath(QStringLiteral("classes.txt")),
+        QStringLiteral("widget\n"));
+
+    QJsonObject options;
+    options.insert(QStringLiteral("xAnyLabelingExecutable"), writeSlowFakeXAnyExecutable(root));
+    options.insert(QStringLiteral("disableXAnyLabelingAutoDiscovery"), true);
+
+    WorkerClient client;
+    QVector<QPair<QString, QJsonObject>> messages;
+    bool finished = false;
+    bool ok = true;
+    QString finishedMessage;
+    bool idle = false;
+    bool cancelRequested = false;
+    connect(&client, &WorkerClient::messageReceived, this, [&messages, &client, &cancelRequested](const QString& type, const QJsonObject& payload) {
+        messages.append(qMakePair(type, payload));
+        if (!cancelRequested && type == QStringLiteral("progress") && payload.value(QStringLiteral("percent")).toInt() == 0) {
+            cancelRequested = true;
+            QTimer::singleShot(0, &client, [&client]() {
+                client.cancel();
+            });
+        }
+    });
+    connect(&client, &WorkerClient::finished, this, [&finished, &ok, &finishedMessage](bool result, const QString& message) {
+        finished = true;
+        ok = result;
+        finishedMessage = message;
+    });
+    connect(&client, &WorkerClient::idle, this, [&idle]() {
+        idle = true;
+    });
+
+    QString error;
+    QVERIFY2(client.requestDatasetConversion(
+                 workerExecutablePath(),
+                 sourcePath,
+                 root.filePath(QStringLiteral("converted_yolo")),
+                 QStringLiteral("xanylabeling_xlabel"),
+                 QStringLiteral("yolo_detection"),
+                 options,
+                 &error,
+                 QStringLiteral("xany-worker-cancel-test")),
+        qPrintable(error));
+    QTRY_VERIFY_WITH_TIMEOUT(finished, 15000);
+    QVERIFY(!ok);
+    QVERIFY(finishedMessage.contains(QStringLiteral("Canceled")));
+    QTRY_VERIFY_WITH_TIMEOUT(idle, 5000);
+
+    bool sawCanceled = false;
+    for (const auto& message : messages) {
+        if (message.first == QStringLiteral("canceled")) {
+            sawCanceled = true;
+            QCOMPARE(message.second.value(QStringLiteral("errorCode")).toString(), QStringLiteral("canceled"));
+        }
+    }
+    QVERIFY(sawCanceled);
+    QVERIFY(!client.isRunning());
+}
+
+void AnnotationIntegrationTests::workerAnnotationSessionEmitsArtifactsAndCompleted()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QDir root(temp.path());
+    const QString datasetPath = root.filePath(QStringLiteral("dataset"));
+    const QString outputPath = root.filePath(QStringLiteral("session"));
+    writeTextFileForAnnotationTest(QDir(datasetPath).filePath(QStringLiteral("data.yaml")),
+        QStringLiteral("path: .\ntrain: images/train\nval: images/train\nnc: 1\nnames: [widget]\n"));
+
+    WorkerClient client;
+    QVector<QPair<QString, QJsonObject>> messages;
+    bool idle = false;
+    connect(&client, &WorkerClient::messageReceived, this, [&messages](const QString& type, const QJsonObject& payload) {
+        messages.append(qMakePair(type, payload));
+    });
+    connect(&client, &WorkerClient::idle, this, [&idle]() {
+        idle = true;
+    });
+
+    QString error;
+    QVERIFY2(client.requestAnnotationSession(
+                 workerExecutablePath(),
+                 datasetPath,
+                 outputPath,
+                 QStringLiteral("yolo_detection"),
+                 disabledDiscoveryOptions(),
+                 &error,
+                 QStringLiteral("xany-worker-session-test")),
+        qPrintable(error));
+    QTRY_VERIFY_WITH_TIMEOUT(idle, 15000);
+
+    bool sawStartProgress = false;
+    bool sawDoneProgress = false;
+    bool sawAnnotationSession = false;
+    bool sawCompleted = false;
+    bool sawManifestArtifact = false;
+    bool sawLaunchArtifact = false;
+    bool sawReviewArtifact = false;
+
+    for (const auto& message : messages) {
+        const QString type = message.first;
+        const QJsonObject payload = message.second;
+        if (type == QStringLiteral("progress")) {
+            sawStartProgress = sawStartProgress || payload.value(QStringLiteral("percent")).toInt() == 0;
+            sawDoneProgress = sawDoneProgress || payload.value(QStringLiteral("percent")).toInt() == 100;
+        } else if (type == QStringLiteral("annotationSession")) {
+            sawAnnotationSession = true;
+            QVERIFY(QFileInfo::exists(payload.value(QStringLiteral("manifestPath")).toString()));
+            QVERIFY(QFileInfo::exists(payload.value(QStringLiteral("launchRequestPath")).toString()));
+            QVERIFY(QFileInfo::exists(payload.value(QStringLiteral("reviewSamplesPath")).toString()));
+        } else if (type == QStringLiteral("completed")) {
+            sawCompleted = payload.value(QStringLiteral("status")).toString() == QStringLiteral("completed");
+            QCOMPARE(payload.value(QStringLiteral("command")).toString(), QStringLiteral("prepareAnnotationSession"));
+        } else if (type == QStringLiteral("artifact")) {
+            const QString kind = payload.value(QStringLiteral("kind")).toString();
+            const QString path = payload.value(QStringLiteral("path")).toString();
+            QVERIFY2(QFileInfo::exists(path), qPrintable(path));
+            sawManifestArtifact = sawManifestArtifact || kind == QStringLiteral("xanylabeling_session_manifest");
+            sawLaunchArtifact = sawLaunchArtifact || kind == QStringLiteral("xanylabeling_launch_request");
+            sawReviewArtifact = sawReviewArtifact || kind == QStringLiteral("xanylabeling_review_samples");
+        }
+    }
+
+    QVERIFY(sawStartProgress);
+    QVERIFY(sawDoneProgress);
+    QVERIFY(sawAnnotationSession);
+    QVERIFY(sawCompleted);
+    QVERIFY(sawManifestArtifact);
+    QVERIFY(sawLaunchArtifact);
+    QVERIFY(sawReviewArtifact);
+    QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
 }
 
 QTEST_MAIN(AnnotationIntegrationTests)

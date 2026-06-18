@@ -51,6 +51,18 @@ GUI 只暴露已经接入 Worker 和核心转换实现的组合：
 
 涉及 X-AnyLabeling XLABEL 的组合会自动切换为 `conversionEngine=xanylabeling_cli`。Worker 只调用本机 `xanylabeling` CLI，不内嵌 X-AnyLabeling GUI，也不把 X-AnyLabeling 作为产品包默认二进制。可执行文件优先从 `AITRAIN_XANYLABELING_EXE`、程序目录、`tools/x-anylabeling`、`.deps/tools/annotation-tools/X-AnyLabeling`、旧 `.deps/annotation-tools/X-AnyLabeling` 和 `PATH` 查找。YOLO -> XLABEL 会优先从 `data.yaml` 自动生成 `classes.txt`；XLABEL -> YOLO 需要源目录已有 `classes.txt`，否则报告 `classes_missing`。XLABEL -> YOLO 默认从 XLABEL 的 `imagePath`、`images` 子目录或源目录推断图片目录；图片在其他位置时需通过 `imagesPath` 传入。
 
+## X-AnyLabeling 用户流程验收
+
+可以用独立 smoke 脚本模拟用户从 AITrain 打开 X-AnyLabeling、准备会话、同步标注产物，以及执行 YOLO Detection / Segmentation / OBB 与 XLABEL 双向转换的流程：
+
+```powershell
+.\tools\xanylabeling-user-flow-smoke.ps1
+.\tools\xanylabeling-user-flow-smoke.ps1 -UseRealTool
+.\tools\xanylabeling-user-flow-smoke.ps1 -FakeOnly
+```
+
+脚本只写 `.deps\xanylabeling-user-flow`，不会修改原始数据集。默认模式会使用本机真实 X-AnyLabeling CLI（如存在）和 fake CLI 两条 lane；`-FakeOnly` 用于隔离验证 AITrain 自身的请求、会话和路径推断链路；`-UseRealTool` 会额外短暂启动外部 X-AnyLabeling GUI 并由脚本收尾，不自动在 GUI 内画框。最终结果写入 `xanylabeling_user_flow_summary.json`，每个 lane 会记录 `passed` / `failed` / `blocked`、命令、报告路径、关键产物和失败原因。
+
 ## 输出产物
 
 转换成功后，输出目录通常包含：

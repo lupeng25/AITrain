@@ -12,6 +12,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QRegularExpression>
 #include <QSet>
 #include <QStandardPaths>
@@ -110,6 +111,15 @@ QString resolveExecutableCandidate(const QString& candidate)
     return info.exists() && info.isFile() ? info.absoluteFilePath() : QString();
 }
 
+QString decodeProcessText(const QByteArray& bytes)
+{
+    QString text = QString::fromUtf8(bytes);
+    if (text.contains(QChar::ReplacementCharacter)) {
+        text = QString::fromLocal8Bit(bytes);
+    }
+    return text.trimmed();
+}
+
 QJsonObject processProbe(
     const QString& executable,
     const QStringList& arguments,
@@ -126,6 +136,11 @@ QJsonObject processProbe(
     }
 
     QProcess process;
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("PYTHONIOENCODING"), QStringLiteral("utf-8"));
+    environment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
+    environment.insert(QStringLiteral("PYTHONUNBUFFERED"), QStringLiteral("1"));
+    process.setProcessEnvironment(environment);
     process.start(executable, arguments);
     if (!process.waitForStarted(3000)) {
         object.insert(QStringLiteral("status"), QStringLiteral("failed"));
@@ -153,8 +168,8 @@ QJsonObject processProbe(
         return object;
     }
 
-    const QString stdoutText = QString::fromLocal8Bit(process.readAllStandardOutput()).trimmed();
-    const QString stderrText = QString::fromLocal8Bit(process.readAllStandardError()).trimmed();
+    const QString stdoutText = decodeProcessText(process.readAllStandardOutput());
+    const QString stderrText = decodeProcessText(process.readAllStandardError());
     object.insert(QStringLiteral("exitCode"), process.exitCode());
     object.insert(QStringLiteral("stdout"), stdoutText);
     object.insert(QStringLiteral("stderr"), stderrText);
@@ -620,6 +635,37 @@ bool copyFileForStaging(const QString& sourcePath, const QString& targetPath, QS
     return true;
 }
 
+bool copyYoloLabelForStaging(const QString& sourcePath, const QString& targetPath, QString* error)
+{
+    QDir().mkpath(QFileInfo(targetPath).absolutePath());
+    QFile::remove(targetPath);
+    if (!QFileInfo::exists(sourcePath)) {
+        return writeTextFile(targetPath, QString(), error);
+    }
+
+    QFile source(sourcePath);
+    if (!source.open(QIODevice::ReadOnly)) {
+        if (error) {
+            *error = QStringLiteral("Cannot read staging label file: %1.").arg(sourcePath);
+        }
+        return false;
+    }
+    QByteArray bytes = source.readAll();
+    if (bytes.startsWith("\xEF\xBB\xBF")) {
+        bytes.remove(0, 3);
+    }
+
+    QFile target(targetPath);
+    if (!target.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        if (error) {
+            *error = QStringLiteral("Cannot write staging label file: %1.").arg(targetPath);
+        }
+        return false;
+    }
+    target.write(bytes);
+    return true;
+}
+
 QSet<QString> persistXLabelImages(
     const QString& stagedImagesDir,
     const QString& outputPath,
@@ -736,7 +782,7 @@ YoloCliPaths stageYoloInputForCli(
             const QString relativeLabelPath = QDir(relativeInfo.path()).filePath(relativeInfo.completeBaseName() + QStringLiteral(".txt"));
             const QString sourceLabelPath = QDir(splitDirsForCli.labelDir).filePath(relativeLabelPath);
             const QString stagedLabelPath = QDir(paths.labelsDir).filePath(QFileInfo(stagedImageName).completeBaseName() + QStringLiteral(".txt"));
-            if (!copyFileForStaging(sourceLabelPath, stagedLabelPath, &error)) {
+            if (!copyYoloLabelForStaging(sourceLabelPath, stagedLabelPath, &error)) {
                 paths.errorCode = QStringLiteral("xanylabeling_staging_failed");
                 paths.errorMessage = error;
                 return paths;
@@ -1122,8 +1168,39 @@ WorkflowResult syncAnnotationSession(
 
     QJsonObject manifest;
     QString readError;
-    if (!manifestPath.isEmpty() && QFileInfo::exists(manifestPath)) {
-        readJsonFile(manifestPath, &manifest, &readError);
+    if (manifestPath.isEmpty()) {
+        readError = QStringLiteral("Missing X-AnyLabeling session manifest path.");
+    } else if (!QFileInfo::exists(manifestPath)) {
+        readError = QStringLiteral("X-AnyLabeling session manifest does not exist: %1").arg(manifestPath);
+    } else if (!readJsonFile(manifestPath, &manifest, &readError)) {
+        manifest = {};
+    }
+    if (manifest.isEmpty()) {
+        QJsonObject report;
+        report.insert(QStringLiteral("schemaVersion"), 1);
+        report.insert(QStringLiteral("kind"), QStringLiteral("annotation_sync_report"));
+        report.insert(QStringLiteral("checkedAt"), nowIso());
+        report.insert(QStringLiteral("datasetPath"), cleanDatasetPath);
+        report.insert(QStringLiteral("format"), format);
+        report.insert(QStringLiteral("sessionManifestPath"), manifestPath);
+        report.insert(QStringLiteral("sessionLoaded"), false);
+        report.insert(QStringLiteral("sessionReadError"), readError);
+        report.insert(QStringLiteral("status"), QStringLiteral("failed"));
+        report.insert(QStringLiteral("message"), QStringLiteral("Annotation sync requires a readable X-AnyLabeling session manifest."));
+
+        QString writeError;
+        if (!writeJsonFile(reportPath, report, &writeError)) {
+            result.error = writeError;
+            return result;
+        }
+        result.ok = false;
+        result.error = readError.isEmpty()
+            ? QStringLiteral("Annotation sync requires a readable X-AnyLabeling session manifest.")
+            : readError;
+        result.reportPath = reportPath;
+        result.payload = report;
+        result.payload.insert(QStringLiteral("reportPath"), reportPath);
+        return result;
     }
     const QDateTime createdAt = QDateTime::fromString(manifest.value(QStringLiteral("createdAt")).toString(), Qt::ISODateWithMs);
     const QString sessionOutputPath = normalizedPath(manifest.value(QStringLiteral("outputPath")).toString());

@@ -1,5 +1,7 @@
 #include "WorkerSession.h"
 
+#include "aitrain/core/AnnotationIntegration.h"
+#include "aitrain/core/DatasetConversion.h"
 #include "aitrain/core/Deployment.h"
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/PluginManager.h"
@@ -10,6 +12,7 @@
 
 #include <QCoreApplication>
 #include <QCommandLineParser>
+#include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -24,6 +27,7 @@ namespace {
 void writeJsonLine(const QJsonObject& object)
 {
     QTextStream stream(stdout);
+    stream.setCodec("UTF-8");
     stream << QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact)) << QLatin1Char('\n');
     stream.flush();
 }
@@ -46,6 +50,212 @@ bool writeJsonFile(const QString& path, const QJsonObject& object, QString* erro
     }
     file.write(QJsonDocument(object).toJson(QJsonDocument::Indented));
     return true;
+}
+
+bool readJsonFile(const QString& path, QJsonObject* object, QString* error)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (error) {
+            *error = QStringLiteral("Cannot read JSON file: %1").arg(path);
+        }
+        return false;
+    }
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+    if (!document.isObject()) {
+        if (error) {
+            *error = QStringLiteral("JSON file is not an object: %1").arg(path);
+        }
+        return false;
+    }
+    if (object) {
+        *object = document.object();
+    }
+    return true;
+}
+
+QJsonObject profileCheck(
+    const QString& name,
+    const QString& status,
+    const QString& message,
+    const QJsonObject& details = {})
+{
+    QJsonObject object;
+    object.insert(QStringLiteral("name"), name);
+    object.insert(QStringLiteral("status"), status);
+    object.insert(QStringLiteral("message"), message);
+    object.insert(QStringLiteral("details"), details);
+    return object;
+}
+
+QJsonObject makeProfile(
+    const QString& id,
+    const QString& title,
+    const QJsonArray& checks,
+    const QJsonArray& repairHints)
+{
+    bool hasMissing = false;
+    bool hasWarning = false;
+    bool hasBlocked = false;
+    for (const QJsonValue& value : checks) {
+        const QString status = value.toObject().value(QStringLiteral("status")).toString();
+        hasMissing = hasMissing || status == QStringLiteral("missing");
+        hasWarning = hasWarning || status == QStringLiteral("warning");
+        hasBlocked = hasBlocked || status == QStringLiteral("hardware-blocked");
+    }
+
+    QString status = QStringLiteral("ok");
+    if (hasBlocked) {
+        status = QStringLiteral("hardware-blocked");
+    } else if (hasMissing) {
+        status = QStringLiteral("missing");
+    } else if (hasWarning) {
+        status = QStringLiteral("warning");
+    }
+
+    QJsonObject profile;
+    profile.insert(QStringLiteral("id"), id);
+    profile.insert(QStringLiteral("title"), title);
+    profile.insert(QStringLiteral("status"), status);
+    profile.insert(QStringLiteral("checks"), checks);
+    profile.insert(QStringLiteral("repairHints"), repairHints);
+    return profile;
+}
+
+QJsonObject workflowResultJson(
+    const QString& command,
+    const aitrain::WorkflowResult& result)
+{
+    QJsonObject object = result.payload;
+    object.insert(QStringLiteral("command"), command);
+    object.insert(QStringLiteral("ok"), result.ok);
+    object.insert(QStringLiteral("error"), result.error);
+    object.insert(QStringLiteral("reportPath"), result.reportPath);
+    return object;
+}
+
+bool loadRequestFile(const QString& requestPath, QJsonObject* request)
+{
+    QString error;
+    if (!readJsonFile(requestPath, request, &error)) {
+        writeJsonLine(QJsonObject{
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("stage"), QStringLiteral("request")},
+            {QStringLiteral("requestPath"), requestPath},
+            {QStringLiteral("error"), error}
+        });
+        return false;
+    }
+    return true;
+}
+
+int runXAnyEnvironmentRequest(const QString& requestPath)
+{
+    QJsonObject request;
+    if (!loadRequestFile(requestPath, &request)) {
+        return 26;
+    }
+    const QString outputPath = request.value(QStringLiteral("outputPath")).toString(
+        QFileInfo(requestPath).absoluteDir().filePath(QStringLiteral("environment")));
+    const QJsonObject options = request.value(QStringLiteral("options")).toObject();
+    const aitrain::WorkflowResult xAnyEnvironment =
+        aitrain::inspectXAnyLabelingEnvironment(outputPath, options);
+    const QJsonObject xAnyPayload = xAnyEnvironment.payload;
+    const QString xAnyStatus = xAnyPayload.value(QStringLiteral("status")).toString(
+        xAnyEnvironment.ok ? QStringLiteral("ok") : QStringLiteral("missing"));
+    const QString xAnyMessage = xAnyPayload.value(QStringLiteral("message")).toString(xAnyEnvironment.error);
+
+    QJsonArray checks;
+    checks.append(profileCheck(
+        QStringLiteral("xanylabelingExecutable"),
+        xAnyStatus,
+        xAnyMessage,
+        QJsonObject{
+            {QStringLiteral("executable"), xAnyPayload.value(QStringLiteral("executable")).toString()},
+            {QStringLiteral("candidates"), xAnyPayload.value(QStringLiteral("candidates")).toArray()},
+            {QStringLiteral("reportPath"), xAnyEnvironment.reportPath},
+            {QStringLiteral("licenseBoundary"), xAnyPayload.value(QStringLiteral("licenseBoundary")).toString()},
+            {QStringLiteral("redistributionReviewRequired"), xAnyPayload.value(QStringLiteral("redistributionReviewRequired")).toBool(true)}
+        }));
+    QJsonArray repairHints;
+    repairHints.append(QStringLiteral("Set `AITRAIN_XANYLABELING_EXE` to the local X-AnyLabeling executable."));
+    repairHints.append(QStringLiteral("Or place X-AnyLabeling under `.deps/tools/annotation-tools/X-AnyLabeling`."));
+    repairHints.append(QStringLiteral("Keep X-AnyLabeling as a local external dependency unless redistribution has a separate license/package review."));
+    QJsonObject profiles;
+    profiles.insert(
+        QStringLiteral("xanylabeling"),
+        makeProfile(QStringLiteral("xanylabeling"), QStringLiteral("X-AnyLabeling Profile"), checks, repairHints));
+
+    QJsonObject report;
+    report.insert(QStringLiteral("checkedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    report.insert(QStringLiteral("checks"), checks);
+    report.insert(QStringLiteral("profiles"), profiles);
+    report.insert(QStringLiteral("xanylabelingEnvironmentReportPath"), xAnyEnvironment.reportPath);
+    const QString reportPath = QDir(outputPath).filePath(QStringLiteral("environment_profiles_report.json"));
+    QString error;
+    if (!writeJsonFile(reportPath, report, &error)) {
+        writeJsonLine(QJsonObject{
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("stage"), QStringLiteral("environment-report")},
+            {QStringLiteral("error"), error}
+        });
+        return 27;
+    }
+    report.insert(QStringLiteral("ok"), xAnyEnvironment.ok);
+    report.insert(QStringLiteral("reportPath"), reportPath);
+    report.insert(QStringLiteral("xanylabeling"), xAnyPayload);
+    writeJsonLine(report);
+    return xAnyEnvironment.ok ? 0 : 28;
+}
+
+int runAnnotationSessionRequest(const QString& requestPath)
+{
+    QJsonObject request;
+    if (!loadRequestFile(requestPath, &request)) {
+        return 29;
+    }
+    const aitrain::WorkflowResult result = aitrain::prepareAnnotationSession(
+        request.value(QStringLiteral("datasetPath")).toString(),
+        request.value(QStringLiteral("outputPath")).toString(),
+        request.value(QStringLiteral("format")).toString(),
+        request.value(QStringLiteral("options")).toObject());
+    writeJsonLine(workflowResultJson(QStringLiteral("prepareAnnotationSession"), result));
+    return result.ok ? 0 : 30;
+}
+
+int runAnnotationSyncRequest(const QString& requestPath)
+{
+    QJsonObject request;
+    if (!loadRequestFile(requestPath, &request)) {
+        return 31;
+    }
+    const aitrain::WorkflowResult result = aitrain::syncAnnotationSession(
+        request.value(QStringLiteral("sessionManifestPath")).toString(),
+        request.value(QStringLiteral("datasetPath")).toString(),
+        request.value(QStringLiteral("outputPath")).toString(),
+        request.value(QStringLiteral("format")).toString(),
+        request.value(QStringLiteral("options")).toObject());
+    writeJsonLine(workflowResultJson(QStringLiteral("syncAnnotationSession"), result));
+    return result.ok ? 0 : 32;
+}
+
+int runDatasetConversionRequest(const QString& requestPath)
+{
+    QJsonObject object;
+    if (!loadRequestFile(requestPath, &object)) {
+        return 33;
+    }
+    aitrain::DatasetConversionRequest request;
+    request.sourcePath = object.value(QStringLiteral("sourcePath")).toString();
+    request.sourceFormat = object.value(QStringLiteral("sourceFormat")).toString();
+    request.targetFormat = object.value(QStringLiteral("targetFormat")).toString();
+    request.outputPath = object.value(QStringLiteral("outputPath")).toString();
+    request.options = object.value(QStringLiteral("options")).toObject();
+    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
+    QJsonObject payload = result.toJson();
+    payload.insert(QStringLiteral("command"), QStringLiteral("convertDataset"));
+    writeJsonLine(payload);
+    return result.ok ? 0 : 34;
 }
 
 int runSelfCheck()
@@ -655,6 +865,10 @@ int main(int argc, char* argv[])
     QCommandLineOption semanticOnnxSmokeOption(QStringLiteral("semantic-onnx-smoke"), QStringLiteral("Run semantic segmentation ONNX Runtime inference, benchmark, and deployment validation smoke and print JSON."), QStringLiteral("onnx"));
     QCommandLineOption obbOnnxSmokeOption(QStringLiteral("obb-onnx-smoke"), QStringLiteral("Run OBB ONNX Runtime inference, overlay, benchmark, and deployment validation smoke and print JSON."), QStringLiteral("onnx"));
     QCommandLineOption ocrDetOnnxSmokeOption(QStringLiteral("ocr-det-onnx-smoke"), QStringLiteral("Deprecated: OCR is official-only; use PaddleOCR official Det/Rec/System reports instead."), QStringLiteral("onnx"));
+    QCommandLineOption xAnyEnvironmentRequestOption(QStringLiteral("xany-environment-request"), QStringLiteral("Run X-AnyLabeling environment/profile request JSON and print JSON."), QStringLiteral("json"));
+    QCommandLineOption annotationSessionRequestOption(QStringLiteral("annotation-session-request"), QStringLiteral("Run annotation session preparation request JSON and print JSON."), QStringLiteral("json"));
+    QCommandLineOption annotationSyncRequestOption(QStringLiteral("annotation-sync-request"), QStringLiteral("Run annotation session sync request JSON and print JSON."), QStringLiteral("json"));
+    QCommandLineOption datasetConversionRequestOption(QStringLiteral("dataset-conversion-request"), QStringLiteral("Run dataset conversion request JSON and print JSON."), QStringLiteral("json"));
     QCommandLineOption imageOption(QStringLiteral("image"), QStringLiteral("Image path for smoke checks."), QStringLiteral("path"));
     QCommandLineOption outputOption(QStringLiteral("output"), QStringLiteral("Output directory for smoke artifacts."), QStringLiteral("directory"));
     QCommandLineOption taskTypeOption(QStringLiteral("task-type"), QStringLiteral("Task type for model smoke checks."), QStringLiteral("type"), QStringLiteral("detection"));
@@ -671,6 +885,10 @@ int main(int argc, char* argv[])
     parser.addOption(semanticOnnxSmokeOption);
     parser.addOption(obbOnnxSmokeOption);
     parser.addOption(ocrDetOnnxSmokeOption);
+    parser.addOption(xAnyEnvironmentRequestOption);
+    parser.addOption(annotationSessionRequestOption);
+    parser.addOption(annotationSyncRequestOption);
+    parser.addOption(datasetConversionRequestOption);
     parser.addOption(imageOption);
     parser.addOption(outputOption);
     parser.addOption(taskTypeOption);
@@ -724,6 +942,18 @@ int main(int argc, char* argv[])
             {QStringLiteral("error"), QStringLiteral("OCR Det ONNX smoke is deprecated. AITrain OCR product routes are official-only; use PaddleOCR official Det/Rec/System reports and predict_system.py artifacts.")}
         });
         return 11;
+    }
+    if (parser.isSet(xAnyEnvironmentRequestOption)) {
+        return runXAnyEnvironmentRequest(parser.value(xAnyEnvironmentRequestOption));
+    }
+    if (parser.isSet(annotationSessionRequestOption)) {
+        return runAnnotationSessionRequest(parser.value(annotationSessionRequestOption));
+    }
+    if (parser.isSet(annotationSyncRequestOption)) {
+        return runAnnotationSyncRequest(parser.value(annotationSyncRequestOption));
+    }
+    if (parser.isSet(datasetConversionRequestOption)) {
+        return runDatasetConversionRequest(parser.value(datasetConversionRequestOption));
     }
 
     const QString serverName = parser.value(serverOption);
