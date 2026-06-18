@@ -6,6 +6,7 @@
 #include "aitrain/core/OcrRecDataset.h"
 #include "aitrain/core/SegmentationDataset.h"
 
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
@@ -18,8 +19,11 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMap>
+#include <QProcess>
+#include <QProcessEnvironment>
 #include <QRegularExpression>
 #include <QSet>
+#include <QStandardPaths>
 #include <QTextStream>
 #include <QThread>
 
@@ -52,6 +56,200 @@ double averageMs(const QVector<double>& values)
     return total / static_cast<double>(values.size());
 }
 
+bool pythonUsable(const QString& executable)
+{
+    if (executable.trimmed().isEmpty()) {
+        return false;
+    }
+    QProcess process;
+    process.start(executable, QStringList() << QStringLiteral("--version"));
+    return process.waitForStarted(2000)
+        && process.waitForFinished(5000)
+        && process.exitStatus() == QProcess::NormalExit
+        && process.exitCode() == 0;
+}
+
+QString workflowPythonExecutable(const QJsonObject& options)
+{
+    const QString requested = options.value(QStringLiteral("pythonExecutable")).toString().trimmed();
+    if (pythonUsable(requested)) {
+        return requested;
+    }
+    const QString envRequested = QString::fromLocal8Bit(qgetenv("AITRAIN_PYTHON_EXECUTABLE")).trimmed();
+    if (pythonUsable(envRequested)) {
+        return envRequested;
+    }
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        QDir(appDir).absoluteFilePath(QStringLiteral("python_env/Scripts/python.exe")),
+        QDir(appDir).absoluteFilePath(QStringLiteral("python_env/python.exe")),
+        QDir(appDir).absoluteFilePath(QStringLiteral("../python_env/Scripts/python.exe")),
+        QDir(appDir).absoluteFilePath(QStringLiteral("../python_env/python.exe")),
+        QDir::current().absoluteFilePath(QStringLiteral("python_env/Scripts/python.exe")),
+        QDir::current().absoluteFilePath(QStringLiteral("python_env/python.exe")),
+        QDir::current().absoluteFilePath(QStringLiteral(".deps/python-3.13.13-embed-amd64/python.exe")),
+        QStandardPaths::findExecutable(QStringLiteral("python")),
+        QStandardPaths::findExecutable(QStringLiteral("python3"))
+    };
+    for (const QString& candidate : candidates) {
+        if (pythonUsable(candidate)) {
+            return candidate;
+        }
+    }
+    return {};
+}
+
+QString packagedPythonEnvRoot()
+{
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        QDir(appDir).absoluteFilePath(QStringLiteral("python_env")),
+        QDir(appDir).absoluteFilePath(QStringLiteral("../python_env")),
+        QDir::current().absoluteFilePath(QStringLiteral("python_env"))
+    };
+    for (const QString& candidate : candidates) {
+        if (QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("Scripts/python.exe")))
+            || QFileInfo::exists(QDir(candidate).filePath(QStringLiteral("python.exe")))) {
+            return QFileInfo(candidate).absoluteFilePath();
+        }
+    }
+    return {};
+}
+
+void configurePackagedPythonEnvironment(QProcessEnvironment* environment)
+{
+    if (!environment) {
+        return;
+    }
+    const QString pythonRoot = packagedPythonEnvRoot();
+    if (pythonRoot.isEmpty()) {
+        return;
+    }
+    QStringList pathEntries;
+    pathEntries << QDir(pythonRoot).filePath(QStringLiteral("Scripts"));
+    pathEntries << pythonRoot;
+    const QString existingPath = environment->value(QStringLiteral("PATH"));
+    if (!existingPath.isEmpty()) {
+        pathEntries << existingPath;
+    }
+    environment->insert(QStringLiteral("PATH"), pathEntries.join(QDir::listSeparator()));
+}
+
+QString anomalibAdapterScriptPath(const QJsonObject& options)
+{
+    const QString requested = options.value(QStringLiteral("anomalibAdapterScript")).toString().trimmed();
+    if (!requested.isEmpty() && QFileInfo::exists(requested)) {
+        return QFileInfo(requested).absoluteFilePath();
+    }
+    const QString script = QStringLiteral("python_trainers/anomaly/anomalib_adapter.py");
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        QDir(appDir).absoluteFilePath(script),
+        QDir(appDir).absoluteFilePath(QStringLiteral("../%1").arg(script)),
+        QDir(appDir).absoluteFilePath(QStringLiteral("../../%1").arg(script)),
+        QDir::current().absoluteFilePath(script)
+    };
+    for (const QString& candidate : candidates) {
+        if (QFileInfo::exists(candidate)) {
+            return QFileInfo(candidate).absoluteFilePath();
+        }
+    }
+    return candidates.first();
+}
+
+WorkflowResult runAnomalibBenchmark(
+    const QString& modelPath,
+    const QString& outputPath,
+    const QJsonObject& options,
+    const CancellationCallback& shouldCancel)
+{
+    QDir().mkpath(outputPath);
+    const QString python = workflowPythonExecutable(options);
+    const QString reportPath = QDir(outputPath).filePath(QStringLiteral("benchmark_report.json"));
+    const auto writeBlocked = [&](const QString& message, const QString& code) {
+        QJsonObject report;
+        report.insert(QStringLiteral("ok"), false);
+        report.insert(QStringLiteral("status"), QStringLiteral("blocked"));
+        report.insert(QStringLiteral("failureCategory"), code);
+        report.insert(QStringLiteral("kind"), QStringLiteral("benchmark_report"));
+        report.insert(QStringLiteral("createdAt"), nowIso());
+        report.insert(QStringLiteral("modelPath"), modelPath);
+        report.insert(QStringLiteral("runtime"), QStringLiteral("anomalib_python"));
+        report.insert(QStringLiteral("modelFamily"), QStringLiteral("anomaly_detection"));
+        report.insert(QStringLiteral("runtimeUsable"), false);
+        report.insert(QStringLiteral("timedInference"), false);
+        report.insert(QStringLiteral("message"), message);
+        report.insert(QStringLiteral("deploymentConclusion"), QStringLiteral("anomalib-python-blocked"));
+        QString error;
+        writeJsonFile(reportPath, report, &error);
+        report.insert(QStringLiteral("reportPath"), reportPath);
+        return resultFromReport(reportPath, report);
+    };
+
+    if (python.isEmpty()) {
+        return writeBlocked(
+            QStringLiteral("Python executable is required for anomalib_python benchmark."),
+            QStringLiteral("python_missing"));
+    }
+    const QString adapterScript = anomalibAdapterScriptPath(options);
+    if (!QFileInfo::exists(adapterScript)) {
+        return writeBlocked(
+            QStringLiteral("Anomalib adapter script not found: %1").arg(adapterScript),
+            QStringLiteral("anomalib_adapter_script_missing"));
+    }
+
+    QJsonObject request;
+    request.insert(QStringLiteral("protocolVersion"), 1);
+    request.insert(QStringLiteral("mode"), QStringLiteral("benchmark"));
+    request.insert(QStringLiteral("modelPath"), modelPath);
+    request.insert(QStringLiteral("outputPath"), outputPath);
+    request.insert(QStringLiteral("backend"), options.value(QStringLiteral("trainingBackend")).toString(QStringLiteral("anomalib_patchcore")));
+    request.insert(QStringLiteral("imagePath"), options.value(QStringLiteral("sampleImagePath")).toString(options.value(QStringLiteral("imagePath")).toString()));
+    request.insert(QStringLiteral("options"), options);
+    const QString requestPath = QDir(outputPath).filePath(QStringLiteral("anomalib_benchmark_request.json"));
+    QString error;
+    if (!writeJsonFile(requestPath, request, &error)) {
+        return failedResult(error);
+    }
+
+    QProcess process;
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
+    environment.insert(QStringLiteral("PYTHONIOENCODING"), QStringLiteral("utf-8"));
+    configurePackagedPythonEnvironment(&environment);
+    process.setProcessEnvironment(environment);
+    process.setProgram(python);
+    process.setArguments(QStringList() << QStringLiteral("-u") << adapterScript << QStringLiteral("--request") << requestPath << QStringLiteral("--mode") << QStringLiteral("benchmark"));
+    process.setProcessChannelMode(QProcess::MergedChannels);
+    process.start();
+    if (!process.waitForStarted(5000)) {
+        return writeBlocked(
+            QStringLiteral("Cannot start Anomalib benchmark adapter: %1").arg(process.errorString()),
+            QStringLiteral("anomalib_benchmark_start_failed"));
+    }
+    QByteArray output;
+    while (!process.waitForFinished(100)) {
+        output.append(process.readAll());
+        if (isCancellationRequested(shouldCancel)) {
+            process.kill();
+            process.waitForFinished(1500);
+            return canceledResult();
+        }
+    }
+    output.append(process.readAll());
+    writeTextFile(QDir(outputPath).filePath(QStringLiteral("anomalib_benchmark.log")), QString::fromUtf8(output), &error);
+
+    QJsonObject report;
+    if (!readJsonFile(reportPath, &report, &error)) {
+        return writeBlocked(
+            QStringLiteral("Anomalib benchmark did not produce a readable report: %1").arg(error),
+            QStringLiteral("anomalib_benchmark_report_missing"));
+    }
+    report.insert(QStringLiteral("reportPath"), reportPath);
+    writeJsonFile(reportPath, report, &error);
+    return resultFromReport(reportPath, report);
+}
+
 } // namespace
 
 WorkflowResult benchmarkModelReport(const QString& modelPath, const QString& outputPath, const QJsonObject& options)
@@ -77,6 +275,9 @@ WorkflowResult benchmarkModelReport(
     const QString runtime = options.value(QStringLiteral("runtime")).toString(
         suffix == QStringLiteral("onnx") ? QStringLiteral("onnxruntime") :
         (suffix == QStringLiteral("engine") || suffix == QStringLiteral("plan") ? QStringLiteral("tensorrt") : QStringLiteral("file")));
+    if (runtime == QStringLiteral("anomalib_python")) {
+        return runAnomalibBenchmark(modelPath, outputPath, options, shouldCancel);
+    }
     if (runtime == QStringLiteral("tensorrt") && !isTensorRtInferenceAvailable()) {
         QString digestError;
         const QJsonObject modelDigest = fileDigestObject(modelPath, &digestError);

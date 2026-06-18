@@ -62,6 +62,8 @@ void WorkerSession::validateDataset(const QJsonObject& payload)
         result = aitrain::validateYoloObbDataset(datasetPath, options);
     } else if (format == QStringLiteral("semantic_segmentation_mask")) {
         result = aitrain::validateSemanticSegmentationMaskDataset(datasetPath, options);
+    } else if (format == QStringLiteral("anomaly_folder")) {
+        result = aitrain::validateAnomalyFolderDataset(datasetPath, options);
     } else if (format == QStringLiteral("paddleocr_det")) {
         result = aitrain::validatePaddleOcrDetDataset(datasetPath, options);
     } else if (format == QStringLiteral("paddleocr_rec")) {
@@ -150,6 +152,8 @@ void WorkerSession::splitDataset(const QJsonObject& payload)
         result = aitrain::splitYoloObbDataset(datasetPath, outputPath, options);
     } else if (format == QStringLiteral("semantic_segmentation_mask")) {
         result = aitrain::splitSemanticSegmentationMaskDataset(datasetPath, outputPath, options);
+    } else if (format == QStringLiteral("anomaly_folder")) {
+        result = aitrain::splitAnomalyFolderDataset(datasetPath, outputPath, options);
     } else if (format == QStringLiteral("paddleocr_det")) {
         result = aitrain::splitPaddleOcrDetDataset(datasetPath, outputPath, options);
     } else if (format == QStringLiteral("paddleocr_rec")) {

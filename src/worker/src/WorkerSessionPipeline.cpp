@@ -126,7 +126,21 @@ void WorkerSession::runLocalPipeline(const QJsonObject& payload)
             return;
         }
 
-        if (!trainingResult.onnxPath.isEmpty()) {
+        if (!trainingResult.anomalySidecarPath.isEmpty()) {
+            pipelineOptions.insert(QStringLiteral("modelPath"), trainingResult.anomalySidecarPath);
+            if (!trainingResult.checkpointPath.isEmpty()) {
+                pipelineOptions.insert(QStringLiteral("checkpointPath"), trainingResult.checkpointPath);
+            }
+            pipelineOptions.insert(QStringLiteral("runtime"), QStringLiteral("anomalib_python"));
+
+            QJsonObject benchmarkOptions = pipelineOptions.value(QStringLiteral("benchmarkOptions")).toObject();
+            benchmarkOptions.insert(QStringLiteral("runtime"), QStringLiteral("anomalib_python"));
+            pipelineOptions.insert(QStringLiteral("benchmarkOptions"), benchmarkOptions);
+
+            QJsonObject evaluationOptions = pipelineOptions.value(QStringLiteral("evaluationOptions")).toObject();
+            evaluationOptions.insert(QStringLiteral("runtime"), QStringLiteral("anomalib_python"));
+            pipelineOptions.insert(QStringLiteral("evaluationOptions"), evaluationOptions);
+        } else if (!trainingResult.onnxPath.isEmpty()) {
             pipelineOptions.insert(QStringLiteral("modelPath"), trainingResult.onnxPath);
             pipelineOptions.insert(QStringLiteral("checkpointPath"), trainingResult.onnxPath);
         } else if (!trainingResult.checkpointPath.isEmpty()) {
@@ -139,6 +153,7 @@ void WorkerSession::runLocalPipeline(const QJsonObject& payload)
         pipelineOptions.insert(QStringLiteral("pipelineOfficialTrainingMetrics"), trainingResult.metrics);
         pipelineOptions.insert(QStringLiteral("pipelineOfficialTrainingReportPath"), trainingResult.reportPath);
         pipelineOptions.insert(QStringLiteral("pipelineOfficialTrainingCheckpointPath"), trainingResult.checkpointPath);
+        pipelineOptions.insert(QStringLiteral("pipelineOfficialTrainingAnomalySidecarPath"), trainingResult.anomalySidecarPath);
         pipelineOptions.insert(QStringLiteral("pipelineOfficialTrainingOnnxPath"), trainingResult.onnxPath);
     }
 
@@ -526,6 +541,8 @@ bool WorkerSession::forwardPipelinePythonTrainerLine(const QByteArray& line, Pip
         const QString path = payload.value(QStringLiteral("path")).toString();
         if (kind == QStringLiteral("checkpoint") && result->checkpointPath.isEmpty()) {
             result->checkpointPath = path;
+        } else if (kind == QStringLiteral("anomaly_sidecar") && result->anomalySidecarPath.isEmpty()) {
+            result->anomalySidecarPath = path;
         } else if (kind == QStringLiteral("onnx") && result->onnxPath.isEmpty()) {
             result->onnxPath = path;
         } else if ((kind == QStringLiteral("report") || kind == QStringLiteral("training_report")) && result->reportPath.isEmpty()) {
@@ -540,6 +557,10 @@ bool WorkerSession::forwardPipelinePythonTrainerLine(const QByteArray& line, Pip
         result->completedPayload = payload;
         if (result->checkpointPath.isEmpty()) {
             result->checkpointPath = payload.value(QStringLiteral("checkpointPath")).toString();
+        }
+        if (result->anomalySidecarPath.isEmpty()) {
+            result->anomalySidecarPath = payload.value(QStringLiteral("anomalySidecarPath")).toString(
+                payload.value(QStringLiteral("sidecarPath")).toString());
         }
         if (result->onnxPath.isEmpty()) {
             result->onnxPath = payload.value(QStringLiteral("onnxPath")).toString();

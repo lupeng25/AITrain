@@ -172,4 +172,10 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(aitrain_smp_semantic_python_tests PROPERTIES
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     )
+    add_test(NAME aitrain_anomalib_adapter_python_tests
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_anomalib_adapter.py"
+    )
+    set_tests_properties(aitrain_anomalib_adapter_python_tests PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    )
 endif()

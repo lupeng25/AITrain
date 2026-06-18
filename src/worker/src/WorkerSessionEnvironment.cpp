@@ -56,6 +56,11 @@ void WorkerSession::runEnvironmentCheck(const QJsonObject& payload)
         QStringLiteral("segmentation-models-pytorch is not installed. The SMP semantic segmentation trainer backend will be unavailable.")));
     checks.append(pythonModuleCheck(
         pythonExecutable,
+        QStringLiteral("Anomalib"),
+        QStringLiteral("anomalib"),
+        QStringLiteral("Anomalib is not installed. PatchCore and EfficientAD anomaly detection backends will be unavailable.")));
+    checks.append(pythonModuleCheck(
+        pythonExecutable,
         QStringLiteral("PaddleOCR"),
         QStringLiteral("paddleocr"),
         QStringLiteral("PaddleOCR is not installed. Official OCR detection, recognition, and system adapters will be unavailable.")));
@@ -69,6 +74,7 @@ void WorkerSession::runEnvironmentCheck(const QJsonObject& payload)
     QJsonObject profiles;
     profiles.insert(QStringLiteral("yolo"), yoloEnvironmentProfile(pythonExecutable));
     profiles.insert(QStringLiteral("smp_semantic_segmentation"), smpEnvironmentProfile(pythonExecutable));
+    profiles.insert(QStringLiteral("anomaly_detection"), anomalibEnvironmentProfile(pythonExecutable));
     profiles.insert(QStringLiteral("ocr"), ocrEnvironmentProfile(pythonExecutable));
     profiles.insert(QStringLiteral("tensorrt"), tensorRtEnvironmentProfile(checks));
 

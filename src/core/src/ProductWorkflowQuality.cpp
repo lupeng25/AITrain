@@ -136,6 +136,7 @@ bool isSupportedQualityFormat(const QString& format)
         || format == QStringLiteral("yolo_segmentation")
         || format == QStringLiteral("yolo_obb")
         || format == QStringLiteral("semantic_segmentation_mask")
+        || format == QStringLiteral("anomaly_folder")
         || format == QStringLiteral("paddleocr_det")
         || format == QStringLiteral("paddleocr_rec");
 }
@@ -689,6 +690,169 @@ void scanSemanticMaskQuality(DatasetQualityContext& context, const QJsonObject& 
                 addQualityIssue(context, issue);
             }
         }
+    }
+}
+
+bool anomalyQualityMaskStemMatches(const QFileInfo& maskInfo, const QString& imageStem)
+{
+    const QString maskStem = maskInfo.completeBaseName();
+    return maskStem == imageStem
+        || maskStem == QStringLiteral("%1_mask").arg(imageStem)
+        || maskStem.startsWith(QStringLiteral("%1_").arg(imageStem));
+}
+
+bool anomalyQualityMaskMatchesExpected(
+    const QString& split,
+    const QFileInfo& maskInfo,
+    const QSet<QString>& expectedMaskKeys)
+{
+    const QString prefix = QStringLiteral("%1/").arg(split);
+    for (const QString& key : expectedMaskKeys) {
+        if (!key.startsWith(prefix)) {
+            continue;
+        }
+        if (anomalyQualityMaskStemMatches(maskInfo, key.mid(prefix.size()))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+QString anomalyMaskCandidate(const QDir& root, const QString& split, const QString& label, const QFileInfo& imageInfo)
+{
+    if (label != QStringLiteral("anomaly")) {
+        return {};
+    }
+    const QDir canonicalMaskDir(root.filePath(QStringLiteral("masks/%1/anomaly").arg(split)));
+    const QString canonical = canonicalMaskDir.filePath(QStringLiteral("%1.png").arg(imageInfo.completeBaseName()));
+    const QFileInfoList canonicalMasks = canonicalMaskDir.exists()
+        ? canonicalMaskDir.entryInfoList({QStringLiteral("*.png")}, QDir::Files, QDir::Name)
+        : QFileInfoList();
+    for (const QFileInfo& maskInfo : canonicalMasks) {
+        if (anomalyQualityMaskStemMatches(maskInfo, imageInfo.completeBaseName())) {
+            return maskInfo.absoluteFilePath();
+        }
+    }
+    const QString path = QDir::fromNativeSeparators(root.relativeFilePath(imageInfo.absoluteFilePath()));
+    const QStringList parts = path.split(QLatin1Char('/'), QString::SkipEmptyParts);
+    if (parts.size() >= 3 && parts.at(0) == QStringLiteral("test") && parts.at(1) != QStringLiteral("good")) {
+        const QDir mvtecMaskDir(root.filePath(QStringLiteral("ground_truth/%1").arg(parts.at(1))));
+        const QFileInfoList mvtecMasks = mvtecMaskDir.exists()
+            ? mvtecMaskDir.entryInfoList({QStringLiteral("*.png")}, QDir::Files, QDir::Name)
+            : QFileInfoList();
+        for (const QFileInfo& maskInfo : mvtecMasks) {
+            if (anomalyQualityMaskStemMatches(maskInfo, imageInfo.completeBaseName())) {
+                return maskInfo.absoluteFilePath();
+            }
+        }
+    }
+    return canonical;
+}
+
+void scanAnomalyFolderQuality(DatasetQualityContext& context)
+{
+    const QDir root(context.datasetPath);
+    const bool hasMaskRoot = QDir(root.filePath(QStringLiteral("masks"))).exists()
+        || QDir(root.filePath(QStringLiteral("ground_truth"))).exists();
+    QSet<QString> expectedMaskKeys;
+
+    auto scanImageDir = [&](const QString& split, const QString& label, const QDir& imageDir) {
+        const QFileInfoList images = imageDir.exists() ? qualityImageFiles(imageDir) : QFileInfoList();
+        for (const QFileInfo& imageInfo : images) {
+            if (qualityCanceled(context)) {
+                return;
+            }
+            if (scanLimitReached(context, imageInfo.absoluteFilePath())) {
+                return;
+            }
+            const QString maskPath = anomalyMaskCandidate(root, split, label, imageInfo);
+            inspectQualityImage(context, imageInfo.absoluteFilePath(), split, maskPath);
+            const int classId = label == QStringLiteral("anomaly") ? 1 : 0;
+            context.splits[split].classCounts[classId] += 1;
+            if (label != QStringLiteral("anomaly")) {
+                continue;
+            }
+            const QString maskKey = QStringLiteral("%1/%2").arg(split, imageInfo.completeBaseName());
+            expectedMaskKeys.insert(maskKey);
+            if (maskPath.isEmpty() || !QFileInfo::exists(maskPath)) {
+                if (hasMaskRoot) {
+                    QualityIssue issue;
+                    issue.severity = QStringLiteral("warning");
+                    issue.code = QStringLiteral("missing_anomaly_mask");
+                    issue.filePath = maskPath;
+                    issue.imagePath = imageInfo.absoluteFilePath();
+                    issue.labelPath = maskPath;
+                    issue.split = split;
+                    issue.message = QStringLiteral("Anomaly image has no matching pixel mask.");
+                    issue.repairHint = QStringLiteral("Create masks/<split>/anomaly/<stem>.png or MVTec ground_truth/<defect>/<stem>_mask.png, or accept image-level only evaluation.");
+                    addQualityIssue(context, issue);
+                }
+                continue;
+            }
+            context.splits[split].labelCount += 1;
+            const QImage mask(maskPath);
+            if (mask.isNull()) {
+                QualityIssue issue;
+                issue.severity = QStringLiteral("error");
+                issue.code = QStringLiteral("invalid_anomaly_mask");
+                issue.filePath = maskPath;
+                issue.imagePath = imageInfo.absoluteFilePath();
+                issue.labelPath = maskPath;
+                issue.split = split;
+                issue.message = QStringLiteral("Anomaly mask cannot be decoded.");
+                issue.repairHint = QStringLiteral("Re-export the anomaly mask as a readable PNG.");
+                addQualityIssue(context, issue);
+            }
+        }
+    };
+
+    for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
+        if (qualityCanceled(context)) {
+            return;
+        }
+        scanImageDir(split, QStringLiteral("good"), QDir(root.filePath(QStringLiteral("%1/good").arg(split))));
+        scanImageDir(split, QStringLiteral("anomaly"), QDir(root.filePath(QStringLiteral("%1/anomaly").arg(split))));
+    }
+
+    const QDir testRoot(root.filePath(QStringLiteral("test")));
+    const QFileInfoList defectDirs = testRoot.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+    for (const QFileInfo& defectInfo : defectDirs) {
+        const QString defect = defectInfo.fileName();
+        const QString normalized = defect.toLower();
+        if (normalized == QStringLiteral("good") || normalized == QStringLiteral("anomaly")) {
+            continue;
+        }
+        scanImageDir(QStringLiteral("test"), QStringLiteral("anomaly"), QDir(defectInfo.absoluteFilePath()));
+    }
+
+    const auto scanMaskDir = [&](const QString& split, const QString& basePath) {
+        const QDir maskDir(basePath);
+        if (!maskDir.exists()) {
+            return;
+        }
+        const QFileInfoList masks = maskDir.entryInfoList({QStringLiteral("*.png")}, QDir::Files, QDir::Name);
+        for (const QFileInfo& maskInfo : masks) {
+            if (anomalyQualityMaskMatchesExpected(split, maskInfo, expectedMaskKeys)) {
+                continue;
+            }
+            QualityIssue issue;
+            issue.severity = QStringLiteral("warning");
+            issue.code = QStringLiteral("orphan_anomaly_mask");
+            issue.filePath = maskInfo.absoluteFilePath();
+            issue.labelPath = maskInfo.absoluteFilePath();
+            issue.split = split;
+            issue.message = QStringLiteral("Anomaly mask does not match any anomaly image stem.");
+            issue.repairHint = QStringLiteral("Rename the mask to match an anomaly image stem or remove stale mask files.");
+            addQualityIssue(context, issue);
+        }
+    };
+    for (const QString& split : {QStringLiteral("val"), QStringLiteral("test")}) {
+        scanMaskDir(split, root.filePath(QStringLiteral("masks/%1/anomaly").arg(split)));
+    }
+    const QDir gtRoot(root.filePath(QStringLiteral("ground_truth")));
+    const QFileInfoList gtDirs = gtRoot.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+    for (const QFileInfo& gtDir : gtDirs) {
+        scanMaskDir(QStringLiteral("test"), gtDir.absoluteFilePath());
     }
 }
 
@@ -1371,6 +1535,8 @@ WorkflowResult curateDatasetQualityReport(
         scanYoloQuality(context, true);
     } else if (format == QStringLiteral("semantic_segmentation_mask")) {
         scanSemanticMaskQuality(context, options);
+    } else if (format == QStringLiteral("anomaly_folder")) {
+        scanAnomalyFolderQuality(context);
     } else if (format == QStringLiteral("paddleocr_rec")) {
         scanOcrRecQuality(context, options);
     } else if (format == QStringLiteral("paddleocr_det")) {

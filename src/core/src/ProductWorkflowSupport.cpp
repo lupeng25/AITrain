@@ -309,6 +309,9 @@ DatasetValidationResult validateByFormat(const QString& datasetPath, const QStri
     if (format == QStringLiteral("semantic_segmentation_mask")) {
         return validateSemanticSegmentationMaskDataset(datasetPath, options);
     }
+    if (format == QStringLiteral("anomaly_folder")) {
+        return validateAnomalyFolderDataset(datasetPath, options);
+    }
     if (format == QStringLiteral("paddleocr_det")) {
         return validatePaddleOcrDetDataset(datasetPath, options);
     }

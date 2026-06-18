@@ -57,6 +57,7 @@
 | Profile | 检查内容 | 常见处理 |
 |---|---|---|
 | YOLO | Python、Ultralytics、Torch、ONNX、ONNX Runtime | 安装或切换到 YOLO 专用 Python 环境 |
+| Anomalib | Python、anomalib、torch、torchvision、lightning、timm、Pillow、numpy、opencv | 安装 `python_trainers\requirements-anomaly.txt`，EfficientAD 另需 imagenetDir，训练 batchSize 固定为 1 |
 | OCR | PaddlePaddle、PaddleOCR、PaddleOCR 源码 checkout、官方脚本可用性 | 使用隔离 OCR Python 环境，避免 Torch / Paddle DLL 冲突 |
 | TensorRT | NVIDIA 驱动、CUDA、cuDNN、TensorRT、GPU compute capability | 使用 RTX / SM 75+ 机器，旧 GPU 保持 `hardware-blocked` |
 
@@ -123,7 +124,27 @@ class_id x1 y1 x2 y2 x3 y3 x4 y4
 
 四个角点坐标使用 0 到 1 的归一化值。AITrain 会校验列数、类别范围、坐标范围、有限数值、非零面积四边形，并对疑似非矩形标注给出 warning。正好 4 点的 YOLO segmentation polygon 会标为 ambiguous，避免自动误判为 OBB；这类数据应手选 `yolo_obb` 格式。
 
-### 4.5 PaddleOCR Rec 数据集
+### 4.5 异常检测 Folder 数据集
+
+异常检测用于工业良品/异常样本的一类或少样本缺陷检测。推荐目录：
+
+```text
+dataset/
+  train/
+    good/
+  test/
+    good/
+    anomaly/
+  masks/
+    test/
+      anomaly/
+```
+
+`train/good` 必须存在。`val/good`、`val/anomaly`、`test/good`、`test/anomaly` 可按数据情况提供。像素级 mask 可放在 `masks/val/anomaly/<stem>.png` 或 `masks/test/anomaly/<stem>.png`。MVTec 风格 `test/<defect_type>` 和 `ground_truth/<defect_type>/<stem>_mask.png` 也可以识别。
+
+只有 good 样本时可以训练 PatchCore / EfficientAD，但评估会显示为 `limited`。EfficientAD 在 Anomalib 2.5 下使用 `modelSize=small|medium`，训练 batchSize 固定为 1；旧的 `s/m` 输入只作为兼容值归一化。MVTec 官方 `tar.xz` 不需要手工提前解压给质量矩阵脚本，脚本可从 `.deps/datasets/downloads/mvtec_ad/mvtec_anomaly_detection.tar.xz` 物化分类目录，也可以直接使用已预物化的 `.deps/datasets/materialized/mvtec-ad/<category>`。Anomalib v1 的推理/benchmark/部署验证运行时是 `anomalib_python`，不会生成 AITrain C++ ONNX/TensorRT/NCNN anomaly runtime。
+
+### 4.6 PaddleOCR Rec 数据集
 
 OCR Rec 用于文字识别。推荐目录：
 
@@ -143,7 +164,7 @@ images/sample.png<TAB>label
 
 `dict.txt` 是字符字典。训练前应确认标签中出现的字符都包含在字典中。
 
-### 4.5 PaddleOCR Det 数据集
+### 4.7 PaddleOCR Det 数据集
 
 OCR Det 用于文字检测。推荐目录：
 

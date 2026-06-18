@@ -40,6 +40,9 @@ QString officialTrainingBackendForPipelineTask(const QString& taskType)
     if (normalized == QStringLiteral("obb_detection") || normalized == QStringLiteral("obb")) {
         return QStringLiteral("ultralytics_yolo_obb");
     }
+    if (normalized == QStringLiteral("anomaly_detection")) {
+        return QStringLiteral("anomalib_patchcore");
+    }
     if (normalized == QStringLiteral("ocr_detection")) {
         return QStringLiteral("paddleocr_det_official");
     }
@@ -47,6 +50,43 @@ QString officialTrainingBackendForPipelineTask(const QString& taskType)
         return QStringLiteral("paddleocr_rec_official");
     }
     return {};
+}
+
+bool isAnomalyPipelineTask(const QString& taskType, const QString& trainingBackend, const QJsonObject& options)
+{
+    const QString normalizedTask = taskType.trimmed().toLower();
+    const QString normalizedBackend = trainingBackend.trimmed().toLower();
+    return normalizedTask == QStringLiteral("anomaly_detection")
+        || normalizedBackend == QStringLiteral("anomalib_patchcore")
+        || normalizedBackend == QStringLiteral("anomalib_efficientad")
+        || options.value(QStringLiteral("runtime")).toString().trimmed().toLower() == QStringLiteral("anomalib_python")
+        || options.value(QStringLiteral("modelFamily")).toString().trimmed().toLower() == QStringLiteral("anomaly_detection");
+}
+
+QString anomalySidecarPathForModel(const QString& path)
+{
+    if (path.trimmed().isEmpty()) {
+        return {};
+    }
+    const QFileInfo info(path);
+    if (info.fileName().compare(QStringLiteral("anomaly_sidecar.json"), Qt::CaseInsensitive) == 0
+        && info.exists()) {
+        return info.absoluteFilePath();
+    }
+    const QString siblingSidecar = info.absoluteDir().filePath(QStringLiteral("anomaly_sidecar.json"));
+    if (QFileInfo::exists(siblingSidecar)) {
+        return QFileInfo(siblingSidecar).absoluteFilePath();
+    }
+    return {};
+}
+
+QString resolvedAnomalyBackend(const QString& trainingBackend)
+{
+    const QString normalized = trainingBackend.trimmed().toLower();
+    if (normalized == QStringLiteral("anomalib_efficientad")) {
+        return QStringLiteral("anomalib_efficientad");
+    }
+    return QStringLiteral("anomalib_patchcore");
 }
 } // namespace
 
@@ -77,6 +117,7 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
     const int epochs = qMax(1, options.value(QStringLiteral("epochs")).toInt(1));
     const QString exportFormat = options.value(QStringLiteral("exportFormat")).toString(QStringLiteral("onnx"));
     const QString preferredSampleImage = options.value(QStringLiteral("sampleImagePath")).toString(options.value(QStringLiteral("imagePath")).toString());
+    const bool anomalyPipeline = isAnomalyPipelineTask(taskType, trainingBackend, options);
 
     QString modelPath = options.value(QStringLiteral("modelPath")).toString(options.value(QStringLiteral("checkpointPath")).toString());
     QString exportPath;
@@ -156,6 +197,21 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
             QStringLiteral("Official YOLO .pt pre-export completed."),
             officialReportPath.isEmpty() ? officialExportPath : officialReportPath,
             officialArtifacts);
+    };
+
+    const auto mergedStepOptions = [&](const QString& nestedKey) {
+        QJsonObject merged = options;
+        const QJsonObject nested = options.value(nestedKey).toObject();
+        for (auto it = nested.constBegin(); it != nested.constEnd(); ++it) {
+            merged.insert(it.key(), it.value());
+        }
+        if (anomalyPipeline) {
+            merged.insert(QStringLiteral("runtime"), QStringLiteral("anomalib_python"));
+            merged.insert(QStringLiteral("trainingBackend"), resolvedAnomalyBackend(trainingBackend));
+            merged.insert(QStringLiteral("modelFamily"), QStringLiteral("anomaly_detection"));
+            merged.insert(QStringLiteral("taskType"), QStringLiteral("anomaly_detection"));
+        }
+        return merged;
     };
 
     const auto failPipeline = [&](const QString& stepName, const QString& message) -> WorkflowResult {
@@ -238,10 +294,23 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
             const QJsonArray trainingArtifacts = options.value(QStringLiteral("pipelineOfficialTrainingArtifacts")).toArray();
             const QJsonArray trainingMetrics = options.value(QStringLiteral("pipelineOfficialTrainingMetrics")).toArray();
             const QString trainingCheckpointPath = options.value(QStringLiteral("pipelineOfficialTrainingCheckpointPath")).toString();
+            QString trainingAnomalySidecarPath = options.value(QStringLiteral("pipelineOfficialTrainingAnomalySidecarPath")).toString();
             const QString trainingOnnxPath = options.value(QStringLiteral("pipelineOfficialTrainingOnnxPath")).toString();
             const QString trainingReportPath = options.value(QStringLiteral("pipelineOfficialTrainingReportPath")).toString();
 
-            if (!trainingOnnxPath.isEmpty()) {
+            if (trainingAnomalySidecarPath.isEmpty()) {
+                for (const QJsonValue& value : trainingArtifacts) {
+                    const QJsonObject artifact = value.toObject();
+                    if (artifact.value(QStringLiteral("kind")).toString() == QStringLiteral("anomaly_sidecar")) {
+                        trainingAnomalySidecarPath = artifact.value(QStringLiteral("path")).toString();
+                        break;
+                    }
+                }
+            }
+
+            if (anomalyPipeline && !trainingAnomalySidecarPath.isEmpty()) {
+                modelPath = trainingAnomalySidecarPath;
+            } else if (!trainingOnnxPath.isEmpty()) {
                 modelPath = trainingOnnxPath;
             } else if (!trainingCheckpointPath.isEmpty()) {
                 modelPath = trainingCheckpointPath;
@@ -250,7 +319,9 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
                     completedPayload.value(QStringLiteral("checkpointPath")).toString());
             }
             if (modelPath.isEmpty()) {
-                failureReason = QStringLiteral("Pipeline official training finished without a checkpointPath or onnxPath.");
+                failureReason = anomalyPipeline
+                    ? QStringLiteral("Pipeline Anomalib training finished without anomaly_sidecar.json.")
+                    : QStringLiteral("Pipeline official training finished without a checkpointPath or onnxPath.");
                 return false;
             }
 
@@ -280,6 +351,7 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
                 QStringLiteral("Official backend training completed through Worker-managed Python trainer."),
                 stepReportPath,
                 QJsonArray{
+                    pathArtifact(QStringLiteral("anomaly_sidecar"), trainingAnomalySidecarPath),
                     pathArtifact(QStringLiteral("checkpoint"), trainingCheckpointPath),
                     pathArtifact(QStringLiteral("onnx"), trainingOnnxPath),
                     pathArtifact(QStringLiteral("training_report"), trainingReportPath)});
@@ -322,7 +394,9 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
                 QString());
             return true;
         }
-        QJsonObject evalOptions = options.value(QStringLiteral("evaluationOptions")).toObject();
+        QJsonObject evalOptions = anomalyPipeline
+            ? mergedStepOptions(QStringLiteral("evaluationOptions"))
+            : options.value(QStringLiteral("evaluationOptions")).toObject();
         if (!datasetSnapshotHash.isEmpty()) {
             evalOptions.insert(QStringLiteral("datasetSnapshotHash"), datasetSnapshotHash);
         }
@@ -375,6 +449,25 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
             failureReason = QStringLiteral("Model export requires modelPath/checkpointPath.");
             return false;
         }
+        if (anomalyPipeline) {
+            const QString sidecarPath = anomalySidecarPathForModel(modelPath);
+            if (sidecarPath.isEmpty()) {
+                failureReason = QStringLiteral("Anomaly detection pipeline expects anomaly_sidecar.json; ONNX/TensorRT/NCNN export is not supported for Anomalib v1 artifacts.");
+                return false;
+            }
+            modelPath = sidecarPath;
+            const QJsonObject sidecarArtifact = pathArtifact(
+                QStringLiteral("anomaly_sidecar"),
+                sidecarPath,
+                QStringLiteral("Anomalib Python runtime sidecar"));
+            artifactArray.append(sidecarArtifact);
+            appendStep(QStringLiteral("exportModel"),
+                QStringLiteral("skipped"),
+                QStringLiteral("Anomaly detection v1 uses Worker-managed Python/Anomalib sidecar artifacts; ONNX/TensorRT/NCNN export is not supported."),
+                sidecarPath,
+                QJsonArray{sidecarArtifact});
+            return true;
+        }
         const QString exportDir = QDir(outputPath).filePath(QStringLiteral("export"));
         const QString suffix = QFileInfo(modelPath).suffix().toLower();
         const QString outputModelPath = QDir(exportDir).filePath(
@@ -417,6 +510,59 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
                 QStringLiteral("skipped"),
                 QStringLiteral("Inference smoke skipped because model/image input is missing."),
                 QString());
+            return true;
+        }
+
+        if (anomalyPipeline) {
+            const QString sidecarPath = anomalySidecarPathForModel(candidateModel);
+            if (sidecarPath.isEmpty()) {
+                failureReason = QStringLiteral("Anomalib inference smoke requires anomaly_sidecar.json.");
+                return false;
+            }
+            modelPath = sidecarPath;
+            QJsonObject inferenceOptions = mergedStepOptions(QStringLiteral("inferenceOptions"));
+            inferenceOptions.insert(QStringLiteral("sampleImagePath"), imagePath);
+            inferenceOptions.insert(QStringLiteral("imagePath"), imagePath);
+            const WorkflowResult inference = validateDeploymentArtifactReport(
+                sidecarPath,
+                QDir(outputPath).filePath(QStringLiteral("inference")),
+                QStringLiteral("anomalib_python"),
+                inferenceOptions);
+            if (!inference.ok) {
+                failureReason = inference.error;
+                return false;
+            }
+            const QJsonObject inferenceArtifact = pathArtifact(
+                QStringLiteral("deployment_validation_report"),
+                inference.reportPath,
+                QStringLiteral("Anomalib inference smoke report"));
+            artifactArray.append(inferenceArtifact);
+            inferencePredictionsPath = inference.payload.value(QStringLiteral("predictionsPath")).toString();
+            inferenceOverlayPath = inference.payload.value(QStringLiteral("overlayPath")).toString();
+            const QString heatmapPath = inference.payload.value(QStringLiteral("heatmapPath")).toString();
+            const QString maskPath = inference.payload.value(QStringLiteral("maskPath")).toString();
+            if (!inferencePredictionsPath.isEmpty()) {
+                artifactArray.append(pathArtifact(QStringLiteral("inference_predictions"), inferencePredictionsPath, QStringLiteral("Anomaly inference predictions")));
+            }
+            if (!inferenceOverlayPath.isEmpty()) {
+                artifactArray.append(pathArtifact(QStringLiteral("inference_overlay"), inferenceOverlayPath, QStringLiteral("Anomaly inference overlay")));
+            }
+            if (!heatmapPath.isEmpty()) {
+                artifactArray.append(pathArtifact(QStringLiteral("inference_heatmap"), heatmapPath, QStringLiteral("Anomaly inference heatmap")));
+            }
+            if (!maskPath.isEmpty()) {
+                artifactArray.append(pathArtifact(QStringLiteral("inference_mask"), maskPath, QStringLiteral("Anomaly inference mask")));
+            }
+            if (!inference.payload.value(QStringLiteral("ok")).toBool(true)) {
+                failureReason = inference.payload.value(QStringLiteral("message")).toString(
+                    QStringLiteral("Anomalib inference smoke did not pass."));
+                return false;
+            }
+            appendStep(QStringLiteral("infer"),
+                QStringLiteral("completed"),
+                QStringLiteral("Anomalib Python inference smoke completed."),
+                inference.reportPath,
+                QJsonArray{inferenceArtifact});
             return true;
         }
 
@@ -514,10 +660,18 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
             failureReason = QStringLiteral("Benchmark step requires a model artifact.");
             return false;
         }
-        QJsonObject benchmarkOptions = options.value(QStringLiteral("benchmarkOptions")).toObject();
+        QJsonObject benchmarkOptions = anomalyPipeline
+            ? mergedStepOptions(QStringLiteral("benchmarkOptions"))
+            : options.value(QStringLiteral("benchmarkOptions")).toObject();
         benchmarkOptions.insert(QStringLiteral("datasetPath"), datasetPath);
         if (!preferredSampleImage.isEmpty()) {
             benchmarkOptions.insert(QStringLiteral("sampleImagePath"), preferredSampleImage);
+        } else if (anomalyPipeline) {
+            const QString firstImage = firstImageFileUnder(datasetPath);
+            if (!firstImage.isEmpty()) {
+                benchmarkOptions.insert(QStringLiteral("sampleImagePath"), firstImage);
+                benchmarkOptions.insert(QStringLiteral("imagePath"), firstImage);
+            }
         }
         const WorkflowResult benchmark = benchmarkModelReport(
             benchmarkModelPath,
@@ -590,6 +744,10 @@ WorkflowResult runLocalPipelinePlan(const QString& outputPath, const QString& te
         deliveryContext.insert(QStringLiteral("templateId"), resolvedTemplate);
         deliveryContext.insert(QStringLiteral("taskType"), taskType);
         deliveryContext.insert(QStringLiteral("trainingBackend"), trainingBackend);
+        if (anomalyPipeline) {
+            deliveryContext.insert(QStringLiteral("runtime"), QStringLiteral("anomalib_python"));
+            deliveryContext.insert(QStringLiteral("runtimeBoundary"), QStringLiteral("Worker-managed Python/Anomalib artifact runtime; no AITrain C++ ONNX/TensorRT/NCNN anomaly export."));
+        }
         deliveryContext.insert(QStringLiteral("modelPreset"), modelPreset);
         deliveryContext.insert(QStringLiteral("modelPath"), exportPath.isEmpty() ? modelPath : exportPath);
         deliveryContext.insert(QStringLiteral("datasetPath"), datasetPath);

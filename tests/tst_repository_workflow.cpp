@@ -177,6 +177,110 @@ private slots:
             QVERIFY(!value.toString().contains(QStringLiteral("diagnostic"), Qt::CaseInsensitive));
         }
     }
+
+    void anomalyPipelineSkipsOnnxExportForSidecarArtifacts()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        const QString python = pythonExecutablePath();
+        if (python.isEmpty()) {
+            QSKIP("Python executable is not available for the fake Anomalib benchmark adapter.");
+        }
+
+        const QString modelDir = dir.filePath(QStringLiteral("model"));
+        const QString checkpointPath = QDir(modelDir).filePath(QStringLiteral("model.ckpt"));
+        const QString sidecarPath = QDir(modelDir).filePath(QStringLiteral("anomaly_sidecar.json"));
+        const QString escapedCheckpointPath = QString(checkpointPath).replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
+        writeTextFile(checkpointPath, QStringLiteral("fake checkpoint\n"));
+        writeTextFile(
+            sidecarPath,
+            QStringLiteral("{\n"
+                           "  \"schemaVersion\": 1,\n"
+                           "  \"kind\": \"anomaly_sidecar\",\n"
+                           "  \"taskType\": \"anomaly_detection\",\n"
+                           "  \"runtime\": \"anomalib_python\",\n"
+                           "  \"trainingBackend\": \"anomalib_patchcore\",\n"
+                           "  \"checkpointPath\": \"%1\"\n"
+                           "}\n").arg(escapedCheckpointPath));
+
+        const QString adapterScript = dir.filePath(QStringLiteral("fake_anomalib_adapter.py"));
+        writeTextFile(
+            adapterScript,
+            QStringLiteral("import argparse, json\n"
+                           "from pathlib import Path\n"
+                           "parser = argparse.ArgumentParser()\n"
+                           "parser.add_argument('--request', required=True)\n"
+                           "parser.add_argument('--mode', default='benchmark')\n"
+                           "args = parser.parse_args()\n"
+                           "request = json.loads(Path(args.request).read_text(encoding='utf-8-sig'))\n"
+                           "out = Path(request['outputPath'])\n"
+                           "out.mkdir(parents=True, exist_ok=True)\n"
+                           "report = {\n"
+                           "  'schemaVersion': 1,\n"
+                           "  'kind': 'benchmark_report',\n"
+                           "  'ok': True,\n"
+                           "  'status': 'completed',\n"
+                           "  'runtime': 'anomalib_python',\n"
+                           "  'modelFamily': 'anomaly_detection',\n"
+                           "  'runtimeUsable': True,\n"
+                           "  'timedInference': True,\n"
+                           "  'averageMs': 1.0,\n"
+                           "  'p50Ms': 1.0,\n"
+                           "  'p95Ms': 1.0,\n"
+                           "  'p99Ms': 1.0,\n"
+                           "  'throughput': 1000.0\n"
+                           "}\n"
+                           "(out / 'benchmark_report.json').write_text(json.dumps(report), encoding='utf-8')\n"));
+
+        const QString datasetPath = dir.filePath(QStringLiteral("empty_dataset"));
+        QDir().mkpath(datasetPath);
+
+        QJsonObject benchmarkOptions;
+        benchmarkOptions.insert(QStringLiteral("runtime"), QStringLiteral("anomalib_python"));
+        benchmarkOptions.insert(QStringLiteral("pythonExecutable"), python);
+        benchmarkOptions.insert(QStringLiteral("anomalibAdapterScript"), adapterScript);
+
+        QJsonObject options;
+        options.insert(QStringLiteral("taskType"), QStringLiteral("anomaly_detection"));
+        options.insert(QStringLiteral("datasetFormat"), QStringLiteral("anomaly_folder"));
+        options.insert(QStringLiteral("datasetPath"), datasetPath);
+        options.insert(QStringLiteral("trainingBackend"), QStringLiteral("anomalib_patchcore"));
+        options.insert(QStringLiteral("runtime"), QStringLiteral("anomalib_python"));
+        options.insert(QStringLiteral("modelPath"), sidecarPath);
+        options.insert(QStringLiteral("exportFormat"), QStringLiteral("anomalib_python"));
+        options.insert(QStringLiteral("benchmarkOptions"), benchmarkOptions);
+
+        const aitrain::WorkflowResult result = aitrain::runLocalPipelinePlan(
+            dir.filePath(QStringLiteral("pipeline")),
+            QStringLiteral("export-infer-benchmark-report"),
+            options);
+        QVERIFY2(result.ok, qPrintable(result.error));
+        QCOMPARE(result.payload.value(QStringLiteral("state")).toString(), QStringLiteral("completed"));
+        QCOMPARE(QFileInfo(result.payload.value(QStringLiteral("modelPath")).toString()).absoluteFilePath(), QFileInfo(sidecarPath).absoluteFilePath());
+        QVERIFY(result.payload.value(QStringLiteral("exportPath")).toString().isEmpty());
+        QVERIFY(!QFileInfo::exists(QDir(dir.filePath(QStringLiteral("pipeline"))).filePath(QStringLiteral("export/model.onnx"))));
+
+        bool sawSkippedExport = false;
+        bool sawSkippedInference = false;
+        bool sawCompletedBenchmark = false;
+        const QJsonArray steps = result.payload.value(QStringLiteral("steps")).toArray();
+        for (const QJsonValue& value : steps) {
+            const QJsonObject step = value.toObject();
+            const QString command = step.value(QStringLiteral("command")).toString();
+            const QString state = step.value(QStringLiteral("state")).toString();
+            if (command == QStringLiteral("exportModel")) {
+                sawSkippedExport = state == QStringLiteral("skipped");
+            } else if (command == QStringLiteral("infer")) {
+                sawSkippedInference = state == QStringLiteral("skipped");
+            } else if (command == QStringLiteral("benchmarkModel")) {
+                sawCompletedBenchmark = state == QStringLiteral("completed");
+            }
+        }
+        QVERIFY(sawSkippedExport);
+        QVERIFY(sawSkippedInference);
+        QVERIFY(sawCompletedBenchmark);
+    }
 };
 
 QTEST_MAIN(RepositoryWorkflowTests)

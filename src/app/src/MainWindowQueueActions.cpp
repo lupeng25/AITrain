@@ -50,8 +50,110 @@
 #include <QVBoxLayout>
 #include <QUrl>
 #include <QUuid>
+#include <QSet>
 
 using namespace aitrain_app;
+
+namespace {
+
+QString anomalyArgObjectName(const QString& key)
+{
+    return QStringLiteral("AnomalyTrainArg_%1").arg(key);
+}
+
+QString anomalyTrainArgText(const QWidget* root, const QString& key)
+{
+    if (!root) {
+        return {};
+    }
+    if (const auto* edit = root->findChild<QLineEdit*>(anomalyArgObjectName(key))) {
+        return edit->text().trimmed();
+    }
+    if (const auto* combo = root->findChild<QComboBox*>(anomalyArgObjectName(key))) {
+        const QString value = combo->currentData().toString().trimmed();
+        return value.isEmpty() ? combo->currentText().trimmed() : value;
+    }
+    return {};
+}
+
+bool integerLike(const QString& text)
+{
+    bool ok = false;
+    text.trimmed().toInt(&ok);
+    return ok;
+}
+
+bool numberLike(const QString& text)
+{
+    bool ok = false;
+    text.trimmed().toDouble(&ok);
+    return ok;
+}
+
+QJsonValue anomalyTrainArgJsonValue(const QString& key, const QString& text)
+{
+    const QString normalized = text.trimmed();
+    if (normalized.isEmpty()) {
+        return QJsonValue();
+    }
+    const QSet<QString> intKeys = {
+        QStringLiteral("seed"),
+        QStringLiteral("workers"),
+        QStringLiteral("numNeighbors")
+    };
+    if (intKeys.contains(key) && integerLike(normalized)) {
+        return normalized.toInt();
+    }
+    const QSet<QString> numericKeys = {
+        QStringLiteral("quantile"),
+        QStringLiteral("coresetSamplingRatio"),
+        QStringLiteral("lr"),
+        QStringLiteral("weightDecay")
+    };
+    if (numericKeys.contains(key) && numberLike(normalized)) {
+        return normalized.toDouble();
+    }
+    if (key == QStringLiteral("layers")) {
+        QJsonArray layers;
+        for (const QString& part : normalized.split(QLatin1Char(','), QString::SkipEmptyParts)) {
+            const QString layer = part.trimmed();
+            if (!layer.isEmpty()) {
+                layers.append(layer);
+            }
+        }
+        return layers;
+    }
+    return normalized;
+}
+
+QJsonObject anomalyTrainArgsFromUi(const QWidget* root)
+{
+    const QStringList keys = {
+        QStringLiteral("seed"),
+        QStringLiteral("device"),
+        QStringLiteral("workers"),
+        QStringLiteral("thresholdStrategy"),
+        QStringLiteral("quantile"),
+        QStringLiteral("backbone"),
+        QStringLiteral("layers"),
+        QStringLiteral("coresetSamplingRatio"),
+        QStringLiteral("numNeighbors"),
+        QStringLiteral("modelSize"),
+        QStringLiteral("lr"),
+        QStringLiteral("weightDecay"),
+        QStringLiteral("imagenetDir")
+    };
+    QJsonObject args;
+    for (const QString& key : keys) {
+        const QJsonValue value = anomalyTrainArgJsonValue(key, anomalyTrainArgText(root, key));
+        if (!value.isUndefined() && !value.isNull()) {
+            args.insert(key, value);
+        }
+    }
+    return args;
+}
+
+} // namespace
 
 void MainWindow::cancelSelectedTask()
 {
@@ -371,19 +473,47 @@ void MainWindow::runLocalPipelinePlanFromCurrentDataset()
 
     QJsonObject options;
     const QString datasetPath = QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
+    const QString trainingBackend = trainingBackendCombo_ ? trainingBackendCombo_->currentData().toString().trimmed() : QString();
+    const QString taskType = currentTaskType();
+    const bool anomalyBackend = taskType == QStringLiteral("anomaly_detection")
+        || trainingBackend == QStringLiteral("anomalib_patchcore")
+        || trainingBackend == QStringLiteral("anomalib_efficientad");
+    const int requestedBatchSize = batchEdit_ ? batchEdit_->text().toInt() : 1;
+    const int effectiveBatchSize = trainingBackend == QStringLiteral("anomalib_efficientad") ? 1 : requestedBatchSize;
     options.insert(QStringLiteral("datasetId"), datasetId);
     options.insert(QStringLiteral("datasetPath"), datasetPath);
     options.insert(QStringLiteral("datasetFormat"), currentDatasetFormat());
-    options.insert(QStringLiteral("taskType"), currentTaskType());
-    options.insert(QStringLiteral("trainingBackend"), trainingBackendCombo_ ? trainingBackendCombo_->currentData().toString() : QString());
+    options.insert(QStringLiteral("taskType"), taskType);
+    options.insert(QStringLiteral("trainingBackend"), trainingBackend);
     options.insert(QStringLiteral("modelPreset"), modelPresetCombo_ ? modelPresetCombo_->currentText().trimmed() : QString());
     options.insert(QStringLiteral("epochs"), epochsEdit_ ? epochsEdit_->text().toInt() : 1);
-    options.insert(QStringLiteral("batchSize"), batchEdit_ ? batchEdit_->text().toInt() : 1);
+    options.insert(QStringLiteral("batchSize"), effectiveBatchSize);
     options.insert(QStringLiteral("imageSize"), imageSizeEdit_ ? imageSizeEdit_->text().toInt() : 640);
-    options.insert(QStringLiteral("exportFormat"), QStringLiteral("onnx"));
+    options.insert(QStringLiteral("exportFormat"), anomalyBackend ? QStringLiteral("anomalib_python") : QStringLiteral("onnx"));
     options.insert(QStringLiteral("sourceTaskId"), selectedTaskId());
     options.insert(QStringLiteral("modelPath"), selectedArtifactPath());
     options.insert(QStringLiteral("sampleImagePath"), inferenceImageEdit_ ? QDir::fromNativeSeparators(inferenceImageEdit_->text().trimmed()) : QString());
+    if (anomalyBackend) {
+        const QJsonObject anomalyArgs = anomalyTrainArgsFromUi(this);
+        for (auto it = anomalyArgs.constBegin(); it != anomalyArgs.constEnd(); ++it) {
+            options.insert(it.key(), it.value());
+        }
+        options.insert(QStringLiteral("modelFamily"), QStringLiteral("anomaly_detection"));
+        options.insert(QStringLiteral("runtime"), QStringLiteral("anomalib_python"));
+        options.insert(QStringLiteral("exportFormats"), QJsonArray{});
+
+        QJsonObject evaluationOptions = options.value(QStringLiteral("evaluationOptions")).toObject();
+        evaluationOptions.insert(QStringLiteral("runtime"), QStringLiteral("anomalib_python"));
+        options.insert(QStringLiteral("evaluationOptions"), evaluationOptions);
+
+        QJsonObject benchmarkOptions = options.value(QStringLiteral("benchmarkOptions")).toObject();
+        benchmarkOptions.insert(QStringLiteral("runtime"), QStringLiteral("anomalib_python"));
+        options.insert(QStringLiteral("benchmarkOptions"), benchmarkOptions);
+
+        QJsonObject inferenceOptions = options.value(QStringLiteral("inferenceOptions")).toObject();
+        inferenceOptions.insert(QStringLiteral("runtime"), QStringLiteral("anomalib_python"));
+        options.insert(QStringLiteral("inferenceOptions"), inferenceOptions);
+    }
 
     QString error;
     if (!worker_.requestLocalPipeline(workerExecutablePath(), outputPath, templateId, options, &error, taskId)) {

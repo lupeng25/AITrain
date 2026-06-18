@@ -53,6 +53,16 @@ struct SemanticMaskSample {
     QString split;
 };
 
+struct AnomalySample {
+    QString imagePath;
+    QString maskPath;
+    QString fileName;
+    QString baseName;
+    QString split;
+    QString label;
+    QString defectType;
+};
+
 enum class YoloAnnotationKind {
     Detection,
     Segmentation,
@@ -248,6 +258,253 @@ QJsonObject semanticClassPixelCounts(const QString& datasetPath, int classCount,
         }
     }
     return counts;
+}
+
+bool anomalyMaskStemMatches(const QFileInfo& maskInfo, const QString& imageStem)
+{
+    const QString maskStem = maskInfo.completeBaseName();
+    return maskStem == imageStem
+        || maskStem == QStringLiteral("%1_mask").arg(imageStem)
+        || maskStem.startsWith(QStringLiteral("%1_").arg(imageStem));
+}
+
+QString anomalyMaskForImage(
+    const QDir& canonicalMaskDir,
+    const QDir& mvtecMaskDir,
+    const QFileInfo& imageInfo)
+{
+    const QString imageStem = imageInfo.completeBaseName();
+    const QStringList canonicalCandidates = {
+        canonicalMaskDir.filePath(QStringLiteral("%1.png").arg(imageStem)),
+        canonicalMaskDir.filePath(QStringLiteral("%1_mask.png").arg(imageStem))
+    };
+    for (const QString& candidate : canonicalCandidates) {
+        if (QFileInfo::exists(candidate)) {
+            return QFileInfo(candidate).absoluteFilePath();
+        }
+    }
+    if (mvtecMaskDir.exists()) {
+        const QFileInfoList masks = mvtecMaskDir.entryInfoList({QStringLiteral("*.png")}, QDir::Files, QDir::Name);
+        for (const QFileInfo& maskInfo : masks) {
+            if (anomalyMaskStemMatches(maskInfo, imageStem)) {
+                return maskInfo.absoluteFilePath();
+            }
+        }
+    }
+    return {};
+}
+
+void appendAnomalyImages(
+    const QDir& imageDir,
+    const QString& split,
+    const QString& label,
+    const QString& defectType,
+    const QDir& canonicalMaskDir,
+    const QDir& mvtecMaskDir,
+    QVector<AnomalySample>* samples)
+{
+    if (!samples || !imageDir.exists()) {
+        return;
+    }
+    const QFileInfoList images = imageFiles(imageDir);
+    for (const QFileInfo& imageInfo : images) {
+        AnomalySample sample;
+        sample.imagePath = imageInfo.absoluteFilePath();
+        sample.fileName = imageInfo.fileName();
+        sample.baseName = imageInfo.completeBaseName();
+        sample.split = split;
+        sample.label = label;
+        sample.defectType = defectType;
+        if (label == QStringLiteral("anomaly")) {
+            sample.maskPath = anomalyMaskForImage(canonicalMaskDir, mvtecMaskDir, imageInfo);
+        }
+        samples->append(sample);
+    }
+}
+
+QVector<AnomalySample> collectAnomalySamples(const QString& datasetPath)
+{
+    QVector<AnomalySample> samples;
+    const QDir root(datasetPath);
+    const QDir groundTruthRoot(root.filePath(QStringLiteral("ground_truth")));
+
+    appendAnomalyImages(
+        QDir(root.filePath(QStringLiteral("train/good"))),
+        QStringLiteral("train"),
+        QStringLiteral("good"),
+        QStringLiteral("good"),
+        QDir(),
+        QDir(),
+        &samples);
+    for (const QString& split : {QStringLiteral("val"), QStringLiteral("test")}) {
+        appendAnomalyImages(
+            QDir(root.filePath(QStringLiteral("%1/good").arg(split))),
+            split,
+            QStringLiteral("good"),
+            QStringLiteral("good"),
+            QDir(),
+            QDir(),
+            &samples);
+        appendAnomalyImages(
+            QDir(root.filePath(QStringLiteral("%1/anomaly").arg(split))),
+            split,
+            QStringLiteral("anomaly"),
+            QStringLiteral("anomaly"),
+            QDir(root.filePath(QStringLiteral("masks/%1/anomaly").arg(split))),
+            QDir(),
+            &samples);
+    }
+
+    const QDir mvtecTest(root.filePath(QStringLiteral("test")));
+    if (mvtecTest.exists()) {
+        const QFileInfoList defectDirs = mvtecTest.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+        for (const QFileInfo& defectInfo : defectDirs) {
+            const QString defectType = defectInfo.fileName();
+            if (defectType.compare(QStringLiteral("good"), Qt::CaseInsensitive) == 0
+                || defectType.compare(QStringLiteral("anomaly"), Qt::CaseInsensitive) == 0) {
+                continue;
+            }
+            appendAnomalyImages(
+                QDir(defectInfo.absoluteFilePath()),
+                QStringLiteral("test"),
+                QStringLiteral("anomaly"),
+                defectType,
+                QDir(root.filePath(QStringLiteral("masks/test/anomaly"))),
+                QDir(groundTruthRoot.filePath(defectType)),
+                &samples);
+        }
+    }
+    return samples;
+}
+
+QJsonObject anomalyCounts(const QVector<AnomalySample>& samples)
+{
+    QJsonObject counts;
+    QJsonObject splits;
+    int normalCount = 0;
+    int anomalyCount = 0;
+    int maskCount = 0;
+    for (const AnomalySample& sample : samples) {
+        QJsonObject split = splits.value(sample.split).toObject();
+        split.insert(sample.label, split.value(sample.label).toInt() + 1);
+        splits.insert(sample.split, split);
+        if (sample.label == QStringLiteral("anomaly")) {
+            ++anomalyCount;
+            if (!sample.maskPath.isEmpty()) {
+                ++maskCount;
+            }
+        } else {
+            ++normalCount;
+        }
+    }
+    counts.insert(QStringLiteral("normalCount"), normalCount);
+    counts.insert(QStringLiteral("anomalyCount"), anomalyCount);
+    counts.insert(QStringLiteral("maskCount"), maskCount);
+    counts.insert(QStringLiteral("splits"), splits);
+    counts.insert(QStringLiteral("evaluationLimited"), anomalyCount == 0);
+    counts.insert(QStringLiteral("pixelEvaluationAvailable"), maskCount > 0);
+    return counts;
+}
+
+QString anomalyMaskKey(const AnomalySample& sample)
+{
+    const QString defectType = sample.defectType.trimmed().isEmpty()
+        ? sample.label
+        : sample.defectType.trimmed();
+    return QStringLiteral("%1/%2/%3").arg(sample.split, defectType, sample.baseName);
+}
+
+void appendValidationMetadata(DatasetValidationResult& result, const QJsonObject& metadata)
+{
+    const QString marker = QStringLiteral("__aitrain_validation_metadata__=%1")
+        .arg(QString::fromUtf8(QJsonDocument(metadata).toJson(QJsonDocument::Compact)));
+    result.warnings.append(marker);
+}
+
+DatasetValidationResult validateAnomalyDataset(const QString& datasetPath, const QJsonObject& options)
+{
+    DatasetValidationResult result;
+    const int maxIssues = options.value(QStringLiteral("maxIssues")).toInt(kDefaultMaxIssues);
+    const int maxFiles = options.value(QStringLiteral("maxFiles")).toInt(kDefaultMaxFiles);
+    const QDir root(datasetPath);
+    if (!root.exists()) {
+        addIssue(result, QStringLiteral("error"), QStringLiteral("dataset_missing"), datasetPath, 0,
+            QStringLiteral("异常检测数据集目录不存在。"));
+        return result;
+    }
+    const QDir trainGood(root.filePath(QStringLiteral("train/good")));
+    if (!trainGood.exists()) {
+        addIssue(result, QStringLiteral("error"), QStringLiteral("missing_train_good"), trainGood.path(), 0,
+            QStringLiteral("异常检测数据集必须包含 train/good 正常样本目录。"));
+        return result;
+    }
+
+    const QVector<AnomalySample> samples = collectAnomalySamples(datasetPath);
+    QSet<QString> seenImages;
+    QSet<QString> expectedMaskKeys;
+    QSet<QString> actualMaskKeys;
+    int trainGoodCount = 0;
+    int checkedCount = 0;
+    for (const AnomalySample& sample : samples) {
+        if (checkedCount >= maxFiles) {
+            addIssue(result, QStringLiteral("warning"), QStringLiteral("file_limit"), datasetPath, 0,
+                QStringLiteral("异常检测数据集较大，已在 %1 个样本后截断校验。").arg(maxFiles));
+            break;
+        }
+        ++checkedCount;
+        if (sample.split == QStringLiteral("train") && sample.label == QStringLiteral("good")) {
+            ++trainGoodCount;
+        }
+        const QString imageKey = canonicalImageKey(QFileInfo(sample.imagePath));
+        if (seenImages.contains(imageKey)) {
+            addIssue(result, QStringLiteral("warning"), QStringLiteral("duplicate_image"), sample.imagePath, 0,
+                QStringLiteral("异常检测数据集存在重复图片路径。"));
+        }
+        seenImages.insert(imageKey);
+        if (result.previewSamples.size() < 20) {
+            result.previewSamples.append(QStringLiteral("%1\t%2\t%3").arg(sample.split, sample.label, sample.imagePath));
+        }
+        validateReadableImageFile(sample.imagePath, result, QStringLiteral("invalid_image"), QStringLiteral("异常检测 "));
+        if (sample.label == QStringLiteral("anomaly")) {
+            const QString maskKey = anomalyMaskKey(sample);
+            expectedMaskKeys.insert(maskKey);
+            if (!sample.maskPath.isEmpty()) {
+                actualMaskKeys.insert(maskKey);
+                validateReadableImageFile(sample.maskPath, result, QStringLiteral("invalid_mask"), QStringLiteral("异常检测 mask "));
+            }
+        }
+        if (issueLimitReached(result, maxIssues)) {
+            result.sampleCount = checkedCount;
+            appendValidationMetadata(result, anomalyCounts(samples));
+            return result;
+        }
+    }
+
+    const QDir canonicalMaskRoot(root.filePath(QStringLiteral("masks")));
+    const QDir mvtecGtRoot(root.filePath(QStringLiteral("ground_truth")));
+    if (canonicalMaskRoot.exists() || mvtecGtRoot.exists()) {
+        for (const QString& key : expectedMaskKeys) {
+            if (!actualMaskKeys.contains(key)) {
+                addIssue(result, QStringLiteral("warning"), QStringLiteral("missing_anomaly_mask"), datasetPath, 0,
+                    QStringLiteral("异常样本缺少可匹配 mask：%1。").arg(key));
+                if (issueLimitReached(result, maxIssues)) {
+                    break;
+                }
+            }
+        }
+    }
+    if (trainGoodCount == 0) {
+        addIssue(result, QStringLiteral("error"), QStringLiteral("no_train_good_images"), trainGood.path(), 0,
+            QStringLiteral("train/good 中没有可用正常样本。"));
+    }
+    const QJsonObject counts = anomalyCounts(samples);
+    if (counts.value(QStringLiteral("anomalyCount")).toInt() == 0) {
+        addIssue(result, QStringLiteral("warning"), QStringLiteral("good_only_dataset"), datasetPath, 0,
+            QStringLiteral("仅发现正常样本；可以训练一类异常检测模型，但评估指标将标记为 limited。"));
+    }
+    result.sampleCount = samples.size();
+    appendValidationMetadata(result, counts);
+    return result;
 }
 
 int parseClassCount(const QString& yamlPath, DatasetValidationResult& result)
@@ -820,6 +1077,15 @@ void shuffleSamples(QVector<SemanticMaskSample>& samples, quint32 seed)
     }
 }
 
+void shuffleSamples(QVector<AnomalySample>& samples, quint32 seed)
+{
+    QRandomGenerator rng(seed);
+    for (int index = samples.size() - 1; index > 0; --index) {
+        const int swapIndex = static_cast<int>(rng.bounded(static_cast<quint32>(index + 1)));
+        qSwap(samples[index], samples[swapIndex]);
+    }
+}
+
 bool copyFileReplacing(const QString& sourcePath, const QString& targetPath, QStringList& errors)
 {
     QDir().mkpath(QFileInfo(targetPath).absolutePath());
@@ -1176,6 +1442,11 @@ DatasetValidationResult validateSemanticSegmentationMaskDataset(const QString& d
     return validateSemanticMaskDataset(datasetPath, options);
 }
 
+DatasetValidationResult validateAnomalyFolderDataset(const QString& datasetPath, const QJsonObject& options)
+{
+    return validateAnomalyDataset(datasetPath, options);
+}
+
 DatasetValidationResult validatePaddleOcrDetDataset(const QString& datasetPath, const QJsonObject& options)
 {
     DatasetValidationResult result;
@@ -1504,6 +1775,121 @@ DatasetSplitResult splitSemanticSegmentationMaskDataset(const QString& datasetPa
         result.warnings.append(QStringLiteral("无法写入 split_report.json。"));
     }
 
+    return result;
+}
+
+DatasetSplitResult splitAnomalyFolderDataset(const QString& datasetPath, const QString& outputPath, const QJsonObject& options)
+{
+    DatasetSplitResult result;
+    result.outputPath = outputPath;
+
+    const DatasetValidationResult validation = validateAnomalyFolderDataset(datasetPath, options);
+    if (!validation.ok) {
+        result.ok = false;
+        result.errors.append(QStringLiteral("源数据集未通过 anomaly_folder 校验，已取消划分。"));
+        result.errors.append(validation.errors);
+        return result;
+    }
+
+    const double trainRatio = options.value(QStringLiteral("trainRatio")).toDouble(0.8);
+    const double valRatio = options.value(QStringLiteral("valRatio")).toDouble(0.2);
+    const double testRatio = options.value(QStringLiteral("testRatio")).toDouble(0.0);
+    if (!validateSplitRatios(trainRatio, valRatio, testRatio, result)) {
+        return result;
+    }
+
+    QVector<AnomalySample> normalSamples;
+    QVector<AnomalySample> anomalySamples;
+    for (const AnomalySample& sample : collectAnomalySamples(datasetPath)) {
+        if (sample.label == QStringLiteral("anomaly")) {
+            anomalySamples.append(sample);
+        } else {
+            normalSamples.append(sample);
+        }
+    }
+    if (normalSamples.isEmpty()) {
+        result.ok = false;
+        result.errors.append(QStringLiteral("没有可划分的 anomaly_folder 正常样本。"));
+        return result;
+    }
+
+    const quint32 seed = static_cast<quint32>(options.value(QStringLiteral("seed")).toInt(42));
+    shuffleSamples(normalSamples, seed);
+    shuffleSamples(anomalySamples, seed + 1);
+
+    int normalTrain = 0;
+    int normalVal = 0;
+    int normalTest = 0;
+    calculateSplitCounts(normalSamples.size(), trainRatio, valRatio, testRatio, &normalTrain, &normalVal, &normalTest);
+
+    int anomalyTrain = 0;
+    int anomalyVal = 0;
+    int anomalyTest = 0;
+    if (!anomalySamples.isEmpty()) {
+        const double anomalyTrainRatio = options.value(QStringLiteral("trainAnomalyRatio")).toDouble(0.0);
+        if (anomalyTrainRatio <= 0.0) {
+            anomalyTrain = 0;
+            if (testRatio > 0.0) {
+                anomalyTest = qMax(1, anomalySamples.size() - qMax(0, anomalySamples.size() / 2));
+                anomalyVal = anomalySamples.size() - anomalyTest;
+            } else {
+                anomalyVal = anomalySamples.size();
+                anomalyTest = 0;
+            }
+        } else {
+            calculateSplitCounts(anomalySamples.size(), anomalyTrainRatio, valRatio, testRatio, &anomalyTrain, &anomalyVal, &anomalyTest);
+        }
+    }
+
+    result.trainCount = normalTrain + anomalyTrain;
+    result.valCount = normalVal + anomalyVal;
+    result.testCount = normalTest + anomalyTest;
+
+    const QDir outputRoot(outputPath);
+    QDir().mkpath(outputRoot.path());
+    for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
+        QDir().mkpath(outputRoot.filePath(QStringLiteral("%1/good").arg(split)));
+        QDir().mkpath(outputRoot.filePath(QStringLiteral("%1/anomaly").arg(split)));
+        QDir().mkpath(outputRoot.filePath(QStringLiteral("masks/%1/anomaly").arg(split)));
+    }
+
+    auto copyAnomalySample = [&outputRoot, &result](const AnomalySample& sample, const QString& split, int index) {
+        const QString label = sample.label == QStringLiteral("anomaly") ? QStringLiteral("anomaly") : QStringLiteral("good");
+        const QString fileName = QStringLiteral("%1_%2").arg(index + 1, 5, 10, QLatin1Char('0')).arg(sample.fileName);
+        const QString imageTarget = outputRoot.filePath(QStringLiteral("%1/%2/%3").arg(split, label, fileName));
+        copyFileReplacing(sample.imagePath, imageTarget, result.errors);
+        if (label == QStringLiteral("anomaly") && !sample.maskPath.isEmpty()) {
+            const QString maskTarget = outputRoot.filePath(QStringLiteral("masks/%1/anomaly/%2.png").arg(split, QFileInfo(fileName).completeBaseName()));
+            copyFileReplacing(sample.maskPath, maskTarget, result.errors);
+        }
+    };
+
+    for (int index = 0; index < normalSamples.size(); ++index) {
+        copyAnomalySample(normalSamples.at(index), splitNameForIndex(index, normalTrain, normalVal), index);
+    }
+    for (int index = 0; index < anomalySamples.size(); ++index) {
+        copyAnomalySample(anomalySamples.at(index), splitNameForIndex(index, anomalyTrain, anomalyVal), index);
+    }
+
+    if (!result.errors.isEmpty()) {
+        result.ok = false;
+    }
+
+    QJsonObject report = result.toJson();
+    report.insert(QStringLiteral("sourcePath"), datasetPath);
+    report.insert(QStringLiteral("format"), QStringLiteral("anomaly_folder"));
+    report.insert(QStringLiteral("seed"), static_cast<int>(seed));
+    report.insert(QStringLiteral("trainRatio"), trainRatio);
+    report.insert(QStringLiteral("valRatio"), valRatio);
+    report.insert(QStringLiteral("testRatio"), testRatio);
+    report.insert(QStringLiteral("normalCount"), normalSamples.size());
+    report.insert(QStringLiteral("anomalyCount"), anomalySamples.size());
+    QFile reportFile(outputRoot.filePath(QStringLiteral("split_report.json")));
+    if (reportFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        reportFile.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+    } else {
+        result.warnings.append(QStringLiteral("无法写入 split_report.json。"));
+    }
     return result;
 }
 

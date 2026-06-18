@@ -34,10 +34,23 @@ QString snapshotFileRole(const QString& relativePath, const QFileInfo& fileInfo)
     const QString path = QDir::fromNativeSeparators(relativePath).toLower();
     const QString name = fileInfo.fileName().toLower();
     const QString suffix = fileInfo.suffix().toLower();
-    if ((path.startsWith(QStringLiteral("masks/")) || path.contains(QStringLiteral("/masks/"))) && suffix == QStringLiteral("png")) {
+    if (((path.startsWith(QStringLiteral("masks/")) || path.contains(QStringLiteral("/masks/")))
+            || path.startsWith(QStringLiteral("ground_truth/")) || path.contains(QStringLiteral("/ground_truth/")))
+        && suffix == QStringLiteral("png")) {
         return QStringLiteral("mask");
     }
     if (isImageFile(suffix)) {
+        if (path.contains(QStringLiteral("/good/")) || path.startsWith(QStringLiteral("train/good/"))
+            || path.startsWith(QStringLiteral("val/good/")) || path.startsWith(QStringLiteral("test/good/"))) {
+            return QStringLiteral("normal_image");
+        }
+        if (path.contains(QStringLiteral("/anomaly/")) || path.startsWith(QStringLiteral("train/anomaly/"))
+            || path.startsWith(QStringLiteral("val/anomaly/")) || path.startsWith(QStringLiteral("test/anomaly/"))) {
+            return QStringLiteral("anomaly_image");
+        }
+        if (path.startsWith(QStringLiteral("test/")) && !path.startsWith(QStringLiteral("test/good/"))) {
+            return QStringLiteral("anomaly_image");
+        }
         return QStringLiteral("image");
     }
     if (name == QStringLiteral("classes.txt")
@@ -142,6 +155,43 @@ QJsonObject countSemanticImageSplits(const QString& datasetPath)
             }
         }
         splits.insert(split, count);
+    }
+    return splits;
+}
+
+QJsonObject countAnomalyImageSplits(const QString& datasetPath)
+{
+    QJsonObject splits;
+    const QDir root(datasetPath);
+    for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
+        QJsonObject splitCounts;
+        for (const QString& label : {QStringLiteral("good"), QStringLiteral("anomaly")}) {
+            const QDir imageDir(root.filePath(QStringLiteral("%1/%2").arg(split, label)));
+            int count = 0;
+            if (imageDir.exists()) {
+                for (const QString& filter : imageNameFilters()) {
+                    count += imageDir.entryInfoList({filter}, QDir::Files).size();
+                }
+            }
+            splitCounts.insert(label, count);
+        }
+        if (split == QStringLiteral("test")) {
+            const QDir testRoot(root.filePath(QStringLiteral("test")));
+            const QFileInfoList defectDirs = testRoot.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+            int aliasCount = 0;
+            for (const QFileInfo& defectInfo : defectDirs) {
+                const QString defect = defectInfo.fileName().toLower();
+                if (defect == QStringLiteral("good") || defect == QStringLiteral("anomaly")) {
+                    continue;
+                }
+                const QDir defectDir(defectInfo.absoluteFilePath());
+                for (const QString& filter : imageNameFilters()) {
+                    aliasCount += defectDir.entryInfoList({filter}, QDir::Files).size();
+                }
+            }
+            splitCounts.insert(QStringLiteral("anomaly"), splitCounts.value(QStringLiteral("anomaly")).toInt() + aliasCount);
+        }
+        splits.insert(split, splitCounts);
     }
     return splits;
 }
@@ -258,9 +308,11 @@ WorkflowResult createDatasetSnapshotReport(
     manifest.insert(QStringLiteral("fileCount"), files.size());
     manifest.insert(QStringLiteral("totalBytes"), QString::number(totalBytes));
     manifest.insert(QStringLiteral("contentHash"), QString::fromLatin1(manifestHash.result().toHex()));
-    manifest.insert(QStringLiteral("splits"), format == QStringLiteral("semantic_segmentation_mask")
-        ? countSemanticImageSplits(datasetPath)
-        : countImageSplits(datasetPath));
+    manifest.insert(QStringLiteral("splits"), format == QStringLiteral("anomaly_folder")
+        ? countAnomalyImageSplits(datasetPath)
+        : (format == QStringLiteral("semantic_segmentation_mask")
+            ? countSemanticImageSplits(datasetPath)
+            : countImageSplits(datasetPath)));
     if (format == QStringLiteral("yolo_detection") || format == QStringLiteral("yolo_segmentation") || format == QStringLiteral("yolo_obb")) {
         manifest.insert(QStringLiteral("classCounts"), countYoloClasses(datasetPath));
     } else if (format == QStringLiteral("semantic_segmentation_mask")) {
@@ -268,7 +320,11 @@ WorkflowResult createDatasetSnapshotReport(
     }
     manifest.insert(QStringLiteral("roleCounts"), roleCounts);
     manifest.insert(QStringLiteral("keyFiles"), keyFileArray);
-    manifest.insert(QStringLiteral("imageCount"), roleCounts.value(QStringLiteral("image")).toInt());
+    manifest.insert(QStringLiteral("imageCount"), roleCounts.value(QStringLiteral("image")).toInt()
+        + roleCounts.value(QStringLiteral("normal_image")).toInt()
+        + roleCounts.value(QStringLiteral("anomaly_image")).toInt());
+    manifest.insert(QStringLiteral("normalImageCount"), roleCounts.value(QStringLiteral("normal_image")).toInt());
+    manifest.insert(QStringLiteral("anomalyImageCount"), roleCounts.value(QStringLiteral("anomaly_image")).toInt());
     manifest.insert(QStringLiteral("labelCount"), roleCounts.value(QStringLiteral("label")).toInt());
     manifest.insert(QStringLiteral("maskCount"), roleCounts.value(QStringLiteral("mask")).toInt());
     manifest.insert(QStringLiteral("files"), fileArray);

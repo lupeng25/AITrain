@@ -598,6 +598,15 @@ void MainWindow::updateTrainingSelectionSummary()
     if (auto* smpPanel = findChild<QWidget*>(QStringLiteral("SmpSemanticArgsGroup"))) {
         smpPanel->setVisible(visibleBackend == QStringLiteral("smp_semantic_segmentation"));
     }
+    if (auto* anomalyPanel = findChild<QWidget*>(QStringLiteral("AnomalyDetectionArgsGroup"))) {
+        anomalyPanel->setVisible(visibleBackend == QStringLiteral("anomalib_patchcore")
+            || visibleBackend == QStringLiteral("anomalib_efficientad"));
+    }
+    if (auto* caption = findChild<QLabel*>(QStringLiteral("TrainingLiveCaption_TrainingMapValue"))) {
+        caption->setText((visibleBackend == QStringLiteral("anomalib_patchcore") || visibleBackend == QStringLiteral("anomalib_efficientad"))
+            ? QStringLiteral("Score/F1")
+            : QStringLiteral("mAP"));
+    }
     if (trainingRunSummaryLabel_) {
         const QString backend = trainingBackendCombo_
             ? trainingBackendCombo_->currentData().toString()
@@ -655,6 +664,10 @@ void MainWindow::refreshTrainingDefaults()
         preferredPlugin = QStringLiteral("com.aitrain.plugins.semantic_segmentation");
         preferredTask = QStringLiteral("semantic_segmentation");
         preferredBackend = QStringLiteral("smp_semantic_segmentation");
+    } else if (datasetFormat == QStringLiteral("anomaly_folder")) {
+        preferredPlugin = QStringLiteral("com.aitrain.plugins.anomaly_detection");
+        preferredTask = QStringLiteral("anomaly_detection");
+        preferredBackend = QStringLiteral("anomalib_patchcore");
     } else if (datasetFormat == QStringLiteral("paddleocr_det")) {
         preferredPlugin = QStringLiteral("com.aitrain.plugins.ocr_rec_native");
         preferredTask = QStringLiteral("ocr_detection");

@@ -94,6 +94,7 @@ int runPluginSmoke(const QString& pluginDirectory)
         QStringLiteral("com.aitrain.plugins.dataset_interop"),
         QStringLiteral("com.aitrain.plugins.yolo_native"),
         QStringLiteral("com.aitrain.plugins.semantic_segmentation"),
+        QStringLiteral("com.aitrain.plugins.anomaly_detection"),
         QStringLiteral("com.aitrain.plugins.ocr_rec_native")
     };
     QStringList missingIds;

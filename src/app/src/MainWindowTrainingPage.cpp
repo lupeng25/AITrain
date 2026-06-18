@@ -25,6 +25,7 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSplitter>
 #include <QStatusBar>
@@ -48,6 +49,11 @@ QString yoloArgObjectName(const QString& key)
 QString smpArgObjectName(const QString& key)
 {
     return QStringLiteral("SmpTrainArg_%1").arg(key);
+}
+
+QString anomalyArgObjectName(const QString& key)
+{
+    return QStringLiteral("AnomalyTrainArg_%1").arg(key);
 }
 
 QLineEdit* yoloArgLineEdit(const QString& key, const QString& placeholder = QString(), const QString& value = QString())
@@ -79,10 +85,33 @@ QLineEdit* smpArgLineEdit(const QString& key, const QString& placeholder = QStri
     return edit;
 }
 
+QLineEdit* anomalyArgLineEdit(const QString& key, const QString& placeholder = QString(), const QString& value = QString())
+{
+    auto* edit = new QLineEdit(value);
+    edit->setObjectName(anomalyArgObjectName(key));
+    edit->setPlaceholderText(placeholder);
+    edit->setMinimumWidth(0);
+    return edit;
+}
+
 QComboBox* smpArgComboBox(const QString& key, const QVector<QPair<QString, QString>>& items, const QString& defaultValue)
 {
     auto* combo = new QComboBox;
     combo->setObjectName(smpArgObjectName(key));
+    for (const auto& item : items) {
+        combo->addItem(item.first, item.second);
+    }
+    const int index = combo->findData(defaultValue);
+    if (index >= 0) {
+        combo->setCurrentIndex(index);
+    }
+    return combo;
+}
+
+QComboBox* anomalyArgComboBox(const QString& key, const QVector<QPair<QString, QString>>& items, const QString& defaultValue)
+{
+    auto* combo = new QComboBox;
+    combo->setObjectName(anomalyArgObjectName(key));
     for (const auto& item : items) {
         combo->addItem(item.first, item.second);
     }
@@ -130,6 +159,13 @@ void addYoloRow(QGroupBox* group, const QString& label, QWidget* field)
 }
 
 void addSmpRow(QGroupBox* group, const QString& label, QWidget* field)
+{
+    if (auto* form = qobject_cast<QFormLayout*>(group->layout())) {
+        form->addRow(label, field);
+    }
+}
+
+void addAnomalyRow(QGroupBox* group, const QString& label, QWidget* field)
 {
     if (auto* form = qobject_cast<QFormLayout*>(group->layout())) {
         form->addRow(label, field);
@@ -267,6 +303,45 @@ QWidget* buildSmpArgsPanel()
     root->addWidget(dataGroup);
     return container;
 }
+
+QWidget* buildAnomalyArgsPanel()
+{
+    auto* container = new QWidget;
+    auto* root = new QVBoxLayout(container);
+    root->setContentsMargins(0, 0, 0, 0);
+    root->setSpacing(10);
+
+    auto* runtimeGroup = yoloArgGroup(QStringLiteral("运行与阈值"));
+    addAnomalyRow(runtimeGroup, QStringLiteral("seed"), anomalyArgLineEdit(QStringLiteral("seed"), QStringLiteral("42"), QStringLiteral("42")));
+    addAnomalyRow(runtimeGroup, QStringLiteral("device"), anomalyArgLineEdit(QStringLiteral("device"), QStringLiteral("cpu / cuda / 0"), QStringLiteral("cpu")));
+    addAnomalyRow(runtimeGroup, QStringLiteral("workers"), anomalyArgLineEdit(QStringLiteral("workers"), QStringLiteral("0"), QStringLiteral("0")));
+    addAnomalyRow(runtimeGroup, QStringLiteral("thresholdStrategy"), anomalyArgComboBox(QStringLiteral("thresholdStrategy"), {
+        {QStringLiteral("quantile"), QStringLiteral("quantile")},
+        {QStringLiteral("adaptive"), QStringLiteral("adaptive")},
+        {QStringLiteral("manual"), QStringLiteral("manual")}
+    }, QStringLiteral("quantile")));
+    addAnomalyRow(runtimeGroup, QStringLiteral("quantile"), anomalyArgLineEdit(QStringLiteral("quantile"), QStringLiteral("0.995"), QStringLiteral("0.995")));
+
+    auto* patchCoreGroup = yoloArgGroup(QStringLiteral("PatchCore"));
+    addAnomalyRow(patchCoreGroup, QStringLiteral("backbone"), anomalyArgLineEdit(QStringLiteral("backbone"), QStringLiteral("wide_resnet50_2"), QStringLiteral("wide_resnet50_2")));
+    addAnomalyRow(patchCoreGroup, QStringLiteral("layers"), anomalyArgLineEdit(QStringLiteral("layers"), QStringLiteral("layer2,layer3"), QStringLiteral("layer2,layer3")));
+    addAnomalyRow(patchCoreGroup, QStringLiteral("coresetSamplingRatio"), anomalyArgLineEdit(QStringLiteral("coresetSamplingRatio"), QStringLiteral("0.1"), QStringLiteral("0.1")));
+    addAnomalyRow(patchCoreGroup, QStringLiteral("numNeighbors"), anomalyArgLineEdit(QStringLiteral("numNeighbors"), QStringLiteral("9"), QStringLiteral("9")));
+
+    auto* efficientAdGroup = yoloArgGroup(QStringLiteral("EfficientAD"));
+    addAnomalyRow(efficientAdGroup, QStringLiteral("modelSize"), anomalyArgComboBox(QStringLiteral("modelSize"), {
+        {QStringLiteral("small"), QStringLiteral("small")},
+        {QStringLiteral("medium"), QStringLiteral("medium")}
+    }, QStringLiteral("small")));
+    addAnomalyRow(efficientAdGroup, QStringLiteral("lr"), anomalyArgLineEdit(QStringLiteral("lr"), QStringLiteral("0.0001"), QStringLiteral("0.0001")));
+    addAnomalyRow(efficientAdGroup, QStringLiteral("weightDecay"), anomalyArgLineEdit(QStringLiteral("weightDecay"), QStringLiteral("0.00001"), QStringLiteral("0.00001")));
+    addAnomalyRow(efficientAdGroup, QStringLiteral("imagenetDir"), anomalyArgLineEdit(QStringLiteral("imagenetDir"), QStringLiteral(".deps/anomalib/imagenette")));
+
+    root->addWidget(runtimeGroup);
+    root->addWidget(patchCoreGroup);
+    root->addWidget(efficientAdGroup);
+    return container;
+}
 } // namespace
 
 QLabel* MainWindow::trainingLiveValueLabel(const QString& objectName) const
@@ -288,6 +363,8 @@ QWidget* MainWindow::buildTrainingPage()
     trainingBackendCombo_->addItem(backendLabel(QStringLiteral("ultralytics_yolo_segment")), QStringLiteral("ultralytics_yolo_segment"));
     trainingBackendCombo_->addItem(backendLabel(QStringLiteral("ultralytics_yolo_obb")), QStringLiteral("ultralytics_yolo_obb"));
     trainingBackendCombo_->addItem(backendLabel(QStringLiteral("smp_semantic_segmentation")), QStringLiteral("smp_semantic_segmentation"));
+    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("anomalib_patchcore")), QStringLiteral("anomalib_patchcore"));
+    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("anomalib_efficientad")), QStringLiteral("anomalib_efficientad"));
     trainingBackendCombo_->addItem(backendLabel(QStringLiteral("paddleocr_det_official")), QStringLiteral("paddleocr_det_official"));
     trainingBackendCombo_->addItem(backendLabel(QStringLiteral("paddleocr_rec_official")), QStringLiteral("paddleocr_rec_official"));
     modelPresetCombo_ = new QComboBox;
@@ -321,11 +398,31 @@ QWidget* MainWindow::buildTrainingPage()
             }
         }
         const QString normalized = trainingBackendCombo_ ? trainingBackendCombo_->currentData().toString().trimmed().toLower() : QString();
+        if (batchEdit_) {
+            const bool efficientAd = normalized == QStringLiteral("anomalib_efficientad");
+            if (efficientAd && batchEdit_->text().trimmed() != QStringLiteral("1")) {
+                QSignalBlocker block(batchEdit_);
+                batchEdit_->setText(QStringLiteral("1"));
+            }
+            batchEdit_->setEnabled(!efficientAd);
+            batchEdit_->setToolTip(efficientAd
+                ? uiText("Anomalib 2.5 EfficientAD 训练 batchSize 固定为 1。")
+                : QString());
+        }
         if (auto* yoloPanel = findChild<QWidget*>(QStringLiteral("YoloOfficialArgsGroup"))) {
             yoloPanel->setVisible(normalized.startsWith(QStringLiteral("ultralytics_yolo")));
         }
         if (auto* smpPanel = findChild<QWidget*>(QStringLiteral("SmpSemanticArgsGroup"))) {
             smpPanel->setVisible(normalized == QStringLiteral("smp_semantic_segmentation"));
+        }
+        if (auto* anomalyPanel = findChild<QWidget*>(QStringLiteral("AnomalyDetectionArgsGroup"))) {
+            anomalyPanel->setVisible(normalized == QStringLiteral("anomalib_patchcore")
+                || normalized == QStringLiteral("anomalib_efficientad"));
+        }
+        if (auto* caption = findChild<QLabel*>(QStringLiteral("TrainingLiveCaption_TrainingMapValue"))) {
+            caption->setText((normalized == QStringLiteral("anomalib_patchcore") || normalized == QStringLiteral("anomalib_efficientad"))
+                ? QStringLiteral("Score/F1")
+                : QStringLiteral("mAP"));
         }
         updateTrainingSelectionSummary();
     });
@@ -431,9 +528,18 @@ QWidget* MainWindow::buildTrainingPage()
     smpArgsLayout->setSpacing(8);
     smpArgsLayout->addWidget(buildSmpArgsPanel());
     setupPanel->bodyLayout()->addWidget(smpArgsGroup);
+    auto* anomalyArgsGroup = new QGroupBox(QStringLiteral("Anomalib 异常检测参数"));
+    anomalyArgsGroup->setObjectName(QStringLiteral("AnomalyDetectionArgsGroup"));
+    auto* anomalyArgsLayout = new QVBoxLayout(anomalyArgsGroup);
+    anomalyArgsLayout->setContentsMargins(10, 8, 10, 8);
+    anomalyArgsLayout->setSpacing(8);
+    anomalyArgsLayout->addWidget(buildAnomalyArgsPanel());
+    setupPanel->bodyLayout()->addWidget(anomalyArgsGroup);
     const QString normalizedBackend = trainingBackendCombo_ ? trainingBackendCombo_->currentData().toString().trimmed().toLower() : QString();
     yoloOfficialArgsGroup->setVisible(normalizedBackend.startsWith(QStringLiteral("ultralytics_yolo")));
     smpArgsGroup->setVisible(normalizedBackend == QStringLiteral("smp_semantic_segmentation"));
+    anomalyArgsGroup->setVisible(normalizedBackend == QStringLiteral("anomalib_patchcore")
+        || normalizedBackend == QStringLiteral("anomalib_efficientad"));
     setupPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("当前模型能力说明")));
     setupPanel->bodyLayout()->addWidget(trainingBackendHintLabel_);
 

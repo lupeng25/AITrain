@@ -66,6 +66,11 @@ QString smpArgObjectName(const QString& key)
     return QStringLiteral("SmpTrainArg_%1").arg(key);
 }
 
+QString anomalyArgObjectName(const QString& key)
+{
+    return QStringLiteral("AnomalyTrainArg_%1").arg(key);
+}
+
 QString yoloExportArgObjectName(const QString& prefix, const QString& key)
 {
     return QStringLiteral("%1_%2").arg(prefix, key);
@@ -95,6 +100,21 @@ QString smpTrainArgText(const QWidget* root, const QString& key)
         return edit->text().trimmed();
     }
     if (const auto* combo = root->findChild<QComboBox*>(smpArgObjectName(key))) {
+        const QString value = combo->currentData().toString().trimmed();
+        return value.isEmpty() ? combo->currentText().trimmed() : value;
+    }
+    return {};
+}
+
+QString anomalyTrainArgText(const QWidget* root, const QString& key)
+{
+    if (!root) {
+        return {};
+    }
+    if (const auto* edit = root->findChild<QLineEdit*>(anomalyArgObjectName(key))) {
+        return edit->text().trimmed();
+    }
+    if (const auto* combo = root->findChild<QComboBox*>(anomalyArgObjectName(key))) {
         const QString value = combo->currentData().toString().trimmed();
         return value.isEmpty() ? combo->currentText().trimmed() : value;
     }
@@ -268,6 +288,69 @@ QJsonObject smpTrainArgsFromUi(const QWidget* root)
     QJsonObject args;
     for (const QString& key : keys) {
         const QJsonValue value = smpTrainArgJsonValue(key, smpTrainArgText(root, key));
+        if (!value.isUndefined() && !value.isNull()) {
+            args.insert(key, value);
+        }
+    }
+    return args;
+}
+
+QJsonValue anomalyTrainArgJsonValue(const QString& key, const QString& text)
+{
+    const QString normalized = text.trimmed();
+    if (normalized.isEmpty()) {
+        return QJsonValue();
+    }
+    const QSet<QString> intKeys = {
+        QStringLiteral("seed"),
+        QStringLiteral("workers"),
+        QStringLiteral("numNeighbors")
+    };
+    if (intKeys.contains(key) && isIntegerLike(normalized)) {
+        return normalized.toInt();
+    }
+    const QSet<QString> numericKeys = {
+        QStringLiteral("quantile"),
+        QStringLiteral("coresetSamplingRatio"),
+        QStringLiteral("lr"),
+        QStringLiteral("weightDecay")
+    };
+    if (numericKeys.contains(key) && isNumberLike(normalized)) {
+        return normalized.toDouble();
+    }
+    if (key == QStringLiteral("layers")) {
+        QJsonArray layers;
+        for (const QString& part : normalized.split(QLatin1Char(','), QString::SkipEmptyParts)) {
+            const QString layer = part.trimmed();
+            if (!layer.isEmpty()) {
+                layers.append(layer);
+            }
+        }
+        return layers;
+    }
+    return normalized;
+}
+
+QJsonObject anomalyTrainArgsFromUi(const QWidget* root)
+{
+    const QStringList keys = {
+        QStringLiteral("seed"),
+        QStringLiteral("device"),
+        QStringLiteral("workers"),
+        QStringLiteral("thresholdStrategy"),
+        QStringLiteral("quantile"),
+        QStringLiteral("backbone"),
+        QStringLiteral("layers"),
+        QStringLiteral("coresetSamplingRatio"),
+        QStringLiteral("numNeighbors"),
+        QStringLiteral("modelSize"),
+        QStringLiteral("lr"),
+        QStringLiteral("weightDecay"),
+        QStringLiteral("imagenetDir")
+    };
+    QJsonObject args;
+    for (const QString& key : keys) {
+        const QJsonValue value = anomalyTrainArgJsonValue(key, anomalyTrainArgText(root, key));
         if (!value.isUndefined() && !value.isNull()) {
             args.insert(key, value);
         }
@@ -595,20 +678,24 @@ void MainWindow::startTraining()
     const QString runDir = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(taskId));
     QDir().mkpath(runDir);
 
-    QJsonObject parameters;
-    parameters.insert(QStringLiteral("epochs"), epochsEdit_->text().toInt());
-    parameters.insert(QStringLiteral("batchSize"), batchEdit_->text().toInt());
-    parameters.insert(QStringLiteral("imageSize"), imageSizeEdit_->text().toInt());
-    parameters.insert(QStringLiteral("gridSize"), gridSizeEdit_->text().toInt());
-    parameters.insert(QStringLiteral("datasetFormat"), datasetFormat);
     const QString trainingBackend = trainingBackendCombo_
         ? trainingBackendCombo_->currentData().toString().trimmed()
         : defaultBackendForTask(currentTaskType());
     const QString backendForRequest = trainingBackend.isEmpty() ? defaultBackendForTask(currentTaskType()) : trainingBackend;
+    const int requestedBatchSize = batchEdit_ ? batchEdit_->text().toInt() : 1;
+    const int effectiveBatchSize = backendForRequest == QStringLiteral("anomalib_efficientad") ? 1 : requestedBatchSize;
+    QJsonObject parameters;
+    parameters.insert(QStringLiteral("epochs"), epochsEdit_->text().toInt());
+    parameters.insert(QStringLiteral("batchSize"), effectiveBatchSize);
+    parameters.insert(QStringLiteral("imageSize"), imageSizeEdit_->text().toInt());
+    parameters.insert(QStringLiteral("gridSize"), gridSizeEdit_->text().toInt());
+    parameters.insert(QStringLiteral("datasetFormat"), datasetFormat);
     const QString modelPreset = modelPresetCombo_ ? modelPresetCombo_->currentText().trimmed() : QString();
     const QString seedText = backendForRequest == QStringLiteral("smp_semantic_segmentation")
         ? smpTrainArgText(this, QStringLiteral("seed"))
-        : yoloTrainArgText(this, QStringLiteral("seed"));
+        : ((backendForRequest == QStringLiteral("anomalib_patchcore") || backendForRequest == QStringLiteral("anomalib_efficientad"))
+            ? anomalyTrainArgText(this, QStringLiteral("seed"))
+            : yoloTrainArgText(this, QStringLiteral("seed")));
     bool seedOk = false;
     const int seed = seedText.toInt(&seedOk);
     parameters.insert(QStringLiteral("seed"), seedOk ? seed : 42);
@@ -631,7 +718,7 @@ void MainWindow::startTraining()
         backendForRequest,
         modelPreset,
         epochsEdit_ ? epochsEdit_->text().toInt() : 0,
-        batchEdit_ ? batchEdit_->text().toInt() : 0,
+        requestedBatchSize,
         imageSizeEdit_ ? imageSizeEdit_->text().toInt() : 0);
     if (!preflight.value(QStringLiteral("canStart")).toBool()) {
         QStringList blockers;
@@ -671,6 +758,17 @@ void MainWindow::startTraining()
         parameters.insert(QStringLiteral("modelFamily"), QStringLiteral("semantic_segmentation"));
         parameters.insert(QStringLiteral("taskType"), QStringLiteral("semantic_segmentation"));
         parameters.insert(QStringLiteral("exportOnnx"), true);
+    }
+    if (backendForRequest == QStringLiteral("anomalib_patchcore")
+        || backendForRequest == QStringLiteral("anomalib_efficientad")) {
+        const QJsonObject anomalyArgs = anomalyTrainArgsFromUi(this);
+        for (auto it = anomalyArgs.constBegin(); it != anomalyArgs.constEnd(); ++it) {
+            parameters.insert(it.key(), it.value());
+        }
+        parameters.insert(QStringLiteral("modelFamily"), QStringLiteral("anomaly_detection"));
+        parameters.insert(QStringLiteral("taskType"), QStringLiteral("anomaly_detection"));
+        parameters.insert(QStringLiteral("runtime"), QStringLiteral("anomalib_python"));
+        parameters.insert(QStringLiteral("exportFormats"), QJsonArray{});
     }
     if (backendForRequest == QStringLiteral("paddleocr_det_official")
         || backendForRequest == QStringLiteral("paddleocr_rec_official")

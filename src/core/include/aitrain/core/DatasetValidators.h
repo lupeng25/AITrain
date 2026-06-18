@@ -23,12 +23,14 @@ DatasetValidationResult validateYoloDetectionDataset(const QString& datasetPath,
 DatasetValidationResult validateYoloSegmentationDataset(const QString& datasetPath, const QJsonObject& options = {});
 DatasetValidationResult validateYoloObbDataset(const QString& datasetPath, const QJsonObject& options = {});
 DatasetValidationResult validateSemanticSegmentationMaskDataset(const QString& datasetPath, const QJsonObject& options = {});
+DatasetValidationResult validateAnomalyFolderDataset(const QString& datasetPath, const QJsonObject& options = {});
 DatasetValidationResult validatePaddleOcrDetDataset(const QString& datasetPath, const QJsonObject& options = {});
 DatasetValidationResult validatePaddleOcrRecDataset(const QString& datasetPath, const QJsonObject& options = {});
 DatasetSplitResult splitYoloDetectionDataset(const QString& datasetPath, const QString& outputPath, const QJsonObject& options = {});
 DatasetSplitResult splitYoloSegmentationDataset(const QString& datasetPath, const QString& outputPath, const QJsonObject& options = {});
 DatasetSplitResult splitYoloObbDataset(const QString& datasetPath, const QString& outputPath, const QJsonObject& options = {});
 DatasetSplitResult splitSemanticSegmentationMaskDataset(const QString& datasetPath, const QString& outputPath, const QJsonObject& options = {});
+DatasetSplitResult splitAnomalyFolderDataset(const QString& datasetPath, const QString& outputPath, const QJsonObject& options = {});
 DatasetSplitResult splitPaddleOcrDetDataset(const QString& datasetPath, const QString& outputPath, const QJsonObject& options = {});
 DatasetSplitResult splitPaddleOcrRecDataset(const QString& datasetPath, const QString& outputPath, const QJsonObject& options = {});
 

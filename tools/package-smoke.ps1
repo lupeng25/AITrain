@@ -85,6 +85,7 @@ Assert-PathExists "plugins\marketplace" "plugin marketplace directory"
 Assert-PathExists "plugins\models\DatasetInteropPlugin.dll" "dataset interop plugin"
 Assert-PathExists "plugins\models\YoloNativePlugin.dll" "YOLO native plugin"
 Assert-PathExists "plugins\models\SemanticSegmentationPlugin.dll" "semantic segmentation plugin"
+Assert-PathExists "plugins\models\AnomalyDetectionPlugin.dll" "anomaly detection plugin"
 Assert-PathExists "plugins\models\OcrRecNativePlugin.dll" "OCR Rec plugin"
 Assert-PathExists "runtimes\onnxruntime" "ONNX Runtime folder"
 Assert-PathExists "runtimes\tensorrt" "TensorRT folder"
@@ -111,10 +112,12 @@ Assert-PathExists "docs\plugin-package-format.md" "plugin package format docs"
 Assert-PathExists "examples\plugin-package-template\plugin.json" "plugin package template manifest"
 Assert-PathExists "python_trainers\requirements-yolo.txt" "YOLO Python requirements"
 Assert-PathExists "python_trainers\requirements-smp.txt" "SMP Python requirements"
+Assert-PathExists "python_trainers\requirements-anomaly.txt" "Anomalib Python requirements"
 Assert-PathExists "python_trainers\requirements-ocr.txt" "OCR Python requirements"
 Assert-PathExists "python_trainers\yolo\ultralytics_evaluator.py" "Official Ultralytics evaluator"
 Assert-PathExists "python_trainers\semantic_segmentation\smp_trainer.py" "SMP semantic segmentation trainer"
 Assert-PathExists "python_trainers\semantic_segmentation\smp_evaluator.py" "SMP semantic segmentation evaluator"
+Assert-PathExists "python_trainers\anomaly\anomalib_adapter.py" "Anomalib anomaly detection adapter"
 Assert-PathExists "python_trainers\ocr_rec\paddleocr_official_adapter.py" "Official PaddleOCR adapter"
 Assert-PathExists "python_trainers\ocr_det\paddleocr_det_official_adapter.py" "Official PaddleOCR Det adapter"
 Assert-PathExists "python_trainers\ocr_system\paddleocr_system_official_adapter.py" "Official PaddleOCR System adapter"
@@ -134,6 +137,8 @@ Assert-PathExists "tools\phase45-yolo-model-matrix-smoke.ps1" "Phase 45 YOLO mod
 Assert-PathExists "tools\phase-p1-yolo-full-matrix-smoke.ps1" "P1 YOLO full model matrix smoke script"
 Assert-PathExists "tools\phase-yolo26-model-matrix-smoke.ps1" "YOLO26 targeted model matrix smoke script"
 Assert-PathExists "tools\phase-smp-semantic-segmentation-smoke.ps1" "SMP semantic segmentation smoke script"
+Assert-PathExists "tools\phase-anomaly-anomalib-smoke.ps1" "Anomalib anomaly detection smoke script"
+Assert-PathExists "tools\phase-anomaly-mvtec-quality-matrix.ps1" "Anomalib MVTec quality matrix script"
 Assert-PathExists "tools\phase-smp-4090d-gpu-realtest.ps1" "SMP RTX 4090D GPU realtest script"
 Assert-PathExists "tools\phase-smp-oxford-pets-quality-matrix.ps1" "SMP Oxford Pets quality matrix script"
 Assert-PathExists "tools\full-model-lifecycle-matrix.ps1" "full model lifecycle matrix script"
@@ -233,8 +238,8 @@ $pluginSmoke = $pluginSmokeOutput | Select-Object -Last 1 | ConvertFrom-Json
 if (-not $pluginSmoke.ok) {
     throw "Packaged plugin smoke reported ok=false"
 }
-if ($pluginSmoke.pluginCount -lt 4) {
-    throw "Expected at least 4 packaged plugins, found $($pluginSmoke.pluginCount)"
+if ($pluginSmoke.pluginCount -lt 5) {
+    throw "Expected at least 5 packaged plugins, found $($pluginSmoke.pluginCount)"
 }
 Write-Host ("  [ok] packaged plugins={0}" -f $pluginSmoke.pluginCount)
 

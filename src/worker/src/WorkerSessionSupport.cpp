@@ -202,6 +202,10 @@ QString pythonTrainerScriptFileForBackend(const QString& backend)
     if (normalized == QStringLiteral("smp_semantic_segmentation")) {
         return QStringLiteral("python_trainers/semantic_segmentation/smp_trainer.py");
     }
+    if (normalized == QStringLiteral("anomalib_patchcore")
+        || normalized == QStringLiteral("anomalib_efficientad")) {
+        return QStringLiteral("python_trainers/anomaly/anomalib_adapter.py");
+    }
     if (normalized == QStringLiteral("paddleocr_rec_official") || normalized == QStringLiteral("paddleocr_ppocrv4_rec")) {
         return QStringLiteral("python_trainers/ocr_rec/paddleocr_official_adapter.py");
     }
@@ -301,6 +305,9 @@ QString officialTrainingBackendForTask(const QString& taskType)
     if (normalized == QStringLiteral("semantic_segmentation")) {
         return QStringLiteral("smp_semantic_segmentation");
     }
+    if (normalized == QStringLiteral("anomaly_detection")) {
+        return QStringLiteral("anomalib_patchcore");
+    }
     if (normalized == QStringLiteral("ocr_detection")) {
         return QStringLiteral("paddleocr_det_official");
     }
@@ -326,6 +333,10 @@ bool isTrainingBackendCompatibleWithTask(const QString& taskType, const QString&
     }
     if (normalizedTask == QStringLiteral("semantic_segmentation")) {
         return normalizedBackend == QStringLiteral("smp_semantic_segmentation");
+    }
+    if (normalizedTask == QStringLiteral("anomaly_detection")) {
+        return normalizedBackend == QStringLiteral("anomalib_patchcore")
+            || normalizedBackend == QStringLiteral("anomalib_efficientad");
     }
     if (normalizedTask == QStringLiteral("ocr_detection")) {
         return normalizedBackend == QStringLiteral("paddleocr_det_official");
@@ -357,6 +368,9 @@ QString datasetFormatForTrainingTask(const QString& taskType)
     }
     if (normalized == QStringLiteral("semantic_segmentation")) {
         return QStringLiteral("semantic_segmentation_mask");
+    }
+    if (normalized == QStringLiteral("anomaly_detection")) {
+        return QStringLiteral("anomaly_folder");
     }
     if (normalized == QStringLiteral("ocr_detection")) {
         return QStringLiteral("paddleocr_det");
@@ -465,6 +479,8 @@ bool isOfficialWorkerBackendId(const QString& normalized)
         || normalized == QStringLiteral("ultralytics_yolo_segment")
         || normalized == QStringLiteral("ultralytics_yolo_obb")
         || normalized == QStringLiteral("smp_semantic_segmentation")
+        || normalized == QStringLiteral("anomalib_patchcore")
+        || normalized == QStringLiteral("anomalib_efficientad")
         || normalized == QStringLiteral("paddleocr_det_official")
         || normalized == QStringLiteral("paddleocr_rec_official")
         || normalized == QStringLiteral("paddleocr_ppocrv4_rec");
@@ -854,6 +870,73 @@ QJsonObject smpEnvironmentProfile(const QString& pythonExecutable)
     repairHints.append(QStringLiteral("SMP supports ONNX Runtime inference/deployment validation only; NCNN/TensorRT export is not part of the SMP capability scope."));
 
     return makeProfile(QStringLiteral("smp_semantic_segmentation"), QStringLiteral("SMP Semantic Segmentation Profile"), checks, repairHints);
+}
+
+QJsonObject anomalibEnvironmentProfile(const QString& pythonExecutable)
+{
+    QJsonArray checks;
+    QJsonArray repairHints;
+
+    if (pythonExecutable.isEmpty()) {
+        checks.append(profileCheck(
+            QStringLiteral("pythonExecutable"),
+            QStringLiteral("missing"),
+            QStringLiteral("No usable Python executable was found for Anomalib anomaly detection.")));
+        repairHints.append(QStringLiteral("Set training parameter `pythonExecutable` or AITRAIN_PYTHON_EXECUTABLE to a valid Python path."));
+    } else {
+        checks.append(profileCheck(
+            QStringLiteral("pythonExecutable"),
+            QStringLiteral("ok"),
+            QStringLiteral("Python executable is available."),
+            QJsonObject{{QStringLiteral("path"), pythonExecutable}}));
+    }
+
+    checks.append(runModuleProbe(
+        pythonExecutable,
+        QStringLiteral("anomalib"),
+        QStringLiteral("anomalib"),
+        QStringLiteral("Anomalib is missing; PatchCore/EfficientAD anomaly detection will be unavailable.")));
+    checks.append(runModuleProbe(
+        pythonExecutable,
+        QStringLiteral("torch"),
+        QStringLiteral("torch"),
+        QStringLiteral("PyTorch is missing; Anomalib requires torch.")));
+    checks.append(runModuleProbe(
+        pythonExecutable,
+        QStringLiteral("torchvision"),
+        QStringLiteral("torchvision"),
+        QStringLiteral("torchvision is missing; Anomalib dataset transforms require torchvision.")));
+    checks.append(runModuleProbe(
+        pythonExecutable,
+        QStringLiteral("lightning"),
+        QStringLiteral("lightning"),
+        QStringLiteral("Lightning is missing; Anomalib >=2 uses Lightning for training orchestration.")));
+    checks.append(runModuleProbe(
+        pythonExecutable,
+        QStringLiteral("timm"),
+        QStringLiteral("timm"),
+        QStringLiteral("timm is missing; EfficientAD/PatchCore dependencies may require timm.")));
+    checks.append(runModuleProbe(
+        pythonExecutable,
+        QStringLiteral("Pillow"),
+        QStringLiteral("PIL"),
+        QStringLiteral("Pillow is missing; anomaly image loading will be unavailable.")));
+    checks.append(runModuleProbe(
+        pythonExecutable,
+        QStringLiteral("numpy"),
+        QStringLiteral("numpy"),
+        QStringLiteral("numpy is missing; anomaly reports and heatmaps require numpy.")));
+    checks.append(runModuleProbe(
+        pythonExecutable,
+        QStringLiteral("opencv"),
+        QStringLiteral("cv2"),
+        QStringLiteral("opencv-python is missing; anomaly overlays and masks require cv2.")));
+
+    repairHints.append(QStringLiteral("Install Anomalib profile packages: `pip install -r python_trainers/requirements-anomaly.txt`."));
+    repairHints.append(QStringLiteral("EfficientAD requires imagenetDir from parameters, AITRAIN_ANOMALIB_IMAGENET_DIR, or `.deps/anomalib/imagenette`; AITrain will not auto-download external data."));
+    repairHints.append(QStringLiteral("Anomaly v1 deployment boundary is Worker-managed Python/Anomalib artifacts, not AITrain C++ ONNX/TensorRT/NCNN runtime."));
+
+    return makeProfile(QStringLiteral("anomaly_detection"), QStringLiteral("Anomalib Profile"), checks, repairHints);
 }
 
 QJsonObject ocrEnvironmentProfile(const QString& pythonExecutable)

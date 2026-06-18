@@ -674,6 +674,7 @@ add_subdirectory(src/worker)
 add_subdirectory(src/plugins/dataset_interop)
 add_subdirectory(src/plugins/yolo_native)
 add_subdirectory(src/plugins/semantic_segmentation)
+add_subdirectory(src/plugins/anomaly_detection)
 add_subdirectory(src/plugins/ocr_rec)
 
 add_custom_target(aitrain_python_trainers_copy ALL
@@ -734,6 +735,8 @@ install(FILES
     tools/phase-p1-yolo-full-matrix-smoke.ps1
     tools/phase-yolo26-model-matrix-smoke.ps1
     tools/phase-smp-semantic-segmentation-smoke.ps1
+    tools/phase-anomaly-anomalib-smoke.ps1
+    tools/phase-anomaly-mvtec-quality-matrix.ps1
     tools/phase-smp-4090d-gpu-realtest.ps1
     tools/phase-smp-oxford-pets-quality-matrix.ps1
     tools/full-model-lifecycle-matrix.ps1

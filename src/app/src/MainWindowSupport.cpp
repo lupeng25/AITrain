@@ -117,6 +117,9 @@ QString taskTypeLabel(const QString& taskType)
     if (taskType == QStringLiteral("semantic_segmentation")) {
         return uiText("语义分割");
     }
+    if (taskType == QStringLiteral("anomaly_detection")) {
+        return uiText("异常检测");
+    }
     if (taskType == QStringLiteral("ocr_detection")) {
         return uiText("OCR 检测");
     }
@@ -150,6 +153,12 @@ QString backendLabel(const QString& backend)
     }
     if (backend == QStringLiteral("smp_semantic_segmentation")) {
         return uiText("SMP 语义分割（官方）");
+    }
+    if (backend == QStringLiteral("anomalib_patchcore")) {
+        return uiText("Anomalib PatchCore（官方）");
+    }
+    if (backend == QStringLiteral("anomalib_efficientad")) {
+        return uiText("Anomalib EfficientAD（官方）");
     }
     if (backend == QStringLiteral("paddleocr_det_official")) {
         return uiText("PaddleOCR Det（官方/隔离环境）");
@@ -234,6 +243,10 @@ QString modelSummaryText(const QJsonObject& summary)
     const QString metricText = metricValueText(metrics, {
         QStringLiteral("mAP50"),
         QStringLiteral("maskIoU"),
+        QStringLiteral("imageF1"),
+        QStringLiteral("imageAUROC"),
+        QStringLiteral("pixelAUROC"),
+        QStringLiteral("threshold"),
         QStringLiteral("accuracy"),
         QStringLiteral("cer")
     });
@@ -525,6 +538,9 @@ QString inferenceTaskTypeLabel(const QString& taskType)
     if (taskType == QStringLiteral("semantic_segmentation")) {
         return uiText("语义分割");
     }
+    if (taskType == QStringLiteral("anomaly_detection")) {
+        return uiText("异常检测");
+    }
     if (taskType == QStringLiteral("ocr_detection")) {
         return uiText("OCR 检测");
     }
@@ -550,6 +566,9 @@ QString datasetFormatLabel(const QString& format)
     }
     if (format == QStringLiteral("semantic_segmentation_mask")) {
         return uiText("语义分割 Mask PNG");
+    }
+    if (format == QStringLiteral("anomaly_folder")) {
+        return uiText("异常检测 Folder");
     }
     if (format == QStringLiteral("paddleocr_det")) {
         return QStringLiteral("PaddleOCR Det");
@@ -582,6 +601,9 @@ QString defaultBackendForTask(const QString& taskType)
     }
     if (taskType == QStringLiteral("semantic_segmentation")) {
         return QStringLiteral("smp_semantic_segmentation");
+    }
+    if (taskType == QStringLiteral("anomaly_detection")) {
+        return QStringLiteral("anomalib_patchcore");
     }
     if (taskType == QStringLiteral("ocr_detection")) {
         return QStringLiteral("paddleocr_det_official");
@@ -644,6 +666,20 @@ QStringList smpSemanticModelPresets()
     };
 }
 
+QStringList anomalibPatchCorePresets()
+{
+    return {
+        QStringLiteral("anomalib_patchcore_wide_resnet50_2")
+    };
+}
+
+QStringList anomalibEfficientAdPresets()
+{
+    return {
+        QStringLiteral("anomalib_efficientad_s")
+    };
+}
+
 QStringList yoloObbModelPresets()
 {
     QStringList presets;
@@ -689,6 +725,12 @@ QStringList modelPresetItemsForBackend(const QString& backend)
     if (normalized == QStringLiteral("smp_semantic_segmentation")) {
         return smpSemanticModelPresets();
     }
+    if (normalized == QStringLiteral("anomalib_patchcore")) {
+        return anomalibPatchCorePresets();
+    }
+    if (normalized == QStringLiteral("anomalib_efficientad")) {
+        return anomalibEfficientAdPresets();
+    }
     if (normalized == QStringLiteral("paddleocr_det_official")) {
         return {
             QStringLiteral("PP-OCRv5_mobile_det"),
@@ -714,6 +756,8 @@ QStringList modelPresetItemsForBackend(const QString& backend)
 
     QStringList presets = yoloModelPresetItems();
     presets << smpSemanticModelPresets()
+            << anomalibPatchCorePresets()
+            << anomalibEfficientAdPresets()
             << QStringLiteral("PP-OCRv5_mobile_det")
             << QStringLiteral("PP-OCRv5_server_det")
             << QStringLiteral("PP-OCRv6_tiny_det")
@@ -850,6 +894,12 @@ QString defaultModelForBackend(const QString& backend)
     if (backend == QStringLiteral("smp_semantic_segmentation")) {
         return QStringLiteral("smp_unet_resnet34");
     }
+    if (backend == QStringLiteral("anomalib_patchcore")) {
+        return QStringLiteral("anomalib_patchcore_wide_resnet50_2");
+    }
+    if (backend == QStringLiteral("anomalib_efficientad")) {
+        return QStringLiteral("anomalib_efficientad_s");
+    }
     if (backend == QStringLiteral("ultralytics_yolo_segment")) {
         return QStringLiteral("yolov8n-seg.yaml");
     }
@@ -881,6 +931,12 @@ QString trainingBackendDescription(const QString& backend)
     }
     if (backend == QStringLiteral("smp_semantic_segmentation")) {
         return uiText("当前模型能力：SMP 专用语义分割。适合 Mask PNG class-id 数据，输出 best.pt、best.onnx、训练/评估报告，并支持 ONNX Runtime 单图 mask overlay 和 benchmark；SMP 不需要 NCNN/TensorRT 导出。");
+    }
+    if (backend == QStringLiteral("anomalib_patchcore")) {
+        return uiText("当前模型能力：Anomalib PatchCore 异常检测。适合 anomaly_folder/MVTec 兼容目录，输出 checkpoint、anomaly_sidecar、训练/评估报告和热力图；v1 部署边界是 Worker-managed Python/Anomalib，不是 C++ ONNX/TensorRT/NCNN runtime。");
+    }
+    if (backend == QStringLiteral("anomalib_efficientad")) {
+        return uiText("当前模型能力：Anomalib EfficientAD 异常检测。需要 imagenetDir、AITRAIN_ANOMALIB_IMAGENET_DIR 或 .deps/anomalib/imagenette；Anomalib 2.5 下训练 batchSize 固定为 1，缺失外部数据时 blocked，不自动下载。");
     }
     if (backend == QStringLiteral("paddleocr_rec_official") || backend == QStringLiteral("paddleocr_ppocrv4_rec")) {
         return uiText("当前模型能力：官方 PaddleOCR PP-OCRv4/v5/v6 Rec 适配器。通过模型预设选择版本，适合隔离 OCR Python 环境，记录 train/export/predict 命令、checkpoint、inference model 和官方预测报告。");
@@ -933,6 +989,9 @@ QString expectedTrainingTaskForDatasetFormat(const QString& format)
     if (format == QStringLiteral("semantic_segmentation_mask")) {
         return QStringLiteral("semantic_segmentation");
     }
+    if (format == QStringLiteral("anomaly_folder")) {
+        return QStringLiteral("anomaly_detection");
+    }
     if (format == QStringLiteral("paddleocr_det")) {
         return QStringLiteral("ocr_detection");
     }
@@ -957,6 +1016,10 @@ bool isTrainingBackendCompatible(const QString& format, const QString& backend)
     }
     if (format == QStringLiteral("semantic_segmentation_mask")) {
         return normalized == QStringLiteral("smp_semantic_segmentation");
+    }
+    if (format == QStringLiteral("anomaly_folder")) {
+        return normalized == QStringLiteral("anomalib_patchcore")
+            || normalized == QStringLiteral("anomalib_efficientad");
     }
     if (format == QStringLiteral("paddleocr_det")) {
         return normalized == QStringLiteral("paddleocr_det_official");
@@ -1010,6 +1073,8 @@ QJsonObject trainingPreflightReport(
     }
     const QString normalizedBackend = backend.trimmed().toLower();
     const QString normalizedModel = modelPreset.trimmed().toLower();
+    const bool efficientAdBackend = normalizedBackend == QStringLiteral("anomalib_efficientad");
+    const int effectiveBatchSize = efficientAdBackend ? 1 : batchSize;
     const Yolo26TargetedMatrixStatus yolo26Status = yolo26TargetedMatrixStatus();
     const bool yolo26Model = normalizedBackend.startsWith(QStringLiteral("ultralytics_yolo"))
         && normalizedModel.startsWith(QStringLiteral("yolo26"));
@@ -1040,7 +1105,11 @@ QJsonObject trainingPreflightReport(
     if (epochs <= 0) {
         blockers.append(QStringLiteral("epochs_invalid"));
     }
-    if (batchSize <= 0) {
+    if (efficientAdBackend && batchSize != 1) {
+        warnings.append(QStringLiteral("efficientad_batch_size_forced_to_1"));
+        nextActions.append(QStringLiteral("use_efficientad_batch_size_1"));
+    }
+    if (effectiveBatchSize <= 0) {
         blockers.append(QStringLiteral("batch_size_invalid"));
     }
     if (imageSize <= 0) {
@@ -1079,7 +1148,10 @@ QJsonObject trainingPreflightReport(
         preflight.insert(QStringLiteral("yolo26PythonExecutable"), yolo26Status.pythonExecutable);
     }
     preflight.insert(QStringLiteral("epochs"), epochs);
-    preflight.insert(QStringLiteral("batchSize"), batchSize);
+    preflight.insert(QStringLiteral("batchSize"), effectiveBatchSize);
+    if (effectiveBatchSize != batchSize) {
+        preflight.insert(QStringLiteral("requestedBatchSize"), batchSize);
+    }
     preflight.insert(QStringLiteral("imageSize"), imageSize);
     preflight.insert(QStringLiteral("blockers"), blockers);
     preflight.insert(QStringLiteral("warnings"), warnings);
@@ -1303,6 +1375,14 @@ QString detectDatasetFormatFromPath(const QString& path)
         && QDir(root.filePath(QStringLiteral("masks/val"))).exists()) {
         return QStringLiteral("semantic_segmentation_mask");
     }
+    if (QDir(root.filePath(QStringLiteral("train/good"))).exists()) {
+        return QStringLiteral("anomaly_folder");
+    }
+    if (QDir(root.filePath(QStringLiteral("test/good"))).exists()
+        && (QDir(root.filePath(QStringLiteral("ground_truth"))).exists()
+            || QDir(root.filePath(QStringLiteral("masks/test/anomaly"))).exists())) {
+        return QStringLiteral("anomaly_folder");
+    }
 
     if (!QFileInfo::exists(root.filePath(QStringLiteral("data.yaml")))) {
         return QString();
@@ -1446,6 +1526,15 @@ QString inferenceSummaryFromPredictions(const QString& predictionsPath, const QJ
             if (!classParts.isEmpty()) {
                 detail.append(QStringLiteral("，%1").arg(classParts.join(QStringLiteral(", "))));
             }
+        } else if (taskType == QStringLiteral("anomaly_detection")) {
+            const double score = first.value(QStringLiteral("anomalyScore")).toDouble();
+            const double threshold = first.value(QStringLiteral("threshold")).toDouble();
+            const QString decision = first.value(QStringLiteral("decision")).toString(QStringLiteral("unknown")).toUpper();
+            detail = uiText("%1，score %2 / threshold %3")
+                .arg(decision)
+                .arg(score, 0, 'f', 4)
+                .arg(threshold, 0, 'f', 4);
+            resultCount = 1;
         } else if (taskType == QStringLiteral("ocr_recognition")) {
             const QString text = first.value(QStringLiteral("text")).toString();
             detail = text.isEmpty()

@@ -144,6 +144,10 @@ void WorkerSession::startTraining(const aitrain::TrainingRequest& request)
         runSemanticSegmentationTraining();
         return;
     }
+    if (request_.taskType.compare(QStringLiteral("anomaly_detection"), Qt::CaseInsensitive) == 0) {
+        runAnomalyDetectionTraining();
+        return;
+    }
     if (request_.taskType.compare(QStringLiteral("ocr_recognition"), Qt::CaseInsensitive) == 0
         || request_.taskType.compare(QStringLiteral("ocr_detection"), Qt::CaseInsensitive) == 0
         || request_.taskType.compare(QStringLiteral("ocr"), Qt::CaseInsensitive) == 0) {
@@ -220,6 +224,18 @@ void WorkerSession::runSemanticSegmentationTraining()
     }
     failWithDetails(
         QStringLiteral("Semantic segmentation training requires the SMP Python backend. Use smp_semantic_segmentation."),
+        QStringLiteral("unsupported_training_backend"),
+        QJsonObject{{QStringLiteral("taskType"), request_.taskType}, {QStringLiteral("outputPath"), request_.outputPath}});
+}
+
+void WorkerSession::runAnomalyDetectionTraining()
+{
+    if (shouldUsePythonTrainer()) {
+        runPythonTrainer();
+        return;
+    }
+    failWithDetails(
+        QStringLiteral("Anomaly detection training requires the Anomalib Python backend. Use anomalib_patchcore or anomalib_efficientad."),
         QStringLiteral("unsupported_training_backend"),
         QJsonObject{{QStringLiteral("taskType"), request_.taskType}, {QStringLiteral("outputPath"), request_.outputPath}});
 }

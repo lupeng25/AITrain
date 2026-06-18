@@ -18,6 +18,7 @@ Run the unified smoke script from the repository root:
 .\tools\phase-ppocrv6-model-matrix-smoke.ps1
 .\tools\phase-smp-semantic-segmentation-smoke.ps1
 .\tools\phase-smp-4090d-gpu-realtest.ps1
+.\tools\phase-anomaly-anomalib-smoke.ps1
 .\tools\phase-obb-ultralytics-smoke.ps1 -Epochs 1 -ImageSize 640 -BatchSize 2 -Device cpu
 .\tools\phase-obb-dota-quality-matrix.ps1 -Dataset DOTA8 -Epochs 30 -Device 0
 .\tools\acceptance-smoke.ps1 -TensorRT
@@ -63,6 +64,17 @@ For OBB rotated-box detection, use:
 ```
 
 OBB v1 accepts `taskType=obb_detection`, `datasetFormat=yolo_obb`, `trainingBackend=ultralytics_yolo_obb`, and `modelFamily=yolo_obb`. Training, first ONNX export, and evaluation are official Ultralytics OBB operations. Packaged inference, overlay, benchmark, and deployment validation use AITrain C++ ONNX Runtime with rotated quadrilateral output. NCNN is not an OBB v1 deployment target and must be reported as unsupported/rejected, not failed acceptance. TensorRT engine export is optional status evidence only. Public DOTA/DOTA-subset matrix results are workflow/benchmark evidence and must not be represented as customer-domain industrial precision.
+
+For Anomalib anomaly detection, use:
+
+```powershell
+.\tools\phase-anomaly-anomalib-smoke.ps1
+.\tools\phase-anomaly-mvtec-quality-matrix.ps1 -PythonExecutable .\.deps\envs\anomalib\python.exe
+```
+
+Anomaly v1 accepts `taskType=anomaly_detection`, `datasetFormat=anomaly_folder`, `trainingBackend=anomalib_patchcore|anomalib_efficientad`, `modelFamily=anomaly_detection`, and `runtime=anomalib_python`. The smoke generates a minimal anomaly folder, compiles `python_trainers\anomaly\anomalib_adapter.py`, and only runs PatchCore/EfficientAD train/evaluate/infer/benchmark when Anomalib dependencies are available. Missing Anomalib or EfficientAD `imagenetDir` must be recorded as `blocked`, not passed. EfficientAD uses Anomalib 2.5 `modelSize=small|medium` and training `batchSize=1`; legacy `s/m` input may be accepted only as normalized compatibility input. `.ckpt` inference must route through Anomalib `Engine.predict(..., ckpt_path=...)`. This path validates Worker-managed Python/Anomalib artifacts and does not claim AITrain C++ ONNX/TensorRT/NCNN anomaly deployment.
+
+`phase-anomaly-mvtec-quality-matrix.ps1` is the public MVTec evidence lane. It uses `bottle`, `hazelnut`, and `leather` with PatchCore and EfficientAD, writes `anomaly_mvtec_quality_matrix_summary.json/.csv/.md` under `.deps\anomaly-mvtec-quality-matrix`, and keeps each row's train/evaluate/infer/benchmark requests, logs, reports, heatmap, overlay, mask, and benchmark output. MVTec data is not committed; place the official archive at `.deps\datasets\downloads\mvtec_ad\mvtec_anomaly_detection.tar.xz`, pass `-MvtecArchiveUrl`, or pre-materialize categories under `.deps\datasets\materialized\mvtec-ad\<category>`. The script can materialize from the official archive, so manual pre-extraction is optional. The 2026-06-18 local default matrix passed 6/6 rows and wrote `.deps\anomaly-mvtec-quality-matrix\anomaly_mvtec_quality_matrix_summary.json`. The matrix remains public-dataset workflow evidence, not customer-domain production precision.
 
 ## Phase 49 Lite: Delivery Closeout Workbench
 

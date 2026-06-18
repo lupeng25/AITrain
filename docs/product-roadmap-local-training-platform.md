@@ -27,13 +27,13 @@ AITrain Studio 已完成 Worker、SQLite、任务记录、artifact 浏览、YOLO
 1. 收集外部 clean Windows package acceptance 证据，除非本 lane 明确继续 defer。
 2. 只在明确重开时做 package-root TensorRT rerun；旧 GPU 保持 `hardware-blocked`。
 3. 用客户域数据执行 OCR 验收；public Total-Text / generated smoke 不能作为生产证明。
-4. 下一阶段工业模型扩展只覆盖异常检测/定位、OBB、专用语义分割；专用语义分割首版已选择 SMP 落地，OBB v1 已通过本地 smoke/质量矩阵证据。
+4. 下一阶段工业模型扩展只覆盖异常检测/定位、OBB、专用语义分割；专用语义分割首版已选择 SMP 落地，OBB v1 已通过本地 smoke/质量矩阵证据，异常检测 v1 已选择 Anomalib PatchCore + EfficientAD 并通过本地 public MVTec 默认三类质量矩阵。
 
-Phase 40 backlog 的优先级已重新确认：异常检测/定位、OBB、专用语义分割作为下一阶段开发方向；其中专用语义分割已先落地 SMP 首版闭环，并通过本机 RTX 4090D GPU realtest；OBB v1 走官方 Ultralytics OBB + AITrain ONNX Runtime 旋转框部署路径，并在 2026-06-17 通过 `tools\phase-obb-ultralytics-smoke.ps1` 与 `tools\phase-obb-dota-quality-matrix.ps1` 本地验证。OBB 现有证据是 public DOTA/workflow evidence，不能替代客户域工业精度证明。图像分类、姿态/关键点、YOLO-World、YOLOE、3D/RGB-D、视频/时序以及云/多人协作不属于当前项目方向，除非新的范围决策明确加入。
+Phase 40 backlog 的优先级已重新确认：异常检测/定位、OBB、专用语义分割作为下一阶段开发方向；其中专用语义分割已先落地 SMP 首版闭环，并通过本机 RTX 4090D GPU realtest；OBB v1 走官方 Ultralytics OBB + AITrain ONNX Runtime 旋转框部署路径，并在 2026-06-17 通过 `tools\phase-obb-ultralytics-smoke.ps1` 与 `tools\phase-obb-dota-quality-matrix.ps1` 本地验证；异常检测 v1 走 `taskType=anomaly_detection`、`datasetFormat=anomaly_folder`、`trainingBackend=anomalib_patchcore|anomalib_efficientad`、`runtime=anomalib_python`，不引入 C++ ONNX/TensorRT/NCNN anomaly runtime，并在 2026-06-18 通过 public MVTec 默认三类矩阵 6/6。OBB 现有证据是 public DOTA/workflow evidence，异常检测现有证据是 public MVTec workflow/quality evidence，二者都不能替代客户域工业精度证明。图像分类、姿态/关键点、YOLO-World、YOLOE、3D/RGB-D、视频/时序以及云/多人协作不属于当前项目方向，除非新的范围决策明确加入。
 
 下一阶段目标不是堆 demo 后端，而是把工业检测常见任务纳入现有闭环：
 
-- 异常检测/定位：优先考虑 PatchCore / EfficientAD / PaDiM / FastFlow 等 Anomalib 或同等级维护良好的 Python adapter 路径，支持仅良品训练、异常分数、热力图、阈值、OK/NG、mask/overlay、评估和交付报告。
+- 异常检测/定位：首版已选 Anomalib PatchCore + EfficientAD。PatchCore 是默认后端；EfficientAD 需要显式 `imagenetDir`、`AITRAIN_ANOMALIB_IMAGENET_DIR` 或 `.deps/anomalib/imagenette`，Anomalib 2.5 训练 batchSize 固定为 1，缺失外部数据时 blocked，不自动下载。v1 支持仅良品训练、异常分数、热力图、阈值、OK/NG、mask/overlay、评估和交付报告，但运行边界固定为 Worker-managed Python/Anomalib artifacts；当前已有 public MVTec 默认三类矩阵证据，不等同客户域工业精度。
 - OBB：基于官方 Ultralytics OBB 能力，旋转框数据集校验、训练、ONNX 导出、官方 `val()` 评估、AITrain C++ ONNX Runtime 旋转框推理/overlay/benchmark/部署验证、GUI 入口和脚本闭环已形成本地证据；NCNN 不纳入 OBB v1，TensorRT engine export 只记录可选状态，不作为必过项，TensorRT runtime OBB inference 不宣称为通过能力。不要把普通 YOLO bbox 结果伪装成 OBB，也不要把 public DOTA/workflow evidence 说成客户域工业精度证明。
 - 专用语义分割：面向像素级工业缺陷/区域分割，首版使用 `segmentation_models.pytorch`，与现有 YOLO 实例分割区分，输出 per-pixel mask、面积/类别像素统计、overlay、评估和部署限制；当前已有 RTX 4090D GPU realtest 证据，Mask2Former 等路线仍可作为后续扩展候选。
 
@@ -186,7 +186,7 @@ Phase 40 backlog 的优先级已重新确认：异常检测/定位、OBB、专�
 
 下一阶段开发方向：
 
-- 异常检测/定位：新增工业 anomaly detection / localization 工作流，优先走 Worker-managed Python adapter，不在 GUI 进程内训练。首批能力应覆盖数据集结构、正常样本训练、异常分数、热力图、阈值选择、OK/NG 分类、mask/overlay 产物、评估报告、benchmark 和交付限制。
+- 异常检测/定位：工业 anomaly detection / localization 工作流 v1 已接入 Worker-managed Python adapter，不在 GUI 进程内训练。首批能力覆盖 `anomaly_folder` 数据结构、正常样本训练、异常分数、热力图、阈值选择、OK/NG 分类、mask/overlay 产物、评估报告、benchmark 和交付限制；2026-06-18 默认 public MVTec 三类矩阵已通过 6/6，后续重点是目标域数据指标和更完整的客户域像素级评估证据。
 - OBB：旋转框数据集、训练、评估、导出和结果展示闭环已通过本地 smoke/质量矩阵验证。首选官方 Ultralytics OBB 路径；报告必须记录官方来源、模型 preset、输入格式、评估指标、ONNX Runtime 部署证据、TensorRT 可选状态、NCNN v1 不支持边界和失败原因。客户域工业可用性仍需目标域数据验证。
 - 专用语义分割：新增区别于 YOLO 实例分割的 semantic segmentation 路线，用于裂纹、污渍、涂层、焊缝、气孔等像素级区域检测。首批实现已选择 SMP，覆盖 Mask PNG 校验/划分、SMP 训练、评估、ONNX 导出、ONNX Runtime 推理/overlay、benchmark、GUI 入口和 package smoke；NCNN/TensorRT 导出不属于 SMP 能力范围，也不是 SMP 验收要求。
 

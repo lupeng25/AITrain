@@ -73,6 +73,7 @@ private:
     void runDetectionTraining();
     void runSegmentationTraining();
     void runSemanticSegmentationTraining();
+    void runAnomalyDetectionTraining();
     void runOcrRecTraining();
     bool shouldUsePythonTrainer() const;
     void runPythonTrainer();
@@ -93,6 +94,7 @@ private:
         bool ok = false;
         QString error;
         QString checkpointPath;
+        QString anomalySidecarPath;
         QString onnxPath;
         QString reportPath;
         QJsonObject completedPayload;

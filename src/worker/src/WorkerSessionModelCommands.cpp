@@ -1274,6 +1274,157 @@ void WorkerSession::runInference(const QJsonObject& payload)
         return;
     }
 
+    const QFileInfo checkpointInfo(checkpointPath);
+    const QString siblingAnomalySidecar = checkpointInfo.absoluteDir().filePath(QStringLiteral("anomaly_sidecar.json"));
+    const bool anomalyModel = checkpointInfo.fileName().compare(QStringLiteral("anomaly_sidecar.json"), Qt::CaseInsensitive) == 0
+        || QFileInfo::exists(siblingAnomalySidecar)
+        || payload.value(QStringLiteral("runtime")).toString() == QStringLiteral("anomalib_python")
+        || payload.value(QStringLiteral("modelFamily")).toString() == QStringLiteral("anomaly_detection");
+    if (anomalyModel) {
+        const QString sidecarPath = checkpointInfo.fileName().compare(QStringLiteral("anomaly_sidecar.json"), Qt::CaseInsensitive) == 0
+            ? checkpointInfo.absoluteFilePath()
+            : siblingAnomalySidecar;
+        QJsonObject sidecar;
+        QFile sidecarFile(sidecarPath);
+        if (sidecarFile.open(QIODevice::ReadOnly)) {
+            const QJsonDocument document = QJsonDocument::fromJson(sidecarFile.readAll());
+            if (document.isObject()) {
+                sidecar = document.object();
+            }
+        }
+        const QString backend = sidecar.value(QStringLiteral("trainingBackend")).toString(QStringLiteral("anomalib_patchcore"));
+        QJsonObject pythonOptions = payload.value(QStringLiteral("options")).toObject();
+        if (payload.contains(QStringLiteral("pythonExecutable"))) {
+            pythonOptions.insert(QStringLiteral("pythonExecutable"), payload.value(QStringLiteral("pythonExecutable")));
+        }
+        const QString pythonExecutable = firstUsablePythonExecutable(pythonOptions);
+        if (pythonExecutable.isEmpty()) {
+            fail(QStringLiteral("Anomalib Python inference requires a usable Python executable. Configure pythonExecutable or AITRAIN_PYTHON_EXECUTABLE."));
+            return;
+        }
+        const QString adapterScript = pythonTrainerScriptPath(QJsonObject{}, backend);
+        if (!QFileInfo::exists(adapterScript)) {
+            fail(QStringLiteral("Anomalib adapter script not found: %1").arg(adapterScript));
+            return;
+        }
+        QJsonObject adapterRequest;
+        adapterRequest.insert(QStringLiteral("protocolVersion"), 1);
+        adapterRequest.insert(QStringLiteral("mode"), QStringLiteral("infer"));
+        adapterRequest.insert(QStringLiteral("taskId"), taskId);
+        adapterRequest.insert(QStringLiteral("modelPath"), QFileInfo::exists(sidecarPath) ? sidecarPath : checkpointPath);
+        adapterRequest.insert(QStringLiteral("checkpointPath"), checkpointPath);
+        adapterRequest.insert(QStringLiteral("imagePath"), imagePath);
+        adapterRequest.insert(QStringLiteral("outputPath"), outputPath);
+        adapterRequest.insert(QStringLiteral("backend"), backend);
+        QJsonObject adapterOptions = payload.value(QStringLiteral("options")).toObject();
+        adapterOptions.insert(QStringLiteral("runtime"), QStringLiteral("anomalib_python"));
+        adapterRequest.insert(QStringLiteral("options"), adapterOptions);
+
+        const QString adapterRequestPath = QDir(outputPath).filePath(QStringLiteral("anomalib_inference_request.json"));
+        QFile adapterRequestFile(adapterRequestPath);
+        if (!adapterRequestFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            fail(QStringLiteral("Cannot write Anomalib inference request: %1").arg(adapterRequestPath));
+            return;
+        }
+        adapterRequestFile.write(QJsonDocument(adapterRequest).toJson(QJsonDocument::Indented));
+        adapterRequestFile.close();
+
+        QElapsedTimer elapsed;
+        elapsed.start();
+        QProcess process;
+        QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+        environment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
+        environment.insert(QStringLiteral("PYTHONIOENCODING"), QStringLiteral("utf-8"));
+        configurePackagedPythonEnvironment(&environment);
+        process.setProcessEnvironment(environment);
+        process.setProgram(pythonExecutable);
+        process.setArguments(QStringList() << QStringLiteral("-u") << adapterScript << QStringLiteral("--request") << adapterRequestPath << QStringLiteral("--mode") << QStringLiteral("infer"));
+        process.setProcessChannelMode(QProcess::MergedChannels);
+        process.start();
+        if (!process.waitForStarted(5000)) {
+            fail(QStringLiteral("Cannot start Anomalib inference adapter: %1").arg(process.errorString()));
+            return;
+        }
+        QByteArray processOutput;
+        while (!process.waitForFinished(100)) {
+            processOutput.append(process.readAll());
+            if (pollPendingCancel(0)) {
+                process.kill();
+                process.waitForFinished(1500);
+                sendCanceledAndFinish(taskId, QStringLiteral("Canceled by user"));
+                return;
+            }
+        }
+        processOutput.append(process.readAll());
+        QFile logFile(QDir(outputPath).filePath(QStringLiteral("anomalib_inference.log")));
+        if (logFile.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+            logFile.write(processOutput);
+        }
+
+        const QString predictionsPath = QDir(outputPath).filePath(QStringLiteral("inference_predictions.json"));
+        QFile predictionsFile(predictionsPath);
+        QJsonObject predictionsDocument;
+        if (predictionsFile.open(QIODevice::ReadOnly)) {
+            predictionsDocument = QJsonDocument::fromJson(predictionsFile.readAll()).object();
+        }
+        if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0 || !predictionsDocument.value(QStringLiteral("ok")).toBool(false)) {
+            fail(predictionsDocument.value(QStringLiteral("message")).toString(QStringLiteral("Anomalib Python inference failed. Inspect anomalib_inference.log.")));
+            return;
+        }
+
+        const QJsonArray predictions = predictionsDocument.value(QStringLiteral("predictions")).toArray();
+        const QJsonObject firstPrediction = predictions.isEmpty() ? QJsonObject{} : predictions.first().toObject();
+        const QString overlayPath = firstPrediction.value(QStringLiteral("overlayPath")).toString();
+        const QString heatmapPath = firstPrediction.value(QStringLiteral("heatmapPath")).toString();
+        const QString maskPath = firstPrediction.value(QStringLiteral("maskPath")).toString();
+
+        QJsonObject progressPayload;
+        progressPayload.insert(QStringLiteral("taskId"), taskId);
+        progressPayload.insert(QStringLiteral("percent"), 100);
+        progressPayload.insert(QStringLiteral("message"), QStringLiteral("异常检测推理完成。"));
+        send(wp::event::progress(), progressPayload);
+
+        for (const auto& item : {
+                 qMakePair(QStringLiteral("inference_predictions"), predictionsPath),
+                 qMakePair(QStringLiteral("inference_overlay"), overlayPath),
+                 qMakePair(QStringLiteral("inference_heatmap"), heatmapPath),
+                 qMakePair(QStringLiteral("inference_mask"), maskPath)}) {
+            if (item.second.isEmpty()) {
+                continue;
+            }
+            QJsonObject artifact;
+            artifact.insert(QStringLiteral("taskId"), taskId);
+            artifact.insert(QStringLiteral("kind"), item.first);
+            artifact.insert(QStringLiteral("path"), item.second);
+            artifact.insert(QStringLiteral("message"), QStringLiteral("Anomaly inference artifact"));
+            send(wp::event::artifact(), artifact);
+        }
+
+        QJsonObject response;
+        response.insert(QStringLiteral("ok"), true);
+        response.insert(QStringLiteral("taskId"), taskId);
+        response.insert(QStringLiteral("checkpointPath"), checkpointPath);
+        response.insert(QStringLiteral("imagePath"), imagePath);
+        response.insert(QStringLiteral("taskType"), QStringLiteral("anomaly_detection"));
+        response.insert(QStringLiteral("runtime"), QStringLiteral("anomalib_python"));
+        response.insert(QStringLiteral("predictionsPath"), predictionsPath);
+        response.insert(QStringLiteral("overlayPath"), overlayPath);
+        response.insert(QStringLiteral("heatmapPath"), heatmapPath);
+        response.insert(QStringLiteral("maskPath"), maskPath);
+        response.insert(QStringLiteral("elapsedMs"), static_cast<int>(elapsed.elapsed()));
+        response.insert(QStringLiteral("predictionCount"), predictions.size());
+        response.insert(QStringLiteral("finishedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+        send(wp::event::inferenceResult(), response);
+
+        QJsonObject completed;
+        completed.insert(QStringLiteral("taskId"), taskId);
+        completed.insert(QStringLiteral("message"), QStringLiteral("Inference completed"));
+        running_ = false;
+        send(wp::event::completed(), completed);
+        finishSession();
+        return;
+    }
+
     QElapsedTimer elapsed;
     elapsed.start();
     QString error;

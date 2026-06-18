@@ -787,6 +787,118 @@ private slots:
         QCOMPARE(validation.sampleCount, 2);
     }
 
+    void anomalyFolderDatasetValidation()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.path();
+        writeTinyPng(QDir(root).filePath(QStringLiteral("train/good/a.png")));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("val/good/b.png")));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("test/anomaly/ng.png")));
+        writeTinyMaskPng(QDir(root).filePath(QStringLiteral("masks/test/anomaly/ng.png")));
+
+        const aitrain::DatasetValidationResult valid = aitrain::validateAnomalyFolderDataset(root);
+        QVERIFY2(valid.ok, qPrintable(valid.errors.join(QStringLiteral("\n"))));
+        const QJsonObject metadata = valid.toJson().value(QStringLiteral("metadata")).toObject();
+        QCOMPARE(valid.sampleCount, 3);
+        QCOMPARE(metadata.value(QStringLiteral("normalCount")).toInt(), 2);
+        QCOMPARE(metadata.value(QStringLiteral("anomalyCount")).toInt(), 1);
+        QCOMPARE(metadata.value(QStringLiteral("maskCount")).toInt(), 1);
+        QVERIFY(!metadata.value(QStringLiteral("evaluationLimited")).toBool());
+    }
+
+    void anomalyFolderMvtecAliasValidation()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.path();
+        writeTinyPng(QDir(root).filePath(QStringLiteral("train/good/a.png")));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("test/good/b.png")));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("test/scratch/ng.png")));
+        writeTinyMaskPng(QDir(root).filePath(QStringLiteral("ground_truth/scratch/ng_mask.png")));
+
+        const aitrain::DatasetValidationResult valid = aitrain::validateAnomalyFolderDataset(root);
+        QVERIFY2(valid.ok, qPrintable(valid.errors.join(QStringLiteral("\n"))));
+        const QJsonObject metadata = valid.toJson().value(QStringLiteral("metadata")).toObject();
+        QCOMPARE(metadata.value(QStringLiteral("anomalyCount")).toInt(), 1);
+        QCOMPARE(metadata.value(QStringLiteral("maskCount")).toInt(), 1);
+    }
+
+    void anomalyFolderMvtecSameStemMissingMaskWarns()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.path();
+        writeTinyPng(QDir(root).filePath(QStringLiteral("train/good/a.png")));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("test/scratch/000.png")));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("test/crack/000.png")));
+        writeTinyMaskPng(QDir(root).filePath(QStringLiteral("ground_truth/scratch/000_mask.png")));
+
+        const aitrain::DatasetValidationResult valid = aitrain::validateAnomalyFolderDataset(root);
+        QVERIFY2(valid.ok, qPrintable(valid.errors.join(QStringLiteral("\n"))));
+        QVERIFY(jsonArrayContainsCode(valid.toJson().value(QStringLiteral("issues")).toArray(), QStringLiteral("missing_anomaly_mask")));
+    }
+
+    void anomalyFolderGoodOnlyLimited()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.path();
+        writeTinyPng(QDir(root).filePath(QStringLiteral("train/good/a.png")));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("test/good/b.png")));
+
+        const aitrain::DatasetValidationResult valid = aitrain::validateAnomalyFolderDataset(root);
+        QVERIFY2(valid.ok, qPrintable(valid.errors.join(QStringLiteral("\n"))));
+        const QJsonObject metadata = valid.toJson().value(QStringLiteral("metadata")).toObject();
+        QVERIFY(metadata.value(QStringLiteral("evaluationLimited")).toBool());
+        QVERIFY(jsonArrayContainsCode(valid.toJson().value(QStringLiteral("issues")).toArray(), QStringLiteral("good_only_dataset")));
+    }
+
+    void anomalyFolderMaskMismatchWarns()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.path();
+        writeTinyPng(QDir(root).filePath(QStringLiteral("train/good/a.png")));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("test/anomaly/ng.png")));
+        writeTinyMaskPng(QDir(root).filePath(QStringLiteral("masks/test/anomaly/other.png")));
+
+        const aitrain::DatasetValidationResult valid = aitrain::validateAnomalyFolderDataset(root);
+        QVERIFY2(valid.ok, qPrintable(valid.errors.join(QStringLiteral("\n"))));
+        QVERIFY(jsonArrayContainsCode(valid.toJson().value(QStringLiteral("issues")).toArray(), QStringLiteral("missing_anomaly_mask")));
+    }
+
+    void anomalyFolderQualityAcceptsMaskSuffix()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QTemporaryDir output;
+        QVERIFY(output.isValid());
+        const QString root = dir.path();
+        writeTinyPng(QDir(root).filePath(QStringLiteral("train/good/a.png")));
+        writeTinyPng(QDir(root).filePath(QStringLiteral("test/anomaly/ng.png")));
+        writeTinyMaskPng(QDir(root).filePath(QStringLiteral("masks/test/anomaly/ng_mask.png")));
+
+        const aitrain::WorkflowResult report = aitrain::curateDatasetQualityReport(
+            root,
+            output.path(),
+            QStringLiteral("anomaly_folder"),
+            QJsonObject{});
+        QVERIFY2(report.ok, qPrintable(report.error));
+        const QJsonArray issues = report.payload.value(QStringLiteral("issues")).toArray();
+        QVERIFY(!jsonArrayContainsCode(issues, QStringLiteral("missing_anomaly_mask")));
+        QVERIFY(!jsonArrayContainsCode(issues, QStringLiteral("orphan_anomaly_mask")));
+    }
+
+    void anomalyFolderEmptyFails()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const aitrain::DatasetValidationResult invalid = aitrain::validateAnomalyFolderDataset(dir.path());
+        QVERIFY(!invalid.ok);
+        QVERIFY(jsonArrayContainsCode(invalid.toJson().value(QStringLiteral("issues")).toArray(), QStringLiteral("missing_train_good")));
+    }
+
 };
 
 QTEST_MAIN(DatasetTests)

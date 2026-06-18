@@ -262,6 +262,33 @@ QString smpEvaluatorScriptPath(const QJsonObject& options)
     return candidates.first();
 }
 
+QString anomalibAdapterScriptPath(const QJsonObject& options)
+{
+    const QString requested = options.value(QStringLiteral("anomalibAdapterScript")).toString().trimmed();
+    if (!requested.isEmpty() && QFileInfo::exists(requested)) {
+        return QFileInfo(requested).absoluteFilePath();
+    }
+    const QString envRequested = QString::fromLocal8Bit(qgetenv("AITRAIN_ANOMALIB_ADAPTER_SCRIPT")).trimmed();
+    if (!envRequested.isEmpty() && QFileInfo::exists(envRequested)) {
+        return QFileInfo(envRequested).absoluteFilePath();
+    }
+
+    const QString script = QStringLiteral("python_trainers/anomaly/anomalib_adapter.py");
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        QDir(appDir).absoluteFilePath(script),
+        QDir(appDir).absoluteFilePath(QStringLiteral("../%1").arg(script)),
+        QDir(appDir).absoluteFilePath(QStringLiteral("../../%1").arg(script)),
+        QDir::current().absoluteFilePath(script)
+    };
+    for (const QString& candidate : candidates) {
+        if (QFileInfo::exists(candidate)) {
+            return QFileInfo(candidate).absoluteFilePath();
+        }
+    }
+    return candidates.first();
+}
+
 WorkflowResult officialYoloEvaluationFailure(
     const QString& outputPath,
     const QString& modelPath,
@@ -443,6 +470,155 @@ WorkflowResult runSmpSemanticEvaluation(
     return result;
 }
 
+WorkflowResult anomalibEvaluationFailure(
+    const QString& outputPath,
+    const QString& modelPath,
+    const QString& datasetPath,
+    const QString& message,
+    const QString& errorCode)
+{
+    QJsonObject report;
+    report.insert(QStringLiteral("ok"), false);
+    report.insert(QStringLiteral("status"), QStringLiteral("blocked"));
+    report.insert(QStringLiteral("failureCategory"), QStringLiteral("anomalib-evaluation"));
+    report.insert(QStringLiteral("errorCode"), errorCode);
+    report.insert(QStringLiteral("message"), message);
+    report.insert(QStringLiteral("kind"), QStringLiteral("evaluation_report"));
+    report.insert(QStringLiteral("createdAt"), nowIso());
+    report.insert(QStringLiteral("modelPath"), modelPath);
+    report.insert(QStringLiteral("datasetPath"), datasetPath);
+    report.insert(QStringLiteral("taskType"), QStringLiteral("anomaly_detection"));
+    report.insert(QStringLiteral("datasetFormat"), QStringLiteral("anomaly_folder"));
+    report.insert(QStringLiteral("runtime"), QStringLiteral("anomalib_python"));
+    report.insert(QStringLiteral("scaffold"), false);
+    report.insert(QStringLiteral("metrics"), QJsonObject{});
+    report.insert(QStringLiteral("errorSamples"), QJsonArray{});
+    report.insert(QStringLiteral("limitations"), QJsonArray{
+        QStringLiteral("Anomaly detection v1 evaluation uses Worker-managed Python/Anomalib artifacts, not AITrain C++ runtime.")
+    });
+
+    const QString reportPath = QDir(outputPath).filePath(QStringLiteral("evaluation_report.json"));
+    QString writeError;
+    writeJsonFile(reportPath, report, &writeError);
+
+    WorkflowResult result;
+    result.ok = false;
+    result.error = message;
+    result.reportPath = reportPath;
+    result.payload = report;
+    return result;
+}
+
+WorkflowResult runAnomalibEvaluation(
+    const QString& modelPath,
+    const QString& datasetPath,
+    const QString& outputPath,
+    const QJsonObject& options,
+    const CancellationCallback& shouldCancel)
+{
+    QDir().mkpath(outputPath);
+    const QString python = officialYoloEvaluationPython(options);
+    if (python.isEmpty()) {
+        return anomalibEvaluationFailure(
+            outputPath,
+            modelPath,
+            datasetPath,
+            QStringLiteral("Python executable is required for Anomalib evaluation. Set pythonExecutable or AITRAIN_PYTHON_EXECUTABLE."),
+            QStringLiteral("python_missing"));
+    }
+    const QString adapterScript = anomalibAdapterScriptPath(options);
+    if (!QFileInfo::exists(adapterScript)) {
+        return anomalibEvaluationFailure(
+            outputPath,
+            modelPath,
+            datasetPath,
+            QStringLiteral("Anomalib adapter script not found: %1").arg(adapterScript),
+            QStringLiteral("anomalib_adapter_script_missing"));
+    }
+
+    QJsonObject request;
+    request.insert(QStringLiteral("protocolVersion"), 1);
+    request.insert(QStringLiteral("mode"), QStringLiteral("evaluate"));
+    request.insert(QStringLiteral("modelPath"), modelPath);
+    request.insert(QStringLiteral("datasetPath"), datasetPath);
+    request.insert(QStringLiteral("outputPath"), outputPath);
+    request.insert(QStringLiteral("taskType"), QStringLiteral("anomaly_detection"));
+    request.insert(QStringLiteral("backend"), options.value(QStringLiteral("trainingBackend")).toString(QStringLiteral("anomalib_patchcore")));
+    request.insert(QStringLiteral("options"), options);
+
+    const QString requestPath = QDir(outputPath).filePath(QStringLiteral("anomalib_evaluation_request.json"));
+    QString error;
+    if (!writeJsonFile(requestPath, request, &error)) {
+        return failedResult(error);
+    }
+
+    QProcess process;
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("PYTHONUTF8"), QStringLiteral("1"));
+    environment.insert(QStringLiteral("PYTHONIOENCODING"), QStringLiteral("utf-8"));
+    configurePackagedPythonEnvironment(&environment);
+    process.setProcessEnvironment(environment);
+    process.setProgram(python);
+    process.setArguments(QStringList() << QStringLiteral("-u") << adapterScript << QStringLiteral("--request") << requestPath << QStringLiteral("--mode") << QStringLiteral("evaluate"));
+    process.setProcessChannelMode(QProcess::MergedChannels);
+    process.start();
+    if (!process.waitForStarted(5000)) {
+        return anomalibEvaluationFailure(
+            outputPath,
+            modelPath,
+            datasetPath,
+            QStringLiteral("Cannot start Anomalib evaluator: %1").arg(process.errorString()),
+            QStringLiteral("anomalib_evaluator_start_failed"));
+    }
+
+    QByteArray output;
+    while (!process.waitForFinished(100)) {
+        output.append(process.readAll());
+        if (isCancellationRequested(shouldCancel)) {
+            process.kill();
+            process.waitForFinished(1500);
+            return canceledResult();
+        }
+    }
+    output.append(process.readAll());
+    const QString logPath = QDir(outputPath).filePath(QStringLiteral("anomalib_evaluation.log"));
+    writeTextFile(logPath, QString::fromUtf8(output), &error);
+
+    const QString reportPath = QDir(outputPath).filePath(QStringLiteral("evaluation_report.json"));
+    QJsonObject report;
+    if (!readJsonFile(reportPath, &report, &error)) {
+        return anomalibEvaluationFailure(
+            outputPath,
+            modelPath,
+            datasetPath,
+            QStringLiteral("Anomalib evaluator did not produce a readable report: %1").arg(error),
+            QStringLiteral("anomalib_evaluation_report_missing"));
+    }
+    report.insert(QStringLiteral("evaluationLogPath"), logPath);
+    if (!writeJsonFile(reportPath, report, &error)) {
+        return failedResult(error);
+    }
+
+    WorkflowResult result;
+    result.ok = process.exitStatus() == QProcess::NormalExit
+        && process.exitCode() == 0
+        && report.value(QStringLiteral("ok")).toBool(false);
+    result.reportPath = reportPath;
+    result.payload = report;
+    if (!result.ok) {
+        if (!report.value(QStringLiteral("message")).toString().isEmpty()) {
+            result.error = report.value(QStringLiteral("message")).toString();
+        } else if (process.exitStatus() != QProcess::NormalExit) {
+            result.error = QStringLiteral("Anomalib evaluation process crashed.");
+        } else if (process.exitCode() != 0) {
+            result.error = QStringLiteral("Anomalib evaluation exited with code %1.").arg(process.exitCode());
+        } else {
+            result.error = QStringLiteral("Anomalib evaluation report did not pass.");
+        }
+    }
+    return result;
+}
+
 WorkflowResult runOfficialYoloEvaluation(
     const QString& modelPath,
     const QString& datasetPath,
@@ -587,6 +763,10 @@ WorkflowResult evaluateModelReport(
 
     if (taskType == QStringLiteral("semantic_segmentation")) {
         return runSmpSemanticEvaluation(modelPath, datasetPath, outputPath, options, shouldCancel);
+    }
+
+    if (taskType == QStringLiteral("anomaly_detection")) {
+        return runAnomalibEvaluation(modelPath, datasetPath, outputPath, options, shouldCancel);
     }
 
     if (taskType == QStringLiteral("detection")

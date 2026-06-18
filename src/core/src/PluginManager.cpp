@@ -3,6 +3,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QJsonDocument>
 #include <QLibrary>
 #include <QPluginLoader>
 #include <QSet>
@@ -62,12 +63,29 @@ PluginManifest PluginManifest::fromJson(const QJsonObject& object)
 
 QJsonObject DatasetValidationResult::toJson() const
 {
+    const QString metadataWarningPrefix = QStringLiteral("__aitrain_validation_metadata__=");
     QJsonObject object;
     object.insert(QStringLiteral("ok"), ok);
     object.insert(QStringLiteral("sampleCount"), sampleCount);
     object.insert(QStringLiteral("errors"), QJsonArray::fromStringList(errors));
-    object.insert(QStringLiteral("warnings"), QJsonArray::fromStringList(warnings));
+    QJsonObject metadata;
+    QStringList visibleWarnings;
+    for (const QString& warning : warnings) {
+        if (warning.startsWith(metadataWarningPrefix)) {
+            const QByteArray bytes = warning.mid(metadataWarningPrefix.size()).toUtf8();
+            const QJsonDocument document = QJsonDocument::fromJson(bytes);
+            if (document.isObject()) {
+                metadata = document.object();
+            }
+            continue;
+        }
+        visibleWarnings.append(warning);
+    }
+    object.insert(QStringLiteral("warnings"), QJsonArray::fromStringList(visibleWarnings));
     object.insert(QStringLiteral("previewSamples"), QJsonArray::fromStringList(previewSamples));
+    if (!metadata.isEmpty()) {
+        object.insert(QStringLiteral("metadata"), metadata);
+    }
     QJsonArray issueArray;
     for (const DatasetValidationResult::Issue& issue : issues) {
         issueArray.append(issue.toJson());
