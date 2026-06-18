@@ -164,8 +164,8 @@ QWidget* MainWindow::buildTaskQueuePage()
 
     layout->addWidget(createWorkbenchHeader(
         QStringLiteral("TASK ARTIFACT CENTER"),
-        QStringLiteral("任务与产物工作台"),
-        QStringLiteral("按任务追踪 Worker 产物、指标、导出和评估报告；选中产物后进入部署验证、注册、评估或交付报告。"),
+        uiText("任务与产物工作台"),
+        uiText("按任务追踪 Worker 产物、指标、导出和评估报告；选中产物后进入部署验证、注册、评估或交付报告。"),
         headerRefreshButton,
         QStringList()
             << QStringLiteral("Task History")

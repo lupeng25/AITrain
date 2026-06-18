@@ -174,7 +174,7 @@ QWidget* MainWindow::buildModelExportPanel()
     auto* exportDataEdit = new QLineEdit;
     exportDataEdit->setObjectName(QStringLiteral("YoloModelExportArg_data"));
     exportDataEdit->setPlaceholderText(QStringLiteral("TensorRT INT8 calibration data.yaml"));
-    auto* chooseExportDataButton = new QPushButton(QStringLiteral("选择 data.yaml"));
+    auto* chooseExportDataButton = new QPushButton(uiText("选择 data.yaml"));
     connect(chooseExportDataButton, &QPushButton::clicked, this, [this, exportDataEdit]() {
         const QString inputPath = QDir::fromNativeSeparators(conversionCheckpointEdit_ ? conversionCheckpointEdit_->text().trimmed() : QString());
         const QString defaultDir = !currentProjectPath_.isEmpty()
@@ -211,7 +211,7 @@ QWidget* MainWindow::buildModelExportPanel()
     form->setVerticalSpacing(10);
     form->addRow(QStringLiteral("模型输入"), inputRow);
     form->addRow(QStringLiteral("目标格式"), conversionFormatCombo_);
-    form->addRow(QStringLiteral("官方参数"), exportArgsBox);
+    form->addRow(uiText("官方参数"), exportArgsBox);
     form->addRow(QStringLiteral("输出路径"), outputRow);
     form->addRow(uiText("验证图片"), validationImageRow);
     setupPanel->bodyLayout()->addLayout(form);
@@ -401,7 +401,7 @@ QWidget* MainWindow::buildInferenceValidationPanel()
     capabilityGrid->addWidget(createInferenceCapability(QStringLiteral("YOLO 检测"), QStringLiteral("box、类别、置信度、NMS 与 overlay。")), 0, 0);
     capabilityGrid->addWidget(createInferenceCapability(QStringLiteral("YOLO 分割"), QStringLiteral("box、mask、mask area 与半透明 overlay。")), 0, 1);
     capabilityGrid->addWidget(createInferenceCapability(QStringLiteral("YOLO OBB"), QStringLiteral("旋转四边形、xywhr、外接 bbox 与 overlay。")), 1, 0);
-    capabilityGrid->addWidget(createInferenceCapability(QStringLiteral("PaddleOCR 官方"), QStringLiteral("Det / Rec / System 结果通过官方报告和可视化产物查看。")), 1, 1);
+    capabilityGrid->addWidget(createInferenceCapability(uiText("PaddleOCR 官方"), uiText("Det / Rec / System 结果通过官方报告和可视化产物查看。")), 1, 1);
     capabilityGrid->setColumnStretch(0, 1);
     capabilityGrid->setColumnStretch(1, 1);
     capabilityPanel->bodyLayout()->addLayout(capabilityGrid);
@@ -442,7 +442,7 @@ QWidget* MainWindow::buildInferenceValidationPanel()
     summaryPanel->bodyLayout()->addStretch();
 
     auto* resultPanel = new InfoPanel(QStringLiteral("Overlay 预览"));
-    auto* overlayHint = mutedLabel(QStringLiteral("完成后显示检测框或分割 mask；OCR 可视化图来自 PaddleOCR 官方任务产物。"));
+    auto* overlayHint = mutedLabel(uiText("完成后显示检测框或分割 mask；OCR 可视化图来自 PaddleOCR 官方任务产物。"));
     allowLabelToShrink(overlayHint);
     resultPanel->bodyLayout()->addWidget(overlayHint);
     inferenceOverlayLabel_ = new QLabel(QStringLiteral("暂无 overlay\n运行推理后显示可视化产物。"));

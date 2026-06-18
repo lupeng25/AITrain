@@ -321,7 +321,7 @@ QWidget* MainWindow::buildDatasetPage()
     auto* annotationLayout = new QVBoxLayout(annotationPanel);
     annotationLayout->setContentsMargins(10, 12, 10, 8);
     annotationLayout->setSpacing(6);
-    auto* annotationSummary = mutedLabel(QStringLiteral("X-AnyLabeling：检测导出 YOLO bbox，分割导出 YOLO polygon；PaddleOCR 使用 det_gt / rec_gt + dict。"));
+    auto* annotationSummary = mutedLabel(uiText("X-AnyLabeling：检测导出 YOLO bbox，分割导出 YOLO polygon；PaddleOCR 使用 det_gt / rec_gt + dict。"));
     annotationToolStatusLabel_ = inlineStatusLabel(xAnyLabelingStatusText());
     allowLabelToShrink(annotationSummary);
     allowLabelToShrink(annotationToolStatusLabel_);
@@ -395,7 +395,7 @@ QWidget* MainWindow::buildDatasetPage()
     auto* samplePreviewLayout = new QVBoxLayout(samplePreviewTab);
     samplePreviewLayout->setContentsMargins(0, 0, 0, 0);
     samplePreviewLayout->setSpacing(10);
-    auto* samplePreviewHint = mutedLabel(QStringLiteral("划分会复制到新目录，不修改原始数据；支持 YOLO 检测、YOLO 分割、YOLO OBB、语义分割 Mask PNG、PaddleOCR Det 和 PaddleOCR Rec。"));
+    auto* samplePreviewHint = mutedLabel(uiText("划分会复制到新目录，不修改原始数据；支持 YOLO 检测、YOLO 分割、YOLO OBB、语义分割 Mask PNG、PaddleOCR Det 和 PaddleOCR Rec。"));
     allowLabelToShrink(samplePreviewHint);
     samplePreviewLayout->addWidget(datasetPreviewTable_, 1);
     samplePreviewLayout->addWidget(samplePreviewHint);
@@ -427,8 +427,8 @@ QWidget* MainWindow::buildDatasetPage()
 
     layout->addWidget(createWorkbenchHeader(
         QStringLiteral("DATASET VALIDATION"),
-        QStringLiteral("数据集工作台"),
-        QStringLiteral("导入、校验、转换、快照，并处理质量复核样本。"),
+        uiText("数据集工作台"),
+        uiText("导入、校验、转换、快照，并处理质量复核样本。"),
         headerValidateButton,
         QStringList()
             << QStringLiteral("YOLO BBox")

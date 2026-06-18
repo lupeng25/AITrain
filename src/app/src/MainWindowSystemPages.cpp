@@ -111,7 +111,7 @@ QWidget* MainWindow::buildPluginsPanel()
     pluginConsoleStatusLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
     pluginSearchPathLabel_ = inlineStatusLabel(QStringLiteral("插件搜索路径：未初始化"));
     pluginSearchPathLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
-    pluginMarketplaceStatusLabel_ = inlineStatusLabel(QStringLiteral("插件市场：等待加载本地索引。"));
+    pluginMarketplaceStatusLabel_ = inlineStatusLabel(uiText("插件市场：等待加载本地索引。"));
     pluginMarketplaceStatusLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
     allowLabelToShrink(pluginConsoleStatusLabel_);
     allowLabelToShrink(pluginSearchPathLabel_);
@@ -120,7 +120,7 @@ QWidget* MainWindow::buildPluginsPanel()
     headerGrid->addWidget(pluginConsoleStatusLabel_, 0, 1);
     headerGrid->addWidget(pathCaption, 1, 0);
     headerGrid->addWidget(pluginSearchPathLabel_, 1, 1);
-    headerGrid->addWidget(new QLabel(QStringLiteral("市场")), 2, 0);
+    headerGrid->addWidget(new QLabel(uiText("市场")), 2, 0);
     headerGrid->addWidget(pluginMarketplaceStatusLabel_, 2, 1);
     headerRoot->addLayout(headerGrid);
 
@@ -143,7 +143,7 @@ QWidget* MainWindow::buildPluginsPanel()
     summaryLayout->addWidget(exportFormatCard, 0, 2);
     summaryLayout->addWidget(gpuCard, 0, 3);
 
-    auto* tablePanel = new InfoPanel(QStringLiteral("插件扩展"));
+    auto* tablePanel = new InfoPanel(uiText("插件扩展"));
     pluginTable_ = new QTableWidget(0, 7);
     pluginTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("ID")
@@ -186,8 +186,8 @@ QWidget* MainWindow::buildPluginsPanel()
     loadedLayout->setContentsMargins(0, 0, 0, 0);
     loadedLayout->addWidget(pluginTable_);
 
-    tabs->addTab(loadedTab, QStringLiteral("已加载"));
-    tabs->addTab(pluginMarketplaceWidget_, QStringLiteral("插件市场"));
+    tabs->addTab(loadedTab, uiText("已加载"));
+    tabs->addTab(pluginMarketplaceWidget_, uiText("插件市场"));
     tablePanel->bodyLayout()->addWidget(tabs);
 
     layout->addWidget(headerPanel);

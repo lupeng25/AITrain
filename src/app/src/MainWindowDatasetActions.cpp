@@ -76,6 +76,34 @@ QString samplePathField(const QJsonObject& sample, const QStringList& keys)
     return QDir::fromNativeSeparators(sampleTextField(sample, keys));
 }
 
+QString translatedText(const QString& source)
+{
+    const QString fixCountTemplate = QStringLiteral("请修正 %1 个字段后再转换。");
+    const int markerIndex = fixCountTemplate.indexOf(QStringLiteral("%1"));
+    const QString prefix = fixCountTemplate.left(markerIndex);
+    const QString suffix = fixCountTemplate.mid(markerIndex + 2);
+    if (markerIndex >= 0 && source.startsWith(prefix) && source.endsWith(suffix)) {
+        const QString count = source.mid(prefix.size(), source.size() - prefix.size() - suffix.size());
+        return uiText("请修正 %1 个字段后再转换。").arg(count);
+    }
+    return translateText("MainWindow", source);
+}
+
+DatasetConversionValidation translatedValidation(DatasetConversionValidation validation)
+{
+    validation.summary = translatedText(validation.summary);
+    validation.sourceFormatError = translatedText(validation.sourceFormatError);
+    validation.targetFormatError = translatedText(validation.targetFormatError);
+    validation.inputPathError = translatedText(validation.inputPathError);
+    validation.outputPathError = translatedText(validation.outputPathError);
+    QStringList messages;
+    for (const QString& message : validation.messages) {
+        messages.append(translatedText(message));
+    }
+    validation.messages = messages;
+    return validation;
+}
+
 QJsonObject normalizedReviewSample(QJsonObject sample, const QString& source)
 {
     if (sample.value(QStringLiteral("source")).toString().isEmpty()) {
@@ -331,8 +359,8 @@ void MainWindow::browseDatasetConversionInput()
     const QString sourceFormat = comboCurrentDataOrText(datasetConversionSourceFormatCombo_);
     const bool expectsCocoJsonFile = sourceFormat == QStringLiteral("coco_json");
     const QString selectedPath = expectsCocoJsonFile
-        ? QFileDialog::getOpenFileName(this, QStringLiteral("选择 COCO JSON 标注文件"), QString(), QStringLiteral("JSON 文件 (*.json);;所有文件 (*)"))
-        : QFileDialog::getExistingDirectory(this, QStringLiteral("选择待转换数据集目录"));
+        ? QFileDialog::getOpenFileName(this, uiText("选择 COCO JSON 标注文件"), QString(), uiText("JSON 文件 (*.json);;所有文件 (*)"))
+        : QFileDialog::getExistingDirectory(this, uiText("选择待转换数据集目录"));
     if (selectedPath.isEmpty()) {
         return;
     }
@@ -364,7 +392,7 @@ void MainWindow::browseDatasetConversionInput()
 
 void MainWindow::browseDatasetConversionOutput()
 {
-    const QString directory = QFileDialog::getExistingDirectory(this, QStringLiteral("选择转换输出目录"));
+    const QString directory = QFileDialog::getExistingDirectory(this, uiText("选择转换输出目录"));
     if (!directory.isEmpty() && datasetConversionOutputEdit_) {
         datasetConversionOutputEdit_->setText(QDir::toNativeSeparators(directory));
     }
@@ -424,9 +452,9 @@ void MainWindow::cancelDatasetConversion()
     }
     worker_.cancel();
     if (datasetConversionStatusLabel_) {
-        datasetConversionStatusLabel_->setText(QStringLiteral("正在取消数据集转换。"));
+        datasetConversionStatusLabel_->setText(uiText("正在取消数据集转换。"));
     }
-    appendDatasetConversionLog(QStringLiteral("正在取消数据集转换。"));
+    appendDatasetConversionLog(uiText("正在取消数据集转换。"));
 }
 
 void MainWindow::startDatasetConversion()
@@ -440,7 +468,7 @@ void MainWindow::startDatasetConversion()
     form.outputPath = datasetConversionOutputEdit_ ? datasetConversionOutputEdit_->text() : QString();
     form.workerRunning = worker_.isRunning();
 
-    const DatasetConversionValidation validation = validateDatasetConversionForm(form);
+    const DatasetConversionValidation validation = translatedValidation(validateDatasetConversionForm(form));
     if (!validation.ok) {
         if (datasetConversionStatusLabel_) {
             datasetConversionStatusLabel_->setText(validation.summary);
@@ -455,7 +483,7 @@ void MainWindow::startDatasetConversion()
     const QString sourcePath = normalizedDatasetConversionPath(form.inputPath);
     const QString outputPath = normalizedDatasetConversionPath(form.outputPath);
     if (!QDir().mkpath(outputPath)) {
-        const QString message = QStringLiteral("无法创建输出目录：%1").arg(QDir::toNativeSeparators(outputPath));
+        const QString message = uiText("无法创建输出目录：%1").arg(QDir::toNativeSeparators(outputPath));
         if (datasetConversionStatusLabel_) {
             datasetConversionStatusLabel_->setText(message);
         }
@@ -491,12 +519,12 @@ void MainWindow::startDatasetConversion()
         datasetConversionLog_->clear();
     }
     if (datasetConversionResultLabel_) {
-        datasetConversionResultLabel_->setText(QStringLiteral("等待转换结果。"));
+        datasetConversionResultLabel_->setText(uiText("等待转换结果。"));
     }
     if (datasetConversionStatusLabel_) {
-        datasetConversionStatusLabel_->setText(QStringLiteral("正在通过 Worker 转换数据集。"));
+        datasetConversionStatusLabel_->setText(uiText("正在通过 Worker 转换数据集。"));
     }
-    appendDatasetConversionLog(QStringLiteral("开始转换数据集。"));
+    appendDatasetConversionLog(uiText("开始转换数据集。"));
     state_.dataset.currentConversionTaskId = taskId;
     setDatasetConversionFormRunning(true);
 
@@ -518,17 +546,17 @@ void MainWindow::startDatasetConversion()
         state_.training.currentTaskId.clear();
         state_.dataset.currentConversionTaskId.clear();
         setDatasetConversionFormRunning(false);
-        const QString message = QStringLiteral("无法启动数据集转换：%1").arg(error);
+        const QString message = uiText("无法启动数据集转换：%1").arg(error);
         if (datasetConversionStatusLabel_) {
             datasetConversionStatusLabel_->setText(message);
         }
         appendDatasetConversionLog(message);
-        QMessageBox::critical(this, QStringLiteral("数据集转换"), message);
+        QMessageBox::critical(this, uiText("数据集转换"), message);
         return;
     }
 
-    workerPill_->setStatus(QStringLiteral("数据集转换中"), StatusPill::Tone::Info);
-    statusBar()->showMessage(QStringLiteral("正在转换数据集"), 3000);
+    workerPill_->setStatus(uiText("数据集转换中"), StatusPill::Tone::Info);
+    statusBar()->showMessage(uiText("正在转换数据集"), 3000);
 }
 
 void MainWindow::validateDataset()

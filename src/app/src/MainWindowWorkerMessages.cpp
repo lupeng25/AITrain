@@ -78,13 +78,13 @@ void setAcceptanceTableRow(QTableWidget* table, const QString& stage, const QStr
 
 QString phaseText(const QString& phase)
 {
-    if (phase == QStringLiteral("snapshot")) return QStringLiteral("快照");
-    if (phase == QStringLiteral("train")) return QStringLiteral("训练");
-    if (phase == QStringLiteral("validate")) return QStringLiteral("验证");
-    if (phase == QStringLiteral("export")) return QStringLiteral("导出");
-    if (phase == QStringLiteral("completed")) return QStringLiteral("完成");
-    if (phase == QStringLiteral("failed")) return QStringLiteral("失败");
-    return phase.isEmpty() ? QStringLiteral("运行中") : phase;
+    if (phase == QStringLiteral("snapshot")) return uiText("快照");
+    if (phase == QStringLiteral("train")) return uiText("训练");
+    if (phase == QStringLiteral("validate")) return uiText("验证");
+    if (phase == QStringLiteral("export")) return uiText("导出");
+    if (phase == QStringLiteral("completed")) return uiText("完成");
+    if (phase == QStringLiteral("failed")) return uiText("失败");
+    return phase.isEmpty() ? uiText("运行中") : phase;
 }
 
 QString etaText(int seconds)
@@ -186,7 +186,7 @@ void MainWindow::handleProgressMessage(const QJsonObject& payload)
     }
     const QString phase = payload.value(QStringLiteral("phase")).toString();
     if (trainingPhaseLabel_ && (!phase.isEmpty() || !message.isEmpty())) {
-        const QString stageFlow = QStringLiteral("快照 -> 训练 -> 验证 -> 导出 -> 完成");
+        const QString stageFlow = uiText("快照 -> 训练 -> 验证 -> 导出 -> 完成");
         const QString current = phaseText(phase);
         trainingPhaseLabel_->setText(message.isEmpty()
             ? uiText("阶段：%1 | 当前：%2").arg(stageFlow, current)

@@ -1,5 +1,7 @@
 #include "PluginMarketplaceWidget.h"
 
+#include "LanguageSupport.h"
+
 #include <QAbstractItemView>
 #include <QDateTime>
 #include <QDesktopServices>
@@ -15,6 +17,13 @@
 #include <QTableWidgetItem>
 #include <QUrl>
 #include <QVBoxLayout>
+
+namespace {
+QString uiText(const char* source)
+{
+    return aitrain_app::translateText("MainWindow", QString::fromUtf8(source));
+}
+} // namespace
 
 PluginMarketplaceWidget::PluginMarketplaceWidget(
     const QString& marketplaceRoot,
@@ -37,10 +46,10 @@ void PluginMarketplaceWidget::loadIndex()
         marketplaceTable_->setRowCount(0);
         if (entries.isEmpty()) {
             marketplaceTable_->setRowCount(1);
-            marketplaceTable_->setItem(0, 0, new QTableWidgetItem(QStringLiteral("暂无市场插件")));
+            marketplaceTable_->setItem(0, 0, new QTableWidgetItem(uiText("暂无市场插件")));
             for (int column = 1; column < marketplaceTable_->columnCount(); ++column) {
                 marketplaceTable_->setItem(0, column, new QTableWidgetItem(report.message.isEmpty()
-                    ? QStringLiteral("请加载 plugins/marketplace/marketplace.json 或内网静态索引。")
+                    ? uiText("请加载 plugins/marketplace/marketplace.json 或内网静态索引。")
                     : report.message));
             }
         }
@@ -64,9 +73,9 @@ void PluginMarketplaceWidget::importPackage()
 {
     const QString path = QFileDialog::getOpenFileName(
         this,
-        QStringLiteral("选择插件包"),
+        uiText("选择插件包"),
         marketplaceRoot_,
-        QStringLiteral("AITrain 插件包 (*.aitrain-plugin.zip *.zip);;所有文件 (*.*)"));
+        uiText("AITrain 插件包 (*.aitrain-plugin.zip *.zip);;所有文件 (*.*)"));
     if (path.isEmpty()) {
         return;
     }
@@ -75,7 +84,7 @@ void PluginMarketplaceWidget::importPackage()
     const aitrain::PluginMarketplaceReport report = marketplace().installPackage(path, true);
     appendReport(report);
     if (!report.ok) {
-        QMessageBox::warning(this, QStringLiteral("插件市场"), report.errors.isEmpty() ? report.message : report.errors.join(QStringLiteral("\n")));
+        QMessageBox::warning(this, uiText("插件市场"), report.errors.isEmpty() ? report.message : report.errors.join(QStringLiteral("\n")));
     } else {
         setStatus(report.message);
     }
@@ -88,16 +97,16 @@ void PluginMarketplaceWidget::enableSelectedPlugin()
     const QString id = selectedInstalledPluginId();
     const QString version = selectedInstalledPluginVersion();
     if (id.isEmpty() || version.isEmpty()) {
-        QMessageBox::information(this, QStringLiteral("插件市场"), QStringLiteral("请先在“已安装”表格中选择插件。"));
+        QMessageBox::information(this, uiText("插件市场"), uiText("请先在“已安装”表格中选择插件。"));
         return;
     }
     emit releasePluginLoadersRequested(activeFilesForPlugin(id));
     const aitrain::PluginMarketplaceReport report = marketplace().enablePlugin(id, version);
     appendReport(report);
     if (!report.ok) {
-        QMessageBox::warning(this, QStringLiteral("插件市场"), report.errors.isEmpty() ? report.message : report.errors.join(QStringLiteral("\n")));
+        QMessageBox::warning(this, uiText("插件市场"), report.errors.isEmpty() ? report.message : report.errors.join(QStringLiteral("\n")));
     } else {
-        setStatus(QStringLiteral("插件已启用：%1 %2").arg(id, version));
+        setStatus(uiText("插件已启用：%1 %2").arg(id, version));
     }
     refreshInstalledPlugins();
     emit pluginsChanged();
@@ -107,16 +116,16 @@ void PluginMarketplaceWidget::disableSelectedPlugin()
 {
     const QString id = selectedInstalledPluginId();
     if (id.isEmpty()) {
-        QMessageBox::information(this, QStringLiteral("插件市场"), QStringLiteral("请先在“已安装”表格中选择插件。"));
+        QMessageBox::information(this, uiText("插件市场"), uiText("请先在“已安装”表格中选择插件。"));
         return;
     }
     emit releasePluginLoadersRequested(activeFilesForPlugin(id));
     const aitrain::PluginMarketplaceReport report = marketplace().disablePlugin(id);
     appendReport(report);
     if (!report.ok) {
-        QMessageBox::warning(this, QStringLiteral("插件市场"), report.errors.isEmpty() ? report.message : report.errors.join(QStringLiteral("\n")));
+        QMessageBox::warning(this, uiText("插件市场"), report.errors.isEmpty() ? report.message : report.errors.join(QStringLiteral("\n")));
     } else {
-        setStatus(QStringLiteral("插件已禁用：%1").arg(id));
+        setStatus(uiText("插件已禁用：%1").arg(id));
     }
     refreshInstalledPlugins();
 }
@@ -126,16 +135,16 @@ void PluginMarketplaceWidget::uninstallSelectedPlugin()
     const QString id = selectedInstalledPluginId();
     const QString version = selectedInstalledPluginVersion();
     if (id.isEmpty() || version.isEmpty()) {
-        QMessageBox::information(this, QStringLiteral("插件市场"), QStringLiteral("请先在“已安装”表格中选择插件。"));
+        QMessageBox::information(this, uiText("插件市场"), uiText("请先在“已安装”表格中选择插件。"));
         return;
     }
     emit releasePluginLoadersRequested(activeFilesForPlugin(id));
     const aitrain::PluginMarketplaceReport report = marketplace().uninstallPlugin(id, version);
     appendReport(report);
     if (!report.ok) {
-        QMessageBox::warning(this, QStringLiteral("插件市场"), report.errors.isEmpty() ? report.message : report.errors.join(QStringLiteral("\n")));
+        QMessageBox::warning(this, uiText("插件市场"), report.errors.isEmpty() ? report.message : report.errors.join(QStringLiteral("\n")));
     } else {
-        setStatus(QStringLiteral("插件已卸载：%1 %2").arg(id, version));
+        setStatus(uiText("插件已卸载：%1 %2").arg(id, version));
     }
     refreshInstalledPlugins();
 }
@@ -149,9 +158,9 @@ void PluginMarketplaceWidget::refreshInstalledPlugins()
         installedTable_->setRowCount(0);
         if (installed.isEmpty()) {
             installedTable_->setRowCount(1);
-            installedTable_->setItem(0, 0, new QTableWidgetItem(QStringLiteral("暂无已安装市场插件")));
+            installedTable_->setItem(0, 0, new QTableWidgetItem(uiText("暂无已安装市场插件")));
             for (int column = 1; column < installedTable_->columnCount(); ++column) {
-                installedTable_->setItem(0, column, new QTableWidgetItem(QStringLiteral("可通过“导入插件包”安装本地插件包。")));
+                installedTable_->setItem(0, column, new QTableWidgetItem(uiText("可通过“导入插件包”安装本地插件包。")));
             }
         }
         for (const aitrain::InstalledPluginRecord& record : installed) {
@@ -164,14 +173,14 @@ void PluginMarketplaceWidget::refreshInstalledPlugins()
             installedTable_->setItem(row, 0, idItem);
             installedTable_->setItem(row, 1, new QTableWidgetItem(record.name));
             installedTable_->setItem(row, 2, versionItem);
-            installedTable_->setItem(row, 3, new QTableWidgetItem(record.enabled ? QStringLiteral("是") : QStringLiteral("否")));
+            installedTable_->setItem(row, 3, new QTableWidgetItem(record.enabled ? uiText("是") : uiText("否")));
             installedTable_->setItem(row, 4, new QTableWidgetItem(record.verificationStatus));
             installedTable_->setItem(row, 5, new QTableWidgetItem(QDir::toNativeSeparators(record.installPath)));
             installedTable_->setItem(row, 6, new QTableWidgetItem(record.message));
         }
     }
     setStatus(report.ok
-        ? QStringLiteral("插件市场：已安装 %1 个，状态文件 %2").arg(installed.size()).arg(QDir::toNativeSeparators(currentMarketplace.statePath()))
+        ? uiText("插件市场：已安装 %1 个，状态文件 %2").arg(installed.size()).arg(QDir::toNativeSeparators(currentMarketplace.statePath()))
         : report.message);
 }
 
@@ -213,25 +222,25 @@ void PluginMarketplaceWidget::buildUi()
     rootLayout->setSpacing(8);
 
     sourceEdit_ = new QLineEdit(QDir(marketplaceRoot_).filePath(QStringLiteral("marketplace.json")));
-    auto* loadIndexButton = new QPushButton(QStringLiteral("加载索引"));
+    auto* loadIndexButton = new QPushButton(uiText("加载索引"));
     loadIndexButton->setCursor(Qt::PointingHandCursor);
     connect(loadIndexButton, &QPushButton::clicked, this, &PluginMarketplaceWidget::loadIndex);
 
     auto* marketplaceToolbar = new QHBoxLayout;
-    marketplaceToolbar->addWidget(new QLabel(QStringLiteral("市场索引")));
+    marketplaceToolbar->addWidget(new QLabel(uiText("市场索引")));
     marketplaceToolbar->addWidget(sourceEdit_, 1);
     marketplaceToolbar->addWidget(loadIndexButton);
 
     marketplaceTable_ = new QTableWidget(0, 8);
     marketplaceTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("ID")
-        << QStringLiteral("名称")
-        << QStringLiteral("版本")
-        << QStringLiteral("分类")
-        << QStringLiteral("发布者")
-        << QStringLiteral("状态")
-        << QStringLiteral("来源")
-        << QStringLiteral("说明"));
+        << uiText("名称")
+        << uiText("版本")
+        << uiText("分类")
+        << uiText("发布者")
+        << uiText("状态")
+        << uiText("来源")
+        << uiText("说明"));
     configureTable(marketplaceTable_);
     marketplaceTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     marketplaceTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
@@ -245,12 +254,12 @@ void PluginMarketplaceWidget::buildUi()
     installedTable_ = new QTableWidget(0, 7);
     installedTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("ID")
-        << QStringLiteral("名称")
-        << QStringLiteral("版本")
-        << QStringLiteral("启用")
-        << QStringLiteral("校验")
-        << QStringLiteral("安装目录")
-        << QStringLiteral("消息"));
+        << uiText("名称")
+        << uiText("版本")
+        << uiText("启用")
+        << uiText("校验")
+        << uiText("安装目录")
+        << uiText("消息"));
     configureTable(installedTable_);
     installedTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     installedTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
@@ -260,11 +269,11 @@ void PluginMarketplaceWidget::buildUi()
     installedTable_->horizontalHeader()->setSectionResizeMode(5, QHeaderView::Stretch);
     installedTable_->horizontalHeader()->setSectionResizeMode(6, QHeaderView::Stretch);
 
-    auto* importButton = new QPushButton(QStringLiteral("导入插件包"));
-    auto* enableButton = new QPushButton(QStringLiteral("启用"));
-    auto* disableButton = new QPushButton(QStringLiteral("禁用"));
-    auto* uninstallButton = new QPushButton(QStringLiteral("卸载"));
-    auto* openMarketplaceDirButton = new QPushButton(QStringLiteral("打开市场目录"));
+    auto* importButton = new QPushButton(uiText("导入插件包"));
+    auto* enableButton = new QPushButton(uiText("启用"));
+    auto* disableButton = new QPushButton(uiText("禁用"));
+    auto* uninstallButton = new QPushButton(uiText("卸载"));
+    auto* openMarketplaceDirButton = new QPushButton(uiText("打开市场目录"));
     importButton->setCursor(Qt::PointingHandCursor);
     enableButton->setCursor(Qt::PointingHandCursor);
     disableButton->setCursor(Qt::PointingHandCursor);
@@ -288,10 +297,10 @@ void PluginMarketplaceWidget::buildUi()
 
     installLogTable_ = new QTableWidget(0, 4);
     installLogTable_->setHorizontalHeaderLabels(QStringList()
-        << QStringLiteral("时间")
-        << QStringLiteral("状态")
-        << QStringLiteral("消息")
-        << QStringLiteral("详情"));
+        << uiText("时间")
+        << uiText("状态")
+        << uiText("消息")
+        << uiText("详情"));
     configureTable(installLogTable_);
     installLogTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     installLogTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
@@ -318,9 +327,9 @@ void PluginMarketplaceWidget::buildUi()
     logLayout->addWidget(installLogTable_);
 
     auto* tabs = new QTabWidget;
-    tabs->addTab(installedTab, QStringLiteral("已安装"));
-    tabs->addTab(marketplaceTab, QStringLiteral("市场"));
-    tabs->addTab(logTab, QStringLiteral("安装记录"));
+    tabs->addTab(installedTab, uiText("已安装"));
+    tabs->addTab(marketplaceTab, uiText("市场"));
+    tabs->addTab(logTab, uiText("安装记录"));
     rootLayout->addWidget(tabs);
 }
 
@@ -352,7 +361,7 @@ void PluginMarketplaceWidget::appendReport(const aitrain::PluginMarketplaceRepor
 
 void PluginMarketplaceWidget::setStatus(const QString& status)
 {
-    const QString text = status.isEmpty() ? QStringLiteral("插件市场：等待加载本地索引。") : status;
+    const QString text = status.isEmpty() ? uiText("插件市场：等待加载本地索引。") : status;
     if (statusLabel_) {
         statusLabel_->setText(text);
     }

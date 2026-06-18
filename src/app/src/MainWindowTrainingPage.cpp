@@ -69,7 +69,7 @@ QComboBox* yoloArgComboBox(const QString& key, const QVector<QPair<QString, QStr
 {
     auto* combo = new QComboBox;
     combo->setObjectName(yoloArgObjectName(key));
-    combo->addItem(QStringLiteral("默认"), QString());
+    combo->addItem(uiText("默认"), QString());
     for (const auto& item : items) {
         combo->addItem(item.first, item.second);
     }
@@ -179,7 +179,7 @@ QWidget* buildYoloOfficialArgsPanel()
     root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(10);
 
-    auto* deviceGroup = yoloArgGroup(QStringLiteral("数据与设备"));
+    auto* deviceGroup = yoloArgGroup(uiText("数据与设备"));
     addYoloRow(deviceGroup, QStringLiteral("seed"), yoloArgLineEdit(QStringLiteral("seed"), QStringLiteral("42"), QStringLiteral("42")));
     addYoloRow(deviceGroup, QStringLiteral("device"), yoloArgLineEdit(QStringLiteral("device"), QStringLiteral("cpu / 0 / 0,1")));
     addYoloRow(deviceGroup, QStringLiteral("workers"), yoloArgLineEdit(QStringLiteral("workers"), QStringLiteral("0")));
@@ -202,9 +202,9 @@ QWidget* buildYoloOfficialArgsPanel()
     addYoloRow(deviceGroup, QStringLiteral("multi_scale"), yoloArgLineEdit(QStringLiteral("multi_scale"), QStringLiteral("0.5")));
     addYoloRow(deviceGroup, QStringLiteral("single_cls"), yoloBoolComboBox(QStringLiteral("single_cls")));
     addYoloRow(deviceGroup, QStringLiteral("classes"), yoloArgLineEdit(QStringLiteral("classes"), QStringLiteral("0,1,2")));
-    addYoloRow(deviceGroup, QStringLiteral("freeze"), yoloArgLineEdit(QStringLiteral("freeze"), QStringLiteral("10 或 0,1,2")));
+    addYoloRow(deviceGroup, QStringLiteral("freeze"), yoloArgLineEdit(QStringLiteral("freeze"), uiText("10 或 0,1,2")));
 
-    auto* optimizerGroup = yoloArgGroup(QStringLiteral("优化器与学习率"));
+    auto* optimizerGroup = yoloArgGroup(uiText("优化器与学习率"));
     addYoloRow(optimizerGroup, QStringLiteral("optimizer"), yoloArgComboBox(QStringLiteral("optimizer"), {
         {QStringLiteral("auto"), QStringLiteral("auto")},
         {QStringLiteral("SGD"), QStringLiteral("SGD")},
@@ -223,7 +223,7 @@ QWidget* buildYoloOfficialArgsPanel()
     addYoloRow(optimizerGroup, QStringLiteral("dfl"), yoloArgLineEdit(QStringLiteral("dfl"), QStringLiteral("1.5")));
     addYoloRow(optimizerGroup, QStringLiteral("nbs"), yoloArgLineEdit(QStringLiteral("nbs"), QStringLiteral("64")));
 
-    auto* augmentGroup = yoloArgGroup(QStringLiteral("增强"));
+    auto* augmentGroup = yoloArgGroup(uiText("增强"));
     for (const QString& key : {
              QStringLiteral("hsv_h"), QStringLiteral("hsv_s"), QStringLiteral("hsv_v"),
              QStringLiteral("degrees"), QStringLiteral("translate"), QStringLiteral("scale"),
@@ -233,7 +233,7 @@ QWidget* buildYoloOfficialArgsPanel()
         addYoloRow(augmentGroup, key, yoloArgLineEdit(key));
     }
 
-    auto* segmentationGroup = yoloArgGroup(QStringLiteral("分割专属"));
+    auto* segmentationGroup = yoloArgGroup(uiText("分割专属"));
     addYoloRow(segmentationGroup, QStringLiteral("copy_paste_mode"), yoloArgComboBox(QStringLiteral("copy_paste_mode"), {
         {QStringLiteral("flip"), QStringLiteral("flip")},
         {QStringLiteral("mixup"), QStringLiteral("mixup")}
@@ -241,7 +241,7 @@ QWidget* buildYoloOfficialArgsPanel()
     addYoloRow(segmentationGroup, QStringLiteral("overlap_mask"), yoloBoolComboBox(QStringLiteral("overlap_mask")));
     addYoloRow(segmentationGroup, QStringLiteral("mask_ratio"), yoloArgLineEdit(QStringLiteral("mask_ratio"), QStringLiteral("4")));
 
-    auto* validationGroup = yoloArgGroup(QStringLiteral("验证与导出"));
+    auto* validationGroup = yoloArgGroup(uiText("验证与导出"));
     addYoloRow(validationGroup, QStringLiteral("val"), yoloBoolComboBox(QStringLiteral("val")));
     addYoloRow(validationGroup, QStringLiteral("plots"), yoloBoolComboBox(QStringLiteral("plots")));
     addYoloRow(validationGroup, QStringLiteral("max_det"), yoloArgLineEdit(QStringLiteral("max_det"), QStringLiteral("300")));
@@ -280,7 +280,7 @@ QWidget* buildSmpArgsPanel()
     root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(10);
 
-    auto* trainGroup = yoloArgGroup(QStringLiteral("训练参数"));
+    auto* trainGroup = yoloArgGroup(uiText("训练参数"));
     addSmpRow(trainGroup, QStringLiteral("seed"), smpArgLineEdit(QStringLiteral("seed"), QStringLiteral("42"), QStringLiteral("42")));
     addSmpRow(trainGroup, QStringLiteral("device"), smpArgLineEdit(QStringLiteral("device"), QStringLiteral("cpu / cuda / 0"), QStringLiteral("cpu")));
     addSmpRow(trainGroup, QStringLiteral("workers"), smpArgLineEdit(QStringLiteral("workers"), QStringLiteral("0"), QStringLiteral("0")));
@@ -292,7 +292,7 @@ QWidget* buildSmpArgsPanel()
         {QStringLiteral("dice_ce"), QStringLiteral("dice_ce")}
     }, QStringLiteral("dice_ce")));
 
-    auto* dataGroup = yoloArgGroup(QStringLiteral("Mask 与 encoder"));
+    auto* dataGroup = yoloArgGroup(uiText("Mask 与 encoder"));
     addSmpRow(dataGroup, QStringLiteral("encoderWeights"), smpArgComboBox(QStringLiteral("encoderWeights"), {
         {QStringLiteral("none"), QStringLiteral("none")},
         {QStringLiteral("imagenet"), QStringLiteral("imagenet")}
@@ -311,7 +311,7 @@ QWidget* buildAnomalyArgsPanel()
     root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(10);
 
-    auto* runtimeGroup = yoloArgGroup(QStringLiteral("运行与阈值"));
+    auto* runtimeGroup = yoloArgGroup(uiText("运行与阈值"));
     addAnomalyRow(runtimeGroup, QStringLiteral("seed"), anomalyArgLineEdit(QStringLiteral("seed"), QStringLiteral("42"), QStringLiteral("42")));
     addAnomalyRow(runtimeGroup, QStringLiteral("device"), anomalyArgLineEdit(QStringLiteral("device"), QStringLiteral("cpu / cuda / 0"), QStringLiteral("cpu")));
     addAnomalyRow(runtimeGroup, QStringLiteral("workers"), anomalyArgLineEdit(QStringLiteral("workers"), QStringLiteral("0"), QStringLiteral("0")));
@@ -501,7 +501,7 @@ QWidget* MainWindow::buildTrainingPage()
     headerLayout->addWidget(trainingRunSummaryLabel_, 1, 1);
     headerRoot->addLayout(headerLayout);
 
-    auto* setupPanel = new InfoPanel(QStringLiteral("实验参数"));
+    auto* setupPanel = new InfoPanel(uiText("实验参数"));
     auto* form = new QFormLayout;
     form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
@@ -514,21 +514,21 @@ QWidget* MainWindow::buildTrainingPage()
     form->addRow(QStringLiteral("Batch Size"), batchEdit_);
     form->addRow(QStringLiteral("Image Size"), imageSizeEdit_);
     setupPanel->bodyLayout()->addLayout(form);
-    auto* yoloOfficialArgsGroup = new QGroupBox(QStringLiteral("YOLO 官方高级参数"));
+    auto* yoloOfficialArgsGroup = new QGroupBox(uiText("YOLO 官方高级参数"));
     yoloOfficialArgsGroup->setObjectName(QStringLiteral("YoloOfficialArgsGroup"));
     auto* yoloOfficialArgsLayout = new QVBoxLayout(yoloOfficialArgsGroup);
     yoloOfficialArgsLayout->setContentsMargins(10, 8, 10, 8);
     yoloOfficialArgsLayout->setSpacing(8);
     yoloOfficialArgsLayout->addWidget(buildYoloOfficialArgsPanel());
     setupPanel->bodyLayout()->addWidget(yoloOfficialArgsGroup);
-    auto* smpArgsGroup = new QGroupBox(QStringLiteral("SMP 语义分割参数"));
+    auto* smpArgsGroup = new QGroupBox(uiText("SMP 语义分割参数"));
     smpArgsGroup->setObjectName(QStringLiteral("SmpSemanticArgsGroup"));
     auto* smpArgsLayout = new QVBoxLayout(smpArgsGroup);
     smpArgsLayout->setContentsMargins(10, 8, 10, 8);
     smpArgsLayout->setSpacing(8);
     smpArgsLayout->addWidget(buildSmpArgsPanel());
     setupPanel->bodyLayout()->addWidget(smpArgsGroup);
-    auto* anomalyArgsGroup = new QGroupBox(QStringLiteral("Anomalib 异常检测参数"));
+    auto* anomalyArgsGroup = new QGroupBox(uiText("Anomalib 异常检测参数"));
     anomalyArgsGroup->setObjectName(QStringLiteral("AnomalyDetectionArgsGroup"));
     auto* anomalyArgsLayout = new QVBoxLayout(anomalyArgsGroup);
     anomalyArgsLayout->setContentsMargins(10, 8, 10, 8);
@@ -570,9 +570,9 @@ QWidget* MainWindow::buildTrainingPage()
     setupScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setupScroll->setMinimumWidth(360);
 
-    auto* monitorPanel = new InfoPanel(QStringLiteral("训练监控"));
+    auto* monitorPanel = new InfoPanel(uiText("训练监控"));
     monitorPanel->setMinimumWidth(0);
-    trainingPhaseLabel_ = inlineStatusLabel(QStringLiteral("阶段：等待启动"));
+    trainingPhaseLabel_ = inlineStatusLabel(uiText("阶段：等待启动"));
     trainingPhaseLabel_->setObjectName(QStringLiteral("TrainingPhaseStatus"));
     monitorPanel->bodyLayout()->addWidget(trainingPhaseLabel_);
 
@@ -633,8 +633,8 @@ QWidget* MainWindow::buildTrainingPage()
     artifactPanel->bodyLayout()->addWidget(artifactGuideLabel);
     artifactPanel->bodyLayout()->addWidget(artifactBoundaryLabel);
     latestCheckpointLabel_ = mutedLabel(QStringLiteral("最新 checkpoint：暂无"));
-    latestOnnxLabel_ = mutedLabel(QStringLiteral("最新 ONNX：暂无"));
-    latestReportLabel_ = mutedLabel(QStringLiteral("训练报告：暂无"));
+    latestOnnxLabel_ = mutedLabel(uiText("最新 ONNX：暂无"));
+    latestReportLabel_ = mutedLabel(uiText("训练报告：暂无"));
     latestPreviewPathLabel_ = mutedLabel(QStringLiteral("最新预览：暂无"));
     allowLabelToShrink(latestCheckpointLabel_);
     allowLabelToShrink(latestOnnxLabel_);
@@ -664,7 +664,7 @@ QWidget* MainWindow::buildTrainingPage()
     logEdit_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
     logPanel->bodyLayout()->addWidget(logEdit_);
 
-    auto* metricsPanel = new InfoPanel(QStringLiteral("指标曲线"));
+    auto* metricsPanel = new InfoPanel(uiText("指标曲线"));
     metricsPanel->setMinimumWidth(0);
     metricsWidget_ = new MetricsWidget;
     metricsPanel->bodyLayout()->addWidget(metricsWidget_, 1);
@@ -672,7 +672,7 @@ QWidget* MainWindow::buildTrainingPage()
     auto* detailTabs = new QTabWidget;
     detailTabs->setObjectName(QStringLiteral("TrainingDetailTabs"));
     detailTabs->setDocumentMode(true);
-    detailTabs->addTab(metricsPanel, QStringLiteral("指标曲线"));
+    detailTabs->addTab(metricsPanel, uiText("指标曲线"));
     detailTabs->addTab(logPanel, QStringLiteral("训练日志"));
     detailTabs->addTab(artifactPanel, QStringLiteral("任务与产物"));
 

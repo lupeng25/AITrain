@@ -117,7 +117,7 @@ QWidget* MainWindow::buildModelRegistryPage()
     for (int column = 0; column < 3; ++column) {
         actionGrid->setColumnStretch(column, 1);
     }
-    modelRegistrySummaryLabel_ = mutedLabel(QStringLiteral("训练产物可从“任务与产物”注册为模型版本；评估报告、模型对比和流水线记录集中在当前模型库工作区。"));
+    modelRegistrySummaryLabel_ = mutedLabel(uiText("训练产物可从“任务与产物”注册为模型版本；评估报告、模型对比和流水线记录集中在当前模型库工作区。"));
     allowLabelToShrink(modelRegistrySummaryLabel_);
     toolbar->bodyLayout()->addWidget(actionStrip);
     toolbar->bodyLayout()->addWidget(modelRegistrySummaryLabel_);
@@ -131,7 +131,7 @@ QWidget* MainWindow::buildModelRegistryPage()
         << QStringLiteral("Checkpoint")
         << QStringLiteral("ONNX")
         << QStringLiteral("来源任务")
-        << QStringLiteral("交付摘要")
+        << uiText("交付摘要")
         << QStringLiteral("更新时间"));
     configureTable(modelVersionTable_);
     modelVersionTable_->setWordWrap(true);
@@ -202,8 +202,8 @@ QWidget* MainWindow::buildModelRegistryPage()
 
     layout->addWidget(createWorkbenchHeader(
         QStringLiteral("MODEL REGISTRY"),
-        QStringLiteral("模型库工作台"),
-        QStringLiteral("管理模型版本、评估报告、对比和流水线记录。"),
+        uiText("模型库工作台"),
+        uiText("管理模型版本、评估报告、对比和流水线记录。"),
         headerRefreshButton,
         QStringList()
             << QStringLiteral("Versioned Models")
@@ -250,7 +250,7 @@ QWidget* MainWindow::buildEvaluationReportsPanel()
         << QStringLiteral("任务")
         << QStringLiteral("类型")
         << QStringLiteral("模型")
-        << QStringLiteral("报告")
+        << uiText("报告")
         << QStringLiteral("时间"));
     configureTable(evaluationReportTable_);
     evaluationReportTable_->setWordWrap(true);
