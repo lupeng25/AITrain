@@ -322,6 +322,12 @@ void apply(QApplication& app)
             background: #EEF2F7;
         }
 
+        QPushButton:disabled {
+            color: #9CA3AF;
+            background: #F3F5F8;
+            border-color: #D8DEE6;
+        }
+
         QPushButton#PrimaryButton {
             background: #2563EB;
             border-color: #2563EB;
@@ -334,10 +340,22 @@ void apply(QApplication& app)
             border-color: #1D4ED8;
         }
 
+        QPushButton#PrimaryButton:disabled {
+            background: #D8DEE6;
+            border-color: #D8DEE6;
+            color: #6B7280;
+        }
+
         QPushButton#DangerButton {
             color: #B91C1C;
             border-color: #F1B4B4;
             background: #FFF7F7;
+        }
+
+        QPushButton#DangerButton:disabled {
+            color: #9CA3AF;
+            border-color: #D8DEE6;
+            background: #F3F5F8;
         }
 
         QPushButton#GreenButton {
@@ -353,6 +371,12 @@ void apply(QApplication& app)
         QPushButton#GreenButton:hover {
             background: #1F2937;
             border-color: #BFF230;
+        }
+
+        QPushButton#GreenButton:disabled {
+            color: #9CA3AF;
+            border-color: #4B5563;
+            background: transparent;
         }
 
         QFrame#ExperimentHeader {
@@ -371,16 +395,22 @@ void apply(QApplication& app)
             border-color: #E5E7EB;
         }
 
-        QTabWidget#DatasetTabs::pane,
-        QTabWidget#DatasetToolsTabs::pane {
+        QTabWidget {
+            background: transparent;
+        }
+
+        QTabWidget::pane {
             border: 1px solid #D8DEE6;
             border-radius: 6px;
             background: #FFFFFF;
             top: -1px;
         }
 
-        QTabWidget#DatasetTabs QTabBar::tab,
-        QTabWidget#DatasetToolsTabs QTabBar::tab {
+        QTabWidget::tab-bar {
+            left: 0;
+        }
+
+        QTabWidget QTabBar::tab {
             background: #F3F5F8;
             color: #6B7280;
             border: 1px solid #D8DEE6;
@@ -393,18 +423,21 @@ void apply(QApplication& app)
             padding: 7px 14px;
         }
 
-        QTabWidget#DatasetTabs QTabBar::tab:hover,
-        QTabWidget#DatasetToolsTabs QTabBar::tab:hover {
+        QTabWidget QTabBar::tab:hover {
             background: #E8EDF5;
             color: #111827;
         }
 
-        QTabWidget#DatasetTabs QTabBar::tab:selected,
-        QTabWidget#DatasetToolsTabs QTabBar::tab:selected {
+        QTabWidget QTabBar::tab:selected {
             background: #FFFFFF;
             color: #111827;
             border-bottom-color: #FFFFFF;
             font-weight: 700;
+        }
+
+        QTabWidget QTabBar::tab:disabled {
+            color: #9CA3AF;
+            background: #F3F5F8;
         }
 
         QFrame#TaskControlStrip,
@@ -425,31 +458,6 @@ void apply(QApplication& app)
             font-size: 8pt;
             font-weight: 700;
             padding: 0 4px;
-        }
-
-        QTabWidget#TaskDetailTabs::pane {
-            border: 1px solid #D8DEE6;
-            border-radius: 6px;
-            background: #FFFFFF;
-            top: -1px;
-        }
-
-        QTabWidget#TaskDetailTabs QTabBar::tab {
-            background: #F3F5F8;
-            color: #6B7280;
-            border: 1px solid #D8DEE6;
-            border-bottom: none;
-            border-top-left-radius: 5px;
-            border-top-right-radius: 5px;
-            padding: 7px 14px;
-            margin-right: 3px;
-            min-width: 58px;
-        }
-
-        QTabWidget#TaskDetailTabs QTabBar::tab:selected {
-            background: #FFFFFF;
-            color: #111827;
-            font-weight: 700;
         }
 
         QLabel#ArtifactPreviewCanvas {
