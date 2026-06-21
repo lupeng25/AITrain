@@ -22,6 +22,76 @@ void apply(QApplication& app)
             font-size: 9pt;
         }
 
+        QScrollBar:vertical {
+            background: #EEF2F7;
+            border: none;
+            border-radius: 5px;
+            margin: 0;
+            width: 10px;
+        }
+
+        QScrollBar::handle:vertical {
+            background: #B8C2D0;
+            border: 2px solid #EEF2F7;
+            border-radius: 5px;
+            min-height: 32px;
+        }
+
+        QScrollBar::handle:vertical:hover {
+            background: #9AA6B2;
+        }
+
+        QScrollBar::handle:vertical:pressed {
+            background: #6B7280;
+        }
+
+        QScrollBar::add-line:vertical,
+        QScrollBar::sub-line:vertical {
+            background: transparent;
+            border: none;
+            height: 0;
+        }
+
+        QScrollBar::add-page:vertical,
+        QScrollBar::sub-page:vertical {
+            background: transparent;
+        }
+
+        QScrollBar:horizontal {
+            background: #EEF2F7;
+            border: none;
+            border-radius: 5px;
+            height: 10px;
+            margin: 0;
+        }
+
+        QScrollBar::handle:horizontal {
+            background: #B8C2D0;
+            border: 2px solid #EEF2F7;
+            border-radius: 5px;
+            min-width: 32px;
+        }
+
+        QScrollBar::handle:horizontal:hover {
+            background: #9AA6B2;
+        }
+
+        QScrollBar::handle:horizontal:pressed {
+            background: #6B7280;
+        }
+
+        QScrollBar::add-line:horizontal,
+        QScrollBar::sub-line:horizontal {
+            background: transparent;
+            border: none;
+            width: 0;
+        }
+
+        QScrollBar::add-page:horizontal,
+        QScrollBar::sub-page:horizontal {
+            background: transparent;
+        }
+
         QFrame#TopBar {
             background: #FFFFFF;
             border-bottom: 1px solid #D8DEE6;
@@ -299,6 +369,42 @@ void apply(QApplication& app)
 
         QFrame#ActionStrip QFrame#Panel {
             border-color: #E5E7EB;
+        }
+
+        QTabWidget#DatasetTabs::pane,
+        QTabWidget#DatasetToolsTabs::pane {
+            border: 1px solid #D8DEE6;
+            border-radius: 6px;
+            background: #FFFFFF;
+            top: -1px;
+        }
+
+        QTabWidget#DatasetTabs QTabBar::tab,
+        QTabWidget#DatasetToolsTabs QTabBar::tab {
+            background: #F3F5F8;
+            color: #6B7280;
+            border: 1px solid #D8DEE6;
+            border-bottom: none;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+            margin-right: 3px;
+            min-height: 24px;
+            min-width: 86px;
+            padding: 7px 14px;
+        }
+
+        QTabWidget#DatasetTabs QTabBar::tab:hover,
+        QTabWidget#DatasetToolsTabs QTabBar::tab:hover {
+            background: #E8EDF5;
+            color: #111827;
+        }
+
+        QTabWidget#DatasetTabs QTabBar::tab:selected,
+        QTabWidget#DatasetToolsTabs QTabBar::tab:selected {
+            background: #FFFFFF;
+            color: #111827;
+            border-bottom-color: #FFFFFF;
+            font-weight: 700;
         }
 
         QFrame#TaskControlStrip,
