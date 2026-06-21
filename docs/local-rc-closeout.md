@@ -1,6 +1,6 @@
 # AITrain Studio Local RC Closeout
 
-This checklist is the local, non-external release-candidate closeout path after Phase 39B, Phase 39C, Phase 41 Lite, and Phase 49 Lite. It does not add new model backends. It exists to make the current detection, segmentation, OCR, pipeline, benchmark, model registry, delivery report, environment profile, sample review, deployment validation, diagnostics, and environment-page delivery evidence loop repeatable on the development machine.
+This checklist is the local, non-external release-candidate closeout path after Phase 39B, Phase 39C, Phase 41 Lite, Phase 49 Lite, and the current industrial-vision expansion lane. It does not add new model backends by itself. It exists to make the current detection, segmentation, OBB, semantic segmentation, anomaly, OCR, pipeline, benchmark, model registry, delivery report, environment profile, sample review, deployment validation, diagnostics, and environment-page delivery evidence loop repeatable on the development machine.
 
 After this local gate passes, use `docs\external-acceptance-handoff.md` and `docs\acceptance-templates\` for the clean Windows package handoff and for any explicitly reopened package-root RTX / SM 75+ TensorRT rerun. The RTX 4090 D source-side TensorRT validation lane already has passing evidence archived in `docs\validation\rtx4090-validation-evidence-20260615.json`; do not weaken or overwrite that lane with package-root or clean-machine status.
 
@@ -19,7 +19,7 @@ Out of scope:
 
 - Clean Windows machine acceptance.
 - Clean Windows package-root TensorRT rerun or independent external TensorRT refresh. The existing RTX 4090 D validation evidence remains the recorded passing TensorRT lane unless a new package-root rerun is explicitly requested and returned.
-- New classification, pose, OBB, or anomaly training backends.
+- New classification, pose, YOLO-World, YOLOE, tracking, video/time-series, 3D/RGB-D, cloud, or multi-user training/product directions.
 - Embedding Python training or annotation tools into the GUI process.
 
 ## Command Plan
@@ -75,7 +75,7 @@ For manual exploration beyond the automated gate, walk through these screens:
 | Dataset | Import generated YOLO detection, YOLO segmentation, PaddleOCR Rec, and PaddleOCR Det datasets; auto-detection and validation should be visible. |
 | Dataset > Quality Review | Load problem/error/rework sample JSON when available; filters and X-AnyLabeling review-list export should be visible. |
 | Annotation | X-AnyLabeling remains an external tool; launch/detect actions should not block the GUI or imply embedded annotation. |
-| Training | Official YOLO / OCR backends should be the only product training choices; removed diagnostic/scaffold backends must not reappear in the GUI. |
+| Training | Official/upstream YOLO/OBB, SMP, Anomalib, and OCR backends should be the only product training choices; removed diagnostic/scaffold backends must not reappear in the GUI. |
 | Task Artifacts | Select recent tasks and preview JSON/TXT/CSV/image/ONNX/model artifacts; unsupported artifacts should show a clear message. |
 | Model Library | Registered model versions, evaluation reports, comparison rows, pipeline records, lineage, benchmarks, artifacts, and limitation summaries should be visible. |
 | Deployment Validation | Export and inference validation controls should be visible under the `模型导出` and `推理验证` tabs. |
@@ -94,7 +94,7 @@ Before marking the local RC closeout done, check docs and UI text for:
 - TensorRT on GTX 1060 / SM 61 is `hardware-blocked`; RTX / SM 75+ is still required for real TensorRT acceptance. The RTX 4090 D validation lane already passed, while clean Windows package-root reruns remain separate evidence.
 - Customer-domain OCR production readiness requires customer/target-domain data; Total-Text, generated smoke, and `.deps` examples are workflow smoke only.
 - NCNN deployment validation runs runtime inference for supported YOLO detection/segmentation artifacts when NCNN SDK/runtime and a sample image are available; otherwise it reports failed/blocked instead of artifact-only passed. Current local evidence covers Hyuto YOLOv8 detection ONNX -> NCNN and nihui preconverted YOLOv8n-seg pnnx/DFL NCNN; YOLOv8-seg ONNX conversion with unsupported `Shape` layers is failed conversion evidence.
-- Phase 40 classification / pose / OBB / anomaly backends remain deferred until priorities are reset.
+- Classification, pose, YOLO-World, YOLOE, tracking, video/time-series, 3D/RGB-D, cloud, and multi-user product directions remain out of scope until priorities are reset. OBB v1, SMP semantic segmentation, and Anomalib PatchCore/EfficientAD anomaly v1 are current local industrial-vision capabilities, with customer-domain readiness still requiring target-domain evidence.
 
 ## Completion Record
 

@@ -1,6 +1,6 @@
 # AITrain Studio 运维交付 Runbook
 
-最后更新：2026-05-17
+最后更新：2026-06-21
 
 本文面向打包、安装、现场运维和交付验收人员，说明 AITrain Studio 的包体边界、依赖准备、证据采集和常见处置。开发架构见 `docs/developer-architecture.md`，用户操作见 `docs/user-guide.md`。
 
@@ -10,9 +10,9 @@
 
 - 产品本体安装包：当前项目编译生成的 `AITrainStudio.exe`、`aitrain_worker.exe`、内置插件，以及产品随附的 `docs`、`examples`、`python_trainers`、`tools`、`translations`。
 - Native 依赖项安装包：Qt/VC runtime、Qt runtime plugin folders、ONNX Runtime、NCNN、TensorRT 和其他运行时 DLL。
-- Python AI 环境安装包：官方 YOLO / OCR 适配器使用的隔离 Python 环境，以及可选的 PaddleOCR 源码 checkout。默认安装到 `python_env`，不写系统 Python，不要求全局 `AITRAIN_PYTHON_EXECUTABLE`。
+- Python AI 环境安装包：官方 YOLO/OBB、SMP、Anomalib 和 OCR 适配器使用的隔离 Python 环境，以及可选的 PaddleOCR 源码 checkout。默认安装到 `python_env`，不写系统 Python，不要求全局 `AITRAIN_PYTHON_EXECUTABLE`。
 
-三个安装包默认安装到同一个 `AITrain Studio` 目录，但写入不同子树，避免互相覆盖。产品本体安装后需要 Native 依赖项安装包和 Python AI 环境安装包，或等价运行时，才能完整启用 GUI、Worker、YOLO/OCR 官方后端和部署验证。
+三个安装包默认安装到同一个 `AITrain Studio` 目录，但写入不同子树，避免互相覆盖。产品本体安装后需要 Native 依赖项安装包和 Python AI 环境安装包，或等价运行时，才能完整启用 GUI、Worker、YOLO/OBB/SMP/Anomalib/OCR 后端和部署验证。
 
 产品本体安装包应包含：
 
@@ -33,7 +33,7 @@ Native 依赖项安装包应包含：
 Python AI 环境安装包应包含：
 
 - `python_env\python.exe` 或 `python_env\Scripts\python.exe`。
-- Ultralytics、Torch、ONNX、ONNX Runtime、PaddlePaddle、PaddleOCR、NumPy、Pillow、PyYAML 等官方适配器所需 Python 包。
+- Ultralytics、segmentation_models.pytorch、Anomalib、Torch、Lightning、timm、ONNX、ONNX Runtime、PaddlePaddle、PaddleOCR、NumPy、Pillow、OpenCV、PyYAML 等官方/上游适配器所需 Python 包。
 - 可选 `python_env\PaddleOCR\tools\train.py`，用于 PaddleOCR Det/Rec/System 官方工具链。
 
 安装顺序建议：
@@ -69,11 +69,13 @@ Python AI 环境安装包应包含：
 - Windows x64。
 - NVIDIA GPU 工作站用于 GPU 训练、TensorRT 和 CUDA 相关验收；无兼容 GPU 时 TensorRT 应显示 `hardware-blocked`。
 - 与包体匹配的 Qt runtime。
-- 用于官方 YOLO / OCR 后端的独立 Python 环境。
+- 用于官方 YOLO/OBB、SMP、Anomalib 和 OCR 后端的独立 Python 环境。
 
 常见外部依赖：
 
-- Ultralytics / Torch / ONNX / ONNX Runtime：用于官方 YOLO 训练、导出和 smoke。
+- Ultralytics / Torch / ONNX / ONNX Runtime：用于官方 YOLO detection/segmentation/OBB 训练、导出和 smoke。
+- segmentation_models.pytorch / Torch / timm / ONNX / ONNX Runtime：用于 SMP 专用语义分割训练、评估、导出和 ONNX Runtime 部署验证。
+- Anomalib / Torch / Lightning / timm / OpenCV / Pillow / NumPy：用于 PatchCore / EfficientAD 异常检测训练、评估、推理、heatmap/overlay/mask 和 benchmark；EfficientAD 还需要显式 `imagenetDir` 或等价本地数据。
 - PaddlePaddle / PaddleOCR / PaddleOCR 源码 checkout：用于官方 OCR 工具链。
 - CUDA / cuDNN / TensorRT：用于 TensorRT engine build 和推理验收。
 - NCNN 工具和 SDK/runtime：用于 NCNN `.param/.bin` 导出和部署验证；配置 NCNN SDK/runtime 后，部署验证可执行 YOLO 检测/分割 runtime 推理。本机验证根目录为 `.deps\sdks\ncnn`，交付机器应使用等价 SDK/runtime 路径。
@@ -179,7 +181,9 @@ package-root TensorRT rerun：
 | 现象 | 优先检查 |
 |---|---|
 | 只能看到注册窗口 | 机器码和注册码是否匹配；公钥是否正确编译进主程序。 |
-| YOLO 后端启动失败 | Python 环境、Ultralytics、Torch、ONNX、ONNX Runtime。若使用 `device=0`，确认该 Python 安装的是 CUDA 版 PyTorch；CPU-only 环境只能用 `device=cpu`。 |
+| YOLO/OBB 后端启动失败 | Python 环境、Ultralytics、Torch、ONNX、ONNX Runtime。若使用 `device=0`，确认该 Python 安装的是 CUDA 版 PyTorch；CPU-only 环境只能用 `device=cpu`。 |
+| SMP 后端启动失败 | Python 环境、segmentation_models.pytorch、Torch、timm、ONNX、ONNX Runtime；SMP 只承诺 ONNX Runtime 部署验证，不要求 NCNN/TensorRT。 |
+| Anomaly 后端启动失败 | Python 环境、Anomalib、Torch、Lightning、timm、OpenCV、Pillow、NumPy；EfficientAD 缺少 Imagenette/ImageNet 辅助数据时应记录为 blocked。 |
 | YOLO12 分割 `.pt` 训练立即失败 | 当前记录的 Ultralytics 8.3.171 环境无法解析 `yolo12n-seg.pt`，按 `blocked_missing_official_weight` 处理；改用 YOLO12 `-seg.yaml` 架构训练，或等待上游官方 `yolo12*-seg.pt` 权重可解析。 |
 | YOLO26 共享环境失败，targeted 已过 | 共享 Ultralytics 8.3.171 环境没有可用的 YOLO26 configs/assets，且 nano `.pt` 权重与包代码不兼容；按 `blocked_model_unavailable` / `blocked_ultralytics_incompatible` 处理。隔离 targeted full 已在 2026-06-15 生成 20/20 训练、官方 ONNX、AITrain C++ ONNX 推理和 TensorRT 通过证据；YOLO26 NCNN 历史尝试 20/20 failed，当前产品不提供 YOLO26 NCNN 导出/转换。客户预检只能按 targeted summary 放行 YOLO26 训练/ONNX/TensorRT。 |
 | 浏览器进度页 failed 数和历史失败数不一致 | 进度页按当前 `runId` 统计主 failed/planned/passed，并把旧 `row_summary.json` 计入 `historicalRowCount` / `historicalByStatus`。排查时先确认页面顶部 `runId`，不要把历史 failed 当成当前 run 失败。 |

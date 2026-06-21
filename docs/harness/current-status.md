@@ -1,8 +1,8 @@
 ﻿# Current Project Status
 
-Last updated: 2026-06-17
+Last updated: 2026-06-21
 
-This file is the source of truth for phase status in new AI coding conversations. Use `docs/product-roadmap-local-training-platform.md` for current broad direction after reading this file. `docs/archive/AITrainStudio_后续实施方案.md` is historical roadmap background only and may contain superseded phase descriptions.
+This file is the source of truth for phase status in new AI coding conversations. Use `docs/product-roadmap-local-training-platform.md` for current broad direction after reading this file. Deleted or external historical roadmap notes must not be used as current implementation plans or phase status sources.
 
 ## Phase Status
 
@@ -87,7 +87,7 @@ Recorded validation baseline on 2026-05-12:
 - Phase 7 / Phase 10 impact: TensorRT is no longer hardware-blocked for the current RTX 4090 D validation lane. `acceptance-smoke.ps1 -TensorRT` passed and produced RTX 4090 evidence archived in `docs/validation/rtx4090-validation-evidence-20260615.json`.
 - GPU Paddle environment is exposed through `.deps/envs/ocr-gpu`; on this machine that canonical path may point at the retained `.deps/rtx4090-validation/python-ocr-gpu` compatibility target. `paddlepaddle-gpu==3.3.1` reports CUDA ready on RTX 4090 D.
 - Closeout refresh on 2026-05-13 is archived in `docs/validation/rtx4090-validation-evidence-20260615.json`: local RC closeout with local baseline and CPU training smoke passed, package acceptance passed, TensorRT passed with GPU compute capability `8.9`, Phase 45 YOLO11/YOLO12 detection/segmentation matrix passed, Phase 47 PaddleOCR Det ONNX wiring passed through a fresh Paddle 2.6 old-IR export plus Paddle2ONNX direct conversion, and the public Total-Text OCR chain passed the current `accuracy>0.7` gate with official GPU Rec `accuracy=0.73263886345003948` and `CER=0.13776229079138269`. This remains public workflow evidence, not customer-domain production OCR proof.
-- RTX 4090D refresh on 2026-06-05 and follow-up repair evidence are archived in `docs/validation/rtx4090-validation-evidence-20260615.json`. The follow-up records `acceptance-smoke.ps1 -LocalBaseline -Package -SkipBuild` passed, the repeatable 1280x820 Qt GUI walkthrough passed with screenshots for all 14 RC pages, and Phase 47 Det ONNX old-IR conversion plus Worker smoke and CTest passed with `predictionCount=100`. The repaired CPU training smoke and repaired Phase 45 matrix are both preserved in the archive as passing evidence for the 2026-06-05 lane; their original `.deps` output directories have been cleaned. TensorRT and public OCR GPU workflow also passed in the initial 2026-06-05 refresh, but the public OCR result remains workflow-only evidence.
+- RTX 4090D refresh on 2026-06-05 and follow-up repair evidence are archived in `docs/validation/rtx4090-validation-evidence-20260615.json`. The follow-up records `acceptance-smoke.ps1 -LocalBaseline -Package -SkipBuild` passed, the then-current repeatable 1280x820 Qt GUI walkthrough passed, and Phase 47 Det ONNX old-IR conversion plus Worker smoke and CTest passed with `predictionCount=100`. The current workbench walkthrough target is the 9-entry object workspace set documented below. The repaired CPU training smoke and repaired Phase 45 matrix are both preserved in the archive as passing evidence for the 2026-06-05 lane; their original `.deps` output directories have been cleaned. TensorRT and public OCR GPU workflow also passed in the initial 2026-06-05 refresh, but the public OCR result remains workflow-only evidence.
 - Historical GTX 1060 / SM 61 results remain useful only as compatibility notes for older machines; they are not the current acceptance baseline.
 - Python note: downloaded Python runtimes and venvs under `.deps/` are ignored and should not be committed.
 

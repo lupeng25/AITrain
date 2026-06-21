@@ -169,7 +169,7 @@ From a packaged build directory, validate the already-installed layout with:
 Expected result:
 
 - `AITrainStudio.exe` and `aitrain_worker.exe` exist.
-- The four built-in plugins load through `aitrain_worker.exe --plugin-smoke`.
+- The five built-in plugins load through `aitrain_worker.exe --plugin-smoke`: YOLO native, semantic segmentation, anomaly detection, OCR Rec, and dataset interop. Marketplace packages are additional local/offline plugins.
 - Runtime folders, docs, examples, Python trainers, requirements, and this acceptance script are present.
 - Worker self-check emits JSON and reports missing optional runtimes clearly.
 

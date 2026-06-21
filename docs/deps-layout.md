@@ -10,6 +10,8 @@
 | General embedded Python | `.deps\envs\python-embed-3.13.13` |
 | YOLO CUDA Python | `.deps\envs\yolo-cuda` |
 | YOLO26 isolated Python | `.deps\envs\yolo26` |
+| SMP GPU Python | `.deps\envs\smp-gpu` |
+| Anomalib Python | `.deps\envs\anomalib` |
 | PaddleOCR CPU/portable Python | `.deps\envs\ocr-cpu` |
 | PaddleOCR GPU Python | `.deps\envs\ocr-gpu` |
 | Paddle2ONNX compatibility Python | `.deps\envs\paddle2onnx` |
@@ -21,6 +23,9 @@
 | TensorRT headers/source support | `.deps\sdks\tensorrt-oss` |
 | TensorRT runtime DLLs | `.deps\sdks\tensorrt-runtime` |
 | Download archives/bootstrap files | `.deps\archives` |
+| Public/local datasets | `.deps\datasets` |
+| Anomalib auxiliary data | `.deps\anomalib` |
+| EfficientAD Imagenette data | `.deps\anomalib\imagenette` |
 | External tools | `.deps\tools` |
 | X-AnyLabeling | `.deps\tools\annotation-tools\X-AnyLabeling` |
 | UI walkthrough evidence root | `.deps\UI-Walkthrough` |
@@ -32,6 +37,12 @@ Use separate folders for generated outputs, for example:
 - `.deps\acceptance-smoke`
 - `.deps\full-model-lifecycle`
 - `.deps\phase-yolo26-model-matrix`
+- `.deps\phase-smp-semantic-segmentation-smoke`
+- `.deps\smp-realtest\gpu-4090d`
+- `.deps\phase-obb-ultralytics-smoke`
+- `.deps\obb-quality\dota`
+- `.deps\phase-anomaly-anomalib-smoke`
+- `.deps\anomaly-mvtec-quality-matrix`
 - `.deps\production-ocr-data`
 - `.deps\production-ocr-official-chain`
 - `.deps\rtx4090-validation`

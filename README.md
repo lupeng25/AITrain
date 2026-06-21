@@ -10,16 +10,16 @@ This repository implements the first usable platform layer from the requested pl
 - Isolated `aitrain_worker` process using JSON Lines over `QLocalSocket`.
 - SQLite-backed project/task/artifact metadata with task detail queries for artifacts, metrics, exports, and dataset versions.
 - Qt plugin interfaces for model, dataset, training, validation, export, and inference extensions.
-- Built-in plugin manifests for YOLO-style detection/segmentation, dedicated semantic segmentation, PaddleOCR-style recognition, dataset interop, and the local/offline-first plugin marketplace.
-- Dataset validation and split helpers for YOLO detection, YOLO segmentation, semantic segmentation Mask PNG, PaddleOCR Det, and PaddleOCR Rec label files.
+- Built-in plugin manifests for YOLO-style detection/segmentation/OBB, dedicated semantic segmentation, anomaly detection, PaddleOCR-style recognition, and dataset interop, plus the local/offline-first plugin marketplace.
+- Dataset validation and split helpers for YOLO detection, YOLO segmentation, YOLO OBB, semantic segmentation Mask PNG, anomaly-folder, PaddleOCR Det, and PaddleOCR Rec label files.
 - Worker-backed dataset conversion GUI for the implemented COCO / Pascal VOC / YOLO detection / YOLO segmentation conversion matrix.
 - External annotation workflow entrypoint for X-AnyLabeling, with local tool detection and a post-labeling refresh/revalidation path.
 - Segmentation dataset admission with dataset loading, polygon-to-mask conversion, overlay preview, and Worker metrics; model training is routed through the official Ultralytics segmentation backend.
-- Worker-managed Python trainer adapters for official Ultralytics YOLO detection, official Ultralytics YOLO segmentation, SMP semantic segmentation, and official PaddleOCR Det/Rec train/export/inference orchestration.
+- Worker-managed Python trainer adapters for official Ultralytics YOLO detection/segmentation/OBB, SMP semantic segmentation, Anomalib PatchCore/EfficientAD, and official PaddleOCR Det/Rec train/export/inference orchestration.
 - Delivery-closeout workbench surfaces for sample review, delivery acceptance, customer OCR validation, diagnostics, deployment validation, and model-card/report generation.
 - QtTest coverage for JSONL protocol, project repository behavior, detection workflow, and segmentation admission behavior.
 
-Production training is routed through Worker-managed Python trainer subprocesses: Ultralytics for YOLO detection/segmentation, SMP for dedicated semantic segmentation, and PaddleOCR official adapters for Det/Rec. The legacy tiny detector, small PaddleOCR CTC trainer, C++ segmentation/OCR training scaffolds, and shipped `python_mock` trainer have been physically removed from the product path. RTX 4090 D TensorRT acceptance has passing evidence for the current validation lane; clean Windows package acceptance and any package-root TensorRT rerun still require returned external evidence before they can be marked passed.
+Production training is routed through Worker-managed Python trainer subprocesses: Ultralytics for YOLO detection/segmentation/OBB, SMP for dedicated semantic segmentation, Anomalib for PatchCore/EfficientAD anomaly workflows, and PaddleOCR official adapters for Det/Rec. The legacy tiny detector, small PaddleOCR CTC trainer, C++ segmentation/OCR training scaffolds, and shipped `python_mock` trainer have been physically removed from the product path. RTX 4090 D TensorRT acceptance has passing evidence for the current validation lane; clean Windows package acceptance and any package-root TensorRT rerun still require returned external evidence before they can be marked passed.
 
 ## Build
 
@@ -27,15 +27,13 @@ Requirements:
 
 - CMake 3.21+
 - C++20-capable MSVC
-- Qt 6 preferred, Qt 5.12+ supported for the current platform layer
+- Qt 5.12.9 is the current verified kit; keep Qt 5.12+ compatibility unless an upgrade is explicitly planned
 
 ```powershell
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH=C:\Qt\6.6.3\msvc2019_64
-cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure
+.\tools\harness-check.ps1
 ```
 
-If only Qt 5 is installed, point `CMAKE_PREFIX_PATH` to the Qt 5 MSVC kit.
+The harness configures the verified MSVC/Qt environment, builds `build-vscode`, and runs CTest. For manual CMake work, point `CMAKE_PREFIX_PATH` to the Qt 5.12 MSVC kit used by `tools\toolchain-env.ps1`.
 
 ## Run
 
@@ -110,7 +108,7 @@ Print the project context:
 
 ## Acceptance
 
-Phase 17-49 delivery acceptance is documented in `docs/acceptance-runbook.md`. The current source of truth for phase status and evidence paths is `docs/harness/current-status.md`; the evidence index in `docs/delivery-evidence-index.md` summarizes what is local, what has RTX 4090 D evidence, and what still needs returned external evidence.
+Phase 17-50, P1 YOLO, SMP, OBB, anomaly, and delivery acceptance paths are documented in `docs/acceptance-runbook.md`. The current source of truth for phase status and evidence paths is `docs/harness/current-status.md`; the evidence index in `docs/delivery-evidence-index.md` summarizes what is local, what has RTX 4090 D evidence, and what still needs returned external or customer-domain evidence.
 
 Run the local baseline and packaged layout smoke checks with:
 
@@ -147,7 +145,7 @@ TensorRT acceptance must be run on an RTX / SM 75+ machine. The RTX 4090 D valid
 
 Environment and backend notes are documented in `docs/training-backends.md`.
 
-Production training entry points expose Worker-managed official/upstream adapters: Ultralytics for YOLO detection/segmentation, SMP for dedicated semantic segmentation, and PaddleOCR official adapters for Det/Rec. Legacy diagnostic training implementations have been removed instead of hidden behind user-facing switches. `paddleocr_rec` remains only a dataset format; production OCR Rec training uses `paddleocr_rec_official` or `paddleocr_ppocrv4_rec`.
+Production training entry points expose Worker-managed official/upstream adapters: Ultralytics for YOLO detection/segmentation/OBB, SMP for dedicated semantic segmentation, Anomalib for PatchCore/EfficientAD anomaly workflows, and PaddleOCR official adapters for Det/Rec. Legacy diagnostic training implementations have been removed instead of hidden behind user-facing switches. `paddleocr_rec` remains only a dataset format; production OCR Rec training uses `paddleocr_rec_official` or `paddleocr_ppocrv4_rec`.
 
 Minimal sample datasets can be generated with:
 
@@ -155,13 +153,13 @@ Minimal sample datasets can be generated with:
 python examples\create-minimal-datasets.py --output .deps\examples-smoke
 ```
 
-The local CPU smoke profile generates larger deterministic detection, segmentation, and OCR Rec samples:
+The local CPU smoke profile generates larger deterministic detection, segmentation, semantic segmentation, OCR Det, and OCR Rec samples:
 
 ```powershell
 python examples\create-minimal-datasets.py --output .deps\cpu-smoke-data --profile cpu-smoke
 ```
 
-The generated requests can be passed directly to the Python trainers for smoke validation. These datasets are intentionally tiny and are only meant to verify trainer wiring and artifact creation. The GUI can import, validate, split, and preview the generated detection, segmentation, and OCR Rec layouts.
+The generated requests can be passed directly to the Python trainers for smoke validation. These datasets are intentionally tiny and are only meant to verify trainer wiring and artifact creation. The GUI can import, validate, split, and preview the generated detection, segmentation, semantic segmentation, OCR Det, and OCR Rec layouts.
 
 Hardware support and TensorRT acceptance requirements are documented in `docs/hardware-compatibility.md`.
 
@@ -173,7 +171,7 @@ Official PaddleOCR Rec train/export/inference smoke can be run in an isolated OC
 
 ## Annotation Tool
 
-The dataset page uses X-AnyLabeling as the default external annotation tool. The GUI detects it from `AITRAIN_XANYLABELING_EXE`, the app directory, `tools\x-anylabeling`, `.deps\annotation-tools\X-AnyLabeling`, or `PATH`.
+The dataset page uses X-AnyLabeling as the default external annotation tool. The GUI detects it from `AITRAIN_XANYLABELING_EXE`, the app directory, `tools\x-anylabeling`, `.deps\tools\annotation-tools\X-AnyLabeling`, legacy `.deps\annotation-tools\X-AnyLabeling`, or `PATH`.
 
 Recommended exports:
 

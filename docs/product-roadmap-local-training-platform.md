@@ -1,10 +1,10 @@
 # AITrain Studio 后续功能规划与实现方案（本地交付版）
 
-日期：2026-05-13
+日期：2026-06-21
 
 定位：Windows + Qt Widgets + Worker 的本地视觉训练平台。
 
-本文是 Phase 39+ 的当前方向文档。当前权威状态仍以 `docs/harness/current-status.md` 为准。`docs/archive/AITrainStudio_后续实施方案.md` 只保留为历史路线背景，不作为下一步实施、阶段状态或验收口径来源。
+本文是 Phase 39+ 的当前方向文档。当前权威状态仍以 `docs/harness/current-status.md` 为准。已删除或外部保留的历史路线笔记不作为下一步实施、阶段状态或验收口径来源。
 
 ## 1. 当前基线与判断
 
@@ -52,7 +52,7 @@ Phase 40 backlog 的优先级已重新确认：异常检测/定位、OBB、专�
 
 ## 3. Phase 39A：真实评估补齐
 
-目标：让 detection / segmentation / OCR Rec 都能通过 `evaluateModel` 生成可信的质量判断报告；YOLO detection/segmentation 指标由 Ultralytics 官方 `val()` 产生，AITrain 不再自行计算本地 AP/mAP 或 mask IoU。
+目标：让 YOLO detection / segmentation / OBB 和 OCR 都能生成可信的质量判断报告；YOLO detection/segmentation/OBB 指标由 Ultralytics 官方 `val()` 产生，AITrain 不再自行计算本地 AP/mAP、rotated AP 或 mask IoU。OCR 评估和验收收口为 PaddleOCR 官方 Det/Rec/System 报告和客户域验收证据。
 
 ### Detection
 
@@ -70,16 +70,14 @@ Phase 40 backlog 的优先级已重新确认：异常检测/定位、OBB、专�
 - AITrain 不再在 C++ 中执行 GT polygon -> mask、预测 mask IoU、本地 mask AP/mAP、error samples 或本地 overlay 评估。
 - 报告 `scaffold=false`，但 limitations 说明指标来源为 Ultralytics official val，客户/目标域验收仍需配合使用。
 
-### OCR Rec
+### OCR
 
-新增真实 OCR Rec evaluation：
+OCR 评估和验收使用 PaddleOCR 官方报告路径：
 
-- 读取 PaddleOCR Rec label file 和 dictionary。
-- 调用现有 OCR ONNX Runtime greedy decode。
-- 计算 accuracy、edit distance、CER、WER。
-- 输出错误样本、错误字符统计、低置信或空预测样本。
-- 输出 `evaluation_report.json`、`error_samples.json`、可读 preview / overlay artifacts。
-- official PaddleOCR inference model 仍不直接走 C++ runtime；报告中明确限制。
+- Det / Rec / System 证据来自 PaddleOCR 官方 adapter、official report 和 `predict_system.py` 输出。
+- AITrain 不再把历史 C++ OCR ONNX wiring 当作产品 OCR 评估、benchmark、部署验证或验收路线。
+- 客户域 OCR production claim 必须使用客户/目标域数据、官方 Det/Rec/System 报告和 `customer-ocr-validation` 结果。
+- Public Total-Text、generated smoke、`.deps` 示例和 tiny CPU smoke 只能证明工作流，不证明客户域 OCR 精度。
 
 ## 4. Phase 39B：本地流水线真实执行
 
@@ -165,7 +163,7 @@ Phase 40 backlog 的优先级已重新确认：异常检测/定位、OBB、专�
 
 ## 7. Phase 49 Lite：交付闭环工作台
 
-目标：把本地 YOLO/OCR 能力变成“能验收、能诊断、能交付”的 GUI 闭环，而不新增算法后端。
+目标：把本地 YOLO/OBB/SMP/anomaly/OCR 能力变成“能验收、能诊断、能交付”的 GUI 闭环。后续算法扩展已单独收敛到工业模型方向：OBB、专用语义分割和异常检测/定位。
 
 已落地能力：
 
@@ -205,7 +203,7 @@ Phase 40 backlog 的优先级已重新确认：异常检测/定位、OBB、专�
 - NCNN runtime validation 覆盖 YOLO 检测/分割；外部 NCNN 模型需要 sidecar 或显式 blob/decoder 配置。当前不要把失败的 YOLOv8-seg ONNX -> `onnx2ncnn` `Shape` layer case 说成通过证据。
 - 暂不把 X-AnyLabeling 嵌入 GUI。
 - 暂不把 Python 训练嵌入 GUI 主进程。
-- 暂不重新引入 C++ scaffold 训练能力；真实 YOLO/OCR 训练只走官方后端。
+- 暂不重新引入 C++ scaffold 训练能力；真实 YOLO/OBB/OCR 训练只走官方后端，SMP 和 Anomalib 只走 Worker-managed 上游 Python 适配器。
 - 云平台、Kubernetes 调度、多人权限和 Web 控制台不属于当前项目方向。
 
 ## 10. 验收与测试计划

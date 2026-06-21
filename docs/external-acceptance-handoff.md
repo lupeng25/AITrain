@@ -9,7 +9,7 @@ External acceptance covers:
 - Clean Windows package layout validation from an installed package root.
 - Worker self-check and plugin loading from the package.
 - Optional source-tree local RC repeatability check before handoff.
-- TensorRT engine build and inference smoke on supported RTX / SM 75+ hardware when reproducing or refreshing the recorded RTX 4090 D pass.
+- TensorRT engine build/deployment validation smoke on supported RTX / SM 75+ hardware when reproducing or refreshing the recorded RTX 4090 D pass.
 - Return of machine-readable summaries and enough environment evidence to update `docs\harness\current-status.md`.
 
 Out of scope:
@@ -101,7 +101,7 @@ Acceptance requires:
 - Worker self-check resolves the CUDA/TensorRT runtime components needed for TensorRT ONNX-to-engine export.
 - GPU compute capability is accepted by the TensorRT release.
 - `acceptance-smoke.ps1 -TensorRT` generates a small official Ultralytics YOLO ONNX artifact, or uses `-TensorRtOnnxPath <official.onnx>` when supplied.
-- `aitrain_worker.exe --tensorrt-smoke <official.onnx>` builds a TensorRT engine from an official Ultralytics ONNX artifact. This is an official-artifact smoke with AITrain TensorRT export/runtime checks; it does not use the removed tiny-detector TensorRT inference fixture and is not an end-to-end Ultralytics Python runtime check.
+- `aitrain_worker.exe --tensorrt-smoke <official.onnx>` builds a TensorRT engine from an official Ultralytics ONNX artifact. This is an official-artifact smoke with AITrain TensorRT export/deployment validation checks; it does not use the removed tiny-detector TensorRT inference fixture and is not an end-to-end Ultralytics Python runtime check.
 - The command finishes with `passed`, not `hardware-blocked`.
 
 Use `docs\acceptance-templates\tensorrt-acceptance-result.md` to record the result.

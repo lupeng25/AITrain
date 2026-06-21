@@ -56,7 +56,7 @@
 ## Acceptance Decision
 
 - TensorRT engine build passed:
-- TensorRT runtime inference available/passed, if enabled:
+- TensorRT engine export/deployment validation passed:
 - Result can update Phase 7 / Phase 10 status:
 - Status wording to add to `docs\harness\current-status.md`:
 

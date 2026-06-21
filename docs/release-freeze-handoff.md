@@ -52,7 +52,7 @@ The repo also includes Inno Setup 6 scripts for producing Windows installers fro
 
 - Product installer: AITrain Studio executables, built-in plugins, product scripts, docs, examples, translations, and Python trainer adapter files.
 - Dependency installer: Qt/VC runtime files, Qt runtime plugin folders, ONNX Runtime, NCNN, TensorRT, and other runtime dependency DLLs.
-- Python AI environment installer: a prepared Python environment for official YOLO/OCR adapters plus an optional PaddleOCR source checkout under `python_env\PaddleOCR`.
+- Python AI environment installer: a prepared Python environment for official YOLO/OBB, SMP, Anomalib, and OCR adapters plus an optional PaddleOCR source checkout under `python_env\PaddleOCR`.
 
 ```powershell
 .\tools\build-inno-installer.ps1

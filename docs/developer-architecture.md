@@ -1,6 +1,6 @@
 # AITrain Studio 开发架构说明
 
-最后更新：2026-05-15
+最后更新：2026-06-21
 
 本文面向后续维护和扩展开发，说明当前架构边界、主要模块、扩展入口和验证要求。所有阶段事实以 `docs/harness/current-status.md` 为准。
 
@@ -39,7 +39,7 @@ AITrainStudio.exe
 | `src/core` | 协议、插件接口、数据集校验/转换、训练/评估/交付 workflow、SQLite repository、ONNX/TensorRT 支持。 |
 | `src/app` | Qt Widgets GUI、页面、动作、Worker 消息处理、预览、翻译和 marketplace UI。 |
 | `src/worker` | 独立任务进程、WorkerSession、数据集/训练/模型/交付命令入口。 |
-| `src/plugins` | 内置模型、OCR、dataset interop 插件。 |
+| `src/plugins` | 内置 YOLO、semantic segmentation、anomaly detection、OCR Rec、dataset interop 插件。 |
 | `src/license_generator` | 内部离线注册码生成器。 |
 | `tests` | QtTest 和核心行为覆盖。 |
 | `tools` | harness、acceptance、packaging、handoff、OCR validation 脚本。 |
@@ -115,7 +115,9 @@ Marketplace v1 是本地/离线优先机制：
 
 Generated smoke 或 public dataset smoke 只能证明官方链路接线和 artifact 生成，不能写成客户域生产精度结论。
 
-官方 Ultralytics、PaddleOCR、PaddlePaddle 等后端也需要独立依赖和许可证审查。Public smoke 只证明接线和 artifact 生成，不证明客户域精度。
+当前生产训练入口是 Worker-managed 官方/上游适配器：Ultralytics YOLO detection/segmentation/OBB、SMP semantic segmentation、Anomalib PatchCore/EfficientAD，以及 PaddleOCR Det/Rec 官方适配器。YOLO/OBB、SMP、Anomalib 和 OCR 的运行时边界不同，必须按 `docs/harness/current-status.md` 和 `docs/training-backends.md` 的能力说明记录限制。
+
+官方 Ultralytics、SMP、Anomalib、PaddleOCR、PaddlePaddle 等后端也需要独立依赖和许可证审查。Public smoke 只证明接线和 artifact 生成，不证明客户域精度。
 
 ## 文档与状态
 

@@ -22,13 +22,43 @@ For official YOLO segmentation training, Worker routes `trainingBackend=ultralyt
 python python_trainers/segmentation/ultralytics_trainer.py --request <request-json>
 ```
 
-For YOLO detection/segmentation evaluation, `evaluateModel` launches the official evaluator directly:
+For official YOLO OBB training, Worker routes `trainingBackend=ultralytics_yolo_obb` to:
+
+```powershell
+python python_trainers/obb/ultralytics_trainer.py --request <request-json>
+```
+
+OBB uses `taskType=obb_detection`, `datasetFormat=yolo_obb`, and `modelFamily=yolo_obb`. Training, first ONNX export, and evaluation are official Ultralytics OBB operations. Packaged OBB inference, overlay, benchmark, and deployment validation use AITrain C++ ONNX Runtime with rotated-box output. NCNN is not an OBB v1 target, and TensorRT runtime OBB inference is not claimed.
+
+For YOLO detection/segmentation/OBB evaluation, `evaluateModel` launches the official evaluator directly:
 
 ```powershell
 python python_trainers/yolo/ultralytics_evaluator.py --request <request-json>
 ```
 
-The evaluator calls official `YOLO(modelPath).val()` and writes an AITrain-compatible `evaluation_report.json` with `evaluationSource=ultralytics_official_val`. AITrain no longer computes local YOLO AP/mAP, mask IoU, TP/FP/FN, local error samples, local confusion CSV, or local evaluation overlays.
+The evaluator calls official `YOLO(modelPath).val()` and writes an AITrain-compatible `evaluation_report.json` with `evaluationSource=ultralytics_official_val`. AITrain no longer computes local YOLO AP/mAP, rotated AP, mask IoU, TP/FP/FN, local error samples, local confusion CSV, or local evaluation overlays.
+
+For dedicated semantic segmentation, Worker routes `trainingBackend=smp_semantic_segmentation` to:
+
+```powershell
+python python_trainers/semantic_segmentation/smp_trainer.py --request <request-json>
+```
+
+SMP evaluation uses:
+
+```powershell
+python python_trainers/semantic_segmentation/smp_evaluator.py --request <request-json>
+```
+
+SMP uses `taskType=semantic_segmentation`, `datasetFormat=semantic_segmentation_mask`, and `modelFamily=semantic_segmentation`. Datasets use `classes.txt` plus single-channel PNG class-id masks. Training exports `best.pt`, `best.onnx`, `smp_training_report.json`, and `semantic_segmentation_sidecar.json`; product inference, overlay, benchmark, and deployment validation are ONNX Runtime-only. NCNN/TensorRT export is outside SMP scope.
+
+For anomaly detection/localization, Worker routes `trainingBackend=anomalib_patchcore` or `trainingBackend=anomalib_efficientad` to:
+
+```powershell
+python python_trainers/anomaly/anomalib_adapter.py --request <request-json>
+```
+
+Anomaly v1 uses `taskType=anomaly_detection`, `datasetFormat=anomaly_folder`, `modelFamily=anomaly_detection`, and `runtime=anomalib_python`. It writes Worker-managed Python/Anomalib artifacts such as `anomalib_training_report.json`, `anomaly_sidecar.json`, `evaluation_report.json`, `inference_predictions.json`, heatmaps, overlays, masks, and benchmark/deployment reports. It does not add AITrain C++ ONNX/TensorRT/NCNN anomaly runtime.
 
 For the official PaddleOCR PP-OCRv4 / PP-OCRv5 / PP-OCRv6 Rec adapter, Worker routes `trainingBackend=paddleocr_rec_official` or the compatibility alias `trainingBackend=paddleocr_ppocrv4_rec` to:
 
@@ -114,6 +144,9 @@ Official Python packages are adapted behind this protocol:
 
 - `ultralytics_yolo_detect`: Ultralytics YOLO detection training. The adapter writes normalized `aitrain_yolo_data.yaml`, calls official `YOLO(...).train()`, exports ONNX, and forwards `best.pt`, `last.pt`, `results.csv`, `args.yaml`, `model.onnx`, and `ultralytics_training_report.json`.
 - `ultralytics_yolo_segment`: Ultralytics YOLO segmentation training. It reuses the detection adapter with segmentation defaults such as `yolov8n-seg.yaml` and forwards mask metrics when the official results expose them.
+- `ultralytics_yolo_obb`: Ultralytics YOLO OBB training. It uses official OBB training, ONNX export, and `val()` evaluation over YOLO OBB 9-column labels. Product deployment validation is ONNX Runtime-only for OBB v1.
+- `smp_semantic_segmentation`: SMP dedicated semantic segmentation training and evaluation. It is separate from YOLO instance segmentation and uses Mask PNG datasets plus ONNX Runtime product inference/deployment validation.
+- `anomalib_patchcore` / `anomalib_efficientad`: Anomalib anomaly detection/localization. It uses Worker-managed Python/Anomalib artifacts and `runtime=anomalib_python`; missing Anomalib or EfficientAD external data is blocked, not downgraded to a pass.
 - `paddleocr_rec_official` / `paddleocr_ppocrv4_rec`: PaddleOCR official-recognition adapter. It prepares a PP-OCRv4, PP-OCRv5, or PP-OCRv6 config selected by `modelPreset` and can run official PaddleOCR training/export/inference from a source checkout. `prepareOnly` artifacts are configuration validation, not trained model artifacts.
   When official training runs, the adapter parses stdout metrics such as `loss`, `ctcLoss`, `nrtrLoss`, `accuracy`, and `normalizedEditDistance` into Worker `metric` events and the final report.
 - `paddleocr_det_official`: PaddleOCR official-detection adapter. It prepares a PP-OCRv4, PP-OCRv5, or PP-OCRv6 Det config selected by `modelPreset` and can run official PaddleOCR training/export from a source checkout. `prepareOnly` artifacts are configuration validation, not trained model artifacts.
@@ -136,6 +169,26 @@ Common Phase 9 detection parameters:
 - `ultralyticsTrainArgs`: optional JSON object of whitelisted official training args such as `optimizer`, `lr0`, `lrf`, `momentum`, `weight_decay`, `patience`, `cos_lr`, `amp`, `cache`, `classes`, `freeze`, `mosaic`, `mixup`, `copy_paste`, `overlap_mask`, and `mask_ratio`
 
 Common Phase 11 segmentation parameters are the same as detection, with default `model=yolov8n-seg.yaml`.
+
+Common YOLO OBB parameters are the same as detection, with default `model=yolo11n-obb.pt`, `taskType=obb_detection`, and `datasetFormat=yolo_obb`.
+
+Common SMP semantic segmentation parameters:
+
+- `model`: default `smp_unet_resnet34`
+- `epochs`: default adapter-dependent smoke value
+- `batchSize` / `batch`
+- `imageSize` / `imgsz`
+- `device`: `cpu` or CUDA device
+- `numClasses`, `ignoreIndex`, and class metadata from `classes.txt`
+- `pythonExecutable`: optional Python path for SMP training/evaluation
+
+Common Anomalib parameters:
+
+- `modelPreset`: `anomalib_patchcore_wide_resnet50_2`, `anomalib_efficientad_s`, or compatible explicit settings
+- `backbone`, `layers`, `coresetSamplingRatio`, and `numNeighbors` for PatchCore
+- `modelSize=small|medium` for EfficientAD; legacy `s/m` may be normalized for compatibility
+- `imagenetDir` or `AITRAIN_ANOMALIB_IMAGENET_DIR` for EfficientAD auxiliary data
+- `threshold`, `imageSize`, `batchSize`, `device`, and `pythonExecutable`
 
 Common YOLO evaluation options:
 
