@@ -5,9 +5,8 @@
 #include "InfoPanel.h"
 #include "LanguageSupport.h"
 #include "MainWindowSupport.h"
-#include "PluginMarketplaceWidget.h"
+#include "aitrain/core/CapabilityRegistry.h"
 #include "aitrain/core/DetectionTrainer.h"
-#include "aitrain/core/PluginInterfaces.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -113,35 +112,34 @@ void MainWindow::runEnvironmentCheck()
     workerPill_->setStatus(uiText("环境自检中"), StatusPill::Tone::Info);
 }
 
-void MainWindow::refreshPlugins()
+void MainWindow::refreshBuiltInCapabilities()
 {
-    pluginManager_.scan(pluginSearchPaths());
-    if (pluginTable_) {
-        pluginTable_->setRowCount(0);
-        const QVector<aitrain::IModelPlugin*> plugins = pluginManager_.plugins();
-        if (plugins.isEmpty()) {
-            pluginTable_->setRowCount(1);
-            pluginTable_->setItem(0, 0, new QTableWidgetItem(uiText("暂无插件")));
-            for (int column = 1; column < pluginTable_->columnCount(); ++column) {
-                pluginTable_->setItem(0, column, new QTableWidgetItem(uiText("重新扫描或检查 plugins/models 目录。")));
+    const QVector<aitrain::CapabilityDescriptor> capabilities =
+        aitrain::BuiltinCapabilityRegistry::instance().capabilities();
+    if (capabilityTable_) {
+        capabilityTable_->setRowCount(0);
+        if (capabilities.isEmpty()) {
+            capabilityTable_->setRowCount(1);
+            capabilityTable_->setItem(0, 0, new QTableWidgetItem(uiText("暂无内置能力")));
+            for (int column = 1; column < capabilityTable_->columnCount(); ++column) {
+                capabilityTable_->setItem(0, column, new QTableWidgetItem(uiText("内置能力注册表为空。")));
             }
         }
-        for (auto* plugin : plugins) {
-            const aitrain::PluginManifest manifest = plugin->manifest();
-            const int row = pluginTable_->rowCount();
-            pluginTable_->insertRow(row);
-            pluginTable_->setItem(row, 0, new QTableWidgetItem(manifest.id));
-            pluginTable_->setItem(row, 1, new QTableWidgetItem(manifest.name));
-            pluginTable_->setItem(row, 2, new QTableWidgetItem(manifest.version));
-            pluginTable_->setItem(row, 3, new QTableWidgetItem(compactListSummary(manifest.taskTypes, 4)));
-            pluginTable_->setItem(row, 4, new QTableWidgetItem(compactListSummary(manifest.datasetFormats, 4)));
-            pluginTable_->setItem(row, 5, new QTableWidgetItem(compactListSummary(manifest.exportFormats, 4)));
-            pluginTable_->setItem(row, 6, new QTableWidgetItem(manifest.requiresGpu ? uiText("需要") : uiText("否")));
+        for (const aitrain::CapabilityDescriptor& capability : capabilities) {
+            const int row = capabilityTable_->rowCount();
+            capabilityTable_->insertRow(row);
+            capabilityTable_->setItem(row, 0, new QTableWidgetItem(capability.id));
+            capabilityTable_->setItem(row, 1, new QTableWidgetItem(capability.displayName));
+            capabilityTable_->setItem(row, 2, new QTableWidgetItem(uiText("内置")));
+            capabilityTable_->setItem(row, 3, new QTableWidgetItem(compactListSummary(capability.taskTypes, 4)));
+            capabilityTable_->setItem(row, 4, new QTableWidgetItem(compactListSummary(capability.datasetFormats, 4)));
+            capabilityTable_->setItem(row, 5, new QTableWidgetItem(compactListSummary(capability.backendIds, 4)));
+            capabilityTable_->setItem(row, 6, new QTableWidgetItem(uiText("内置")));
         }
     }
-    loadPluginCombos();
+    loadCapabilityCombos();
     updateHeaderState();
-    updatePluginSummary();
+    updateCapabilitySummary();
     updateDashboardSummary();
     refreshTrainingDefaults();
 }

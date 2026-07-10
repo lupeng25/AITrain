@@ -4,10 +4,8 @@
 #include "InfoPanel.h"
 #include "LanguageSupport.h"
 #include "MainWindowSupport.h"
-#include "PluginMarketplaceWidget.h"
 #include "TaskArtifactPanel.h"
 #include "aitrain/core/DetectionTrainer.h"
-#include "aitrain/core/PluginInterfaces.h"
 
 #include <QApplication>
 #include <QCheckBox>

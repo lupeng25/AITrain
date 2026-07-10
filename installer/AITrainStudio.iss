@@ -86,5 +86,3 @@ Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(
 Type: dirifempty; Name: "{app}\runtimes\onnxruntime"
 Type: dirifempty; Name: "{app}\runtimes\tensorrt"
 Type: dirifempty; Name: "{app}\runtimes"
-Type: dirifempty; Name: "{app}\plugins\models"
-Type: dirifempty; Name: "{app}\plugins"

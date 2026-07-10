@@ -12,7 +12,7 @@ AITrain Studio 当前是 Windows + NVIDIA GPU 本地视觉训练工作台，核�
 - 长任务进入 `aitrain_worker`。
 - 训练优先通过 Worker 启动独立 Python 子进程。
 - 元数据进入 `ProjectRepository` / SQLite。
-- 模型、数据集、训练、验证、导出、推理扩展走插件接口。
+- 模型、数据集、训练、验证、导出、推理扩展走内置能力注册表。
 - scaffold、smoke、diagnostic 能力必须明确标注，不能写成真实生产训练能力。
 
 ## 运行时结构
@@ -22,7 +22,7 @@ AITrainStudio.exe
   -> Qt Widgets workbench
   -> WorkerClient
   -> ProjectRepository / SQLite
-  -> Qt plugin scan / marketplace UI
+  -> BuiltinCapabilityRegistry / capability matrix UI
   -> aitrain_worker.exe
        -> core workflow functions
        -> Python trainer subprocesses
@@ -36,10 +36,10 @@ AITrainStudio.exe
 
 | 路径 | 职责 |
 |---|---|
-| `src/core` | 协议、插件接口、数据集校验/转换、训练/评估/交付 workflow、SQLite repository、ONNX/TensorRT 支持。 |
-| `src/app` | Qt Widgets GUI、页面、动作、Worker 消息处理、预览、翻译和 marketplace UI。 |
+| `src/core` | 协议、能力注册表、数据集校验/转换、训练/评估/交付 workflow、SQLite repository、ONNX/TensorRT 支持。 |
+| `src/app` | Qt Widgets GUI、页面、动作、Worker 消息处理、预览、翻译和能力矩阵。 |
 | `src/worker` | 独立任务进程、WorkerSession、数据集/训练/模型/交付命令入口。 |
-| `src/plugins` | 内置 YOLO、semantic segmentation、anomaly detection、OCR Rec、dataset interop 插件。 |
+| `src/core/CapabilityRegistry.cpp` | 内置 YOLO、semantic segmentation、anomaly detection、PaddleOCR、dataset interop 能力注册表。 |
 | `src/license_generator` | 内部离线注册码生成器。 |
 | `tests` | QtTest 和核心行为覆盖。 |
 | `tools` | harness、acceptance、packaging、handoff、OCR validation 脚本。 |
@@ -92,19 +92,13 @@ AITrainStudio.exe
 - 转换后的数据集不会自动注册，必须由用户选择并重新校验。
 - 交付报告和诊断包是证据产物，不应修改用户全局 Python、CUDA、驱动或数据。
 
-## 插件边界
+## 能力注册边界
 
-插件接口覆盖模型、数据集、训练、验证、导出和推理扩展。新增能力优先通过插件或 Worker/core 边界接入，而不是在 GUI 页面里硬编码模型特化逻辑。
-
-Marketplace v1 是本地/离线优先机制：
-
-- 未启用发布者签名强制校验。
-- 禁用/卸载要兼容 Windows DLL 锁定。
-- 第三方插件的来源、许可证和二进制风险需要单独审查。
+模型、数据集、训练、验证、导出和推理能力统一由 `BuiltinCapabilityRegistry` 描述。新增能力必须同时更新注册表、Worker 兼容性校验、GUI 选择器、环境自检和验收测试，不得在页面中散落后端字符串。
 
 ## 当前训练边界
 
-以下历史实现已从产品训练路径中物理删除，不能作为插件、Worker 后端或验收 passed 依据重新暴露：
+以下历史实现已从产品训练路径中物理删除，不能作为 Worker 后端或验收 passed 依据重新暴露：
 
 - `tiny_linear_detector`
 - shipped `python_mock`

@@ -5,9 +5,7 @@
 #include "InfoPanel.h"
 #include "LanguageSupport.h"
 #include "MainWindowSupport.h"
-#include "PluginMarketplaceWidget.h"
 #include "aitrain/core/DetectionTrainer.h"
-#include "aitrain/core/PluginInterfaces.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -193,7 +191,7 @@ void MainWindow::cancelSelectedTask()
             return;
         }
 
-        if ((task.state == aitrain::TaskState::Running || task.state == aitrain::TaskState::Paused) && taskId == state_.training.currentTaskId) {
+        if (task.state == aitrain::TaskState::Running && taskId == state_.training.currentTaskId) {
             worker_.cancel();
             return;
         }
@@ -264,8 +262,8 @@ void MainWindow::reproduceSelectedTrainingTask()
     request.taskId = newTaskId;
     request.projectPath = currentProjectPath_;
     request.outputPath = runDir;
-    if (request.pluginId.isEmpty()) {
-        request.pluginId = sourceTask.pluginId;
+    if (request.capabilityId.isEmpty()) {
+        request.capabilityId = sourceTask.capabilityId;
     }
     if (request.taskType.isEmpty()) {
         request.taskType = sourceTask.taskType;
@@ -283,7 +281,7 @@ void MainWindow::reproduceSelectedTrainingTask()
     aitrain::TaskRecord record;
     record.id = newTaskId;
     record.projectName = currentProjectName_;
-    record.pluginId = request.pluginId;
+    record.capabilityId = request.capabilityId;
     record.taskType = request.taskType;
     record.kind = aitrain::TaskKind::Train;
     record.state = aitrain::TaskState::Queued;
@@ -388,7 +386,7 @@ void MainWindow::startSnapshotForQueuedTraining(const PendingTrainingTask& pendi
     const QString createdTaskId = createRepositoryTask(
         aitrain::TaskKind::Snapshot,
         QStringLiteral("dataset_snapshot"),
-        QStringLiteral("com.aitrain.plugins.dataset_interop"),
+        QStringLiteral("dataset_interop"),
         outputPath,
         uiText("为训练自动创建数据快照。"),
         snapshotTaskId);

@@ -1,5 +1,6 @@
 ﻿#include "WorkerSessionSupport.h"
 
+#include "aitrain/core/CapabilityRegistry.h"
 #include "aitrain/core/DatasetValidators.h"
 #include "aitrain/core/Deployment.h"
 #include "aitrain/core/DetectionTrainer.h"
@@ -293,92 +294,31 @@ bool diagnosticTrainingBackendsEnabled()
 QString officialTrainingBackendForTask(const QString& taskType)
 {
     const QString normalized = taskType.trimmed().toLower();
-    if (normalized == QStringLiteral("detection")) {
-        return QStringLiteral("ultralytics_yolo_detect");
-    }
-    if (normalized == QStringLiteral("segmentation")) {
-        return QStringLiteral("ultralytics_yolo_segment");
-    }
-    if (normalized == QStringLiteral("obb_detection") || normalized == QStringLiteral("obb")) {
-        return QStringLiteral("ultralytics_yolo_obb");
-    }
-    if (normalized == QStringLiteral("semantic_segmentation")) {
-        return QStringLiteral("smp_semantic_segmentation");
-    }
-    if (normalized == QStringLiteral("anomaly_detection")) {
-        return QStringLiteral("anomalib_patchcore");
-    }
-    if (normalized == QStringLiteral("ocr_detection")) {
-        return QStringLiteral("paddleocr_det_official");
-    }
-    if (normalized == QStringLiteral("ocr_recognition")) {
-        return QStringLiteral("paddleocr_rec_official");
-    }
-    return {};
+    const QString lookupTask = normalized == QStringLiteral("ocr") ? QStringLiteral("ocr_detection") : normalized;
+    const QStringList candidates = aitrain::BuiltinCapabilityRegistry::instance().backendsForTask(lookupTask);
+    return candidates.isEmpty() ? QString() : candidates.first();
 }
 
 bool isTrainingBackendCompatibleWithTask(const QString& taskType, const QString& backend)
 {
     const QString normalizedTask = taskType.trimmed().toLower();
-    const QString normalizedBackend = backend.trimmed().toLower();
-    if (normalizedTask == QStringLiteral("detection")) {
-        return normalizedBackend == QStringLiteral("ultralytics_yolo")
-            || normalizedBackend == QStringLiteral("ultralytics_yolo_detect");
-    }
-    if (normalizedTask == QStringLiteral("segmentation")) {
-        return normalizedBackend == QStringLiteral("ultralytics_yolo_segment");
-    }
-    if (normalizedTask == QStringLiteral("obb_detection") || normalizedTask == QStringLiteral("obb")) {
-        return normalizedBackend == QStringLiteral("ultralytics_yolo_obb");
-    }
-    if (normalizedTask == QStringLiteral("semantic_segmentation")) {
-        return normalizedBackend == QStringLiteral("smp_semantic_segmentation");
-    }
-    if (normalizedTask == QStringLiteral("anomaly_detection")) {
-        return normalizedBackend == QStringLiteral("anomalib_patchcore")
-            || normalizedBackend == QStringLiteral("anomalib_efficientad");
-    }
-    if (normalizedTask == QStringLiteral("ocr_detection")) {
-        return normalizedBackend == QStringLiteral("paddleocr_det_official");
-    }
-    if (normalizedTask == QStringLiteral("ocr_recognition")) {
-        return normalizedBackend == QStringLiteral("paddleocr_rec_official")
-            || normalizedBackend == QStringLiteral("paddleocr_ppocrv4_rec");
-    }
+    const auto& registry = aitrain::BuiltinCapabilityRegistry::instance();
+    const QString normalizedBackend = registry.backend(backend).id;
     if (normalizedTask == QStringLiteral("ocr")) {
         return normalizedBackend == QStringLiteral("paddleocr_det_official")
-            || normalizedBackend == QStringLiteral("paddleocr_rec_official")
-            || normalizedBackend == QStringLiteral("paddleocr_ppocrv4_rec");
+            || normalizedBackend == QStringLiteral("paddleocr_rec_official");
     }
-    return false;
+    const QString lookupTask = normalizedTask == QStringLiteral("ocr") ? QStringLiteral("ocr_detection") : normalizedTask;
+    return registry.backendsForTask(lookupTask).contains(normalizedBackend);
 }
 
 namespace {
 QString datasetFormatForTrainingTask(const QString& taskType)
 {
     const QString normalized = taskType.trimmed().toLower();
-    if (normalized == QStringLiteral("detection")) {
-        return QStringLiteral("yolo_detection");
-    }
-    if (normalized == QStringLiteral("segmentation")) {
-        return QStringLiteral("yolo_segmentation");
-    }
-    if (normalized == QStringLiteral("obb_detection") || normalized == QStringLiteral("obb")) {
-        return QStringLiteral("yolo_obb");
-    }
-    if (normalized == QStringLiteral("semantic_segmentation")) {
-        return QStringLiteral("semantic_segmentation_mask");
-    }
-    if (normalized == QStringLiteral("anomaly_detection")) {
-        return QStringLiteral("anomaly_folder");
-    }
-    if (normalized == QStringLiteral("ocr_detection")) {
-        return QStringLiteral("paddleocr_det");
-    }
-    if (normalized == QStringLiteral("ocr_recognition")) {
-        return QStringLiteral("paddleocr_rec");
-    }
-    return {};
+    const QString lookupTask = normalized == QStringLiteral("ocr") ? QStringLiteral("ocr_detection") : normalized;
+    const QStringList formats = aitrain::BuiltinCapabilityRegistry::instance().datasetFormatsForTask(lookupTask);
+    return formats.isEmpty() ? QString() : formats.first();
 }
 
 QString datasetFormatForTrainingRequest(const aitrain::TrainingRequest& request)
@@ -474,16 +414,7 @@ bool verifyTrainingDatasetSnapshot(const aitrain::TrainingRequest& request, QStr
 namespace {
 bool isOfficialWorkerBackendId(const QString& normalized)
 {
-    return normalized == QStringLiteral("ultralytics_yolo")
-        || normalized == QStringLiteral("ultralytics_yolo_detect")
-        || normalized == QStringLiteral("ultralytics_yolo_segment")
-        || normalized == QStringLiteral("ultralytics_yolo_obb")
-        || normalized == QStringLiteral("smp_semantic_segmentation")
-        || normalized == QStringLiteral("anomalib_patchcore")
-        || normalized == QStringLiteral("anomalib_efficientad")
-        || normalized == QStringLiteral("paddleocr_det_official")
-        || normalized == QStringLiteral("paddleocr_rec_official")
-        || normalized == QStringLiteral("paddleocr_ppocrv4_rec");
+    return !aitrain::BuiltinCapabilityRegistry::instance().backend(normalized).id.isEmpty();
 }
 
 bool hasTrainerScriptOverride(const QJsonObject& parameters)

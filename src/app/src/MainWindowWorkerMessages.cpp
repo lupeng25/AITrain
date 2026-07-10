@@ -4,9 +4,7 @@
 #include "InfoPanel.h"
 #include "LanguageSupport.h"
 #include "MainWindowSupport.h"
-#include "PluginMarketplaceWidget.h"
 #include "aitrain/core/DetectionTrainer.h"
-#include "aitrain/core/PluginInterfaces.h"
 #include "aitrain/core/WorkerProtocol.h"
 
 #include <QApplication>
@@ -332,22 +330,6 @@ void MainWindow::handleArtifactMessage(const QJsonObject& payload)
 
 void MainWindow::handleTaskStateMessage(const QString& type, const QJsonObject& payload)
 {
-    if (type == wp::event::paused()) {
-        QString error;
-        repository_.updateTaskState(state_.training.currentTaskId, wp::taskStateForEvent(type), payload.value(wp::field::message()).toString(), &error);
-        workerPill_->setStatus(uiText("任务已暂停"), StatusPill::Tone::Warning);
-        updateRecentTasks();
-        return;
-    }
-
-    if (type == wp::event::resumed()) {
-        QString error;
-        repository_.updateTaskState(state_.training.currentTaskId, wp::taskStateForEvent(type), payload.value(wp::field::message()).toString(), &error);
-        workerPill_->setStatus(uiText("训练运行中"), StatusPill::Tone::Info);
-        updateRecentTasks();
-        return;
-    }
-
     if (type == wp::event::canceled()) {
         QString error;
         const QString canceledTaskId = payload.value(wp::field::taskId()).toString(state_.training.currentTaskId);

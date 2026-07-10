@@ -4,13 +4,12 @@ AITrain Studio is a C++/Qt desktop foundation for managing local computer-vision
 
 This repository implements the first usable platform layer from the requested plan:
 
-- Qt Widgets GUI organized as a local training workbench with project dashboard, dataset library, training experiments, task/artifact history, model export, inference validation, plugin, and environment views.
+- Qt Widgets GUI organized as a local training workbench with project dashboard, dataset library, training experiments, task/artifact history, model export, inference validation, built-in capability, and environment views.
 - Chinese/English GUI language switching through Qt translation resources, with language settings persisted in `QSettings` and applied after restart.
 - Offline machine-bound license verification before the main window opens, plus a separate Qt license generator tool for issuing signed license codes.
 - Isolated `aitrain_worker` process using JSON Lines over `QLocalSocket`.
 - SQLite-backed project/task/artifact metadata with task detail queries for artifacts, metrics, exports, and dataset versions.
-- Qt plugin interfaces for model, dataset, training, validation, export, and inference extensions.
-- Built-in plugin manifests for YOLO-style detection/segmentation/OBB, dedicated semantic segmentation, anomaly detection, PaddleOCR-style recognition, and dataset interop, plus the local/offline-first plugin marketplace.
+- A compile-time capability registry for YOLO-style detection/segmentation/OBB, dedicated semantic segmentation, anomaly detection, PaddleOCR, and dataset interoperability.
 - Dataset validation and split helpers for YOLO detection, YOLO segmentation, YOLO OBB, semantic segmentation Mask PNG, anomaly-folder, PaddleOCR Det, and PaddleOCR Rec label files.
 - Worker-backed dataset conversion GUI for the implemented COCO / Pascal VOC / YOLO detection / YOLO segmentation conversion matrix.
 - External annotation workflow entrypoint for X-AnyLabeling, with local tool detection and a post-labeling refresh/revalidation path.
@@ -47,11 +46,11 @@ For single-config generators such as NMake, use:
 .\build\bin\AITrainStudio.exe
 ```
 
-Plugins are built under `build\plugins\models`. The GUI scans that directory and the application-local `plugins\models` directory.
+The Worker reports the authoritative built-in capability matrix with `aitrain_worker.exe --builtin-capabilities`; no dynamic model-plugin directory is required.
 
 ## User Guide
 
-End-user operation is documented in `docs/user-guide.md`. It covers registration, projects, dataset preparation, dataset conversion, validation and split, sample review, training, artifacts, evaluation, model export, deployment validation, inference validation, plugin marketplace use, delivery acceptance, and diagnostic bundles through the GUI.
+End-user operation is documented in `docs/user-guide.md`. It covers registration, projects, dataset preparation, dataset conversion, validation and split, sample review, training, artifacts, evaluation, model export, deployment validation, inference validation, built-in capability selection, delivery acceptance, and diagnostic bundles through the GUI.
 
 Additional operational and delivery references:
 
@@ -76,11 +75,11 @@ The generator uses a private key file to issue customer license codes. Keep priv
 
 ## Project Layout
 
-- `src/core`: shared interfaces, plugin contracts, protocol, SQLite repository.
+- `src/core`: capability registry, protocol, data workflows, and SQLite repository.
 - `src/app`: Qt Widgets desktop app.
 - `src/license_generator`: internal Qt license generator tool.
 - `src/worker`: isolated task runner.
-- `src/plugins`: built-in plugin DLLs.
+- `src/core/CapabilityRegistry.cpp`: compile-time built-in capability matrix used by GUI, Worker, and diagnostics.
 - `tests`: QtTest tests.
 
 ## Harness

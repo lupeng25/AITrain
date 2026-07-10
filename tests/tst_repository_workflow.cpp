@@ -46,7 +46,7 @@ private slots:
         QVERIFY(query.exec(QStringLiteral("create table tasks ("
                                           "id text primary key,"
                                           "project_name text not null,"
-                                          "plugin_id text not null,"
+                                          "capability_id text not null,"
                                           "task_type text not null,"
                                           "kind text not null,"
                                           "state text not null,"
@@ -54,11 +54,11 @@ private slots:
                                           "message text,"
                                           "created_at text not null,"
                                           "updated_at text not null)")));
-        query.prepare(QStringLiteral("insert into tasks(id, project_name, plugin_id, task_type, kind, state, work_dir, message, created_at, updated_at) "
+        query.prepare(QStringLiteral("insert into tasks(id, project_name, capability_id, task_type, kind, state, work_dir, message, created_at, updated_at) "
                                      "values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
         query.addBindValue(taskId);
         query.addBindValue(QStringLiteral("legacy"));
-        query.addBindValue(QStringLiteral("com.aitrain.plugins.yolo_native"));
+        query.addBindValue(QStringLiteral("yolo"));
         query.addBindValue(QStringLiteral("detection"));
         query.addBindValue(QStringLiteral("train"));
         query.addBindValue(QStringLiteral("queued"));
@@ -88,6 +88,95 @@ private slots:
         QCOMPARE(tasks.first().message, QStringLiteral("legacy queued task"));
     }
 
+    void repositoryMigratesLegacyPluginSchema()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString dbPath = dir.filePath(QStringLiteral("legacy-plugin.sqlite"));
+        const QString taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        const QString connectionName = QStringLiteral("legacy_plugin_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+
+        QSqlDatabase legacyDb = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+        legacyDb.setDatabaseName(dbPath);
+        QVERIFY(legacyDb.open());
+        QSqlQuery query(legacyDb);
+        QVERIFY(query.exec(QStringLiteral("create table tasks ("
+                                          "id text primary key,"
+                                          "project_name text not null,"
+                                          "plugin_id text not null,"
+                                          "task_type text not null,"
+                                          "kind text not null,"
+                                          "state text not null,"
+                                          "work_dir text not null,"
+                                          "message text,"
+                                          "created_at text not null,"
+                                          "updated_at text not null)")));
+        QVERIFY(query.exec(QStringLiteral("create table plugin_configs ("
+                                          "id integer primary key autoincrement,"
+                                          "plugin_id text not null,"
+                                          "name text not null,"
+                                          "config_json text not null,"
+                                          "created_at text not null,"
+                                          "updated_at text not null,"
+                                          "unique(plugin_id, name))")));
+        query.prepare(QStringLiteral("insert into tasks(id, project_name, plugin_id, task_type, kind, state, work_dir, message, created_at, updated_at) "
+                                     "values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+        query.addBindValue(taskId);
+        query.addBindValue(QStringLiteral("legacy"));
+        query.addBindValue(QStringLiteral("yolo_native"));
+        query.addBindValue(QStringLiteral("detection"));
+        query.addBindValue(QStringLiteral("train"));
+        query.addBindValue(QStringLiteral("queued"));
+        query.addBindValue(dir.filePath(QStringLiteral("runs/legacy")));
+        query.addBindValue(QStringLiteral("legacy plugin task"));
+        query.addBindValue(QStringLiteral("2026-05-01T00:00:00.000Z"));
+        query.addBindValue(QStringLiteral("2026-05-01T00:00:00.000Z"));
+        QVERIFY(query.exec());
+        query.prepare(QStringLiteral("insert into plugin_configs(plugin_id, name, config_json, created_at, updated_at) values(?, ?, ?, ?, ?)"));
+        query.addBindValue(QStringLiteral("yolo_native"));
+        query.addBindValue(QStringLiteral("default"));
+        query.addBindValue(QStringLiteral("{}"));
+        query.addBindValue(QStringLiteral("2026-05-01T00:00:00.000Z"));
+        query.addBindValue(QStringLiteral("2026-05-01T00:00:00.000Z"));
+        QVERIFY(query.exec());
+        query = QSqlQuery();
+        legacyDb.close();
+        legacyDb = QSqlDatabase();
+        QSqlDatabase::removeDatabase(connectionName);
+
+        aitrain::ProjectRepository repository;
+        QString error;
+        QVERIFY2(repository.open(dbPath, &error), qPrintable(error));
+        const QVector<aitrain::TaskRecord> tasks = repository.recentTasks(10, &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(tasks.size(), 1);
+        QCOMPARE(tasks.first().capabilityId, QStringLiteral("yolo_native"));
+
+        aitrain::TaskRecord inserted;
+        inserted.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        inserted.projectName = QStringLiteral("new");
+        inserted.capabilityId = QStringLiteral("yolo");
+        inserted.taskType = QStringLiteral("detection");
+        inserted.workDir = dir.filePath(QStringLiteral("runs/new"));
+        inserted.createdAt = QDateTime::currentDateTimeUtc();
+        inserted.updatedAt = inserted.createdAt;
+        QVERIFY2(repository.insertTask(inserted, &error), qPrintable(error));
+
+        const QString verifyConnectionName = QStringLiteral("verify_plugin_migration_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+        QSqlDatabase verifyDb = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), verifyConnectionName);
+        verifyDb.setDatabaseName(dbPath);
+        QVERIFY(verifyDb.open());
+        QSqlQuery migrated(verifyDb);
+        QVERIFY(migrated.exec(QStringLiteral("pragma table_info(tasks)")));
+        while (migrated.next()) {
+            QVERIFY(migrated.value(1).toString() != QStringLiteral("plugin_id"));
+        }
+        QVERIFY(!migrated.exec(QStringLiteral("select * from plugin_configs")));
+        verifyDb.close();
+        verifyDb = QSqlDatabase();
+        QSqlDatabase::removeDatabase(verifyConnectionName);
+    }
+
     void repositoryStoresOfficialTrainingArtifacts()
     {
         QTemporaryDir dir;
@@ -101,7 +190,7 @@ private slots:
         aitrain::TaskRecord task;
         task.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
         task.projectName = QStringLiteral("demo");
-        task.pluginId = QStringLiteral("com.aitrain.plugins.yolo_native");
+        task.capabilityId = QStringLiteral("yolo");
         task.taskType = QStringLiteral("detection");
         task.kind = aitrain::TaskKind::Train;
         task.state = aitrain::TaskState::Queued;

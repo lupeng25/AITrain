@@ -80,13 +80,6 @@ function Assert-PathExists {
 Write-Host "Package smoke: verify layout" -ForegroundColor Cyan
 Assert-PathExists "AITrainStudio.exe" "AITrain Studio executable"
 Assert-PathExists "aitrain_worker.exe" "Worker executable"
-Assert-PathExists "plugins\models" "model plugin directory"
-Assert-PathExists "plugins\marketplace" "plugin marketplace directory"
-Assert-PathExists "plugins\models\DatasetInteropPlugin.dll" "dataset interop plugin"
-Assert-PathExists "plugins\models\YoloNativePlugin.dll" "YOLO native plugin"
-Assert-PathExists "plugins\models\SemanticSegmentationPlugin.dll" "semantic segmentation plugin"
-Assert-PathExists "plugins\models\AnomalyDetectionPlugin.dll" "anomaly detection plugin"
-Assert-PathExists "plugins\models\OcrRecNativePlugin.dll" "OCR Rec plugin"
 Assert-PathExists "runtimes\onnxruntime" "ONNX Runtime folder"
 Assert-PathExists "runtimes\tensorrt" "TensorRT folder"
 Assert-PathExists "examples" "examples folder"
@@ -107,9 +100,6 @@ Assert-PathExists "docs\acceptance-templates\clean-windows-acceptance-result.md"
 Assert-PathExists "docs\acceptance-templates\tensorrt-acceptance-result.md" "TensorRT acceptance template"
 Assert-PathExists "docs\acceptance-templates\production-ocr-acceptance-result.md" "production OCR acceptance template"
 Assert-PathExists "docs\product-roadmap-local-training-platform.md" "local training platform roadmap"
-Assert-PathExists "docs\plugin-marketplace.md" "plugin marketplace docs"
-Assert-PathExists "docs\plugin-package-format.md" "plugin package format docs"
-Assert-PathExists "examples\plugin-package-template\plugin.json" "plugin package template manifest"
 Assert-PathExists "python_trainers\requirements-yolo.txt" "YOLO Python requirements"
 Assert-PathExists "python_trainers\requirements-smp.txt" "SMP Python requirements"
 Assert-PathExists "python_trainers\requirements-anomaly.txt" "Anomalib Python requirements"
@@ -146,8 +136,6 @@ Assert-PathExists "tools\full-model-lifecycle-progress-server.py" "full model li
 Assert-PathExists "tools\phase-ncnn-runtime-smoke.ps1" "NCNN runtime smoke script"
 Assert-PathExists "tools\local-rc-closeout.ps1" "local RC closeout script"
 Assert-PathExists "tools\release-freeze-handoff.ps1" "release freeze handoff script"
-Assert-PathExists "tools\create-plugin-package.ps1" "plugin package creation script"
-Assert-PathExists "tools\create-plugin-marketplace-demo.ps1" "plugin marketplace demo script"
 Assert-PathExists "tools\materialize-ultralytics-dataset.py" "Ultralytics dataset materializer"
 Assert-PathExists "tools\materialize-oxford-pets-semantic.py" "Oxford Pets SMP dataset materializer"
 Assert-PathExists "tools\phase31-paddleocr-full-official-smoke.ps1" "Phase 31 PaddleOCR full smoke script"
@@ -160,6 +148,20 @@ Assert-PathExists "tools\run-production-ocr-official-chain.ps1" "production OCR 
 Assert-PathExists "tools\production-ocr-acceptance.ps1" "production OCR acceptance script"
 Assert-PathExists "tools\customer-ocr-validation.ps1" "customer OCR validation script"
 Assert-PathExists "tools\phase50-paddleocr-v5-gpu-official-chain.ps1" "Phase 50 PP-OCRv5 GPU official chain script"
+
+$forbiddenLegacyPaths = @(
+    "plugins",
+    "pluginModels",
+    "examples\plugin-package-template",
+    "docs\plugin-marketplace.md",
+    "docs\plugin-package-format.md"
+)
+foreach ($legacyPath in $forbiddenLegacyPaths) {
+    if (Test-Path -LiteralPath (Join-Path $prefixFull $legacyPath)) {
+        throw "Package contains removed legacy plugin path: $legacyPath"
+    }
+}
+Write-Host "  [ok] no legacy dynamic-plugin package paths"
 
 $pythonCacheDirs = @(Get-ChildItem -LiteralPath $prefixFull -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue)
 $pythonCacheFiles = @(Get-ChildItem -LiteralPath $prefixFull -Recurse -File -ErrorAction SilentlyContinue |
@@ -212,7 +214,6 @@ if ($qtCoreDll) {
 }
 
 $workerExe = Join-Path $prefixFull "aitrain_worker.exe"
-$pluginDir = Join-Path $prefixFull "plugins\models"
 
 Write-Host "Package smoke: worker self-check" -ForegroundColor Cyan
 $workerSelfCheckOutput = & $workerExe --self-check
@@ -229,18 +230,18 @@ if ($missingRuntimeChecks.Count -gt 0) {
     Write-Host ("  [info] missing optional runtimes: {0}" -f ($missingRuntimeChecks -join ", "))
 }
 
-Write-Host "Package smoke: plugin load" -ForegroundColor Cyan
-$pluginSmokeOutput = & $workerExe --plugin-smoke $pluginDir
+Write-Host "Package smoke: built-in capability registry" -ForegroundColor Cyan
+$capabilityOutput = & $workerExe --builtin-capabilities
 if ($LASTEXITCODE -ne 0) {
-    throw "Packaged plugin smoke failed with exit code $LASTEXITCODE"
+    throw "Packaged built-in capability check failed with exit code $LASTEXITCODE"
 }
-$pluginSmoke = $pluginSmokeOutput | Select-Object -Last 1 | ConvertFrom-Json
-if (-not $pluginSmoke.ok) {
-    throw "Packaged plugin smoke reported ok=false"
+$capabilityCheck = $capabilityOutput | Select-Object -Last 1 | ConvertFrom-Json
+if (-not $capabilityCheck.ok) {
+    throw "Built-in capability check reported ok=false"
 }
-if ($pluginSmoke.pluginCount -lt 5) {
-    throw "Expected at least 5 packaged plugins, found $($pluginSmoke.pluginCount)"
+if ($capabilityCheck.capabilityCount -lt 1) {
+    throw "Expected at least one built-in capability"
 }
-Write-Host ("  [ok] packaged plugins={0}" -f $pluginSmoke.pluginCount)
+Write-Host ("  [ok] built-in capabilities={0}" -f $capabilityCheck.capabilityCount)
 
 Write-Host "Package smoke passed: $prefixFull" -ForegroundColor Green

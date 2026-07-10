@@ -3,7 +3,6 @@
 #include "EvaluationReportView.h"
 #include "InfoPanel.h"
 #include "MainWindowSupport.h"
-#include "PluginMarketplaceWidget.h"
 
 #include <QAbstractItemView>
 #include <QCheckBox>
@@ -62,7 +61,7 @@ QWidget* MainWindow::buildTopBar()
     headerProjectLabel_->setObjectName(QStringLiteral("MutedText"));
     workerPill_ = new StatusPill;
     workerPill_->setStatus(tr("Worker 空闲"), StatusPill::Tone::Neutral);
-    pluginPill_ = new StatusPill;
+    capabilityPill_ = new StatusPill;
     gpuPill_ = new StatusPill;
     gpuPill_->setStatus(tr("GPU 未检测"), StatusPill::Tone::Warning);
     licensePill_ = new StatusPill;
@@ -102,7 +101,7 @@ QWidget* MainWindow::buildTopBar()
     layout->addWidget(titleBlock, 1);
     layout->addWidget(headerProjectLabel_);
     layout->addWidget(workerPill_);
-    layout->addWidget(pluginPill_);
+    layout->addWidget(capabilityPill_);
     layout->addWidget(gpuPill_);
     layout->addWidget(licensePill_);
     layout->addWidget(languageSwitch);

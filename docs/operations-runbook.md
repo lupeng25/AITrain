@@ -8,8 +8,8 @@
 
 安装包分为三个：
 
-- 产品本体安装包：当前项目编译生成的 `AITrainStudio.exe`、`aitrain_worker.exe`、内置插件，以及产品随附的 `docs`、`examples`、`python_trainers`、`tools`、`translations`。
-- Native 依赖项安装包：Qt/VC runtime、Qt runtime plugin folders、ONNX Runtime、NCNN、TensorRT 和其他运行时 DLL。
+- 产品本体安装包：当前项目编译生成的 `AITrainStudio.exe`、`aitrain_worker.exe`、内置能力注册表，以及产品随附的 `docs`、`examples`、`python_trainers`、`tools`、`translations`。
+- Native 依赖项安装包：Qt/VC runtime、Qt runtime module folders、ONNX Runtime、NCNN、TensorRT 和其他运行时 DLL。
 - Python AI 环境安装包：官方 YOLO/OBB、SMP、Anomalib 和 OCR 适配器使用的隔离 Python 环境，以及可选的 PaddleOCR 源码 checkout。默认安装到 `python_env`，不写系统 Python，不要求全局 `AITRAIN_PYTHON_EXECUTABLE`。
 
 三个安装包默认安装到同一个 `AITrain Studio` 目录，但写入不同子树，避免互相覆盖。产品本体安装后需要 Native 依赖项安装包和 Python AI 环境安装包，或等价运行时，才能完整启用 GUI、Worker、YOLO/OBB/SMP/Anomalib/OCR 后端和部署验证。
@@ -18,14 +18,14 @@
 
 - `AITrainStudio.exe`
 - `aitrain_worker.exe`
-- 内置 Qt plugin DLL
-- `plugins\models` 下的内置插件
+- 内置 Qt runtime module DLL
+- 编译期内置能力注册表
 - `translations` 下的 `.qm` 翻译文件
 - `docs`、`examples`、`requirements` 和验收脚本
 
 Native 依赖项安装包应包含：
 
-- 必要的 Qt runtime DLL 和 Qt runtime plugin folders。
+- 必要的 Qt runtime DLL 和 Qt runtime module folders。
 - 必要的 MSVC runtime DLL。
 - `runtimes\onnxruntime`、`runtimes\ncnn`、`runtimes\tensorrt`。
 - 根目录下供 Worker 直接加载的 ONNX Runtime / NCNN 等 runtime DLL。
@@ -194,7 +194,7 @@ package-root TensorRT rerun：
 | NCNN 部署验证返回 `sample_missing` | 提供可读取的 `sampleImagePath`，否则只记录 blocked，不声明 runtime passed。 |
 | NCNN 部署验证返回 `sidecar_missing` | 为外部 `.param/.bin` 提供 AITrain sidecar，或显式传入 `modelFamily`、`classNames`、`inputBlob`、`outputBlobs`、`decoder` 等配置。 |
 | NCNN 部署验证失败并提示 unsupported `Shape` layer | 当前 `.param` 来自不兼容的 ONNX 转换；使用静态/兼容导出的 ONNX，或改用带 sidecar/config 的预转换 NCNN artifact 后运行 `--ncnn-param-smoke`。 |
-| 插件禁用失败 | Windows 是否锁定 Qt plugin DLL；关闭相关任务或重启后重新扫描。 |
+| 能力注册表为空 | 检查 Worker `--builtin-capabilities` 输出和构建版本是否一致。 |
 | 数据集转换后无法训练 | 是否手动选择转换输出目录并重新运行数据集校验。 |
 
 ## 证据保全

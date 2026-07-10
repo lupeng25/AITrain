@@ -8,7 +8,7 @@ AITrain Studio 的 UI 定位是本地视觉训练工作台，不是营销页。
 
 - Linear：清晰的信息架构。
 - NVIDIA：GPU / 训练平台的技术状态表达。
-- Airtable：数据集、插件、任务表格。
+- Airtable：数据集、内置能力、任务表格。
 - Cursor：日志和开发者工具式反馈。
 
 ## 布局

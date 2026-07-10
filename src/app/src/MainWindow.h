@@ -5,7 +5,6 @@
 #include "Sidebar.h"
 #include "StatusPill.h"
 #include "WorkerClient.h"
-#include "aitrain/core/PluginManager.h"
 #include "aitrain/core/ProjectRepository.h"
 
 #include <QComboBox>
@@ -24,7 +23,6 @@
 
 class InfoPanel;
 class EvaluationReportView;
-class PluginMarketplaceWidget;
 class TaskArtifactPanel;
 class QPushButton;
 class QTabWidget;
@@ -68,7 +66,7 @@ private slots:
     void cancelSelectedTask();
     void runEnvironmentCheck();
     void handleWorkerMessage(const QString& type, const QJsonObject& payload);
-    void refreshPlugins();
+    void refreshBuiltInCapabilities();
     void showPage(int pageIndex, const QString& title);
     void updateSelectedTaskDetails();
     void openSelectedArtifactDirectory();
@@ -114,7 +112,7 @@ private:
     QWidget* buildModelExportPanel();
     QWidget* buildInferenceValidationPanel();
     QWidget* buildDeliveryEvidencePanel();
-    QWidget* buildPluginsPanel();
+    QWidget* buildCapabilitiesPanel();
     QWidget* buildEnvironmentPage();
     QWidget* buildSystemSettingsPage();
     QWidget* buildApplicationSettingsPanel();
@@ -126,12 +124,11 @@ private:
     void showDeploymentTab(int tabIndex);
     void showSystemSettingsTab(int tabIndex);
     QString workerExecutablePath() const;
-    QStringList pluginSearchPaths() const;
     QString defaultProjectPath() const;
     QString configuredDefaultProjectPath() const;
     void ensureProjectSubdirs(const QString& rootPath);
     void appendLog(const QString& text);
-    void loadPluginCombos();
+    void loadCapabilityCombos();
     QString currentDatasetFormat() const;
     QString currentTaskType() const;
     QString currentTaskKindFilter() const;
@@ -172,7 +169,7 @@ private:
     void configureTable(QTableWidget* table) const;
     void updateDashboardSummary();
     void updateProjectSummary();
-    void updatePluginSummary();
+    void updateCapabilitySummary();
     void updateEnvironmentSummary();
     void updateSettingsSummary();
     void updateDeliveryAcceptanceSummary();
@@ -200,14 +197,13 @@ private:
     void updateExperimentRunSummary(const QString& taskId);
     QLabel* trainingLiveValueLabel(const QString& objectName) const;
     void registerPipelineModelVersion(const QJsonObject& payload);
-    QString createRepositoryTask(aitrain::TaskKind kind, const QString& taskType, const QString& pluginId, const QString& workDir, const QString& message, const QString& requestedTaskId = {});
+    QString createRepositoryTask(aitrain::TaskKind kind, const QString& taskType, const QString& capabilityId, const QString& workDir, const QString& message, const QString& requestedTaskId = {});
     QString selectedTaskId() const;
     QString selectedArtifactPath() const;
     QString selectedEvaluationReportPath() const;
     QString selectedComparisonModelPath() const;
     QString selectedComparisonReportPath() const;
 
-    aitrain::PluginManager pluginManager_;
     aitrain::ProjectRepository repository_;
     WorkerClient worker_;
     MainWindowState state_;
@@ -225,7 +221,7 @@ private:
     QLabel* pageCaption_ = nullptr;
     QLabel* headerProjectLabel_ = nullptr;
     StatusPill* workerPill_ = nullptr;
-    StatusPill* pluginPill_ = nullptr;
+    StatusPill* capabilityPill_ = nullptr;
     StatusPill* gpuPill_ = nullptr;
     StatusPill* licensePill_ = nullptr;
     QToolButton* topBarZhLanguageButton_ = nullptr;
@@ -239,7 +235,7 @@ private:
     QLabel* gpuLabel_ = nullptr;
     QLabel* dashboardProjectValue_ = nullptr;
     QLabel* dashboardTaskValue_ = nullptr;
-    QLabel* dashboardPluginValue_ = nullptr;
+    QLabel* dashboardCapabilityValue_ = nullptr;
     QLabel* dashboardDatasetValue_ = nullptr;
     QLabel* dashboardModelValue_ = nullptr;
     QLabel* dashboardEnvironmentValue_ = nullptr;
@@ -250,13 +246,12 @@ private:
     QLabel* projectDatasetSummaryLabel_ = nullptr;
     QLabel* projectTaskSummaryLabel_ = nullptr;
     QLabel* projectExportSummaryLabel_ = nullptr;
-    QLabel* pluginConsoleStatusLabel_ = nullptr;
-    QLabel* pluginSearchPathLabel_ = nullptr;
-    QLabel* pluginCountSummaryLabel_ = nullptr;
-    QLabel* pluginDatasetFormatSummaryLabel_ = nullptr;
-    QLabel* pluginExportFormatSummaryLabel_ = nullptr;
-    QLabel* pluginGpuSummaryLabel_ = nullptr;
-    QLabel* pluginMarketplaceStatusLabel_ = nullptr;
+    QLabel* capabilityConsoleStatusLabel_ = nullptr;
+    QLabel* capabilitySourceLabel_ = nullptr;
+    QLabel* capabilityCountSummaryLabel_ = nullptr;
+    QLabel* capabilityDatasetFormatSummaryLabel_ = nullptr;
+    QLabel* capabilityExportFormatSummaryLabel_ = nullptr;
+    QLabel* capabilityGpuSummaryLabel_ = nullptr;
     QLabel* environmentConsoleStatusLabel_ = nullptr;
     QLabel* environmentOkSummaryLabel_ = nullptr;
     QLabel* environmentWarningSummaryLabel_ = nullptr;
@@ -272,8 +267,7 @@ private:
     QTableWidget* evaluationReportTable_ = nullptr;
     QTableWidget* pipelineRunTable_ = nullptr;
     QTableWidget* datasetListTable_ = nullptr;
-    QTableWidget* pluginTable_ = nullptr;
-    PluginMarketplaceWidget* pluginMarketplaceWidget_ = nullptr;
+    QTableWidget* capabilityTable_ = nullptr;
     QTableWidget* environmentTable_ = nullptr;
     QComboBox* taskKindFilterCombo_ = nullptr;
     QComboBox* taskStateFilterCombo_ = nullptr;
@@ -303,7 +297,7 @@ private:
     QPushButton* datasetConversionBrowseOutputButton_ = nullptr;
     QProgressBar* datasetConversionProgressBar_ = nullptr;
     QPlainTextEdit* datasetConversionLog_ = nullptr;
-    QComboBox* pluginCombo_ = nullptr;
+    QComboBox* capabilityCombo_ = nullptr;
     QComboBox* taskTypeCombo_ = nullptr;
     QComboBox* trainingBackendCombo_ = nullptr;
     QComboBox* modelPresetCombo_ = nullptr;

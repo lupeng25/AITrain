@@ -4,7 +4,6 @@
 #include "EvaluationReportView.h"
 #include "InfoPanel.h"
 #include "MainWindowSupport.h"
-#include "PluginMarketplaceWidget.h"
 
 #include <QAbstractItemView>
 #include <QCheckBox>

@@ -1,5 +1,6 @@
 add_library(aitrain_core STATIC
-    include/aitrain/core/PluginInterfaces.h
+    include/aitrain/core/CapabilityRegistry.h
+    include/aitrain/core/DatasetValidation.h
     include/aitrain/core/AnnotationIntegration.h
     include/aitrain/core/Cancellation.h
     include/aitrain/core/Deployment.h
@@ -11,8 +12,6 @@ add_library(aitrain_core STATIC
     include/aitrain/core/SegmentationDataset.h
     include/aitrain/core/JsonProtocol.h
     include/aitrain/core/LicenseManager.h
-    include/aitrain/core/PluginManager.h
-    include/aitrain/core/PluginMarketplace.h
     include/aitrain/core/ProjectRepository.h
     include/aitrain/core/ProductWorkflow.h
     include/aitrain/core/TaskModels.h
@@ -22,6 +21,7 @@ add_library(aitrain_core STATIC
     include/aitrain/core/WorkerProtocol.h
     include/aitrain/core/WorkerRequests.h
     src/JsonProtocol.cpp
+    src/CapabilityRegistry.cpp
     src/AnnotationIntegration.cpp
     src/LicenseManager.cpp
     src/Deployment.cpp
@@ -32,6 +32,7 @@ add_library(aitrain_core STATIC
     src/DatasetConversionVoc.cpp
     src/DatasetConversionYolo.cpp
     src/DatasetValidators.cpp
+    src/DatasetValidation.cpp
     src/YoloDatasetLayout.h
     src/YoloDatasetLayout.cpp
     src/DetectionDataset.cpp
@@ -48,8 +49,6 @@ add_library(aitrain_core STATIC
     src/VisionPostprocessYolo.cpp
     src/OcrRecDataset.cpp
     src/SegmentationDataset.cpp
-    src/PluginManager.cpp
-    src/PluginMarketplace.cpp
     src/ProjectRepository.cpp
     src/ProjectRepositoryDatasetStore.cpp
     src/ProjectRepositoryInternal.h

@@ -226,16 +226,6 @@ void WorkerClient::cancel()
     }
 }
 
-void WorkerClient::pause()
-{
-    send(wp::command::pause(), {});
-}
-
-void WorkerClient::resume()
-{
-    send(wp::command::resume(), {});
-}
-
 void WorkerClient::requestHeartbeat()
 {
     send(wp::command::heartbeat(), {});
@@ -342,9 +332,6 @@ void WorkerClient::readLines()
                 cancelTimer_.stop();
                 finishedEmitted_ = true;
                 emit finished(false, payload.value(wp::field::message()).toString());
-            } else if (type == wp::event::paused()
-                || type == wp::event::resumed()) {
-                emit logLine(payload.value(wp::field::message()).toString());
             } else if (type == wp::event::canceled()) {
                 cancelRequested_ = false;
                 cancelTimer_.stop();

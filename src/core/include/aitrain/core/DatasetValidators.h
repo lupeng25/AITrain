@@ -1,6 +1,6 @@
 #pragma once
 
-#include "aitrain/core/PluginInterfaces.h"
+#include "aitrain/core/DatasetValidation.h"
 
 #include <QJsonObject>
 #include <QString>

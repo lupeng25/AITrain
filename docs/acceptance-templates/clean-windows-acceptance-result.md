@@ -48,7 +48,7 @@ Optional source-side preflight, if run:
 - Full console output:
 - `acceptance_summary.json`:
 - Worker self-check JSON:
-- Worker plugin smoke JSON:
+- Worker built-in capability JSON:
 - Package root layout:
 - Screenshots, if any:
 
@@ -56,7 +56,7 @@ Optional source-side preflight, if run:
 
 - Optional runtimes reported missing:
 - Package layout gaps:
-- Plugin load issues:
+- Capability registry issues:
 - Documentation/script presence issues:
 - Follow-up owner:
 - Follow-up due date:

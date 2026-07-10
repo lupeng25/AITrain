@@ -32,13 +32,13 @@ bool ProjectRepository::upsertProject(const QString& name, const QString& rootPa
 bool ProjectRepository::insertTask(const TaskRecord& task, QString* error)
 {
     QSqlQuery query(db_);
-    query.prepare(QStringLiteral("insert into tasks(id, project_name, plugin_id, task_type, kind, state, work_dir, message, created_at, updated_at, started_at, finished_at) "
+    query.prepare(QStringLiteral("insert into tasks(id, project_name, capability_id, task_type, kind, state, work_dir, message, created_at, updated_at, started_at, finished_at) "
                                  "values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
     const QString created = task.createdAt.isValid() ? task.createdAt.toUTC().toString(Qt::ISODateWithMs) : nowIso();
     const QString updated = task.updatedAt.isValid() ? task.updatedAt.toUTC().toString(Qt::ISODateWithMs) : created;
     query.addBindValue(task.id);
     query.addBindValue(task.projectName);
-    query.addBindValue(task.pluginId);
+    query.addBindValue(task.capabilityId);
     query.addBindValue(task.taskType);
     query.addBindValue(taskKindToString(task.kind));
     query.addBindValue(taskStateToString(task.state));
@@ -136,13 +136,12 @@ bool ProjectRepository::markInterruptedTasksFailed(const QString& message, QStri
     QSqlQuery query(db_);
     const QString timestamp = nowIso();
     query.prepare(QStringLiteral("update tasks set state = ?, message = ?, updated_at = ?, finished_at = ? "
-                                 "where state in (?, ?)"));
+                                 "where state = ?"));
     query.addBindValue(taskStateToString(TaskState::Failed));
     query.addBindValue(message);
     query.addBindValue(timestamp);
     query.addBindValue(timestamp);
     query.addBindValue(taskStateToString(TaskState::Running));
-    query.addBindValue(taskStateToString(TaskState::Paused));
     if (!query.exec()) {
         if (error) {
             *error = sqlError(query);
@@ -214,7 +213,7 @@ QVector<TaskRecord> ProjectRepository::recentTasks(int limit, QString* error) co
 {
     QVector<TaskRecord> tasks;
     QSqlQuery query(db_);
-    query.prepare(QStringLiteral("select id, project_name, plugin_id, task_type, kind, state, work_dir, message, created_at, updated_at, started_at, finished_at "
+    query.prepare(QStringLiteral("select id, project_name, capability_id, task_type, kind, state, work_dir, message, created_at, updated_at, started_at, finished_at "
                                  "from tasks order by updated_at desc limit ?"));
     query.addBindValue(limit);
     if (!query.exec()) {
@@ -228,7 +227,7 @@ QVector<TaskRecord> ProjectRepository::recentTasks(int limit, QString* error) co
         TaskRecord task;
         task.id = query.value(0).toString();
         task.projectName = query.value(1).toString();
-        task.pluginId = query.value(2).toString();
+        task.capabilityId = query.value(2).toString();
         task.taskType = query.value(3).toString();
         task.kind = taskKindFromString(query.value(4).toString());
         task.state = taskStateFromString(query.value(5).toString());

@@ -302,7 +302,6 @@ bool WorkerSession::forwardPythonTrainerLine(const QByteArray& line, bool* termi
     send(type, payload);
     if (type == QStringLiteral("completed") || type == QStringLiteral("failed")) {
         running_ = false;
-        paused_ = false;
         if (terminalMessageSeen) {
             *terminalMessageSeen = true;
         }

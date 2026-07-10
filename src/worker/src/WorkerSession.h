@@ -32,8 +32,6 @@ private:
 
     void handleMessage(const QString& type, const QJsonObject& payload);
     void startTrainingCommand(const QJsonObject& payload);
-    void pauseCommand(const QJsonObject& payload);
-    void resumeCommand(const QJsonObject& payload);
     void heartbeatCommand(const QJsonObject& payload);
     void environmentCheckCommand(const QJsonObject& payload);
     void validateDatasetCommand(const QJsonObject& payload);
@@ -54,8 +52,6 @@ private:
     void inferCommand(const QJsonObject& payload);
     void cancelCommand(const QJsonObject& payload);
     void startTraining(const aitrain::TrainingRequest& request);
-    void pauseTraining();
-    void resumeTraining();
     void sendHeartbeat();
     void runEnvironmentCheck(const QJsonObject& payload);
     void validateDataset(const QJsonObject& payload);
@@ -138,7 +134,6 @@ private:
     int step_ = 0;
     int maxSteps_ = 20;
     bool running_ = false;
-    bool paused_ = false;
     bool canceled_ = false;
     QProcess pythonTrainerProcess_;
     bool interceptPythonTrainerMessages_ = false;

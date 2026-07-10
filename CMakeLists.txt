@@ -588,6 +588,7 @@ endfunction()
 set(AITRAIN_QT_RUNTIME_DLLS)
 set(AITRAIN_QT_PLATFORM_PLUGIN_DLLS)
 set(AITRAIN_QT_SQL_PLUGIN_DLLS)
+set(AITRAIN_QT_IMAGE_PLUGIN_DLLS)
 set(AITRAIN_QT_CONF_FILE)
 if(WIN32)
     if(AITRAIN_WINDEPLOYQT_EXECUTABLE)
@@ -620,6 +621,9 @@ if(WIN32)
         )
         file(GLOB AITRAIN_QT_SQL_PLUGIN_DLLS CONFIGURE_DEPENDS
             "${AITRAIN_QT_RUNTIME_ROOT_DIR}/plugins/sqldrivers/qsqlite*.dll"
+        )
+        file(GLOB AITRAIN_QT_IMAGE_PLUGIN_DLLS CONFIGURE_DEPENDS
+            "${AITRAIN_QT_RUNTIME_ROOT_DIR}/plugins/imageformats/*.dll"
         )
         set(AITRAIN_QT_CONF_FILE "${CMAKE_BINARY_DIR}/aitrain_qt.conf")
         file(WRITE "${AITRAIN_QT_CONF_FILE}" "[Paths]\nPlugins = .\n")
@@ -655,6 +659,16 @@ function(aitrain_copy_qt_platform_runtime target_name)
             VERBATIM
         )
     endif()
+    if(WIN32 AND AITRAIN_QT_IMAGE_PLUGIN_DLLS)
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                $<TARGET_FILE_DIR:${target_name}>/imageformats
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${AITRAIN_QT_IMAGE_PLUGIN_DLLS}
+                $<TARGET_FILE_DIR:${target_name}>/imageformats
+            VERBATIM
+        )
+    endif()
     if(WIN32 AND AITRAIN_QT_CONF_FILE)
         add_custom_command(TARGET ${target_name} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -671,11 +685,6 @@ if(AITRAIN_BUILD_LICENSE_GENERATOR)
 endif()
 add_subdirectory(src/app)
 add_subdirectory(src/worker)
-add_subdirectory(src/plugins/dataset_interop)
-add_subdirectory(src/plugins/yolo_native)
-add_subdirectory(src/plugins/semantic_segmentation)
-add_subdirectory(src/plugins/anomaly_detection)
-add_subdirectory(src/plugins/ocr_rec)
 
 add_custom_target(aitrain_python_trainers_copy ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -686,8 +695,6 @@ add_custom_target(aitrain_python_trainers_copy ALL
 add_dependencies(AITrainStudio aitrain_python_trainers_copy)
 add_dependencies(aitrain_worker aitrain_python_trainers_copy)
 
-install(DIRECTORY DESTINATION plugins/models)
-install(DIRECTORY DESTINATION plugins/marketplace)
 install(DIRECTORY DESTINATION runtimes/onnxruntime)
 install(DIRECTORY DESTINATION runtimes/ncnn)
 install(DIRECTORY DESTINATION runtimes/tensorrt)
@@ -711,11 +718,8 @@ install(FILES
     docs/production-ocr-acceptance.md
     docs/customer-ocr-validation.md
     docs/product-roadmap-local-training-platform.md
-    docs/plugin-marketplace.md
-    docs/plugin-package-format.md
     DESTINATION docs
 )
-install(DIRECTORY examples/plugin-package-template DESTINATION examples)
 install(DIRECTORY python_trainers DESTINATION .
     PATTERN "__pycache__" EXCLUDE
     PATTERN "*.pyc" EXCLUDE
@@ -744,8 +748,6 @@ install(FILES
     tools/phase-ncnn-runtime-smoke.ps1
     tools/local-rc-closeout.ps1
     tools/release-freeze-handoff.ps1
-    tools/create-plugin-package.ps1
-    tools/create-plugin-marketplace-demo.ps1
     tools/materialize-ultralytics-dataset.py
     tools/materialize-oxford-pets-semantic.py
     tools/phase16-ocr-official-smoke.ps1

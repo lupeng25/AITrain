@@ -4,9 +4,8 @@
 #include "InfoPanel.h"
 #include "LanguageSupport.h"
 #include "MainWindowSupport.h"
-#include "PluginMarketplaceWidget.h"
+#include "aitrain/core/CapabilityRegistry.h"
 #include "aitrain/core/DetectionTrainer.h"
-#include "aitrain/core/PluginInterfaces.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -61,7 +60,7 @@ QString MainWindow::pageCaption(int pageIndex) const
     case ModelRegistryPage: return uiText("管理模型版本、评估报告、对比和流水线记录");
     case DeploymentPage: return uiText("导出模型，运行推理验证，并查看部署验证状态");
     case EnvironmentPage: return uiText("检查运行环境，并集中查看交付证据、诊断包和客户域 OCR 验收");
-    case SystemSettingsPage: return uiText("管理插件、界面语言、默认目录、授权状态和本地路径");
+    case SystemSettingsPage: return uiText("管理内置能力、界面语言、默认目录、授权状态和本地路径");
     default: return {};
     }
 }
@@ -88,7 +87,7 @@ void MainWindow::showPage(int pageIndex, const QString& title)
         updateDeliveryAcceptanceSummary();
     }
     if (pageIndex == SystemSettingsPage) {
-        updatePluginSummary();
+        updateCapabilitySummary();
         updateSettingsSummary();
     }
 }
@@ -130,12 +129,12 @@ void MainWindow::updateHeaderState()
     headerProjectLabel_->setText(currentProjectPath_.isEmpty()
         ? tr("项目：未打开")
         : tr("项目：%1").arg(currentProjectName_));
-    const int pluginCount = pluginManager_.plugins().size();
-    pluginPill_->setStatus(tr("插件 %1").arg(pluginCount), pluginCount > 0 ? StatusPill::Tone::Success : StatusPill::Tone::Warning);
-    if (dashboardPluginValue_) {
-        dashboardPluginValue_->setText(QString::number(pluginCount));
+    const int capabilityCount = aitrain::BuiltinCapabilityRegistry::instance().capabilities().size();
+    capabilityPill_->setStatus(uiText("内置能力 %1").arg(capabilityCount), capabilityCount > 0 ? StatusPill::Tone::Success : StatusPill::Tone::Warning);
+    if (dashboardCapabilityValue_) {
+        dashboardCapabilityValue_->setText(QString::number(capabilityCount));
     }
-    updatePluginSummary();
+    updateCapabilitySummary();
 }
 
 void MainWindow::updateEnvironmentTable(const QJsonObject& payload)
@@ -221,12 +220,11 @@ void MainWindow::updateEnvironmentTable(const QJsonObject& payload)
     }
 
     {
-        const int pluginCount = pluginManager_.plugins().size();
-        const QString status = pluginCount > 0 ? QStringLiteral("ok") : QStringLiteral("warning");
-        const QString message = pluginCount > 0
-            ? uiText("已加载 %1 个 AITrain 插件。").arg(pluginCount)
-            : uiText("未加载 AITrain 插件，请检查 plugins/models 目录。");
-        appendRow(uiText("AITrain Plugins"), status, message);
+        const int capabilityCount = aitrain::BuiltinCapabilityRegistry::instance().capabilities().size();
+        appendRow(uiText("内置能力"), capabilityCount > 0 ? QStringLiteral("ok") : QStringLiteral("warning"),
+            capabilityCount > 0
+                ? uiText("已注册 %1 个内置能力。").arg(capabilityCount)
+                : uiText("内置能力注册表为空。"));
     }
 
     const StatusPill::Tone tone = hasMissing ? StatusPill::Tone::Error : (hasWarning ? StatusPill::Tone::Warning : StatusPill::Tone::Success);
@@ -282,44 +280,48 @@ void MainWindow::updateProjectSummary()
     }
 }
 
-void MainWindow::updatePluginSummary()
+void MainWindow::updateCapabilitySummary()
 {
-    const QVector<aitrain::IModelPlugin*> plugins = pluginManager_.plugins();
+    const QVector<aitrain::CapabilityDescriptor> capabilities =
+        aitrain::BuiltinCapabilityRegistry::instance().capabilities();
     QStringList datasetFormats;
     QStringList exportFormats;
-    int gpuPlugins = 0;
-    for (auto* plugin : plugins) {
-        const aitrain::PluginManifest manifest = plugin->manifest();
-        if (manifest.requiresGpu) {
-            ++gpuPlugins;
+    int gpuCapabilities = 0;
+    for (const aitrain::CapabilityDescriptor& capability : capabilities) {
+        datasetFormats.append(capability.datasetFormats);
+        for (const QString& backendId : capability.backendIds) {
+            const aitrain::BackendDescriptor backend =
+                aitrain::BuiltinCapabilityRegistry::instance().backend(backendId);
+            exportFormats.append(backend.exportFormats);
+            if (backend.devicePolicy == QStringLiteral("gpu_required")
+                || backend.devicePolicy == QStringLiteral("gpu_recommended")) {
+                ++gpuCapabilities;
+            }
         }
-        datasetFormats.append(manifest.datasetFormats);
-        exportFormats.append(manifest.exportFormats);
     }
 
-    if (pluginConsoleStatusLabel_) {
-        pluginConsoleStatusLabel_->setText(plugins.isEmpty()
-            ? uiText("未加载插件，请检查插件目录。")
-            : uiText("已加载 %1 个插件。").arg(plugins.size()));
+    if (capabilityConsoleStatusLabel_) {
+        capabilityConsoleStatusLabel_->setText(capabilities.isEmpty()
+            ? uiText("内置能力注册表为空。")
+            : uiText("已注册 %1 个内置能力。").arg(capabilities.size()));
     }
-    if (pluginSearchPathLabel_) {
-        const QString searchPaths = pluginSearchPaths().join(QStringLiteral(" | "));
-        pluginSearchPathLabel_->setText(uiText("插件搜索路径：%1").arg(compactTextForStatus(searchPaths, 108)));
-        pluginSearchPathLabel_->setToolTip(searchPaths);
+    if (capabilitySourceLabel_) {
+        capabilitySourceLabel_->setText(uiText("能力来源：编译期内置注册表"));
+        capabilitySourceLabel_->setToolTip(uiText("能力由编译期注册表提供。"));
     }
-    if (pluginCountSummaryLabel_) {
-        pluginCountSummaryLabel_->setText(QString::number(plugins.size()));
+    if (capabilityCountSummaryLabel_) {
+        capabilityCountSummaryLabel_->setText(QString::number(capabilities.size()));
     }
-    if (pluginDatasetFormatSummaryLabel_) {
-        pluginDatasetFormatSummaryLabel_->setText(QString::number(uniqueStringCount(datasetFormats)));
-        pluginDatasetFormatSummaryLabel_->setToolTip(compactListSummary(datasetFormats, 12));
+    if (capabilityDatasetFormatSummaryLabel_) {
+        capabilityDatasetFormatSummaryLabel_->setText(QString::number(uniqueStringCount(datasetFormats)));
+        capabilityDatasetFormatSummaryLabel_->setToolTip(compactListSummary(datasetFormats, 12));
     }
-    if (pluginExportFormatSummaryLabel_) {
-        pluginExportFormatSummaryLabel_->setText(QString::number(uniqueStringCount(exportFormats)));
-        pluginExportFormatSummaryLabel_->setToolTip(compactListSummary(exportFormats, 12));
+    if (capabilityExportFormatSummaryLabel_) {
+        capabilityExportFormatSummaryLabel_->setText(QString::number(uniqueStringCount(exportFormats)));
+        capabilityExportFormatSummaryLabel_->setToolTip(compactListSummary(exportFormats, 12));
     }
-    if (pluginGpuSummaryLabel_) {
-        pluginGpuSummaryLabel_->setText(QString::number(gpuPlugins));
+    if (capabilityGpuSummaryLabel_) {
+        capabilityGpuSummaryLabel_->setText(QString::number(gpuCapabilities));
     }
 }
 
@@ -491,8 +493,8 @@ void MainWindow::updateDashboardSummary()
             ? QStringLiteral("%1 / %2").arg(modelVersionCount).arg(exportCount)
             : QStringLiteral("0"));
     }
-    if (dashboardPluginValue_) {
-        dashboardPluginValue_->setText(QString::number(pluginManager_.plugins().size()));
+    if (dashboardCapabilityValue_) {
+        dashboardCapabilityValue_->setText(QString::number(aitrain::BuiltinCapabilityRegistry::instance().capabilities().size()));
     }
 
     QString environmentText = uiText("待检测");
@@ -515,7 +517,7 @@ void MainWindow::updateDashboardSummary()
         dashboardEnvironmentValue_->setText(environmentText);
     }
     updateProjectSummary();
-    updatePluginSummary();
+    updateCapabilitySummary();
     updateEnvironmentSummary();
 
     if (dashboardNextStepLabel_) {
@@ -644,52 +646,54 @@ void MainWindow::refreshTrainingDefaults()
     const QString datasetFormat = !state_.dataset.currentFormat.isEmpty()
         ? state_.dataset.currentFormat
         : currentDatasetFormat();
-    QString preferredPlugin;
+    QString preferredCapability;
     QString preferredTask;
     QString preferredBackend;
 
     if (datasetFormat == QStringLiteral("yolo_detection") || datasetFormat == QStringLiteral("yolo_txt")) {
-        preferredPlugin = QStringLiteral("com.aitrain.plugins.yolo_native");
+        preferredCapability = QStringLiteral("yolo");
         preferredTask = QStringLiteral("detection");
         preferredBackend = QStringLiteral("ultralytics_yolo_detect");
     } else if (datasetFormat == QStringLiteral("yolo_segmentation")) {
-        preferredPlugin = QStringLiteral("com.aitrain.plugins.yolo_native");
+        preferredCapability = QStringLiteral("yolo");
         preferredTask = QStringLiteral("segmentation");
         preferredBackend = QStringLiteral("ultralytics_yolo_segment");
     } else if (datasetFormat == QStringLiteral("yolo_obb")) {
-        preferredPlugin = QStringLiteral("com.aitrain.plugins.yolo_native");
+        preferredCapability = QStringLiteral("yolo");
         preferredTask = QStringLiteral("obb_detection");
         preferredBackend = QStringLiteral("ultralytics_yolo_obb");
     } else if (datasetFormat == QStringLiteral("semantic_segmentation_mask")) {
-        preferredPlugin = QStringLiteral("com.aitrain.plugins.semantic_segmentation");
+        preferredCapability = QStringLiteral("semantic_segmentation");
         preferredTask = QStringLiteral("semantic_segmentation");
         preferredBackend = QStringLiteral("smp_semantic_segmentation");
     } else if (datasetFormat == QStringLiteral("anomaly_folder")) {
-        preferredPlugin = QStringLiteral("com.aitrain.plugins.anomaly_detection");
+        preferredCapability = QStringLiteral("anomaly_detection");
         preferredTask = QStringLiteral("anomaly_detection");
         preferredBackend = QStringLiteral("anomalib_patchcore");
     } else if (datasetFormat == QStringLiteral("paddleocr_det")) {
-        preferredPlugin = QStringLiteral("com.aitrain.plugins.ocr_rec_native");
+        preferredCapability = QStringLiteral("paddleocr");
         preferredTask = QStringLiteral("ocr_detection");
         preferredBackend = QStringLiteral("paddleocr_det_official");
     } else if (datasetFormat == QStringLiteral("paddleocr_rec")) {
-        preferredPlugin = QStringLiteral("com.aitrain.plugins.ocr_rec_native");
+        preferredCapability = QStringLiteral("paddleocr");
         preferredTask = QStringLiteral("ocr_recognition");
         preferredBackend = QStringLiteral("paddleocr_rec_official");
     }
 
-    if (!preferredPlugin.isEmpty() && pluginCombo_) {
-        QSignalBlocker block(pluginCombo_);
-        setComboCurrentData(pluginCombo_, preferredPlugin);
+    if (!preferredCapability.isEmpty() && capabilityCombo_) {
+        QSignalBlocker block(capabilityCombo_);
+        setComboCurrentData(capabilityCombo_, preferredCapability);
     }
 
     if (taskTypeCombo_) {
         const QString currentTask = currentTaskType();
         QSignalBlocker block(taskTypeCombo_);
         taskTypeCombo_->clear();
-        auto* plugin = pluginCombo_ ? pluginManager_.pluginById(pluginCombo_->currentData().toString()) : nullptr;
-        if (plugin) {
-            addTaskTypeItems(taskTypeCombo_, plugin->manifest().taskTypes);
+        const aitrain::CapabilityDescriptor capability = capabilityCombo_
+            ? aitrain::BuiltinCapabilityRegistry::instance().capability(capabilityCombo_->currentData().toString())
+            : aitrain::CapabilityDescriptor();
+        if (!capability.id.isEmpty()) {
+            addTaskTypeItems(taskTypeCombo_, capability.taskTypes);
         }
         const QString targetTask = preferredTask.isEmpty() ? currentTask : preferredTask;
         const int taskIndex = taskTypeCombo_->findData(targetTask);

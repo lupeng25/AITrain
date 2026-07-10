@@ -3,13 +3,21 @@
 #include <QJsonDocument>
 #include <QJsonParseError>
 
+#include <atomic>
+
 namespace aitrain::protocol {
+
+namespace {
+std::atomic<quint64> nextSequence{1};
+}
 
 QByteArray encodeMessage(const QString& type, const QJsonObject& payload, const QString& requestId)
 {
     QJsonObject message;
     message.insert(QString::fromLatin1(kType), type);
     message.insert(QString::fromLatin1(kPayload), payload);
+    message.insert(QString::fromLatin1(kProtocolVersion), kCurrentProtocolVersion);
+    message.insert(QString::fromLatin1(kSequence), static_cast<qint64>(nextSequence.fetch_add(1)));
     if (!requestId.isEmpty()) {
         message.insert(QString::fromLatin1(kRequestId), requestId);
     }
@@ -31,6 +39,19 @@ bool decodeMessage(const QByteArray& line, QString* type, QJsonObject* payload, 
     }
 
     const QJsonObject object = document.object();
+    const int protocolVersion = object.value(QString::fromLatin1(kProtocolVersion)).toInt(-1);
+    if (protocolVersion != kCurrentProtocolVersion) {
+        if (error) {
+            *error = QStringLiteral("Unsupported protocolVersion: %1").arg(protocolVersion);
+        }
+        return false;
+    }
+    if (!object.value(QString::fromLatin1(kSequence)).isDouble()) {
+        if (error) {
+            *error = QStringLiteral("Message has no sequence");
+        }
+        return false;
+    }
     const QString messageType = object.value(QString::fromLatin1(kType)).toString();
     if (messageType.isEmpty()) {
         if (error) {

@@ -3,7 +3,7 @@
 #include "EvaluationReportView.h"
 #include "InfoPanel.h"
 #include "MainWindowSupport.h"
-#include "PluginMarketplaceWidget.h"
+#include "aitrain/core/CapabilityRegistry.h"
 
 #include <QAbstractItemView>
 #include <QCheckBox>
@@ -356,7 +356,7 @@ QWidget* MainWindow::buildTrainingPage()
     layout->setContentsMargins(18, 18, 18, 18);
     layout->setSpacing(12);
 
-    pluginCombo_ = new QComboBox;
+    capabilityCombo_ = new QComboBox;
     taskTypeCombo_ = new QComboBox;
     trainingBackendCombo_ = new QComboBox;
     trainingBackendCombo_->addItem(backendLabel(QStringLiteral("ultralytics_yolo_detect")), QStringLiteral("ultralytics_yolo_detect"));
@@ -378,11 +378,12 @@ QWidget* MainWindow::buildTrainingPage()
     resumeCheckpointEdit_->setPlaceholderText(QStringLiteral("可选：选择已有 checkpoint 继续训练"));
     horizontalFlipCheck_ = new QCheckBox(QStringLiteral("水平翻转增强"));
     colorJitterCheck_ = new QCheckBox(QStringLiteral("亮度扰动增强"));
-    connect(pluginCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
+    connect(capabilityCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
         taskTypeCombo_->clear();
-        auto* plugin = pluginManager_.pluginById(pluginCombo_->currentData().toString());
-        if (plugin) {
-            addTaskTypeItems(taskTypeCombo_, plugin->manifest().taskTypes);
+        const aitrain::CapabilityDescriptor capability =
+            aitrain::BuiltinCapabilityRegistry::instance().capability(capabilityCombo_->currentData().toString());
+        if (!capability.id.isEmpty()) {
+            addTaskTypeItems(taskTypeCombo_, capability.taskTypes);
         }
         refreshTrainingDefaults();
     });
@@ -441,12 +442,8 @@ QWidget* MainWindow::buildTrainingPage()
 
     auto* startButton = primaryButton(QStringLiteral("启动训练"));
     startButton->setObjectName(QStringLiteral("GreenButton"));
-    auto* pauseButton = new QPushButton(QStringLiteral("暂停任务"));
-    auto* resumeButton = new QPushButton(QStringLiteral("继续任务"));
     auto* cancelButton = dangerButton(QStringLiteral("取消任务"));
     connect(startButton, &QPushButton::clicked, this, &MainWindow::startTraining);
-    connect(pauseButton, &QPushButton::clicked, &worker_, &WorkerClient::pause);
-    connect(resumeButton, &QPushButton::clicked, &worker_, &WorkerClient::resume);
     connect(cancelButton, &QPushButton::clicked, &worker_, &WorkerClient::cancel);
 
     trainingDatasetSummaryLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
@@ -480,8 +477,6 @@ QWidget* MainWindow::buildTrainingPage()
     actionLayout->setContentsMargins(0, 0, 0, 0);
     actionLayout->setSpacing(10);
     actionLayout->addWidget(startButton);
-    actionLayout->addWidget(pauseButton);
-    actionLayout->addWidget(resumeButton);
     actionLayout->addWidget(cancelButton);
     actionLayout->addStretch();
     headerRoot->addLayout(actionLayout);
@@ -549,7 +544,7 @@ QWidget* MainWindow::buildTrainingPage()
     advancedForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     advancedForm->setHorizontalSpacing(14);
     advancedForm->setVerticalSpacing(10);
-    advancedForm->addRow(QStringLiteral("能力插件"), pluginCombo_);
+    advancedForm->addRow(QStringLiteral("内置能力"), capabilityCombo_);
     advancedForm->addRow(QStringLiteral("Grid Size"), gridSizeEdit_);
     advancedForm->addRow(QStringLiteral("Resume"), resumeCheckpointEdit_);
     auto* augmentRow = new QWidget;

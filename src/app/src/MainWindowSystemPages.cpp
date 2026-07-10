@@ -3,10 +3,8 @@
 #include "EvaluationReportView.h"
 #include "InfoPanel.h"
 #include "MainWindowSupport.h"
-#include "PluginMarketplaceWidget.h"
 
 #include <QAbstractItemView>
-#include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDesktopServices>
@@ -48,32 +46,32 @@ QWidget* MainWindow::buildSystemSettingsPage()
     layout->addWidget(createWorkbenchHeader(
         QStringLiteral("SYSTEM SETTINGS"),
         uiText("系统设置"),
-        uiText("管理插件、界面语言、默认目录、授权状态和本地路径。"),
+        uiText("管理内置能力、界面语言、默认目录、授权状态和本地路径。"),
         nullptr,
         QStringList()
-            << QStringLiteral("Plugins")
+            << QStringLiteral("Capabilities")
             << QStringLiteral("Preferences")
             << QStringLiteral("Local Paths")));
 
     systemSettingsTabs_ = new QTabWidget;
     systemSettingsTabs_->setObjectName(QStringLiteral("SystemSettingsTabs"));
-    systemSettingsTabs_->addTab(buildPluginsPanel(), uiText("插件"));
+    systemSettingsTabs_->addTab(buildCapabilitiesPanel(), uiText("内置能力"));
     systemSettingsTabs_->addTab(buildApplicationSettingsPanel(), uiText("应用设置"));
     layout->addWidget(systemSettingsTabs_, 1);
-    updatePluginSummary();
+    updateCapabilitySummary();
     updateSettingsSummary();
     return page;
 }
 
-QWidget* MainWindow::buildPluginsPanel()
+QWidget* MainWindow::buildCapabilitiesPanel()
 {
     auto* page = new QWidget;
     auto* layout = new QVBoxLayout(page);
     layout->setContentsMargins(0, 12, 0, 0);
     layout->setSpacing(16);
 
-    auto* refreshButton = primaryButton(QStringLiteral("重新扫描插件"));
-    connect(refreshButton, &QPushButton::clicked, this, &MainWindow::refreshPlugins);
+    auto* refreshButton = primaryButton(QStringLiteral("刷新能力摘要"));
+    connect(refreshButton, &QPushButton::clicked, this, &MainWindow::refreshBuiltInCapabilities);
 
     auto* headerPanel = new QFrame;
     headerPanel->setObjectName(QStringLiteral("ExperimentHeader"));
@@ -85,11 +83,11 @@ QWidget* MainWindow::buildPluginsPanel()
     auto* titleLayout = new QVBoxLayout(titleBlock);
     titleLayout->setContentsMargins(0, 0, 0, 0);
     titleLayout->setSpacing(2);
-    auto* kicker = new QLabel(QStringLiteral("PLUGIN CAPABILITY MATRIX"));
+    auto* kicker = new QLabel(QStringLiteral("BUILTIN CAPABILITY MATRIX"));
     kicker->setObjectName(QStringLiteral("ExperimentKicker"));
-    auto* title = new QLabel(QStringLiteral("插件能力矩阵"));
+    auto* title = new QLabel(QStringLiteral("内置能力矩阵"));
     title->setObjectName(QStringLiteral("ExperimentTitle"));
-    auto* subtitle = new QLabel(QStringLiteral("扫描模型、数据集、导出和推理扩展能力；插件仍只通过公共接口暴露能力。"));
+    auto* subtitle = new QLabel(QStringLiteral("编译期注册的模型、数据集、导出和推理能力。"));
     subtitle->setObjectName(QStringLiteral("ExperimentMeta"));
     subtitle->setWordWrap(true);
     allowLabelToShrink(subtitle);
@@ -103,25 +101,20 @@ QWidget* MainWindow::buildPluginsPanel()
     auto* headerGrid = new QGridLayout;
     headerGrid->setHorizontalSpacing(12);
     headerGrid->setVerticalSpacing(8);
-    auto* scanCaption = new QLabel(QStringLiteral("扫描"));
+    auto* scanCaption = new QLabel(QStringLiteral("状态"));
     scanCaption->setObjectName(QStringLiteral("ExperimentMeta"));
-    auto* pathCaption = new QLabel(QStringLiteral("路径"));
+    auto* pathCaption = new QLabel(QStringLiteral("来源"));
     pathCaption->setObjectName(QStringLiteral("ExperimentMeta"));
-    pluginConsoleStatusLabel_ = inlineStatusLabel(QStringLiteral("等待插件扫描。"));
-    pluginConsoleStatusLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
-    pluginSearchPathLabel_ = inlineStatusLabel(QStringLiteral("插件搜索路径：未初始化"));
-    pluginSearchPathLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
-    pluginMarketplaceStatusLabel_ = inlineStatusLabel(uiText("插件市场：等待加载本地索引。"));
-    pluginMarketplaceStatusLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
-    allowLabelToShrink(pluginConsoleStatusLabel_);
-    allowLabelToShrink(pluginSearchPathLabel_);
-    allowLabelToShrink(pluginMarketplaceStatusLabel_);
+    capabilityConsoleStatusLabel_ = inlineStatusLabel(QStringLiteral("等待读取内置能力注册表。"));
+    capabilityConsoleStatusLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
+    capabilitySourceLabel_ = inlineStatusLabel(QStringLiteral("能力来源：编译期内置注册表"));
+    capabilitySourceLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
+    allowLabelToShrink(capabilityConsoleStatusLabel_);
+    allowLabelToShrink(capabilitySourceLabel_);
     headerGrid->addWidget(scanCaption, 0, 0);
-    headerGrid->addWidget(pluginConsoleStatusLabel_, 0, 1);
+    headerGrid->addWidget(capabilityConsoleStatusLabel_, 0, 1);
     headerGrid->addWidget(pathCaption, 1, 0);
-    headerGrid->addWidget(pluginSearchPathLabel_, 1, 1);
-    headerGrid->addWidget(new QLabel(uiText("市场")), 2, 0);
-    headerGrid->addWidget(pluginMarketplaceStatusLabel_, 2, 1);
+    headerGrid->addWidget(capabilitySourceLabel_, 1, 1);
     headerRoot->addLayout(headerGrid);
 
     auto* summaryStrip = new QFrame;
@@ -130,70 +123,46 @@ QWidget* MainWindow::buildPluginsPanel()
     summaryLayout->setContentsMargins(12, 12, 12, 12);
     summaryLayout->setHorizontalSpacing(12);
     summaryLayout->setVerticalSpacing(12);
-    auto* pluginCountCard = createMetricCard(QStringLiteral("已加载插件"), QStringLiteral("0"), QStringLiteral("manifest 已加载"));
-    pluginCountSummaryLabel_ = pluginCountCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
+    auto* capabilityCountCard = createMetricCard(QStringLiteral("内置能力"), QStringLiteral("0"), QStringLiteral("编译期注册"));
+    capabilityCountSummaryLabel_ = capabilityCountCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
     auto* datasetFormatCard = createMetricCard(QStringLiteral("数据集格式"), QStringLiteral("0"), QStringLiteral("可识别 / 校验格式"));
-    pluginDatasetFormatSummaryLabel_ = datasetFormatCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
-    auto* exportFormatCard = createMetricCard(QStringLiteral("导出格式"), QStringLiteral("0"), QStringLiteral("插件声明的导出目标"));
-    pluginExportFormatSummaryLabel_ = exportFormatCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
-    auto* gpuCard = createMetricCard(QStringLiteral("GPU 需求"), QStringLiteral("0"), QStringLiteral("声明需要 GPU 的插件"));
-    pluginGpuSummaryLabel_ = gpuCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
-    summaryLayout->addWidget(pluginCountCard, 0, 0);
+    capabilityDatasetFormatSummaryLabel_ = datasetFormatCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
+    auto* exportFormatCard = createMetricCard(QStringLiteral("导出格式"), QStringLiteral("0"), QStringLiteral("能力声明的导出目标"));
+    capabilityExportFormatSummaryLabel_ = exportFormatCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
+    auto* gpuCard = createMetricCard(QStringLiteral("GPU 策略"), QStringLiteral("0"), QStringLiteral("GPU 推荐或必需能力"));
+    capabilityGpuSummaryLabel_ = gpuCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
+    summaryLayout->addWidget(capabilityCountCard, 0, 0);
     summaryLayout->addWidget(datasetFormatCard, 0, 1);
     summaryLayout->addWidget(exportFormatCard, 0, 2);
     summaryLayout->addWidget(gpuCard, 0, 3);
 
-    auto* tablePanel = new InfoPanel(uiText("插件扩展"));
-    pluginTable_ = new QTableWidget(0, 7);
-    pluginTable_->setHorizontalHeaderLabels(QStringList()
+    auto* tablePanel = new InfoPanel(uiText("内置能力"));
+    capabilityTable_ = new QTableWidget(0, 7);
+    capabilityTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("ID")
         << QStringLiteral("名称")
-        << QStringLiteral("版本")
+        << QStringLiteral("来源")
         << QStringLiteral("任务")
         << QStringLiteral("数据集")
-        << QStringLiteral("导出")
-        << QStringLiteral("GPU"));
-    configureTable(pluginTable_);
-    pluginTable_->setWordWrap(true);
-    pluginTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    pluginTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    pluginTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    pluginTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
-    pluginTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
-    pluginTable_->horizontalHeader()->setSectionResizeMode(5, QHeaderView::Stretch);
-    pluginTable_->horizontalHeader()->setSectionResizeMode(6, QHeaderView::ResizeToContents);
-    pluginTable_->verticalHeader()->setDefaultSectionSize(42);
+        << QStringLiteral("后端")
+        << QStringLiteral("运行策略"));
+    configureTable(capabilityTable_);
+    capabilityTable_->setWordWrap(true);
+    capabilityTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    capabilityTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    capabilityTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    capabilityTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
+    capabilityTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
+    capabilityTable_->horizontalHeader()->setSectionResizeMode(5, QHeaderView::Stretch);
+    capabilityTable_->horizontalHeader()->setSectionResizeMode(6, QHeaderView::ResizeToContents);
+    capabilityTable_->verticalHeader()->setDefaultSectionSize(42);
 
-    const QString appDir = QApplication::applicationDirPath();
-    pluginMarketplaceWidget_ = new PluginMarketplaceWidget(
-        QDir(appDir).filePath(QStringLiteral("plugins/marketplace")),
-        QDir(appDir).filePath(QStringLiteral("plugins/models")));
-    connect(pluginMarketplaceWidget_, &PluginMarketplaceWidget::releasePluginLoadersRequested, this, [this](const QStringList& activeFiles) {
-        pluginManager_.releasePluginFiles(activeFiles);
-    });
-    connect(pluginMarketplaceWidget_, &PluginMarketplaceWidget::pluginsChanged, this, &MainWindow::refreshPlugins);
-    connect(pluginMarketplaceWidget_, &PluginMarketplaceWidget::statusChanged, this, [this](const QString& status) {
-        if (pluginMarketplaceStatusLabel_) {
-            pluginMarketplaceStatusLabel_->setText(compactTextForStatus(status, 108));
-            pluginMarketplaceStatusLabel_->setToolTip(status);
-        }
-    });
-    pluginMarketplaceWidget_->refreshInstalledPlugins();
-
-    auto* tabs = new QTabWidget;
-    auto* loadedTab = new QWidget;
-    auto* loadedLayout = new QVBoxLayout(loadedTab);
-    loadedLayout->setContentsMargins(0, 0, 0, 0);
-    loadedLayout->addWidget(pluginTable_);
-
-    tabs->addTab(loadedTab, uiText("已加载"));
-    tabs->addTab(pluginMarketplaceWidget_, uiText("插件市场"));
-    tablePanel->bodyLayout()->addWidget(tabs);
+    tablePanel->bodyLayout()->addWidget(capabilityTable_);
 
     layout->addWidget(headerPanel);
     layout->addWidget(summaryStrip);
     layout->addWidget(tablePanel, 1);
-    updatePluginSummary();
+    updateCapabilitySummary();
     return page;
 }
 
@@ -221,7 +190,7 @@ QWidget* MainWindow::buildEnvironmentPage()
     kicker->setObjectName(QStringLiteral("ExperimentKicker"));
     auto* title = new QLabel(QStringLiteral("运行时健康面板"));
     title->setObjectName(QStringLiteral("ExperimentTitle"));
-    auto* subtitle = new QLabel(uiText("检查 NVIDIA 驱动、CUDA、TensorRT、ONNX Runtime、Qt 插件和 Worker 可用性，并集中查看交付证据、诊断包和客户域 OCR 验收。"));
+    auto* subtitle = new QLabel(uiText("检查 NVIDIA 驱动、CUDA、TensorRT、ONNX Runtime、Qt 运行时模块和 Worker 可用性，并集中查看交付证据、诊断包和客户域 OCR 验收。"));
     subtitle->setObjectName(QStringLiteral("ExperimentMeta"));
     subtitle->setWordWrap(true);
     allowLabelToShrink(subtitle);
@@ -272,8 +241,8 @@ QWidget* MainWindow::buildEnvironmentPage()
         QStringLiteral("TensorRT"),
         QStringLiteral("ONNX Runtime"),
         QStringLiteral("LibTorch"),
-        QStringLiteral("Qt Plugins"),
-        QStringLiteral("AITrain Plugins"),
+        QStringLiteral("Qt Runtime Modules"),
+        QStringLiteral("内置能力"),
         QStringLiteral("Worker")
     };
     for (const QString& rowName : rows) {
@@ -422,18 +391,18 @@ QWidget* MainWindow::buildApplicationSettingsPanel()
     entryLayout->setHorizontalSpacing(10);
     entryLayout->setVerticalSpacing(10);
     auto* openProjectButton = primaryButton(uiText("打开项目页"));
-    auto* openPluginsButton = new QPushButton(uiText("打开插件设置"));
+    auto* openCapabilitiesButton = new QPushButton(uiText("打开内置能力设置"));
     auto* openEnvironmentButton = new QPushButton(uiText("打开环境页"));
     auto* runEnvironmentButton = new QPushButton(uiText("执行环境自检"));
     connect(openProjectButton, &QPushButton::clicked, this, [this]() { showPage(ProjectPage, uiText("项目")); });
-    connect(openPluginsButton, &QPushButton::clicked, this, [this]() { showSystemSettingsTab(0); });
+    connect(openCapabilitiesButton, &QPushButton::clicked, this, [this]() { showSystemSettingsTab(0); });
     connect(openEnvironmentButton, &QPushButton::clicked, this, [this]() { showPage(EnvironmentPage, uiText("环境")); });
     connect(runEnvironmentButton, &QPushButton::clicked, this, [this]() {
         showPage(EnvironmentPage, uiText("环境"));
         runEnvironmentCheck();
     });
     entryLayout->addWidget(openProjectButton, 0, 0);
-    entryLayout->addWidget(openPluginsButton, 0, 1);
+    entryLayout->addWidget(openCapabilitiesButton, 0, 1);
     entryLayout->addWidget(openEnvironmentButton, 1, 0);
     entryLayout->addWidget(runEnvironmentButton, 1, 1);
     entryPanel->bodyLayout()->addWidget(entryActions);
@@ -445,7 +414,6 @@ QWidget* MainWindow::buildApplicationSettingsPanel()
     auto* pathsGrid = new QGridLayout;
     pathsGrid->setHorizontalSpacing(10);
     pathsGrid->setVerticalSpacing(8);
-    const QString appDir = QApplication::applicationDirPath();
     const auto addStaticPathRow = [this, pathsGrid](int row, const QString& labelText, const QString& path) {
         auto* label = new QLabel(labelText);
         auto* edit = new QLineEdit(QDir::toNativeSeparators(path));
@@ -459,8 +427,6 @@ QWidget* MainWindow::buildApplicationSettingsPanel()
         pathsGrid->addWidget(openButton, row, 2);
         pathsGrid->addWidget(copyButton, row, 3);
     };
-    addStaticPathRow(0, uiText("插件目录"), QDir(appDir).filePath(QStringLiteral("plugins/models")));
-    addStaticPathRow(1, uiText("插件市场目录"), QDir(appDir).filePath(QStringLiteral("plugins/marketplace")));
     auto* currentProjectLabel = new QLabel(uiText("当前项目目录"));
     settingsCurrentProjectPathLabel_ = inlineStatusLabel(uiText("未打开项目"));
     allowLabelToShrink(settingsCurrentProjectPathLabel_);
@@ -468,10 +434,10 @@ QWidget* MainWindow::buildApplicationSettingsPanel()
     auto* copyCurrentProjectButton = new QPushButton(uiText("复制路径"));
     connect(openCurrentProjectButton, &QPushButton::clicked, this, [this]() { openLocalDirectory(currentProjectPath_); });
     connect(copyCurrentProjectButton, &QPushButton::clicked, this, [this]() { copyLocalPath(currentProjectPath_, uiText("当前项目目录")); });
-    pathsGrid->addWidget(currentProjectLabel, 2, 0);
-    pathsGrid->addWidget(settingsCurrentProjectPathLabel_, 2, 1);
-    pathsGrid->addWidget(openCurrentProjectButton, 2, 2);
-    pathsGrid->addWidget(copyCurrentProjectButton, 2, 3);
+    pathsGrid->addWidget(currentProjectLabel, 0, 0);
+    pathsGrid->addWidget(settingsCurrentProjectPathLabel_, 0, 1);
+    pathsGrid->addWidget(openCurrentProjectButton, 0, 2);
+    pathsGrid->addWidget(copyCurrentProjectButton, 0, 3);
     pathsGrid->setColumnStretch(1, 1);
     pathsPanel->bodyLayout()->addLayout(pathsGrid);
 

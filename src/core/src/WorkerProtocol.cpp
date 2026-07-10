@@ -5,8 +5,6 @@ namespace worker_protocol {
 
 namespace command {
 QString startTrain() { return QStringLiteral("startTrain"); }
-QString pause() { return QStringLiteral("pause"); }
-QString resume() { return QStringLiteral("resume"); }
 QString heartbeat() { return QStringLiteral("heartbeat"); }
 QString environmentCheck() { return QStringLiteral("environmentCheck"); }
 QString validateDataset() { return QStringLiteral("validateDataset"); }
@@ -36,8 +34,6 @@ QString progress() { return QStringLiteral("progress"); }
 QString metric() { return QStringLiteral("metric"); }
 QString artifact() { return QStringLiteral("artifact"); }
 QString completed() { return QStringLiteral("completed"); }
-QString paused() { return QStringLiteral("paused"); }
-QString resumed() { return QStringLiteral("resumed"); }
 QString canceled() { return QStringLiteral("canceled"); }
 QString failed() { return QStringLiteral("failed"); }
 QString environmentCheck() { return QStringLiteral("environmentCheck"); }
@@ -87,9 +83,7 @@ QString sessionManifestPath() { return QStringLiteral("sessionManifestPath"); }
 bool isControlCommand(const QString& type)
 {
     return type == command::heartbeat()
-        || type == command::cancel()
-        || type == command::pause()
-        || type == command::resume();
+        || type == command::cancel();
 }
 
 bool isTerminalEvent(const QString& type)
@@ -101,9 +95,7 @@ bool isTerminalEvent(const QString& type)
 
 bool isTaskStateEvent(const QString& type)
 {
-    return isTerminalEvent(type)
-        || type == event::paused()
-        || type == event::resumed();
+    return isTerminalEvent(type);
 }
 
 TaskState taskStateForEvent(const QString& type, TaskState fallback)
@@ -116,12 +108,6 @@ TaskState taskStateForEvent(const QString& type, TaskState fallback)
     }
     if (type == event::canceled()) {
         return TaskState::Canceled;
-    }
-    if (type == event::paused()) {
-        return TaskState::Paused;
-    }
-    if (type == event::resumed()) {
-        return TaskState::Running;
     }
     return fallback;
 }

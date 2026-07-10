@@ -9,7 +9,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 - CMake
 - SQLite
 - 独立 Worker 进程
-- Qt 插件系统
+- 编译期内置能力注册表与 Worker 官方适配器
 
 目标能力：
 
@@ -43,13 +43,15 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 
 2026-06-14/15 全量模型生命周期验证暴露了当前软件影响项：Ultralytics 8.3.171 无法解析 YOLO12 分割 `.pt` 权重 `yolo12n-seg.pt`，这类行应记录为上游权重 blocker；共享 Ultralytics 8.3.171 环境下 YOLO26 20 行全部失败，原因是 `.yaml` 配置不存在、官方权重不可解析或 nano `.pt` 权重与包代码不兼容；进度页面可能把历史 `row_summary.json` 失败计入当前 failed 数；GPU YOLO 训练必须使用 CUDA PyTorch 环境。随后隔离 YOLO26 targeted matrix 在 2026-06-15 取得 `-Full -Epochs 100` 20/20 训练、官方 ONNX、AITrain C++ ONNX 推理和 TensorRT 通过证据。YOLO26 NCNN 历史尝试 20/20 failed，当前产品移除 YOLO26 NCNN 选项并拒绝 `format=ncnn`。详细边界见 `docs/harness/current-status.md` 和 `docs/yolo-model-support-matrix.md`。
 
+当前架构覆写（2026-07-10）：上段历史记录中的“本地插件 marketplace”、插件 tab 和五个插件骨架已从源码与发布包删除；当前能力矩阵统一来自 `src/core/CapabilityRegistry`，任务请求使用 `capabilityId`，旧 `plugin_id` 仅在 SQLite 打开迁移时读取并随后移除。
+
 已完成：
 
 - `AITrainStudio.exe` Qt GUI。
 - `aitrain_worker.exe` 独立任务进程。
 - JSON Lines over `QLocalSocket` 通信。
 - SQLite 项目、任务、指标存储。
-- 插件接口和五个内置插件骨架。
+- 内置能力注册表和官方后端描述。
 - 数据集校验初版。
 - 数据集转换 GUI 入口：已实现 COCO/VOC/YOLO 转换矩阵的 Worker 编排、表单预检、进度/日志/取消和结果展示；转换产物不自动登记为数据集。
 - 官方 Ultralytics YOLO detection 训练、ONNX 导出和 `val()` 评估；ONNX Runtime 推理、overlay、benchmark 和部署验证由 AITrain C++ runtime 执行。
@@ -104,15 +106,12 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 
 | 路径 | 职责 |
 |---|---|
-| `src/core` | 协议、插件接口、任务模型、SQLite 仓库、数据集/训练/评估/交付 workflow、product workflow companion files |
+| `src/core` | 协议、内置能力注册表、任务模型、SQLite 仓库、数据集/训练/评估/交付 workflow、product workflow companion files |
 | `src/app` | Qt Widgets GUI |
 | `src/app/translations` | GUI 翻译源文件，构建时生成 `.qm` 并随应用安装 |
 | `src/license_generator` | 内部 Qt 注册码生成器，用私钥签发绑定机器码的离线注册码 |
 | `src/worker` | 长任务隔离进程 |
-| `src/plugins/yolo_native` | YOLO 风格插件骨架 |
-| `src/plugins/anomaly_detection` | Anomalib 异常检测插件骨架 |
-| `src/plugins/ocr_rec` | OCR Rec 插件骨架 |
-| `src/plugins/dataset_interop` | 数据集互操作插件骨架，承载已实现的数据集转换能力 |
+| `src/core/CapabilityRegistry.cpp` | YOLO、Anomalib、PaddleOCR、语义分割和数据集互操作的内置能力注册表 |
 | `tests` | QtTest 测试 |
 | `.vscode` | VSCode 构建、调试、任务配置 |
 | `tools` | Harness 脚本 |
@@ -127,7 +126,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 
 - `src/app/src/MainWindow.cpp` 已完成第一层 companion 拆分；Qt Widgets shell 仍保持 left sidebar、top status bar、central `QStackedWidget` 架构。
 - `src/core/src/ProductWorkflow.cpp` 已完成第一层 companion 拆分，现在只作为 `ProductWorkflow.h` 的入口锚点；snapshot、quality、evaluation、benchmark、delivery、acceptance、pipeline 的实现分别位于同目录 `ProductWorkflow*.cpp` 文件，跨文件共享 helper 位于内部 `ProductWorkflowSupport.h/.cpp`。
-- 这些拆分是行为保持型维护重构，不代表新的 Worker protocol、SQLite schema、插件接口、训练/推理/评估算法或报告字段变更。
+- 这些拆分是行为保持型维护重构，不代表新的 Worker protocol、SQLite schema、内置能力注册表、训练/推理/评估算法或报告字段变更。
 
 ## 构建环境
 
@@ -171,5 +170,5 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 - GUI 可见文本优先保持中文源文案，通过 Qt 翻译资源和 `LanguageSupport` 派生英文界面；core/Worker/Python trainer 日志不要求在第一版全部翻译。
 - 注册码系统使用离线签名 token；主应用只内置公钥，私钥文件必须本地保管，不进入客户包和源码提交。
 - Worker 协议改动必须同步测试。
-- 插件接口改动必须考虑已有五个内置插件。
+- 能力注册表改动必须同步 GUI、Worker、环境检查和协议测试。
 - scaffold、smoke、diagnostic 或 report-only 能力必须明确标注；已移除的 tiny/scaffold/mock/小型 CTC 训练路径不得重新描述为产品后端。

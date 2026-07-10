@@ -40,7 +40,6 @@ QString taskStateToString(TaskState state)
     switch (state) {
     case TaskState::Queued: return QStringLiteral("queued");
     case TaskState::Running: return QStringLiteral("running");
-    case TaskState::Paused: return QStringLiteral("paused");
     case TaskState::Completed: return QStringLiteral("completed");
     case TaskState::Failed: return QStringLiteral("failed");
     case TaskState::Canceled: return QStringLiteral("canceled");
@@ -51,7 +50,6 @@ QString taskStateToString(TaskState state)
 TaskState taskStateFromString(const QString& value)
 {
     if (value == QStringLiteral("running")) return TaskState::Running;
-    if (value == QStringLiteral("paused")) return TaskState::Paused;
     if (value == QStringLiteral("completed")) return TaskState::Completed;
     if (value == QStringLiteral("failed")) return TaskState::Failed;
     if (value == QStringLiteral("canceled")) return TaskState::Canceled;
@@ -75,12 +73,9 @@ bool isValidTaskStateTransition(TaskState from, TaskState to)
     case TaskState::Queued:
         return to == TaskState::Running || to == TaskState::Failed || to == TaskState::Canceled;
     case TaskState::Running:
-        return to == TaskState::Paused
-            || to == TaskState::Completed
+        return to == TaskState::Completed
             || to == TaskState::Failed
             || to == TaskState::Canceled;
-    case TaskState::Paused:
-        return to == TaskState::Running || to == TaskState::Failed || to == TaskState::Canceled;
     case TaskState::Completed:
     case TaskState::Failed:
     case TaskState::Canceled:
@@ -94,7 +89,7 @@ QJsonObject TrainingRequest::toJson() const
     QJsonObject object;
     object.insert(QStringLiteral("taskId"), taskId);
     object.insert(QStringLiteral("projectPath"), projectPath);
-    object.insert(QStringLiteral("pluginId"), pluginId);
+    object.insert(QStringLiteral("capabilityId"), capabilityId);
     object.insert(QStringLiteral("taskType"), taskType);
     object.insert(QStringLiteral("datasetPath"), datasetPath);
     object.insert(QStringLiteral("outputPath"), outputPath);
@@ -107,7 +102,7 @@ TrainingRequest TrainingRequest::fromJson(const QJsonObject& object)
     TrainingRequest request;
     request.taskId = object.value(QStringLiteral("taskId")).toString();
     request.projectPath = object.value(QStringLiteral("projectPath")).toString();
-    request.pluginId = object.value(QStringLiteral("pluginId")).toString();
+    request.capabilityId = object.value(QStringLiteral("capabilityId")).toString();
     request.taskType = object.value(QStringLiteral("taskType")).toString();
     request.datasetPath = object.value(QStringLiteral("datasetPath")).toString();
     request.outputPath = object.value(QStringLiteral("outputPath")).toString();

@@ -5,9 +5,8 @@
 #include "InfoPanel.h"
 #include "LanguageSupport.h"
 #include "MainWindowSupport.h"
-#include "PluginMarketplaceWidget.h"
+#include "aitrain/core/CapabilityRegistry.h"
 #include "aitrain/core/DetectionTrainer.h"
-#include "aitrain/core/PluginInterfaces.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -565,7 +564,7 @@ void MainWindow::startModelExport()
         taskId = createRepositoryTask(
             aitrain::TaskKind::Export,
             QStringLiteral("model_export"),
-            QStringLiteral("com.aitrain.plugins.yolo_native"),
+            QStringLiteral("yolo"),
             QFileInfo(outputPath).absolutePath(),
             uiText("模型导出中。"));
         if (taskId.isEmpty()) {
@@ -612,7 +611,7 @@ void MainWindow::startInference()
         taskId = createRepositoryTask(
             aitrain::TaskKind::Infer,
             QStringLiteral("inference"),
-            QStringLiteral("com.aitrain.plugins.yolo_native"),
+            QStringLiteral("yolo"),
             outputPath,
             uiText("推理中。"));
         if (taskId.isEmpty()) {
@@ -646,19 +645,14 @@ void MainWindow::startTraining()
             return;
         }
     }
-    if (pluginCombo_->currentData().toString().isEmpty() || currentTaskType().isEmpty()) {
-        QMessageBox::warning(this, uiText("训练"), uiText("请选择可用插件和任务类型。"));
+    if (capabilityCombo_->currentData().toString().isEmpty() || currentTaskType().isEmpty()) {
+        QMessageBox::warning(this, uiText("训练"), uiText("请选择可用内置能力和任务类型。"));
         return;
     }
     const QString datasetPath = QDir::fromNativeSeparators(datasetPathEdit_->text());
     const QString datasetFormat = currentDatasetFormat();
     if (datasetPath.isEmpty() || datasetFormat.isEmpty()) {
         QMessageBox::warning(this, uiText("训练"), uiText("请先选择并校验数据集。"));
-        return;
-    }
-    auto* selectedPlugin = pluginManager_.pluginById(pluginCombo_->currentData().toString());
-    if (!selectedPlugin || !selectedPlugin->datasetAdapter(datasetFormat)) {
-        QMessageBox::warning(this, uiText("训练"), uiText("当前训练插件不支持所选数据集格式。"));
         return;
     }
     bool datasetReady = state_.dataset.currentValid && state_.dataset.currentPath == datasetPath && state_.dataset.currentFormat == datasetFormat;
@@ -682,6 +676,16 @@ void MainWindow::startTraining()
         ? trainingBackendCombo_->currentData().toString().trimmed()
         : defaultBackendForTask(currentTaskType());
     const QString backendForRequest = trainingBackend.isEmpty() ? defaultBackendForTask(currentTaskType()) : trainingBackend;
+    QString capabilityError;
+    if (!aitrain::BuiltinCapabilityRegistry::instance().supports(
+            capabilityCombo_->currentData().toString(),
+            currentTaskType(),
+            datasetFormat,
+            backendForRequest,
+            &capabilityError)) {
+        QMessageBox::warning(this, uiText("训练"), capabilityError);
+        return;
+    }
     const int requestedBatchSize = batchEdit_ ? batchEdit_->text().toInt() : 1;
     const int effectiveBatchSize = backendForRequest == QStringLiteral("anomalib_efficientad") ? 1 : requestedBatchSize;
     QJsonObject parameters;
@@ -787,7 +791,7 @@ void MainWindow::startTraining()
     aitrain::TrainingRequest request;
     request.taskId = taskId;
     request.projectPath = currentProjectPath_;
-    request.pluginId = pluginCombo_->currentData().toString();
+    request.capabilityId = capabilityCombo_->currentData().toString();
     request.taskType = currentTaskType();
     request.datasetPath = datasetPath;
     request.outputPath = runDir;
@@ -805,7 +809,7 @@ void MainWindow::startTraining()
     aitrain::TaskRecord record;
     record.id = taskId;
     record.projectName = currentProjectName_;
-    record.pluginId = request.pluginId;
+    record.capabilityId = request.capabilityId;
     record.taskType = request.taskType;
     record.kind = aitrain::TaskKind::Train;
     record.state = aitrain::TaskState::Queued;

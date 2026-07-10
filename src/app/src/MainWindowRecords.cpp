@@ -4,10 +4,8 @@
 #include "InfoPanel.h"
 #include "LanguageSupport.h"
 #include "MainWindowSupport.h"
-#include "PluginMarketplaceWidget.h"
 #include "TaskArtifactPanel.h"
 #include "aitrain/core/DetectionTrainer.h"
-#include "aitrain/core/PluginInterfaces.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -629,7 +627,7 @@ void MainWindow::updateTaskTable(QTableWidget* table, const QVector<aitrain::Tas
         idItem->setData(Qt::UserRole, task.id);
         table->setItem(row, 0, idItem);
         if (table->columnCount() == 5) {
-            table->setItem(row, 1, new QTableWidgetItem(task.pluginId));
+            table->setItem(row, 1, new QTableWidgetItem(task.capabilityId));
             auto* typeItem = new QTableWidgetItem(taskTypeLabel(task.taskType));
             typeItem->setData(Qt::UserRole, task.taskType);
             table->setItem(row, 2, typeItem);
@@ -654,7 +652,7 @@ void MainWindow::updateTaskTable(QTableWidget* table, const QVector<aitrain::Tas
             }
             kindItem->setData(Qt::UserRole, kindData);
             table->setItem(row, 1, kindItem);
-            table->setItem(row, 2, new QTableWidgetItem(task.pluginId));
+            table->setItem(row, 2, new QTableWidgetItem(task.capabilityId));
             auto* typeItem = new QTableWidgetItem(taskTypeLabel(task.taskType));
             typeItem->setData(Qt::UserRole, task.taskType);
             table->setItem(row, 3, typeItem);
@@ -663,7 +661,6 @@ void MainWindow::updateTaskTable(QTableWidget* table, const QVector<aitrain::Tas
             switch (task.state) {
             case aitrain::TaskState::Queued: stateData = QStringLiteral("queued"); break;
             case aitrain::TaskState::Running: stateData = QStringLiteral("running"); break;
-            case aitrain::TaskState::Paused: stateData = QStringLiteral("paused"); break;
             case aitrain::TaskState::Completed: stateData = QStringLiteral("completed"); break;
             case aitrain::TaskState::Failed: stateData = QStringLiteral("failed"); break;
             case aitrain::TaskState::Canceled: stateData = QStringLiteral("canceled"); break;
@@ -678,7 +675,7 @@ void MainWindow::updateTaskTable(QTableWidget* table, const QVector<aitrain::Tas
 
 QString MainWindow::createRepositoryTask(aitrain::TaskKind kind,
     const QString& taskType,
-    const QString& pluginId,
+    const QString& capabilityId,
     const QString& workDir,
     const QString& message,
     const QString& requestedTaskId)
@@ -693,7 +690,7 @@ QString MainWindow::createRepositoryTask(aitrain::TaskKind kind,
     aitrain::TaskRecord record;
     record.id = taskId;
     record.projectName = currentProjectName_.isEmpty() ? QStringLiteral("manual") : currentProjectName_;
-    record.pluginId = pluginId;
+    record.capabilityId = capabilityId;
     record.taskType = taskType;
     record.kind = kind;
     record.state = aitrain::TaskState::Queued;

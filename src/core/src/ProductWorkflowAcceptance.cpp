@@ -865,7 +865,7 @@ WorkflowResult collectDiagnosticsReport(const QString& outputPath, const QJsonOb
     report.insert(QStringLiteral("workerExecutable"), context.value(QStringLiteral("workerExecutable")).toString());
     report.insert(QStringLiteral("applicationDir"), QCoreApplication::applicationDirPath());
     report.insert(QStringLiteral("licenseSummary"), context.value(QStringLiteral("licenseSummary")).toObject());
-    report.insert(QStringLiteral("pluginSummary"), context.value(QStringLiteral("pluginSummary")).toObject());
+    report.insert(QStringLiteral("capabilitySummary"), context.value(QStringLiteral("capabilitySummary")).toObject());
     report.insert(QStringLiteral("recentTasks"), context.value(QStringLiteral("recentTasks")).toArray());
     report.insert(QStringLiteral("recentFailures"), context.value(QStringLiteral("recentFailures")).toArray());
     report.insert(QStringLiteral("failedRequests"), context.value(QStringLiteral("failedRequests")).toArray());

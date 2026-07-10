@@ -36,8 +36,6 @@ public:
     bool requestModelExport(const QString& workerProgram, const QString& checkpointPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId = {});
     bool requestInference(const QString& workerProgram, const QString& checkpointPath, const QString& imagePath, const QString& outputPath, QString* error, const QString& taskId = {});
     void cancel();
-    void pause();
-    void resume();
     void requestHeartbeat();
     bool isRunning() const;
 

@@ -3,7 +3,6 @@
 #include "EvaluationReportView.h"
 #include "InfoPanel.h"
 #include "MainWindowSupport.h"
-#include "PluginMarketplaceWidget.h"
 
 #include <QAbstractItemView>
 #include <QCheckBox>
@@ -63,9 +62,9 @@ QWidget* MainWindow::buildDashboardPage()
     auto* modelCard = createMetricCard(QStringLiteral("模型版本"), QStringLiteral("0"), QStringLiteral("模型库 / 导出产物"));
     dashboardModelValue_ = modelCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
     grid->addWidget(modelCard, 0, 3);
-    auto* pluginCard = createMetricCard(QStringLiteral("插件"), QStringLiteral("0"), QStringLiteral("已加载能力插件"));
-    dashboardPluginValue_ = pluginCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
-    grid->addWidget(pluginCard, 1, 0);
+    auto* capabilityCard = createMetricCard(QStringLiteral("内置能力"), QStringLiteral("0"), QStringLiteral("已注册能力"));
+    dashboardCapabilityValue_ = capabilityCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
+    grid->addWidget(capabilityCard, 1, 0);
     auto* environmentCard = createMetricCard(QStringLiteral("环境"), QStringLiteral("待检测"), QStringLiteral("CUDA / TensorRT / Worker"));
     dashboardEnvironmentValue_ = environmentCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
     grid->addWidget(environmentCard, 1, 1);
@@ -106,7 +105,7 @@ QWidget* MainWindow::buildDashboardPage()
     recentTasksTable_ = new QTableWidget(0, 5);
     recentTasksTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("任务")
-        << QStringLiteral("插件")
+        << QStringLiteral("内置能力")
         << QStringLiteral("类型")
         << QStringLiteral("状态")
         << QStringLiteral("消息"));

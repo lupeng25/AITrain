@@ -11,7 +11,6 @@ struct PackagingLayout {
     QString rootPath;
     QString appExecutablePath;
     QString workerExecutablePath;
-    QString pluginModelsDirectory;
     QString runtimesDirectory;
     QString onnxRuntimeDirectory;
     QString tensorRtRuntimeDirectory;

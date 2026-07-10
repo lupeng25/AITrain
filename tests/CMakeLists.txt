@@ -98,8 +98,6 @@ add_executable(aitrain_delivery_acceptance_ui_tests
     ../src/app/src/MainWindowWorkerMessages.cpp
     ../src/app/src/MetricsWidget.h
     ../src/app/src/MetricsWidget.cpp
-    ../src/app/src/PluginMarketplaceWidget.h
-    ../src/app/src/PluginMarketplaceWidget.cpp
     ../src/app/src/RegistrationDialog.h
     ../src/app/src/RegistrationDialog.cpp
     ../src/app/src/Sidebar.h

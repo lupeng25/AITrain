@@ -99,18 +99,6 @@ void WorkerSession::startTrainingCommand(const QJsonObject& payload)
     startTraining(wr::parseTrainingRequest(payload));
 }
 
-void WorkerSession::pauseCommand(const QJsonObject& payload)
-{
-    Q_UNUSED(payload);
-    pauseTraining();
-}
-
-void WorkerSession::resumeCommand(const QJsonObject& payload)
-{
-    Q_UNUSED(payload);
-    resumeTraining();
-}
-
 void WorkerSession::heartbeatCommand(const QJsonObject& payload)
 {
     Q_UNUSED(payload);
@@ -206,7 +194,6 @@ void WorkerSession::cancelCommand(const QJsonObject& payload)
 {
     Q_UNUSED(payload);
     running_ = false;
-    paused_ = false;
     canceled_ = true;
     timer_.stop();
     shutdownPythonTrainer(QStringLiteral("Canceled by user"), true);
@@ -220,7 +207,6 @@ void WorkerSession::handleSocketDisconnected()
     }
 
     running_ = false;
-    paused_ = false;
     canceled_ = true;
     timer_.stop();
     shutdownPythonTrainer(QStringLiteral("Worker client disconnected."), false);
@@ -232,7 +218,6 @@ void WorkerSession::sendHeartbeat()
     QJsonObject payload;
     payload.insert(wp::field::taskId(), request_.taskId);
     payload.insert(QStringLiteral("running"), running_);
-    payload.insert(QStringLiteral("paused"), paused_);
     payload.insert(QStringLiteral("step"), step_);
     payload.insert(QStringLiteral("timestamp"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     send(wp::event::heartbeat(), payload);
@@ -240,7 +225,23 @@ void WorkerSession::sendHeartbeat()
 
 void WorkerSession::send(const QString& type, const QJsonObject& payload)
 {
-    socket_.write(aitrain::protocol::encodeMessage(type, payload));
+    QJsonObject envelopePayload = payload;
+    if (!request_.taskId.isEmpty() && !envelopePayload.contains(wp::field::taskId())) {
+        envelopePayload.insert(wp::field::taskId(), request_.taskId);
+    }
+    if (!activeCommand_.isEmpty() && !envelopePayload.contains(wp::field::command())) {
+        envelopePayload.insert(wp::field::command(), activeCommand_);
+    }
+    if (type == wp::event::completed() && !envelopePayload.contains(wp::field::status())) {
+        envelopePayload.insert(wp::field::status(), QStringLiteral("completed"));
+    }
+    if (type == wp::event::failed() && !envelopePayload.contains(wp::field::status())) {
+        envelopePayload.insert(wp::field::status(), QStringLiteral("failed"));
+    }
+    if (type == wp::event::canceled() && !envelopePayload.contains(wp::field::status())) {
+        envelopePayload.insert(wp::field::status(), QStringLiteral("canceled"));
+    }
+    socket_.write(aitrain::protocol::encodeMessage(type, envelopePayload));
     socket_.flush();
 }
 
@@ -284,7 +285,6 @@ bool WorkerSession::pollPendingCancel(int timeoutMs)
             }
             if (type == wp::command::cancel()) {
                 running_ = false;
-                paused_ = false;
                 canceled_ = true;
                 timer_.stop();
                 shutdownPythonTrainer(QStringLiteral("Canceled by user"), true);
@@ -330,7 +330,6 @@ void WorkerSession::shutdownPythonTrainer(const QString& reason, bool notifyClie
 void WorkerSession::sendCanceledAndFinish(const QString& taskId, const QString& message)
 {
     running_ = false;
-    paused_ = false;
     canceled_ = true;
     timer_.stop();
 
@@ -380,7 +379,6 @@ void WorkerSession::fail(const QString& message)
 void WorkerSession::failWithDetails(const QString& message, const QString& errorCode, const QJsonObject& details)
 {
     running_ = false;
-    paused_ = false;
     timer_.stop();
     QJsonObject payload;
     payload.insert(wp::field::taskId(), activeTaskId_.isEmpty() ? request_.taskId : activeTaskId_);
@@ -414,7 +412,6 @@ void WorkerSession::failWithDetails(const QString& message, const QString& error
 void WorkerSession::complete()
 {
     running_ = false;
-    paused_ = false;
     timer_.stop();
 
     const QString checkpointPath = QDir(request_.outputPath).filePath(QStringLiteral("checkpoint_best.aitrain"));
@@ -422,10 +419,10 @@ void WorkerSession::complete()
     if (checkpoint.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         QJsonObject content;
         content.insert(QStringLiteral("taskId"), request_.taskId);
-        content.insert(QStringLiteral("pluginId"), request_.pluginId);
+        content.insert(QStringLiteral("capabilityId"), request_.capabilityId);
         content.insert(QStringLiteral("taskType"), request_.taskType);
         content.insert(QStringLiteral("createdAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
-        content.insert(QStringLiteral("note"), QStringLiteral("Platform scaffold checkpoint. Replace with native LibTorch weights in production plugins."));
+        content.insert(QStringLiteral("note"), QStringLiteral("Platform scaffold checkpoint. Replace with native LibTorch weights in production backends."));
         checkpoint.write(QJsonDocument(content).toJson(QJsonDocument::Indented));
     }
 
@@ -436,6 +433,9 @@ void WorkerSession::complete()
     send(wp::event::artifact(), artifact);
 
     QJsonObject payload;
+    payload.insert(wp::field::taskId(), request_.taskId);
+    payload.insert(wp::field::status(), QStringLiteral("completed"));
+    payload.insert(wp::field::command(), activeCommand_);
     payload.insert(wp::field::message(), QStringLiteral("Training workflow completed"));
     send(wp::event::completed(), payload);
     finishSession();

@@ -48,8 +48,8 @@
         <translation>系统</translation>
     </message>
     <message>
-        <source>插件</source>
-        <translation>插件</translation>
+        <source>内置能力</source>
+        <translation>内置能力</translation>
     </message>
     <message>
         <source>环境</source>
@@ -168,8 +168,8 @@
         <translation>选择模型与样本图，验证 detection、segmentation 或 OCR 推理结果</translation>
     </message>
     <message>
-        <source>扫描和诊断模型插件</source>
-        <translation>扫描和诊断模型插件</translation>
+        <source>查看和诊断内置能力</source>
+        <translation>查看和诊断内置能力</translation>
     </message>
     <message>
         <source>检查 GPU、CUDA、TensorRT 和运行时依赖</source>
@@ -180,8 +180,8 @@
         <translation>项目：%1</translation>
     </message>
     <message>
-        <source>插件 %1</source>
-        <translation>插件 %1</translation>
+        <source>内置能力 %1</source>
+        <translation>内置能力 %1</translation>
     </message>
     <message>
         <source>未打开项目。先创建或打开本地项目，后续数据集、任务和模型产物都会写入项目目录。</source>
@@ -208,7 +208,7 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>已加载能力插件</source>
+        <source>已注册内置能力</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -508,19 +508,51 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>插件能力矩阵</source>
+        <source>内置能力矩阵</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>重新扫描插件</source>
+        <source>编译期注册的模型、数据集、导出和推理能力。</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>插件摘要</source>
+        <source>能力来源：编译期内置注册表</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>已加载插件</source>
+        <source>能力由编译期注册表提供。</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>编译期注册</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>GPU 策略</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>GPU 推荐或必需能力</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>运行策略</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>内置</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>刷新能力摘要</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>能力摘要</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>已注册能力</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -528,7 +560,7 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>GPU 插件</source>
+        <source>GPU 能力</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

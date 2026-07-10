@@ -82,7 +82,6 @@ void WorkerSession::startTraining(const aitrain::TrainingRequest& request)
     step_ = 0;
     maxSteps_ = qMax(4, request.parameters.value(QStringLiteral("epochs")).toInt(20));
     running_ = true;
-    paused_ = false;
     canceled_ = false;
 
     QDir().mkpath(request_.outputPath);
@@ -124,7 +123,7 @@ void WorkerSession::startTraining(const aitrain::TrainingRequest& request)
     }
 
     QJsonObject payload;
-    payload.insert(QStringLiteral("message"), QStringLiteral("Worker accepted task %1 for plugin %2").arg(request_.taskId, request_.pluginId));
+    payload.insert(QStringLiteral("message"), QStringLiteral("Worker accepted task %1 for capability %2").arg(request_.taskId, request_.capabilityId));
     send(wp::event::log(), payload);
 
     if (request_.taskType.compare(QStringLiteral("detection"), Qt::CaseInsensitive) == 0) {
@@ -156,40 +155,6 @@ void WorkerSession::startTraining(const aitrain::TrainingRequest& request)
     }
 
     timer_.start();
-}
-
-void WorkerSession::pauseTraining()
-{
-    if (!running_) {
-        fail(QStringLiteral("Cannot pause because no training task is running"));
-        return;
-    }
-
-    running_ = false;
-    paused_ = true;
-    timer_.stop();
-
-    QJsonObject payload;
-    payload.insert(QStringLiteral("taskId"), request_.taskId);
-    payload.insert(QStringLiteral("message"), QStringLiteral("Training task paused"));
-    send(wp::event::paused(), payload);
-}
-
-void WorkerSession::resumeTraining()
-{
-    if (!paused_) {
-        fail(QStringLiteral("Cannot resume because no training task is paused"));
-        return;
-    }
-
-    paused_ = false;
-    running_ = true;
-    timer_.start();
-
-    QJsonObject payload;
-    payload.insert(QStringLiteral("taskId"), request_.taskId);
-    payload.insert(QStringLiteral("message"), QStringLiteral("Training task resumed"));
-    send(wp::event::resumed(), payload);
 }
 
 void WorkerSession::runDetectionTraining()

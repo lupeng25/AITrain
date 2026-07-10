@@ -202,7 +202,6 @@ QJsonObject PackagingLayout::toJson() const
         {QStringLiteral("rootPath"), rootPath},
         {QStringLiteral("appExecutablePath"), appExecutablePath},
         {QStringLiteral("workerExecutablePath"), workerExecutablePath},
-        {QStringLiteral("pluginModelsDirectory"), pluginModelsDirectory},
         {QStringLiteral("runtimesDirectory"), runtimesDirectory},
         {QStringLiteral("onnxRuntimeDirectory"), onnxRuntimeDirectory},
         {QStringLiteral("tensorRtRuntimeDirectory"), tensorRtRuntimeDirectory},
@@ -235,7 +234,6 @@ PackagingLayout packagingLayoutForRoot(const QString& rootPath)
     layout.rootPath = root;
     layout.appExecutablePath = rootDir.filePath(executableName(QStringLiteral("AITrainStudio")));
     layout.workerExecutablePath = rootDir.filePath(executableName(QStringLiteral("aitrain_worker")));
-    layout.pluginModelsDirectory = rootDir.filePath(QStringLiteral("plugins/models"));
     layout.runtimesDirectory = rootDir.filePath(QStringLiteral("runtimes"));
     layout.onnxRuntimeDirectory = rootDir.filePath(QStringLiteral("runtimes/onnxruntime"));
     layout.tensorRtRuntimeDirectory = rootDir.filePath(QStringLiteral("runtimes/tensorrt"));

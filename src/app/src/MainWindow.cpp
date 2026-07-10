@@ -4,9 +4,8 @@
 #include "InfoPanel.h"
 #include "LanguageSupport.h"
 #include "MainWindowSupport.h"
-#include "PluginMarketplaceWidget.h"
+#include "aitrain/core/CapabilityRegistry.h"
 #include "aitrain/core/DetectionTrainer.h"
-#include "aitrain/core/PluginInterfaces.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -161,7 +160,7 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
         }
     });
 
-    refreshPlugins();
+    refreshBuiltInCapabilities();
     aitrain_app::translateWidgetTree(this);
     showPage(DashboardPage, tr("总览"));
     updateHeaderState();
@@ -189,16 +188,6 @@ QString MainWindow::workerExecutablePath() const
         }
     }
     return QDir(appDir).filePath(name);
-}
-
-QStringList MainWindow::pluginSearchPaths() const
-{
-    const QString appDir = QApplication::applicationDirPath();
-    return {
-        QDir(appDir).filePath(QStringLiteral("plugins/models")),
-        QDir(appDir).filePath(QStringLiteral("../plugins/models")),
-        QDir(appDir).filePath(QStringLiteral("../../plugins/models"))
-    };
 }
 
 QString MainWindow::defaultProjectPath() const
@@ -237,34 +226,34 @@ void MainWindow::appendLog(const QString& text)
     }
 }
 
-void MainWindow::loadPluginCombos()
+void MainWindow::loadCapabilityCombos()
 {
-    const QString currentPlugin = pluginCombo_ ? pluginCombo_->currentData().toString() : QString();
+    const QString currentCapability = capabilityCombo_ ? capabilityCombo_->currentData().toString() : QString();
     const QString previousDatasetFormat = datasetFormatCombo_ ? comboCurrentDataOrText(datasetFormatCombo_) : QString();
 
     QStringList formats;
-    if (pluginCombo_) {
-        const QSignalBlocker blocker(pluginCombo_);
-        pluginCombo_->clear();
-        for (auto* plugin : pluginManager_.plugins()) {
-            const aitrain::PluginManifest manifest = plugin->manifest();
-            pluginCombo_->addItem(manifest.name, manifest.id);
-            for (const QString& format : manifest.datasetFormats) {
+    const QVector<aitrain::CapabilityDescriptor> capabilities =
+        aitrain::BuiltinCapabilityRegistry::instance().capabilities();
+    if (capabilityCombo_) {
+        const QSignalBlocker blocker(capabilityCombo_);
+        capabilityCombo_->clear();
+        for (const aitrain::CapabilityDescriptor& capability : capabilities) {
+            capabilityCombo_->addItem(capability.displayName, capability.id);
+            for (const QString& format : capability.datasetFormats) {
                 if (!formats.contains(format)) {
                     formats.append(format);
                 }
             }
         }
-        if (!currentPlugin.isEmpty()) {
-            const int index = pluginCombo_->findData(currentPlugin);
+        if (!currentCapability.isEmpty()) {
+            const int index = capabilityCombo_->findData(currentCapability);
             if (index >= 0) {
-                pluginCombo_->setCurrentIndex(index);
+                capabilityCombo_->setCurrentIndex(index);
             }
         }
     } else {
-        for (auto* plugin : pluginManager_.plugins()) {
-            const aitrain::PluginManifest manifest = plugin->manifest();
-            for (const QString& format : manifest.datasetFormats) {
+        for (const aitrain::CapabilityDescriptor& capability : capabilities) {
+            for (const QString& format : capability.datasetFormats) {
                 if (!formats.contains(format)) {
                     formats.append(format);
                 }

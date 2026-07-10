@@ -4,8 +4,7 @@
 #include "aitrain/core/DatasetConversion.h"
 #include "aitrain/core/Deployment.h"
 #include "aitrain/core/DetectionTrainer.h"
-#include "aitrain/core/PluginManager.h"
-#include "aitrain/core/PluginMarketplace.h"
+#include "aitrain/core/CapabilityRegistry.h"
 #include "aitrain/core/ProductWorkflow.h"
 #include "aitrain/core/VisionModelRuntime.h"
 #include "aitrain/core/VisionPostprocess.h"
@@ -279,63 +278,22 @@ int runSelfCheck()
     result.insert(QStringLiteral("applicationDir"), QCoreApplication::applicationDirPath());
     result.insert(QStringLiteral("ncnnBackend"), aitrain::ncnnBackendStatus().toJson());
     result.insert(QStringLiteral("tensorRtBackend"), aitrain::tensorRtBackendStatus().toJson());
+    result.insert(QStringLiteral("builtinCapabilities"), aitrain::BuiltinCapabilityRegistry::instance().toJson());
     result.insert(QStringLiteral("checks"), checks);
     writeJsonLine(result);
     return 0;
 }
 
-int runPluginSmoke(const QString& pluginDirectory)
+int runBuiltinCapabilityCheck()
 {
-    aitrain::PluginManager manager;
-    manager.scan(QStringList() << pluginDirectory);
-
-    QJsonArray pluginArray;
-    QStringList pluginIds;
-    for (aitrain::IModelPlugin* plugin : manager.plugins()) {
-        if (!plugin) {
-            continue;
-        }
-        const aitrain::PluginManifest manifest = plugin->manifest();
-        pluginIds.append(manifest.id);
-        pluginArray.append(manifest.toJson());
-    }
-
-    const QStringList requiredIds = {
-        QStringLiteral("com.aitrain.plugins.dataset_interop"),
-        QStringLiteral("com.aitrain.plugins.yolo_native"),
-        QStringLiteral("com.aitrain.plugins.semantic_segmentation"),
-        QStringLiteral("com.aitrain.plugins.anomaly_detection"),
-        QStringLiteral("com.aitrain.plugins.ocr_rec_native")
-    };
-    QStringList missingIds;
-    for (const QString& requiredId : requiredIds) {
-        if (!pluginIds.contains(requiredId)) {
-            missingIds.append(requiredId);
-        }
-    }
-
+    const auto& registry = aitrain::BuiltinCapabilityRegistry::instance();
     QJsonObject result;
-    result.insert(QStringLiteral("ok"), missingIds.isEmpty());
-    result.insert(QStringLiteral("pluginDirectory"), QFileInfo(pluginDirectory).absoluteFilePath());
-    result.insert(QStringLiteral("pluginCount"), pluginArray.size());
-    result.insert(QStringLiteral("plugins"), pluginArray);
-    result.insert(QStringLiteral("errors"), QJsonArray::fromStringList(manager.errors()));
-    result.insert(QStringLiteral("missingRequiredPlugins"), QJsonArray::fromStringList(missingIds));
-
-    const QString marketplaceRoot = QDir(QFileInfo(pluginDirectory).absolutePath()).filePath(QStringLiteral("marketplace"));
-    aitrain::PluginMarketplace marketplace(marketplaceRoot, QFileInfo(pluginDirectory).absoluteFilePath());
-    aitrain::PluginMarketplaceReport marketplaceReport;
-    const QVector<aitrain::InstalledPluginRecord> installed = marketplace.installedPlugins(&marketplaceReport);
-    QJsonArray installedArray;
-    for (const aitrain::InstalledPluginRecord& record : installed) {
-        installedArray.append(record.toJson());
-    }
-    result.insert(QStringLiteral("marketplaceRoot"), QFileInfo(marketplaceRoot).absoluteFilePath());
-    result.insert(QStringLiteral("marketplaceStatePath"), marketplace.statePath());
-    result.insert(QStringLiteral("marketplaceInstalledPlugins"), installedArray);
-    result.insert(QStringLiteral("marketplaceState"), marketplaceReport.toJson());
+    result.insert(QStringLiteral("ok"), !registry.capabilities().isEmpty() && !registry.backends().isEmpty());
+    result.insert(QStringLiteral("capabilityCount"), registry.capabilities().size());
+    result.insert(QStringLiteral("backendCount"), registry.backends().size());
+    result.insert(QStringLiteral("registry"), registry.toJson());
     writeJsonLine(result);
-    return missingIds.isEmpty() ? 0 : 4;
+    return result.value(QStringLiteral("ok")).toBool() ? 0 : 4;
 }
 
 int runTensorRtSmoke(const QString& onnxPath)
@@ -858,7 +816,7 @@ int main(int argc, char* argv[])
     parser.addHelpOption();
     QCommandLineOption serverOption(QStringLiteral("server"), QStringLiteral("QLocalServer name."), QStringLiteral("name"));
     QCommandLineOption selfCheckOption(QStringLiteral("self-check"), QStringLiteral("Run package/runtime self-check and print JSON."));
-    QCommandLineOption pluginSmokeOption(QStringLiteral("plugin-smoke"), QStringLiteral("Scan model plugin directory and print JSON."), QStringLiteral("directory"));
+    QCommandLineOption capabilityCheckOption(QStringLiteral("builtin-capabilities"), QStringLiteral("Print the built-in capability registry."));
     QCommandLineOption tensorRtSmokeOption(QStringLiteral("tensorrt-smoke"), QStringLiteral("Run TensorRT export smoke for an official ONNX model and print JSON."), QStringLiteral("onnx"));
     QCommandLineOption ncnnSmokeOption(QStringLiteral("ncnn-smoke"), QStringLiteral("Run NCNN export and deployment validation smoke and print JSON."), QStringLiteral("onnx"));
     QCommandLineOption ncnnParamSmokeOption(QStringLiteral("ncnn-param-smoke"), QStringLiteral("Run NCNN deployment validation smoke for an existing .param/.bin artifact and print JSON."), QStringLiteral("param"));
@@ -878,7 +836,7 @@ int main(int argc, char* argv[])
     QCommandLineOption maxDetectionsOption(QStringLiteral("max-detections"), QStringLiteral("OCR Det maximum detections."), QStringLiteral("count"), QStringLiteral("100"));
     parser.addOption(serverOption);
     parser.addOption(selfCheckOption);
-    parser.addOption(pluginSmokeOption);
+    parser.addOption(capabilityCheckOption);
     parser.addOption(tensorRtSmokeOption);
     parser.addOption(ncnnSmokeOption);
     parser.addOption(ncnnParamSmokeOption);
@@ -901,8 +859,8 @@ int main(int argc, char* argv[])
     if (parser.isSet(selfCheckOption)) {
         return runSelfCheck();
     }
-    if (parser.isSet(pluginSmokeOption)) {
-        return runPluginSmoke(parser.value(pluginSmokeOption));
+    if (parser.isSet(capabilityCheckOption)) {
+        return runBuiltinCapabilityCheck();
     }
     if (parser.isSet(tensorRtSmokeOption)) {
         return runTensorRtSmoke(parser.value(tensorRtSmokeOption));

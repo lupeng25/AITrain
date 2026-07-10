@@ -1,5 +1,6 @@
 #include "MainWindowSupport.h"
 
+#include "aitrain/core/CapabilityRegistry.h"
 #include "InfoPanel.h"
 #include "LanguageSupport.h"
 
@@ -474,7 +475,6 @@ QString taskStateLabel(aitrain::TaskState state)
     switch (state) {
     case aitrain::TaskState::Queued: return uiText("排队中");
     case aitrain::TaskState::Running: return uiText("运行中");
-    case aitrain::TaskState::Paused: return uiText("已暂停");
     case aitrain::TaskState::Completed: return uiText("已完成");
     case aitrain::TaskState::Failed: return uiText("失败");
     case aitrain::TaskState::Canceled: return uiText("已取消");
@@ -614,163 +614,20 @@ QString defaultBackendForTask(const QString& taskType)
     return {};
 }
 
-namespace {
-QStringList yoloModelPresetsForTask(bool segmentation)
-{
-    const QStringList families = {
-        QStringLiteral("yolov8"),
-        QStringLiteral("yolo11"),
-        QStringLiteral("yolo12"),
-        QStringLiteral("yolo26")
-    };
-    const QStringList scales = {
-        QStringLiteral("n"),
-        QStringLiteral("s"),
-        QStringLiteral("m"),
-        QStringLiteral("l"),
-        QStringLiteral("x")
-    };
-    QStringList presets;
-    if (!segmentation) {
-        for (const QString& scale : scales) {
-            presets << QStringLiteral("yolov5%1.yaml").arg(scale)
-                    << QStringLiteral("yolov5%1u.pt").arg(scale);
-        }
-    }
-    for (const QString& family : families) {
-        for (const QString& scale : scales) {
-            const QString stem = segmentation
-                ? QStringLiteral("%1%2-seg").arg(family, scale)
-                : QStringLiteral("%1%2").arg(family, scale);
-            presets << QStringLiteral("%1.yaml").arg(stem)
-                    << QStringLiteral("%1.pt").arg(stem);
-        }
-    }
-    if (!segmentation) {
-        for (const QString& scale : scales) {
-            presets << QStringLiteral("yolov8%1-p2.yaml").arg(scale)
-                    << QStringLiteral("yolov8%1-p6.yaml").arg(scale);
-        }
-    }
-    return presets;
-}
-
-QStringList smpSemanticModelPresets()
-{
-    return {
-        QStringLiteral("smp_unet_resnet34"),
-        QStringLiteral("smp_unetplusplus_resnet34"),
-        QStringLiteral("smp_fpn_resnet34"),
-        QStringLiteral("smp_deeplabv3plus_resnet50"),
-        QStringLiteral("smp_segformer_mit_b0")
-    };
-}
-
-QStringList anomalibPatchCorePresets()
-{
-    return {
-        QStringLiteral("anomalib_patchcore_wide_resnet50_2")
-    };
-}
-
-QStringList anomalibEfficientAdPresets()
-{
-    return {
-        QStringLiteral("anomalib_efficientad_s")
-    };
-}
-
-QStringList yoloObbModelPresets()
-{
-    QStringList presets;
-    const QStringList scales = {
-        QStringLiteral("n"),
-        QStringLiteral("s"),
-        QStringLiteral("m"),
-        QStringLiteral("l"),
-        QStringLiteral("x")
-    };
-    for (const QString& scale : scales) {
-        presets << QStringLiteral("yolo11%1-obb.pt").arg(scale);
-    }
-    for (const QString& scale : scales) {
-        presets << QStringLiteral("yolo11%1-obb.yaml").arg(scale);
-    }
-    return presets;
-}
-} // namespace
-
-QStringList yoloModelPresetItems()
-{
-    QStringList presets;
-    presets << yoloModelPresetsForTask(false)
-            << yoloModelPresetsForTask(true)
-            << yoloObbModelPresets();
-    return presets;
-}
-
 QStringList modelPresetItemsForBackend(const QString& backend)
 {
-    const QString normalized = backend.trimmed().toLower();
-    if (normalized == QStringLiteral("ultralytics_yolo")
-        || normalized == QStringLiteral("ultralytics_yolo_detect")) {
-        return yoloModelPresetsForTask(false);
-    }
-    if (normalized == QStringLiteral("ultralytics_yolo_segment")) {
-        return yoloModelPresetsForTask(true);
-    }
-    if (normalized == QStringLiteral("ultralytics_yolo_obb")) {
-        return yoloObbModelPresets();
-    }
-    if (normalized == QStringLiteral("smp_semantic_segmentation")) {
-        return smpSemanticModelPresets();
-    }
-    if (normalized == QStringLiteral("anomalib_patchcore")) {
-        return anomalibPatchCorePresets();
-    }
-    if (normalized == QStringLiteral("anomalib_efficientad")) {
-        return anomalibEfficientAdPresets();
-    }
-    if (normalized == QStringLiteral("paddleocr_det_official")) {
-        return {
-            QStringLiteral("PP-OCRv5_mobile_det"),
-            QStringLiteral("PP-OCRv5_server_det"),
-            QStringLiteral("PP-OCRv6_tiny_det"),
-            QStringLiteral("PP-OCRv6_small_det"),
-            QStringLiteral("PP-OCRv6_medium_det"),
-            QStringLiteral("PP-OCRv4_mobile_det")
-        };
-    }
-    if (normalized == QStringLiteral("paddleocr_rec_official")
-        || normalized == QStringLiteral("paddleocr_ppocrv4_rec")) {
-        return {
-            QStringLiteral("PP-OCRv5_mobile_rec"),
-            QStringLiteral("PP-OCRv5_server_rec"),
-            QStringLiteral("en_PP-OCRv5_mobile_rec"),
-            QStringLiteral("PP-OCRv6_tiny_rec"),
-            QStringLiteral("PP-OCRv6_small_rec"),
-            QStringLiteral("PP-OCRv6_medium_rec"),
-            QStringLiteral("PP-OCRv4_mobile_rec")
-        };
+    const aitrain::BackendDescriptor selected =
+        aitrain::BuiltinCapabilityRegistry::instance().backend(backend);
+    if (!selected.id.isEmpty()) {
+        return selected.modelPresets;
     }
 
-    QStringList presets = yoloModelPresetItems();
-    presets << smpSemanticModelPresets()
-            << anomalibPatchCorePresets()
-            << anomalibEfficientAdPresets()
-            << QStringLiteral("PP-OCRv5_mobile_det")
-            << QStringLiteral("PP-OCRv5_server_det")
-            << QStringLiteral("PP-OCRv6_tiny_det")
-            << QStringLiteral("PP-OCRv6_small_det")
-            << QStringLiteral("PP-OCRv6_medium_det")
-            << QStringLiteral("PP-OCRv5_mobile_rec")
-            << QStringLiteral("PP-OCRv5_server_rec")
-            << QStringLiteral("en_PP-OCRv5_mobile_rec")
-            << QStringLiteral("PP-OCRv6_tiny_rec")
-            << QStringLiteral("PP-OCRv6_small_rec")
-            << QStringLiteral("PP-OCRv6_medium_rec")
-            << QStringLiteral("PP-OCRv4_mobile_det")
-            << QStringLiteral("PP-OCRv4_mobile_rec");
+    QStringList presets;
+    for (const aitrain::BackendDescriptor& descriptor :
+        aitrain::BuiltinCapabilityRegistry::instance().backends()) {
+        presets.append(descriptor.modelPresets);
+    }
+    presets.removeDuplicates();
     return presets;
 }
 
@@ -977,58 +834,24 @@ bool paddleOcrOfficialRepoConfigured()
 
 QString expectedTrainingTaskForDatasetFormat(const QString& format)
 {
-    if (format == QStringLiteral("yolo_detection") || format == QStringLiteral("yolo_txt")) {
-        return QStringLiteral("detection");
-    }
-    if (format == QStringLiteral("yolo_segmentation")) {
-        return QStringLiteral("segmentation");
-    }
-    if (format == QStringLiteral("yolo_obb")) {
-        return QStringLiteral("obb_detection");
-    }
-    if (format == QStringLiteral("semantic_segmentation_mask")) {
-        return QStringLiteral("semantic_segmentation");
-    }
-    if (format == QStringLiteral("anomaly_folder")) {
-        return QStringLiteral("anomaly_detection");
-    }
-    if (format == QStringLiteral("paddleocr_det")) {
-        return QStringLiteral("ocr_detection");
-    }
-    if (format == QStringLiteral("paddleocr_rec")) {
-        return QStringLiteral("ocr_recognition");
+    const auto& registry = aitrain::BuiltinCapabilityRegistry::instance();
+    for (const aitrain::CapabilityDescriptor& capability : registry.capabilities()) {
+        for (const QString& taskType : capability.taskTypes) {
+            if (registry.datasetFormatsForTask(taskType).contains(format)) {
+                return taskType;
+            }
+        }
     }
     return {};
 }
 
 bool isTrainingBackendCompatible(const QString& format, const QString& backend)
 {
-    const QString normalized = backend.trimmed().toLower();
-    if (format == QStringLiteral("yolo_detection") || format == QStringLiteral("yolo_txt")) {
-        return normalized == QStringLiteral("ultralytics_yolo")
-            || normalized == QStringLiteral("ultralytics_yolo_detect");
-    }
-    if (format == QStringLiteral("yolo_segmentation")) {
-        return normalized == QStringLiteral("ultralytics_yolo_segment");
-    }
-    if (format == QStringLiteral("yolo_obb")) {
-        return normalized == QStringLiteral("ultralytics_yolo_obb");
-    }
-    if (format == QStringLiteral("semantic_segmentation_mask")) {
-        return normalized == QStringLiteral("smp_semantic_segmentation");
-    }
-    if (format == QStringLiteral("anomaly_folder")) {
-        return normalized == QStringLiteral("anomalib_patchcore")
-            || normalized == QStringLiteral("anomalib_efficientad");
-    }
-    if (format == QStringLiteral("paddleocr_det")) {
-        return normalized == QStringLiteral("paddleocr_det_official");
-    }
-    if (format == QStringLiteral("paddleocr_rec")) {
-        return normalized == QStringLiteral("paddleocr_rec_official")
-            || normalized == QStringLiteral("paddleocr_ppocrv4_rec");
-    }
-    return false;
+    const QString taskType = expectedTrainingTaskForDatasetFormat(format);
+    return !taskType.isEmpty()
+        && aitrain::BuiltinCapabilityRegistry::instance()
+            .backendsForTask(taskType, format)
+            .contains(backend.trimmed());
 }
 } // namespace
 

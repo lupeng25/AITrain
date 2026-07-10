@@ -309,7 +309,7 @@ WorkerSession::PipelineTrainResult WorkerSession::runPipelineTrainingStep(
     request_ = aitrain::TrainingRequest();
     request_.taskId = parentTaskId.isEmpty() ? QStringLiteral("pipeline") : parentTaskId;
     request_.projectPath = QDir::currentPath();
-    request_.pluginId = QStringLiteral("com.aitrain.workflow");
+    request_.capabilityId = QStringLiteral("pipeline");
     request_.taskType = taskType;
     request_.datasetPath = datasetPath;
     request_.outputPath = outputPath;

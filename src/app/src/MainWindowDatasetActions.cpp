@@ -5,9 +5,7 @@
 #include "InfoPanel.h"
 #include "LanguageSupport.h"
 #include "MainWindowSupport.h"
-#include "PluginMarketplaceWidget.h"
 #include "aitrain/core/DetectionTrainer.h"
-#include "aitrain/core/PluginInterfaces.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -497,7 +495,7 @@ void MainWindow::startDatasetConversion()
         taskId = createRepositoryTask(
             aitrain::TaskKind::Validate,
             QStringLiteral("dataset_conversion"),
-            QStringLiteral("com.aitrain.plugins.dataset_interop"),
+             QStringLiteral("dataset_interop"),
             outputPath,
             uiText("数据集格式转换中。"),
             taskId);
@@ -601,8 +599,8 @@ void MainWindow::validateDataset()
         outputPath = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(taskId));
         taskId = createRepositoryTask(
             aitrain::TaskKind::Validate,
-            QStringLiteral("dataset_validation"),
-            QStringLiteral("com.aitrain.plugins.dataset_interop"),
+             QStringLiteral("dataset_validation"),
+             QStringLiteral("dataset_interop"),
             outputPath,
             uiText("数据集校验中。"),
             taskId);
@@ -683,8 +681,8 @@ void MainWindow::splitDataset()
     if (repository_.isOpen()) {
         taskId = createRepositoryTask(
             aitrain::TaskKind::Validate,
-            QStringLiteral("dataset_split"),
-            QStringLiteral("com.aitrain.plugins.dataset_interop"),
+             QStringLiteral("dataset_split"),
+             QStringLiteral("dataset_interop"),
             outputPath,
             uiText("数据集划分中。"));
         if (taskId.isEmpty()) {
@@ -727,8 +725,8 @@ void MainWindow::curateDataset()
         outputPath = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(taskId));
         taskId = createRepositoryTask(
             aitrain::TaskKind::Curate,
-            QStringLiteral("dataset_quality"),
-            QStringLiteral("com.aitrain.plugins.dataset_interop"),
+             QStringLiteral("dataset_quality"),
+             QStringLiteral("dataset_interop"),
             outputPath,
             uiText("数据质量报告生成中。"),
             taskId);
@@ -834,8 +832,8 @@ void MainWindow::prepareXAnyLabelingAnnotationSession()
     if (repository_.isOpen()) {
         taskId = createRepositoryTask(
             aitrain::TaskKind::Curate,
-            QStringLiteral("xanylabeling_annotation_session"),
-            QStringLiteral("com.aitrain.plugins.dataset_interop"),
+             QStringLiteral("xanylabeling_annotation_session"),
+             QStringLiteral("dataset_interop"),
             outputPath,
             uiText("X-AnyLabeling 标注会话准备中。"),
             taskId);
@@ -908,8 +906,8 @@ void MainWindow::syncXAnyLabelingAnnotationSession()
     if (repository_.isOpen()) {
         taskId = createRepositoryTask(
             aitrain::TaskKind::Curate,
-            QStringLiteral("xanylabeling_annotation_sync"),
-            QStringLiteral("com.aitrain.plugins.dataset_interop"),
+             QStringLiteral("xanylabeling_annotation_sync"),
+             QStringLiteral("dataset_interop"),
             outputPath,
             uiText("X-AnyLabeling 标注同步中。"),
             taskId);
@@ -1203,8 +1201,8 @@ void MainWindow::createDatasetSnapshot()
         outputPath = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(taskId));
         taskId = createRepositoryTask(
             aitrain::TaskKind::Snapshot,
-            QStringLiteral("dataset_snapshot"),
-            QStringLiteral("com.aitrain.plugins.dataset_interop"),
+             QStringLiteral("dataset_snapshot"),
+             QStringLiteral("dataset_interop"),
             outputPath,
             uiText("数据集快照创建中。"),
             taskId);

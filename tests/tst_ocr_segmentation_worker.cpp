@@ -256,7 +256,7 @@ private slots:
         aitrain::TrainingRequest request;
         request.taskId = QStringLiteral("removed-backend");
         request.projectPath = dir.path();
-        request.pluginId = QStringLiteral("com.aitrain.plugins.yolo_native");
+        request.capabilityId = QStringLiteral("yolo");
         request.taskType = QStringLiteral("detection");
         request.datasetPath = datasetRoot;
         request.outputPath = dir.filePath(QStringLiteral("run"));
@@ -307,7 +307,7 @@ private slots:
         aitrain::TrainingRequest request;
         request.taskId = QStringLiteral("mismatched-backend");
         request.projectPath = dir.path();
-        request.pluginId = QStringLiteral("com.aitrain.plugins.yolo_native");
+        request.capabilityId = QStringLiteral("yolo");
         request.taskType = QStringLiteral("detection");
         request.datasetPath = datasetRoot;
         request.outputPath = dir.filePath(QStringLiteral("run"));
@@ -366,7 +366,7 @@ private slots:
         aitrain::TrainingRequest request;
         request.taskId = QStringLiteral("snapshot-mismatch");
         request.projectPath = dir.path();
-        request.pluginId = QStringLiteral("com.aitrain.plugins.yolo_native");
+        request.capabilityId = QStringLiteral("yolo");
         request.taskType = QStringLiteral("detection");
         request.datasetPath = datasetRoot;
         request.outputPath = dir.filePath(QStringLiteral("run"));
@@ -441,7 +441,7 @@ private slots:
         aitrain::TrainingRequest request;
         request.taskId = QStringLiteral("temporary-fixture");
         request.projectPath = dir.path();
-        request.pluginId = QStringLiteral("com.aitrain.plugins.yolo_native");
+        request.capabilityId = QStringLiteral("yolo");
         request.taskType = QStringLiteral("detection");
         request.datasetPath = datasetRoot;
         request.outputPath = dir.filePath(QStringLiteral("run"));
@@ -510,7 +510,7 @@ private slots:
         aitrain::TrainingRequest request;
         request.taskId = QStringLiteral("mixed-line-fixture");
         request.projectPath = dir.path();
-        request.pluginId = QStringLiteral("com.aitrain.plugins.yolo_native");
+        request.capabilityId = QStringLiteral("yolo");
         request.taskType = QStringLiteral("detection");
         request.datasetPath = datasetRoot;
         request.outputPath = dir.filePath(QStringLiteral("run"));
@@ -761,7 +761,7 @@ private slots:
         aitrain::TrainingRequest request;
         request.taskId = QStringLiteral("paddleocr-rec-official-task");
         request.projectPath = dir.path();
-        request.pluginId = QStringLiteral("com.aitrain.plugins.ocr_rec_native");
+        request.capabilityId = QStringLiteral("paddleocr");
         request.taskType = QStringLiteral("ocr_recognition");
         request.datasetPath = datasetPath;
         request.outputPath = outputPath;
@@ -835,7 +835,7 @@ private slots:
         aitrain::TrainingRequest request;
         request.taskId = QStringLiteral("paddleocr-det-official-task");
         request.projectPath = dir.path();
-        request.pluginId = QStringLiteral("com.aitrain.plugins.ocr_rec_native");
+        request.capabilityId = QStringLiteral("paddleocr");
         request.taskType = QStringLiteral("ocr_detection");
         request.datasetPath = datasetPath;
         request.outputPath = outputPath;
@@ -909,7 +909,7 @@ private slots:
         aitrain::TrainingRequest request;
         request.taskId = QStringLiteral("paddleocr-rec-v5-task");
         request.projectPath = dir.path();
-        request.pluginId = QStringLiteral("com.aitrain.plugins.ocr_rec_native");
+        request.capabilityId = QStringLiteral("paddleocr");
         request.taskType = QStringLiteral("ocr_recognition");
         request.datasetPath = datasetPath;
         request.outputPath = outputPath;
@@ -964,7 +964,7 @@ private slots:
         aitrain::TrainingRequest request;
         request.taskId = QStringLiteral("paddleocr-det-v5-task");
         request.projectPath = dir.path();
-        request.pluginId = QStringLiteral("com.aitrain.plugins.ocr_rec_native");
+        request.capabilityId = QStringLiteral("paddleocr");
         request.taskType = QStringLiteral("ocr_detection");
         request.datasetPath = datasetPath;
         request.outputPath = outputPath;
@@ -1020,7 +1020,7 @@ private slots:
         aitrain::TrainingRequest request;
         request.taskId = QStringLiteral("paddleocr-rec-v6-task");
         request.projectPath = dir.path();
-        request.pluginId = QStringLiteral("com.aitrain.plugins.ocr_rec_native");
+        request.capabilityId = QStringLiteral("paddleocr");
         request.taskType = QStringLiteral("ocr_recognition");
         request.datasetPath = datasetPath;
         request.outputPath = outputPath;
@@ -1126,7 +1126,7 @@ private slots:
         aitrain::TrainingRequest request;
         request.taskId = QStringLiteral("paddleocr-det-v6-task");
         request.projectPath = dir.path();
-        request.pluginId = QStringLiteral("com.aitrain.plugins.ocr_rec_native");
+        request.capabilityId = QStringLiteral("paddleocr");
         request.taskType = QStringLiteral("ocr_detection");
         request.datasetPath = datasetPath;
         request.outputPath = outputPath;

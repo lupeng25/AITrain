@@ -22,7 +22,6 @@ enum class TaskKind {
 enum class TaskState {
     Queued,
     Running,
-    Paused,
     Completed,
     Failed,
     Canceled
@@ -39,7 +38,7 @@ bool isValidTaskStateTransition(TaskState from, TaskState to);
 struct TrainingRequest {
     QString taskId;
     QString projectPath;
-    QString pluginId;
+    QString capabilityId;
     QString taskType;
     QString datasetPath;
     QString outputPath;
@@ -52,7 +51,7 @@ struct TrainingRequest {
 struct TaskRecord {
     QString id;
     QString projectName;
-    QString pluginId;
+    QString capabilityId;
     QString taskType;
     TaskKind kind = TaskKind::Train;
     TaskState state = TaskState::Queued;

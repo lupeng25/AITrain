@@ -50,8 +50,8 @@ The manifest records:
 
 The repo also includes Inno Setup 6 scripts for producing Windows installers from the same verified package layout used by package smoke. The default installer build is split into three files:
 
-- Product installer: AITrain Studio executables, built-in plugins, product scripts, docs, examples, translations, and Python trainer adapter files.
-- Dependency installer: Qt/VC runtime files, Qt runtime plugin folders, ONNX Runtime, NCNN, TensorRT, and other runtime dependency DLLs.
+- Product installer: AITrain Studio executables, built-in capability registry, product scripts, docs, examples, translations, and Python trainer adapter files.
+- Dependency installer: Qt/VC runtime files, Qt/VC runtime module folders, ONNX Runtime, NCNN, TensorRT, and other runtime dependency DLLs.
 - Python AI environment installer: a prepared Python environment for official YOLO/OBB, SMP, Anomalib, and OCR adapters plus an optional PaddleOCR source checkout under `python_env\PaddleOCR`.
 
 ```powershell
@@ -94,8 +94,8 @@ The product and native dependency installers wrap the package-smoke directory on
 
 Install all three packages into the same target directory. They write to separate roots and should not overwrite one another:
 
-- Product: application root, `plugins`, `docs`, `examples`, `python_trainers`, `tools`, `translations`.
-- Native dependencies: application root runtime DLLs, Qt runtime plugin folders, `runtimes`.
+- Product: application root, `docs`, `examples`, `python_trainers`, `tools`, `translations`.
+- Native dependencies: application root runtime DLLs, Qt runtime module folders, `runtimes`.
 - Python AI environment: `python_env` and optional `python_env\PaddleOCR`.
 
 The product installer is not self-contained until the dependency installer and Python AI environment installer, or equivalent runtime dependencies, are installed into the same target directory. For clean-machine release candidates, build the Python AI environment package from a prepared relocatable staging directory rather than an ad hoc developer venv.

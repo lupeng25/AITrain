@@ -5,9 +5,8 @@
 #include "InfoPanel.h"
 #include "LanguageSupport.h"
 #include "MainWindowSupport.h"
-#include "PluginMarketplaceWidget.h"
+#include "aitrain/core/CapabilityRegistry.h"
 #include "aitrain/core/DetectionTrainer.h"
-#include "aitrain/core/PluginInterfaces.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -260,7 +259,7 @@ void MainWindow::validateDeploymentArtifact()
         taskId = createRepositoryTask(
             aitrain::TaskKind::Benchmark,
             QStringLiteral("deployment_validation"),
-            QStringLiteral("com.aitrain.plugins.yolo_native"),
+            QStringLiteral("yolo"),
             outputPath,
             uiText("部署产物验证中。"),
             taskId);
@@ -320,7 +319,7 @@ void MainWindow::runCustomerOcrAcceptance()
         taskId = createRepositoryTask(
             aitrain::TaskKind::Report,
             QStringLiteral("customer_ocr_acceptance"),
-            QStringLiteral("com.aitrain.plugins.ocr_rec_native"),
+            QStringLiteral("paddleocr"),
             outputPath,
             uiText("客户域 OCR 验收中。"),
             taskId);
@@ -396,9 +395,9 @@ void MainWindow::collectDiagnosticsBundle()
         {QStringLiteral("owner"), licenseOwner_},
         {QStringLiteral("expiry"), licenseExpiry_}
     });
-    context.insert(QStringLiteral("pluginSummary"), QJsonObject{
-        {QStringLiteral("count"), pluginManager_.plugins().size()},
-        {QStringLiteral("searchPaths"), QJsonArray::fromStringList(pluginSearchPaths())}
+    context.insert(QStringLiteral("capabilitySummary"), QJsonObject{
+        {QStringLiteral("count"), aitrain::BuiltinCapabilityRegistry::instance().capabilities().size()},
+        {QStringLiteral("source"), QStringLiteral("builtin_registry")}
     });
 
     QString taskId;

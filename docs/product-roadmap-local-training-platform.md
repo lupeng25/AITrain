@@ -8,9 +8,9 @@
 
 ## 1. 当前基线与判断
 
-AITrain Studio 已完成 Worker、SQLite、任务记录、artifact 浏览、YOLO 检测/分割官方训练链路、PaddleOCR Det/Rec/System 官方工具链入口、ONNX Runtime 推理、RTX 4090 TensorRT 验收证据、打包、离线授权、CPU smoke、插件 marketplace、环境 profile、样本复核、部署验证、诊断包、客户域 OCR 验收向导和成熟 Qt Widgets workbench。
+AITrain Studio 已完成 Worker、SQLite、任务记录、artifact 浏览、YOLO 检测/分割官方训练链路、PaddleOCR Det/Rec/System 官方工具链入口、ONNX Runtime 推理、RTX 4090 TensorRT 验收证据、打包、离线授权、CPU smoke、内置能力注册表、环境 profile、样本复核、部署验证、诊断包、客户域 OCR 验收向导和成熟 Qt Widgets workbench。
 
-维护基线：UI 与 core 的第一层源文件拆分已经完成。`MainWindow` 和 `ProductWorkflow` 都已拆为 companion 文件；`ProductWorkflow.cpp` 只保留公共入口锚点，snapshot、quality、evaluation、benchmark、delivery、acceptance、pipeline 逻辑分别落在同目录 companion 文件中。这是行为保持型重构，不改变 Worker protocol、SQLite schema、插件接口、报告 JSON 或算法语义。
+维护基线：UI 与 core 的第一层源文件拆分已经完成。`MainWindow` 和 `ProductWorkflow` 都已拆为 companion 文件；`ProductWorkflow.cpp` 只保留公共入口锚点，snapshot、quality、evaluation、benchmark、delivery、acceptance、pipeline 逻辑分别落在同目录 companion 文件中。这是行为保持型重构，不改变 Worker protocol、SQLite schema、内置能力注册表、报告 JSON 或算法语义。
 
 当前项目的主要缺口不是继续堆更多 demo 后端。Phase 39A/39B/39C/41/49 已经把已有 detection / segmentation / OCR 能力推进到本地可交付闭环：
 
@@ -170,14 +170,14 @@ OCR 评估和验收使用 PaddleOCR 官方报告路径：
 - `数据集 > 质量与复核`：读取 `problem_samples.json`、`error_samples.json`、`rework_sample_set.json`、`evaluation_report.json`，按来源、问题类型、类别、split、OCR edit distance / CER、搜索文本过滤，并导出 X-AnyLabeling 复核清单。
 - `环境 > 交付证据`：汇总本机 RC、clean Windows、TensorRT、客户域 OCR、包体完整性、诊断包和部署验证状态，显示 `passed` / `blocked` / `failed` / `hardware-blocked`。
 - 客户域 OCR 验收：通过 Worker/core 生成客户 OCR manifest 和 summary；public/generated/smoke 数据只能作为流程 evidence，不能作为生产 OCR 精度证明。
-- 诊断包：收集 Worker self-check、环境 profile、GPU/runtime、最近任务日志、失败 request、artifact index、插件状态和授权摘要。
+- 诊断包：收集 Worker self-check、环境 profile、GPU/runtime、最近任务日志、失败 request、artifact index、内置能力状态和授权摘要。
 - 导出后验证：ONNX 要可推理；TensorRT 区分 `passed` / `failed` / `hardware-blocked`；NCNN 在配置 SDK/runtime 和样本图时执行 YOLO 检测/分割 runtime inference。2026-05-16 本机证据已覆盖 Hyuto YOLOv8 detection ONNX -> NCNN 和 nihui 预转换 YOLOv8n-seg pnnx/DFL NCNN；YOLOv8-seg ONNX 若残留 unsupported `Shape` layer，则记录 failed report。
 
 保留限制：
 
 - 不自动修改用户全局 Python/CUDA 环境。
 - 不把 X-AnyLabeling 嵌入 GUI。
-- 不新增 SQLite schema 或插件接口语义。
+- 不新增 SQLite schema 或内置能力注册表语义。
 - 不用 Total-Text 或 generated smoke 宣称客户域 OCR production ready。
 
 ## 8. 下一阶段：工业模型能力扩展
@@ -191,7 +191,7 @@ OCR 评估和验收使用 PaddleOCR 官方报告路径：
 实现约束：
 
 - 沿用 Worker JSON request / artifact / metric / report 模式；必要协议扩展必须同步测试。
-- 训练、推理、评估、导出、benchmark 和报告逻辑继续放在 core/plugin/Worker 边界内，不进入 `MainWindow`。
+- 训练、推理、评估、导出、benchmark 和报告逻辑继续放在 core/CapabilityRegistry/Worker 边界内，不进入 `MainWindow`。
 - GUI 只添加入口、状态、日志、预览和复用现有任务/产物/模型库/部署验证页面。
 - 每项新能力必须从 dataset validator、最小 smoke 数据、adapter request 示例、失败诊断、交付报告限制和 harness 测试一起落地。
 - 未经真实 smoke / evaluation / deployment evidence，不得声明生产可用。

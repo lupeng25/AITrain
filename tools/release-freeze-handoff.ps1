@@ -129,7 +129,7 @@ $manifest = [ordered]@{
         "acceptance_summary.json",
         "full console output",
         "Worker self-check JSON",
-        "Worker plugin smoke JSON for package mode",
+        "Worker built-in capability JSON for package mode",
         "package root layout summary",
         "GPU and driver evidence for TensorRT mode"
     )

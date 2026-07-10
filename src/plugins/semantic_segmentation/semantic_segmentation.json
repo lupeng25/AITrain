@@ -1,6 +1,0 @@
-{
-  "id": "com.aitrain.plugins.semantic_segmentation",
-  "name": "Semantic Segmentation",
-  "version": "0.1.0",
-  "description": "SMP semantic segmentation plugin for Mask PNG datasets and ONNX Runtime deployment."
-}

@@ -4,6 +4,10 @@ Last updated: 2026-06-21
 
 This file is the source of truth for phase status in new AI coding conversations. Use `docs/product-roadmap-local-training-platform.md` for current broad direction after reading this file. Deleted or external historical roadmap notes must not be used as current implementation plans or phase status sources.
 
+## Current architectural override (2026-07-10)
+
+当前实现已完成能力架构收口：模型、数据集、导出、推理和校验能力由 `src/core/CapabilityRegistry` 编译期注册，并由 GUI、Worker 和环境检查共同查询。旧的动态插件接口、插件市场、插件包模板、插件目录和 `--plugin-smoke` 入口已删除；本文件中 Phase 48 及更早记录的插件市场内容仅保留为历史证据，不代表当前代码或发布包。任务状态机不再提供暂停/恢复命令，旧数据库中的 `paused` 记录会在打开时迁移为失败。
+
 ## Phase Status
 
 | Phase | Status | Current interpretation |

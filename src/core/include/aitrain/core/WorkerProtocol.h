@@ -10,8 +10,6 @@ namespace worker_protocol {
 
 namespace command {
 QString startTrain();
-QString pause();
-QString resume();
 QString heartbeat();
 QString environmentCheck();
 QString validateDataset();
@@ -41,8 +39,6 @@ QString progress();
 QString metric();
 QString artifact();
 QString completed();
-QString paused();
-QString resumed();
 QString canceled();
 QString failed();
 QString environmentCheck();

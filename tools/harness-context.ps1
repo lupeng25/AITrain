@@ -12,7 +12,7 @@ Write-Host "Key files:" -ForegroundColor Cyan
 $files = @(
     "HARNESS.md",
     "README.md",
-    "src/core/include/aitrain/core/PluginInterfaces.h",
+    "src/core/include/aitrain/core/CapabilityRegistry.h",
     "src/core/include/aitrain/core/JsonProtocol.h",
     "src/core/include/aitrain/core/ProjectRepository.h",
     "src/app/src/MainWindow.cpp",

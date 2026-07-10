@@ -2,13 +2,13 @@
 
 ## 开始前
 
-- 明确任务类型：UI、Core、Worker、Plugin、Dataset、Training、Docs。
+- 明确任务类型：UI、Core、Worker、Capability、Dataset、Training、Docs。
 - 读取 `docs/harness/project-context.md`。
 - 在 Windows PowerShell 中读取项目文本时使用 `-Encoding UTF8`；不要用默认编码读取中文文档后根据乱码输出做判断。
 - 枚举 Git 路径时如涉及中文文件名，使用 `git -c core.quotepath=false ...`。
 - 如果是 UI 任务，读取 `docs/harness/ui-guidelines.md`。
 - 确认是否会修改公共接口：
-  - `PluginInterfaces.h`
+  - `CapabilityRegistry.h`
   - `JsonProtocol.h`
   - `TaskModels.h`
   - `ProjectRepository.h`
@@ -20,7 +20,7 @@
 - 新增或修改文本文件保持 UTF-8，除非明确做编码迁移，否则保留原文件 BOM / no BOM 风格。
 - 不把训练逻辑塞进 GUI。
 - 不在 Worker 中直接依赖 GUI 类型。
-- 不让插件绕过公共接口访问主窗口。
+- 不让能力后端绕过公共接口访问主窗口。
 - 新增 UI 文本使用 `QStringLiteral`。
 - 新增表格和状态必须有空状态。
 - 新增长任务必须有日志、进度和失败信息。
@@ -65,7 +65,7 @@ C:\Users\73200\.codex\skills\qt-gui-walkthrough\scripts\qt_walkthrough.ps1 `
   -Height 820
 ```
 
-Tab-level areas such as `数据集 > 质量与复核`, `模型库 > 评估报告`, `部署验证 > 模型导出 / 推理验证`, `系统设置 > 插件 / 应用设置`, and `环境 > 交付证据` should be covered by focused QtTest or manual notes when touched.
+Tab-level areas such as `数据集 > 质量与复核`, `模型库 > 评估报告`, `部署验证 > 模型导出 / 推理验证`, `系统设置 > 内置能力 / 应用设置`, and `环境 > 交付证据` should be covered by focused QtTest or manual notes when touched.
 
 验收重点：关键操作按钮不能被非全屏首屏裁切；长路径、长状态文本和表格不能造成横向溢出；允许页面纵向滚动。
 

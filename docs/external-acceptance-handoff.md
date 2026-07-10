@@ -7,7 +7,7 @@ This handoff package is for Phase 43 Lite external acceptance and repeatability.
 External acceptance covers:
 
 - Clean Windows package layout validation from an installed package root.
-- Worker self-check and plugin loading from the package.
+- Worker self-check and built-in capability registry from the package.
 - Optional source-tree local RC repeatability check before handoff.
 - TensorRT engine build/deployment validation smoke on supported RTX / SM 75+ hardware when reproducing or refreshing the recorded RTX 4090 D pass.
 - Return of machine-readable summaries and enough environment evidence to update `docs\harness\current-status.md`.
@@ -24,7 +24,7 @@ Out of scope:
 Clean Windows package acceptance:
 
 - Windows x64 machine separate from the primary development tree.
-- Unpacked AITrain Studio package root containing `AITrainStudio.exe`, `aitrain_worker.exe`, `plugins`, `docs`, `examples`, `python_trainers`, and `tools`.
+- Unpacked AITrain Studio package root containing `AITrainStudio.exe`, `aitrain_worker.exe`, `docs`, `examples`, `python_trainers`, and `tools`.
 - PowerShell available.
 - MSVC/Qt build tools are not required when testing from an already-installed package root.
 - Optional Python runtimes may be missing; package acceptance should report optional runtime gaps clearly rather than fail for every optional backend.
@@ -82,7 +82,7 @@ Expected result:
 
 - Package layout exists.
 - Worker self-check emits valid JSON.
-- Built-in plugins load through Worker plugin smoke.
+- Built-in capabilities are reported through Worker capability check.
 - Missing optional runtimes are reported as environment gaps, not as silent success.
 - `acceptance_summary.json` is written under the selected work directory.
 
@@ -115,7 +115,7 @@ For every external acceptance run, return:
 - Full console output.
 - Package root file layout summary.
 - Worker self-check JSON.
-- Worker plugin smoke JSON when package mode is run.
+- Worker built-in capability JSON when package mode is run.
 - GPU and driver information for TensorRT mode.
 - TensorRT smoke output or exact failure / hardware-blocked message. Current RTX 4090 D passing evidence lives under `.deps\\rtx4090-validation\\acceptance-tensorrt`.
 - ZIP/package name, hash, and source commit when available.

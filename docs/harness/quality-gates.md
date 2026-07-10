@@ -55,14 +55,14 @@ UI 改动必须满足：
 - 长任务必须可取消。
 - 进度和日志输出不能依赖 stdout 解析作为唯一通道。
 
-## Plugin Gate
+## Built-in Capability Gate
 
-插件改动必须满足：
+能力改动必须满足：
 
-- `manifest()` 信息准确。
-- `datasetAdapter()` 对不支持的格式返回 `nullptr`。
-- 插件不能直接依赖 `MainWindow`。
-- 插件接口改动必须同步所有内置插件。
+- 注册表中的任务、数据集格式、后端和限制准确。
+- 不支持的组合必须由 Worker/core 明确拒绝。
+- 能力实现不能直接依赖 `MainWindow`。
+- 注册表改动必须同步 GUI、Worker、自检和验收测试。
 
 ## Dataset Gate
 

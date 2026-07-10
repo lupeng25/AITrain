@@ -10,8 +10,6 @@ QVector<WorkerSession::CommandBinding> WorkerSession::commandBindings()
     // and add/extend focused tests before relying on GUI entry points.
     return {
         {wp::command::startTrain(), &WorkerSession::startTrainingCommand},
-        {wp::command::pause(), &WorkerSession::pauseCommand},
-        {wp::command::resume(), &WorkerSession::resumeCommand},
         {wp::command::heartbeat(), &WorkerSession::heartbeatCommand},
         {wp::command::environmentCheck(), &WorkerSession::environmentCheckCommand},
         {wp::command::validateDataset(), &WorkerSession::validateDatasetCommand},

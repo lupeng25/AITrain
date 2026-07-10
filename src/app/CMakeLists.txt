@@ -35,8 +35,6 @@ add_executable(AITrainStudio WIN32
     src/MainWindowWorkerMessages.cpp
     src/MetricsWidget.h
     src/MetricsWidget.cpp
-    src/PluginMarketplaceWidget.h
-    src/PluginMarketplaceWidget.cpp
     src/RegistrationDialog.h
     src/RegistrationDialog.cpp
     src/Sidebar.h

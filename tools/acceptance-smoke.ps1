@@ -121,23 +121,6 @@ function Resolve-WorkerExe {
     throw "Could not find aitrain_worker.exe. Build first or pass -PackagedRoot."
 }
 
-function Resolve-PluginDir {
-    param([string]$WorkerExe)
-    $workerDir = Split-Path -Parent $WorkerExe
-    $candidates = @(
-        (Join-Path $workerDir "plugins\models"),
-        (Join-Path $script:Root "plugins\models"),
-        (Join-Path $script:Root "$BuildDir\plugins\models"),
-        (Join-Path $script:Root "$BuildDir\package-smoke\plugins\models")
-    )
-    foreach ($candidate in $candidates) {
-        if (Test-Path $candidate) {
-            return [System.IO.Path]::GetFullPath($candidate)
-        }
-    }
-    throw "Could not find plugins\models directory for worker: $WorkerExe"
-}
-
 function Resolve-PythonExe {
     if ($PythonExe) {
         $resolved = Resolve-AcceptancePath $PythonExe
@@ -218,33 +201,29 @@ function Invoke-WorkerSelfCheck {
     return $json
 }
 
-function Invoke-PluginSmoke {
-    param(
-        [string]$WorkerExe,
-        [string]$PluginDir
-    )
-    Write-Step "plugin smoke"
-    $output = & $WorkerExe --plugin-smoke $PluginDir
+function Invoke-BuiltinCapabilityCheck {
+    param([string]$WorkerExe)
+    Write-Step "built-in capability check"
+    $output = & $WorkerExe --builtin-capabilities
     if ($LASTEXITCODE -ne 0) {
-        throw "Plugin smoke failed with exit code $LASTEXITCODE"
+        throw "Built-in capability check failed with exit code $LASTEXITCODE"
     }
     $json = $output | Select-Object -Last 1 | ConvertFrom-Json
     if (-not $json.ok) {
-        throw "Plugin smoke reported ok=false"
+        throw "Built-in capability check reported ok=false"
     }
-    if ($json.pluginCount -lt 3) {
-        throw "Expected at least 3 plugins, found $($json.pluginCount)"
+    if ($json.capabilityCount -lt 1) {
+        throw "Expected at least one built-in capability"
     }
-    Write-Host ("  [ok] plugin count={0}" -f $json.pluginCount)
+    Write-Host ("  [ok] built-in capabilities={0}" -f $json.capabilityCount)
 }
 
 function Invoke-LocalBaseline {
     $harness = Join-Path $script:Root "tools\harness-check.ps1"
     if (!(Test-Path $harness)) {
         $worker = Resolve-WorkerExe
-        $plugins = Resolve-PluginDir -WorkerExe $worker
         Invoke-WorkerSelfCheck -WorkerExe $worker | Out-Null
-        Invoke-PluginSmoke -WorkerExe $worker -PluginDir $plugins
+        Invoke-BuiltinCapabilityCheck -WorkerExe $worker | Out-Null
         return
     }
     Invoke-Checked -FilePath $harness
@@ -271,9 +250,8 @@ function Invoke-PackageAcceptance {
     Assert-PathExists (Join-Path $packageRoot "examples\create-minimal-datasets.py") "minimal dataset generator"
     Assert-PathExists (Join-Path $packageRoot "python_trainers\requirements-yolo.txt") "YOLO requirements"
     Assert-PathExists (Join-Path $packageRoot "python_trainers\requirements-ocr.txt") "OCR requirements"
-    $plugins = Resolve-PluginDir -WorkerExe $worker
     Invoke-WorkerSelfCheck -WorkerExe $worker | Out-Null
-    Invoke-PluginSmoke -WorkerExe $worker -PluginDir $plugins
+    Invoke-BuiltinCapabilityCheck -WorkerExe $worker | Out-Null
 }
 
 function Materialize-UltralyticsDataset {

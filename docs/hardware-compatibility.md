@@ -4,7 +4,7 @@ This matrix records what can be verified on current and historical AITrain Studi
 
 | Environment | Supported / Verified | Not Supported / Notes |
 |---|---|---|
-| CPU-only Windows | Qt GUI, Worker, SQLite, plugins, Python YOLO CPU smoke through official Ultralytics adapters, PaddlePaddle OCR CPU smoke through official PaddleOCR adapters, C++ ONNX Runtime detection inference | GPU acceleration and TensorRT engine validation |
+| CPU-only Windows | Qt GUI, Worker, SQLite, built-in capabilities, Python YOLO CPU smoke through official Ultralytics adapters, PaddlePaddle OCR CPU smoke through official PaddleOCR adapters, C++ ONNX Runtime detection inference | GPU acceleration and TensorRT engine validation |
 | RTX 4090 D Windows validation machine | TensorRT 10 engine build/deployment validation smoke, Worker CUDA/cuDNN/TensorRT self-check, ONNX Runtime, SMP GPU realtest, OBB public DOTA matrix, anomaly public MVTec matrix, package and RC validation | Generated `.deps` evidence is local validation output and must not be committed |
 | Lenovo Legion Y7000P GTX 1060 / SM 61 | CUDA runtime self-check after driver 582.28, package smoke, ONNX Runtime, CPU training smoke | TensorRT 10 engine build; TensorRT reports SM 61 unsupported and should remain `hardware-blocked` on that hardware |
 | Cloud GPU with RTX / SM 75+ | Optional repeat target for TensorRT acceptance if the RTX 4090 D evidence needs independent reproduction | Requires matching CUDA/TensorRT runtime setup |

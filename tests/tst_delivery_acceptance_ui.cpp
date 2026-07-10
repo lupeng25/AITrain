@@ -25,6 +25,7 @@ private slots:
     void embeddedWorkspaceTabsExist();
     void switchingToEnvironmentShowsDeliveryEvidenceTab();
     void clickingSidebarEnvironmentSwitchesPageWithoutDeliveryEntry();
+    void capabilityPanelEnglishFallbackIsComplete();
 
 private:
     QString previousLanguage_;
@@ -89,7 +90,6 @@ void EnvironmentDeliveryEvidenceUiTests::mainNavigationUsesNineWorkspaceEntries(
         QStringLiteral("评估报告"),
         QStringLiteral("模型导出"),
         QStringLiteral("推理验证"),
-        QStringLiteral("插件"),
         QStringLiteral("设置"),
         QStringLiteral("交付验收")
     };
@@ -125,7 +125,7 @@ void EnvironmentDeliveryEvidenceUiTests::embeddedWorkspaceTabsExist()
     auto* systemTabs = window.findChild<QTabWidget*>(QStringLiteral("SystemSettingsTabs"));
     QVERIFY(systemTabs != nullptr);
     QCOMPARE(systemTabs->count(), 2);
-    QCOMPARE(systemTabs->tabText(0), QStringLiteral("插件"));
+    QCOMPARE(systemTabs->tabText(0), QStringLiteral("内置能力"));
     QCOMPARE(systemTabs->tabText(1), QStringLiteral("应用设置"));
 }
 
@@ -171,7 +171,6 @@ void EnvironmentDeliveryEvidenceUiTests::clickingSidebarEnvironmentSwitchesPageW
         QVERIFY(button->text() != QStringLiteral("评估报告"));
         QVERIFY(button->text() != QStringLiteral("模型导出"));
         QVERIFY(button->text() != QStringLiteral("推理验证"));
-        QVERIFY(button->text() != QStringLiteral("插件"));
         QVERIFY(button->text() != QStringLiteral("设置"));
     }
 
@@ -188,6 +187,41 @@ void EnvironmentDeliveryEvidenceUiTests::clickingSidebarEnvironmentSwitchesPageW
     QVERIFY(tabs != nullptr);
     QCOMPARE(window.deliveryAcceptanceTable_->rowCount(), 7);
     QVERIFY(window.deliveryAcceptanceSummaryLabel_->text().contains(QStringLiteral("not-run 7")));
+}
+
+void EnvironmentDeliveryEvidenceUiTests::capabilityPanelEnglishFallbackIsComplete()
+{
+    const QStringList sources = {
+        QStringLiteral("编译期注册的模型、数据集、导出和推理能力。"),
+        QStringLiteral("能力来源：编译期内置注册表"),
+        QStringLiteral("能力由编译期注册表提供。"),
+        QStringLiteral("编译期注册"),
+        QStringLiteral("GPU 策略"),
+        QStringLiteral("GPU 推荐或必需能力"),
+        QStringLiteral("运行策略"),
+        QStringLiteral("内置"),
+        QStringLiteral("检查 NVIDIA 驱动、CUDA、TensorRT、ONNX Runtime、Qt 运行时模块和 Worker 可用性，并集中查看交付证据、诊断包和客户域 OCR 验收。")
+    };
+    const QStringList expected = {
+        QStringLiteral("Model, dataset, export, and inference capabilities registered at compile time."),
+        QStringLiteral("Capability source: compile-time built-in registry"),
+        QStringLiteral("Capabilities are provided by the compile-time registry."),
+        QStringLiteral("Registered at compile time"),
+        QStringLiteral("GPU Policy"),
+        QStringLiteral("Capabilities that recommend or require a GPU"),
+        QStringLiteral("Runtime Policy"),
+        QStringLiteral("Built-in"),
+        QStringLiteral("Check NVIDIA driver, CUDA, TensorRT, ONNX Runtime, Qt runtime modules, and Worker availability, and review delivery evidence, diagnostics bundles, and customer-domain OCR acceptance in one place.")
+    };
+
+    aitrain_app::storeLanguageCode(QStringLiteral("en_US"));
+    QStringList actual;
+    for (const QString& source : sources) {
+        actual.append(aitrain_app::translateText("MainWindow", source));
+    }
+    aitrain_app::storeLanguageCode(QStringLiteral("zh_CN"));
+
+    QCOMPARE(actual, expected);
 }
 
 QTEST_MAIN(EnvironmentDeliveryEvidenceUiTests)

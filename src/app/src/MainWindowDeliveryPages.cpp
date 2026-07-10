@@ -3,7 +3,6 @@
 #include "EvaluationReportView.h"
 #include "InfoPanel.h"
 #include "MainWindowSupport.h"
-#include "PluginMarketplaceWidget.h"
 
 #include <QAbstractItemView>
 #include <QCheckBox>
@@ -585,7 +584,7 @@ QWidget* MainWindow::buildDeliveryEvidencePanel()
     auto* diagnosticsPanel = new InfoPanel(uiText("诊断包"));
     diagnosticsStatusLabel_ = inlineStatusLabel(uiText("诊断包尚未生成。"));
     diagnosticsPanel->bodyLayout()->addWidget(diagnosticsStatusLabel_);
-    diagnosticsPanel->bodyLayout()->addWidget(mutedLabel(uiText("诊断包包含 Worker self-check、环境 profile、GPU/驱动、最近任务日志、失败请求、artifact index、插件状态和授权摘要。")));
+    diagnosticsPanel->bodyLayout()->addWidget(mutedLabel(uiText("诊断包包含 Worker self-check、环境 profile、GPU/驱动、最近任务日志、失败请求、artifact index、内置能力状态和授权摘要。")));
     auto* diagnosticsPanelButton = primaryButton(uiText("一键诊断包"));
     connect(diagnosticsPanelButton, &QPushButton::clicked, this, &MainWindow::collectDiagnosticsBundle);
     diagnosticsPanel->bodyLayout()->addWidget(diagnosticsPanelButton, 0, Qt::AlignRight);

@@ -48,8 +48,8 @@
         <translation>System</translation>
     </message>
     <message>
-        <source>插件</source>
-        <translation>Plugins</translation>
+        <source>内置能力</source>
+        <translation>Built-in Capabilities</translation>
     </message>
     <message>
         <source>环境</source>
@@ -168,8 +168,8 @@
         <translation>Select a model and sample image to check detection, segmentation, or OCR inference</translation>
     </message>
     <message>
-        <source>扫描和诊断模型插件</source>
-        <translation>Scan and diagnose model plugins</translation>
+        <source>查看和诊断内置能力</source>
+        <translation>Review and diagnose built-in capabilities</translation>
     </message>
     <message>
         <source>检查 GPU、CUDA、TensorRT 和运行时依赖</source>
@@ -180,8 +180,8 @@
         <translation>Project: %1</translation>
     </message>
     <message>
-        <source>插件 %1</source>
-        <translation>Plugins %1</translation>
+        <source>内置能力 %1</source>
+        <translation>Built-in Capabilities %1</translation>
     </message>
     <message>
         <source>未打开项目。先创建或打开本地项目，后续数据集、任务和模型产物都会写入项目目录。</source>
@@ -208,8 +208,8 @@
         <translation>Recent exported or inference-ready models</translation>
     </message>
     <message>
-        <source>已加载能力插件</source>
-        <translation>Loaded capability plugins</translation>
+        <source>已注册内置能力</source>
+        <translation>Registered built-in capabilities</translation>
     </message>
     <message>
         <source>待检测</source>
@@ -508,28 +508,60 @@
         <translation>No inference yet.</translation>
     </message>
     <message>
-        <source>插件能力矩阵</source>
-        <translation>Plugin Capability Matrix</translation>
+        <source>内置能力矩阵</source>
+        <translation>Built-in Capability Matrix</translation>
     </message>
     <message>
-        <source>重新扫描插件</source>
-        <translation>Rescan Plugins</translation>
+        <source>编译期注册的模型、数据集、导出和推理能力。</source>
+        <translation>Model, dataset, export, and inference capabilities registered at compile time.</translation>
     </message>
     <message>
-        <source>插件摘要</source>
-        <translation>Plugin Summary</translation>
+        <source>能力来源：编译期内置注册表</source>
+        <translation>Capability source: compile-time built-in registry</translation>
     </message>
     <message>
-        <source>已加载插件</source>
-        <translation>Loaded Plugins</translation>
+        <source>能力由编译期注册表提供。</source>
+        <translation>Capabilities are provided by the compile-time registry.</translation>
+    </message>
+    <message>
+        <source>编译期注册</source>
+        <translation>Registered at compile time</translation>
+    </message>
+    <message>
+        <source>GPU 策略</source>
+        <translation>GPU Policy</translation>
+    </message>
+    <message>
+        <source>GPU 推荐或必需能力</source>
+        <translation>Capabilities that recommend or require a GPU</translation>
+    </message>
+    <message>
+        <source>运行策略</source>
+        <translation>Runtime Policy</translation>
+    </message>
+    <message>
+        <source>内置</source>
+        <translation>Built-in</translation>
+    </message>
+    <message>
+        <source>刷新能力摘要</source>
+        <translation>Refresh Capability Summary</translation>
+    </message>
+    <message>
+        <source>能力摘要</source>
+        <translation>Capability Summary</translation>
+    </message>
+    <message>
+        <source>已注册能力</source>
+        <translation>Registered Capabilities</translation>
     </message>
     <message>
         <source>数据集格式</source>
         <translation>Dataset Formats</translation>
     </message>
     <message>
-        <source>GPU 插件</source>
-        <translation>GPU Plugins</translation>
+        <source>GPU 能力</source>
+        <translation>GPU Capabilities</translation>
     </message>
     <message>
         <source>运行时健康面板</source>
