@@ -353,8 +353,46 @@ QWidget* MainWindow::buildTrainingPage()
 {
     auto* page = new QWidget;
     auto* layout = new QVBoxLayout(page);
-    layout->setContentsMargins(18, 18, 18, 18);
+    layout->setContentsMargins(18, 0, 18, 18);
     layout->setSpacing(12);
+
+    auto* flowRail = new QFrame;
+    flowRail->setObjectName(QStringLiteral("FlowRail"));
+    auto* flowLayout = new QHBoxLayout(flowRail);
+    flowLayout->setContentsMargins(10, 0, 10, 0);
+    flowLayout->setSpacing(0);
+    const QVector<QStringList> flowSteps = {
+        {QStringLiteral("1"), uiText("数据准备"), uiText("数据集已通过")},
+        {QStringLiteral("2"), uiText("训练实验"), uiText("配置并监控运行")},
+        {QStringLiteral("3"), uiText("评估与模型"), uiText("等待当前训练")},
+        {QStringLiteral("4"), uiText("部署验证"), uiText("ONNX · 待运行")}
+    };
+    for (int index = 0; index < flowSteps.size(); ++index) {
+        auto* step = new QFrame;
+        step->setObjectName(index == 1 ? QStringLiteral("FlowStepActive")
+                                      : (index < 1 ? QStringLiteral("FlowStepDone") : QStringLiteral("FlowStep")));
+        auto* stepLayout = new QHBoxLayout(step);
+        stepLayout->setContentsMargins(12, 9, 12, 9);
+        stepLayout->setSpacing(8);
+        auto* number = new QLabel(flowSteps[index][0]);
+        number->setObjectName(QStringLiteral("FlowStepNumber"));
+        number->setAlignment(Qt::AlignCenter);
+        number->setFixedSize(24, 24);
+        auto* textBlock = new QWidget;
+        auto* textLayout = new QVBoxLayout(textBlock);
+        textLayout->setContentsMargins(0, 0, 0, 0);
+        textLayout->setSpacing(0);
+        auto* name = new QLabel(flowSteps[index][1]);
+        name->setObjectName(QStringLiteral("FlowStepTitle"));
+        auto* detail = new QLabel(flowSteps[index][2]);
+        detail->setObjectName(QStringLiteral("FlowStepDetail"));
+        textLayout->addWidget(name);
+        textLayout->addWidget(detail);
+        stepLayout->addWidget(number);
+        stepLayout->addWidget(textBlock, 1);
+        flowLayout->addWidget(step, 1);
+    }
+    layout->addWidget(flowRail);
 
     capabilityCombo_ = new QComboBox;
     taskTypeCombo_ = new QComboBox;
@@ -411,14 +449,17 @@ QWidget* MainWindow::buildTrainingPage()
                 : QString());
         }
         if (auto* yoloPanel = findChild<QWidget*>(QStringLiteral("YoloOfficialArgsGroup"))) {
-            yoloPanel->setVisible(normalized.startsWith(QStringLiteral("ultralytics_yolo")));
+            yoloPanel->setVisible(yoloPanel->property("advancedExpanded").toBool()
+                && normalized.startsWith(QStringLiteral("ultralytics_yolo")));
         }
         if (auto* smpPanel = findChild<QWidget*>(QStringLiteral("SmpSemanticArgsGroup"))) {
-            smpPanel->setVisible(normalized == QStringLiteral("smp_semantic_segmentation"));
+            smpPanel->setVisible(smpPanel->property("advancedExpanded").toBool()
+                && normalized == QStringLiteral("smp_semantic_segmentation"));
         }
         if (auto* anomalyPanel = findChild<QWidget*>(QStringLiteral("AnomalyDetectionArgsGroup"))) {
-            anomalyPanel->setVisible(normalized == QStringLiteral("anomalib_patchcore")
-                || normalized == QStringLiteral("anomalib_efficientad"));
+            anomalyPanel->setVisible(anomalyPanel->property("advancedExpanded").toBool()
+                && (normalized == QStringLiteral("anomalib_patchcore")
+                    || normalized == QStringLiteral("anomalib_efficientad")));
         }
         if (auto* caption = findChild<QLabel*>(QStringLiteral("TrainingLiveCaption_TrainingMapValue"))) {
             caption->setText((normalized == QStringLiteral("anomalib_patchcore") || normalized == QStringLiteral("anomalib_efficientad"))
@@ -433,72 +474,63 @@ QWidget* MainWindow::buildTrainingPage()
     connect(imageSizeEdit_, &QLineEdit::textChanged, this, &MainWindow::updateTrainingSelectionSummary);
     trainingDatasetSummaryLabel_ = inlineStatusLabel(QStringLiteral("当前数据集：未选择。请先在数据集页导入并通过校验。"));
     trainingDatasetSummaryLabel_->setMinimumHeight(34);
+    trainingDatasetSummaryLabel_->setWordWrap(true);
     allowLabelToShrink(trainingDatasetSummaryLabel_);
     trainingBackendHintLabel_ = mutedLabel(QStringLiteral("生产训练仅使用官方后端：Ultralytics YOLO 或 PaddleOCR official adapter。"));
+    trainingBackendHintLabel_->setWordWrap(true);
     allowLabelToShrink(trainingBackendHintLabel_);
     trainingRunSummaryLabel_ = inlineStatusLabel(QStringLiteral("等待配置训练实验。"));
     trainingRunSummaryLabel_->setMinimumHeight(42);
     allowLabelToShrink(trainingRunSummaryLabel_);
 
     auto* startButton = primaryButton(QStringLiteral("启动训练"));
-    startButton->setObjectName(QStringLiteral("GreenButton"));
     auto* cancelButton = dangerButton(QStringLiteral("取消任务"));
     connect(startButton, &QPushButton::clicked, this, &MainWindow::startTraining);
     connect(cancelButton, &QPushButton::clicked, &worker_, &WorkerClient::cancel);
 
-    trainingDatasetSummaryLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
-    trainingRunSummaryLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
+    trainingDatasetSummaryLabel_->setObjectName(QStringLiteral("TrainingDatasetNote"));
+    trainingRunSummaryLabel_->setObjectName(QStringLiteral("TrainingRunNote"));
 
     auto* headerPanel = new QFrame;
-    headerPanel->setObjectName(QStringLiteral("ExperimentHeader"));
-    auto* headerRoot = new QVBoxLayout(headerPanel);
-    headerRoot->setContentsMargins(14, 12, 14, 12);
-    headerRoot->setSpacing(10);
-    auto* headerTop = new QHBoxLayout;
+    headerPanel->setObjectName(QStringLiteral("TrainingRunHeader"));
+    auto* headerRoot = new QHBoxLayout(headerPanel);
+    headerRoot->setContentsMargins(14, 10, 14, 10);
+    headerRoot->setSpacing(12);
     auto* titleBlock = new QWidget;
-    auto* titleLayout = new QVBoxLayout(titleBlock);
+    auto* titleLayout = new QGridLayout(titleBlock);
     titleLayout->setContentsMargins(0, 0, 0, 0);
-    titleLayout->setSpacing(2);
-    auto* kicker = new QLabel(QStringLiteral("LOCAL TRAINING WORKBENCH"));
-    kicker->setObjectName(QStringLiteral("ExperimentKicker"));
-    auto* title = new QLabel(QStringLiteral("训练实验"));
-    title->setObjectName(QStringLiteral("ExperimentTitle"));
-    auto* subtitle = new QLabel(QStringLiteral("按数据集类型优先选择官方 YOLO / OCR 后端；运行结果沉淀到任务与产物。"));
-    subtitle->setObjectName(QStringLiteral("ExperimentMeta"));
-    subtitle->setWordWrap(true);
-    allowLabelToShrink(subtitle);
-    titleLayout->addWidget(kicker);
-    titleLayout->addWidget(title);
-    titleLayout->addWidget(subtitle);
-    headerTop->addWidget(titleBlock, 1);
-    headerRoot->addLayout(headerTop);
+    titleLayout->setHorizontalSpacing(8);
+    titleLayout->setVerticalSpacing(2);
+    auto* runStatus = new QLabel(uiText("待启动"));
+    runStatus->setObjectName(QStringLiteral("RunStatus"));
+    auto* title = new QLabel(QStringLiteral("yolo11n-bearing-v3"));
+    title->setObjectName(QStringLiteral("TrainingRunTitle"));
+    auto* subtitle = new QLabel(QStringLiteral("Ultralytics YOLO Detection · yolo11n.pt · bearing-v3"));
+    subtitle->setObjectName(QStringLiteral("TrainingRunMeta"));
+    titleLayout->addWidget(runStatus, 0, 0);
+    titleLayout->addWidget(title, 0, 1);
+    titleLayout->addWidget(subtitle, 1, 1);
+    titleLayout->setColumnStretch(1, 1);
 
     auto* actionLayout = new QHBoxLayout;
     actionLayout->setContentsMargins(0, 0, 0, 0);
     actionLayout->setSpacing(10);
+    auto* editConfigButton = new QPushButton(uiText("编辑配置"));
+    editConfigButton->setObjectName(QStringLiteral("SecondaryButton"));
+    actionLayout->addWidget(editConfigButton);
     actionLayout->addWidget(startButton);
     actionLayout->addWidget(cancelButton);
-    actionLayout->addStretch();
+    headerRoot->addWidget(titleBlock, 1);
     headerRoot->addLayout(actionLayout);
 
-    auto* headerLayout = new QGridLayout;
-    headerLayout->setHorizontalSpacing(12);
-    headerLayout->setVerticalSpacing(8);
-    headerLayout->setColumnStretch(0, 0);
-    headerLayout->setColumnStretch(1, 1);
-    auto* datasetHeader = new QLabel(QStringLiteral("数据集"));
-    datasetHeader->setObjectName(QStringLiteral("ExperimentMeta"));
-    auto* summaryHeader = new QLabel(QStringLiteral("摘要"));
-    summaryHeader->setObjectName(QStringLiteral("ExperimentMeta"));
-    headerLayout->addWidget(datasetHeader, 0, 0);
-    headerLayout->addWidget(trainingDatasetSummaryLabel_, 0, 1);
-    headerLayout->addWidget(summaryHeader, 1, 0);
-    headerLayout->addWidget(trainingRunSummaryLabel_, 1, 1);
-    headerRoot->addLayout(headerLayout);
-
-    auto* setupPanel = new InfoPanel(uiText("实验参数"));
+    auto* setupPanel = new InfoPanel(uiText("训练配置"));
+    setupPanel->setMinimumWidth(0);
+    setupPanel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    setupPanel->bodyLayout()->addWidget(mutedLabel(uiText("实验参数快照")));
+    setupPanel->bodyLayout()->addWidget(trainingDatasetSummaryLabel_);
     auto* form = new QFormLayout;
     form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    form->setRowWrapPolicy(QFormLayout::WrapLongRows);
     form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     form->setHorizontalSpacing(14);
     form->setVerticalSpacing(10);
@@ -555,7 +587,31 @@ QWidget* MainWindow::buildTrainingPage()
     augmentLayout->addWidget(colorJitterCheck_);
     augmentLayout->addStretch();
     advancedForm->addRow(QStringLiteral("Augment"), augmentRow);
+    auto* advancedToggleButton = new QPushButton(uiText("展开高级参数"));
+    advancedToggleButton->setCheckable(true);
+    advancedToggleButton->setObjectName(QStringLiteral("AdvancedToggle"));
+    setupPanel->bodyLayout()->addWidget(advancedToggleButton);
     setupPanel->bodyLayout()->addWidget(advancedGroup);
+    yoloOfficialArgsGroup->setVisible(false);
+    yoloOfficialArgsGroup->setProperty("advancedExpanded", false);
+    smpArgsGroup->setVisible(false);
+    smpArgsGroup->setProperty("advancedExpanded", false);
+    anomalyArgsGroup->setVisible(false);
+    anomalyArgsGroup->setProperty("advancedExpanded", false);
+    advancedGroup->setVisible(false);
+    connect(advancedToggleButton, &QPushButton::toggled, this,
+        [advancedToggleButton, advancedGroup, yoloOfficialArgsGroup, smpArgsGroup, anomalyArgsGroup, this](bool expanded) {
+            advancedToggleButton->setText(expanded ? uiText("收起高级参数") : uiText("展开高级参数"));
+            advancedGroup->setVisible(expanded);
+            yoloOfficialArgsGroup->setProperty("advancedExpanded", expanded);
+            smpArgsGroup->setProperty("advancedExpanded", expanded);
+            anomalyArgsGroup->setProperty("advancedExpanded", expanded);
+            const QString backend = trainingBackendCombo_ ? trainingBackendCombo_->currentData().toString().trimmed().toLower() : QString();
+            yoloOfficialArgsGroup->setVisible(expanded && backend.startsWith(QStringLiteral("ultralytics_yolo")));
+            smpArgsGroup->setVisible(expanded && backend == QStringLiteral("smp_semantic_segmentation"));
+            anomalyArgsGroup->setVisible(expanded && (backend == QStringLiteral("anomalib_patchcore")
+                || backend == QStringLiteral("anomalib_efficientad")));
+        });
     setupPanel->bodyLayout()->addStretch();
 
     auto* setupScroll = new QScrollArea;
@@ -563,7 +619,12 @@ QWidget* MainWindow::buildTrainingPage()
     setupScroll->setWidgetResizable(true);
     setupScroll->setFrameShape(QFrame::NoFrame);
     setupScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    setupScroll->setMinimumWidth(360);
+    setupScroll->setMinimumWidth(240);
+    setupScroll->setMaximumWidth(280);
+    connect(editConfigButton, &QPushButton::clicked, this, [setupScroll, taskTypeCombo = taskTypeCombo_]() {
+        setupScroll->ensureWidgetVisible(taskTypeCombo);
+        taskTypeCombo->setFocus();
+    });
 
     auto* monitorPanel = new InfoPanel(uiText("训练监控"));
     monitorPanel->setMinimumWidth(0);
@@ -602,22 +663,21 @@ QWidget* MainWindow::buildTrainingPage()
         liveGrid->addWidget(frame, row, column);
         *valueLabel = value;
     };
-    for (int column = 0; column < 3; ++column) {
+    for (int column = 0; column < 6; ++column) {
         liveGrid->setColumnStretch(column, 1);
     }
     addLiveCard(0, 0, QStringLiteral("Epoch"), QStringLiteral("TrainingEpochValue"), &trainingEpochValueLabel_);
     addLiveCard(0, 1, QStringLiteral("Batch"), QStringLiteral("TrainingBatchValue"), &trainingBatchValueLabel_);
     addLiveCard(0, 2, QStringLiteral("ETA"), QStringLiteral("TrainingEtaValue"), &trainingEtaValueLabel_);
-    addLiveCard(1, 0, QStringLiteral("Device"), QStringLiteral("TrainingDeviceValue"), &trainingDeviceValueLabel_);
-    addLiveCard(1, 1, QStringLiteral("Loss"), QStringLiteral("TrainingLossValue"), &trainingLossValueLabel_);
-    addLiveCard(1, 2, QStringLiteral("mAP"), QStringLiteral("TrainingMapValue"), &trainingMapValueLabel_);
+    addLiveCard(0, 3, QStringLiteral("Device"), QStringLiteral("TrainingDeviceValue"), &trainingDeviceValueLabel_);
+    addLiveCard(0, 4, QStringLiteral("Loss"), QStringLiteral("TrainingLossValue"), &trainingLossValueLabel_);
+    addLiveCard(0, 5, QStringLiteral("mAP"), QStringLiteral("TrainingMapValue"), &trainingMapValueLabel_);
     monitorPanel->bodyLayout()->addLayout(liveGrid);
 
     progressBar_ = new QProgressBar;
     progressBar_->setRange(0, 100);
     progressBar_->setValue(0);
     monitorPanel->bodyLayout()->addWidget(progressBar_);
-    monitorPanel->bodyLayout()->addStretch();
 
     auto* artifactPanel = new InfoPanel(QStringLiteral("任务与产物"));
     artifactPanel->setMinimumWidth(0);
@@ -669,22 +729,22 @@ QWidget* MainWindow::buildTrainingPage()
     detailTabs->setDocumentMode(true);
     detailTabs->addTab(metricsPanel, uiText("指标曲线"));
     detailTabs->addTab(logPanel, QStringLiteral("训练日志"));
-    detailTabs->addTab(artifactPanel, QStringLiteral("任务与产物"));
+    detailTabs->addTab(artifactPanel, uiText("Checkpoint 与产物"));
 
     auto* rightSplitter = new QSplitter(Qt::Vertical);
     rightSplitter->setMinimumWidth(0);
     rightSplitter->addWidget(monitorPanel);
     rightSplitter->addWidget(detailTabs);
-    rightSplitter->setStretchFactor(0, 2);
+    rightSplitter->setStretchFactor(0, 0);
     rightSplitter->setStretchFactor(1, 1);
-    rightSplitter->setSizes(QList<int>() << 430 << 230);
+    rightSplitter->setSizes(QList<int>() << 150 << 520);
 
     auto* bodySplitter = new QSplitter(Qt::Horizontal);
     bodySplitter->addWidget(setupScroll);
     bodySplitter->addWidget(rightSplitter);
-    bodySplitter->setStretchFactor(0, 4);
-    bodySplitter->setStretchFactor(1, 7);
-    bodySplitter->setSizes(QList<int>() << 390 << 620);
+    bodySplitter->setStretchFactor(0, 0);
+    bodySplitter->setStretchFactor(1, 1);
+    bodySplitter->setSizes(QList<int>() << 220 << 760);
 
     layout->addWidget(headerPanel);
     layout->addWidget(bodySplitter, 1);

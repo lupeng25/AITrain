@@ -40,7 +40,7 @@ QWidget* MainWindow::buildDeploymentPage()
 {
     auto* page = new QWidget;
     auto* layout = new QVBoxLayout(page);
-    layout->setContentsMargins(18, 18, 18, 18);
+    layout->setContentsMargins(18, 0, 18, 18);
     layout->setSpacing(16);
 
     layout->addWidget(createWorkbenchHeader(
@@ -52,7 +52,7 @@ QWidget* MainWindow::buildDeploymentPage()
             << QStringLiteral("ONNX")
             << QStringLiteral("NCNN")
             << QStringLiteral("TensorRT")
-            << QStringLiteral("Inference")));
+            << uiText("推理")));
 
     deploymentTabs_ = new QTabWidget;
     deploymentTabs_->setObjectName(QStringLiteral("DeploymentTabs"));
@@ -72,6 +72,8 @@ QWidget* MainWindow::buildModelExportPanel()
     auto* mainSplitter = new QSplitter(Qt::Horizontal);
 
     auto* setupPanel = new InfoPanel(QStringLiteral("导出设置"));
+    setupPanel->setMinimumWidth(0);
+    setupPanel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     conversionCheckpointEdit_ = new QLineEdit;
     conversionCheckpointEdit_->setPlaceholderText(QStringLiteral("从任务产物带入，或选择 checkpoint / ONNX / AITrain export"));
     auto* chooseCheckpointButton = new QPushButton(QStringLiteral("选择模型产物"));
@@ -146,10 +148,13 @@ QWidget* MainWindow::buildModelExportPanel()
     validationImageLayout->addWidget(chooseValidationImageButton);
 
     auto* exportArgsBox = new QWidget;
-    auto* exportArgsLayout = new QGridLayout(exportArgsBox);
-    exportArgsLayout->setContentsMargins(0, 0, 0, 0);
-    exportArgsLayout->setHorizontalSpacing(8);
-    exportArgsLayout->setVerticalSpacing(6);
+    exportArgsBox->setObjectName(QStringLiteral("ExportAdvancedArgs"));
+    auto* exportArgsLayout = new QFormLayout(exportArgsBox);
+    exportArgsLayout->setContentsMargins(10, 10, 10, 10);
+    exportArgsLayout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    exportArgsLayout->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    exportArgsLayout->setHorizontalSpacing(12);
+    exportArgsLayout->setVerticalSpacing(8);
     auto* dynamicCheck = new QCheckBox(QStringLiteral("dynamic"));
     dynamicCheck->setObjectName(QStringLiteral("YoloModelExportArg_dynamic"));
     auto* halfCheck = new QCheckBox(QStringLiteral("half"));
@@ -194,26 +199,46 @@ QWidget* MainWindow::buildModelExportPanel()
     exportDataLayout->setSpacing(8);
     exportDataLayout->addWidget(exportDataEdit, 1);
     exportDataLayout->addWidget(chooseExportDataButton);
-    exportArgsLayout->addWidget(dynamicCheck, 0, 0);
-    exportArgsLayout->addWidget(halfCheck, 0, 1);
-    exportArgsLayout->addWidget(int8Check, 0, 2);
-    exportArgsLayout->addWidget(endToEndCombo, 0, 3);
-    exportArgsLayout->addWidget(exportImageSizeEdit, 1, 0);
-    exportArgsLayout->addWidget(exportBatchEdit, 1, 1);
-    exportArgsLayout->addWidget(exportDeviceEdit, 1, 2);
-    exportArgsLayout->addWidget(exportDataRow, 2, 0, 1, 4);
+    auto* precisionRow = new QWidget;
+    auto* precisionLayout = new QHBoxLayout(precisionRow);
+    precisionLayout->setContentsMargins(0, 0, 0, 0);
+    precisionLayout->setSpacing(12);
+    precisionLayout->addWidget(dynamicCheck);
+    precisionLayout->addWidget(halfCheck);
+    precisionLayout->addWidget(int8Check);
+    precisionLayout->addStretch();
+    exportArgsLayout->addRow(uiText("尺寸与精度"), precisionRow);
+    exportArgsLayout->addRow(QStringLiteral("End-to-end"), endToEndCombo);
+    exportArgsLayout->addRow(uiText("图像尺寸"), exportImageSizeEdit);
+    exportArgsLayout->addRow(uiText("批大小"), exportBatchEdit);
+    exportArgsLayout->addRow(uiText("运行设备"), exportDeviceEdit);
+    exportArgsLayout->addRow(uiText("校准数据"), exportDataRow);
 
     auto* form = new QFormLayout;
     form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    form->setRowWrapPolicy(QFormLayout::WrapLongRows);
     form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     form->setHorizontalSpacing(14);
     form->setVerticalSpacing(10);
     form->addRow(QStringLiteral("模型输入"), inputRow);
     form->addRow(QStringLiteral("目标格式"), conversionFormatCombo_);
-    form->addRow(uiText("官方参数"), exportArgsBox);
     form->addRow(QStringLiteral("输出路径"), outputRow);
     form->addRow(uiText("验证图片"), validationImageRow);
     setupPanel->bodyLayout()->addLayout(form);
+
+    auto* exportAdvancedToggle = new QPushButton(uiText("展开高级导出参数"));
+    exportAdvancedToggle->setObjectName(QStringLiteral("AdvancedToggle"));
+    exportAdvancedToggle->setCheckable(true);
+    exportArgsBox->setVisible(false);
+    connect(exportAdvancedToggle, &QPushButton::toggled, this,
+        [exportAdvancedToggle, exportArgsBox, this](bool expanded) {
+            exportAdvancedToggle->setText(expanded
+                ? uiText("收起高级导出参数")
+                : uiText("展开高级导出参数"));
+            exportArgsBox->setVisible(expanded);
+        });
+    setupPanel->bodyLayout()->addWidget(exportAdvancedToggle);
+    setupPanel->bodyLayout()->addWidget(exportArgsBox);
 
     auto* sourceHelp = emptyStateLabel(QStringLiteral("从“任务与产物”中选中 best.onnx、checkpoint 或官方导出目录后，可点击“用作导出输入”自动带入这里。"));
     allowLabelToShrink(sourceHelp);
@@ -277,7 +302,13 @@ QWidget* MainWindow::buildModelExportPanel()
     rightLayout->addWidget(matrixPanel);
     rightLayout->addWidget(resultPanel, 1);
 
-    mainSplitter->addWidget(setupPanel);
+    auto* setupScroll = new QScrollArea;
+    setupScroll->setWidget(setupPanel);
+    setupScroll->setWidgetResizable(true);
+    setupScroll->setFrameShape(QFrame::NoFrame);
+    setupScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setupScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    mainSplitter->addWidget(setupScroll);
     mainSplitter->addWidget(rightStack);
     mainSplitter->setChildrenCollapsible(false);
     mainSplitter->setStretchFactor(0, 3);

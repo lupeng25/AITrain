@@ -32,6 +32,7 @@
 #include <QProcess>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QResizeEvent>
 #include <QScrollArea>
 #include <QSettings>
 #include <QSignalBlocker>
@@ -84,29 +85,33 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     contentLayout->setContentsMargins(0, 0, 0, 0);
     contentLayout->setSpacing(0);
     contentLayout->addWidget(buildTopBar());
+    contentLayout->addWidget(buildPageHeading());
 
     stack_ = new QStackedWidget;
-    stack_->addWidget(buildDashboardPage());
-    stack_->addWidget(buildProjectPage());
-    stack_->addWidget(buildDatasetPage());
-    stack_->addWidget(buildTrainingPage());
-    stack_->addWidget(buildTaskQueuePage());
-    stack_->addWidget(buildModelRegistryPage());
-    stack_->addWidget(buildDeploymentPage());
-    stack_->addWidget(buildEnvironmentPage());
-    stack_->addWidget(buildSystemSettingsPage());
+    QWidget* dashboardPage = buildDashboardPage();
+    dashboardPage->setProperty("workspaceInitialized", true);
+    stack_->addWidget(dashboardPage);
+    for (int pageIndex = ProjectPage; pageIndex < PageCount; ++pageIndex) {
+        auto* placeholder = new QWidget;
+        placeholder->setProperty("workspaceInitialized", false);
+        stack_->addWidget(placeholder);
+    }
     contentLayout->addWidget(stack_, 1);
 
     rootLayout->addWidget(content, 1);
+    inspector_ = qobject_cast<QFrame*>(buildInspector());
+    rootLayout->addWidget(inspector_);
     setCentralWidget(central);
 
     statusBar()->showMessage(tr("就绪"));
+    statusBar()->setVisible(false);
 
     connect(sidebar_, &Sidebar::pageRequested, this, &MainWindow::showPage);
     connect(&worker_, &WorkerClient::messageReceived, this, &MainWindow::handleWorkerMessage);
     connect(&worker_, &WorkerClient::logLine, this, &MainWindow::appendLog);
     connect(&worker_, &WorkerClient::connected, this, [this]() {
         workerPill_->setStatus(tr("Worker 已连接"), StatusPill::Tone::Success);
+        updateHeaderState();
     });
     connect(&worker_, &WorkerClient::idle, this, [this]() {
         QTimer::singleShot(0, this, &MainWindow::startNextQueuedTask);
@@ -123,6 +128,7 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
         }
         workerPill_->setStatus(ok ? tr("任务完成") : tr("任务失败"),
             ok ? StatusPill::Tone::Success : StatusPill::Tone::Error);
+        updateHeaderState();
         appendLog(ok ? tr("任务完成：%1").arg(message) : tr("任务失败：%1").arg(message));
         if (!state_.dataset.currentConversionTaskId.isEmpty()) {
             if (datasetConversionProgressBar_ && ok) {
@@ -162,10 +168,36 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
 
     refreshBuiltInCapabilities();
     aitrain_app::translateWidgetTree(this);
-    showPage(DashboardPage, tr("总览"));
+    showPage(TrainingPage, tr("训练实验"));
     updateHeaderState();
+    updateResponsiveChrome();
     updateDashboardSummary();
     updateLanguageButtonState();
+}
+
+void MainWindow::resizeEvent(QResizeEvent* event)
+{
+    QMainWindow::resizeEvent(event);
+    updateResponsiveChrome();
+}
+
+void MainWindow::updateResponsiveChrome()
+{
+    const int width = this->width();
+    if (sidebar_) {
+        const bool compact = width < 1366;
+        sidebar_->setCompact(compact);
+        sidebar_->setFixedWidth(compact ? 72 : (width >= 1600 ? 216 : 200));
+    }
+    if (inspectorToggleButton_ && !inspectorUserOverride_) {
+        applyingResponsiveChrome_ = true;
+        inspectorToggleButton_->setChecked(width >= 1366);
+        applyingResponsiveChrome_ = false;
+    }
+    if (inspector_) {
+        inspector_->setVisible(!inspectorToggleButton_ || inspectorToggleButton_->isChecked());
+        inspector_->setFixedWidth(width >= 1600 ? 304 : 272);
+    }
 }
 
 QString MainWindow::workerExecutablePath() const
@@ -274,7 +306,10 @@ void MainWindow::loadCapabilityCombos()
         }
         state_.dataset.currentFormat = currentDatasetFormat();
     }
-    refreshTrainingDefaults();
+    if (stack_ && stack_->widget(TrainingPage)
+        && stack_->widget(TrainingPage)->property("workspaceInitialized").toBool()) {
+        refreshTrainingDefaults();
+    }
 }
 
 QString MainWindow::currentDatasetFormat() const

@@ -35,7 +35,7 @@ QWidget* MainWindow::buildTaskQueuePage()
 
     auto* content = new QWidget;
     auto* layout = new QVBoxLayout(content);
-    layout->setContentsMargins(18, 18, 18, 18);
+    layout->setContentsMargins(18, 0, 18, 18);
     layout->setSpacing(16);
 
     auto* headerRefreshButton = primaryButton(QStringLiteral("刷新历史"));
@@ -110,7 +110,7 @@ QWidget* MainWindow::buildTaskQueuePage()
     toolbar->bodyLayout()->addWidget(mutedLabel(QStringLiteral("这里统一追踪训练、校验、划分、导出和推理任务；运行产物在下方详情区集中查看。")));
 
     auto* tablePanel = new InfoPanel(QStringLiteral("任务历史"));
-    tablePanel->setMinimumWidth(420);
+    tablePanel->setMinimumWidth(300);
     tablePanel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     taskQueueTable_ = new QTableWidget(0, 7);
     taskQueueTable_->setHorizontalHeaderLabels(QStringList()
@@ -141,7 +141,7 @@ QWidget* MainWindow::buildTaskQueuePage()
     tablePanel->bodyLayout()->addWidget(taskQueueTable_);
 
     auto* detailPanel = new InfoPanel(QStringLiteral("任务详情与产物"));
-    detailPanel->setMinimumWidth(640);
+    detailPanel->setMinimumWidth(480);
     detailPanel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     detailPanel->bodyLayout()->setSpacing(12);
     taskArtifactPanel_ = new TaskArtifactPanel;
@@ -160,7 +160,7 @@ QWidget* MainWindow::buildTaskQueuePage()
     bodySplitter->setChildrenCollapsible(false);
     bodySplitter->setStretchFactor(0, 2);
     bodySplitter->setStretchFactor(1, 3);
-    bodySplitter->setSizes(QList<int>() << 520 << 840);
+    bodySplitter->setSizes(QList<int>() << 380 << 680);
 
     layout->addWidget(createWorkbenchHeader(
         QStringLiteral("TASK ARTIFACT CENTER"),
@@ -168,10 +168,10 @@ QWidget* MainWindow::buildTaskQueuePage()
         uiText("按任务追踪 Worker 产物、指标、导出和评估报告；选中产物后进入部署验证、注册、评估或交付报告。"),
         headerRefreshButton,
         QStringList()
-            << QStringLiteral("Task History")
-            << QStringLiteral("Artifacts")
-            << QStringLiteral("Metrics")
-            << QStringLiteral("Reports")));
+            << uiText("任务历史")
+            << uiText("产物")
+            << uiText("指标")
+            << uiText("报告")));
     layout->addWidget(toolbar);
     layout->addWidget(bodySplitter, 1);
     page->setWidget(content);

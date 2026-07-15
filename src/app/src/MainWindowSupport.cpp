@@ -396,48 +396,32 @@ QFrame* createWorkbenchHeader(
     const QStringList& badges)
 {
     auto* headerPanel = new QFrame;
-    headerPanel->setObjectName(QStringLiteral("InferenceHeader"));
-    auto* headerRoot = new QVBoxLayout(headerPanel);
-    headerRoot->setContentsMargins(16, 14, 16, 14);
-    headerRoot->setSpacing(11);
-
-    auto* headerTop = new QHBoxLayout;
-    headerTop->setSpacing(14);
-    auto* titleBlock = new QWidget;
-    auto* titleLayout = new QVBoxLayout(titleBlock);
-    titleLayout->setContentsMargins(0, 0, 0, 0);
-    titleLayout->setSpacing(4);
-
-    auto* kicker = new QLabel(kickerText);
-    kicker->setObjectName(QStringLiteral("InferenceKicker"));
-    auto* title = new QLabel(titleText);
-    title->setObjectName(QStringLiteral("InferenceTitle"));
-    auto* subtitle = new QLabel(subtitleText);
-    subtitle->setObjectName(QStringLiteral("InferenceMeta"));
-    subtitle->setWordWrap(true);
-    allowLabelToShrink(subtitle);
-
-    titleLayout->addWidget(kicker);
-    titleLayout->addWidget(title);
-    titleLayout->addWidget(subtitle);
+    headerPanel->setObjectName(QStringLiteral("WorkspaceToolbar"));
+    auto* headerRoot = new QHBoxLayout(headerPanel);
+    headerRoot->setContentsMargins(10, 6, 10, 6);
+    headerRoot->setSpacing(10);
+    Q_UNUSED(kickerText)
+    Q_UNUSED(subtitleText)
+    auto* contextLabel = new QLabel(titleText);
+    contextLabel->setObjectName(QStringLiteral("WorkspaceToolbarContext"));
+    headerRoot->addWidget(contextLabel);
 
     if (!badges.isEmpty()) {
         auto* badgeRow = new QWidget;
         auto* badgeLayout = new QHBoxLayout(badgeRow);
-        badgeLayout->setContentsMargins(0, 4, 0, 0);
+        badgeLayout->setContentsMargins(0, 0, 0, 0);
         badgeLayout->setSpacing(7);
         for (const QString& badge : badges) {
             badgeLayout->addWidget(inferenceBadge(badge));
         }
         badgeLayout->addStretch();
-        titleLayout->addWidget(badgeRow);
+        headerRoot->addWidget(badgeRow, 1);
+    } else {
+        headerRoot->addStretch(1);
     }
-
-    headerTop->addWidget(titleBlock, 1);
     if (actionButton) {
-        headerTop->addWidget(actionButton, 0, Qt::AlignTop);
+        headerRoot->addWidget(actionButton);
     }
-    headerRoot->addLayout(headerTop);
     return headerPanel;
 }
 
@@ -1092,6 +1076,9 @@ bool setComboCurrentData(QComboBox* combo, const QString& data)
     const int index = combo->findData(data);
     if (index < 0) {
         return false;
+    }
+    if (combo->currentIndex() == index) {
+        return true;
     }
     combo->setCurrentIndex(index);
     return true;

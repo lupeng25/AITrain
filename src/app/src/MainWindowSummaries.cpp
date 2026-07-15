@@ -67,9 +67,11 @@ QString MainWindow::pageCaption(int pageIndex) const
 
 void MainWindow::showPage(int pageIndex, const QString& title)
 {
+    ensureWorkspacePage(pageIndex);
     stack_->setCurrentIndex(pageIndex);
     pageTitle_->setText(title);
-    pageCaption_->setText(pageCaption(pageIndex));
+    pageCaption_->setText(QStringLiteral("%1 / %2")
+        .arg(currentProjectName_.isEmpty() ? uiText("本地工作台") : currentProjectName_, title));
     sidebar_->setCurrentIndex(pageIndex);
     if (pageIndex == TaskQueuePage) {
         updateRecentTasks();
@@ -126,15 +128,78 @@ void MainWindow::showSystemSettingsTab(int tabIndex)
 
 void MainWindow::updateHeaderState()
 {
-    headerProjectLabel_->setText(currentProjectPath_.isEmpty()
-        ? tr("项目：未打开")
-        : tr("项目：%1").arg(currentProjectName_));
+    if (headerProjectLabel_) {
+        headerProjectLabel_->setText(currentProjectPath_.isEmpty()
+            ? uiText("未打开项目")
+            : currentProjectName_);
+    }
+    if (pageContextPill_) {
+        pageContextPill_->setStatus(currentProjectPath_.isEmpty() ? uiText("项目未打开") : uiText("项目已就绪"),
+            currentProjectPath_.isEmpty() ? StatusPill::Tone::Neutral : StatusPill::Tone::Success);
+    }
     const int capabilityCount = aitrain::BuiltinCapabilityRegistry::instance().capabilities().size();
-    capabilityPill_->setStatus(uiText("内置能力 %1").arg(capabilityCount), capabilityCount > 0 ? StatusPill::Tone::Success : StatusPill::Tone::Warning);
+    if (capabilityPill_) {
+        capabilityPill_->setStatus(uiText("内置能力 %1").arg(capabilityCount),
+            capabilityCount > 0 ? StatusPill::Tone::Success : StatusPill::Tone::Warning);
+    }
     if (dashboardCapabilityValue_) {
         dashboardCapabilityValue_->setText(QString::number(capabilityCount));
     }
+    if (inspectorProjectLabel_) {
+        inspectorProjectLabel_->setText(currentProjectPath_.isEmpty()
+                ? uiText("未打开项目")
+                : currentProjectName_);
+    }
+    if (inspectorCapabilityLabel_) {
+        inspectorCapabilityLabel_->setText(uiText("内置能力 %1 项").arg(capabilityCount));
+    }
+    if (inspectorWorkerLabel_) {
+        inspectorWorkerLabel_->setText(workerPill_ ? workerPill_->text() : uiText("Worker：等待连接"));
+    }
+    if (inspectorGpuLabel_) {
+        inspectorGpuLabel_->setText(gpuPill_ ? gpuPill_->text() : uiText("GPU：等待环境检查"));
+    }
     updateCapabilitySummary();
+}
+
+void MainWindow::ensureWorkspacePage(int pageIndex)
+{
+    if (!stack_ || pageIndex < 0 || pageIndex >= PageCount) {
+        return;
+    }
+    QWidget* placeholder = stack_->widget(pageIndex);
+    if (!placeholder || placeholder->property("workspaceInitialized").toBool()) {
+        return;
+    }
+
+    QWidget* page = nullptr;
+    switch (pageIndex) {
+    case ProjectPage: page = buildProjectPage(); break;
+    case DatasetPage: page = buildDatasetPage(); break;
+    case TrainingPage: page = buildTrainingPage(); break;
+    case TaskQueuePage: page = buildTaskQueuePage(); break;
+    case ModelRegistryPage: page = buildModelRegistryPage(); break;
+    case DeploymentPage: page = buildDeploymentPage(); break;
+    case EnvironmentPage: page = buildEnvironmentPage(); break;
+    case SystemSettingsPage: page = buildSystemSettingsPage(); break;
+    default: return;
+    }
+
+    if (pageIndex == DatasetPage || pageIndex == TrainingPage) {
+        loadCapabilityCombos();
+    }
+
+    page->setProperty("workspaceInitialized", true);
+    stack_->removeWidget(placeholder);
+    delete placeholder;
+    stack_->insertWidget(pageIndex, page);
+
+    if (pageIndex == TrainingPage) {
+        refreshTrainingDefaults();
+    }
+    if (pageIndex == SystemSettingsPage) {
+        refreshBuiltInCapabilities();
+    }
 }
 
 void MainWindow::updateEnvironmentTable(const QJsonObject& payload)
@@ -595,14 +660,17 @@ void MainWindow::updateTrainingSelectionSummary()
         ? trainingBackendCombo_->currentData().toString().trimmed().toLower()
         : QString();
     if (auto* yoloPanel = findChild<QWidget*>(QStringLiteral("YoloOfficialArgsGroup"))) {
-        yoloPanel->setVisible(visibleBackend.startsWith(QStringLiteral("ultralytics_yolo")));
+        yoloPanel->setVisible(yoloPanel->property("advancedExpanded").toBool()
+            && visibleBackend.startsWith(QStringLiteral("ultralytics_yolo")));
     }
     if (auto* smpPanel = findChild<QWidget*>(QStringLiteral("SmpSemanticArgsGroup"))) {
-        smpPanel->setVisible(visibleBackend == QStringLiteral("smp_semantic_segmentation"));
+        smpPanel->setVisible(smpPanel->property("advancedExpanded").toBool()
+            && visibleBackend == QStringLiteral("smp_semantic_segmentation"));
     }
     if (auto* anomalyPanel = findChild<QWidget*>(QStringLiteral("AnomalyDetectionArgsGroup"))) {
-        anomalyPanel->setVisible(visibleBackend == QStringLiteral("anomalib_patchcore")
-            || visibleBackend == QStringLiteral("anomalib_efficientad"));
+        anomalyPanel->setVisible(anomalyPanel->property("advancedExpanded").toBool()
+            && (visibleBackend == QStringLiteral("anomalib_patchcore")
+                || visibleBackend == QStringLiteral("anomalib_efficientad")));
     }
     if (auto* caption = findChild<QLabel*>(QStringLiteral("TrainingLiveCaption_TrainingMapValue"))) {
         caption->setText((visibleBackend == QStringLiteral("anomalib_patchcore") || visibleBackend == QStringLiteral("anomalib_efficientad"))

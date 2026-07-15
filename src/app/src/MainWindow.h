@@ -27,12 +27,18 @@ class TaskArtifactPanel;
 class QPushButton;
 class QTabWidget;
 class QToolButton;
+class QFrame;
+class QResizeEvent;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
-    explicit MainWindow(const QString& licenseOwner = QString(), const QString& licenseExpiry = QString(), QWidget* parent = nullptr);
+    explicit MainWindow(const QString& licenseOwner = QString(), const QString& licenseExpiry = QString(),
+        QWidget* parent = nullptr);
+
+protected:
+    void resizeEvent(QResizeEvent* event) override;
 
 private slots:
     void createProject();
@@ -96,10 +102,13 @@ private:
         ModelRegistryPage,
         DeploymentPage,
         EnvironmentPage,
-        SystemSettingsPage
+        SystemSettingsPage,
+        PageCount
     };
 
     QWidget* buildTopBar();
+    QWidget* buildPageHeading();
+    QWidget* buildInspector();
     QWidget* buildDashboardPage();
     QWidget* buildProjectPage();
     QWidget* buildDatasetPage();
@@ -152,6 +161,8 @@ private:
     void updateDatasetList();
     void updateTaskTable(QTableWidget* table, const QVector<aitrain::TaskRecord>& tasks);
     void updateHeaderState();
+    void updateResponsiveChrome();
+    void ensureWorkspacePage(int pageIndex);
     void updateEnvironmentTable(const QJsonObject& payload);
     void updateDatasetValidationResult(const QJsonObject& payload);
     void updateDatasetSplitResult(const QJsonObject& payload);
@@ -212,6 +223,7 @@ private:
     QString currentProjectName_;
 
     Sidebar* sidebar_ = nullptr;
+    QFrame* inspector_ = nullptr;
     QStackedWidget* stack_ = nullptr;
     QTabWidget* datasetTabs_ = nullptr;
     QTabWidget* modelWorkspaceTabs_ = nullptr;
@@ -226,10 +238,18 @@ private:
     StatusPill* licensePill_ = nullptr;
     QToolButton* topBarZhLanguageButton_ = nullptr;
     QToolButton* topBarEnLanguageButton_ = nullptr;
+    QToolButton* inspectorToggleButton_ = nullptr;
+    bool inspectorUserOverride_ = false;
+    bool applyingResponsiveChrome_ = false;
+    StatusPill* pageContextPill_ = nullptr;
     QToolButton* settingsZhLanguageButton_ = nullptr;
     QToolButton* settingsEnLanguageButton_ = nullptr;
     QString licenseOwner_;
     QString licenseExpiry_;
+    QLabel* inspectorProjectLabel_ = nullptr;
+    QLabel* inspectorCapabilityLabel_ = nullptr;
+    QLabel* inspectorWorkerLabel_ = nullptr;
+    QLabel* inspectorGpuLabel_ = nullptr;
 
     QLabel* projectLabel_ = nullptr;
     QLabel* gpuLabel_ = nullptr;

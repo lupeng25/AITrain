@@ -46,7 +46,7 @@ QWidget* MainWindow::buildDatasetPage()
 
     auto* content = new QWidget;
     auto* layout = new QVBoxLayout(content);
-    layout->setContentsMargins(18, 18, 18, 18);
+    layout->setContentsMargins(18, 0, 18, 18);
     layout->setSpacing(16);
 
     auto* headerValidateButton = primaryButton(QStringLiteral("校验数据集"));
@@ -176,22 +176,22 @@ QWidget* MainWindow::buildDatasetPage()
     conversionForm->setVerticalSpacing(6);
     conversionForm->addRow(QStringLiteral("源格式"), datasetConversionSourceFormatCombo_);
     datasetConversionSourceErrorLabel_ = new QLabel;
-    datasetConversionSourceErrorLabel_->setStyleSheet(QStringLiteral("color: #DC2626;"));
+    datasetConversionSourceErrorLabel_->setObjectName(QStringLiteral("FieldErrorText"));
     datasetConversionSourceErrorLabel_->hide();
     conversionForm->addRow(QString(), datasetConversionSourceErrorLabel_);
     conversionForm->addRow(QStringLiteral("目标格式"), datasetConversionTargetFormatCombo_);
     datasetConversionTargetErrorLabel_ = new QLabel;
-    datasetConversionTargetErrorLabel_->setStyleSheet(QStringLiteral("color: #DC2626;"));
+    datasetConversionTargetErrorLabel_->setObjectName(QStringLiteral("FieldErrorText"));
     datasetConversionTargetErrorLabel_->hide();
     conversionForm->addRow(QString(), datasetConversionTargetErrorLabel_);
     conversionForm->addRow(QStringLiteral("输入路径"), conversionInputRow);
     datasetConversionInputErrorLabel_ = new QLabel;
-    datasetConversionInputErrorLabel_->setStyleSheet(QStringLiteral("color: #DC2626;"));
+    datasetConversionInputErrorLabel_->setObjectName(QStringLiteral("FieldErrorText"));
     datasetConversionInputErrorLabel_->hide();
     conversionForm->addRow(QString(), datasetConversionInputErrorLabel_);
     conversionForm->addRow(QStringLiteral("输出目录"), conversionOutputRow);
     datasetConversionOutputErrorLabel_ = new QLabel;
-    datasetConversionOutputErrorLabel_->setStyleSheet(QStringLiteral("color: #DC2626;"));
+    datasetConversionOutputErrorLabel_->setObjectName(QStringLiteral("FieldErrorText"));
     datasetConversionOutputErrorLabel_->hide();
     conversionForm->addRow(QString(), datasetConversionOutputErrorLabel_);
     conversionLayout->addLayout(conversionForm);
@@ -461,6 +461,8 @@ QWidget* MainWindow::buildSampleReviewPanel()
     auto* splitter = new QSplitter(Qt::Horizontal);
 
     auto* setupPanel = new InfoPanel(uiText("输入与过滤"));
+    setupPanel->setMinimumWidth(280);
+    setupPanel->setMaximumWidth(340);
     reviewSamplePathEdit_ = new QLineEdit;
     reviewSamplePathEdit_->setPlaceholderText(uiText("选择 problem_samples.json / error_samples.json / rework_sample_set.json / evaluation_report.json"));
     auto* browseButton = new QPushButton(uiText("选择文件"));
@@ -493,9 +495,13 @@ QWidget* MainWindow::buildSampleReviewPanel()
     form->addRow(uiText("搜索"), reviewSearchEdit_);
     setupPanel->bodyLayout()->addLayout(form);
 
+    auto* reviewWorkflowHint = mutedLabel(uiText("标注完成后返回数据集准备页重新校验并创建快照。"));
+    allowLabelToShrink(reviewWorkflowHint);
+    setupPanel->bodyLayout()->addWidget(reviewWorkflowHint);
+
     auto* actionStrip = new QFrame;
     actionStrip->setObjectName(QStringLiteral("ActionStrip"));
-    auto* actionLayout = new QHBoxLayout(actionStrip);
+    auto* actionLayout = new QGridLayout(actionStrip);
     actionLayout->setContentsMargins(10, 8, 10, 8);
     actionLayout->setSpacing(8);
     auto* loadButton = primaryButton(uiText("加载复核样本"));
@@ -506,11 +512,12 @@ QWidget* MainWindow::buildSampleReviewPanel()
     connect(openButton, &QPushButton::clicked, this, &MainWindow::openSelectedReviewSample);
     connect(generateButton, &QPushButton::clicked, this, &MainWindow::generateFilteredReviewList);
     connect(xAnyButton, &QPushButton::clicked, this, &MainWindow::launchXAnyLabelingForReview);
-    actionLayout->addWidget(mutedLabel(uiText("标注完成后回到“数据集”页重新校验并创建快照。")), 1);
-    actionLayout->addWidget(loadButton);
-    actionLayout->addWidget(openButton);
-    actionLayout->addWidget(generateButton);
-    actionLayout->addWidget(xAnyButton);
+    actionLayout->addWidget(loadButton, 0, 0);
+    actionLayout->addWidget(openButton, 0, 1);
+    actionLayout->addWidget(generateButton, 1, 0);
+    actionLayout->addWidget(xAnyButton, 1, 1);
+    actionLayout->setColumnStretch(0, 1);
+    actionLayout->setColumnStretch(1, 1);
     setupPanel->bodyLayout()->addWidget(actionStrip);
 
     sampleReviewSummaryLabel_ = inlineStatusLabel(uiText("尚未加载复核样本。"));
@@ -542,9 +549,9 @@ QWidget* MainWindow::buildSampleReviewPanel()
     splitter->addWidget(setupPanel);
     splitter->addWidget(tablePanel);
     splitter->setChildrenCollapsible(false);
-    splitter->setStretchFactor(0, 2);
-    splitter->setStretchFactor(1, 5);
-    splitter->setSizes(QList<int>() << 360 << 840);
+    splitter->setStretchFactor(0, 0);
+    splitter->setStretchFactor(1, 1);
+    splitter->setSizes(QList<int>() << 320 << 820);
 
     layout->addWidget(splitter, 1);
     page->setWidget(content);

@@ -40,7 +40,7 @@ QWidget* MainWindow::buildModelRegistryPage()
 {
     auto* page = new QWidget;
     auto* layout = new QVBoxLayout(page);
-    layout->setContentsMargins(18, 18, 18, 18);
+    layout->setContentsMargins(18, 0, 18, 18);
     layout->setSpacing(16);
 
     auto* headerRefreshButton = primaryButton(QStringLiteral("刷新模型库"));
@@ -53,7 +53,6 @@ QWidget* MainWindow::buildModelRegistryPage()
     actionGrid->setContentsMargins(10, 8, 10, 8);
     actionGrid->setHorizontalSpacing(10);
     actionGrid->setVerticalSpacing(8);
-    auto* refreshButton = primaryButton(QStringLiteral("刷新模型库"));
     auto* inferButton = new QPushButton(QStringLiteral("选中模型用于推理"));
     auto* exportButton = new QPushButton(QStringLiteral("选中模型用于导出"));
     auto* pipelineButton = new QPushButton(QStringLiteral("执行本地流水线"));
@@ -61,7 +60,6 @@ QWidget* MainWindow::buildModelRegistryPage()
     auto* comparisonInferButton = new QPushButton(QStringLiteral("对比候选用于推理"));
     auto* comparisonExportButton = new QPushButton(QStringLiteral("对比候选用于导出"));
     auto* comparisonReportButton = new QPushButton(QStringLiteral("打开候选报告"));
-    connect(refreshButton, &QPushButton::clicked, this, &MainWindow::refreshModelRegistry);
     connect(inferButton, &QPushButton::clicked, this, [this]() {
         if (!modelVersionTable_ || modelVersionTable_->selectedItems().isEmpty()) {
             QMessageBox::information(this, uiText("模型库"), uiText("请先选择一个模型版本。"));
@@ -105,15 +103,11 @@ QWidget* MainWindow::buildModelRegistryPage()
     connect(comparisonInferButton, &QPushButton::clicked, this, &MainWindow::useSelectedComparisonForInference);
     connect(comparisonExportButton, &QPushButton::clicked, this, &MainWindow::useSelectedComparisonForExport);
     connect(comparisonReportButton, &QPushButton::clicked, this, &MainWindow::openSelectedComparisonReport);
-    actionGrid->addWidget(refreshButton, 0, 0);
-    actionGrid->addWidget(inferButton, 0, 1);
-    actionGrid->addWidget(exportButton, 0, 2);
+    actionGrid->addWidget(inferButton, 0, 0);
+    actionGrid->addWidget(exportButton, 0, 1);
     actionGrid->addWidget(pipelineButton, 1, 0);
     actionGrid->addWidget(reportsButton, 1, 1);
-    actionGrid->addWidget(comparisonInferButton, 2, 0);
-    actionGrid->addWidget(comparisonExportButton, 2, 1);
-    actionGrid->addWidget(comparisonReportButton, 2, 2);
-    for (int column = 0; column < 3; ++column) {
+    for (int column = 0; column < 2; ++column) {
         actionGrid->setColumnStretch(column, 1);
     }
     modelRegistrySummaryLabel_ = mutedLabel(uiText("训练产物可从“任务与产物”注册为模型版本；评估报告、模型对比和流水线记录集中在当前模型库工作区。"));
@@ -172,7 +166,19 @@ QWidget* MainWindow::buildModelRegistryPage()
     modelComparisonTable_->horizontalHeader()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
     modelComparisonTable_->horizontalHeader()->setSectionResizeMode(6, QHeaderView::ResizeToContents);
     modelComparisonTable_->horizontalHeader()->setSectionResizeMode(7, QHeaderView::Stretch);
+    auto* comparisonActionStrip = new QFrame;
+    comparisonActionStrip->setObjectName(QStringLiteral("ActionStrip"));
+    auto* comparisonActionLayout = new QGridLayout(comparisonActionStrip);
+    comparisonActionLayout->setContentsMargins(10, 8, 10, 8);
+    comparisonActionLayout->setHorizontalSpacing(10);
+    comparisonActionLayout->addWidget(comparisonInferButton, 0, 0);
+    comparisonActionLayout->addWidget(comparisonExportButton, 0, 1);
+    comparisonActionLayout->addWidget(comparisonReportButton, 0, 2);
+    for (int column = 0; column < 3; ++column) {
+        comparisonActionLayout->setColumnStretch(column, 1);
+    }
     comparisonPanel->bodyLayout()->addWidget(modelComparisonSummaryLabel_);
+    comparisonPanel->bodyLayout()->addWidget(comparisonActionStrip);
     comparisonPanel->bodyLayout()->addWidget(modelComparisonTable_);
 
     auto* pipelinePanel = new InfoPanel(QStringLiteral("流水线记录"));
@@ -205,10 +211,10 @@ QWidget* MainWindow::buildModelRegistryPage()
         uiText("管理模型版本、评估报告、对比和流水线记录。"),
         headerRefreshButton,
         QStringList()
-            << QStringLiteral("Versioned Models")
-            << QStringLiteral("Evaluation Reports")
-            << QStringLiteral("Model Comparison")
-            << QStringLiteral("Pipeline Runs")));
+            << uiText("版本模型")
+            << uiText("评估报告")
+            << uiText("模型对比")
+            << uiText("流水线")));
     layout->addWidget(toolbar);
     layout->addWidget(modelWorkspaceTabs_, 1);
     return page;

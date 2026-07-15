@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AITrain Studio 重点区域对比</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #111827; color: #e5e7eb; font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif; overflow: hidden; }
+    header { height: 48px; display: flex; align-items: center; justify-content: space-around; font-size: 14px; font-weight: 700; }
+    main { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; height: calc(100vh - 48px); }
+    figure { margin: 0; position: relative; overflow: hidden; background: #f4f7fa; }
+    img { position: absolute; width: 1440px; height: 1024px; max-width: none; object-fit: fill; }
+    .reference img { transform: translate(-148px, -54px); }
+    .implementation img { transform: translate(-200px, -54px); }
+  </style>
+</head>
+<body>
+  <header><span>方案 1 · 训练主体（原始像素）</span><span>HTML 实现 · 训练主体（原始像素）</span></header>
+  <main>
+    <figure class="reference"><img src="/qa/option-1.png" alt="方案 1 训练主体" /></figure>
+    <figure class="implementation"><img src="/qa/training-1440x1024.png" alt="实现训练主体" /></figure>
+  </main>
+</body>
+</html>

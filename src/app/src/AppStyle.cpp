@@ -98,65 +98,66 @@ void apply(QApplication& app)
         }
 
         QFrame#Sidebar {
-            background: #111827;
+            background: #071B34;
             border: none;
         }
 
         QLabel#BrandTitle {
             color: #FFFFFF;
-            font-size: 14pt;
+            font-size: 12pt;
             font-weight: 700;
         }
 
         QLabel#BrandSubtitle {
-            color: #9CA3AF;
-            font-size: 8pt;
+            color: #8FA7C2;
+            font-size: 7pt;
         }
 
         QLabel#SidebarSection {
-            color: #6B7280;
+            color: #7F98B5;
             font-size: 8pt;
             font-weight: 700;
-            padding: 6px 2px 2px 2px;
+            padding: 6px 4px 2px 4px;
         }
 
         QPushButton#SidebarButton {
-            color: #D1D5DB;
+            color: #B8C9DC;
             background: transparent;
             border: none;
-            border-radius: 5px;
-            padding: 8px 12px;
+            border-radius: 6px;
+            padding: 8px 10px;
             text-align: left;
-            min-height: 30px;
+            min-height: 34px;
+            icon-size: 18px;
         }
 
         QPushButton#SidebarButton:hover {
-            background: #1F2937;
+            background: #102B4C;
             color: #FFFFFF;
         }
 
         QPushButton#SidebarButton:checked {
-            background: #263244;
+            background: #15365D;
             color: #FFFFFF;
-            border-left: 3px solid #76B900;
-            padding-left: 9px;
+            border-left: 3px solid #5E92FF;
+            padding-left: 7px;
         }
 
         QLabel#PageTitle {
             color: #111827;
-            font-size: 15pt;
+            font-size: 12pt;
             font-weight: 700;
         }
 
         QLabel#PageCaption {
             color: #6B7280;
-            font-size: 9pt;
+            font-size: 8pt;
         }
 
         QFrame#Panel {
             background: #FFFFFF;
             border: 1px solid #D8DEE6;
-            border-radius: 6px;
+            border-radius: 7px;
         }
 
         QFrame#CompactMetricPanel,
@@ -168,12 +169,17 @@ void apply(QApplication& app)
 
         QLabel#PanelTitle {
             color: #111827;
-            font-size: 10pt;
+            font-size: 9pt;
             font-weight: 700;
         }
 
         QLabel#MutedText {
             color: #6B7280;
+        }
+
+        QLabel#FieldErrorText {
+            color: #DC2626;
+            font-size: 8pt;
         }
 
         QLabel#EmptyState {
@@ -245,8 +251,8 @@ void apply(QApplication& app)
         }
 
         QLabel#MetricValue {
-            color: #111827;
-            font-size: 15pt;
+            color: #1F2937;
+            font-size: 14pt;
             font-weight: 700;
         }
 
@@ -272,7 +278,7 @@ void apply(QApplication& app)
 
         QLabel#StatusPill {
             border-radius: 10px;
-            padding: 3px 9px;
+            padding: 3px 8px;
             font-size: 8pt;
             font-weight: 600;
         }
@@ -302,7 +308,7 @@ void apply(QApplication& app)
 
         QToolButton#LanguageSwitchButton:checked {
             color: #FFFFFF;
-            background: #111827;
+            background: #2563EB;
         }
 
         QPushButton {
@@ -310,7 +316,7 @@ void apply(QApplication& app)
             border: 1px solid #C9D1DB;
             border-radius: 5px;
             padding: 5px 12px;
-            min-height: 26px;
+            min-height: 28px;
         }
 
         QPushButton:hover {
@@ -380,9 +386,21 @@ void apply(QApplication& app)
         }
 
         QFrame#ExperimentHeader {
-            background: #0B1020;
-            border: 1px solid #1F2937;
-            border-radius: 3px;
+            background: #FFFFFF;
+            border: 1px solid #D8DEE6;
+            border-radius: 7px;
+        }
+
+        QFrame#ExperimentHeader QLabel#ExperimentTitle {
+            color: #111827;
+        }
+
+        QFrame#ExperimentHeader QLabel#ExperimentKicker {
+            color: #2563EB;
+        }
+
+        QFrame#ExperimentHeader QLabel#ExperimentMeta {
+            color: #6B7280;
         }
 
         QFrame#ActionStrip {
@@ -401,9 +419,9 @@ void apply(QApplication& app)
 
         QTabWidget::pane {
             border: 1px solid #D8DEE6;
-            border-radius: 6px;
+            border-radius: 7px;
             background: #FFFFFF;
-            top: -1px;
+            top: 0;
         }
 
         QTabWidget::tab-bar {
@@ -411,27 +429,25 @@ void apply(QApplication& app)
         }
 
         QTabWidget QTabBar::tab {
-            background: #F3F5F8;
+            background: transparent;
             color: #6B7280;
-            border: 1px solid #D8DEE6;
-            border-bottom: none;
-            border-top-left-radius: 5px;
-            border-top-right-radius: 5px;
-            margin-right: 3px;
-            min-height: 24px;
-            min-width: 86px;
-            padding: 7px 14px;
+            border: none;
+            border-bottom: 2px solid transparent;
+            margin-right: 2px;
+            min-height: 28px;
+            min-width: 74px;
+            padding: 6px 12px;
         }
 
         QTabWidget QTabBar::tab:hover {
-            background: #E8EDF5;
+            background: #F7F9FC;
             color: #111827;
         }
 
         QTabWidget QTabBar::tab:selected {
             background: #FFFFFF;
-            color: #111827;
-            border-bottom-color: #FFFFFF;
+            color: #2563EB;
+            border-bottom-color: #2563EB;
             font-weight: 700;
         }
 
@@ -478,44 +494,44 @@ void apply(QApplication& app)
         }
 
         QFrame#InferenceHeader {
-            background: #0B1020;
-            border: 1px solid #1F2937;
-            border-radius: 4px;
+            background: #FFFFFF;
+            border: 1px solid #D8DEE6;
+            border-radius: 7px;
         }
 
         QFrame#InferenceHeader QPushButton#PrimaryButton {
-            background: #76B900;
-            border-color: #76B900;
-            color: #0B1020;
-            font-weight: 700;
+            background: #2563EB;
+            border-color: #2563EB;
+            color: #FFFFFF;
+            font-weight: 600;
         }
 
         QFrame#InferenceHeader QPushButton#PrimaryButton:hover {
-            background: #8DCE12;
-            border-color: #8DCE12;
+            background: #1D4ED8;
+            border-color: #1D4ED8;
         }
 
         QLabel#InferenceKicker {
-            color: #76B900;
+            color: #2563EB;
             font-size: 8pt;
             font-weight: 700;
         }
 
         QLabel#InferenceTitle {
-            color: #FFFFFF;
-            font-size: 15pt;
+            color: #111827;
+            font-size: 13pt;
             font-weight: 700;
         }
 
         QLabel#InferenceMeta {
-            color: #A7B0BD;
+            color: #6B7280;
             font-size: 9pt;
         }
 
         QLabel#InferenceBadge {
-            color: #D8F99C;
-            background: #111827;
-            border: 1px solid #2F3B4C;
+            color: #1D4ED8;
+            background: #EAF1FF;
+            border: 1px solid #CFE0FF;
             border-radius: 11px;
             padding: 3px 9px;
             font-size: 8pt;
@@ -524,15 +540,15 @@ void apply(QApplication& app)
         }
 
         QFrame#InferenceStep {
-            background: #F9FAFB;
-            border: 1px solid #E5E7EB;
+            background: #FFFFFF;
+            border: 1px solid #D8DEE6;
             border-radius: 6px;
         }
 
         QLabel#InferenceStepIndex {
-            color: #0B1020;
-            background: #D8F99C;
-            border: 1px solid #76B900;
+            color: #FFFFFF;
+            background: #2563EB;
+            border: 1px solid #2563EB;
             border-radius: 12px;
             font-weight: 700;
         }
@@ -548,9 +564,9 @@ void apply(QApplication& app)
         }
 
         QFrame#InferenceCapability {
-            background: #F9FAFB;
-            border: 1px solid #E5E7EB;
-            border-left: 3px solid #76B900;
+            background: #F8FAFC;
+            border: 1px solid #D8DEE6;
+            border-left: 3px solid #2563EB;
             border-radius: 5px;
         }
 
@@ -582,6 +598,65 @@ void apply(QApplication& app)
             border: 1px dashed #C9D1DB;
             border-radius: 8px;
             padding: 16px;
+        }
+    )") + QStringLiteral(R"(
+
+        QFrame#Inspector {
+            background: #FFFFFF;
+            border-left: 1px solid #D8DEE6;
+        }
+
+        QLabel#InspectorTitle {
+            color: #111827;
+            font-size: 10pt;
+            font-weight: 700;
+        }
+
+        QLabel#InspectorSubtitle,
+        QLabel#InspectorFooter {
+            color: #6B7280;
+            font-size: 8pt;
+        }
+
+        QFrame#InspectorIdentity,
+        QFrame#InspectorSection {
+            background: #F8FAFC;
+            border: 1px solid #E1E7EF;
+            border-radius: 6px;
+        }
+
+        QLabel#InspectorProject {
+            color: #111827;
+            font-size: 10pt;
+            font-weight: 700;
+        }
+
+        QLabel#InspectorDetail {
+            color: #5E6C80;
+            font-size: 8pt;
+        }
+
+        QLabel#InspectorSectionTitle {
+            color: #334155;
+            font-size: 8pt;
+            font-weight: 700;
+        }
+
+        QPushButton#InspectorShortcut {
+            color: #475569;
+            background: transparent;
+            border: none;
+            border-bottom: 1px solid #E1E7EF;
+            border-radius: 0;
+            padding: 5px 2px;
+            text-align: left;
+            min-height: 26px;
+        }
+
+        QPushButton#InspectorShortcut:hover {
+            color: #2563EB;
+            background: transparent;
+            border-color: #CFE0FF;
         }
 
         QGroupBox {
@@ -658,8 +733,251 @@ void apply(QApplication& app)
         }
 
         QProgressBar::chunk {
-            background: #76B900;
+            background: #2563EB;
             border-radius: 5px;
+        }
+
+        QFrame#Sidebar {
+            background: #071B34;
+        }
+
+        QWidget#SidebarBrand {
+            background: transparent;
+        }
+
+        QLabel#BrandIcon {
+            background: #FFFFFF;
+            border-radius: 6px;
+        }
+
+        QLabel#SidebarAvatar {
+            background: #385574;
+            color: #FFFFFF;
+            border-radius: 15px;
+            font-size: 8pt;
+            font-weight: 700;
+        }
+
+        QLabel#SidebarUserText {
+            color: #D5E1EF;
+            font-size: 8pt;
+        }
+
+        QFrame#SidebarFooter {
+            background: transparent;
+            border-top: 1px solid #1B3654;
+        }
+
+        QPushButton#SidebarButton[compact="true"] {
+            font-size: 0px;
+            padding: 8px 0;
+            text-align: center;
+        }
+
+        QFrame#TopBar {
+            background: #FFFFFF;
+            border-bottom: 1px solid #DCE3EB;
+        }
+
+        QLabel#TopbarCaption {
+            color: #7A8798;
+            font-size: 8pt;
+        }
+
+        QLabel#TopbarProject {
+            color: #172033;
+            font-size: 9pt;
+            font-weight: 700;
+        }
+
+        QToolButton#InspectorToggle {
+            background: #F4F6F9;
+            border: 1px solid #D6DEE8;
+            border-radius: 5px;
+            min-width: 30px;
+            min-height: 28px;
+        }
+
+        QToolButton#InspectorToggle:checked {
+            color: #2563EB;
+            background: #EEF4FF;
+            border-color: #AFC6F4;
+        }
+
+        QFrame#PageHeading {
+            background: #F4F7FA;
+            border: none;
+        }
+
+        QLabel#PageEyebrow {
+            color: #718096;
+            font-size: 8pt;
+        }
+
+        QLabel#PageTitle {
+            color: #152033;
+            font-size: 15pt;
+            font-weight: 700;
+        }
+
+        QFrame#Inspector {
+            background: #FFFFFF;
+            border-left: 1px solid #DCE3EB;
+        }
+
+        QLabel#InspectorTitle {
+            color: #172033;
+            font-size: 10pt;
+            font-weight: 700;
+        }
+
+        QFrame#InspectorIdentity,
+        QFrame#InspectorSection {
+            background: #FFFFFF;
+            border: none;
+            border-top: 1px solid #E5EAF0;
+            border-radius: 0;
+        }
+
+        QPushButton#InspectorShortcut {
+            background: #FFFFFF;
+            border: none;
+            border-bottom: 1px solid #E8EDF2;
+            border-radius: 0;
+            text-align: left;
+            padding-left: 4px;
+        }
+
+        QFrame#FlowRail {
+            background: #FFFFFF;
+            border: 1px solid #DCE3EB;
+            border-radius: 7px;
+            min-height: 60px;
+        }
+
+        QFrame#FlowStep,
+        QFrame#FlowStepDone,
+        QFrame#FlowStepActive {
+            background: transparent;
+            border: none;
+            border-right: 1px solid #E5EAF0;
+        }
+
+        QFrame#FlowStepActive {
+            background: #F1F6FF;
+        }
+
+        QLabel#FlowStepNumber {
+            color: #607086;
+            background: #F0F3F7;
+            border: 1px solid #D6DEE8;
+            border-radius: 12px;
+            font-size: 8pt;
+            font-weight: 700;
+        }
+
+        QFrame#FlowStepDone QLabel#FlowStepNumber {
+            color: #15803D;
+            background: #ECF9F0;
+            border-color: #A9DFB8;
+        }
+
+        QFrame#FlowStepActive QLabel#FlowStepNumber {
+            color: #FFFFFF;
+            background: #2563EB;
+            border-color: #2563EB;
+        }
+
+        QLabel#FlowStepTitle {
+            color: #1E293B;
+            font-size: 9pt;
+            font-weight: 700;
+        }
+
+        QLabel#FlowStepDetail {
+            color: #7A8798;
+            font-size: 7pt;
+        }
+
+        QFrame#TrainingRunHeader {
+            background: #FFFFFF;
+            border: 1px solid #DCE3EB;
+            border-radius: 7px;
+            min-height: 54px;
+        }
+
+        QFrame#WorkspaceToolbar {
+            background: #FFFFFF;
+            border: 1px solid #DCE3EB;
+            border-radius: 6px;
+            min-height: 34px;
+        }
+
+        QLabel#WorkspaceToolbarContext,
+        QLabel#WorkspaceToolbarTitle {
+            color: #4B5B70;
+            font-size: 8pt;
+            font-weight: 600;
+        }
+
+        QLabel#WorkspaceToolbarStatus {
+            color: #2563EB;
+            background: #EEF4FF;
+            border-radius: 8px;
+            padding: 2px 7px;
+            font-size: 7pt;
+        }
+
+        QLabel#WorkspaceToolbarMeta {
+            color: #758297;
+            font-size: 8pt;
+        }
+
+        QLabel#RunStatus {
+            color: #2563EB;
+            background: #EEF4FF;
+            border-radius: 8px;
+            padding: 2px 7px;
+            font-size: 7pt;
+        }
+
+        QLabel#TrainingRunTitle {
+            color: #182235;
+            font-size: 11pt;
+            font-weight: 700;
+        }
+
+        QLabel#TrainingRunMeta {
+            color: #758297;
+            font-size: 7pt;
+        }
+
+        QLabel#TrainingDatasetNote,
+        QLabel#TrainingRunNote {
+            color: #526175;
+            background: #F7F9FC;
+            border: 1px solid #E3E8EF;
+            border-radius: 5px;
+            padding: 6px 8px;
+            font-size: 8pt;
+        }
+
+        QPushButton#AdvancedToggle {
+            color: #526175;
+            background: #F7F9FB;
+            border-color: #DCE3EB;
+            text-align: left;
+        }
+
+        QWidget#ExportAdvancedArgs {
+            background: #F7F9FC;
+            border: 1px solid #E3E8EF;
+            border-radius: 6px;
+        }
+
+        QTabWidget#TrainingDetailTabs::pane {
+            border: 1px solid #DCE3EB;
+            background: #FFFFFF;
         }
 
         QTextEdit#LogView {

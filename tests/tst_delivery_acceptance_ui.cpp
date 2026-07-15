@@ -5,15 +5,40 @@
 
 #include <QApplication>
 #include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
 #include <QMetaObject>
+#include <QProxyStyle>
 #include <QPushButton>
 #include <QSettings>
-#include <QStringList>
 #include <QStyleFactory>
+#include <QStringList>
 #include <QTabWidget>
 #include <QTest>
 
 #include "LanguageSupport.h"
+#include "AppStyle.h"
+
+namespace {
+
+class NoAnimationStyle final : public QProxyStyle {
+public:
+    NoAnimationStyle()
+        : QProxyStyle(QStyleFactory::create(QStringLiteral("Fusion")))
+    {
+    }
+
+    int styleHint(StyleHint hint, const QStyleOption* option = nullptr,
+        const QWidget* widget = nullptr, QStyleHintReturn* returnData = nullptr) const override
+    {
+        if (hint == SH_Widget_Animate) {
+            return 0;
+        }
+        return QProxyStyle::styleHint(hint, option, widget, returnData);
+    }
+};
+
+} // namespace
 
 class EnvironmentDeliveryEvidenceUiTests : public QObject {
     Q_OBJECT
@@ -30,10 +55,12 @@ private slots:
 private:
     QString previousLanguage_;
     bool hadPreviousLanguage_ = false;
+    MainWindow* window_ = nullptr;
 };
 
 void EnvironmentDeliveryEvidenceUiTests::initTestCase()
 {
+    QApplication::setStyle(new NoAnimationStyle);
     QCoreApplication::setOrganizationName(QStringLiteral("AITrainTests"));
     QCoreApplication::setApplicationName(QStringLiteral("DeliveryAcceptanceUiTests"));
     QSettings settings;
@@ -41,18 +68,72 @@ void EnvironmentDeliveryEvidenceUiTests::initTestCase()
     hadPreviousLanguage_ = settings.contains(aitrain_app::languageSettingsKey());
     aitrain_app::storeLanguageCode(QStringLiteral("zh_CN"));
 
-    auto* fusionStyle = QStyleFactory::create(QStringLiteral("Fusion"));
-    QVERIFY(fusionStyle != nullptr);
-    QApplication::setStyle(fusionStyle);
     QApplication::setEffectEnabled(Qt::UI_AnimateCombo, false);
     QApplication::setEffectEnabled(Qt::UI_AnimateMenu, false);
     QApplication::setEffectEnabled(Qt::UI_FadeMenu, false);
     QApplication::setEffectEnabled(Qt::UI_AnimateTooltip, false);
     QApplication::setEffectEnabled(Qt::UI_FadeTooltip, false);
+    AppStyle::apply(*qApp);
+    window_ = new MainWindow(QStringLiteral("test-license"), QStringLiteral("2099-12-31"));
+    const QString capturePath = qEnvironmentVariable("AITRAIN_CAPTURE_UI_PATH");
+    if (!capturePath.isEmpty()) {
+        QDir().mkpath(QFileInfo(capturePath).absolutePath());
+        window_->resize(1280, 800);
+        bool pageOk = false;
+        const int capturePage = qEnvironmentVariableIntValue("AITRAIN_CAPTURE_UI_PAGE", &pageOk);
+        if (pageOk && capturePage >= MainWindow::DashboardPage && capturePage < MainWindow::PageCount) {
+            const QStringList titles = {
+                QStringLiteral("总览"),
+                QStringLiteral("项目"),
+                QStringLiteral("数据集"),
+                QStringLiteral("训练实验"),
+                QStringLiteral("任务与产物"),
+                QStringLiteral("模型库"),
+                QStringLiteral("部署验证"),
+                QStringLiteral("环境"),
+                QStringLiteral("系统设置")
+            };
+            QVERIFY(QMetaObject::invokeMethod(window_, "showPage", Qt::DirectConnection,
+                Q_ARG(int, capturePage), Q_ARG(QString, titles.at(capturePage))));
+        }
+        bool tabOk = false;
+        const int captureTab = qEnvironmentVariableIntValue("AITRAIN_CAPTURE_UI_TAB", &tabOk);
+        if (tabOk) {
+            QTabWidget* tabs = nullptr;
+            switch (capturePage) {
+            case MainWindow::DatasetPage: tabs = window_->datasetTabs_; break;
+            case MainWindow::TrainingPage: tabs = window_->findChild<QTabWidget*>(QStringLiteral("TrainingDetailTabs")); break;
+            case MainWindow::TaskQueuePage: tabs = window_->findChild<QTabWidget*>(QStringLiteral("TaskDetailTabs")); break;
+            case MainWindow::ModelRegistryPage: tabs = window_->modelWorkspaceTabs_; break;
+            case MainWindow::DeploymentPage: tabs = window_->deploymentTabs_; break;
+            case MainWindow::EnvironmentPage: tabs = window_->findChild<QTabWidget*>(QStringLiteral("EnvironmentTabs")); break;
+            case MainWindow::SystemSettingsPage: tabs = window_->systemSettingsTabs_; break;
+            default: break;
+            }
+            if (tabs && captureTab >= 0 && captureTab < tabs->count()) {
+                tabs->setCurrentIndex(captureTab);
+            }
+        }
+        bool expandAdvancedOk = false;
+        const int expandAdvanced = qEnvironmentVariableIntValue("AITRAIN_CAPTURE_UI_EXPAND_ADVANCED", &expandAdvancedOk);
+        if (expandAdvancedOk && expandAdvanced != 0 && pageOk && capturePage == MainWindow::DeploymentPage
+            && window_->deploymentTabs_) {
+            if (auto* toggle = window_->deploymentTabs_->currentWidget()->findChild<QPushButton*>(QStringLiteral("AdvancedToggle"))) {
+                toggle->setChecked(true);
+            }
+        }
+        window_->setAttribute(Qt::WA_ShowWithoutActivating, true);
+        window_->show();
+        QTest::qWait(150);
+        QVERIFY2(window_->grab().save(capturePath), qPrintable(QStringLiteral("无法保存 UI 截图：%1").arg(capturePath)));
+        window_->hide();
+    }
 }
 
 void EnvironmentDeliveryEvidenceUiTests::cleanupTestCase()
 {
+    delete window_;
+    window_ = nullptr;
     QSettings settings;
     if (hadPreviousLanguage_) {
         settings.setValue(aitrain_app::languageSettingsKey(), previousLanguage_);
@@ -63,13 +144,14 @@ void EnvironmentDeliveryEvidenceUiTests::cleanupTestCase()
 
 void EnvironmentDeliveryEvidenceUiTests::mainNavigationUsesNineWorkspaceEntries()
 {
-    MainWindow window(QStringLiteral("test-license"), QStringLiteral("2099-12-31"));
+    MainWindow& window = *window_;
 
     QStringList labels;
     const auto sidebarButtons = window.sidebar_->findChildren<QPushButton*>();
     for (QPushButton* button : sidebarButtons) {
         if (button->objectName() == QStringLiteral("SidebarButton")) {
-            labels << button->text();
+            const QString fullText = button->property("fullText").toString();
+            labels << (fullText.isEmpty() ? button->text() : fullText);
         }
     }
 
@@ -100,14 +182,18 @@ void EnvironmentDeliveryEvidenceUiTests::mainNavigationUsesNineWorkspaceEntries(
 
 void EnvironmentDeliveryEvidenceUiTests::embeddedWorkspaceTabsExist()
 {
-    MainWindow window(QStringLiteral("test-license"), QStringLiteral("2099-12-31"));
+    MainWindow& window = *window_;
 
+    QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
+        Q_ARG(int, MainWindow::DatasetPage), Q_ARG(QString, QStringLiteral("数据集"))));
     auto* datasetTabs = window.findChild<QTabWidget*>(QStringLiteral("DatasetTabs"));
     QVERIFY(datasetTabs != nullptr);
     QCOMPARE(datasetTabs->count(), 2);
     QCOMPARE(datasetTabs->tabText(0), QStringLiteral("数据集准备"));
     QCOMPARE(datasetTabs->tabText(1), QStringLiteral("质量与复核"));
 
+    QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
+        Q_ARG(int, MainWindow::ModelRegistryPage), Q_ARG(QString, QStringLiteral("模型库"))));
     auto* modelTabs = window.findChild<QTabWidget*>(QStringLiteral("ModelWorkspaceTabs"));
     QVERIFY(modelTabs != nullptr);
     QCOMPARE(modelTabs->count(), 4);
@@ -116,22 +202,26 @@ void EnvironmentDeliveryEvidenceUiTests::embeddedWorkspaceTabsExist()
     QCOMPARE(modelTabs->tabText(2), QStringLiteral("模型对比"));
     QCOMPARE(modelTabs->tabText(3), QStringLiteral("流水线记录"));
 
+    QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
+        Q_ARG(int, MainWindow::DeploymentPage), Q_ARG(QString, QStringLiteral("部署验证"))));
     auto* deploymentTabs = window.findChild<QTabWidget*>(QStringLiteral("DeploymentTabs"));
     QVERIFY(deploymentTabs != nullptr);
     QCOMPARE(deploymentTabs->count(), 2);
     QCOMPARE(deploymentTabs->tabText(0), QStringLiteral("模型导出"));
     QCOMPARE(deploymentTabs->tabText(1), QStringLiteral("推理验证"));
 
-    auto* systemTabs = window.findChild<QTabWidget*>(QStringLiteral("SystemSettingsTabs"));
-    QVERIFY(systemTabs != nullptr);
-    QCOMPARE(systemTabs->count(), 2);
-    QCOMPARE(systemTabs->tabText(0), QStringLiteral("内置能力"));
-    QCOMPARE(systemTabs->tabText(1), QStringLiteral("应用设置"));
+    QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
+        Q_ARG(int, MainWindow::SystemSettingsPage), Q_ARG(QString, QStringLiteral("系统设置"))));
+    auto* settingsTabs = window.findChild<QTabWidget*>(QStringLiteral("SystemSettingsTabs"));
+    QVERIFY(settingsTabs != nullptr);
+    QCOMPARE(settingsTabs->count(), 2);
+    QCOMPARE(settingsTabs->tabText(0), QStringLiteral("内置能力"));
+    QCOMPARE(settingsTabs->tabText(1), QStringLiteral("应用设置"));
 }
 
 void EnvironmentDeliveryEvidenceUiTests::switchingToEnvironmentShowsDeliveryEvidenceTab()
 {
-    MainWindow window(QStringLiteral("test-license"), QStringLiteral("2099-12-31"));
+    MainWindow& window = *window_;
 
     const bool invoked = QMetaObject::invokeMethod(
         &window,
@@ -142,6 +232,7 @@ void EnvironmentDeliveryEvidenceUiTests::switchingToEnvironmentShowsDeliveryEvid
     QVERIFY(invoked);
 
     QCOMPARE(window.stack_->currentIndex(), static_cast<int>(MainWindow::EnvironmentPage));
+    QCOMPARE(window.pageTitle_->text(), QStringLiteral("环境"));
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("EnvironmentTabs"));
     QVERIFY(tabs != nullptr);
     QCOMPARE(tabs->count(), 2);
@@ -159,7 +250,7 @@ void EnvironmentDeliveryEvidenceUiTests::switchingToEnvironmentShowsDeliveryEvid
 
 void EnvironmentDeliveryEvidenceUiTests::clickingSidebarEnvironmentSwitchesPageWithoutDeliveryEntry()
 {
-    MainWindow window(QStringLiteral("test-license"), QStringLiteral("2099-12-31"));
+    MainWindow& window = *window_;
     window.resize(1280, 820);
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
@@ -183,6 +274,7 @@ void EnvironmentDeliveryEvidenceUiTests::clickingSidebarEnvironmentSwitchesPageW
     QCoreApplication::processEvents();
 
     QCOMPARE(window.stack_->currentIndex(), static_cast<int>(MainWindow::EnvironmentPage));
+    QCOMPARE(window.pageTitle_->text(), QStringLiteral("环境"));
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("EnvironmentTabs"));
     QVERIFY(tabs != nullptr);
     QCOMPARE(window.deliveryAcceptanceTable_->rowCount(), 7);

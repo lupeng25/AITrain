@@ -40,7 +40,7 @@ QWidget* MainWindow::buildSystemSettingsPage()
 {
     auto* page = new QWidget;
     auto* layout = new QVBoxLayout(page);
-    layout->setContentsMargins(18, 18, 18, 18);
+    layout->setContentsMargins(18, 0, 18, 18);
     layout->setSpacing(16);
 
     layout->addWidget(createWorkbenchHeader(
@@ -49,9 +49,9 @@ QWidget* MainWindow::buildSystemSettingsPage()
         uiText("管理内置能力、界面语言、默认目录、授权状态和本地路径。"),
         nullptr,
         QStringList()
-            << QStringLiteral("Capabilities")
-            << QStringLiteral("Preferences")
-            << QStringLiteral("Local Paths")));
+            << uiText("内置能力")
+            << uiText("偏好设置")
+            << uiText("本地路径")));
 
     systemSettingsTabs_ = new QTabWidget;
     systemSettingsTabs_->setObjectName(QStringLiteral("SystemSettingsTabs"));
@@ -74,48 +74,23 @@ QWidget* MainWindow::buildCapabilitiesPanel()
     connect(refreshButton, &QPushButton::clicked, this, &MainWindow::refreshBuiltInCapabilities);
 
     auto* headerPanel = new QFrame;
-    headerPanel->setObjectName(QStringLiteral("ExperimentHeader"));
-    auto* headerRoot = new QVBoxLayout(headerPanel);
-    headerRoot->setContentsMargins(14, 12, 14, 12);
-    headerRoot->setSpacing(10);
-    auto* headerTop = new QHBoxLayout;
-    auto* titleBlock = new QWidget;
-    auto* titleLayout = new QVBoxLayout(titleBlock);
-    titleLayout->setContentsMargins(0, 0, 0, 0);
-    titleLayout->setSpacing(2);
-    auto* kicker = new QLabel(QStringLiteral("BUILTIN CAPABILITY MATRIX"));
-    kicker->setObjectName(QStringLiteral("ExperimentKicker"));
-    auto* title = new QLabel(QStringLiteral("内置能力矩阵"));
-    title->setObjectName(QStringLiteral("ExperimentTitle"));
-    auto* subtitle = new QLabel(QStringLiteral("编译期注册的模型、数据集、导出和推理能力。"));
-    subtitle->setObjectName(QStringLiteral("ExperimentMeta"));
-    subtitle->setWordWrap(true);
-    allowLabelToShrink(subtitle);
-    titleLayout->addWidget(kicker);
-    titleLayout->addWidget(title);
-    titleLayout->addWidget(subtitle);
-    headerTop->addWidget(titleBlock, 1);
-    headerTop->addWidget(refreshButton);
-    headerRoot->addLayout(headerTop);
-
-    auto* headerGrid = new QGridLayout;
-    headerGrid->setHorizontalSpacing(12);
-    headerGrid->setVerticalSpacing(8);
-    auto* scanCaption = new QLabel(QStringLiteral("状态"));
-    scanCaption->setObjectName(QStringLiteral("ExperimentMeta"));
-    auto* pathCaption = new QLabel(QStringLiteral("来源"));
-    pathCaption->setObjectName(QStringLiteral("ExperimentMeta"));
+    headerPanel->setObjectName(QStringLiteral("WorkspaceToolbar"));
+    headerPanel->setMaximumHeight(52);
+    auto* headerRoot = new QHBoxLayout(headerPanel);
+    headerRoot->setContentsMargins(14, 10, 14, 10);
+    headerRoot->setSpacing(12);
+    auto* contextLabel = new QLabel(QStringLiteral("编译期内置注册表"));
+    contextLabel->setObjectName(QStringLiteral("WorkspaceToolbarTitle"));
     capabilityConsoleStatusLabel_ = inlineStatusLabel(QStringLiteral("等待读取内置能力注册表。"));
-    capabilityConsoleStatusLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
+    capabilityConsoleStatusLabel_->setObjectName(QStringLiteral("WorkspaceToolbarStatus"));
     capabilitySourceLabel_ = inlineStatusLabel(QStringLiteral("能力来源：编译期内置注册表"));
-    capabilitySourceLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
+    capabilitySourceLabel_->setObjectName(QStringLiteral("WorkspaceToolbarMeta"));
     allowLabelToShrink(capabilityConsoleStatusLabel_);
     allowLabelToShrink(capabilitySourceLabel_);
-    headerGrid->addWidget(scanCaption, 0, 0);
-    headerGrid->addWidget(capabilityConsoleStatusLabel_, 0, 1);
-    headerGrid->addWidget(pathCaption, 1, 0);
-    headerGrid->addWidget(capabilitySourceLabel_, 1, 1);
-    headerRoot->addLayout(headerGrid);
+    headerRoot->addWidget(contextLabel);
+    headerRoot->addWidget(capabilityConsoleStatusLabel_);
+    headerRoot->addWidget(capabilitySourceLabel_, 1);
+    headerRoot->addWidget(refreshButton);
 
     auto* summaryStrip = new QFrame;
     summaryStrip->setObjectName(QStringLiteral("ActionStrip"));
@@ -170,41 +145,25 @@ QWidget* MainWindow::buildEnvironmentPage()
 {
     auto* page = new QWidget;
     auto* layout = new QVBoxLayout(page);
-    layout->setContentsMargins(18, 18, 18, 18);
+    layout->setContentsMargins(18, 0, 18, 18);
     layout->setSpacing(16);
 
     auto* runButton = primaryButton(QStringLiteral("执行环境自检"));
     connect(runButton, &QPushButton::clicked, this, &MainWindow::runEnvironmentCheck);
 
     auto* headerPanel = new QFrame;
-    headerPanel->setObjectName(QStringLiteral("ExperimentHeader"));
-    auto* headerRoot = new QVBoxLayout(headerPanel);
-    headerRoot->setContentsMargins(14, 12, 14, 12);
-    headerRoot->setSpacing(10);
-    auto* headerTop = new QHBoxLayout;
-    auto* titleBlock = new QWidget;
-    auto* titleLayout = new QVBoxLayout(titleBlock);
-    titleLayout->setContentsMargins(0, 0, 0, 0);
-    titleLayout->setSpacing(2);
-    auto* kicker = new QLabel(QStringLiteral("RUNTIME HEALTH"));
-    kicker->setObjectName(QStringLiteral("ExperimentKicker"));
-    auto* title = new QLabel(QStringLiteral("运行时健康面板"));
-    title->setObjectName(QStringLiteral("ExperimentTitle"));
-    auto* subtitle = new QLabel(uiText("检查 NVIDIA 驱动、CUDA、TensorRT、ONNX Runtime、Qt 运行时模块和 Worker 可用性，并集中查看交付证据、诊断包和客户域 OCR 验收。"));
-    subtitle->setObjectName(QStringLiteral("ExperimentMeta"));
-    subtitle->setWordWrap(true);
-    allowLabelToShrink(subtitle);
-    titleLayout->addWidget(kicker);
-    titleLayout->addWidget(title);
-    titleLayout->addWidget(subtitle);
-    headerTop->addWidget(titleBlock, 1);
-    headerTop->addWidget(runButton);
-    headerRoot->addLayout(headerTop);
-
+    headerPanel->setObjectName(QStringLiteral("WorkspaceToolbar"));
+    auto* headerRoot = new QHBoxLayout(headerPanel);
+    headerRoot->setContentsMargins(14, 10, 14, 10);
+    headerRoot->setSpacing(12);
+    auto* contextLabel = new QLabel(QStringLiteral("运行时与交付证据"));
+    contextLabel->setObjectName(QStringLiteral("WorkspaceToolbarTitle"));
     environmentConsoleStatusLabel_ = inlineStatusLabel(QStringLiteral("尚未执行环境自检。"));
-    environmentConsoleStatusLabel_->setObjectName(QStringLiteral("DarkInlineStatus"));
+    environmentConsoleStatusLabel_->setObjectName(QStringLiteral("WorkspaceToolbarStatus"));
     allowLabelToShrink(environmentConsoleStatusLabel_);
-    headerRoot->addWidget(environmentConsoleStatusLabel_);
+    headerRoot->addWidget(contextLabel);
+    headerRoot->addWidget(environmentConsoleStatusLabel_, 1);
+    headerRoot->addWidget(runButton);
 
     auto* summaryStrip = new QFrame;
     summaryStrip->setObjectName(QStringLiteral("ActionStrip"));

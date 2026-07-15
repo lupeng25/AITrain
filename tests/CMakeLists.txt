@@ -151,6 +151,11 @@ set_tests_properties(aitrain_delivery_acceptance_ui_tests PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     ATTACHED_FILES_ON_FAIL "${delivery_acceptance_ui_test_output}"
 )
+if(WIN32 AND DEFINED ENV{WINDIR})
+    set_tests_properties(aitrain_delivery_acceptance_ui_tests PROPERTIES
+        ENVIRONMENT "QT_QPA_FONTDIR=$ENV{WINDIR}/Fonts"
+    )
+endif()
 
 aitrain_copy_onnxruntime_runtime(aitrain_delivery_acceptance_ui_tests)
 aitrain_copy_ncnn_runtime(aitrain_delivery_acceptance_ui_tests)

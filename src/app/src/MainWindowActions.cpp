@@ -137,9 +137,7 @@ void MainWindow::refreshBuiltInCapabilities()
             capabilityTable_->setItem(row, 6, new QTableWidgetItem(uiText("内置")));
         }
     }
-    loadCapabilityCombos();
     updateHeaderState();
     updateCapabilitySummary();
     updateDashboardSummary();
-    refreshTrainingDefaults();
 }
