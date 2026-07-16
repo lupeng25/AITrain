@@ -301,7 +301,7 @@ bool resolveVerifiedArtifact(const StorageV2& storage,
     }
     ArtifactSnapshotV2 artifact;
     if (!storage.artifact(artifactId, &artifact, error)) return false;
-    const QString artifactPath = QDir(artifactStore->rootPath()).filePath(QStringLiteral("artifacts/%1").arg(artifact.id.toString()));
+    const QString artifactPath = artifactStore->artifactPath(artifact.id);
     if (!QFileInfo(artifactPath).isDir()) {
         if (error) *error = QStringLiteral("已提交 Artifact 目录不存在：%1").arg(artifact.id.toString());
         return false;
@@ -686,6 +686,7 @@ bool ProjectWorkspaceV2::open(const QString& projectRoot, QString* error)
         return false;
     }
     artifactStore_ = std::make_unique<ArtifactStoreV2>(QDir(candidate).filePath(QStringLiteral("artifact-store")));
+    storage_.setArtifactStoreRoot(artifactStore_->rootPath());
     workspacePath_ = candidate;
     QStringList diagnostics;
     if (!artifactStore_->recoverStaging(&storage_, &diagnostics, error)
@@ -1153,7 +1154,7 @@ bool ProjectWorkspaceV2::resolveTrainingWorkflowStepInput(const WorkflowRunId& w
     }
     ArtifactSnapshotV2 artifact;
     if (!storage_.artifact(stepIt->inputArtifactId, &artifact, error)) return false;
-    const QString artifactPath = QDir(artifactStore_->rootPath()).filePath(QStringLiteral("artifacts/%1").arg(artifact.id.toString()));
+    const QString artifactPath = artifactStore_->artifactPath(artifact.id);
     if (!QFileInfo(artifactPath).isDir()) {
         if (error) *error = QStringLiteral("已提交训练输入 Artifact 目录不存在：%1").arg(artifact.id.toString());
         return false;
@@ -1218,8 +1219,7 @@ bool ProjectWorkspaceV2::prepareTrainingWorkflowAdapterLaunch(const WorkflowRunI
     const auto manifestIt = std::find_if(snapshotArtifact.files.cbegin(), snapshotArtifact.files.cend(),
         [](const ArtifactFileSnapshot& file) { return file.relativePath == QStringLiteral("dataset_snapshot.json"); });
     VerifiedWorkflowArtifactFileV2 verifiedSnapshotManifest;
-    const QString snapshotArtifactPath = QDir(artifactStore_->rootPath()).filePath(
-        QStringLiteral("artifacts/%1").arg(snapshot.artifactId.toString()));
+    const QString snapshotArtifactPath = artifactStore_->artifactPath(snapshot.artifactId);
     if (manifestIt == snapshotArtifact.files.cend() || manifestIt->sha256 != snapshot.manifestSha256
         || !verifyArtifactFile(snapshotArtifactPath, *manifestIt, &verifiedSnapshotManifest, error)) {
         if (error && error->isEmpty()) *error = QStringLiteral("登记的数据集快照 Artifact 缺少可信 manifest。" );
@@ -1242,7 +1242,7 @@ bool ProjectWorkspaceV2::prepareTrainingWorkflowAdapterLaunch(const WorkflowRunI
     const QString snapshotStaging = QDir(outputRoot).filePath(QStringLiteral("snapshot-input"));
     QJsonObject request;
     request.insert(QStringLiteral("taskId"), workflow.taskId.toString());
-    request.insert(QStringLiteral("datasetPath"), snapshot.rootPath);
+    request.insert(QStringLiteral("datasetPath"), artifactStore_->artifactPath(snapshot.artifactId));
     request.insert(QStringLiteral("datasetSnapshotManifest"), verifiedSnapshotManifest.absolutePath);
     request.insert(QStringLiteral("datasetSnapshotStagingPath"), snapshotStaging);
     request.insert(QStringLiteral("outputPath"), outputRoot);

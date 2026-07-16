@@ -9,12 +9,6 @@
       "args": [],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
-      "environment": [
-        {
-          "name": "PATH",
-          "value": "D:/Qt/Qt5.12.9/5.12.9/msvc2017_64/bin;${env:PATH}"
-        }
-      ],
       "console": "integratedTerminal",
       "preLaunchTask": "Build AITrain"
     },
@@ -29,12 +23,6 @@
       ],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
-      "environment": [
-        {
-          "name": "PATH",
-          "value": "D:/Qt/Qt5.12.9/5.12.9/msvc2017_64/bin;${env:PATH}"
-        }
-      ],
       "console": "integratedTerminal",
       "preLaunchTask": "Build AITrain"
     }

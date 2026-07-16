@@ -71,6 +71,7 @@ bool registerSnapshot(aitrain::v2::StorageV2& storage,
     const aitrain::v2::DatasetId& datasetId,
     QString* error)
 {
+    storage.setArtifactStoreRoot(root);
     const QString manifestSha = QString(64, QLatin1Char('d'));
     const aitrain::v2::ArtifactId artifactId = aitrain::v2::ArtifactId::create();
     if (!storage.recordArtifactWithFiles(artifactId, taskId,

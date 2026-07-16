@@ -4,10 +4,15 @@
     {
       "label": "Configure AITrain",
       "type": "shell",
-      "command": "cmd",
+      "command": "powershell",
       "args": [
-        "/c",
-        "set VSLANG=1033 && call \"D:\\Microsoft Visual Studio\\18\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && cmake -S . -B build-vscode -G \"NMake Makefiles\" -DCMAKE_PREFIX_PATH=D:\\Qt\\Qt5.12.9\\5.12.9\\msvc2017_64 -DAITRAIN_BUILD_TESTS=ON"
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\tools\\vscode-task.ps1",
+        "-Action",
+        "Configure"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -17,10 +22,15 @@
     {
       "label": "Build AITrain",
       "type": "shell",
-      "command": "cmd",
+      "command": "powershell",
       "args": [
-        "/c",
-        "set VSLANG=1033 && call \"D:\\Microsoft Visual Studio\\18\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && cmake --build build-vscode"
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\tools\\vscode-task.ps1",
+        "-Action",
+        "Build"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -35,15 +45,19 @@
     {
       "label": "Test AITrain",
       "type": "shell",
-      "command": "cmd",
+      "command": "powershell",
       "args": [
-        "/c",
-        "set VSLANG=1033 && call \"D:\\Microsoft Visual Studio\\18\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && ctest --test-dir build-vscode --output-on-failure"
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\tools\\vscode-task.ps1",
+        "-Action",
+        "Test"
       ],
       "options": {
         "cwd": "${workspaceFolder}",
         "env": {
-          "PATH": "D:\\Qt\\Qt5.12.9\\5.12.9\\msvc2017_64\\bin;${env:PATH}",
           "QT_QPA_PLATFORM": "offscreen"
         }
       },
@@ -56,10 +70,7 @@
       "type": "shell",
       "command": "${workspaceFolder}\\build-vscode\\bin\\AITrainStudio.exe",
       "options": {
-        "cwd": "${workspaceFolder}",
-        "env": {
-          "PATH": "D:\\Qt\\Qt5.12.9\\5.12.9\\msvc2017_64\\bin;${env:PATH}"
-        }
+        "cwd": "${workspaceFolder}"
       },
       "dependsOn": "Build AITrain",
       "problemMatcher": []

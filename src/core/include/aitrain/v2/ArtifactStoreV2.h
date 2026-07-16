@@ -35,6 +35,7 @@ public:
     bool recoverStaging(StorageV2* storage, QStringList* diagnostics, QString* error = nullptr);
 
     QString rootPath() const;
+    QString artifactPath(const ArtifactId& artifactId) const;
 
 private:
     QString rootPath_;

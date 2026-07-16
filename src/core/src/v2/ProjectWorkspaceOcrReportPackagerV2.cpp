@@ -20,6 +20,7 @@ namespace {
 
 struct VerifiedOcrSnapshot final {
     DatasetSnapshotRecordV2 record;
+    QString rootPath;
     QJsonObject manifest;
     int sampleCount = 0;
 };
@@ -175,8 +176,7 @@ bool resolveSnapshot(StorageV2* storage, const ArtifactStoreV2* store,
         [](const ArtifactFileSnapshot& file) {
             return file.relativePath == QStringLiteral("dataset_snapshot.json");
         });
-    const QString artifactRoot = QDir(store->rootPath()).filePath(
-        QStringLiteral("artifacts/%1").arg(artifact.id.toString()));
+    const QString artifactRoot = store->artifactPath(artifact.id);
     QByteArray manifestBytes;
     QString manifestHash;
     if (manifestFile == artifact.files.cend()
@@ -197,7 +197,12 @@ bool resolveSnapshot(StorageV2* storage, const ArtifactStoreV2* store,
         if (error && error->isEmpty()) *error = QStringLiteral("%1 Snapshot manifest 合同无效").arg(component);
         return false;
     }
-    const QDir root(record.rootPath);
+    const QString rootPath = store->artifactPath(record.artifactId);
+    if (rootPath.isEmpty()) {
+        if (error) *error = QStringLiteral("%1 Snapshot Artifact 路径无效").arg(component);
+        return false;
+    }
+    const QDir root(rootPath);
     if (!root.exists()) {
         if (error) *error = QStringLiteral("%1 Snapshot 源 locator 当前不可用").arg(component);
         return false;
@@ -228,6 +233,7 @@ bool resolveSnapshot(StorageV2* storage, const ArtifactStoreV2* store,
         return false;
     }
     result->record = record;
+    result->rootPath = rootPath;
     result->manifest = manifest;
     result->sampleCount = sampleCount;
     return true;

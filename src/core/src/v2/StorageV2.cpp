@@ -377,6 +377,11 @@ bool StorageV2::isOpen() const
     return db_.isValid() && db_.isOpen();
 }
 
+void StorageV2::setArtifactStoreRoot(QString artifactStoreRoot)
+{
+    artifactStoreRoot_ = QDir::cleanPath(QDir(artifactStoreRoot).absolutePath());
+}
+
 bool StorageV2::initialize(QString* error)
 {
     QString lookupError;
@@ -979,11 +984,16 @@ bool StorageV2::registerDatasetSnapshot(DatasetSnapshotRecordV2* snapshot, QStri
         return false;
     }
 
+    if (artifactStoreRoot_.trimmed().isEmpty()) {
+        if (error) *error = QStringLiteral("登记数据集快照需要配置 Artifact Store 根目录。");
+        db_.rollback();
+        return false;
+    }
     const QString rootPath = QDir::cleanPath(QDir(snapshot->rootPath).absolutePath());
     const QString datasetFormat = snapshot->datasetFormat.trimmed();
-    const QString artifactRootSuffix = QDir::cleanPath(
-        QStringLiteral("artifacts/%1").arg(snapshot->artifactId.toString()));
-    if (!rootPath.endsWith(artifactRootSuffix, Qt::CaseInsensitive)) {
+    const QString expectedRootPath = QDir::cleanPath(QDir(artifactStoreRoot_).filePath(
+        QStringLiteral("artifacts/%1").arg(snapshot->artifactId.toString())));
+    if (rootPath.compare(expectedRootPath, Qt::CaseInsensitive) != 0) {
         if (error) *error = QStringLiteral("数据快照可执行根必须属于其 committed Snapshot Artifact。");
         db_.rollback();
         return false;

@@ -20,6 +20,7 @@ namespace {
 
 struct VerifiedSnapshot final {
     DatasetSnapshotRecordV2 record;
+    QString rootPath;
     QJsonObject manifest;
     QHash<QString, QJsonObject> files;
 };
@@ -89,8 +90,7 @@ bool loadVerifiedSnapshot(StorageV2* storage, ArtifactStoreV2* artifacts,
         if (error && error->isEmpty()) *error = QStringLiteral("quality.snapshot.artifact_invalid");
         return false;
     }
-    const QString artifactPath = QDir(artifacts->rootPath()).filePath(
-        QStringLiteral("artifacts/%1").arg(record.artifactId.toString()));
+    const QString artifactPath = artifacts->artifactPath(record.artifactId);
     const QString manifestPath = QDir(artifactPath).filePath(QStringLiteral("dataset_snapshot.json"));
     const auto manifestFile = std::find_if(artifact.files.cbegin(), artifact.files.cend(), [](const ArtifactFileSnapshot& file) {
         return file.relativePath == QStringLiteral("dataset_snapshot.json");
@@ -133,7 +133,12 @@ bool loadVerifiedSnapshot(StorageV2* storage, ArtifactStoreV2* artifacts,
     }
     // rootPath 仅作临时读取 locator；每个文件必须重新匹配 committed manifest。
     // Workflow 参数、问题清单和报告均不持久化该裸目录。
-    const QDir source(record.rootPath);
+    const QString rootPath = artifacts->artifactPath(record.artifactId);
+    if (rootPath.isEmpty()) {
+        if (error) *error = QStringLiteral("quality.snapshot.artifact_path_invalid");
+        return false;
+    }
+    const QDir source(rootPath);
     if (!source.exists()) {
         if (error) *error = QStringLiteral("quality.snapshot.source_unavailable");
         return false;
@@ -151,6 +156,7 @@ bool loadVerifiedSnapshot(StorageV2* storage, ArtifactStoreV2* artifacts,
         }
     }
     result->record = record;
+    result->rootPath = rootPath;
     result->manifest = manifest;
     result->files = declaredFiles;
     return true;
@@ -235,7 +241,7 @@ bool analyzeYoloDetection(const VerifiedSnapshot& snapshot, const QJsonObject& o
         if (!relative.startsWith(QStringLiteral("labels/")) || !relative.endsWith(QStringLiteral(".txt"))) continue;
         ++labelCount;
         QByteArray bytes;
-        if (!readAndHash(QDir(snapshot.record.rootPath).filePath(relative), &bytes, nullptr, cancellation, error)) return false;
+        if (!readAndHash(QDir(snapshot.rootPath).filePath(relative), &bytes, nullptr, cancellation, error)) return false;
         const QList<QByteArray> lines = bytes.split('\n');
         int sampleBoxes = 0;
         for (int index = 0; index < lines.size(); ++index) {
@@ -284,7 +290,7 @@ bool analyzeYoloPolygon(const VerifiedSnapshot& snapshot, const QJsonObject& opt
         if (!relative.startsWith(QStringLiteral("labels/")) || !relative.endsWith(QStringLiteral(".txt"))) continue;
         ++labelCount;
         QByteArray bytes;
-        if (!readAndHash(QDir(snapshot.record.rootPath).filePath(relative), &bytes, nullptr, cancellation, error)) return false;
+        if (!readAndHash(QDir(snapshot.rootPath).filePath(relative), &bytes, nullptr, cancellation, error)) return false;
         const QList<QByteArray> lines = bytes.split('\n');
         for (int index = 0; index < lines.size(); ++index) {
             if (canceled(cancellation)) {
@@ -338,7 +344,7 @@ bool analyzeSemanticMask(const VerifiedSnapshot& snapshot, const QJsonObject& op
             return false;
         }
         ++maskCount;
-        const QImage mask(QDir(snapshot.record.rootPath).filePath(relative));
+        const QImage mask(QDir(snapshot.rootPath).filePath(relative));
         bool hasForeground = false;
         for (int y = 0; y < mask.height() && !hasForeground; ++y) {
             for (int x = 0; x < mask.width(); ++x) {
@@ -414,7 +420,7 @@ bool analyzePaddleOcrDet(const VerifiedSnapshot& snapshot, const QJsonObject& op
         const QString fileName = QFileInfo(relative).fileName();
         if (!fileName.startsWith(QStringLiteral("det_gt")) || !fileName.endsWith(QStringLiteral(".txt"))) continue;
         QByteArray bytes;
-        if (!readAndHash(QDir(snapshot.record.rootPath).filePath(relative), &bytes, nullptr, cancellation, error)) return false;
+        if (!readAndHash(QDir(snapshot.rootPath).filePath(relative), &bytes, nullptr, cancellation, error)) return false;
         const QList<QByteArray> lines = bytes.split('\n');
         for (int index = 0; index < lines.size(); ++index) {
             if (canceled(cancellation)) {
@@ -467,7 +473,7 @@ bool analyzePaddleOcrRec(const VerifiedSnapshot& snapshot, const QJsonObject& op
         const QString fileName = QFileInfo(relative).fileName();
         if (!fileName.startsWith(QStringLiteral("rec_gt")) || !fileName.endsWith(QStringLiteral(".txt"))) continue;
         QByteArray bytes;
-        if (!readAndHash(QDir(snapshot.record.rootPath).filePath(relative), &bytes, nullptr, cancellation, error)) return false;
+        if (!readAndHash(QDir(snapshot.rootPath).filePath(relative), &bytes, nullptr, cancellation, error)) return false;
         const QList<QByteArray> lines = bytes.split('\n');
         for (int index = 0; index < lines.size(); ++index) {
             if (canceled(cancellation)) {
@@ -711,7 +717,7 @@ bool ProjectWorkspaceV2::runDataQualityWorkflow(const TaskId& taskId,
             DatasetValidationResult validation;
             DatasetOperationContext context;
             context.isCancellationRequested = stepCancellation;
-            if (!driver || !driver->inspect(verifiedSnapshot.record.rootPath, verifiedSnapshot.record.datasetFormat,
+            if (!driver || !driver->inspect(verifiedSnapshot.rootPath, verifiedSnapshot.record.datasetFormat,
                     &inspection, context, &executionError)
                 || !driver->validate(inspection, &validation, context, &executionError)
                 || !validation.valid) {

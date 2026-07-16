@@ -142,8 +142,7 @@ bool resolveReport(StorageV2* storage, const ArtifactStoreV2* store,
         return false;
     }
 
-    const QString artifactRoot = QDir(store->rootPath()).filePath(
-        QStringLiteral("artifacts/%1").arg(contract.artifactId.toString()));
+    const QString artifactRoot = store->artifactPath(contract.artifactId);
     const QFileInfo rootInfo(artifactRoot);
     if (!rootInfo.exists() || !rootInfo.isDir() || rootInfo.isSymLink()) {
         *problem = failure(FailureCode::ArtifactIncomplete, QStringLiteral("ocr_acceptance.report_missing"),

@@ -20,6 +20,7 @@ namespace {
 
 struct BaselineSnapshot final {
     DatasetSnapshotRecordV2 record;
+    QString rootPath;
     QJsonObject manifest;
     QHash<QString, QJsonObject> filesByKey;
 };
@@ -159,7 +160,7 @@ bool commitFiles(ArtifactStoreV2* store, StorageV2* storage, const TaskId& taskI
 
 QString artifactPath(ArtifactStoreV2* store, const ArtifactId& id)
 {
-    return QDir(store->rootPath()).filePath(QStringLiteral("artifacts/%1").arg(id.toString()));
+    return store->artifactPath(id);
 }
 
 bool readVerifiedArtifactJson(StorageV2* storage, ArtifactStoreV2* store,
@@ -226,8 +227,13 @@ bool loadBaseline(StorageV2* storage, ArtifactStoreV2* store, const SnapshotId& 
         if (error) *error = QStringLiteral("annotation.snapshot_file_count_mismatch");
         return false;
     }
+    const QString rootPath = store->artifactPath(record.artifactId);
+    if (rootPath.isEmpty()) {
+        if (error) *error = QStringLiteral("annotation.snapshot_artifact_path_invalid");
+        return false;
+    }
     if (verifySource) {
-        const QDir root(record.rootPath);
+        const QDir root(rootPath);
         if (!root.exists()) {
             if (error) *error = QStringLiteral("annotation.baseline_unavailable");
             return false;
@@ -246,6 +252,7 @@ bool loadBaseline(StorageV2* storage, ArtifactStoreV2* store, const SnapshotId& 
         }
     }
     result->record = record;
+    result->rootPath = rootPath;
     result->manifest = manifest;
     result->filesByKey = files;
     return true;
@@ -377,7 +384,7 @@ bool resolveReadableWorkingDirectory(const QString& path, const QString& baselin
 bool copyBaseline(const BaselineSnapshot& baseline, const QString& destination,
     const aitrain::CancellationCallback& cancellation, QString* error)
 {
-    const QDir source(baseline.record.rootPath);
+    const QDir source(baseline.rootPath);
     const QDir target(destination);
     for (auto it = baseline.filesByKey.cbegin(); it != baseline.filesByKey.cend(); ++it) {
         if (canceled(cancellation)) {
@@ -778,7 +785,7 @@ bool ProjectWorkspaceV2::createAnnotationSession(const TaskId& taskId,
                     QStringLiteral("清理工作区 staging 后重新创建标注会话。"))};
             }
         } else if (step.kind == QStringLiteral("PrepareWorkingCopy")) {
-            if (!prepareEmptyWorkingDirectory(request.workingDirectory, baseline.record.rootPath,
+            if (!prepareEmptyWorkingDirectory(request.workingDirectory, baseline.rootPath,
                     artifactStore_->rootPath(), &resolvedWorkingRoot, &workingRootCreated, &executionError)) {
                 return {WorkflowStepState::Failed, {}, failure(FailureCode::InvalidRequest, executionError,
                     QStringLiteral("选择空的非符号链接独立工作目录后重新创建会话。"))};
@@ -990,7 +997,7 @@ bool ProjectWorkspaceV2::syncAnnotationSession(const TaskId& taskId,
             if (inspection.status == AnnotationSyncStatusV2::Inspected) {
                 QHash<QString, QString> actualFiles;
                 if (!resolveReadableWorkingDirectory(request.workingDirectory,
-                        inspection.baseline.record.rootPath, artifactStore_->rootPath(),
+                        inspection.baseline.rootPath, artifactStore_->rootPath(),
                         &resolvedSyncWorkingRoot, &executionError)
                     || !collectWorkingFiles(resolvedSyncWorkingRoot, &actualFiles, &executionError)
                     || actualFiles.size() != inspection.session.baselineHashes.size()) {
@@ -1089,7 +1096,7 @@ bool ProjectWorkspaceV2::syncAnnotationSession(const TaskId& taskId,
                 QString staging;
                 QString verifiedRoot;
                 if (!resolveReadableWorkingDirectory(resolvedSyncWorkingRoot,
-                        inspection.baseline.record.rootPath, artifactStore_->rootPath(),
+                        inspection.baseline.rootPath, artifactStore_->rootPath(),
                         &verifiedRoot, &executionError)
                     || verifiedRoot.compare(resolvedSyncWorkingRoot, Qt::CaseInsensitive) != 0) {
                     return {WorkflowStepState::Failed, {}, failure(FailureCode::InvalidRequest,

@@ -131,9 +131,10 @@ bool verifyArtifactInventory(const ArtifactSnapshotV2& artifact,
 
 bool verifySnapshotManifest(const DatasetSnapshotRecordV2& snapshot,
     const ArtifactSnapshotV2& artifact,
+    const QString& root,
     QString* error)
 {
-    QFile file(QDir(snapshot.rootPath).filePath(QStringLiteral("dataset_snapshot.json")));
+    QFile file(QDir(root).filePath(QStringLiteral("dataset_snapshot.json")));
     if (!file.open(QIODevice::ReadOnly)) {
         if (error) *error = QStringLiteral("dataset_split_source_manifest_unreadable");
         return false;
@@ -313,9 +314,11 @@ bool ProjectWorkspaceV2::runDatasetSplitWorkflow(const TaskId& taskId,
             context.isCancellationRequested = stepCancellation;
             DatasetInspection inspection;
             DatasetValidationResult validation;
-            if (!verifyArtifactInventory(sourceArtifact, sourceSnapshot.rootPath, &executionError)
-                || !verifySnapshotManifest(sourceSnapshot, sourceArtifact, &executionError)
-                || !driver->inspect(sourceSnapshot.rootPath, sourceSnapshot.datasetFormat,
+            const QString sourceRoot = artifactStore_->artifactPath(sourceSnapshot.artifactId);
+            if (sourceRoot.isEmpty()
+                || !verifyArtifactInventory(sourceArtifact, sourceRoot, &executionError)
+                || !verifySnapshotManifest(sourceSnapshot, sourceArtifact, sourceRoot, &executionError)
+                || !driver->inspect(sourceRoot, sourceSnapshot.datasetFormat,
                     &inspection, context, &executionError)
                 || !driver->validate(inspection, &validation, context, &executionError)
                 || !validation.valid
@@ -400,7 +403,7 @@ bool ProjectWorkspaceV2::runDatasetSplitWorkflow(const TaskId& taskId,
                     QStringLiteral("dataset_split_plan_tampered"))};
             }
             driverPlan.format = sourceSnapshot.datasetFormat;
-            driverPlan.sourceRoot = sourceSnapshot.rootPath;
+            driverPlan.sourceRoot = artifactStore_->artifactPath(sourceSnapshot.artifactId);
             driverPlan.manifest = persistedPlan.value(QStringLiteral("driverPlan")).toObject();
             driverPlan.planHash = driverPlan.manifest.value(QStringLiteral("planHash")).toString();
             QString staging;

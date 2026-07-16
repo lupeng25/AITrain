@@ -422,6 +422,7 @@ void V2StorageTests::persistsCrossTaskWorkflowInputAndEnforcesOwnership()
     aitrain::v2::StorageV2 storage;
     QString error;
     QVERIFY2(storage.open(directory.filePath(QStringLiteral("project.sqlite")), &error), qPrintable(error));
+    storage.setArtifactStoreRoot(directory.filePath(QStringLiteral("artifact-store")));
 
     const auto producer = makeTask();
     const auto consumer = makeTask();
@@ -440,7 +441,7 @@ void V2StorageTests::persistsCrossTaskWorkflowInputAndEnforcesOwnership()
     snapshot.taskId = producer.id;
     snapshot.artifactId = snapshotArtifactId;
     snapshot.rootPath = QDir(directory.path()).filePath(
-        QStringLiteral("artifacts/%1").arg(snapshotArtifactId.toString()));
+        QStringLiteral("foreign/artifacts/%1").arg(snapshotArtifactId.toString()));
     snapshot.datasetFormat = QStringLiteral("yolo_detection");
     snapshot.driverId = QStringLiteral("yolo_detection");
     snapshot.driverVersion = QStringLiteral("2.0");
@@ -448,6 +449,10 @@ void V2StorageTests::persistsCrossTaskWorkflowInputAndEnforcesOwnership()
     snapshot.manifestSha256 = manifestSha256;
     snapshot.fileCount = 1;
     snapshot.totalBytes = 64;
+    QVERIFY(!storage.registerDatasetSnapshot(&snapshot, &error));
+    QVERIFY(error.contains(QStringLiteral("committed Snapshot Artifact")));
+    snapshot.rootPath = QDir(directory.path()).filePath(
+        QStringLiteral("artifact-store/artifacts/%1").arg(snapshotArtifactId.toString()));
     QVERIFY2(storage.registerDatasetSnapshot(&snapshot, &error), qPrintable(error));
 
     aitrain::v2::WorkflowRunSnapshotV2 workflow;

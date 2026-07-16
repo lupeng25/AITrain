@@ -194,6 +194,7 @@ public:
     bool open(const QString& databasePath, QString* error = nullptr);
     void close();
     bool isOpen() const;
+    void setArtifactStoreRoot(QString artifactStoreRoot);
 
     bool createTask(const TaskSnapshot& task, QString* error = nullptr);
     bool transitionTask(const TaskId& taskId,
@@ -312,6 +313,7 @@ private:
         QString* error);
 
     QString connectionName_;
+    QString artifactStoreRoot_;
     QSqlDatabase db_;
 };
 

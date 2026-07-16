@@ -615,4 +615,10 @@ QString ArtifactStoreV2::rootPath() const
     return rootPath_;
 }
 
+QString ArtifactStoreV2::artifactPath(const ArtifactId& artifactId) const
+{
+    if (!artifactId.isValid()) return {};
+    return QDir(rootPath_).filePath(QStringLiteral("artifacts/%1").arg(artifactId.toString()));
+}
+
 } // namespace aitrain::v2
