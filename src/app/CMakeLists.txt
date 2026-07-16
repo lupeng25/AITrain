@@ -7,6 +7,10 @@ add_executable(AITrainStudio WIN32
     src/DatasetConversionUiModel.cpp
     src/EvaluationReportView.h
     src/EvaluationReportView.cpp
+    src/DiagnosticBundlePresenterV2.h
+    src/DiagnosticBundlePresenterV2.cpp
+    src/EnvironmentCheckPresenterV2.h
+    src/EnvironmentCheckPresenterV2.cpp
     src/InfoPanel.h
     src/InfoPanel.cpp
     src/LanguageSupport.h
@@ -23,7 +27,6 @@ add_executable(AITrainStudio WIN32
     src/MainWindowPages.cpp
     src/MainWindowPreviews.cpp
     src/MainWindowProjectPages.cpp
-    src/MainWindowQueueActions.cpp
     src/MainWindowRecords.cpp
     src/MainWindowSummaries.cpp
     src/MainWindowSupport.h
@@ -35,16 +38,24 @@ add_executable(AITrainStudio WIN32
     src/MainWindowWorkerMessages.cpp
     src/MetricsWidget.h
     src/MetricsWidget.cpp
+    src/ModelRegistryPresenterV2.h
+    src/ModelRegistryPresenterV2.cpp
     src/RegistrationDialog.h
     src/RegistrationDialog.cpp
+    src/ProjectSummaryPresenterV2.h
+    src/ProjectSummaryPresenterV2.cpp
     src/Sidebar.h
     src/Sidebar.cpp
     src/StatusPill.h
     src/StatusPill.cpp
     src/TaskArtifactPanel.h
     src/TaskArtifactPanel.cpp
+    src/TaskArtifactPresenterV2.h
+    src/TaskArtifactPresenterV2.cpp
     src/WorkerClient.h
     src/WorkerClient.cpp
+    src/WorkspaceRouter.h
+    src/WorkspaceRouter.cpp
     resources/app.qrc
     resources/app.rc
 )
@@ -63,6 +74,7 @@ target_include_directories(AITrainStudio
 target_link_libraries(AITrainStudio
     PRIVATE
         aitrain_core
+        aitrain_v2_application
         Qt${QT_VERSION_MAJOR}::Core
         Qt${QT_VERSION_MAJOR}::Widgets
         Qt${QT_VERSION_MAJOR}::Network

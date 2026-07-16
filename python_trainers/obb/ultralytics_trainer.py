@@ -13,7 +13,7 @@ TRAINER_ROOT = Path(__file__).resolve().parents[1]
 if str(TRAINER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRAINER_ROOT))
 
-from trainer_protocol import configure_stdio, exception_details, unhandled_failure  # noqa: E402
+from trainer_protocol import configure_stdio, exception_details  # noqa: E402
 
 
 DETECTION_ADAPTER_DIR = Path(__file__).resolve().parents[1] / "detection"
@@ -44,6 +44,7 @@ def main() -> int:
         request = read_request(args.request)
     except Exception as exc:
         shared.BACKEND_ID = BACKEND_ID
+        shared.configure_adapter(BACKEND_ID)
         return shared.fail(f"failed to read trainer request: {exc}", "bad_request", exception_details(exc))
 
     parameters = request.get("parameters")
@@ -57,9 +58,16 @@ def main() -> int:
 
     shared.BACKEND_ID = BACKEND_ID
     try:
+        shared.configure_adapter(BACKEND_ID)
         return shared.run(request)
     except Exception as exc:
-        return unhandled_failure(BACKEND_ID, exc)
+        return shared.fail(
+            "Python trainer failed with an unhandled exception (trainer_unhandled_exception).",
+            "trainer_unhandled_exception",
+            exception_details(exc),
+        )
+    finally:
+        shared.close_adapter()
 
 
 if __name__ == "__main__":

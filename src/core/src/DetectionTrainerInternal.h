@@ -158,6 +158,8 @@ using CudaFreeFn = cudaError_t (*)(void*);
 using CudaMemcpyFn = cudaError_t (*)(void*, const void*, size_t, cudaMemcpyKind);
 using CudaDeviceSynchronizeFn = cudaError_t (*)();
 using CudaGetErrorStringFn = const char* (*)(cudaError_t);
+using CudaGetDeviceCountFn = cudaError_t (*)(int*);
+using CudaGetDevicePropertiesFn = cudaError_t (*)(cudaDeviceProp*, int);
 
 struct TensorRtRuntimeLibraries {
     QLibrary nvinfer;
@@ -171,11 +173,14 @@ struct TensorRtRuntimeLibraries {
     CudaMemcpyFn cudaMemcpy = nullptr;
     CudaDeviceSynchronizeFn cudaDeviceSynchronize = nullptr;
     CudaGetErrorStringFn cudaGetErrorString = nullptr;
+    CudaGetDeviceCountFn cudaGetDeviceCount = nullptr;
+    CudaGetDevicePropertiesFn cudaGetDeviceProperties = nullptr;
 };
 
 bool loadTensorRtCore(TensorRtRuntimeLibraries* libraries, QString* error);
 bool loadTensorRtParser(TensorRtRuntimeLibraries* libraries, QString* error);
 bool loadCudaRuntime(TensorRtRuntimeLibraries* libraries, QString* error);
+QString cudaErrorText(const TensorRtRuntimeLibraries& libraries, cudaError_t code);
 bool writeTensorRtEngineFromOnnx(const QByteArray& onnxModel, const QString& outputPath, bool fp16, QString* error);
 QVector<DetectionPrediction> predictTensorRtEngine(
     const QString& enginePath,

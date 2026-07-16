@@ -125,15 +125,10 @@ Assert-PathExists "tools\build-inno-installer.ps1" "Inno Setup installer build s
 Assert-PathExists "tools\ui-workbench-walkthrough.ps1" "UI workbench walkthrough RC script"
 Assert-PathExists "tools\phase45-yolo-model-matrix-smoke.ps1" "Phase 45 YOLO model matrix smoke script"
 Assert-PathExists "tools\phase-p1-yolo-full-matrix-smoke.ps1" "P1 YOLO full model matrix smoke script"
-Assert-PathExists "tools\phase-yolo26-model-matrix-smoke.ps1" "YOLO26 targeted model matrix smoke script"
 Assert-PathExists "tools\phase-smp-semantic-segmentation-smoke.ps1" "SMP semantic segmentation smoke script"
 Assert-PathExists "tools\phase-anomaly-anomalib-smoke.ps1" "Anomalib anomaly detection smoke script"
 Assert-PathExists "tools\phase-anomaly-mvtec-quality-matrix.ps1" "Anomalib MVTec quality matrix script"
-Assert-PathExists "tools\phase-smp-4090d-gpu-realtest.ps1" "SMP RTX 4090D GPU realtest script"
-Assert-PathExists "tools\phase-smp-oxford-pets-quality-matrix.ps1" "SMP Oxford Pets quality matrix script"
-Assert-PathExists "tools\full-model-lifecycle-matrix.ps1" "full model lifecycle matrix script"
 Assert-PathExists "tools\full-model-lifecycle-progress-server.py" "full model lifecycle progress server"
-Assert-PathExists "tools\phase-ncnn-runtime-smoke.ps1" "NCNN runtime smoke script"
 Assert-PathExists "tools\local-rc-closeout.ps1" "local RC closeout script"
 Assert-PathExists "tools\release-freeze-handoff.ps1" "release freeze handoff script"
 Assert-PathExists "tools\materialize-ultralytics-dataset.py" "Ultralytics dataset materializer"
@@ -194,7 +189,7 @@ $publicKeyLine = if (Test-Path -LiteralPath $cmakeCachePath) {
 }
 $configuredPublicKey = if ($publicKeyLine) { [string]$publicKeyLine.Matches[0].Groups[1].Value } else { "" }
 if ([string]::IsNullOrWhiteSpace($configuredPublicKey)) {
-    throw "Package build has no AITRAIN_LICENSE_PUBLIC_KEY configured. Set AITRAIN_LICENSE_PUBLIC_KEY or create .deps\local-license\aitrain-license-private-key.json before packaging."
+    throw "Package build has no AITRAIN_LICENSE_PUBLIC_KEY configured. Set AITRAIN_LICENSE_PUBLIC_KEY or AITRAIN_LICENSE_PUBLIC_KEY_FILE before packaging."
 }
 Write-Host "  [ok] license public key configured"
 

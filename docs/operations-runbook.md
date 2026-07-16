@@ -47,7 +47,7 @@ Python AI 环境安装包应包含：
 
 不得默认包含：
 
-- 授权私钥、注册码生成器私钥或任何 `*aitrain-license-private-key*.json` 文件。
+- 授权私钥、注册码生成器 `.aitrainkey` 受保护私钥文件或任何历史明文 `*aitrain-license-private-key*.json` 文件。
 - `.deps` 下的本地缓存、下载包、数据集、模型权重、ONNX、TensorRT engine、生成 ZIP。
 - 未完成许可证审查的第三方训练框架、标注工具或二进制依赖。
 - 客户数据、客户报告或包含客户信息的诊断包。
@@ -60,7 +60,9 @@ Python AI 环境安装包应包含：
 4. 验证通过后进入主界面。
 5. 在“环境”页运行环境自检。
 
-注册信息绑定当前机器。换机后需要重新签发注册码。主程序只应内置公钥；私钥只能保存在授权方内部环境。仓库内只允许保留 `tools/aitrain-license-private-key.example.json` 这类无敏感内容模板；如果旧私钥曾进入源码或对外分发，应视为已泄漏，先 rotate 到新 key pair，再用新 `AITRAIN_LICENSE_PUBLIC_KEY` 构建客户包。是否清理 Git 历史应作为单独安全流程处理，不能用普通代码提交替代。
+注册信息绑定当前机器。换机后需要重新签发注册码。主程序只应内置公钥；私钥只能保存在授权方内部环境。生成器使用 Windows DPAPI 当前用户范围和仅当前用户 ACL 保存 `.aitrainkey`，默认不提供明文展示或导出。仓库内不得保存真实私钥；如果旧私钥曾进入源码或对外分发，应视为已泄漏，先 rotate 到新 key pair，再用新 `AITRAIN_LICENSE_PUBLIC_KEY` 构建客户包。是否清理 Git 历史应作为单独安全流程处理，不能用普通代码提交替代。
+
+应用的可信 UTC 文件位于当前用户应用数据目录，由 DPAPI 保护。时钟回拨容差为 5 分钟；明显回拨或可信时间文件损坏会阻止授权通过。现场排障应先校正 Windows 时间并确认应用由原 Windows 用户运行，不得用删除或替换可信时间文件作为常规绕过方法。纯离线授权不能抵御管理员级完整程序和系统状态篡改。
 
 ## 运行环境
 
@@ -142,16 +144,7 @@ RTX / SM 75+ TensorRT 验收：
 .\tools\release-freeze-handoff.ps1
 ```
 
-NCNN runtime smoke：
-
-```powershell
-.\tools\phase-ncnn-runtime-smoke.ps1 -NcnnRoot <ncnn-sdk-root> -OnnxPath <best.onnx> -SampleImagePath <sample.png> -OutputDir <smoke-output> -TaskType detection
-.\build-vscode\bin\aitrain_worker.exe --ncnn-param-smoke <model.param> --image <sample.png> --output <smoke-output> --task-type segmentation
-```
-
-2026-05-16 本机证据显示：Hyuto YOLOv8 detection ONNX -> NCNN passed；nihui 预转换 YOLOv8n-seg pnnx/DFL NCNN + AITrain sidecar passed。若 YOLOv8-seg ONNX 转换后 `.param` 仍包含 unsupported `Shape` layer，应记录为 failed report，并换用静态/兼容导出或已验证的预转换 NCNN artifact。
-
-NCNN failed report 的标准分类为 `sdk_missing`、`sample_missing`、`sidecar_missing`、`unsupported_layer`、`runtime_failed`。报告 JSON 和 Markdown summary 应包含下一步建议；Worker 不应因为 unsupported layer 或缺配置崩溃。
+NCNN 运行时只通过 `runRuntimeDeliveryWorkflowV2`，由 ModelPackageId、Manifest、tensor/blob/decoder 合同和 Artifact Store 解析模型。旧 NCNN smoke 脚本及 Worker 参数已删除；不完整合同统一返回结构化 `Unsupported`/`Blocked`，不得把裸 `.onnx`、`.param` 或样本路径传给 Worker。
 
 ## 外部验收收集
 

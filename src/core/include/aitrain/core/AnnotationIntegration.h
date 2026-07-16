@@ -2,7 +2,7 @@
 
 #include "aitrain/core/Cancellation.h"
 #include "aitrain/core/DatasetConversion.h"
-#include "aitrain/core/ProductWorkflow.h"
+#include "aitrain/core/WorkflowResult.h"
 
 #include <QJsonObject>
 #include <QString>
@@ -15,21 +15,6 @@ QString resolveXAnyLabelingExecutable(const QJsonObject& options = {});
 
 WorkflowResult inspectXAnyLabelingEnvironment(
     const QString& outputPath,
-    const QJsonObject& options = {},
-    const CancellationCallback& shouldCancel = {});
-
-WorkflowResult prepareAnnotationSession(
-    const QString& datasetPath,
-    const QString& outputPath,
-    const QString& format,
-    const QJsonObject& options = {},
-    const CancellationCallback& shouldCancel = {});
-
-WorkflowResult syncAnnotationSession(
-    const QString& sessionManifestPath,
-    const QString& datasetPath,
-    const QString& outputPath,
-    const QString& format,
     const QJsonObject& options = {},
     const CancellationCallback& shouldCancel = {});
 

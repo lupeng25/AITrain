@@ -19,7 +19,7 @@
   -> 在“任务与产物”查看 checkpoint、ONNX、报告和预览图
   -> 评估模型并在“模型库 > 评估报告”查看结果
   -> 注册到“模型库”
-  -> 在“部署验证”完成模型导出、导出后验证和推理验证
+  -> 将训练产物登记为 V2 模型包，再在“部署验证”完成部署验证和推理验证
   -> 环境 > 交付证据和诊断包
 ```
 
@@ -78,7 +78,7 @@
 - `.deps/annotation-tools/X-AnyLabeling`
 - `PATH`
 
-在“数据集”页选择数据集目录后，可以点击“启动 X-AnyLabeling”直接打开标注工具，也可以点击“准备修复会话”。准备会话由 Worker 生成 `xany_session_manifest.json`、`classes.txt`、`review_samples.json` 和 `launch_request.json`，随后以外部进程启动本地 X-AnyLabeling。标注完成后回到 AITrain Studio，先点击“同步标注会话”生成 `annotation_sync_report.json`，再点击“标注后刷新 / 重新校验”重新生成校验或质量报告。
+在“数据集”页仍可点击“启动 X-AnyLabeling”直接打开普通外部标注工具。受控修复闭环使用 V2 Artifact：先从 Data Quality 任务取得 Repair ArtifactId，再点击“准备修复会话”，输入该 ArtifactId 和一个新的空工作目录。Worker 校验已提交 Repair Artifact、复制不可变 Snapshot，并提交 Session Artifact；GUI 只显示 Session ArtifactId 和 Evidence ArtifactId，不读取 Artifact 裸路径。会话准备成功后，GUI 以独立工作目录启动本地 X-AnyLabeling。标注完成后点击“同步标注会话”，确认 Session ArtifactId 和同一工作目录；Worker 会重新校验基线、文件集合、编辑白名单与哈希。只有合法变更才登记新的 Dataset Version/Snapshot；无变化、冲突、越界或取消都不会生成正式新版本。任务、Artifact 和新版本状态在 V2“任务与产物”及项目汇总中刷新。
 
 AITrain Studio 不内嵌 X-AnyLabeling GUI / PyQt 进程，也不打包 X-AnyLabeling Server。X-AnyLabeling 保持本地外部依赖；如需随产品分发，需要单独完成第三方许可证和包体评审。
 
@@ -260,7 +260,7 @@ images/sample.png<TAB>[{"transcription":"text","points":[[1,1],[30,1],[30,20],[1
 
 YOLO、SMP 与 OCR 的产品边界不同：YOLO 的训练、ONNX 导出和检测/实例分割/OBB 评估来自官方 Ultralytics；后续单图推理、benchmark 和部署验证默认使用 AITrain C++ ONNX Runtime，NCNN 只覆盖支持的 YOLO 检测/分割，不覆盖 OBB v1，TensorRT 当前用于 engine 导出和部署验证状态记录。SMP 是专用语义分割路线，不复用 YOLO instance segmentation 的 task/backend/export 语义；SMP 只承诺 ONNX Runtime 推理、overlay、benchmark 和部署验证，NCNN/TensorRT 导出不属于 SMP 能力范围，也不是 SMP 验收要求。OCR 则只接受 PaddleOCR 官方 Det / Rec / System 报告作为当前产品证据。PP-OCRv5/PP-OCRv6 支持只增加 Det / Rec / System 官方链路，不表示已经覆盖 PP-StructureV3、PP-ChatOCR、PaddleOCR-VL、文档方向分类、图像矫正、文本行方向分类或 PaddleOCR C++ 本地部署。PP-OCRv6 tiny 的语言覆盖按 PaddleOCR 官方限制处理，客户域生产声明仍需客户数据验收。
 
-YOLO 模型预设下拉是完整产品化入口，但仍允许手动输入官方 Ultralytics 可解析的模型名。训练页会做任务匹配预检：检测后端不能选择 `-seg` 或 `-obb` 模型，分割后端必须选择 `-seg` 模型，OBB 后端默认选择 `-obb` 模型。YOLOv5 支持按 Ultralytics YOLOv5u 检测路线处理，预设包含 `yolov5n/s/m/l/x.yaml` 和 `yolov5nu/su/mu/lu/xu.pt`；不承诺兼容原始 `ultralytics/yolov5` 仓库旧权重，也不把 YOLOv5 segmentation 或 P6 纳入当前产品矩阵。YOLO12 分割 `.yaml` 是当前可验证路线；YOLO12 分割 `.pt` 只有在安装的 Ultralytics 能解析官方 `yolo12*-seg.pt` 权重时才能运行，当前记录为 `blocked_missing_official_weight`。YOLO26 作为独立兼容阶段跟踪 detection 和 instance segmentation 标准 `n/s/m/l/x` `.yaml`、`.pt` 预设；共享 Ultralytics 8.3.171 环境下仍应记录为 `blocked_model_unavailable` / `blocked_ultralytics_incompatible`，隔离 targeted full 证据仅支持训练、官方 ONNX、AITrain C++ ONNX 推理和 TensorRT。YOLO26 NCNN 不作为客户可用部署目标，“部署验证 > 模型导出”会移除该选项，Worker 会拒绝 `format=ncnn`。YOLO26 不支持 semantic segmentation、classification、pose、OBB、tracking 或 YOLOE-26。`.pt` 权重不随 AITrain 包分发，首次使用时可能由官方 Ultralytics 包下载到用户环境。
+YOLO 模型预设下拉是完整产品化入口，但仍允许手动输入官方 Ultralytics 可解析的模型名。训练页会做任务匹配预检：检测后端不能选择 `-seg` 或 `-obb` 模型，分割后端必须选择 `-seg` 模型，OBB 后端默认选择 `-obb` 模型。YOLOv5 支持按 Ultralytics YOLOv5u 检测路线处理，预设包含 `yolov5n/s/m/l/x.yaml` 和 `yolov5nu/su/mu/lu/xu.pt`；不承诺兼容原始 `ultralytics/yolov5` 仓库旧权重，也不把 YOLOv5 segmentation 或 P6 纳入当前产品矩阵。YOLO12 分割 `.yaml` 是当前可验证路线；YOLO12 分割 `.pt` 只有在安装的 Ultralytics 能解析官方 `yolo12*-seg.pt` 权重时才能运行，当前记录为 `blocked_missing_official_weight`。YOLO26 作为独立兼容阶段跟踪 detection 和 instance segmentation 标准 `n/s/m/l/x` `.yaml`、`.pt` 预设；共享 Ultralytics 8.3.171 环境下仍应记录为 `blocked_model_unavailable` / `blocked_ultralytics_incompatible`，隔离 targeted full 证据仅支持训练、官方 ONNX、AITrain C++ ONNX 推理和 TensorRT。YOLO26 NCNN 不作为客户可用部署目标，V2 Manifest 与 Runtime 能力矩阵会拒绝 NCNN 路由。YOLO26 不支持 semantic segmentation、classification、pose、OBB、tracking 或 YOLOE-26。`.pt` 权重不随 AITrain 包分发，首次使用时可能由官方 Ultralytics 包下载到用户环境。
 
 训练页“验证与导出”区域支持 YOLO 官方导出参数：`dynamic`、`half`、`int8 TensorRT` 和 `end2end`。默认仍导出 ONNX；勾选 `dynamic` 或 `half` 会传给官方 ONNX export；勾选 `int8 TensorRT` 会在 ONNX 之外额外尝试官方 TensorRT INT8 engine export，并使用本次训练的 `data.yaml` 做 calibration。`end2end=auto` 会优先读取已加载 Ultralytics 模型配置中的默认值；没有默认值时按 YOLO26 detection=true、其他模型=false 处理；需要时可显式选择 `true` 或 `false`。`end2end` 只有在当前 Ultralytics 版本和目标格式支持时才传给官方导出；不支持时必须显示 failed 或 blocked。NCNN 使用传统 YOLO 解码，拒绝 `end2end=true`，非 YOLO26 模型会生成 `end2end=false` 的中间 ONNX；YOLO26 会直接拒绝 NCNN。不支持的组合会明确失败，不会静默降级。
 
@@ -272,7 +272,7 @@ YOLO 模型预设下拉是完整产品化入口，但仍允许手动输入官方
 
 - 选择历史任务查看 artifacts、metrics、exports。
 - 预览 JSON、YAML、TXT、CSV、LOG、图片 overlay。
-- 选中 checkpoint、ONNX、engine 或官方导出目录后点击“用作导出输入”，会跳到“部署验证 > 模型导出”。
+- 任务产物页不再把 checkpoint、ONNX 或 engine 裸路径直接送入导出、评估、benchmark 或推理；模型必须先登记为带 Manifest 和哈希的 V2 模型包。
 - 选中 ONNX、NCNN `.param` 或 AITrain export sidecar 后点击“用作推理模型”，会跳到“部署验证 > 推理验证”。TensorRT engine 当前用于部署验证状态记录，不作为单图推理输入。
 - 选中训练产物后注册为模型版本。
 - 对训练任务执行“复现实验”，复用原请求、数据快照、seed、后端和模型预设。
@@ -302,48 +302,38 @@ YOLO 模型预设下拉是完整产品化入口，但仍允许手动输入官方
 - 评估报告
 - benchmark 或交付报告
 
-模型库中的模型可以继续进入“部署验证 > 模型导出”或“部署验证 > 推理验证”。
+模型库中的已验证 V2 模型包可以继续进入“部署验证”或“推理验证”；旧模型版本记录只用于迁移期审计。
 
-## 9. 部署验证 > 模型导出
+## 9. 部署验证
 
-在“部署验证 > 模型导出”可以从训练产物生成部署格式。推荐从“任务与产物”选中模型产物后点击“用作导出输入”，避免手动填错路径。
+“部署验证”只接受已经登记且校验通过的 V2 模型包，不接受 checkpoint、ONNX、NCNN param 或 TensorRT engine 裸路径。
 
-导出格式：
+1. 在“模型库”导入模型文件和用户确认的 Manifest 草稿，等待系统计算 SHA-256 并登记 `ModelPackageId`。
+2. 在“部署验证”选择已验证模型包。
+3. 选择一张验证图片。
+4. 点击“开始部署验证”。
+5. 在状态区和“任务与产物”中查看报告、预测、overlay 与精确 runtime 状态。
 
-| 格式 | 输入 | 输出 | 说明 |
-|---|---|---|---|
-| ONNX | checkpoint、`.pt`、已有 ONNX、AITrain export sidecar | `.onnx` 和 sidecar report | `.pt` 输入走官方 Ultralytics export；已有 ONNX 或指向 ONNX 的 sidecar 继续走 AITrain copy / report 路径 |
-| NCNN | ONNX 或 `.pt` | `.param` 和 `.bin` | `.pt` 输入会先生成静态 FP32 官方 ONNX，再走 `onnx2ncnn`；`dynamic`、`half`、`int8` 会被拒绝 |
-| TensorRT | ONNX 或 `.pt` | `.engine` / `.plan` | `.pt` 输入走官方 Ultralytics TensorRT export；INT8 需要 GPU/TensorRT 和 calibration data；旧 GPU 会 `hardware-blocked` |
+模型导出已从独立 GUI 裸路径命令移除。训练产生的首次导出由八步训练 Workflow 的 `Export` 步骤负责；外部模型必须先通过 V2 导入流程形成模型包。部署验证会依次校验 Manifest、Artifact Store 边界、入口文件与 SHA-256，再由声明的 runtime route 和能力矩阵决定是否可执行。
 
-输出路径留空时，已打开项目会默认写入项目的 `models/exported`；未打开项目时通常写入输入模型同目录。
+当前边界：
 
-“官方参数”区域会随模型导出请求传递 `format`、`dynamic`、`half`、`int8`、`imgsz`、`batch`、`device`，以及 TensorRT INT8 所需的 calibration `data.yaml`。ONNX 不支持 `int8=true`；NCNN 不支持 `dynamic/half/int8`；无 TensorRT、GPU 环境或 calibration data 时，TensorRT INT8 会明确失败或阻塞。
-
-导出后建议在同一 tab 填写“验证图片”，点击“验证导出产物”：
-
-- ONNX：必须能通过 ONNX Runtime 对样本图完成推理，才视为 `passed`。
-- TensorRT：兼容硬件和 runtime 上可推理为 `passed`；旧 GPU 或 runtime 不满足时显示 `hardware-blocked`。
-- NCNN：已支持 YOLO 检测/分割的 runtime 部署验证；OBB v1 不支持 NCNN；无 NCNN SDK/runtime 时会明确失败，缺少样本图时会返回 `blocked`。
-
-NCNN 当前本机验证边界：检测模型已经通过 Hyuto YOLOv8 ONNX -> NCNN runtime smoke；分割模型已经通过 nihui 预转换 YOLOv8n-seg pnnx/DFL NCNN artifact + AITrain sidecar 的 runtime smoke。部分 YOLOv8-seg ONNX 经 `onnx2ncnn` 后仍可能包含 NCNN 不支持的 `Shape` layer，此时会生成失败报告，不应标记为通过。
+- ONNX Runtime 是现有 GUI 产品推理与部署验证主路径。
+- NCNN 必须具有显式模型合同、param/bin 完整性和受支持 decoder；不能靠文件后缀猜测模型。
+- TensorRT 会精确区分 SDK、依赖、硬件与 decoder 状态；decoder 未实现时不得声明真实推理成功。
+- OBB v1 只承诺 ONNX Runtime；SMP 只承诺 ONNX Runtime；Anomaly 使用 Worker 管理的 Anomalib Python 包；OCR 验收使用 PaddleOCR 官方 Det/Rec/System 报告。
 
 ## 10. 部署验证 > 推理验证
 
-在“部署验证 > 推理验证”执行单张图片验证：
+单图推理同样只接受 V2 模型包：
 
-1. 选择模型路径。可以手动选择 ONNX、NCNN `.param` 或 AITrain export sidecar，也可以从“任务与产物”点击“用作推理模型”带入。
+1. 选择已验证的 `ModelPackageId`。
 2. 选择验证图片。
-3. 选择输出目录；留空时写入模型同目录的 `inference`。
-4. 点击“开始推理”。
-5. 查看结果摘要和 overlay 预览。
-6. 在“任务与产物”中查看完整 prediction JSON、overlay 和耗时信息。
+3. 点击“开始推理”。
+4. 查看结果摘要和 overlay 预览。
+5. 在“任务与产物”中复查已提交 prediction JSON、overlay、耗时与 Workflow Step。
 
-当前本地推理验证支持：
-
-- YOLO 检测：基于官方 Ultralytics ONNX / NCNN 产物，由 AITrain C++ runtime 输出类别、置信度、NMS、检测框 overlay。TensorRT engine 当前请走“部署验证 > 模型导出”的“验证导出产物”。
-- YOLO 分割：基于官方 Ultralytics ONNX / NCNN 产物，由 AITrain C++ runtime 输出检测框、mask、mask area、半透明 overlay。TensorRT engine 当前请走“部署验证 > 模型导出”的“验证导出产物”。
-- YOLO OBB：基于官方 Ultralytics ONNX 产物，由 AITrain C++ ONNX Runtime 输出 `classId`、`className`、`confidence`、`xywhr`、四点 `points`、外接 `bbox` 和旋转框 overlay。NCNN 不纳入 OBB v1；TensorRT engine 当前请走“部署验证 > 模型导出”的“验证导出产物”。
+推理输出先写入 V2 runtime staging；Worker 成功后才由 Workspace 校验候选文件并原子提交 Artifact，失败或取消会清理暂存目录。任务产物的裸路径不能直接作为推理模型。
 
 OCR 路线只依赖 PaddleOCR 官方实现。Det / Rec / System 的推理、评估和可视化结果应从官方 PaddleOCR 任务产物与报告中查看，不通过 AITrain C++ OCR ONNX 后处理作为产品路径。
 
@@ -454,4 +444,6 @@ python examples\create-minimal-datasets.py --output .deps\examples-smoke
 
 ## 授权私钥安全说明
 
-正式私钥文件必须保存在授权方本机或受控密钥目录，不能放进项目仓库、客户交付包、日志、诊断包或证据目录。仓库内只允许保留 `tools/aitrain-license-private-key.example.json` 这类无敏感内容模板。如果旧私钥曾进入源码或对外分发，应视为已泄漏：生成新的 key pair，用新公钥重新构建 `AITRAIN_LICENSE_PUBLIC_KEY`，旧私钥不再用于任何客户注册码。
+正式私钥文件必须保存在授权方本机或受控密钥目录，不能放进项目仓库、客户交付包、日志、诊断包或证据目录。注册码生成器只保存 `.aitrainkey` 受保护文件：私钥由 Windows DPAPI 绑定到当前用户，并将文件 ACL 收紧为仅当前用户；界面默认不显示或导出明文私钥。受保护文件不能复制给另一个 Windows 用户直接使用。仓库内只允许保留无敏感内容的说明模板。如果旧私钥曾进入源码或对外分发，应视为已泄漏：生成新的 key pair，用新公钥重新构建 `AITRAIN_LICENSE_PUBLIC_KEY`，旧私钥不再用于任何客户注册码。
+
+主程序会保存由 DPAPI 保护的最近可信 UTC，并允许 5 分钟系统校时容差。系统时间明显早于可信时间时，授权校验会报告时钟回拨；可信时间文件损坏或来自其他 Windows 用户时也会拒绝验证。纯离线授权无法抵御拥有管理员权限并可完整替换程序、用户配置和系统状态的攻击者；该机制用于提高普通文件篡改和简单调钟的成本，不应作为硬件安全模块或在线授权服务的替代品。

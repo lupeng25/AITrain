@@ -4,6 +4,7 @@
 #include "EvaluationReportView.h"
 #include "InfoPanel.h"
 #include "MainWindowSupport.h"
+#include "aitrain/core/CapabilityRegistry.h"
 
 #include <QAbstractItemView>
 #include <QCheckBox>
@@ -25,6 +26,7 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSplitter>
 #include <QStatusBar>
@@ -49,7 +51,7 @@ QWidget* MainWindow::buildDatasetPage()
     layout->setContentsMargins(18, 0, 18, 18);
     layout->setSpacing(16);
 
-    auto* headerValidateButton = primaryButton(QStringLiteral("校验数据集"));
+    auto* headerValidateButton = primaryButton(QStringLiteral("运行质量工作流"));
     connect(headerValidateButton, &QPushButton::clicked, this, &MainWindow::validateDataset);
 
     auto* inputPanel = new InfoPanel(QStringLiteral("数据集操作"));
@@ -65,6 +67,21 @@ QWidget* MainWindow::buildDatasetPage()
     pathLayout->addWidget(browseButton);
 
     datasetFormatCombo_ = new QComboBox;
+    {
+        const QSignalBlocker blocker(datasetFormatCombo_);
+        QStringList formats;
+        for (const aitrain::CapabilityDescriptor& capability
+            : aitrain::BuiltinCapabilityRegistry::instance().capabilities()) {
+            for (const QString& format : capability.datasetFormats) {
+                if (!formats.contains(format)) {
+                    formats.append(format);
+                }
+            }
+        }
+        for (const QString& format : formats) {
+            datasetFormatCombo_->addItem(datasetFormatLabel(format), format);
+        }
+    }
     connect(datasetFormatCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
         state_.dataset.currentFormat = currentDatasetFormat();
         state_.dataset.currentValid = false;
@@ -77,24 +94,64 @@ QWidget* MainWindow::buildDatasetPage()
     form->addRow(QStringLiteral("数据集目录"), pathRow);
     form->addRow(QStringLiteral("格式"), datasetFormatCombo_);
 
-    splitOutputEdit_ = new QLineEdit;
-    splitOutputEdit_->setPlaceholderText(QStringLiteral("默认输出到当前项目 datasets/normalized"));
+    dataQualityDatasetIdEdit_ = new QLineEdit;
+    dataQualityDatasetIdEdit_->setObjectName(QStringLiteral("DataQualityDatasetId"));
+    dataQualityDatasetIdEdit_->setPlaceholderText(QStringLiteral("已登记 DatasetId"));
+    dataQualityDatasetVersionIdEdit_ = new QLineEdit;
+    dataQualityDatasetVersionIdEdit_->setObjectName(QStringLiteral("DataQualityDatasetVersionId"));
+    dataQualityDatasetVersionIdEdit_->setPlaceholderText(QStringLiteral("已登记 DatasetVersionId"));
+    dataQualitySnapshotIdEdit_ = new QLineEdit;
+    dataQualitySnapshotIdEdit_->setObjectName(QStringLiteral("DataQualitySnapshotId"));
+    dataQualitySnapshotIdEdit_->setPlaceholderText(QStringLiteral("已登记 SnapshotId"));
+    dataQualitySnapshotArtifactIdEdit_ = new QLineEdit;
+    dataQualitySnapshotArtifactIdEdit_->setObjectName(QStringLiteral("DataQualitySnapshotArtifactId"));
+    dataQualitySnapshotArtifactIdEdit_->setPlaceholderText(QStringLiteral("committed Snapshot ArtifactId"));
+    form->addRow(QStringLiteral("质量 DatasetId"), dataQualityDatasetIdEdit_);
+    form->addRow(QStringLiteral("质量 VersionId"), dataQualityDatasetVersionIdEdit_);
+    form->addRow(QStringLiteral("质量 SnapshotId"), dataQualitySnapshotIdEdit_);
+    form->addRow(QStringLiteral("质量 Snapshot ArtifactId"), dataQualitySnapshotArtifactIdEdit_);
+
+    splitSourceDatasetIdEdit_ = new QLineEdit;
+    splitSourceDatasetIdEdit_->setObjectName(QStringLiteral("SplitSourceDatasetId"));
+    splitSourceDatasetIdEdit_->setPlaceholderText(QStringLiteral("源 DatasetId"));
+    splitSourceDatasetVersionIdEdit_ = new QLineEdit;
+    splitSourceDatasetVersionIdEdit_->setObjectName(QStringLiteral("SplitSourceDatasetVersionId"));
+    splitSourceDatasetVersionIdEdit_->setPlaceholderText(QStringLiteral("源 DatasetVersionId"));
+    splitSourceSnapshotIdEdit_ = new QLineEdit;
+    splitSourceSnapshotIdEdit_->setObjectName(QStringLiteral("SplitSourceSnapshotId"));
+    splitSourceSnapshotIdEdit_->setPlaceholderText(QStringLiteral("源 SnapshotId"));
+    splitSourceSnapshotArtifactIdEdit_ = new QLineEdit;
+    splitSourceSnapshotArtifactIdEdit_->setObjectName(QStringLiteral("SplitSourceSnapshotArtifactId"));
+    splitSourceSnapshotArtifactIdEdit_->setPlaceholderText(QStringLiteral("committed Snapshot ArtifactId"));
+    splitTargetDatasetIdEdit_ = new QLineEdit(aitrain::v2::DatasetId::create().toString());
+    splitTargetDatasetIdEdit_->setObjectName(QStringLiteral("SplitTargetDatasetId"));
+    splitTargetDatasetNameEdit_ = new QLineEdit;
+    splitTargetDatasetNameEdit_->setObjectName(QStringLiteral("SplitTargetDatasetName"));
+    splitTargetDatasetNameEdit_->setPlaceholderText(QStringLiteral("审计名称（当前 schema 不持久化名称）"));
     splitTrainRatioEdit_ = new QLineEdit(QStringLiteral("0.8"));
     splitValRatioEdit_ = new QLineEdit(QStringLiteral("0.2"));
     splitTestRatioEdit_ = new QLineEdit(QStringLiteral("0.0"));
     splitSeedEdit_ = new QLineEdit(QStringLiteral("42"));
     auto* splitButton = new QPushButton(QStringLiteral("划分数据集"));
     connect(splitButton, &QPushButton::clicked, this, &MainWindow::splitDataset);
-    auto* curateButton = new QPushButton(QStringLiteral("生成质量报告"));
+    auto* curateButton = new QPushButton(QStringLiteral("运行 Data Quality V2"));
+    curateButton->setObjectName(QStringLiteral("RunDataQualityWorkflowV2Button"));
     connect(curateButton, &QPushButton::clicked, this, &MainWindow::curateDataset);
     auto* snapshotButton = new QPushButton(QStringLiteral("创建数据快照"));
+    snapshotButton->setObjectName(QStringLiteral("RunDatasetSnapshotImportWorkflowV2Button"));
     connect(snapshotButton, &QPushButton::clicked, this, &MainWindow::createDatasetSnapshot);
+    datasetSnapshotTargetDatasetIdEdit_ = new QLineEdit(aitrain::v2::DatasetId::create().toString());
+    datasetSnapshotTargetDatasetIdEdit_->setObjectName(QStringLiteral("DatasetSnapshotTargetDatasetId"));
+    datasetSnapshotTargetDatasetIdEdit_->setPlaceholderText(QStringLiteral("新 DatasetId，或已有同格式 DatasetId"));
+    datasetSnapshotTargetDatasetNameEdit_ = new QLineEdit;
+    datasetSnapshotTargetDatasetNameEdit_->setObjectName(QStringLiteral("DatasetSnapshotTargetDatasetName"));
+    datasetSnapshotTargetDatasetNameEdit_->setPlaceholderText(QStringLiteral("审计名称（当前 schema 不持久化名称）"));
     auto* openQualityReportButton = new QPushButton(QStringLiteral("打开质量报告"));
     connect(openQualityReportButton, &QPushButton::clicked, this, &MainWindow::openDatasetQualityReport);
     auto* openFixListButton = new QPushButton(QStringLiteral("打开问题清单"));
     connect(openFixListButton, &QPushButton::clicked, this, &MainWindow::openDatasetQualityFixList);
     auto* fixWithXAnyButton = new QPushButton(QStringLiteral("X-AnyLabeling 修复"));
-    connect(fixWithXAnyButton, &QPushButton::clicked, this, &MainWindow::launchXAnyLabelingForQualityFix);
+    connect(fixWithXAnyButton, &QPushButton::clicked, this, &MainWindow::createXAnyLabelingAnnotationSessionV2);
     auto* ratioRow = new QWidget;
     auto* ratioLayout = new QHBoxLayout(ratioRow);
     ratioLayout->setContentsMargins(0, 0, 0, 0);
@@ -102,8 +159,15 @@ QWidget* MainWindow::buildDatasetPage()
     ratioLayout->addWidget(splitValRatioEdit_);
     ratioLayout->addWidget(splitTestRatioEdit_);
     ratioLayout->addWidget(splitSeedEdit_);
-    form->addRow(QStringLiteral("输出目录"), splitOutputEdit_);
+    form->addRow(QStringLiteral("划分源 DatasetId"), splitSourceDatasetIdEdit_);
+    form->addRow(QStringLiteral("划分源 VersionId"), splitSourceDatasetVersionIdEdit_);
+    form->addRow(QStringLiteral("划分源 SnapshotId"), splitSourceSnapshotIdEdit_);
+    form->addRow(QStringLiteral("划分源 ArtifactId"), splitSourceSnapshotArtifactIdEdit_);
+    form->addRow(QStringLiteral("划分目标 DatasetId"), splitTargetDatasetIdEdit_);
+    form->addRow(QStringLiteral("划分审计名称"), splitTargetDatasetNameEdit_);
     form->addRow(QStringLiteral("train / val / test / seed"), ratioRow);
+    form->addRow(QStringLiteral("快照目标 DatasetId"), datasetSnapshotTargetDatasetIdEdit_);
+    form->addRow(QStringLiteral("快照审计名称"), datasetSnapshotTargetDatasetNameEdit_);
     inputPanel->bodyLayout()->addLayout(form);
     auto* datasetActionStrip = new QFrame;
     datasetActionStrip->setObjectName(QStringLiteral("ActionStrip"));
@@ -131,7 +195,7 @@ QWidget* MainWindow::buildDatasetPage()
 
     auto* conversionTitle = new QLabel(QStringLiteral("格式转换"));
     conversionTitle->setObjectName(QStringLiteral("SectionTitle"));
-    datasetConversionStatusLabel_ = mutedLabel(QStringLiteral("选择源格式、目标格式和输出目录后开始转换。"));
+    datasetConversionStatusLabel_ = mutedLabel(QStringLiteral("选择外部源、目标格式和目标 Dataset 身份后开始受控转换。"));
     allowLabelToShrink(datasetConversionStatusLabel_);
     conversionLayout->addWidget(conversionTitle);
     conversionLayout->addWidget(datasetConversionStatusLabel_);
@@ -159,15 +223,12 @@ QWidget* MainWindow::buildDatasetPage()
     conversionInputLayout->addWidget(datasetConversionInputEdit_, 1);
     conversionInputLayout->addWidget(datasetConversionBrowseInputButton_);
 
-    datasetConversionOutputEdit_ = new QLineEdit;
-    datasetConversionBrowseOutputButton_ = new QPushButton(QStringLiteral("选择输出"));
-    connect(datasetConversionBrowseOutputButton_, &QPushButton::clicked, this, &MainWindow::browseDatasetConversionOutput);
-    auto* conversionOutputRow = new QWidget;
-    auto* conversionOutputLayout = new QHBoxLayout(conversionOutputRow);
-    conversionOutputLayout->setContentsMargins(0, 0, 0, 0);
-    conversionOutputLayout->setSpacing(8);
-    conversionOutputLayout->addWidget(datasetConversionOutputEdit_, 1);
-    conversionOutputLayout->addWidget(datasetConversionBrowseOutputButton_);
+    datasetConversionTargetDatasetIdEdit_ = new QLineEdit(
+        aitrain::v2::DatasetId::create().toString());
+    datasetConversionTargetDatasetIdEdit_->setObjectName(QStringLiteral("DatasetConversionTargetDatasetId"));
+    datasetConversionTargetDatasetNameEdit_ = new QLineEdit;
+    datasetConversionTargetDatasetNameEdit_->setObjectName(QStringLiteral("DatasetConversionTargetDatasetName"));
+    datasetConversionTargetDatasetNameEdit_->setPlaceholderText(QStringLiteral("仅作审计显示；名称尚无独立 Storage 字段"));
 
     auto* conversionForm = new QFormLayout;
     conversionForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
@@ -189,11 +250,8 @@ QWidget* MainWindow::buildDatasetPage()
     datasetConversionInputErrorLabel_->setObjectName(QStringLiteral("FieldErrorText"));
     datasetConversionInputErrorLabel_->hide();
     conversionForm->addRow(QString(), datasetConversionInputErrorLabel_);
-    conversionForm->addRow(QStringLiteral("输出目录"), conversionOutputRow);
-    datasetConversionOutputErrorLabel_ = new QLabel;
-    datasetConversionOutputErrorLabel_->setObjectName(QStringLiteral("FieldErrorText"));
-    datasetConversionOutputErrorLabel_->hide();
-    conversionForm->addRow(QString(), datasetConversionOutputErrorLabel_);
+    conversionForm->addRow(QStringLiteral("目标 DatasetId"), datasetConversionTargetDatasetIdEdit_);
+    conversionForm->addRow(QStringLiteral("目标名称（审计）"), datasetConversionTargetDatasetNameEdit_);
     conversionLayout->addLayout(conversionForm);
 
     auto* conversionActionRow = new QWidget;
@@ -201,6 +259,7 @@ QWidget* MainWindow::buildDatasetPage()
     conversionActionLayout->setContentsMargins(0, 0, 0, 0);
     conversionActionLayout->setSpacing(8);
     datasetConversionStartButton_ = primaryButton(QStringLiteral("转换数据集"));
+    datasetConversionStartButton_->setObjectName(QStringLiteral("RunDatasetConversionWorkflowV2Button"));
     datasetConversionCancelButton_ = dangerButton(QStringLiteral("取消转换"));
     datasetConversionCancelButton_->setEnabled(false);
     connect(datasetConversionStartButton_, &QPushButton::clicked, this, &MainWindow::startDatasetConversion);
@@ -327,16 +386,15 @@ QWidget* MainWindow::buildDatasetPage()
     annotationSummary->setMinimumHeight(28);
     annotationToolStatusLabel_->setMinimumHeight(28);
     annotationToolStatusLabel_->setToolTip(QDir::toNativeSeparators(resolvedXAnyLabelingProgram()));
-    auto* launchAnnotationToolButton = new QPushButton(QStringLiteral("启动 X-AnyLabeling"));
-    auto* prepareAnnotationSessionButton = new QPushButton(QStringLiteral("准备修复会话"));
-    auto* syncAnnotationSessionButton = new QPushButton(QStringLiteral("同步标注会话"));
+    auto* createAnnotationSessionV2Button = new QPushButton(QStringLiteral("准备修复会话"));
+    auto* syncAnnotationSessionV2Button = new QPushButton(QStringLiteral("同步标注会话"));
+    createAnnotationSessionV2Button->setObjectName(QStringLiteral("CreateAnnotationSessionV2Button"));
+    syncAnnotationSessionV2Button->setObjectName(QStringLiteral("SyncAnnotationSessionV2Button"));
     auto* refreshAnnotationStatusButton = new QPushButton(QStringLiteral("检测状态"));
-    auto* refreshDatasetAfterAnnotationButton = new QPushButton(QStringLiteral("标注后刷新 / 重新校验"));
     auto* openDatasetDirButton = new QPushButton(QStringLiteral("打开数据目录"));
     connect(refreshAnnotationStatusButton, &QPushButton::clicked, this, &MainWindow::updateAnnotationToolStatus);
-    connect(refreshDatasetAfterAnnotationButton, &QPushButton::clicked, this, &MainWindow::refreshAfterAnnotation);
-    connect(prepareAnnotationSessionButton, &QPushButton::clicked, this, &MainWindow::prepareXAnyLabelingAnnotationSession);
-    connect(syncAnnotationSessionButton, &QPushButton::clicked, this, &MainWindow::syncXAnyLabelingAnnotationSession);
+    connect(createAnnotationSessionV2Button, &QPushButton::clicked, this, &MainWindow::createXAnyLabelingAnnotationSessionV2);
+    connect(syncAnnotationSessionV2Button, &QPushButton::clicked, this, &MainWindow::syncXAnyLabelingAnnotationSessionV2);
     connect(openDatasetDirButton, &QPushButton::clicked, this, [this]() {
         const QString datasetPath = QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
         if (datasetPath.isEmpty()) {
@@ -345,41 +403,15 @@ QWidget* MainWindow::buildDatasetPage()
         }
         QDesktopServices::openUrl(QUrl::fromLocalFile(datasetPath));
     });
-    connect(launchAnnotationToolButton, &QPushButton::clicked, this, [this]() {
-        const QString datasetPath = QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
-        if (datasetPath.isEmpty()) {
-            QMessageBox::information(this, uiText("标注工具"), uiText("请先选择数据集目录。"));
-            return;
-        }
-        const QString program = resolvedXAnyLabelingProgram();
-        if (program.isEmpty()) {
-            updateAnnotationToolStatus();
-            QMessageBox::warning(this,
-                QStringLiteral("X-AnyLabeling"),
-                uiText("未找到 X-AnyLabeling。请确保 xanylabeling 在 PATH 中，或将 X-AnyLabeling.exe 放到程序目录 / tools/x-anylabeling / .deps/tools/annotation-tools/X-AnyLabeling。"));
-            return;
-        }
-        const QStringList arguments = {QStringLiteral("--filename"), datasetPath, QStringLiteral("--no-auto-update-check")};
-        if (QProcess::startDetached(program, arguments)) {
-            updateAnnotationToolStatus();
-            statusBar()->showMessage(uiText("已启动 X-AnyLabeling：%1").arg(QDir::toNativeSeparators(datasetPath)), 4000);
-            return;
-        }
-        QMessageBox::warning(this,
-            QStringLiteral("X-AnyLabeling"),
-            uiText("X-AnyLabeling 启动失败：%1").arg(QDir::toNativeSeparators(program)));
-    });
     auto* annotationActionRow = new QWidget;
     auto* annotationActionGrid = new QGridLayout(annotationActionRow);
     annotationActionGrid->setContentsMargins(0, 0, 0, 0);
     annotationActionGrid->setHorizontalSpacing(10);
     annotationActionGrid->setVerticalSpacing(8);
-    annotationActionGrid->addWidget(launchAnnotationToolButton, 0, 0);
-    annotationActionGrid->addWidget(prepareAnnotationSessionButton, 0, 1);
-    annotationActionGrid->addWidget(syncAnnotationSessionButton, 0, 2);
-    annotationActionGrid->addWidget(refreshAnnotationStatusButton, 1, 0);
-    annotationActionGrid->addWidget(refreshDatasetAfterAnnotationButton, 1, 1);
-    annotationActionGrid->addWidget(openDatasetDirButton, 1, 2);
+    annotationActionGrid->addWidget(createAnnotationSessionV2Button, 0, 0);
+    annotationActionGrid->addWidget(syncAnnotationSessionV2Button, 0, 1);
+    annotationActionGrid->addWidget(refreshAnnotationStatusButton, 0, 2);
+    annotationActionGrid->addWidget(openDatasetDirButton, 1, 0, 1, 3);
     for (int column = 0; column < 3; ++column) {
         annotationActionGrid->setColumnStretch(column, 1);
     }
@@ -506,23 +538,17 @@ QWidget* MainWindow::buildSampleReviewPanel()
     actionLayout->setSpacing(8);
     auto* loadButton = primaryButton(uiText("加载复核样本"));
     auto* openButton = new QPushButton(uiText("打开样本"));
-    auto* generateButton = primaryButton(uiText("生成复核清单"));
-    auto* xAnyButton = new QPushButton(QStringLiteral("X-AnyLabeling"));
     connect(loadButton, &QPushButton::clicked, this, &MainWindow::loadSampleReviewFile);
     connect(openButton, &QPushButton::clicked, this, &MainWindow::openSelectedReviewSample);
-    connect(generateButton, &QPushButton::clicked, this, &MainWindow::generateFilteredReviewList);
-    connect(xAnyButton, &QPushButton::clicked, this, &MainWindow::launchXAnyLabelingForReview);
     actionLayout->addWidget(loadButton, 0, 0);
     actionLayout->addWidget(openButton, 0, 1);
-    actionLayout->addWidget(generateButton, 1, 0);
-    actionLayout->addWidget(xAnyButton, 1, 1);
     actionLayout->setColumnStretch(0, 1);
     actionLayout->setColumnStretch(1, 1);
     setupPanel->bodyLayout()->addWidget(actionStrip);
 
     sampleReviewSummaryLabel_ = inlineStatusLabel(uiText("尚未加载复核样本。"));
     setupPanel->bodyLayout()->addWidget(sampleReviewSummaryLabel_);
-    setupPanel->bodyLayout()->addWidget(emptyStateLabel(uiText("v1 只生成本地复核队列，不内嵌标注器，也不实现多人协作。")));
+    setupPanel->bodyLayout()->addWidget(emptyStateLabel(uiText("样本复核页只读展示已加载清单；修复必须通过 Data Quality V2 与 Annotation Session V2。")));
     setupPanel->bodyLayout()->addStretch();
 
     auto* tablePanel = new InfoPanel(uiText("复核队列"));

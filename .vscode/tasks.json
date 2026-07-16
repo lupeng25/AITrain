@@ -7,7 +7,7 @@
       "command": "cmd",
       "args": [
         "/c",
-        "set VSLANG=1033 && call \"C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && cmake -S . -B build-vscode -G \"NMake Makefiles\" -DCMAKE_PREFIX_PATH=C:\\Qt\\Qt5.12.9\\5.12.9\\msvc2017_64 -DAITRAIN_BUILD_TESTS=ON"
+        "set VSLANG=1033 && call \"D:\\Microsoft Visual Studio\\18\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && cmake -S . -B build-vscode -G \"NMake Makefiles\" -DCMAKE_PREFIX_PATH=D:\\Qt\\Qt5.12.9\\5.12.9\\msvc2017_64 -DAITRAIN_BUILD_TESTS=ON"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -20,7 +20,7 @@
       "command": "cmd",
       "args": [
         "/c",
-        "set VSLANG=1033 && call \"C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && cmake --build build-vscode"
+        "set VSLANG=1033 && call \"D:\\Microsoft Visual Studio\\18\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && cmake --build build-vscode"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -38,12 +38,13 @@
       "command": "cmd",
       "args": [
         "/c",
-        "set VSLANG=1033 && call \"C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && ctest --test-dir build-vscode --output-on-failure"
+        "set VSLANG=1033 && call \"D:\\Microsoft Visual Studio\\18\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && ctest --test-dir build-vscode --output-on-failure"
       ],
       "options": {
         "cwd": "${workspaceFolder}",
         "env": {
-          "PATH": "C:\\Qt\\Qt5.12.9\\5.12.9\\msvc2017_64\\bin;${env:PATH}"
+          "PATH": "D:\\Qt\\Qt5.12.9\\5.12.9\\msvc2017_64\\bin;${env:PATH}",
+          "QT_QPA_PLATFORM": "offscreen"
         }
       },
       "dependsOn": "Build AITrain",
@@ -57,7 +58,7 @@
       "options": {
         "cwd": "${workspaceFolder}",
         "env": {
-          "PATH": "C:\\Qt\\Qt5.12.9\\5.12.9\\msvc2017_64\\bin;${env:PATH}"
+          "PATH": "D:\\Qt\\Qt5.12.9\\5.12.9\\msvc2017_64\\bin;${env:PATH}"
         }
       },
       "dependsOn": "Build AITrain",

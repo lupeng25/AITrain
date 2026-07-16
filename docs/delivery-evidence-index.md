@@ -4,6 +4,8 @@
 
 本文把当前 RC、RTX 验证、打包、OCR、诊断和外部验收相关证据集中列出，避免把本地证据、RTX 4090 D 证据、clean Windows 证据和客户域证据混在一起。阶段状态仍以 `docs/harness/current-status.md` 为准。
 
+> 2026-07-16 破坏性重构说明：旧 `acceptance-smoke.ps1 -TensorRT`、独立 OBB/NCNN/SMP smoke 及 Worker 裸路径命令均已删除；历史证据不可作为当前 V2 通过结论。当前证据必须来自 V2 Workflow、Artifact/Evidence 查询或官方 Python 适配器报告。
+
 ## 证据总表
 
 | 证据项 | 当前状态 | 主要路径或命令 | 备注 |
@@ -24,8 +26,8 @@
 | SMP semantic segmentation | 已通过本地 RTX 4090D realtest | `.deps\smp-realtest\gpu-4090d`；`.\tools\phase-smp-4090d-gpu-realtest.ps1` | Public/synthetic workflow evidence only; SMP 范围为 ONNX Runtime，不要求 NCNN/TensorRT。 |
 | OBB v1 | 已通过本地 public DOTA smoke/matrix | `.deps\phase-obb-ultralytics-smoke`；`.deps\obb-quality\dota`; `.\tools\phase-obb-dota-quality-matrix.ps1` | Public DOTA/workflow evidence only；OBB v1 产品部署范围为 ONNX Runtime，NCNN 不支持。 |
 | Anomaly v1 | 已通过本地 public MVTec 默认三类矩阵 | `.deps\anomaly-mvtec-quality-matrix\anomaly_mvtec_quality_matrix_summary.json`; `.\tools\phase-anomaly-mvtec-quality-matrix.ps1` | Public MVTec workflow/quality evidence only；运行时为 Worker-managed Python/Anomalib，不声明 AITrain C++ ONNX/TensorRT/NCNN anomaly runtime。 |
-| 诊断包 | GUI/Worker 能力已落地 | `环境 > 交付证据` 的“一键诊断包”；Worker `collectDiagnostics` | 诊断包是只读证据，不修改全局环境。 |
-| 部署验证 | GUI/Worker 能力已落地 | `环境 > 交付证据` 汇总部署验证状态；Worker `validateDeploymentArtifact` | ONNX 需要可运行推理；TensorRT 可返回 `hardware-blocked`；NCNN 在配置 SDK/runtime 和样本图时执行 YOLO 检测/分割 runtime inference。 |
+| Diagnostics Bundle V2 | 两步 EvidenceRequired 工作流已落地并通过统一构建/回归 | `环境 > 交付证据` 的“一键诊断包”；Worker `runDiagnosticsWorkflowV2` | 只读 Presenter 按 TaskId 从 V2 Query 读取 Diagnostics/Evidence ArtifactId，不消费 Worker 路径。同步外部探测不可在调用中抢占，取消在探测前后收口；输出有固定上限。2026-07-16 定向 CTest 4/4 通过。 |
+| Training / Runtime Delivery | V2 Workflow 统一生成交付摘要并通过删除回归 | Training Workflow 提交 `training_delivery_report_v2`，Runtime Delivery 提交 `runtime_delivery_report_v2`，两者终态提交 `evidence_bundle_v2`；任务页按 TaskId 通过 Presenter 查看 ArtifactId 和包内清单 | standalone `generateDeliveryReport` 已删除，不再接收模型、数据集、上下文或输出路径。Runtime 仍只接受已登记 `ModelPackageId`；同步 infer 与 TensorRT 限制保持不变。2026-07-16 定向 CTest 4/4 通过。 |
 | NCNN runtime smoke | 本机检测/分割 runtime 已有证据 | `.deps\github-ncnn-smoke\hyuto-yolov8\runtime-output`；`.deps\github-ncnn-smoke\nihui-yolov8n-seg-ncnn\runtime-output\deployment-validation` | Hyuto YOLOv8 detection ONNX -> NCNN passed，nihui 预转换 YOLOv8n-seg pnnx/DFL NCNN passed；YOLOv8-seg ONNX 若残留 unsupported `Shape` layer，则记录为 failed report。 |
 
 ## 证据分层

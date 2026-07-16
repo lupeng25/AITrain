@@ -34,8 +34,18 @@ QJsonObject TensorRtBackendStatus::toJson() const
 {
     return QJsonObject{
         {QStringLiteral("sdkAvailable"), sdkAvailable},
+        {QStringLiteral("dependenciesAvailable"), dependenciesAvailable},
+        {QStringLiteral("hardwareDetected"), hardwareDetected},
+        {QStringLiteral("hardwareSupported"), hardwareSupported},
         {QStringLiteral("exportAvailable"), exportAvailable},
         {QStringLiteral("inferenceAvailable"), inferenceAvailable},
+        {QStringLiteral("computeCapabilityMajor"), computeCapabilityMajor},
+        {QStringLiteral("computeCapabilityMinor"), computeCapabilityMinor},
+        {QStringLiteral("sdkStatus"), sdkStatus},
+        {QStringLiteral("engineBuildStatus"), engineBuildStatus},
+        {QStringLiteral("runtimeInferenceStatus"), runtimeInferenceStatus},
+        {QStringLiteral("engineBuildMessage"), engineBuildMessage},
+        {QStringLiteral("runtimeInferenceMessage"), runtimeInferenceMessage},
         {QStringLiteral("status"), status},
         {QStringLiteral("message"), message}
     };
@@ -46,12 +56,94 @@ TensorRtBackendStatus tensorRtBackendStatus()
     TensorRtBackendStatus status;
 #ifdef AITRAIN_WITH_TENSORRT_SDK
     status.sdkAvailable = true;
-    status.exportAvailable = true;
+    status.sdkStatus = QStringLiteral("available");
+    TensorRtRuntimeLibraries libraries;
+    QString dependencyError;
+    if (!loadTensorRtCore(&libraries, &dependencyError)
+        || !loadCudaRuntime(&libraries, &dependencyError)) {
+        status.status = QStringLiteral("dependency_missing");
+        status.engineBuildStatus = QStringLiteral("dependency_missing");
+        status.runtimeInferenceStatus = QStringLiteral("dependency_missing");
+        status.runtimeInferenceMessage = dependencyError.isEmpty()
+            ? QStringLiteral("TensorRT/CUDA 运行时依赖不可用。")
+            : dependencyError;
+        status.engineBuildMessage = status.runtimeInferenceMessage;
+        status.message = status.runtimeInferenceMessage;
+        return status;
+    }
+    status.dependenciesAvailable = true;
+    QString parserError;
+    const bool parserAvailable = loadTensorRtParser(&libraries, &parserError);
+    status.engineBuildStatus = parserAvailable ? QStringLiteral("available") : QStringLiteral("dependency_missing");
+    status.engineBuildMessage = parserAvailable
+        ? QStringLiteral("TensorRT engine builder 与 ONNX parser 依赖可用。")
+        : parserError;
+    int deviceCount = 0;
+    const cudaError_t countStatus = libraries.cudaGetDeviceCount(&deviceCount);
+    if (countStatus != cudaSuccess) {
+        status.status = countStatus == cudaErrorNoDevice
+            ? QStringLiteral("hardware_unsupported")
+            : QStringLiteral("dependency_missing");
+        status.engineBuildStatus = status.status;
+        status.runtimeInferenceStatus = status.status;
+        status.runtimeInferenceMessage = QStringLiteral("CUDA 设备探测失败：%1").arg(cudaErrorText(libraries, countStatus));
+        status.engineBuildMessage = status.runtimeInferenceMessage;
+        status.message = status.runtimeInferenceMessage;
+        return status;
+    }
+    if (deviceCount <= 0) {
+        status.status = QStringLiteral("hardware_unsupported");
+        status.engineBuildStatus = status.status;
+        status.runtimeInferenceStatus = status.status;
+        status.runtimeInferenceMessage = QStringLiteral("未检测到可用于 TensorRT 的 CUDA GPU。");
+        status.engineBuildMessage = status.runtimeInferenceMessage;
+        status.message = status.runtimeInferenceMessage;
+        return status;
+    }
+    status.hardwareDetected = true;
+    for (int index = 0; index < deviceCount; ++index) {
+        cudaDeviceProp properties{};
+        const cudaError_t propertyStatus = libraries.cudaGetDeviceProperties(&properties, index);
+        if (propertyStatus != cudaSuccess) {
+            status.status = QStringLiteral("dependency_missing");
+            status.engineBuildStatus = status.status;
+            status.runtimeInferenceStatus = status.status;
+            status.runtimeInferenceMessage = QStringLiteral("读取 CUDA GPU 属性失败：%1").arg(cudaErrorText(libraries, propertyStatus));
+            status.engineBuildMessage = status.runtimeInferenceMessage;
+            status.message = status.runtimeInferenceMessage;
+            return status;
+        }
+        if (properties.major > status.computeCapabilityMajor
+            || (properties.major == status.computeCapabilityMajor && properties.minor > status.computeCapabilityMinor)) {
+            status.computeCapabilityMajor = properties.major;
+            status.computeCapabilityMinor = properties.minor;
+        }
+    }
+    status.hardwareSupported = status.computeCapabilityMajor > 7
+        || (status.computeCapabilityMajor == 7 && status.computeCapabilityMinor >= 5);
+    if (!status.hardwareSupported) {
+        status.status = QStringLiteral("hardware_unsupported");
+        status.engineBuildStatus = status.status;
+        status.runtimeInferenceStatus = status.status;
+        status.runtimeInferenceMessage = QStringLiteral("TensorRT 产品路线要求 GPU compute capability >= 7.5；当前最高为 %1.%2。")
+            .arg(status.computeCapabilityMajor).arg(status.computeCapabilityMinor);
+        status.engineBuildMessage = status.runtimeInferenceMessage;
+        status.message = status.runtimeInferenceMessage;
+        return status;
+    }
+    status.exportAvailable = parserAvailable;
     status.inferenceAvailable = false;
-    status.status = QStringLiteral("export_available");
-    status.message = QStringLiteral("TensorRT export is compiled for official ONNX artifacts; runtime inference requires the official YOLO TensorRT decoder and is not enabled in this build.");
+    status.runtimeInferenceStatus = QStringLiteral("runtime_not_implemented");
+    status.status = QStringLiteral("runtime_not_implemented");
+    status.runtimeInferenceMessage = QStringLiteral("官方 YOLO TensorRT decoder 尚未实现，不能声明 runtime inference 成功。");
+    status.message = status.runtimeInferenceMessage;
 #else
     status.sdkAvailable = false;
+    status.sdkStatus = QStringLiteral("sdk_missing");
+    status.engineBuildStatus = QStringLiteral("sdk_missing");
+    status.runtimeInferenceStatus = QStringLiteral("sdk_missing");
+    status.engineBuildMessage = QStringLiteral("TensorRT SDK 未在配置阶段找到，无法构建 engine。");
+    status.runtimeInferenceMessage = QStringLiteral("TensorRT SDK 未在配置阶段找到，无法执行 runtime inference。");
     status.exportAvailable = false;
     status.inferenceAvailable = false;
     status.status = QStringLiteral("sdk_missing");

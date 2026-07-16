@@ -1,5 +1,7 @@
 ﻿#include "TestSupport.h"
 
+#include "aitrain/core/SemanticMask.h"
+
 class DatasetTests : public QObject {
     Q_OBJECT
 
@@ -502,6 +504,29 @@ private slots:
         QVERIFY(jsonArrayContainsCode(ignoreValid.toJson().value(QStringLiteral("issues")).toArray(), QStringLiteral("empty_mask")));
     }
 
+    void semanticMaskDatasetPreservesPaletteIndexes()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = dir.filePath(QStringLiteral("semantic-palette"));
+        writeTinySemanticMaskDataset(root);
+
+        QImage paletteMask(8, 8, QImage::Format_Indexed8);
+        QVector<QRgb> palette(3, qRgb(0, 0, 0));
+        palette[1] = qRgb(255, 0, 0);
+        palette[2] = qRgb(0, 255, 0);
+        paletteMask.setColorTable(palette);
+        paletteMask.fill(1);
+        const QString maskPath = QDir(root).filePath(QStringLiteral("masks/train/a.png"));
+        QVERIFY(paletteMask.save(maskPath));
+
+        const QImage reloaded(maskPath);
+        QCOMPARE(reloaded.format(), QImage::Format_Indexed8);
+        QCOMPARE(aitrain::semanticMaskClassId(reloaded, 0, 0), 1);
+        const aitrain::DatasetValidationResult validation = aitrain::validateSemanticSegmentationMaskDataset(root);
+        QVERIFY2(validation.ok, qPrintable(validation.errors.join(QStringLiteral("\n"))));
+    }
+
     void semanticMaskDatasetSplit()
     {
         QTemporaryDir dir;
@@ -866,28 +891,6 @@ private slots:
         const aitrain::DatasetValidationResult valid = aitrain::validateAnomalyFolderDataset(root);
         QVERIFY2(valid.ok, qPrintable(valid.errors.join(QStringLiteral("\n"))));
         QVERIFY(jsonArrayContainsCode(valid.toJson().value(QStringLiteral("issues")).toArray(), QStringLiteral("missing_anomaly_mask")));
-    }
-
-    void anomalyFolderQualityAcceptsMaskSuffix()
-    {
-        QTemporaryDir dir;
-        QVERIFY(dir.isValid());
-        QTemporaryDir output;
-        QVERIFY(output.isValid());
-        const QString root = dir.path();
-        writeTinyPng(QDir(root).filePath(QStringLiteral("train/good/a.png")));
-        writeTinyPng(QDir(root).filePath(QStringLiteral("test/anomaly/ng.png")));
-        writeTinyMaskPng(QDir(root).filePath(QStringLiteral("masks/test/anomaly/ng_mask.png")));
-
-        const aitrain::WorkflowResult report = aitrain::curateDatasetQualityReport(
-            root,
-            output.path(),
-            QStringLiteral("anomaly_folder"),
-            QJsonObject{});
-        QVERIFY2(report.ok, qPrintable(report.error));
-        const QJsonArray issues = report.payload.value(QStringLiteral("issues")).toArray();
-        QVERIFY(!jsonArrayContainsCode(issues, QStringLiteral("missing_anomaly_mask")));
-        QVERIFY(!jsonArrayContainsCode(issues, QStringLiteral("orphan_anomaly_mask")));
     }
 
     void anomalyFolderEmptyFails()

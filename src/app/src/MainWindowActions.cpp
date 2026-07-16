@@ -53,7 +53,7 @@ using namespace aitrain_app;
 
 void MainWindow::openEvaluationReportsPage()
 {
-    showModelWorkspaceTab(1);
+    showModelWorkspaceTab(2);
 }
 
 void MainWindow::createProject()
@@ -67,12 +67,10 @@ void MainWindow::createProject()
 
     ensureProjectSubdirs(currentProjectPath_);
     QString error;
-    if (!repository_.open(QDir(currentProjectPath_).filePath(QStringLiteral("project.sqlite")), &error)
-        || !repository_.upsertProject(currentProjectName_, currentProjectPath_, &error)) {
-        QMessageBox::critical(this, uiText("项目"), error);
+    if (!v2Workspace_.open(currentProjectPath_, &error)) {
+        QMessageBox::critical(this, uiText("项目"), uiText("无法打开 V2 项目工作区：%1").arg(error));
         return;
     }
-    repository_.markInterruptedTasksFailed(uiText("上次会话结束时任务未正常完成，已标记为失败。"), &error);
 
     projectLabel_->setText(uiText("当前项目：%1").arg(currentProjectPath_));
     if (dashboardProjectValue_) {
@@ -95,6 +93,10 @@ void MainWindow::runEnvironmentCheck()
         return;
     }
 
+    if (!v2Workspace_.isOpen() || currentProjectPath_.isEmpty()) {
+        QMessageBox::warning(this, uiText("环境自检"), uiText("请先打开 V2 项目。"));
+        return;
+    }
     if (environmentTable_) {
         for (int row = 0; row < environmentTable_->rowCount(); ++row) {
             auto* statusItem = new QTableWidgetItem(uiText("检测中"));
@@ -104,8 +106,14 @@ void MainWindow::runEnvironmentCheck()
     }
     updateEnvironmentSummary();
 
+    const aitrain::v2::TaskId taskId = aitrain::v2::TaskId::create();
+    activeV2TaskId_ = taskId.toString();
+    activeV2WorkflowKind_ = QStringLiteral("environment_check_v2");
     QString error;
-    if (!worker_.requestEnvironmentCheck(workerExecutablePath(), &error)) {
+    if (!worker_.requestEnvironmentCheckWorkflowV2(workerExecutablePath(), currentProjectPath_,
+            &error, activeV2TaskId_)) {
+        activeV2TaskId_.clear();
+        activeV2WorkflowKind_.clear();
         QMessageBox::critical(this, uiText("环境自检"), error);
         return;
     }

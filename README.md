@@ -4,7 +4,7 @@ AITrain Studio is a C++/Qt desktop foundation for managing local computer-vision
 
 This repository implements the first usable platform layer from the requested plan:
 
-- Qt Widgets GUI organized as a local training workbench with project dashboard, dataset library, training experiments, task/artifact history, model export, inference validation, built-in capability, and environment views.
+- Qt Widgets GUI organized as a local training workbench with project dashboard, dataset library, training experiments, task/artifact history, V2 model-package deployment/inference validation, built-in capability, and environment views.
 - Chinese/English GUI language switching through Qt translation resources, with language settings persisted in `QSettings` and applied after restart.
 - Offline machine-bound license verification before the main window opens, plus a separate Qt license generator tool for issuing signed license codes.
 - Isolated `aitrain_worker` process using JSON Lines over `QLocalSocket`.
@@ -50,7 +50,7 @@ The Worker reports the authoritative built-in capability matrix with `aitrain_wo
 
 ## User Guide
 
-End-user operation is documented in `docs/user-guide.md`. It covers registration, projects, dataset preparation, dataset conversion, validation and split, sample review, training, artifacts, evaluation, model export, deployment validation, inference validation, built-in capability selection, delivery acceptance, and diagnostic bundles through the GUI.
+End-user operation is documented in `docs/user-guide.md`. It covers registration, projects, dataset preparation, dataset conversion, validation and split, sample review, training, artifacts, V2 model-package import, deployment validation, inference validation, built-in capability selection, delivery acceptance, and diagnostic bundles through the GUI.
 
 Additional operational and delivery references:
 
@@ -71,7 +71,7 @@ Build-time licensing knobs:
 - `AITRAIN_BUILD_LICENSE_GENERATOR`: builds `AITrainLicenseGenerator.exe` when enabled.
 - `AITRAIN_INSTALL_LICENSE_GENERATOR`: installs the generator only when explicitly enabled; it defaults off so customer packages do not accidentally include it.
 
-The generator uses a private key file to issue customer license codes. Keep private keys local and out of customer packages and source control. The tracked repository must contain only `tools/aitrain-license-private-key.example.json`; any real `aitrain-license-private-key.json` must live in a secured operator path outside the repo. If a private key has ever been committed, treat it as leaked: rotate to a newly generated key pair, rebuild with the new `AITRAIN_LICENSE_PUBLIC_KEY`, and handle history purging through a separate security procedure if the repository was pushed or distributed.
+授权签发工具使用运维机上的私钥文件生成授权码；私钥不进入安装包或源码仓库。当前运行时只接受通过 Windows DPAPI（当前用户）保护的授权载荷，仓库不再提供明文私钥示例。若私钥曾提交过，必须视为泄露并轮换密钥，再重新构建并按独立安全流程处理历史记录。
 
 ## Project Layout
 

@@ -1,6 +1,7 @@
 #include "DetectionTrainerInternal.h"
 
 #include "aitrain/core/Deployment.h"
+#include "aitrain/core/SemanticMask.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -135,7 +136,7 @@ QJsonObject pixelCountsForMask(const QImage& mask)
     QJsonObject counts;
     for (int y = 0; y < mask.height(); ++y) {
         for (int x = 0; x < mask.width(); ++x) {
-            const int classId = qGray(mask.pixel(x, y));
+            const int classId = semanticMaskClassId(mask, x, y);
             const QString key = QString::number(classId);
             counts.insert(key, counts.value(key).toDouble() + 1.0);
         }
@@ -315,9 +316,20 @@ QVector<DetectionPrediction> predictDetectionOnnxRuntime(
     const DetectionInferenceOptions& options,
     QString* error)
 {
+    return predictDetectionOnnxRuntime(onnxPath, imagePath, {}, options, error);
+}
+
+QVector<DetectionPrediction> predictDetectionOnnxRuntime(
+    const QString& onnxPath,
+    const QString& imagePath,
+    const QStringList& manifestClassNames,
+    const DetectionInferenceOptions& options,
+    QString* error)
+{
 #ifndef AITRAIN_WITH_ONNXRUNTIME
     Q_UNUSED(onnxPath)
     Q_UNUSED(imagePath)
+    Q_UNUSED(manifestClassNames)
     Q_UNUSED(options)
     if (error) {
         *error = QStringLiteral("ONNX Runtime inference is not enabled. Configure AITRAIN_ONNXRUNTIME_ROOT with an ONNX Runtime SDK to enable .onnx inference.");
@@ -409,7 +421,8 @@ QVector<DetectionPrediction> predictDetectionOnnxRuntime(
                 outputNames.data(),
                 outputNames.size());
 
-            const QStringList classNames = ultralyticsClassNames(onnxPath);
+            const QStringList classNames = manifestClassNames.isEmpty()
+                ? ultralyticsClassNames(onnxPath) : manifestClassNames;
             const std::vector<int64_t> outputShape = outputs.front().GetTensorTypeAndShapeInfo().GetShape();
             if (yoloEndToEndFromExportConfig(onnxPath, exportConfig)) {
                 return yoloEndToEndPredictionsFromOutput(
@@ -455,9 +468,20 @@ QVector<ObbPrediction> predictObbOnnxRuntime(
     const DetectionInferenceOptions& options,
     QString* error)
 {
+    return predictObbOnnxRuntime(onnxPath, imagePath, {}, options, error);
+}
+
+QVector<ObbPrediction> predictObbOnnxRuntime(
+    const QString& onnxPath,
+    const QString& imagePath,
+    const QStringList& manifestClassNames,
+    const DetectionInferenceOptions& options,
+    QString* error)
+{
 #ifndef AITRAIN_WITH_ONNXRUNTIME
     Q_UNUSED(onnxPath)
     Q_UNUSED(imagePath)
+    Q_UNUSED(manifestClassNames)
     Q_UNUSED(options)
     if (error) {
         *error = QStringLiteral("ONNX Runtime inference is not enabled. Configure AITRAIN_ONNXRUNTIME_ROOT with an ONNX Runtime SDK to enable .onnx inference.");
@@ -545,7 +569,8 @@ QVector<ObbPrediction> predictObbOnnxRuntime(
             return {};
         }
 
-        const QStringList classNames = ultralyticsClassNames(onnxPath);
+        const QStringList classNames = manifestClassNames.isEmpty()
+            ? ultralyticsClassNames(onnxPath) : manifestClassNames;
         const std::vector<int64_t> outputShape = outputs.front().GetTensorTypeAndShapeInfo().GetShape();
         return yoloObbPredictionsFromOutput(
             outputs.front().GetTensorData<float>(),
@@ -575,9 +600,20 @@ QVector<SegmentationPrediction> predictSegmentationOnnxRuntime(
     const DetectionInferenceOptions& options,
     QString* error)
 {
+    return predictSegmentationOnnxRuntime(onnxPath, imagePath, {}, options, error);
+}
+
+QVector<SegmentationPrediction> predictSegmentationOnnxRuntime(
+    const QString& onnxPath,
+    const QString& imagePath,
+    const QStringList& manifestClassNames,
+    const DetectionInferenceOptions& options,
+    QString* error)
+{
 #ifndef AITRAIN_WITH_ONNXRUNTIME
     Q_UNUSED(onnxPath)
     Q_UNUSED(imagePath)
+    Q_UNUSED(manifestClassNames)
     Q_UNUSED(options)
     if (error) {
         *error = QStringLiteral("ONNX Runtime inference is not enabled. Configure AITRAIN_ONNXRUNTIME_ROOT with an ONNX Runtime SDK to enable .onnx inference.");
@@ -667,7 +703,8 @@ QVector<SegmentationPrediction> predictSegmentationOnnxRuntime(
                 boxesIndex = index;
             }
         }
-        const QStringList classNames = ultralyticsClassNames(onnxPath);
+        const QStringList classNames = manifestClassNames.isEmpty()
+            ? ultralyticsClassNames(onnxPath) : manifestClassNames;
         if (yoloEndToEndFromExportConfig(onnxPath, exportConfig)) {
             return yoloEndToEndSegmentationPredictionsFromOutputs(
                 outputs.at(boxesIndex).GetTensorData<float>(),

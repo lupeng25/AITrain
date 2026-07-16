@@ -4,13 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import shutil
 import subprocess
 import sys
-import time
-from collections import deque
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -18,22 +18,70 @@ TRAINER_ROOT = Path(__file__).resolve().parents[1]
 if str(TRAINER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRAINER_ROOT))
 
-from trainer_protocol import configure_stdio, emit_failed, exception_details, unhandled_failure  # noqa: E402
+from adapter_event_channel_v2 import AdapterEventChannelV2, event_channel_from_environment  # noqa: E402
+from adapter_sdk import AdapterCanceled, AdapterSdk  # noqa: E402
+from trainer_protocol import configure_stdio, exception_details  # noqa: E402
 
 
 BACKEND_ID = "paddleocr_system_official"
 
 configure_stdio()
 
+_adapter: AdapterSdk | None = None
+_event_channel: AdapterEventChannelV2 | None = None
+
+
+def configure_adapter() -> None:
+    global _adapter, _event_channel
+    if _event_channel is None and os.environ.get("AITRAIN_EVENT_PORT"):
+        _event_channel = event_channel_from_environment()
+        _event_channel.connect()
+    if _adapter is None:
+        sink = _event_channel.emit_legacy_event if _event_channel is not None else None
+        _adapter = AdapterSdk(BACKEND_ID, event_sink=sink, cancel_file=os.environ.get("AITRAIN_CANCEL_FILE"))
+
+
+def close_adapter() -> None:
+    global _event_channel
+    if _event_channel is not None:
+        _event_channel.close()
+        _event_channel = None
+
+
+def active_adapter() -> AdapterSdk:
+    configure_adapter()
+    assert _adapter is not None
+    return _adapter
+
 
 def emit(event_type: str, **payload: Any) -> None:
-    message = {"type": event_type, "timestamp": time.time(), "backend": BACKEND_ID}
-    message.update(payload)
-    print(json.dumps(message, ensure_ascii=False), flush=True)
+    payload.pop("backend", None)
+    adapter = active_adapter()
+    if event_type == "artifact":
+        adapter.emit_artifact_candidate(
+            str(payload.pop("kind", "artifact")),
+            str(payload.pop("path", "")),
+            message=str(payload.pop("message", "")),
+            **payload,
+        )
+    elif event_type == "log":
+        adapter.emit_log(str(payload.pop("message", "")), level=str(payload.pop("level", "info")), **payload)
+    elif event_type == "completed":
+        adapter.emit_completed(str(payload.pop("message", "PaddleOCR System adapter completed")), **payload)
+    elif event_type == "failed":
+        adapter.emit_failed(
+            str(payload.pop("message", "PaddleOCR System adapter failed")),
+            str(payload.pop("code", "paddleocr_system_failed")),
+            payload.pop("details", {}),
+        )
+    elif event_type == "canceled":
+        adapter.emit_canceled(str(payload.pop("message", "PaddleOCR System adapter canceled")), **payload)
+    else:
+        raise ValueError(f"unsupported adapter event type: {event_type}")
 
 
 def fail(message: str, code: str, details: dict[str, Any] | None = None) -> int:
-    return emit_failed(BACKEND_ID, message, code, details)
+    return active_adapter().emit_failed(message, code, details)
 
 
 def read_request(path: Path) -> dict[str, Any]:
@@ -67,12 +115,6 @@ def official_log_options(parameters: dict[str, Any]) -> tuple[str, int, int]:
     interval_seconds = int_param(parameters, "officialLogEventIntervalSeconds", 30, 1)
     tail_lines = int_param(parameters, "officialLogTailLines", 200, 1)
     return verbosity, interval_seconds, tail_lines
-
-
-def is_important_official_line(line: str) -> bool:
-    lower = line.lower()
-    important_tokens = ("traceback", "error", "exception", "failed", "warning", "fatal")
-    return any(token in lower for token in important_tokens)
 
 
 def find_repo(parameters: dict[str, Any]) -> Path | None:
@@ -248,60 +290,51 @@ def module_version(module_name: str) -> str:
         return ""
 
 
-def run_process(command: list[str], cwd: Path, env: dict[str, str], log_path: Path, parameters: dict[str, Any]) -> tuple[int, list[str]]:
+def run_process(command: list[str], cwd: Path, env: dict[str, str], log_path: Path, parameters: dict[str, Any]) -> tuple[int, list[str], bool]:
     emit("log", level="info", message=f"Running official PaddleOCR command: {' '.join(command)}")
-    verbosity, interval_seconds, tail_lines = official_log_options(parameters)
-    process = subprocess.Popen(
+    _, _, tail_lines = official_log_options(parameters)
+
+    result = active_adapter().run_child_process(
         command,
-        cwd=str(cwd),
+        cwd=cwd,
         env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
+        log_path=log_path,
+        tail_line_limit=tail_lines,
     )
-    assert process.stdout is not None
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    tail: deque[str] = deque(maxlen=tail_lines)
-    line_count = 0
-    last_event_at = time.monotonic()
-    with log_path.open("w", encoding="utf-8") as log_file:
-        for line in process.stdout:
-            stripped = line.rstrip()
-            if not stripped:
-                continue
-            line_count += 1
-            log_file.write(stripped + "\n")
-            log_file.flush()
-            tail.append(stripped)
-            now = time.monotonic()
-            if verbosity == "full" or is_important_official_line(stripped):
-                emit("log", level="info", message=stripped[:2000])
-                last_event_at = now
-            elif verbosity == "summary" and now - last_event_at >= interval_seconds:
-                emit("log", level="info", message=f"Official PaddleOCR command still running; lines={line_count}; latest={stripped[:500]}")
-                last_event_at = now
-    exit_code = process.wait()
-    if verbosity != "full":
-        emit(
-            "log",
-            level="info" if exit_code == 0 else "error",
-            message=f"Official PaddleOCR command finished with exitCode={exit_code}; logPath={log_path}; tailLines={len(tail)}",
-        )
-    return exit_code, list(tail)
+    return result.exit_code, list(result.tail_lines), result.canceled
 
 
 def parse_system_results(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
-        return []
+        raise ValueError(f"PaddleOCR system_results.txt was not produced: {path}")
     predictions: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+    for line_number, line in enumerate(path.read_text(encoding="utf-8", errors="strict").splitlines(), 1):
         if not line.strip():
             continue
         image_name, _, payload = line.partition("\t")
-        predictions.append({"image": image_name, "raw": payload})
+        if not image_name.strip() or not payload.strip():
+            raise ValueError(f"invalid system_results.txt line {line_number}: expected image and payload")
+        try:
+            parsed = json.loads(payload)
+        except json.JSONDecodeError:
+            try:
+                parsed = ast.literal_eval(payload)
+            except (SyntaxError, ValueError) as exc:
+                raise ValueError(f"invalid system_results.txt payload at line {line_number}") from exc
+        if not isinstance(parsed, list):
+            raise ValueError(f"invalid system_results.txt payload at line {line_number}: expected a list")
+        predictions.append({"image": image_name, "results": parsed})
     return predictions
+
+
+def create_preview_archive(draw_dir: Path, archive_path: Path) -> list[str]:
+    files = sorted(path for path in draw_dir.rglob("*") if path.is_file())
+    if not files:
+        raise ValueError(f"PaddleOCR visualization directory contains no files: {draw_dir}")
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in files:
+            archive.write(path, path.relative_to(draw_dir).as_posix())
+    return [path.relative_to(draw_dir).as_posix() for path in files]
 
 
 def run(request: dict[str, Any]) -> int:
@@ -343,6 +376,7 @@ def run(request: dict[str, Any]) -> int:
     log_path = output_path / "official_system_predict.log"
     prediction_path = output_path / "official_system_prediction.json"
     report_path = output_path / "paddleocr_official_system_report.json"
+    preview_archive_path = output_path / "official_system_visualization.zip"
 
     command = [
         sys.executable,
@@ -367,7 +401,8 @@ def run(request: dict[str, Any]) -> int:
         "framework": "PaddleOCR official tools",
         "modelFamily": "ocr",
         "mode": "prepareOnly" if prepare_only else "officialSystemPredict",
-        "note": "Official PaddleOCR predict_system.py adapter for PP-OCRv4/PP-OCRv5/PP-OCRv6 Det+Rec. Angle classifier is disabled in this product route.",
+        "note": "Official PaddleOCR predict_system.py wiring for an independently supplied Det model plus Rec model. This report proves official Det+Rec composition and artifact generation only; it is not customer-domain OCR quality acceptance evidence. Angle classifier is disabled in this product route.",
+        "acceptanceBoundary": "official_det_rec_system_wiring_only_not_customer_domain_quality_acceptance",
         "detModelPreset": det_model_preset,
         "recModelPreset": rec_model_preset,
         "recModelName": rec_metadata.get("recModelName", rec_metadata.get("modelName", "")),
@@ -409,12 +444,37 @@ def run(request: dict[str, Any]) -> int:
         env = os.environ.copy()
         env["PYTHONPATH"] = str(repo) + os.pathsep + env.get("PYTHONPATH", "")
         draw_dir.mkdir(parents=True, exist_ok=True)
-        exit_code, lines = run_process(command, repo, env, log_path, parameters)
+        exit_code, lines, canceled = run_process(command, repo, env, log_path, parameters)
         report["predictExitCode"] = exit_code
+        report["canceled"] = canceled
+        if canceled:
+            report["ok"] = False
+            report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            emit("artifact", name="paddleocr_official_system_report.json", path=str(report_path), kind="report")
+            emit("canceled", message="Official PaddleOCR system prediction was canceled.")
+            return 1
+        if exit_code != 0:
+            report["ok"] = False
+            report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            emit("artifact", name="paddleocr_official_system_report.json", path=str(report_path), kind="report")
+            return fail("Official PaddleOCR system prediction failed.", "official_predict_failed", {"exitCode": exit_code, "logPath": str(log_path)})
         results_path = draw_dir / "system_results.txt"
-        predictions = parse_system_results(results_path)
+        try:
+            predictions = parse_system_results(results_path)
+            preview_files = create_preview_archive(draw_dir, preview_archive_path)
+        except (OSError, UnicodeError, ValueError, zipfile.BadZipFile) as exc:
+            report["ok"] = False
+            report["systemResultsPath"] = str(results_path)
+            report["resultValidationError"] = str(exc)
+            report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            emit("artifact", name="paddleocr_official_system_report.json", path=str(report_path), kind="report")
+            return fail(
+                "Official PaddleOCR command succeeded but system_results.txt or visualization artifacts are invalid.",
+                "official_results_invalid",
+                {"systemResultsPath": str(results_path), "error": str(exc)},
+            )
         prediction_payload = {
-            "ok": exit_code == 0,
+            "ok": True,
             "taskType": "ocr",
             "backend": BACKEND_ID,
             "imagePath": str(inference_image),
@@ -423,19 +483,18 @@ def run(request: dict[str, Any]) -> int:
             "dictionaryFile": str(dictionary_file),
             "systemResultsPath": str(results_path),
             "visualizationDir": str(draw_dir),
+            "visualizationArchivePath": str(preview_archive_path),
             "predictions": predictions,
             "output": lines,
+            "acceptanceBoundary": "official_det_rec_system_wiring_only_not_customer_domain_quality_acceptance",
         }
         prediction_path.write_text(json.dumps(prediction_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         report["systemResultsPath"] = str(results_path)
         report["predictionCount"] = len(predictions)
+        report["visualizationArchivePath"] = str(preview_archive_path)
+        report["visualizationFiles"] = preview_files
         emit("artifact", name="official_system_prediction.json", path=str(prediction_path), kind="prediction")
-        emit("artifact", name="official_system_visualization", path=str(draw_dir), kind="preview_dir")
-        if exit_code != 0:
-            report["ok"] = False
-            report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            emit("artifact", name="paddleocr_official_system_report.json", path=str(report_path), kind="report")
-            return fail("Official PaddleOCR system prediction failed.", "official_predict_failed", {"exitCode": exit_code, "logPath": str(log_path)})
+        emit("artifact", name="official_system_visualization.zip", path=str(preview_archive_path), kind="preview")
 
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     emit("artifact", name="paddleocr_official_system_report.json", path=str(report_path), kind="report")
@@ -448,13 +507,25 @@ def main() -> int:
     parser.add_argument("--request", required=True, type=Path)
     args = parser.parse_args()
     try:
-        request = read_request(args.request)
+        configure_adapter()
+        try:
+            request = read_request(args.request)
+        except Exception as exc:
+            return fail(f"failed to read trainer request: {exc}", "bad_request", exception_details(exc))
+        try:
+            return run(request)
+        except AdapterCanceled:
+            emit("canceled", message="PaddleOCR System adapter was canceled.")
+            return 1
+        except Exception as exc:
+            return fail(f"Unhandled PaddleOCR System adapter error: {exc}", "unhandled_exception", exception_details(exc))
     except Exception as exc:
-        return fail(f"failed to read trainer request: {exc}", "bad_request", exception_details(exc))
-    try:
-        return run(request)
-    except Exception as exc:
-        return unhandled_failure(BACKEND_ID, exc)
+        # Channel/bootstrap failures cannot be reported through the authenticated
+        # channel; keep a concise stderr diagnostic for the Worker Host.
+        print(f"PaddleOCR System adapter bootstrap failed: {exc}", file=sys.stderr, flush=True)
+        return 1
+    finally:
+        close_adapter()
 
 
 if __name__ == "__main__":

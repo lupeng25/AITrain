@@ -1,25 +1,27 @@
 #pragma once
 
 #include "aitrain/core/Cancellation.h"
-#include "aitrain/core/TaskModels.h"
+#include "aitrain/v2/ProjectWorkspaceV2.h"
 
 #include <QJsonArray>
 #include <QLocalSocket>
 #include <QObject>
 #include <QProcess>
 #include <QVector>
-#include <QTimer>
+
+#include <memory>
 
 class WorkerSession : public QObject {
     Q_OBJECT
 
 public:
     explicit WorkerSession(QObject* parent = nullptr);
-    bool connectToServer(const QString& serverName);
+    bool connectToServer(const QString& serverName,
+        const aitrain::v2::RequestId& requestId,
+        const aitrain::v2::TaskId& taskId);
 
 private slots:
     void readLines();
-    void tickTraining();
     void handleSocketDisconnected();
 
 private:
@@ -31,56 +33,41 @@ private:
     static QVector<CommandBinding> commandBindings();
 
     void handleMessage(const QString& type, const QJsonObject& payload);
-    void startTrainingCommand(const QJsonObject& payload);
-    void heartbeatCommand(const QJsonObject& payload);
-    void environmentCheckCommand(const QJsonObject& payload);
-    void validateDatasetCommand(const QJsonObject& payload);
-    void splitDatasetCommand(const QJsonObject& payload);
-    void convertDatasetCommand(const QJsonObject& payload);
-    void curateDatasetCommand(const QJsonObject& payload);
-    void prepareAnnotationSessionCommand(const QJsonObject& payload);
-    void syncAnnotationSessionCommand(const QJsonObject& payload);
-    void createDatasetSnapshotCommand(const QJsonObject& payload);
-    void evaluateModelCommand(const QJsonObject& payload);
-    void benchmarkModelCommand(const QJsonObject& payload);
-    void runLocalPipelineCommand(const QJsonObject& payload);
-    void generateDeliveryReportCommand(const QJsonObject& payload);
-    void runCustomerOcrAcceptanceCommand(const QJsonObject& payload);
-    void collectDiagnosticsCommand(const QJsonObject& payload);
-    void validateDeploymentArtifactCommand(const QJsonObject& payload);
-    void exportModelCommand(const QJsonObject& payload);
-    void inferCommand(const QJsonObject& payload);
+    void runEnvironmentCheckWorkflowV2Command(const QJsonObject& payload);
+    void runDatasetSplitWorkflowV2Command(const QJsonObject& payload);
+    void runDatasetConversionWorkflowV2Command(const QJsonObject& payload);
+    void runDataQualityWorkflowV2Command(const QJsonObject& payload);
+    void runDiagnosticsWorkflowV2Command(const QJsonObject& payload);
+    void createAnnotationSessionV2Command(const QJsonObject& payload);
+    void syncAnnotationSessionV2Command(const QJsonObject& payload);
+    void runDatasetSnapshotImportWorkflowV2Command(const QJsonObject& payload);
+    void importOcrOfficialReportsV2Command(const QJsonObject& payload);
+    void runOcrAcceptanceWorkflowV2Command(const QJsonObject& payload);
+    void runRuntimeDeliveryWorkflowV2Command(const QJsonObject& payload);
+    void importModelV2Command(const QJsonObject& payload);
+    void runTrainingWorkflowV2Command(const QJsonObject& payload);
     void cancelCommand(const QJsonObject& payload);
-    void startTraining(const aitrain::TrainingRequest& request);
-    void sendHeartbeat();
-    void runEnvironmentCheck(const QJsonObject& payload);
-    void validateDataset(const QJsonObject& payload);
-    void splitDataset(const QJsonObject& payload);
-    void convertDataset(const QJsonObject& payload);
-    void curateDataset(const QJsonObject& payload);
-    void prepareAnnotationSession(const QJsonObject& payload);
-    void syncAnnotationSession(const QJsonObject& payload);
-    void createDatasetSnapshot(const QJsonObject& payload);
-    void evaluateModel(const QJsonObject& payload);
-    void benchmarkModel(const QJsonObject& payload);
-    void runLocalPipeline(const QJsonObject& payload);
-    void generateDeliveryReport(const QJsonObject& payload);
-    void runCustomerOcrAcceptance(const QJsonObject& payload);
-    void collectDiagnostics(const QJsonObject& payload);
-    void validateDeploymentArtifact(const QJsonObject& payload);
-    void exportModel(const QJsonObject& payload);
-    void runInference(const QJsonObject& payload);
-    void runDetectionTraining();
-    void runSegmentationTraining();
-    void runSemanticSegmentationTraining();
-    void runAnomalyDetectionTraining();
-    void runOcrRecTraining();
-    bool shouldUsePythonTrainer() const;
-    void runPythonTrainer();
-    void drainPythonTrainerOutput(QByteArray* buffer, bool* terminalMessageSeen);
-    void drainPythonTrainerErrors(QByteArray* buffer);
-    bool forwardPythonTrainerLine(const QByteArray& line, bool* terminalMessageSeen);
+    void runEnvironmentCheckWorkflowV2(const QJsonObject& payload);
+    void runDatasetSplitWorkflowV2(const QJsonObject& payload);
+    void runDatasetConversionWorkflowV2(const QJsonObject& payload);
+    void runDataQualityWorkflowV2(const QJsonObject& payload);
+    void runDiagnosticsWorkflowV2(const QJsonObject& payload);
+    void createAnnotationSessionV2(const QJsonObject& payload);
+    void syncAnnotationSessionV2(const QJsonObject& payload);
+    void runDatasetSnapshotImportWorkflowV2(const QJsonObject& payload);
+    void importOcrOfficialReportsV2(const QJsonObject& payload);
+    void runOcrAcceptanceWorkflowV2(const QJsonObject& payload);
+    void runRuntimeDeliveryWorkflowV2(const QJsonObject& payload);
+    void importModelV2(const QJsonObject& payload);
+    void runTrainingWorkflowV2(const QJsonObject& payload);
+    void dispatchTrainingWorkflowV2(const aitrain::v2::TrainingWorkflowDispatchV2& dispatch);
+    void runTrainingWorkflowV2LocalStep(const aitrain::v2::TrainingWorkflowDispatchV2& dispatch);
+    void finishTrainingWorkflowV2(const aitrain::v2::TrainingWorkflowDispatchV2& dispatch);
+    void forwardTrainingWorkflowAdapterEvent(const aitrain::v2::ProtocolEnvelope& event);
+    void cancelTrainingWorkflowV2();
     void send(const QString& type, const QJsonObject& payload);
+    bool acceptControlEnvelope(const aitrain::v2::ProtocolEnvelope& envelope);
+    void rejectControlProtocol(const QString& message);
     aitrain::CancellationCallback cancellationCallback();
     aitrain::CancellationCallback pollingCancellationCallback(int timeoutMs = 0);
     void shutdownPythonTrainer(const QString& reason, bool notifyClient);
@@ -89,57 +76,49 @@ private:
     void finishSession();
     void fail(const QString& message);
     void failWithDetails(const QString& message, const QString& errorCode, const QJsonObject& details = {});
-    void complete();
-
-    struct PipelineTrainResult {
-        bool ok = false;
-        QString error;
-        QString checkpointPath;
-        QString anomalySidecarPath;
-        QString onnxPath;
-        QString reportPath;
-        QJsonObject completedPayload;
-        QJsonArray artifacts;
-        QJsonArray metrics;
-        QJsonArray logs;
-    };
-
-    struct OfficialYoloExportResult {
-        bool ok = false;
-        QString error;
-        QJsonObject modelExportPayload;
-    };
-
-    PipelineTrainResult runPipelineTrainingStep(
-        const QString& parentTaskId,
-        const QString& outputPath,
-        const QJsonObject& options,
-        const QString& datasetPath,
-        const QString& taskType);
-    OfficialYoloExportResult runOfficialYoloExport(
-        const QString& taskId,
-        const QString& sourcePath,
-        const QString& officialOutputPath,
-        const QString& productFormat,
-        const QJsonObject& exportOptions,
-        bool forwardExportEvents);
-    void drainPipelinePythonTrainerOutput(QByteArray* buffer, PipelineTrainResult* result, bool* terminalMessageSeen);
-    void drainPipelinePythonTrainerErrors(QByteArray* buffer, PipelineTrainResult* result);
-    bool forwardPipelinePythonTrainerLine(const QByteArray& line, PipelineTrainResult* result, bool* terminalMessageSeen);
 
     QLocalSocket socket_;
     QByteArray buffer_;
-    QTimer timer_;
-    aitrain::TrainingRequest request_;
-    int step_ = 0;
-    int maxSteps_ = 20;
     bool running_ = false;
     bool canceled_ = false;
     QProcess pythonTrainerProcess_;
     bool interceptPythonTrainerMessages_ = false;
     bool finishingSession_ = false;
+    bool startTaskReceived_ = false;
+    bool terminalEnvelopeSent_ = false;
+    quint64 outgoingSequence_ = 0;
+    aitrain::v2::RequestId controlRequestId_;
+    aitrain::v2::TaskId controlTaskId_;
+    aitrain::v2::ProtocolV2SequenceTracker incomingSequenceTracker_;
     QString activeTaskId_;
     QString activeCommand_;
-    QString activeOutputPath_;
-    QString activeReportPath_;
+    std::unique_ptr<aitrain::v2::ProjectWorkspaceV2> trainingWorkspaceV2_;
+    aitrain::v2::TaskId trainingWorkflowTaskIdV2_;
+    aitrain::v2::WorkflowRunId trainingWorkflowRunIdV2_;
+    QString trainingWorkflowDeploymentSampleRelativePath_;
+    aitrain::v2::TrainingWorkflowAdapterConfigV2 trainingWorkflowAdapterConfigV2_;
+    std::unique_ptr<aitrain::v2::ProjectWorkspaceV2> runtimeDeliveryWorkspaceV2_;
+    aitrain::v2::TaskId runtimeDeliveryTaskIdV2_;
+    bool runtimeDeliveryRunningV2_ = false;
+    std::unique_ptr<aitrain::v2::ProjectWorkspaceV2> annotationWorkspaceV2_;
+    aitrain::v2::TaskId annotationTaskIdV2_;
+    bool annotationRunningV2_ = false;
+    std::unique_ptr<aitrain::v2::ProjectWorkspaceV2> ocrAcceptanceWorkspaceV2_;
+    aitrain::v2::TaskId ocrAcceptanceTaskIdV2_;
+    bool ocrAcceptanceRunningV2_ = false;
+    std::unique_ptr<aitrain::v2::ProjectWorkspaceV2> dataQualityWorkspaceV2_;
+    aitrain::v2::TaskId dataQualityTaskIdV2_;
+    bool dataQualityRunningV2_ = false;
+    std::unique_ptr<aitrain::v2::ProjectWorkspaceV2> datasetConversionWorkspaceV2_;
+    aitrain::v2::TaskId datasetConversionTaskIdV2_;
+    bool datasetConversionRunningV2_ = false;
+    std::unique_ptr<aitrain::v2::ProjectWorkspaceV2> datasetSnapshotImportWorkspaceV2_;
+    aitrain::v2::TaskId datasetSnapshotImportTaskIdV2_;
+    bool datasetSnapshotImportRunningV2_ = false;
+    std::unique_ptr<aitrain::v2::ProjectWorkspaceV2> datasetSplitWorkspaceV2_;
+    aitrain::v2::TaskId datasetSplitTaskIdV2_;
+    bool datasetSplitRunningV2_ = false;
+    std::unique_ptr<aitrain::v2::ProjectWorkspaceV2> diagnosticsWorkspaceV2_;
+    aitrain::v2::TaskId diagnosticsTaskIdV2_;
+    bool diagnosticsRunningV2_ = false;
 };

@@ -2,7 +2,6 @@
 
 #include <QByteArray>
 #include <QDateTime>
-#include <QJsonObject>
 #include <QString>
 
 namespace aitrain {
@@ -31,7 +30,9 @@ enum class LicenseStatus {
     MachineMismatch,
     Expired,
     SignatureInvalid,
-    CryptoUnavailable
+    CryptoUnavailable,
+    ClockRollbackDetected,
+    ProtectedStorageCorrupted
 };
 
 struct LicenseValidationResult {
@@ -56,9 +57,5 @@ LicenseValidationResult validateLicenseToken(
 bool generateLicenseKeyPair(LicenseKeyPair* keyPair, QString* error = nullptr);
 QByteArray publicKeyFromPrivateKey(const QByteArray& privateKeyBase64, QString* error = nullptr);
 QString createLicenseToken(const LicensePayload& payload, const QByteArray& privateKeyBase64, QString* error = nullptr);
-
-QJsonObject licensePayloadToJson(const LicensePayload& payload);
-bool licensePayloadFromJson(const QJsonObject& object, LicensePayload* payload, QString* error = nullptr);
-QString licenseStatusText(LicenseStatus status);
 
 } // namespace aitrain

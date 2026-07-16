@@ -259,6 +259,10 @@ EvaluationReportView::EvaluationReportView(QWidget* parent)
 
 void EvaluationReportView::clear()
 {
+    const QSignalBlocker metricsBlocker(metricsTable_);
+    const QSignalBlocker perClassBlocker(perClassTable_);
+    const QSignalBlocker officialArtifactsBlocker(officialArtifactsTable_);
+    const QSignalBlocker samplesBlocker(sampleTable_);
     currentReportPath_.clear();
     artifactPreviewPaths_.clear();
     artifactDetailTexts_.clear();

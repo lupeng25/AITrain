@@ -1,0 +1,618 @@
+#include "aitrain/v2/ArtifactStoreV2.h"
+
+#include <QCryptographicHash>
+#include <QDir>
+#include <QDirIterator>
+#include <QFile>
+#include <QFileInfo>
+#include <QHash>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
+#include <QSaveFile>
+#include <QVector>
+
+#include <utility>
+
+namespace aitrain::v2 {
+namespace {
+
+constexpr auto kStagingDirectoryName = ".staging";
+constexpr auto kStagingMetadataDirectoryName = ".staging-meta";
+constexpr auto kJournalSchemaVersion = 1;
+constexpr auto kPhaseBegun = "begun";
+constexpr auto kPhasePrepared = "prepared";
+constexpr auto kPhaseFilesCommitted = "files_committed";
+constexpr auto kPhaseDatabaseCommitted = "database_committed";
+
+struct FileEntry final {
+    QString relativePath;
+    QString sha256;
+    qint64 bytes = 0;
+};
+
+struct CommitJournal final {
+    ArtifactId artifactId;
+    TaskId taskId;
+    QString kind;
+    QString phase;
+    QDateTime createdAt;
+    WorkflowRunId workflowRunId;
+};
+
+QString utcText(const QDateTime& value)
+{
+    return value.toUTC().toString(Qt::ISODateWithMs);
+}
+
+bool sameFiles(const QVector<FileEntry>& actual, const QVector<ArtifactFileSnapshot>& stored)
+{
+    if (actual.size() != stored.size()) return false;
+    QHash<QString, QPair<QString, qint64>> expected;
+    for (const FileEntry& entry : actual) {
+        expected.insert(entry.relativePath, {entry.sha256, entry.bytes});
+    }
+    for (const ArtifactFileSnapshot& file : stored) {
+        if (!expected.contains(file.relativePath)
+            || expected.value(file.relativePath).first != file.sha256
+            || expected.value(file.relativePath).second != file.byteCount) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool collectFiles(const QString& stagingPath,
+    QVector<FileEntry>* entries,
+    QString* error,
+    const aitrain::CancellationCallback& cancellation,
+    bool* canceled)
+{
+    if (canceled) {
+        *canceled = false;
+    }
+    QDirIterator iterator(stagingPath, QDir::Files, QDirIterator::Subdirectories);
+    while (iterator.hasNext()) {
+        if (aitrain::isCancellationRequested(cancellation)) {
+            if (canceled) *canceled = true;
+            if (error) *error = QStringLiteral("Artifact 提交已取消。");
+            return false;
+        }
+        const QString absolutePath = iterator.next();
+        const QFileInfo info(absolutePath);
+        const QString relativePath = QDir(stagingPath).relativeFilePath(absolutePath);
+        if (relativePath == QStringLiteral("manifest.json")) {
+            continue;
+        }
+        QFile file(absolutePath);
+        if (!file.open(QIODevice::ReadOnly)) {
+            if (error) {
+                *error = QStringLiteral("无法读取 staging 文件：%1").arg(absolutePath);
+            }
+            return false;
+        }
+        QCryptographicHash hash(QCryptographicHash::Sha256);
+        while (!file.atEnd()) {
+            if (aitrain::isCancellationRequested(cancellation)) {
+                if (canceled) *canceled = true;
+                if (error) *error = QStringLiteral("Artifact 提交已取消。");
+                return false;
+            }
+            const QByteArray block = file.read(1024 * 1024);
+            if (block.isEmpty() && file.error() != QFileDevice::NoError) {
+                if (error) {
+                    *error = QStringLiteral("读取 staging 文件失败：%1").arg(absolutePath);
+                }
+                return false;
+            }
+            hash.addData(block);
+        }
+        entries->append({relativePath, QString::fromLatin1(hash.result().toHex()), info.size()});
+    }
+    if (entries->isEmpty()) {
+        if (error) {
+            *error = QStringLiteral("Artifact staging 不能为空。");
+        }
+        return false;
+    }
+    return true;
+}
+
+bool writeManifest(const QString& stagingPath,
+    const CommitJournal& journal,
+    const QVector<FileEntry>& entries,
+    QString* error)
+{
+    QJsonArray files;
+    for (const FileEntry& entry : entries) {
+        files.append(QJsonObject{{QStringLiteral("relativePath"), entry.relativePath},
+            {QStringLiteral("sha256"), entry.sha256},
+            {QStringLiteral("bytes"), entry.bytes}});
+    }
+    const QJsonObject manifest{{QStringLiteral("schemaVersion"), kJournalSchemaVersion},
+        {QStringLiteral("artifactId"), journal.artifactId.toString()},
+        {QStringLiteral("taskId"), journal.taskId.toString()},
+        {QStringLiteral("kind"), journal.kind},
+        {QStringLiteral("commitPhase"), QString::fromLatin1(kPhasePrepared)},
+        {QStringLiteral("createdAt"), utcText(journal.createdAt)},
+        {QStringLiteral("workflowRunId"), journal.workflowRunId.toString()},
+        {QStringLiteral("files"), files}};
+    QSaveFile file(QDir(stagingPath).filePath(QStringLiteral("manifest.json")));
+    if (!file.open(QIODevice::WriteOnly)
+        || file.write(QJsonDocument(manifest).toJson(QJsonDocument::Indented)) < 0
+        || !file.commit()) {
+        if (error) {
+            *error = QStringLiteral("无法写入 Artifact manifest：%1").arg(file.errorString());
+        }
+        return false;
+    }
+    return true;
+}
+
+QString stagingMetadataPath(const QString& rootPath, const ArtifactId& artifactId)
+{
+    return QDir(rootPath).filePath(QStringLiteral("%1/%2.json").arg(QString::fromLatin1(kStagingMetadataDirectoryName), artifactId.toString()));
+}
+
+bool writeStagingMetadata(const QString& rootPath, const CommitJournal& journal, QString* error)
+{
+    const QString path = stagingMetadataPath(rootPath, journal.artifactId);
+    if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
+        if (error) {
+            *error = QStringLiteral("无法创建 Artifact staging 元数据目录：%1").arg(path);
+        }
+        return false;
+    }
+    QSaveFile file(path);
+    const QJsonObject metadata{{QStringLiteral("schemaVersion"), kJournalSchemaVersion},
+        {QStringLiteral("artifactId"), journal.artifactId.toString()},
+        {QStringLiteral("taskId"), journal.taskId.toString()},
+        {QStringLiteral("kind"), journal.kind},
+        {QStringLiteral("phase"), journal.phase},
+        {QStringLiteral("createdAt"), utcText(journal.createdAt)},
+        {QStringLiteral("workflowRunId"), journal.workflowRunId.toString()}};
+    if (!file.open(QIODevice::WriteOnly)
+        || file.write(QJsonDocument(metadata).toJson(QJsonDocument::Compact)) < 0
+        || !file.commit()) {
+        if (error) {
+            *error = QStringLiteral("无法写入 Artifact staging 元数据：%1").arg(file.errorString());
+        }
+        return false;
+    }
+    return true;
+}
+
+bool readCommitJournal(const QString& metadataPath, CommitJournal* journal, QString* error)
+{
+    if (!journal) {
+        if (error) *error = QStringLiteral("读取 Artifact 提交日志需要输出对象。");
+        return false;
+    }
+    QFile file(metadataPath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (error) {
+            *error = QStringLiteral("无法读取 Artifact staging 元数据：%1").arg(metadataPath);
+        }
+        return false;
+    }
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        if (error) {
+            *error = QStringLiteral("Artifact staging 元数据不是有效 JSON：%1").arg(metadataPath);
+        }
+        return false;
+    }
+    const QJsonObject object = document.object();
+    CommitJournal parsed;
+    if (object.value(QStringLiteral("schemaVersion")).toInt(-1) != kJournalSchemaVersion
+        || !ArtifactId::parse(object.value(QStringLiteral("artifactId")).toString(), &parsed.artifactId, error)
+        || !TaskId::parse(object.value(QStringLiteral("taskId")).toString(), &parsed.taskId, error)) {
+        if (error && error->isEmpty()) *error = QStringLiteral("Artifact 提交日志版本或标识无效：%1").arg(metadataPath);
+        return false;
+    }
+    parsed.kind = object.value(QStringLiteral("kind")).toString().trimmed();
+    parsed.phase = object.value(QStringLiteral("phase")).toString();
+    parsed.createdAt = QDateTime::fromString(object.value(QStringLiteral("createdAt")).toString(), Qt::ISODateWithMs);
+    const QString workflowRunId = object.value(QStringLiteral("workflowRunId")).toString();
+    if (!workflowRunId.isEmpty() && !WorkflowRunId::parse(workflowRunId, &parsed.workflowRunId, error)) return false;
+    if (parsed.kind.isEmpty() || !parsed.createdAt.isValid()
+        || (parsed.phase != QLatin1String(kPhaseBegun)
+            && parsed.phase != QLatin1String(kPhasePrepared)
+            && parsed.phase != QLatin1String(kPhaseFilesCommitted)
+            && parsed.phase != QLatin1String(kPhaseDatabaseCommitted))) {
+        if (error) *error = QStringLiteral("Artifact 提交日志字段无效：%1").arg(metadataPath);
+        return false;
+    }
+    *journal = parsed;
+    return true;
+}
+
+bool readAndVerifyManifest(const QString& artifactPath,
+    const CommitJournal& journal,
+    QVector<FileEntry>* entries,
+    QString* error)
+{
+    QFile file(QDir(artifactPath).filePath(QStringLiteral("manifest.json")));
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (error) *error = QStringLiteral("无法读取 Artifact manifest：%1").arg(file.fileName());
+        return false;
+    }
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    const QJsonObject object = document.object();
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()
+        || object.value(QStringLiteral("schemaVersion")).toInt(-1) != kJournalSchemaVersion
+        || object.value(QStringLiteral("artifactId")).toString() != journal.artifactId.toString()
+        || object.value(QStringLiteral("taskId")).toString() != journal.taskId.toString()
+        || object.value(QStringLiteral("kind")).toString() != journal.kind
+        || object.value(QStringLiteral("createdAt")).toString() != utcText(journal.createdAt)
+        || object.value(QStringLiteral("workflowRunId")).toString() != journal.workflowRunId.toString()) {
+        if (error) *error = QStringLiteral("Artifact manifest 与提交日志不一致：%1").arg(file.fileName());
+        return false;
+    }
+    QVector<FileEntry> actual;
+    if (!collectFiles(artifactPath, &actual, error, {}, nullptr)) return false;
+    const QJsonArray files = object.value(QStringLiteral("files")).toArray();
+    if (files.size() != actual.size()) {
+        if (error) *error = QStringLiteral("Artifact manifest 文件数量与磁盘不一致：%1").arg(artifactPath);
+        return false;
+    }
+    QHash<QString, QPair<QString, qint64>> declared;
+    for (const QJsonValue& value : files) {
+        const QJsonObject item = value.toObject();
+        declared.insert(item.value(QStringLiteral("relativePath")).toString(),
+            {item.value(QStringLiteral("sha256")).toString(), static_cast<qint64>(item.value(QStringLiteral("bytes")).toDouble(-1))});
+    }
+    for (const FileEntry& entry : actual) {
+        if (!declared.contains(entry.relativePath)
+            || declared.value(entry.relativePath).first != entry.sha256
+            || declared.value(entry.relativePath).second != entry.bytes) {
+            if (error) *error = QStringLiteral("Artifact 文件与 manifest 校验失败：%1").arg(entry.relativePath);
+            return false;
+        }
+    }
+    *entries = actual;
+    return true;
+}
+
+QVector<ArtifactFileSnapshot> snapshots(const QVector<FileEntry>& entries)
+{
+    QVector<ArtifactFileSnapshot> result;
+    result.reserve(entries.size());
+    for (const FileEntry& entry : entries) result.append({entry.relativePath, entry.sha256, entry.bytes});
+    return result;
+}
+
+bool persistArtifactRecord(StorageV2* storage,
+    const CommitJournal& journal,
+    const QVector<FileEntry>& entries,
+    QString* error)
+{
+    const QVector<ArtifactFileSnapshot> files = snapshots(entries);
+    if (journal.workflowRunId.isValid()) {
+        if (journal.kind != QStringLiteral("evidence_bundle_v2")) {
+            if (error) *error = QStringLiteral("只有 Evidence Artifact 可以关联工作流终态。");
+            return false;
+        }
+        return storage->recordEvidenceArtifactWithFilesAndAttachTerminalization(
+            journal.artifactId, journal.taskId, journal.workflowRunId, files, journal.createdAt, error);
+    }
+    return storage->recordArtifactWithFiles(
+        journal.artifactId, journal.taskId, journal.kind, files, journal.createdAt, error);
+}
+
+bool verifyStoredArtifact(StorageV2* storage,
+    const CommitJournal& journal,
+    const QVector<FileEntry>& entries,
+    QString* error)
+{
+    ArtifactSnapshotV2 stored;
+    if (!storage->artifact(journal.artifactId, &stored, error)) return false;
+    if (stored.taskId != journal.taskId || stored.kind != journal.kind
+        || stored.createdAt.toUTC() != journal.createdAt.toUTC()
+        || !sameFiles(entries, stored.files)) {
+        if (error) *error = QStringLiteral("Artifact 数据库记录与提交日志或磁盘文件不一致：%1")
+            .arg(journal.artifactId.toString());
+        return false;
+    }
+    return true;
+}
+
+void appendDiagnostic(QStringList* diagnostics, const QString& message)
+{
+    if (diagnostics) {
+        diagnostics->append(message);
+    }
+}
+
+} // namespace
+
+ArtifactStoreV2::ArtifactStoreV2(QString rootPath,
+    ArtifactCommitFailureInjectorV2 failureInjector)
+    : rootPath_(QDir::cleanPath(std::move(rootPath)))
+    , failureInjector_(std::move(failureInjector))
+{
+}
+
+bool ArtifactStoreV2::begin(const TaskId& taskId, const QString& kind, ArtifactId* artifactId, QString* stagingPath, QString* error)
+{
+    if (!taskId.isValid() || kind.trimmed().isEmpty() || !artifactId || !stagingPath) {
+        if (error) {
+            *error = QStringLiteral("创建 Artifact staging 的参数无效。");
+        }
+        return false;
+    }
+    const ArtifactId id = ArtifactId::create();
+    const QString path = QDir(rootPath_).filePath(QStringLiteral("%1/%2").arg(QString::fromLatin1(kStagingDirectoryName), id.toString()));
+    if (!QDir().mkpath(path)) {
+        if (error) {
+            *error = QStringLiteral("无法创建 Artifact staging：%1").arg(path);
+        }
+        return false;
+    }
+    const CommitJournal journal{id, taskId, kind.trimmed(), QString::fromLatin1(kPhaseBegun),
+        QDateTime::currentDateTimeUtc(), {}};
+    if (!writeStagingMetadata(rootPath_, journal, error)) {
+        QDir(path).removeRecursively();
+        return false;
+    }
+    *artifactId = id;
+    *stagingPath = path;
+    return true;
+}
+
+bool ArtifactStoreV2::commit(const ArtifactId& artifactId,
+    const TaskId& taskId,
+    const QString& kind,
+    const QString& stagingPath,
+    StorageV2* storage,
+    QString* artifactPath,
+    QString* error,
+    const aitrain::CancellationCallback& cancellation,
+    bool* canceled,
+    const WorkflowRunId& workflowRunId)
+{
+    if (canceled) {
+        *canceled = false;
+    }
+    if (!artifactId.isValid() || !taskId.isValid() || kind.trimmed().isEmpty() || !storage || !storage->isOpen()) {
+        if (error) {
+            *error = QStringLiteral("提交 Artifact 的参数无效。");
+        }
+        return false;
+    }
+    const QDir staging(stagingPath);
+    const QString stagingRoot = QDir(rootPath_).absoluteFilePath(QString::fromLatin1(kStagingDirectoryName));
+    const QString normalizedStagingPath = QDir::cleanPath(staging.absolutePath());
+    const QString stagingParent = QDir::cleanPath(QFileInfo(normalizedStagingPath).dir().absolutePath());
+    if (!staging.exists() || stagingParent != QDir::cleanPath(stagingRoot)) {
+        if (error) {
+            *error = QStringLiteral("Artifact staging 路径无效。");
+        }
+        return false;
+    }
+    CommitJournal journal;
+    if (!readCommitJournal(stagingMetadataPath(rootPath_, artifactId), &journal, error)
+        || journal.artifactId != artifactId || journal.taskId != taskId
+        || journal.kind != kind.trimmed()) {
+        if (error && error->isEmpty()) *error = QStringLiteral("Artifact 提交参数与 staging 日志不一致。");
+        return false;
+    }
+    if (workflowRunId.isValid()) journal.workflowRunId = workflowRunId;
+    if (journal.workflowRunId.isValid() && journal.kind != QStringLiteral("evidence_bundle_v2")) {
+        if (error) *error = QStringLiteral("只有 Evidence Artifact 可以关联工作流终态。");
+        return false;
+    }
+    QVector<FileEntry> entries;
+    bool collectCanceled = false;
+    if (!collectFiles(staging.absolutePath(), &entries, error, cancellation, &collectCanceled)
+        || !writeManifest(staging.absolutePath(), journal, entries, error)) {
+        if (collectCanceled && canceled) {
+            *canceled = true;
+        }
+        return false;
+    }
+    journal.phase = QString::fromLatin1(kPhasePrepared);
+    if (!writeStagingMetadata(rootPath_, journal, error)) return false;
+    if (aitrain::isCancellationRequested(cancellation)) {
+        if (canceled) *canceled = true;
+        if (error) *error = QStringLiteral("Artifact 提交已取消。");
+        return false;
+    }
+    const QString finalPath = QDir(rootPath_).filePath(QStringLiteral("artifacts/%1").arg(artifactId.toString()));
+    if (QFileInfo::exists(finalPath) || !QDir().mkpath(QFileInfo(finalPath).absolutePath())) {
+        if (error) {
+            *error = QStringLiteral("Artifact 目标路径不可用：%1").arg(finalPath);
+        }
+        return false;
+    }
+    if (!QDir().rename(staging.absolutePath(), finalPath)) {
+        if (error) {
+            *error = QStringLiteral("Artifact 原子提交失败：%1").arg(finalPath);
+        }
+        return false;
+    }
+    journal.phase = QString::fromLatin1(kPhaseFilesCommitted);
+    if (!writeStagingMetadata(rootPath_, journal, error)) return false;
+    if (failureInjector_
+        && failureInjector_(ArtifactCommitFailPointV2::AfterDirectoryRenameBeforeDatabase)) {
+        if (error) *error = QStringLiteral("故障注入：Artifact 目录已提交但数据库尚未登记。");
+        return false;
+    }
+    if (!persistArtifactRecord(storage, journal, entries, error)) {
+        return false;
+    }
+    journal.phase = QString::fromLatin1(kPhaseDatabaseCommitted);
+    QString journalError;
+    writeStagingMetadata(rootPath_, journal, &journalError);
+    if (failureInjector_
+        && failureInjector_(ArtifactCommitFailPointV2::AfterDatabaseBeforeJournalRemoval)) {
+        if (error) *error = QStringLiteral("故障注入：Artifact 数据库已登记但提交日志尚未清理。");
+        return false;
+    }
+    if (!QFile::remove(stagingMetadataPath(rootPath_, artifactId))
+        && QFileInfo::exists(stagingMetadataPath(rootPath_, artifactId))) {
+        if (error) *error = QStringLiteral("Artifact 已提交，但无法清理提交日志：%1")
+            .arg(stagingMetadataPath(rootPath_, artifactId));
+        return false;
+    }
+    if (artifactPath) {
+        *artifactPath = finalPath;
+    }
+    return true;
+}
+
+bool ArtifactStoreV2::abort(const QString& stagingPath, QString* error)
+{
+    const QString stagingRoot = QDir(rootPath_).absoluteFilePath(QString::fromLatin1(kStagingDirectoryName));
+    const QString normalizedPath = QDir::cleanPath(QDir(stagingPath).absolutePath());
+    const QString stagingParent = QDir::cleanPath(QFileInfo(normalizedPath).dir().absolutePath());
+    if (stagingParent != QDir::cleanPath(stagingRoot) || !QDir(normalizedPath).removeRecursively()) {
+        if (error) {
+            *error = QStringLiteral("无法清理 Artifact staging：%1").arg(stagingPath);
+        }
+        return false;
+    }
+    ArtifactId artifactId;
+    if (ArtifactId::parse(QFileInfo(normalizedPath).fileName(), &artifactId)) {
+        QFile::remove(stagingMetadataPath(rootPath_, artifactId));
+    }
+    return true;
+}
+
+bool ArtifactStoreV2::discardCommitted(const ArtifactId& artifactId, StorageV2* storage, QString* error)
+{
+    if (!artifactId.isValid() || !storage || !storage->isOpen()) {
+        if (error) *error = QStringLiteral("清理已提交 Artifact 需要有效 ID 和已打开存储。");
+        return false;
+    }
+    if (!storage->removeUnreferencedArtifact(artifactId, error)) return false;
+    const QString finalPath = QDir(rootPath_).filePath(QStringLiteral("artifacts/%1").arg(artifactId.toString()));
+    if (QFileInfo::exists(finalPath) && !QDir(finalPath).removeRecursively()) {
+        if (error) *error = QStringLiteral("Artifact 元数据已删除，但无法清理磁盘目录：%1").arg(finalPath);
+        return false;
+    }
+    return true;
+}
+
+bool ArtifactStoreV2::recoverStaging(StorageV2* storage, QStringList* diagnostics, QString* error)
+{
+    if (!storage || !storage->isOpen()) {
+        if (error) {
+            *error = QStringLiteral("恢复 Artifact staging 需要已打开的 V2 存储。");
+        }
+        return false;
+    }
+    const QDir stagingRoot(QDir(rootPath_).filePath(QString::fromLatin1(kStagingDirectoryName)));
+    const QDir finalRoot(QDir(rootPath_).filePath(QStringLiteral("artifacts")));
+    const QDir metadataRoot(QDir(rootPath_).filePath(QString::fromLatin1(kStagingMetadataDirectoryName)));
+    if (metadataRoot.exists()) {
+        const QFileInfoList metadataFiles = metadataRoot.entryInfoList(QStringList() << QStringLiteral("*.json"), QDir::Files, QDir::Name);
+        for (const QFileInfo& metadataInfo : metadataFiles) {
+            ArtifactId artifactId;
+            if (!ArtifactId::parse(metadataInfo.completeBaseName(), &artifactId)) {
+                appendDiagnostic(diagnostics, QStringLiteral("保留未知名称的 Artifact staging 元数据：%1").arg(metadataInfo.absoluteFilePath()));
+                continue;
+            }
+            CommitJournal journal;
+            QString journalError;
+            if (!readCommitJournal(metadataInfo.absoluteFilePath(), &journal, &journalError)
+                || journal.artifactId != artifactId) {
+                appendDiagnostic(diagnostics, QStringLiteral("保留损坏的 Artifact 提交日志：%1（%2）")
+                    .arg(metadataInfo.absoluteFilePath(), journalError));
+                continue;
+            }
+            const QString stagingPath = stagingRoot.filePath(artifactId.toString());
+            const QString finalPath = finalRoot.filePath(artifactId.toString());
+            const bool stagingExists = QDir(stagingPath).exists();
+            const bool finalExists = QDir(finalPath).exists();
+            bool databaseExists = false;
+            if (!storage->artifactExists(artifactId, &databaseExists, error)) return false;
+
+            if (databaseExists && !finalExists) {
+                if (error) *error = QStringLiteral("Artifact 数据库记录存在但最终目录缺失：%1").arg(finalPath);
+                appendDiagnostic(diagnostics, *error);
+                return false;
+            }
+            if (stagingExists && finalExists) {
+                if (error) *error = QStringLiteral("Artifact staging 与最终目录同时存在，无法安全恢复：%1").arg(artifactId.toString());
+                appendDiagnostic(diagnostics, *error);
+                return false;
+            }
+            if (finalExists) {
+                QVector<FileEntry> entries;
+                if (!readAndVerifyManifest(finalPath, journal, &entries, error)) return false;
+                if (journal.workflowRunId.isValid()) {
+                    if (!persistArtifactRecord(storage, journal, entries, error)) return false;
+                } else if (databaseExists) {
+                    if (!verifyStoredArtifact(storage, journal, entries, error)) return false;
+                } else if (!persistArtifactRecord(storage, journal, entries, error)) {
+                    return false;
+                }
+                if (!QFile::remove(metadataInfo.absoluteFilePath())
+                    && QFileInfo::exists(metadataInfo.absoluteFilePath())) {
+                    if (error) *error = QStringLiteral("已恢复 Artifact，但无法清理提交日志：%1")
+                        .arg(metadataInfo.absoluteFilePath());
+                    return false;
+                }
+                appendDiagnostic(diagnostics, databaseExists
+                    ? QStringLiteral("已核对 Artifact 并清理遗留提交日志：%1").arg(finalPath)
+                    : QStringLiteral("已从提交日志恢复 Artifact 数据库关联：%1").arg(finalPath));
+                continue;
+            }
+            if (!stagingExists) {
+                if (!QFile::remove(metadataInfo.absoluteFilePath())) {
+                    appendDiagnostic(diagnostics, QStringLiteral("无法清理孤儿 Artifact 提交日志：%1").arg(metadataInfo.absoluteFilePath()));
+                } else {
+                    appendDiagnostic(diagnostics, QStringLiteral("已清理孤儿 Artifact 提交日志：%1").arg(metadataInfo.absoluteFilePath()));
+                }
+                continue;
+            }
+
+            bool taskExists = false;
+            if (!storage->taskExists(journal.taskId, &taskExists, error)) return false;
+            bool shouldRemove = !taskExists;
+            QString removalReason = QStringLiteral("关联任务不存在");
+            if (taskExists) {
+                TaskSnapshot task;
+                if (!storage->task(journal.taskId, &task, error)) return false;
+                shouldRemove = task.state == TaskState::Failed || task.state == TaskState::Canceled;
+                removalReason = QStringLiteral("关联任务已终态失败或取消");
+                if (!shouldRemove) {
+                    appendDiagnostic(diagnostics, QStringLiteral("保留 Artifact staging：%1（任务状态：%2）")
+                        .arg(stagingPath, taskStateToString(task.state)));
+                    continue;
+                }
+            }
+            if (!QDir(stagingPath).removeRecursively()) {
+                appendDiagnostic(diagnostics, QStringLiteral("无法清理 Artifact staging：%1").arg(stagingPath));
+                continue;
+            }
+            QFile::remove(metadataInfo.absoluteFilePath());
+            appendDiagnostic(diagnostics, QStringLiteral("已清理 Artifact staging：%1（%2）")
+                .arg(stagingPath, removalReason));
+        }
+    }
+
+    if (stagingRoot.exists()) {
+        const QFileInfoList stagingDirectories = stagingRoot.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+        for (const QFileInfo& stagingInfo : stagingDirectories) {
+            ArtifactId artifactId;
+            if (!ArtifactId::parse(stagingInfo.fileName(), &artifactId)
+                || !QFileInfo::exists(stagingMetadataPath(rootPath_, artifactId))) {
+                appendDiagnostic(diagnostics, QStringLiteral("保留缺少提交日志的 Artifact staging：%1")
+                    .arg(stagingInfo.absoluteFilePath()));
+            }
+        }
+    }
+    return true;
+}
+
+QString ArtifactStoreV2::rootPath() const
+{
+    return rootPath_;
+}
+
+} // namespace aitrain::v2

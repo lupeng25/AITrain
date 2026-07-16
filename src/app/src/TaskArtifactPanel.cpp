@@ -56,6 +56,7 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     selectedTaskSummaryLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
 
     artifactTable_ = new QTableWidget(0, 4);
+    artifactTable_->setObjectName(QStringLiteral("TaskArtifactTableV2"));
     artifactTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("类型")
         << QStringLiteral("路径")
@@ -72,6 +73,7 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     connect(artifactTable_, &QTableWidget::itemSelectionChanged, this, &TaskArtifactPanel::updatePreviewFromSelection);
 
     metricTable_ = new QTableWidget(0, 4);
+    metricTable_->setObjectName(QStringLiteral("TaskMetricTableV2"));
     metricTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("指标")
         << QStringLiteral("值")
@@ -86,6 +88,7 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     metricTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
 
     exportTable_ = new QTableWidget(0, 3);
+    exportTable_->setObjectName(QStringLiteral("TaskWorkflowTableV2"));
     exportTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("格式")
         << QStringLiteral("路径")
@@ -128,6 +131,9 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     previewStack_->addWidget(evaluationScroll);
 
     auto* actionGridFrame = new QFrame;
+    legacyArtifactActions_ = actionGridFrame;
+    legacyArtifactActions_->setEnabled(false);
+    legacyArtifactActions_->setToolTip(uiText("V2 页面不暴露 Artifact Store 裸路径；路径驱动的旧操作尚未迁移。"));
     actionGridFrame->setObjectName(QStringLiteral("ArtifactActionGrid"));
     actionGridFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
     auto* actionGrid = new QGridLayout(actionGridFrame);
@@ -137,27 +143,15 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     auto* openDirButton = new QPushButton(QStringLiteral("打开目录"));
     auto* copyPathButton = new QPushButton(QStringLiteral("复制路径"));
     auto* useInferButton = new QPushButton(QStringLiteral("用作推理模型"));
-    auto* useExportButton = new QPushButton(QStringLiteral("用作导出输入"));
     auto* registerModelButton = new QPushButton(QStringLiteral("注册模型版本"));
-    auto* evaluateButton = new QPushButton(QStringLiteral("评估"));
-    auto* benchmarkButton = new QPushButton(QStringLiteral("基准"));
-    auto* reportButton = new QPushButton(QStringLiteral("交付报告"));
     connect(openDirButton, &QPushButton::clicked, this, &TaskArtifactPanel::openDirectoryRequested);
     connect(copyPathButton, &QPushButton::clicked, this, &TaskArtifactPanel::copyPathRequested);
     connect(useInferButton, &QPushButton::clicked, this, &TaskArtifactPanel::useForInferenceRequested);
-    connect(useExportButton, &QPushButton::clicked, this, &TaskArtifactPanel::useForExportRequested);
     connect(registerModelButton, &QPushButton::clicked, this, &TaskArtifactPanel::registerModelRequested);
-    connect(evaluateButton, &QPushButton::clicked, this, &TaskArtifactPanel::evaluateRequested);
-    connect(benchmarkButton, &QPushButton::clicked, this, &TaskArtifactPanel::benchmarkRequested);
-    connect(reportButton, &QPushButton::clicked, this, &TaskArtifactPanel::deliveryReportRequested);
     actionGrid->addWidget(openDirButton, 0, 0);
     actionGrid->addWidget(copyPathButton, 0, 1);
     actionGrid->addWidget(useInferButton, 0, 2);
-    actionGrid->addWidget(useExportButton, 0, 3);
     actionGrid->addWidget(registerModelButton, 1, 0);
-    actionGrid->addWidget(evaluateButton, 1, 1);
-    actionGrid->addWidget(benchmarkButton, 1, 2);
-    actionGrid->addWidget(reportButton, 1, 3);
     for (int column = 0; column < 4; ++column) {
         actionGrid->setColumnStretch(column, 1);
     }
@@ -183,7 +177,7 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     detailTabs_->setObjectName(QStringLiteral("TaskDetailTabs"));
     detailTabs_->addTab(artifactTab, uiText("产物"));
     detailTabs_->addTab(metricTab, uiText("指标"));
-    detailTabs_->addTab(exportTab, uiText("导出"));
+    detailTabs_->addTab(exportTab, uiText("工作流"));
     detailTabs_->addTab(previewTab, uiText("预览"));
     connect(detailTabs_, &QTabWidget::currentChanged, this, &TaskArtifactPanel::updatePreviewFromSelection);
 
@@ -214,77 +208,6 @@ void TaskArtifactPanel::setTaskSummary(const QString& summary)
     }
 }
 
-void TaskArtifactPanel::setArtifacts(const QVector<aitrain::ArtifactRecord>& artifacts)
-{
-    artifactTable_->setRowCount(0);
-    if (artifacts.isEmpty()) {
-        clearTableWithPlaceholder(artifactTable_, uiText("暂无产物"));
-        previewArtifactPath(QString());
-        return;
-    }
-
-    for (const aitrain::ArtifactRecord& artifact : artifacts) {
-        const int row = artifactTable_->rowCount();
-        artifactTable_->insertRow(row);
-        artifactTable_->setItem(row, 0, new QTableWidgetItem(artifact.kind));
-        auto* pathItem = new QTableWidgetItem(QDir::toNativeSeparators(artifact.path));
-        pathItem->setData(Qt::UserRole, artifact.path);
-        artifactTable_->setItem(row, 1, pathItem);
-        artifactTable_->setItem(row, 2, new QTableWidgetItem(artifact.message));
-        artifactTable_->setItem(row, 3, new QTableWidgetItem(artifact.createdAt.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))));
-    }
-
-    int preferredRow = 0;
-    for (int row = 0; row < artifactTable_->rowCount(); ++row) {
-        auto* kindItem = artifactTable_->item(row, 0);
-        if (kindItem && kindItem->text() == QStringLiteral("evaluation_report")) {
-            preferredRow = row;
-            break;
-        }
-    }
-    artifactTable_->selectRow(preferredRow);
-    previewArtifactPath(selectedArtifactPath());
-}
-
-void TaskArtifactPanel::setMetrics(const QVector<aitrain::MetricPoint>& metrics)
-{
-    metricTable_->setRowCount(0);
-    if (metrics.isEmpty()) {
-        clearTableWithPlaceholder(metricTable_, uiText("暂无指标"));
-        return;
-    }
-
-    for (const aitrain::MetricPoint& metric : metrics) {
-        const int row = metricTable_->rowCount();
-        metricTable_->insertRow(row);
-        metricTable_->setItem(row, 0, new QTableWidgetItem(metric.name));
-        metricTable_->setItem(row, 1, new QTableWidgetItem(QString::number(metric.value, 'f', 6)));
-        metricTable_->setItem(row, 2, new QTableWidgetItem(QString::number(metric.step)));
-        metricTable_->setItem(row, 3, new QTableWidgetItem(QString::number(metric.epoch)));
-    }
-}
-
-void TaskArtifactPanel::setExports(const QVector<aitrain::ExportRecord>& exports)
-{
-    exportTable_->setRowCount(0);
-    if (exports.isEmpty()) {
-        clearTableWithPlaceholder(exportTable_, uiText("暂无导出"));
-        return;
-    }
-
-    for (const aitrain::ExportRecord& exportRecord : exports) {
-        const int row = exportTable_->rowCount();
-        exportTable_->insertRow(row);
-        exportTable_->setItem(row, 0, new QTableWidgetItem(exportRecord.format));
-        auto* pathItem = new QTableWidgetItem(QDir::toNativeSeparators(exportRecord.path));
-        pathItem->setData(Qt::UserRole, exportRecord.path);
-        exportTable_->setItem(row, 1, pathItem);
-        exportTable_->setItem(row, 2, new QTableWidgetItem(exportRecord.createdAt.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))));
-    }
-
-    exportTable_->selectRow(0);
-}
-
 QString TaskArtifactPanel::selectedArtifactPath() const
 {
     const QString artifactPath = selectedPathFromTable(artifactTable_, 1);
@@ -293,6 +216,97 @@ QString TaskArtifactPanel::selectedArtifactPath() const
         return exportPath;
     }
     return artifactPath.isEmpty() ? exportPath : artifactPath;
+}
+
+void TaskArtifactPanel::setV2Details(const TaskArtifactDetailsV2& details)
+{
+    setTaskSummary(details.summary.isEmpty()
+        ? uiText("请选择一个 V2 任务查看已提交产物、指标和工作流。")
+        : details.summary);
+    if (legacyArtifactActions_) {
+        legacyArtifactActions_->setEnabled(false);
+        legacyArtifactActions_->setToolTip(uiText("V2 页面不暴露 Artifact Store 裸路径；路径驱动的旧操作尚未迁移。"));
+    }
+
+    artifactTable_->setHorizontalHeaderLabels(QStringList()
+        << QStringLiteral("产物类型") << QStringLiteral("包内相对路径")
+        << QStringLiteral("完整性") << QStringLiteral("提交时间"));
+    artifactTable_->setRowCount(0);
+    for (const ArtifactFileItemV2& artifact : details.artifacts) {
+        const int row = artifactTable_->rowCount();
+        artifactTable_->insertRow(row);
+        artifactTable_->setItem(row, 0, new QTableWidgetItem(artifact.kind));
+        auto* relativePath = new QTableWidgetItem(artifact.relativePath.isEmpty()
+            ? QStringLiteral("（无文件清单）") : artifact.relativePath);
+        // 仅展示不可变包内相对路径，不把它伪装成可执行的本机裸路径。
+        relativePath->setData(Qt::UserRole, QString());
+        relativePath->setData(Qt::UserRole + 1, artifact.artifactId);
+        artifactTable_->setItem(row, 1, relativePath);
+        artifactTable_->setItem(row, 2, new QTableWidgetItem(
+            QStringLiteral("SHA-256 %1 · %2 bytes")
+                .arg(artifact.sha256.isEmpty() ? QStringLiteral("--") : artifact.sha256)
+                .arg(artifact.byteCount)));
+        artifactTable_->setItem(row, 3, new QTableWidgetItem(artifact.createdAt));
+    }
+    if (details.artifacts.isEmpty()) {
+        clearTableWithPlaceholder(artifactTable_, uiText("暂无已提交产物"));
+    } else {
+        artifactTable_->selectRow(0);
+    }
+
+    metricTable_->setHorizontalHeaderLabels(QStringList()
+        << QStringLiteral("指标") << QStringLiteral("值") << QStringLiteral("发生时间") << QStringLiteral("来源"));
+    metricTable_->setRowCount(0);
+    for (const MetricItemV2& metric : details.metrics) {
+        const int row = metricTable_->rowCount();
+        metricTable_->insertRow(row);
+        metricTable_->setItem(row, 0, new QTableWidgetItem(metric.name));
+        metricTable_->setItem(row, 1, new QTableWidgetItem(QString::number(metric.value, 'g', 12)));
+        metricTable_->setItem(row, 2, new QTableWidgetItem(metric.occurredAt));
+        metricTable_->setItem(row, 3, new QTableWidgetItem(QStringLiteral("V2 持久化事件")));
+    }
+    if (details.metrics.isEmpty()) {
+        clearTableWithPlaceholder(metricTable_, uiText("暂无指标"));
+    }
+
+    exportTable_->setHorizontalHeaderLabels(QStringList()
+        << QStringLiteral("步骤") << QStringLiteral("状态 / 后端") << QStringLiteral("输出产物"));
+    exportTable_->setRowCount(0);
+    for (const WorkflowStepItemV2& step : details.workflowSteps) {
+        const int row = exportTable_->rowCount();
+        exportTable_->insertRow(row);
+        exportTable_->setItem(row, 0, new QTableWidgetItem(
+            QStringLiteral("%1. %2").arg(step.ordinal + 1).arg(step.kind)));
+        exportTable_->setItem(row, 1, new QTableWidgetItem(
+            QStringLiteral("%1 / %2").arg(step.state,
+                step.backend.isEmpty() ? QStringLiteral("--") : step.backend)));
+        auto* output = new QTableWidgetItem(step.outputArtifactId.isEmpty()
+            ? QStringLiteral("--") : step.outputArtifactId.left(8));
+        output->setData(Qt::UserRole + 1, step.outputArtifactId);
+        exportTable_->setItem(row, 2, output);
+    }
+    if (details.workflowSteps.isEmpty()) {
+        clearTableWithPlaceholder(exportTable_, uiText("暂无工作流步骤"));
+    }
+    if (detailTabs_) {
+        detailTabs_->setTabText(2, uiText("工作流"));
+    }
+    previewArtifactPath(QString());
+}
+
+int TaskArtifactPanel::artifactRowCount() const
+{
+    return artifactTable_ ? artifactTable_->rowCount() : 0;
+}
+
+int TaskArtifactPanel::metricRowCount() const
+{
+    return metricTable_ ? metricTable_->rowCount() : 0;
+}
+
+int TaskArtifactPanel::workflowStepRowCount() const
+{
+    return exportTable_ ? exportTable_->rowCount() : 0;
 }
 
 void TaskArtifactPanel::configureTable(QTableWidget* table) const

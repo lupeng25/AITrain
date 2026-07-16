@@ -88,18 +88,12 @@ Write-Host "Harness check: tests" -ForegroundColor Cyan
 $test = "$commandPrefix && ctest --test-dir $buildDir --output-on-failure --interactive-debug-mode 1"
 cmd /c $test
 if ($LASTEXITCODE -ne 0) {
-    $firstTestExitCode = $LASTEXITCODE
-    Write-Host "Harness check: tests failed with exit code $firstTestExitCode; retrying once after cleanup delay." -ForegroundColor Yellow
-    Start-Sleep -Seconds 5
-    cmd /c $test
-    if ($LASTEXITCODE -ne 0) {
-        $testLogs = Get-ChildItem -LiteralPath (Join-Path $root "$buildDir\tests") -Filter "*_ctest.txt" -ErrorAction SilentlyContinue
-        foreach ($testLog in $testLogs) {
-            Write-Host ("Harness check: {0} log tail" -f $testLog.Name) -ForegroundColor Yellow
-            Get-Content -LiteralPath $testLog.FullName -Encoding UTF8 -Tail 120
-        }
-        throw "Tests failed with exit code $LASTEXITCODE"
+    $testLogs = Get-ChildItem -LiteralPath (Join-Path $root "$buildDir\tests") -Filter "*_ctest.txt" -ErrorAction SilentlyContinue
+    foreach ($testLog in $testLogs) {
+        Write-Host ("Harness check: {0} log tail" -f $testLog.Name) -ForegroundColor Yellow
+        Get-Content -LiteralPath $testLog.FullName -Encoding UTF8 -Tail 120
     }
+    throw "Tests failed with exit code $LASTEXITCODE"
 }
 
 Write-Host "Harness check passed." -ForegroundColor Green

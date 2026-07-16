@@ -228,7 +228,6 @@ QWidget* MainWindow::buildEnvironmentPage()
     layout->addWidget(headerPanel);
     layout->addWidget(tabs, 1);
     updateEnvironmentSummary();
-    updateDeliveryAcceptanceSummary();
     return page;
 }
 

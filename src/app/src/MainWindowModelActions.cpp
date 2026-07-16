@@ -7,6 +7,8 @@
 #include "MainWindowSupport.h"
 #include "aitrain/core/CapabilityRegistry.h"
 #include "aitrain/core/DetectionTrainer.h"
+#include "aitrain/core/WorkerProtocol.h"
+#include "aitrain/v2/TrainingWorkflowProfileV2.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -46,13 +48,13 @@
 #include <QTableWidgetItem>
 #include <QTextStream>
 #include <QTime>
-#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QUrl>
 #include <QUuid>
 
 using namespace aitrain_app;
+namespace wp = aitrain::worker_protocol;
 
 namespace {
 QString yoloArgObjectName(const QString& key)
@@ -344,8 +346,7 @@ QJsonObject anomalyTrainArgsFromUi(const QWidget* root)
         QStringLiteral("numNeighbors"),
         QStringLiteral("modelSize"),
         QStringLiteral("lr"),
-        QStringLiteral("weightDecay"),
-        QStringLiteral("imagenetDir")
+        QStringLiteral("weightDecay")
     };
     QJsonObject args;
     for (const QString& key : keys) {
@@ -382,263 +383,56 @@ QJsonObject yoloTrainingExportArgsFromUi(const QWidget* root, int imageSize)
     return args;
 }
 
-QJsonObject yoloModelExportArgsFromUi(const QWidget* root, const QString& format)
-{
-    QJsonObject args;
-    args.insert(QStringLiteral("format"), format);
-    const auto insertBoolIfTrue = [&](const QString& key) {
-        if (yoloExportArgText(root, QStringLiteral("YoloModelExportArg"), key) == QStringLiteral("true")) {
-            args.insert(key, true);
-        }
-    };
-    insertBoolIfTrue(QStringLiteral("dynamic"));
-    insertBoolIfTrue(QStringLiteral("half"));
-    insertBoolIfTrue(QStringLiteral("int8"));
-    const QString endToEnd = yoloExportArgText(root, QStringLiteral("YoloModelExportArg"), QStringLiteral("end2end"));
-    if (!endToEnd.isEmpty()) {
-        args.insert(QStringLiteral("end2end"), endToEnd);
-    }
-    for (const QString& key : {QStringLiteral("imgsz"), QStringLiteral("batch")}) {
-        const QString text = yoloExportArgText(root, QStringLiteral("YoloModelExportArg"), key);
-        if (!text.isEmpty() && isIntegerLike(text)) {
-            args.insert(key, text.toInt());
-        }
-    }
-    const QString device = yoloExportArgText(root, QStringLiteral("YoloModelExportArg"), QStringLiteral("device"));
-    if (!device.isEmpty()) {
-        args.insert(QStringLiteral("device"), device);
-    }
-    const QString data = QDir::fromNativeSeparators(yoloExportArgText(root, QStringLiteral("YoloModelExportArg"), QStringLiteral("data")));
-    if (!data.isEmpty()) {
-        args.insert(QStringLiteral("data"), data);
-    }
-    return args;
-}
-
-bool jsonLooksYolo26(const QJsonObject& object)
-{
-    const QStringList keys = {
-        QStringLiteral("modelSeries"),
-        QStringLiteral("model"),
-        QStringLiteral("modelName"),
-        QStringLiteral("sourceCheckpoint"),
-        QStringLiteral("sourceOnnx")
-    };
-    for (const QString& key : keys) {
-        const QString value = object.value(key).toString().trimmed().toLower();
-        if (value.contains(QStringLiteral("yolo26"))) {
-            return true;
-        }
-    }
-    const QJsonObject trainingReport = object.value(QStringLiteral("trainingReport")).toObject();
-    if (!trainingReport.isEmpty() && jsonLooksYolo26(trainingReport)) {
-        return true;
-    }
-    const QJsonObject ncnn = object.value(QStringLiteral("ncnn")).toObject();
-    return !ncnn.isEmpty() && jsonLooksYolo26(ncnn);
-}
-
-QJsonObject readJsonObjectFile(const QString& path)
-{
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
-        return {};
-    }
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
-    return document.isObject() ? document.object() : QJsonObject();
-}
-
-bool modelExportSourceLooksYolo26(const QString& path)
-{
-    const QString normalized = QDir::fromNativeSeparators(path.trimmed());
-    if (normalized.isEmpty()) {
-        return false;
-    }
-    if (normalized.toLower().contains(QStringLiteral("yolo26"))) {
-        return true;
-    }
-
-    const QFileInfo info(normalized);
-    const QString suffix = info.suffix().toLower();
-    if ((suffix == QStringLiteral("json") || suffix == QStringLiteral("aitrain"))
-        && jsonLooksYolo26(readJsonObjectFile(normalized))) {
-        return true;
-    }
-
-    const QString sidecarPath = info.dir().filePath(info.completeBaseName() + QStringLiteral(".aitrain-export.json"));
-    if (QFileInfo::exists(sidecarPath) && jsonLooksYolo26(readJsonObjectFile(sidecarPath))) {
-        return true;
-    }
-
-    const QString siblingReport = info.dir().filePath(QStringLiteral("ultralytics_training_report.json"));
-    if (QFileInfo::exists(siblingReport) && jsonLooksYolo26(readJsonObjectFile(siblingReport))) {
-        return true;
-    }
-
-    const QString parentReport = QFileInfo(info.dir().absolutePath()).dir().filePath(QStringLiteral("ultralytics_training_report.json"));
-    return QFileInfo::exists(parentReport) && jsonLooksYolo26(readJsonObjectFile(parentReport));
-}
 } // namespace
-
-void MainWindow::refreshModelExportFormatOptions()
-{
-    if (!conversionFormatCombo_) {
-        return;
-    }
-
-    const QString inputPath = conversionCheckpointEdit_ ? conversionCheckpointEdit_->text().trimmed() : QString();
-    const bool yolo26 = modelExportSourceLooksYolo26(inputPath);
-    const QString currentFormat = conversionFormatCombo_->currentData().toString();
-    QSignalBlocker blocker(conversionFormatCombo_);
-
-    const int ncnnIndex = conversionFormatCombo_->findData(QStringLiteral("ncnn"));
-    if (yolo26 && ncnnIndex >= 0) {
-        conversionFormatCombo_->removeItem(ncnnIndex);
-    } else if (!yolo26 && ncnnIndex < 0) {
-        const int insertAt = qMin(1, conversionFormatCombo_->count());
-        conversionFormatCombo_->insertItem(insertAt, exportComboLabel(QStringLiteral("ncnn")), QStringLiteral("ncnn"));
-    }
-
-    if (yolo26 && currentFormat == QStringLiteral("ncnn")) {
-        setComboCurrentData(conversionFormatCombo_, QStringLiteral("onnx"));
-        if (conversionOutputEdit_) {
-            const QString outputSuffix = QFileInfo(conversionOutputEdit_->text().trimmed()).suffix().toLower();
-            if (outputSuffix == QStringLiteral("param") || outputSuffix == QStringLiteral("bin")) {
-                conversionOutputEdit_->clear();
-            }
-        }
-    } else if (!currentFormat.isEmpty()) {
-        setComboCurrentData(conversionFormatCombo_, currentFormat);
-    }
-    conversionFormatCombo_->setToolTip(yolo26
-        ? uiText("YOLO26 不支持导出为 NCNN；请使用 ONNX 或 TensorRT。")
-        : QString());
-}
-
-void MainWindow::startModelExport()
-{
-    if (worker_.isRunning()) {
-        QMessageBox::warning(this, uiText("模型导出"), uiText("Worker 正在执行任务，稍后再导出模型。"));
-        return;
-    }
-    const QString checkpointPath = QDir::fromNativeSeparators(conversionCheckpointEdit_ ? conversionCheckpointEdit_->text().trimmed() : QString());
-    if (checkpointPath.isEmpty()) {
-        QMessageBox::warning(this, uiText("模型导出"), uiText("请选择模型输入。"));
-        return;
-    }
-    const QString format = conversionFormatCombo_
-        ? conversionFormatCombo_->currentData().toString()
-        : QStringLiteral("onnx");
-    if (format == QStringLiteral("ncnn") && modelExportSourceLooksYolo26(checkpointPath)) {
-        QMessageBox::warning(
-            this,
-            uiText("模型导出"),
-            uiText("YOLO26 不支持导出为 NCNN；请使用 ONNX 或 TensorRT。"));
-        refreshModelExportFormatOptions();
-        return;
-    }
-    QString outputPath = QDir::fromNativeSeparators(conversionOutputEdit_ ? conversionOutputEdit_->text().trimmed() : QString());
-    if (outputPath.isEmpty()) {
-        const QString outputDir = !currentProjectPath_.isEmpty()
-            ? QDir(currentProjectPath_).filePath(QStringLiteral("models/exported"))
-            : QFileInfo(checkpointPath).absoluteDir().absolutePath();
-        QDir().mkpath(outputDir);
-        outputPath = QDir(outputDir).filePath(defaultExportFileName(format));
-    }
-    const QJsonObject yoloExportArgs = yoloModelExportArgsFromUi(this, format);
-    if (QFileInfo(checkpointPath).suffix().compare(QStringLiteral("pt"), Qt::CaseInsensitive) == 0
-        && format.startsWith(QStringLiteral("tensorrt"))
-        && yoloExportArgs.value(QStringLiteral("int8")).toBool()
-        && yoloExportArgs.value(QStringLiteral("data")).toString().trimmed().isEmpty()) {
-        QMessageBox::warning(
-            this,
-            uiText("模型导出"),
-            uiText("TensorRT INT8 官方导出需要 calibration data.yaml。请在“官方参数”中选择本次训练使用的 YOLO data.yaml。"));
-        return;
-    }
-    QJsonObject exportOptions;
-    exportOptions.insert(QStringLiteral("ultralyticsExportArgs"), yoloExportArgs);
-
-    QString taskId;
-    if (repository_.isOpen()) {
-        taskId = createRepositoryTask(
-            aitrain::TaskKind::Export,
-            QStringLiteral("model_export"),
-            QStringLiteral("yolo"),
-            QFileInfo(outputPath).absolutePath(),
-            uiText("模型导出中。"));
-        if (taskId.isEmpty()) {
-            return;
-        }
-    }
-
-    QString error;
-    if (!worker_.requestModelExport(workerExecutablePath(), checkpointPath, outputPath, format, exportOptions, &error, taskId)) {
-        if (!taskId.isEmpty() && repository_.isOpen()) {
-            QString taskError;
-            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
-            state_.training.currentTaskId.clear();
-            updateRecentTasks();
-        }
-        QMessageBox::critical(this, uiText("模型导出"), error);
-        return;
-    }
-    if (exportResultLabel_) {
-        exportResultLabel_->setText(uiText("正在导出：%1").arg(QDir::toNativeSeparators(outputPath)));
-    }
-    workerPill_->setStatus(uiText("模型导出中"), StatusPill::Tone::Info);
-}
 
 void MainWindow::startInference()
 {
     if (worker_.isRunning()) {
-        QMessageBox::warning(this, uiText("推理"), uiText("Worker 正在执行任务，稍后再推理。"));
+        QMessageBox::warning(this, uiText("推理"), uiText("Worker 正在执行任务，稍后再运行交付工作流。"));
         return;
     }
-    const QString checkpointPath = QDir::fromNativeSeparators(inferenceCheckpointEdit_ ? inferenceCheckpointEdit_->text().trimmed() : QString());
-    const QString imagePath = QDir::fromNativeSeparators(inferenceImageEdit_ ? inferenceImageEdit_->text().trimmed() : QString());
-    QString outputPath = QDir::fromNativeSeparators(inferenceOutputEdit_ ? inferenceOutputEdit_->text().trimmed() : QString());
-    if (checkpointPath.isEmpty() || imagePath.isEmpty()) {
-        QMessageBox::warning(this, uiText("推理"), uiText("请选择模型文件和图片。"));
-        return;
-    }
-    if (outputPath.isEmpty()) {
-        outputPath = QFileInfo(checkpointPath).absoluteDir().filePath(QStringLiteral("inference"));
-    }
-
-    QString taskId;
-    if (repository_.isOpen()) {
-        taskId = createRepositoryTask(
-            aitrain::TaskKind::Infer,
-            QStringLiteral("inference"),
-            QStringLiteral("yolo"),
-            outputPath,
-            uiText("推理中。"));
-        if (taskId.isEmpty()) {
-            return;
-        }
-    }
-
+    const QString modelPackageText = inferenceModelPackageCombo_
+        ? inferenceModelPackageCombo_->currentData().toString().trimmed()
+        : QString();
+    const QString imagePath = QDir::fromNativeSeparators(
+        inferenceImageEdit_ ? inferenceImageEdit_->text().trimmed() : QString());
+    aitrain::v2::ModelPackageId modelPackageId;
     QString error;
-    if (!worker_.requestInference(workerExecutablePath(), checkpointPath, imagePath, outputPath, &error, taskId)) {
-        if (!taskId.isEmpty() && repository_.isOpen()) {
-            QString taskError;
-            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
-            state_.training.currentTaskId.clear();
-            updateRecentTasks();
-        }
+    if (!v2Workspace_.isOpen() || currentProjectPath_.isEmpty()
+        || !aitrain::v2::ModelPackageId::parse(modelPackageText, &modelPackageId, &error)
+        || imagePath.isEmpty() || !QFileInfo(imagePath).isFile()) {
+        QMessageBox::warning(this, uiText("推理"), uiText("请选择已验证 V2 模型包和有效样本图片。"));
+        return;
+    }
+
+    const aitrain::v2::TaskId taskId = aitrain::v2::TaskId::create();
+    QJsonObject options;
+    options.insert(QStringLiteral("benchmarkWarmup"), 1);
+    options.insert(QStringLiteral("benchmarkIterations"), 3);
+    activeV2TaskId_ = taskId.toString();
+    if (!worker_.requestRuntimeDeliveryWorkflowV2(workerExecutablePath(), currentProjectPath_,
+            modelPackageId.toString(), QStringLiteral("aitrain_onnxruntime"), imagePath,
+            options, &error, activeV2TaskId_)) {
+        activeV2TaskId_.clear();
         QMessageBox::critical(this, uiText("推理"), error);
         return;
     }
     if (inferenceResultLabel_) {
-        inferenceResultLabel_->setText(uiText("正在推理：%1").arg(QDir::toNativeSeparators(imagePath)));
+        inferenceResultLabel_->setText(uiText(
+            "Runtime Delivery 已派发：等待六步状态与最终 Evidence。\n"
+            "注意：底层 ONNX Runtime 单次同步 infer 进入后不可中断，取消会在该次调用返回后收口。"));
     }
-    setInferenceOverlayText(inferenceOverlayLabel_, uiText("推理运行中\n等待 Worker 写入 overlay 产物。"));
-    workerPill_->setStatus(uiText("推理中"), StatusPill::Tone::Info);
+    setInferenceOverlayText(inferenceOverlayLabel_, uiText(
+        "Runtime Delivery 运行中\n最终预测与 overlay 请在“任务与产物”中查看已提交 Artifact。"));
+    workerPill_->setStatus(uiText("Runtime Delivery 运行中"), StatusPill::Tone::Info);
 }
 
 void MainWindow::startTraining()
 {
+    if (worker_.isRunning()) {
+        QMessageBox::warning(this, uiText("训练"), uiText("Worker 正在执行任务；当前版本只允许一个活动任务。"));
+        return;
+    }
     if (currentProjectPath_.isEmpty()) {
         createProject();
         if (currentProjectPath_.isEmpty()) {
@@ -649,28 +443,34 @@ void MainWindow::startTraining()
         QMessageBox::warning(this, uiText("训练"), uiText("请选择可用内置能力和任务类型。"));
         return;
     }
-    const QString datasetPath = QDir::fromNativeSeparators(datasetPathEdit_->text());
     const QString datasetFormat = currentDatasetFormat();
-    if (datasetPath.isEmpty() || datasetFormat.isEmpty()) {
-        QMessageBox::warning(this, uiText("训练"), uiText("请先选择并校验数据集。"));
-        return;
-    }
-    bool datasetReady = state_.dataset.currentValid && state_.dataset.currentPath == datasetPath && state_.dataset.currentFormat == datasetFormat;
-    if (!datasetReady && repository_.isOpen()) {
-        QString error;
-        const aitrain::DatasetRecord dataset = repository_.datasetByRootPath(datasetPath, &error);
-        datasetReady = dataset.rootPath == datasetPath
-            && dataset.format == datasetFormat
-            && dataset.validationStatus == QStringLiteral("valid");
-    }
-    if (!datasetReady) {
-        QMessageBox::warning(this, uiText("训练"), uiText("数据集未通过当前格式校验，不能启动训练。"));
+    if (datasetFormat.isEmpty()) {
+        QMessageBox::warning(this, uiText("训练"), uiText("请选择与已登记 Snapshot 一致的数据集格式。"));
         return;
     }
 
-    const QString taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    const QString runDir = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(taskId));
-    QDir().mkpath(runDir);
+    const QString datasetId = dataQualityDatasetIdEdit_ ? dataQualityDatasetIdEdit_->text().trimmed() : QString();
+    const QString datasetVersionId = dataQualityDatasetVersionIdEdit_
+        ? dataQualityDatasetVersionIdEdit_->text().trimmed() : QString();
+    const QString snapshotId = dataQualitySnapshotIdEdit_ ? dataQualitySnapshotIdEdit_->text().trimmed() : QString();
+    const QString snapshotArtifactId = dataQualitySnapshotArtifactIdEdit_
+        ? dataQualitySnapshotArtifactIdEdit_->text().trimmed() : QString();
+    aitrain::v2::DatasetId parsedDatasetId;
+    aitrain::v2::DatasetVersionId parsedDatasetVersionId;
+    aitrain::v2::SnapshotId parsedSnapshotId;
+    aitrain::v2::ArtifactId parsedSnapshotArtifactId;
+    QString snapshotIdentityError;
+    if (!aitrain::v2::DatasetId::parse(datasetId, &parsedDatasetId, &snapshotIdentityError)
+        || !aitrain::v2::DatasetVersionId::parse(datasetVersionId, &parsedDatasetVersionId, &snapshotIdentityError)
+        || !aitrain::v2::SnapshotId::parse(snapshotId, &parsedSnapshotId, &snapshotIdentityError)
+        || !aitrain::v2::ArtifactId::parse(snapshotArtifactId, &parsedSnapshotArtifactId, &snapshotIdentityError)) {
+        QMessageBox::warning(this, uiText("训练"),
+            uiText("训练只消费已登记的 V2 Snapshot。请在“数据集”页填写同一条记录的 DatasetId、DatasetVersionId、SnapshotId 和 Snapshot ArtifactId。\n%1")
+                .arg(snapshotIdentityError));
+        return;
+    }
+
+    const QString taskId = aitrain::v2::TaskId::create().toString();
 
     const QString trainingBackend = trainingBackendCombo_
         ? trainingBackendCombo_->currentData().toString().trimmed()
@@ -693,7 +493,10 @@ void MainWindow::startTraining()
     parameters.insert(QStringLiteral("batchSize"), effectiveBatchSize);
     parameters.insert(QStringLiteral("imageSize"), imageSizeEdit_->text().toInt());
     parameters.insert(QStringLiteral("gridSize"), gridSizeEdit_->text().toInt());
-    parameters.insert(QStringLiteral("datasetFormat"), datasetFormat);
+    parameters.insert(QStringLiteral("datasetId"), datasetId);
+    parameters.insert(QStringLiteral("datasetVersionId"), datasetVersionId);
+    parameters.insert(QStringLiteral("snapshotId"), snapshotId);
+    parameters.insert(QStringLiteral("snapshotArtifactId"), snapshotArtifactId);
     const QString modelPreset = modelPresetCombo_ ? modelPresetCombo_->currentText().trimmed() : QString();
     const QString seedText = backendForRequest == QStringLiteral("smp_semantic_segmentation")
         ? smpTrainArgText(this, QStringLiteral("seed"))
@@ -703,45 +506,9 @@ void MainWindow::startTraining()
     bool seedOk = false;
     const int seed = seedText.toInt(&seedOk);
     parameters.insert(QStringLiteral("seed"), seedOk ? seed : 42);
-    parameters.insert(QStringLiteral("resumeCheckpointPath"), QDir::fromNativeSeparators(resumeCheckpointEdit_->text().trimmed()));
     parameters.insert(QStringLiteral("horizontalFlip"), horizontalFlipCheck_ && horizontalFlipCheck_->isChecked());
     parameters.insert(QStringLiteral("colorJitter"), colorJitterCheck_ && colorJitterCheck_->isChecked());
-    QString latestSnapshotManifest;
-    if (repository_.isOpen()) {
-        QString snapshotError;
-        const aitrain::DatasetRecord dataset = repository_.datasetByRootPath(datasetPath, &snapshotError);
-        const aitrain::DatasetSnapshotRecord snapshot = repository_.latestDatasetSnapshot(dataset.id, &snapshotError);
-        latestSnapshotManifest = snapshot.manifestPath;
-    }
-    const QJsonObject preflight = trainingPreflightReport(
-        datasetPath,
-        datasetFormat,
-        datasetReady,
-        latestSnapshotManifest,
-        currentTaskType(),
-        backendForRequest,
-        modelPreset,
-        epochsEdit_ ? epochsEdit_->text().toInt() : 0,
-        requestedBatchSize,
-        imageSizeEdit_ ? imageSizeEdit_->text().toInt() : 0);
-    if (!preflight.value(QStringLiteral("canStart")).toBool()) {
-        QStringList blockers;
-        const QJsonArray blockerArray = preflight.value(QStringLiteral("blockers")).toArray();
-        for (const QJsonValue& value : blockerArray) {
-            blockers.append(value.toString());
-        }
-        QMessageBox::warning(
-            this,
-            uiText("训练"),
-            QStringLiteral("Training preflight blocked:\n%1").arg(blockers.join(QStringLiteral("\n"))));
-        return;
-    }
     parameters.insert(QStringLiteral("trainingBackend"), backendForRequest);
-    const QString yolo26PythonExecutable = QDir::fromNativeSeparators(
-        preflight.value(QStringLiteral("yolo26PythonExecutable")).toString().trimmed());
-    if (!yolo26PythonExecutable.isEmpty()) {
-        parameters.insert(QStringLiteral("pythonExecutable"), yolo26PythonExecutable);
-    }
     if (backendForRequest.startsWith(QStringLiteral("ultralytics_yolo"))) {
         QJsonObject yoloArgs = yoloTrainArgsFromUi(this);
         if ((horizontalFlipCheck_ && horizontalFlipCheck_->isChecked()) && !yoloArgs.contains(QStringLiteral("fliplr"))) {
@@ -780,205 +547,108 @@ void MainWindow::startTraining()
         parameters.insert(QStringLiteral("runOfficial"), true);
         parameters.insert(QStringLiteral("prepareOnly"), false);
     }
-    parameters.insert(QStringLiteral("trainingPreflight"), preflight);
-    parameters.insert(QStringLiteral("trainingTemplate"), QStringLiteral("manual_worker_training_v1"));
+    aitrain::v2::TrainingWorkflowProfileV2 workflowProfile;
+    QString workflowProfileError;
+    if (!aitrain::v2::resolveTrainingWorkflowProfileV2(
+            backendForRequest, &workflowProfile, &workflowProfileError)) {
+        QMessageBox::critical(
+            this,
+            uiText("训练配置"),
+            uiText("所选训练后端没有 V2 训练工作流，已阻止启动：%1").arg(workflowProfileError));
+        return;
+    }
+    parameters.insert(QStringLiteral("trainingTemplate"), workflowProfile.templateId);
     if (!modelPreset.isEmpty()) {
         parameters.insert(QStringLiteral("modelPreset"), modelPreset);
         if (backendForRequest.startsWith(QStringLiteral("ultralytics_yolo"))) {
             parameters.insert(QStringLiteral("model"), modelPreset);
         }
     }
-    aitrain::TrainingRequest request;
-    request.taskId = taskId;
-    request.projectPath = currentProjectPath_;
-    request.capabilityId = capabilityCombo_->currentData().toString();
-    request.taskType = currentTaskType();
-    request.datasetPath = datasetPath;
-    request.outputPath = runDir;
-    request.parameters = parameters;
+    QJsonObject adapterParameters = parameters;
+    adapterParameters.remove(QStringLiteral("datasetId"));
+    adapterParameters.remove(QStringLiteral("datasetVersionId"));
+    adapterParameters.remove(QStringLiteral("snapshotId"));
+    adapterParameters.remove(QStringLiteral("snapshotArtifactId"));
 
-    int datasetId = 0;
-    bool needsSnapshot = true;
-    if (repository_.isOpen()) {
-        QString snapshotError;
-        const aitrain::DatasetRecord dataset = repository_.datasetByRootPath(datasetPath, &snapshotError);
-        datasetId = dataset.id;
-        needsSnapshot = !attachLatestSnapshotToRequest(request, datasetId, &snapshotError);
+    QJsonObject v2Request;
+    v2Request.insert(wp::field::taskId(), taskId);
+    v2Request.insert(QStringLiteral("projectRoot"), currentProjectPath_);
+    v2Request.insert(QStringLiteral("datasetId"), datasetId);
+    v2Request.insert(QStringLiteral("datasetVersionId"), datasetVersionId);
+    v2Request.insert(QStringLiteral("snapshotId"), snapshotId);
+    v2Request.insert(QStringLiteral("snapshotArtifactId"), snapshotArtifactId);
+    v2Request.insert(QStringLiteral("capabilityId"), capabilityCombo_->currentData().toString());
+    v2Request.insert(wp::field::taskType(), currentTaskType());
+    v2Request.insert(QStringLiteral("trainingBackend"), backendForRequest);
+    v2Request.insert(QStringLiteral("parameters"), adapterParameters);
+
+    metricsWidget_->clear();
+    logEdit_->clear();
+    progressBar_->setValue(0);
+    if (trainingPhaseLabel_) {
+        trainingPhaseLabel_->setText(uiText("阶段：校验快照 -> 训练 -> 评估 -> 导出 -> 部署验证 -> 登记模型 -> 交付报告 | 当前：等待 Worker 启动"));
+    }
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingEpochValue"))) label->setText(QStringLiteral("--"));
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingBatchValue"))) label->setText(QStringLiteral("--"));
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingEtaValue"))) label->setText(QStringLiteral("--"));
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingDeviceValue"))) label->setText(QStringLiteral("--"));
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingLossValue"))) label->setText(QStringLiteral("--"));
+    if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingMapValue"))) label->setText(QStringLiteral("--"));
+    if (latestCheckpointLabel_) latestCheckpointLabel_->setText(uiText("最新 checkpoint：暂无"));
+    if (latestOnnxLabel_) latestOnnxLabel_->setText(uiText("最新 ONNX：暂无"));
+    if (latestReportLabel_) latestReportLabel_->setText(uiText("训练报告：暂无"));
+    if (latestPreviewPathLabel_) latestPreviewPathLabel_->setText(uiText("最新预览：暂无"));
+    if (latestPreviewImageLabel_) {
+        latestPreviewImageLabel_->clear();
+        latestPreviewImageLabel_->setText(uiText("暂无预览图"));
     }
 
-    aitrain::TaskRecord record;
-    record.id = taskId;
-    record.projectName = currentProjectName_;
-    record.capabilityId = request.capabilityId;
-    record.taskType = request.taskType;
-    record.kind = aitrain::TaskKind::Train;
-    record.state = aitrain::TaskState::Queued;
-    record.workDir = runDir;
-    record.message = needsSnapshot
-        ? uiText("等待自动创建数据快照。")
-        : (worker_.isRunning() ? uiText("等待当前任务完成。") : uiText("等待 Worker 启动。"));
-    record.createdAt = QDateTime::currentDateTimeUtc();
-    record.updatedAt = record.createdAt;
+    activeV2TaskId_ = taskId;
+    activeV2WorkflowKind_ = QStringLiteral("training_v2");
     QString error;
-    if (!repository_.insertTask(record, &error)) {
-        QMessageBox::critical(this, uiText("任务"), error);
-        return;
-    }
-
-    if (!needsSnapshot) {
-        recordExperimentRunForRequest(request, datasetId, &error);
-    }
-
-    PendingTrainingTask pending{taskId, request, needsSnapshot, datasetId, datasetFormat};
-    if (worker_.isRunning() || needsSnapshot) {
-        state_.training.pendingTrainingTasks.append(pending);
-        workerPill_->setStatus(uiText("任务已排队"), StatusPill::Tone::Info);
-        appendLog(uiText("任务已加入队列：%1").arg(taskId));
+    if (!worker_.requestTrainingWorkflowV2(workerExecutablePath(), v2Request, &error)) {
+        activeV2TaskId_.clear();
+        activeV2WorkflowKind_.clear();
         updateRecentTasks();
-        startNextQueuedTask();
+        QMessageBox::critical(this, QStringLiteral("Worker"), error);
         return;
     }
-
-    QTimer::singleShot(0, this, [this, taskId, request]() {
-        startQueuedTraining(taskId, request);
-    });
+    workerPill_->setStatus(uiText("训练运行中"), StatusPill::Tone::Info);
+    appendLog(uiText("任务已启动：%1").arg(taskId));
+    updateRecentTasks();
 }
 
-void MainWindow::evaluateSelectedArtifact()
+void MainWindow::importV2ModelPackage()
 {
     if (worker_.isRunning()) {
-        QMessageBox::warning(this, uiText("模型评估"), uiText("Worker 正在执行任务，稍后再评估模型。"));
+        QMessageBox::warning(this, uiText("模型导入"), uiText("Worker 正在执行任务，稍后再导入模型。"));
         return;
     }
-    const QString modelPath = selectedArtifactPath();
-    const QString datasetPath = QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
-    if (modelPath.isEmpty() || datasetPath.isEmpty()) {
-        QMessageBox::warning(this, uiText("模型评估"), uiText("请先选择模型产物，并在数据集页选择评估数据集。"));
+    const QString sourceFilePath = QDir::fromNativeSeparators(v2ModelImportSourceEdit_ ? v2ModelImportSourceEdit_->text().trimmed() : QString());
+    const QString manifestPath = QDir::fromNativeSeparators(v2ModelImportManifestEdit_ ? v2ModelImportManifestEdit_->text().trimmed() : QString());
+    if (!v2Workspace_.isOpen() || !QFileInfo(sourceFilePath).isFile() || !QFileInfo(manifestPath).isFile()) {
+        QMessageBox::warning(this, uiText("模型导入"), uiText("请先打开项目，并选择常规模型文件和用户确认的 Manifest 草稿 JSON。"));
         return;
     }
-
-    const QString taskType = currentTaskType().isEmpty() ? QStringLiteral("detection") : currentTaskType();
-    QString taskId;
-    QString outputPath;
-    if (repository_.isOpen()) {
-        taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        outputPath = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(taskId));
-        taskId = createRepositoryTask(
-            aitrain::TaskKind::Evaluate,
-            taskType,
-            QStringLiteral("com.aitrain.workflow"),
-            outputPath,
-            uiText("模型评估报告生成中。"),
-            taskId);
-        if (taskId.isEmpty()) {
-            return;
-        }
+    QFile manifestFile(manifestPath);
+    if (!manifestFile.open(QIODevice::ReadOnly)) {
+        QMessageBox::critical(this, uiText("模型导入"), uiText("无法读取 Manifest 草稿：%1").arg(manifestPath));
+        return;
     }
-
-    QJsonObject options;
-    options.insert(QStringLiteral("scaffoldAcknowledged"), true);
-    if (repository_.isOpen()) {
-        QString snapshotError;
-        const aitrain::DatasetRecord dataset = repository_.datasetByRootPath(datasetPath, &snapshotError);
-        const aitrain::DatasetSnapshotRecord snapshot = repository_.latestDatasetSnapshot(dataset.id, &snapshotError);
-        if (snapshot.id > 0) {
-            options.insert(QStringLiteral("datasetSnapshotId"), snapshot.id);
-            options.insert(QStringLiteral("datasetSnapshotHash"), snapshot.contentHash);
-            options.insert(QStringLiteral("datasetSnapshotManifest"), snapshot.manifestPath);
-        }
+    const QJsonDocument document = QJsonDocument::fromJson(manifestFile.readAll());
+    if (!document.isObject()) {
+        QMessageBox::warning(this, uiText("模型导入"), uiText("Manifest 草稿必须是 JSON 对象。"));
+        return;
     }
+    const QString taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     QString error;
-    if (!worker_.requestModelEvaluation(workerExecutablePath(), modelPath, datasetPath, outputPath, taskType, options, &error, taskId)) {
-        if (!taskId.isEmpty() && repository_.isOpen()) {
-            QString taskError;
-            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
-            state_.training.currentTaskId.clear();
-            updateRecentTasks();
-        }
-        QMessageBox::critical(this, uiText("模型评估"), error);
+    if (!worker_.requestModelImportV2(workerExecutablePath(), currentProjectPath_, sourceFilePath, document.object(), &error, taskId)) {
+        QMessageBox::critical(this, uiText("模型导入"), error);
         return;
     }
-    workerPill_->setStatus(uiText("模型评估中"), StatusPill::Tone::Info);
-}
-
-void MainWindow::benchmarkSelectedArtifact()
-{
-    if (worker_.isRunning()) {
-        QMessageBox::warning(this, uiText("部署基准"), uiText("Worker 正在执行任务，稍后再运行部署基准。"));
-        return;
+    v2ModelImportInProgress_ = true;
+    if (v2ModelImportResultLabel_) {
+        v2ModelImportResultLabel_->setText(uiText("正在导入模型并计算 SHA-256：%1").arg(QDir::toNativeSeparators(sourceFilePath)));
     }
-    const QString modelPath = selectedArtifactPath();
-    if (modelPath.isEmpty()) {
-        QMessageBox::warning(this, uiText("部署基准"), uiText("请先选择一个模型产物。"));
-        return;
-    }
-
-    QString taskId;
-    QString outputPath;
-    if (repository_.isOpen()) {
-        taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        outputPath = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(taskId));
-        taskId = createRepositoryTask(
-            aitrain::TaskKind::Benchmark,
-            QStringLiteral("model_benchmark"),
-            QStringLiteral("com.aitrain.workflow"),
-            outputPath,
-            uiText("部署基准报告生成中。"),
-            taskId);
-        if (taskId.isEmpty()) {
-            return;
-        }
-    }
-
-    QJsonObject options;
-    options.insert(QStringLiteral("device"), QStringLiteral("cpu"));
-    options.insert(QStringLiteral("batch"), 1);
-    QString error;
-    if (!worker_.requestModelBenchmark(workerExecutablePath(), modelPath, outputPath, options, &error, taskId)) {
-        if (!taskId.isEmpty() && repository_.isOpen()) {
-            QString taskError;
-            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
-            state_.training.currentTaskId.clear();
-            updateRecentTasks();
-        }
-        QMessageBox::critical(this, uiText("部署基准"), error);
-        return;
-    }
-    workerPill_->setStatus(uiText("部署基准运行中"), StatusPill::Tone::Info);
-}
-
-void MainWindow::useSelectedComparisonForInference()
-{
-    const QString modelPath = selectedComparisonModelPath();
-    if (modelPath.isEmpty()) {
-        QMessageBox::information(this, uiText("模型对比"), uiText("请先选择一个对比候选。"));
-        return;
-    }
-    if (inferenceCheckpointEdit_) {
-        inferenceCheckpointEdit_->setText(QDir::toNativeSeparators(modelPath));
-    }
-    showDeploymentTab(1);
-}
-
-void MainWindow::useSelectedComparisonForExport()
-{
-    const QString modelPath = selectedComparisonModelPath();
-    if (modelPath.isEmpty()) {
-        QMessageBox::information(this, uiText("模型对比"), uiText("请先选择一个对比候选。"));
-        return;
-    }
-    if (conversionCheckpointEdit_) {
-        conversionCheckpointEdit_->setText(QDir::toNativeSeparators(modelPath));
-    }
-    showDeploymentTab(0);
-}
-
-void MainWindow::openSelectedComparisonReport()
-{
-    const QString reportPath = selectedComparisonReportPath();
-    if (reportPath.isEmpty() || !QFileInfo::exists(reportPath)) {
-        QMessageBox::information(this, uiText("模型对比"), uiText("选中候选没有可打开的评估报告。"));
-        return;
-    }
-    QDesktopServices::openUrl(QUrl::fromLocalFile(reportPath));
+    workerPill_->setStatus(uiText("模型导入中"), StatusPill::Tone::Info);
 }

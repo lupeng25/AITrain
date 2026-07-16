@@ -1,6 +1,8 @@
 ﻿# AITrain Studio Training Backends
 
-AITrain Studio keeps training out of the GUI process. Real training is launched by `aitrain_worker` as a Python subprocess and reports newline-delimited JSON events back to the existing Worker protocol.
+> 2026-07-16 破坏性重构说明：本文中早期 Phase 的独立矩阵脚本和 Worker 裸路径 smoke 命令均为历史记录，相关脚本已删除。当前训练只能通过注册的 `TrainingWorkflowProfileV2` 和 Worker V2 Workflow 执行；模型交付只能通过 `runRuntimeDeliveryWorkflowV2`，不得直接向 Worker 传入模型/样本路径。
+
+AITrain Studio 将训练置于 GUI 进程之外。真实训练由 `aitrain_worker` 作为 Python 子进程启动，并通过 Worker V2 协议回传换行 JSON 事件。
 
 ## Backend Summary
 
@@ -46,10 +48,6 @@ Run the full P1 productization matrix with:
 
 ```powershell
 .\tools\phase-p1-yolo-full-matrix-smoke.ps1
-.\tools\phase-yolo26-model-matrix-smoke.ps1
-.\tools\phase-yolo26-model-matrix-smoke.ps1 -PrepareEnvironment -ProbeOnly -Device 0
-.\tools\phase-yolo26-model-matrix-smoke.ps1 -Focused -Epochs 1 -Device 0
-.\tools\phase-yolo26-model-matrix-smoke.ps1 -Full -Epochs 100 -Device 0
 ```
 
 The previous Phase 45 matrix remains useful as a faster YOLO11/YOLO12 nano wiring check:
@@ -64,9 +62,6 @@ The P1 matrix does not productize YOLOv5 segmentation, YOLOv5 P6, YOLO26, semant
 OBB v1 smoke and public matrix:
 
 ```powershell
-.\tools\phase-obb-ultralytics-smoke.ps1 -Epochs 1 -ImageSize 640 -BatchSize 2 -Device cpu
-.\tools\phase-obb-ultralytics-smoke.ps1 -Epochs 20 -Device 0
-.\tools\phase-obb-dota-quality-matrix.ps1 -Dataset DOTA8 -Epochs 30 -Device 0
 ```
 
 `phase-obb-ultralytics-smoke.ps1` tries to materialize a public Ultralytics DOTA OBB dataset first, then falls back to generated OBB workflow data unless `-RequirePublicDataset` is set. A passing row must produce `best.pt`, `best.onnx`, `ultralytics_training_report.json`, official `evaluation_report.json`, and Worker `--obb-onnx-smoke` output with prediction JSON, overlay, benchmark report, and deployment validation report. Generated fallback rows validate workflow wiring only. DOTA/DOTA-subset rows are public benchmark evidence and are not customer-domain industrial precision evidence.
@@ -77,8 +72,6 @@ Dedicated semantic segmentation is a separate SMP route, not part of the YOLO P1
 python -m venv .venv-smp
 .\.venv-smp\Scripts\python.exe -m pip install -r python_trainers\requirements-smp.txt
 .\tools\phase-smp-semantic-segmentation-smoke.ps1 -Python .\.venv-smp\Scripts\python.exe
-.\tools\phase-smp-4090d-gpu-realtest.ps1
-.\tools\phase-smp-oxford-pets-quality-matrix.ps1
 ```
 
 Use `phase-smp-semantic-segmentation-smoke.ps1 -SkipTraining` when only verifying package layout and Python script compilation. A passing minimal smoke must produce `best.pt`, `best.onnx`, `smp_training_report.json`, `semantic_segmentation_sidecar.json`, `evaluation_report.json`, and non-empty overlay output. If SMP dependencies are missing, the smoke writes a blocked summary instead of treating generated data as product evidence.
@@ -230,7 +223,6 @@ NCNN export creates `.param/.bin` deployment artifacts and writes an AITrain sid
 NCNN runtime smoke:
 
 ```powershell
-.\tools\phase-ncnn-runtime-smoke.ps1 -NcnnRoot <ncnn-sdk-root> -OnnxPath <best.onnx> -SampleImagePath <sample.png> -OutputDir <smoke-output> -TaskType detection
 ```
 
 For existing external NCNN `.param/.bin` artifacts, provide an AITrain sidecar or explicit blob/decoder settings, then use the Worker helper without forcing an ONNX conversion:

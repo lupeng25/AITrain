@@ -1,6 +1,6 @@
 #pragma once
 
-#include "aitrain/core/TaskModels.h"
+#include "TaskArtifactPresenterV2.h"
 
 #include <QWidget>
 #include <QVector>
@@ -20,20 +20,17 @@ public:
 
     void clear();
     void setTaskSummary(const QString& summary);
-    void setArtifacts(const QVector<aitrain::ArtifactRecord>& artifacts);
-    void setMetrics(const QVector<aitrain::MetricPoint>& metrics);
-    void setExports(const QVector<aitrain::ExportRecord>& exports);
+    void setV2Details(const TaskArtifactDetailsV2& details);
     QString selectedArtifactPath() const;
+    int artifactRowCount() const;
+    int metricRowCount() const;
+    int workflowStepRowCount() const;
 
 signals:
     void openDirectoryRequested();
     void copyPathRequested();
     void useForInferenceRequested();
-    void useForExportRequested();
     void registerModelRequested();
-    void evaluateRequested();
-    void benchmarkRequested();
-    void deliveryReportRequested();
 
 private:
     void configureTable(QTableWidget* table) const;
@@ -50,4 +47,5 @@ private:
     QPlainTextEdit* previewText_ = nullptr;
     QStackedWidget* previewStack_ = nullptr;
     EvaluationReportView* evaluationReportView_ = nullptr;
+    QWidget* legacyArtifactActions_ = nullptr;
 };

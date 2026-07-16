@@ -4,6 +4,8 @@
 
 定位：Windows + Qt Widgets + Worker 的本地视觉训练平台。
 
+> 2026-07-16 破坏性重构覆盖：本文早期 Phase/脚本描述仅作历史证据。当前实现以 SQLite schema 11、V2 Storage/Artifact/Workflow、Protocol V2 和官方适配器为准；旧 Repository、ProductWorkflow、裸路径 Worker 命令及独立 smoke 脚本均已删除。
+
 本文是 Phase 39+ 的当前方向文档。当前权威状态仍以 `docs/harness/current-status.md` 为准。已删除或外部保留的历史路线笔记不作为下一步实施、阶段状态或验收口径来源。
 
 ## 1. 当前基线与判断
@@ -79,39 +81,17 @@ OCR 评估和验收使用 PaddleOCR 官方报告路径：
 - 客户域 OCR production claim 必须使用客户/目标域数据、官方 Det/Rec/System 报告和 `customer-ocr-validation` 结果。
 - Public Total-Text、generated smoke、`.deps` 示例和 tiny CPU smoke 只能证明工作流，不证明客户域 OCR 精度。
 
-## 4. Phase 39B：本地流水线真实执行
+## 4. Phase 39B：历史本地流水线（已删除）
 
-目标：让 `runLocalPipeline` 不只是生成计划或请求文件，而是能真实编排可执行闭环。
+原 `runLocalPipeline` 同时维护另一套训练、评估、导出和报告编排，与 V2 Workflow 形成双事实源，现已从产品代码、协议、GUI 和测试中物理删除。
 
-`train-evaluate-export-register` 模板必须按顺序执行：
+当前方向统一为：
 
-1. validate dataset
-2. create dataset snapshot
-3. start training
-4. evaluate model
-5. export ONNX
-6. register model version
-7. generate delivery report
-
-`export-infer-benchmark-report` 模板必须按顺序执行：
-
-1. export or reuse model artifact
-2. run inference smoke
-3. benchmark model
-4. generate delivery report
-
-官方 Python backend 的流水线要求：
-
-- 复用现有 Python trainer adapter，不在 GUI 进程内执行训练。
-- 每个 step 记录 request、artifact、metrics、状态和失败原因。
-- 缺少 Python / Ultralytics / PaddleOCR / PaddlePaddle 环境时，流水线必须明确失败并产出可读诊断。
-- 不允许只写 `training_request.json` 就把 official backend step 视为完成。
-
-保留的限制：
-
-- TensorRT step 根据硬件记录 `passed` / `failed` / `hardware-blocked`；RTX 4090 D 已有通过证据，旧 GPU 仍应为 `hardware-blocked`。
-- PaddleOCR System 继续作为 official tool inference，不声明为 C++ DB ONNX postprocess。
-- official backend pipeline 不允许回退到 C++ tiny/scaffold backend。
+1. 生产训练通过 `TrainingWorkflowProfileV2` 执行八步工作流。
+2. 运行时交付迁移到 `ImportOrResolveModel → ValidateManifest → RunInferenceSmoke → Benchmark → DeploymentValidate → RenderDeliveryReport`。
+3. 每个步骤只消费已提交 Artifact，并持久化状态、指标、失败和 Evidence。
+4. 缺少 SDK、依赖、硬件或 decoder 时使用 Runtime V2 精确状态，不再使用笼统 `hardware-blocked` 字符串。
+5. PaddleOCR System 保持官方 Det+Rec 组合工具链，不声明为 C++ OCR ONNX 路线。
 
 ## 5. Phase 39C：benchmark、模型库与交付报告
 
@@ -119,7 +99,7 @@ OCR 评估和验收使用 PaddleOCR 官方报告路径：
 
 ### Benchmark
 
-增强 `benchmarkModel`：
+将 benchmark 收口到 V2 运行时交付 Workflow 的 `Benchmark` 步骤；旧 `benchmarkModel` 裸路径 Worker 命令已删除：
 
 - 支持 ONNX Runtime detection / segmentation；OCR 结果通过 PaddleOCR 官方报告和任务产物汇总。
 - 对已有 TensorRT engine 可做 runtime benchmark；不在 GTX 1060 / SM 61 上伪造 engine build 成功。

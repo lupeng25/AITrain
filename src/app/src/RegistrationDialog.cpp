@@ -1,8 +1,11 @@
 #include "RegistrationDialog.h"
 
+#include "aitrain/core/LicenseSecurity.h"
+
 #include "LanguageSupport.h"
 
 #include <QApplication>
+#include <QDir>
 #include <QClipboard>
 #include <QComboBox>
 #include <QDateTime>
@@ -12,6 +15,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QVBoxLayout>
 
 namespace {
@@ -115,8 +119,14 @@ void RegistrationDialog::copyMachineCode()
 void RegistrationDialog::activateLicense()
 {
     const QString token = tokenEdit_->toPlainText().trimmed();
+    const QString trustedClockPath = QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
+        .filePath(QStringLiteral("license/trusted-utc.dat"));
     const aitrain::LicenseValidationResult validation =
-        aitrain::validateLicenseToken(token, publicKeyBase64_, machineCode_);
+        aitrain::validateLicenseTokenWithTrustedClock(
+            token,
+            publicKeyBase64_,
+            trustedClockPath,
+            machineCode_);
     if (!validation.isValid()) {
         statusLabel_->setText(localizedLicenseMessage(validation.status, validation.message));
         return;
@@ -124,13 +134,6 @@ void RegistrationDialog::activateLicense()
 
     QSettings settings;
     settings.setValue(QStringLiteral("license/token"), token);
-    settings.setValue(QStringLiteral("license/customer"), validation.payload.customer);
-    settings.setValue(QStringLiteral("license/licenseId"), validation.payload.licenseId);
-    if (validation.payload.expiresAt.isValid()) {
-        settings.setValue(QStringLiteral("license/expiresAt"), validation.payload.expiresAt.toUTC().toString(Qt::ISODate));
-    } else {
-        settings.remove(QStringLiteral("license/expiresAt"));
-    }
     settings.sync();
 
     activatedPayload_ = validation.payload;
@@ -172,6 +175,10 @@ QString RegistrationDialog::localizedLicenseMessage(aitrain::LicenseStatus statu
         return tr("注册码签名验证失败。");
     case aitrain::LicenseStatus::CryptoUnavailable:
         return tr("当前平台不支持离线授权验证。");
+    case aitrain::LicenseStatus::ClockRollbackDetected:
+        return tr("检测到系统时钟明显回拨，请校正系统时间后重试。");
+    case aitrain::LicenseStatus::ProtectedStorageCorrupted:
+        return tr("授权可信时间存储已损坏或不属于当前 Windows 用户。");
     case aitrain::LicenseStatus::Valid:
         return tr("注册成功。");
     }

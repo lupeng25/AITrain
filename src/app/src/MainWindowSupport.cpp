@@ -287,20 +287,6 @@ QString modelSummaryText(const QJsonObject& summary)
     return fallback.isEmpty() ? QString::fromUtf8(QJsonDocument(summary).toJson(QJsonDocument::Compact)) : fallback.join(QStringLiteral(", "));
 }
 
-QString exportComboLabel(const QString& format)
-{
-    if (format == QStringLiteral("onnx")) {
-        return uiText("ONNX 模型");
-    }
-    if (format == QStringLiteral("ncnn")) {
-        return uiText("NCNN param/bin（onnx2ncnn）");
-    }
-    if (format == QStringLiteral("tensorrt")) {
-        return uiText("TensorRT Engine（RTX / SM 75+ 外部验收）");
-    }
-    return format;
-}
-
 InfoPanel* createCompactSummaryCard(const QString& label, const QString& value, const QString& caption)
 {
     auto* panel = new InfoPanel(label);
@@ -452,35 +438,6 @@ void loadInferenceOverlay(QLabel* label, const QString& path)
         targetSize,
         Qt::KeepAspectRatio,
         Qt::SmoothTransformation));
-}
-
-QString taskStateLabel(aitrain::TaskState state)
-{
-    switch (state) {
-    case aitrain::TaskState::Queued: return uiText("排队中");
-    case aitrain::TaskState::Running: return uiText("运行中");
-    case aitrain::TaskState::Completed: return uiText("已完成");
-    case aitrain::TaskState::Failed: return uiText("失败");
-    case aitrain::TaskState::Canceled: return uiText("已取消");
-    }
-    return uiText("未知");
-}
-
-QString taskKindLabel(aitrain::TaskKind kind)
-{
-    switch (kind) {
-    case aitrain::TaskKind::Train: return uiText("训练");
-    case aitrain::TaskKind::Validate: return uiText("校验");
-    case aitrain::TaskKind::Export: return uiText("导出");
-    case aitrain::TaskKind::Infer: return uiText("推理");
-    case aitrain::TaskKind::Evaluate: return uiText("评估");
-    case aitrain::TaskKind::Benchmark: return uiText("基准");
-    case aitrain::TaskKind::Curate: return uiText("质检");
-    case aitrain::TaskKind::Snapshot: return uiText("快照");
-    case aitrain::TaskKind::Pipeline: return uiText("流水线");
-    case aitrain::TaskKind::Report: return uiText("报告");
-    }
-    return uiText("任务");
 }
 
 QString environmentStatusLabel(const QString& status)
@@ -980,62 +937,6 @@ QString trainingPreflightSummaryText(const QJsonObject& preflight)
         parts.append(QStringLiteral("expectedTask=%1").arg(expectedTask));
     }
     return parts.join(QStringLiteral(" | "));
-}
-
-QString exportFormatLabel(const QString& format)
-{
-    if (format == QStringLiteral("onnx")) {
-        return uiText("ONNX 模型");
-    }
-    if (format == QStringLiteral("ncnn")) {
-        return QStringLiteral("NCNN param/bin");
-    }
-    if (format == QStringLiteral("tensorrt")) {
-        return QStringLiteral("TensorRT Engine");
-    }
-    return uiText("AITrain JSON（诊断）");
-}
-
-QString defaultExportFileName(const QString& format)
-{
-    if (format == QStringLiteral("onnx")) {
-        return QStringLiteral("model.onnx");
-    }
-    if (format == QStringLiteral("ncnn")) {
-        return QStringLiteral("model.param");
-    }
-    if (format == QStringLiteral("tensorrt")) {
-        return QStringLiteral("model.engine");
-    }
-    return QStringLiteral("model.aitrain-export.json");
-}
-
-QString exportFileFilter(const QString& format)
-{
-    if (format == QStringLiteral("onnx")) {
-        return QStringLiteral("ONNX model (*.onnx);;All files (*.*)");
-    }
-    if (format == QStringLiteral("ncnn")) {
-        return QStringLiteral("NCNN param (*.param);;All files (*.*)");
-    }
-    if (format == QStringLiteral("tensorrt")) {
-        return QStringLiteral("TensorRT engine (*.engine *.plan);;All files (*.*)");
-    }
-    return QStringLiteral("AITrain JSON (*.json *.aitrain);;All files (*.*)");
-}
-
-QString exportFormatNote(const QString& format)
-{
-    if (format == QStringLiteral("onnx")) {
-        return uiText("主交付格式，可继续进入推理验证。");
-    }
-    if (format == QStringLiteral("ncnn")) {
-        return uiText("需要配置 onnx2ncnn，输出 param/bin；部署验证需要 NCNN SDK/runtime 和样本图。");
-    }
-    if (format == QStringLiteral("tensorrt")) {
-        return uiText("需要 RTX / SM 75+ 真机外部验收。");
-    }
-    return uiText("仅支持官方模型导出格式。");
 }
 
 QString compactListSummary(const QStringList& values, int maxItems)

@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.21)
 
+# 中文 MSVC 工具链的 /showIncludes 输出会因代码页和语言资源不一致而让
+# NMake 生成空依赖文件，继而漏编公共头文件的使用方并造成 ABI 不一致。
+# NMake 下改用 CMake 自身的依赖扫描器，确保头文件变更必然触发重编译。
+if(CMAKE_GENERATOR STREQUAL "NMake Makefiles")
+    set(CMAKE_DEPENDS_USE_COMPILER FALSE)
+endif()
+
 project(AITrainStudio
     VERSION 0.1.0
     LANGUAGES CXX
@@ -14,13 +21,13 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 option(AITRAIN_BUILD_TESTS "Build AITrain Studio tests" ON)
-option(AITRAIN_BUILD_LICENSE_GENERATOR "Build the AITrain graphical license generator" ON)
+option(AITRAIN_BUILD_LICENSE_GENERATOR "Build the AITrain graphical license generator" OFF)
 option(AITRAIN_INSTALL_LICENSE_GENERATOR "Install the AITrain license generator with the package" OFF)
 option(AITRAIN_ENABLE_ONNXRUNTIME "Enable ONNX Runtime inference when an SDK is available" ON)
 option(AITRAIN_ENABLE_NCNN "Enable NCNN inference when an SDK is available" ON)
 option(AITRAIN_INSTALL_QT_RUNTIME "Run windeployqt during install on Windows when available" ON)
 set(AITRAIN_LICENSE_PUBLIC_KEY "" CACHE STRING "Base64 encoded ECDSA P-256 public key for offline license verification")
-set(AITRAIN_LICENSE_KEY_FILE "" CACHE FILEPATH "Optional local JSON key file containing publicKey for offline license verification")
+set(AITRAIN_LICENSE_PUBLIC_KEY_FILE "" CACHE FILEPATH "Optional JSON file containing only publicKey for offline license verification")
 set(AITRAIN_ONNXRUNTIME_ROOT "" CACHE PATH "Optional ONNX Runtime SDK root containing include and lib directories")
 set(AITRAIN_NCNN_ROOT "" CACHE PATH "Optional NCNN SDK root containing include, lib, bin, and tools directories")
 set(AITRAIN_NCNN_ONNX2NCNN "" CACHE FILEPATH "Optional onnx2ncnn converter executable")
@@ -113,33 +120,25 @@ if(NOT AITRAIN_LICENSE_PUBLIC_KEY AND DEFINED ENV{AITRAIN_LICENSE_PUBLIC_KEY})
     set(AITRAIN_LICENSE_PUBLIC_KEY "$ENV{AITRAIN_LICENSE_PUBLIC_KEY}" CACHE STRING "Base64 encoded ECDSA P-256 public key for offline license verification" FORCE)
 endif()
 
-if(NOT AITRAIN_LICENSE_KEY_FILE AND DEFINED ENV{AITRAIN_LICENSE_KEY_FILE})
-    set(AITRAIN_LICENSE_KEY_FILE "$ENV{AITRAIN_LICENSE_KEY_FILE}" CACHE FILEPATH "Optional local JSON key file containing publicKey for offline license verification" FORCE)
+if(NOT AITRAIN_LICENSE_PUBLIC_KEY_FILE AND DEFINED ENV{AITRAIN_LICENSE_PUBLIC_KEY_FILE})
+    set(AITRAIN_LICENSE_PUBLIC_KEY_FILE "$ENV{AITRAIN_LICENSE_PUBLIC_KEY_FILE}" CACHE FILEPATH "Optional JSON file containing only publicKey for offline license verification" FORCE)
 endif()
 
-if(NOT AITRAIN_LICENSE_PUBLIC_KEY AND NOT AITRAIN_LICENSE_KEY_FILE)
-    foreach(AITRAIN_LICENSE_KEY_CANDIDATE
-        "${CMAKE_SOURCE_DIR}/.deps/local-license/aitrain-license-private-key.json"
-        "${CMAKE_SOURCE_DIR}/tools/aitrain-license-private-key.json"
-    )
-        if(EXISTS "${AITRAIN_LICENSE_KEY_CANDIDATE}")
-            set(AITRAIN_LICENSE_KEY_FILE "${AITRAIN_LICENSE_KEY_CANDIDATE}" CACHE FILEPATH "Optional local JSON key file containing publicKey for offline license verification" FORCE)
-            break()
+if(NOT AITRAIN_LICENSE_PUBLIC_KEY AND AITRAIN_LICENSE_PUBLIC_KEY_FILE)
+    if(EXISTS "${AITRAIN_LICENSE_PUBLIC_KEY_FILE}")
+        file(READ "${AITRAIN_LICENSE_PUBLIC_KEY_FILE}" AITRAIN_LICENSE_KEY_JSON)
+        string(JSON AITRAIN_LICENSE_KEY_JSON_PRIVATE_KEY ERROR_VARIABLE AITRAIN_LICENSE_PRIVATE_KEY_JSON_ERROR GET "${AITRAIN_LICENSE_KEY_JSON}" privateKey)
+        if(NOT AITRAIN_LICENSE_PRIVATE_KEY_JSON_ERROR)
+            message(FATAL_ERROR "AITRAIN_LICENSE_PUBLIC_KEY_FILE must not contain privateKey material: ${AITRAIN_LICENSE_PUBLIC_KEY_FILE}")
         endif()
-    endforeach()
-endif()
-
-if(NOT AITRAIN_LICENSE_PUBLIC_KEY AND AITRAIN_LICENSE_KEY_FILE)
-    if(EXISTS "${AITRAIN_LICENSE_KEY_FILE}")
-        file(READ "${AITRAIN_LICENSE_KEY_FILE}" AITRAIN_LICENSE_KEY_JSON)
         string(JSON AITRAIN_LICENSE_KEY_JSON_PUBLIC_KEY ERROR_VARIABLE AITRAIN_LICENSE_KEY_JSON_ERROR GET "${AITRAIN_LICENSE_KEY_JSON}" publicKey)
         if(NOT AITRAIN_LICENSE_KEY_JSON_ERROR AND AITRAIN_LICENSE_KEY_JSON_PUBLIC_KEY AND NOT AITRAIN_LICENSE_KEY_JSON_PUBLIC_KEY MATCHES "^<")
             set(AITRAIN_LICENSE_PUBLIC_KEY "${AITRAIN_LICENSE_KEY_JSON_PUBLIC_KEY}" CACHE STRING "Base64 encoded ECDSA P-256 public key for offline license verification" FORCE)
         else()
-            message(WARNING "License key file does not contain a usable publicKey: ${AITRAIN_LICENSE_KEY_FILE}")
+            message(WARNING "License public-key file does not contain a usable publicKey: ${AITRAIN_LICENSE_PUBLIC_KEY_FILE}")
         endif()
     else()
-        message(WARNING "AITRAIN_LICENSE_KEY_FILE does not exist: ${AITRAIN_LICENSE_KEY_FILE}")
+        message(WARNING "AITRAIN_LICENSE_PUBLIC_KEY_FILE does not exist: ${AITRAIN_LICENSE_PUBLIC_KEY_FILE}")
     endif()
 endif()
 
@@ -743,7 +742,6 @@ install(FILES
     tools/phase-anomaly-mvtec-quality-matrix.ps1
     tools/phase-smp-4090d-gpu-realtest.ps1
     tools/phase-smp-oxford-pets-quality-matrix.ps1
-    tools/full-model-lifecycle-matrix.ps1
     tools/full-model-lifecycle-progress-server.py
     tools/phase-ncnn-runtime-smoke.ps1
     tools/local-rc-closeout.ps1

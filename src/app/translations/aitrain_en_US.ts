@@ -1131,6 +1131,14 @@
         <translation>Offline license verification is not supported on this platform.</translation>
     </message>
     <message>
+        <source>检测到系统时钟明显回拨，请校正系统时间后重试。</source>
+        <translation>A significant system clock rollback was detected. Correct the system time and try again.</translation>
+    </message>
+    <message>
+        <source>授权可信时间存储已损坏或不属于当前 Windows 用户。</source>
+        <translation>The protected license clock is corrupted or belongs to another Windows user.</translation>
+    </message>
+    <message>
         <source>注册成功。</source>
         <translation>Registration succeeded.</translation>
     </message>

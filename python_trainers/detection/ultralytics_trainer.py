@@ -23,7 +23,10 @@ TRAINER_ROOT = Path(__file__).resolve().parents[1]
 if str(TRAINER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRAINER_ROOT))
 
-from trainer_protocol import configure_stdio, emit_failed, exception_details, unhandled_failure  # noqa: E402
+from adapter_event_channel_v2 import AdapterEventChannelV2, event_channel_from_environment  # noqa: E402
+from adapter_sdk import AdapterSdk  # noqa: E402
+from dataset_snapshot_v2 import materialize_dataset_snapshot_v2  # noqa: E402
+from trainer_protocol import configure_stdio, exception_details  # noqa: E402
 from yolo.ultralytics_exporter import (  # noqa: E402
     LICENSE_NOTE,
     apply_cpu_device_environment,
@@ -40,14 +43,67 @@ BACKEND_ID = "ultralytics_yolo_detect"
 configure_stdio()
 
 
+_adapter: AdapterSdk | None = None
+_adapter_backend = ""
+_event_channel: AdapterEventChannelV2 | None = None
+
+
+def configure_adapter(backend: str | None = None) -> None:
+    """Select JSONL fallback or the V2 authenticated event channel once."""
+    global _adapter, _adapter_backend, _event_channel
+    selected_backend = backend or BACKEND_ID
+    if _event_channel is None and os.environ.get("AITRAIN_EVENT_PORT"):
+        _event_channel = event_channel_from_environment()
+        _event_channel.connect()
+    if _adapter is None or _adapter_backend != selected_backend:
+        sink = _event_channel.emit_legacy_event if _event_channel is not None else None
+        _adapter = AdapterSdk(selected_backend, event_sink=sink)
+        _adapter_backend = selected_backend
+
+
+def close_adapter() -> None:
+    global _event_channel
+    if _event_channel is not None:
+        _event_channel.close()
+        _event_channel = None
+
+
+def active_adapter() -> AdapterSdk:
+    configure_adapter(BACKEND_ID)
+    assert _adapter is not None
+    return _adapter
+
+
 def emit(event_type: str, **payload: Any) -> None:
-    message = {"type": event_type, "timestamp": time.time()}
-    message.update(payload)
-    print(json.dumps(message, ensure_ascii=False), flush=True)
+    payload.pop("backend", None)
+    adapter = active_adapter()
+    if event_type == "log":
+        adapter.emit_log(str(payload.pop("message", "")), level=str(payload.pop("level", "info")), **payload)
+    elif event_type == "progress":
+        adapter.emit_progress(float(payload.pop("percent", 0)), message=str(payload.pop("message", "")), **payload)
+    elif event_type == "metric":
+        adapter.emit_metric(str(payload.pop("name", "")), float(payload.pop("value", 0)), **payload)
+    elif event_type == "artifact":
+        adapter.emit_artifact_candidate(
+            str(payload.pop("kind", "artifact")),
+            str(payload.pop("path", "")),
+            message=str(payload.pop("message", "")),
+            **payload,
+        )
+    elif event_type == "completed":
+        adapter.emit_completed(str(payload.pop("message", "training completed")), **payload)
+    elif event_type == "failed":
+        adapter.emit_failed(
+            str(payload.pop("message", "training failed")),
+            str(payload.pop("code", "ultralytics_trainer_failed")),
+            payload.pop("details", {}),
+        )
+    else:
+        raise ValueError(f"unsupported adapter event type: {event_type}")
 
 
 def fail(message: str, code: str = "ultralytics_trainer_failed", details: dict[str, Any] | None = None) -> int:
-    return emit_failed(BACKEND_ID, message, code, details)
+    return active_adapter().emit_failed(message, code, details)
 
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
@@ -478,7 +534,19 @@ def _relative_to_base_or_absolute(path: Path, base: Path) -> str:
         return path.resolve().as_posix()
 
 
-def normalize_data_yaml(dataset_path: Path, output_path: Path) -> Path:
+def _require_path_within_dataset(path: Path, dataset_path: Path, field: str) -> None:
+    try:
+        path.resolve().relative_to(dataset_path.resolve())
+    except ValueError as exc:
+        raise ValueError(f"data.yaml field '{field}' escapes the immutable dataset snapshot") from exc
+
+
+def normalize_data_yaml(
+    dataset_path: Path,
+    output_path: Path,
+    *,
+    require_snapshot_containment: bool = False,
+) -> Path:
     existing = read_existing_data_yaml(dataset_path)
     nc = existing.get("nc")
     names = existing.get("names")
@@ -498,6 +566,13 @@ def normalize_data_yaml(dataset_path: Path, output_path: Path) -> Path:
     train_path = _resolve_yaml_path(yaml_base, existing.get("train", "images/train"))
     val_path = _resolve_yaml_path(yaml_base, existing.get("val", "images/val"))
     test_value = existing.get("test")
+    test_path = _resolve_yaml_path(yaml_base, test_value) if test_value else None
+    if require_snapshot_containment:
+        _require_path_within_dataset(yaml_base, dataset_path, "path")
+        _require_path_within_dataset(train_path, dataset_path, "train")
+        _require_path_within_dataset(val_path, dataset_path, "val")
+        if test_path is not None:
+            _require_path_within_dataset(test_path, dataset_path, "test")
 
     data_yaml = output_path / "aitrain_yolo_data.yaml"
     lines = [
@@ -505,8 +580,7 @@ def normalize_data_yaml(dataset_path: Path, output_path: Path) -> Path:
         f"train: {yaml_scalar(_relative_to_base_or_absolute(train_path, yaml_base))}",
         f"val: {yaml_scalar(_relative_to_base_or_absolute(val_path, yaml_base))}",
     ]
-    if test_value:
-        test_path = _resolve_yaml_path(yaml_base, test_value)
+    if test_path is not None:
         lines.append(f"test: {yaml_scalar(_relative_to_base_or_absolute(test_path, yaml_base))}")
     lines.extend([
         f"nc: {len(class_names)}",
@@ -855,8 +929,24 @@ def run(request: dict[str, Any]) -> int:
 
     output_path = Path(str(request.get("outputPath") or parameters.get("outputPath") or "aitrain-yolo-output")).resolve()
     output_path.mkdir(parents=True, exist_ok=True)
+    snapshot_manifest = str(parameters.get("datasetSnapshotManifest") or request.get("datasetSnapshotManifest") or "").strip()
+    snapshot_staging = str(parameters.get("datasetSnapshotStagingPath") or request.get("datasetSnapshotStagingPath") or "").strip()
+    if bool(snapshot_manifest) != bool(snapshot_staging):
+        return fail("Dataset Snapshot V2 requires both manifest and staging paths.", "dataset_snapshot_request_invalid")
+    if snapshot_manifest:
+        try:
+            dataset_path = materialize_dataset_snapshot_v2(dataset_path, snapshot_manifest, snapshot_staging)
+        except Exception as exc:
+            return fail("Dataset Snapshot V2 materialization failed.", "dataset_snapshot_invalid", exception_details(exc))
 
-    data_yaml = normalize_data_yaml(dataset_path, output_path)
+    try:
+        data_yaml = normalize_data_yaml(
+            dataset_path,
+            output_path,
+            require_snapshot_containment=bool(snapshot_manifest),
+        )
+    except ValueError as exc:
+        return fail(str(exc), "dataset_snapshot_path_escape" if snapshot_manifest else "dataset_yaml_invalid")
     emit("log", backend=BACKEND_ID, level="info", message=f"Prepared Ultralytics data yaml: {data_yaml}")
 
     try:
@@ -1116,9 +1206,18 @@ def main() -> int:
     except Exception as exc:
         return fail(f"failed to read trainer request: {exc}", "bad_request", exception_details(exc))
     try:
+        configure_adapter(BACKEND_ID)
         return run(request)
     except Exception as exc:
-        return unhandled_failure(BACKEND_ID, exc)
+        emit("log", backend=BACKEND_ID, level="error",
+            message=f"Unhandled Ultralytics trainer exception: {type(exc).__name__}: {exc}")
+        return fail(
+            f"Python trainer failed with an unhandled exception: {type(exc).__name__}: {exc}",
+            "trainer_unhandled_exception",
+            exception_details(exc),
+        )
+    finally:
+        close_adapter()
 
 
 if __name__ == "__main__":

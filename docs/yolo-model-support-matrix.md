@@ -1,6 +1,8 @@
 # YOLO Model Support Matrix
 
-This document is the source of truth for Ultralytics YOLO detection and instance-segmentation model-family productization in AITrain Studio. OBB is tracked separately through the OBB v1 route and smoke/matrix scripts.
+> 2026-07-16 破坏性重构说明：本文下方的旧 YOLO26/OBB 独立 smoke 命令仅保留为历史证据，脚本已删除。当前 YOLO 训练、评估、导出和交付分别由 `TrainingWorkflowProfileV2`、官方 Python 适配器和 `runRuntimeDeliveryWorkflowV2` 负责。
+
+本文是 AITrain Studio Ultralytics YOLO 检测与实例分割模型族的历史支持矩阵。OBB 当前只通过 V2 Profile 与官方适配器描述，不再提供独立 smoke/matrix 脚本。
 
 AITrain owns Worker routing, dataset normalization, artifact recording, official export checks, C++ ONNX Runtime / NCNN single-image inference, benchmark, deployment validation, TensorRT export/deployment status, and smoke regression. Training, first official export, and detection/segmentation/OBB evaluation still run through the installed official `ultralytics` Python package, so supported model resolution depends on that package version and its license terms.
 
@@ -90,10 +92,6 @@ The previous Phase 45 smoke remains as a faster historical YOLO11/YOLO12 nano wi
 Run the separate YOLO26 compatibility matrix:
 
 ```powershell
-.\tools\phase-yolo26-model-matrix-smoke.ps1
-.\tools\phase-yolo26-model-matrix-smoke.ps1 -PrepareEnvironment -ProbeOnly -Device 0
-.\tools\phase-yolo26-model-matrix-smoke.ps1 -Focused -Epochs 1 -Device 0
-.\tools\phase-yolo26-model-matrix-smoke.ps1 -Full -Epochs 100 -Device 0
 ```
 
 The YOLO26 script writes `yolo26_model_matrix_summary.json` and `yolo26_environment_self_check.json` under `.deps\phase-yolo26-model-matrix` by default. Probe mode validates the isolated Python environment, CUDA Torch when `-Device 0` is requested, `cfg/models/26`, and nano `.yaml` / `.pt` model loading before any training. Full mode has 20 rows covering detection and instance segmentation `n/s/m/l/x` `.yaml` and `.pt` presets. Focused mode covers the four nano lifecycle rows: `yolo26n.yaml`, `yolo26n.pt`, `yolo26n-seg.yaml`, and `yolo26n-seg.pt`. In an environment where official YOLO26 assets resolve, each passed row must produce `best.pt`, ONNX, `ultralytics_training_report.json`, AITrain inference JSON, overlay output, and deployment statuses for ONNX and TensorRT. `ncnn` is not an accepted YOLO26 deployment target.
@@ -101,8 +99,6 @@ The YOLO26 script writes `yolo26_model_matrix_summary.json` and `yolo26_environm
 Run the separate OBB v1 smoke/matrix:
 
 ```powershell
-.\tools\phase-obb-ultralytics-smoke.ps1 -Epochs 1 -ImageSize 640 -BatchSize 2 -Device cpu
-.\tools\phase-obb-dota-quality-matrix.ps1 -Dataset DOTA8 -Epochs 30 -Device 0
 ```
 
 Each passed OBB row must produce `best.pt`, `best.onnx`, `ultralytics_training_report.json`, official `evaluation_report.json`, AITrain prediction JSON with `xywhr` and four `points`, overlay output, benchmark report, and ONNX deployment validation report.

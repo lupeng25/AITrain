@@ -19,7 +19,9 @@ TRAINER_ROOT = Path(__file__).resolve().parents[1]
 if str(TRAINER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRAINER_ROOT))
 
-from trainer_protocol import configure_stdio, emit_failed, exception_details  # noqa: E402
+from adapter_event_channel_v2 import AdapterEventChannelV2, event_channel_from_environment  # noqa: E402
+from adapter_sdk import AdapterSdk  # noqa: E402
+from trainer_protocol import configure_stdio, emit_event, exception_details  # noqa: E402
 
 
 BACKEND_ID = "ultralytics_yolo_export"
@@ -27,14 +29,81 @@ LICENSE_NOTE = "Ultralytics YOLO is executed through the installed official Pyth
 SUPPORTED_EXPORT_ARGS = {"format", "dynamic", "half", "int8", "imgsz", "batch", "device", "data", "end2end"}
 
 
+_adapter: AdapterSdk | None = None
+_adapter_backend = ""
+_event_channel: AdapterEventChannelV2 | None = None
+
+
+def configure_adapter(backend: str | None = None) -> None:
+    """Select JSONL fallback or the V2 authenticated event channel once."""
+    global _adapter, _adapter_backend, _event_channel
+    selected_backend = backend or BACKEND_ID
+    if _event_channel is None and os.environ.get("AITRAIN_EVENT_PORT"):
+        _event_channel = event_channel_from_environment()
+        _event_channel.connect()
+    if _adapter is None or _adapter_backend != selected_backend:
+        sink = _event_channel.emit_legacy_event if _event_channel is not None else None
+        _adapter = AdapterSdk(selected_backend, event_sink=sink)
+        _adapter_backend = selected_backend
+
+
+def close_adapter() -> None:
+    global _event_channel
+    if _event_channel is not None:
+        _event_channel.close()
+        _event_channel = None
+
+
+def active_adapter() -> AdapterSdk:
+    configure_adapter(BACKEND_ID)
+    assert _adapter is not None
+    return _adapter
+
+
 def emit(event_type: str, **payload: Any) -> None:
-    message = {"type": event_type, "timestamp": time.time()}
-    message.update(payload)
-    print(json.dumps(message, ensure_ascii=False), flush=True)
+    payload.pop("backend", None)
+    if event_type == "modelExport":
+        # V1 has a dedicated modelExport message. V2 stores the same metadata in
+        # the immutable export sidecar, so retain the legacy frame only on JSONL.
+        if _event_channel is None:
+            emit_event(BACKEND_ID, event_type, **payload)
+        else:
+            active_adapter().emit_log(
+                "Official YOLO export metadata is available in the export sidecar.",
+                level="info",
+                exportPath=str(payload.get("exportPath") or ""),
+                reportPath=str(payload.get("reportPath") or ""),
+            )
+        return
+
+    adapter = active_adapter()
+    if event_type == "log":
+        adapter.emit_log(str(payload.pop("message", "")), level=str(payload.pop("level", "info")), **payload)
+    elif event_type == "progress":
+        adapter.emit_progress(float(payload.pop("percent", 0)), message=str(payload.pop("message", "")), **payload)
+    elif event_type == "metric":
+        adapter.emit_metric(str(payload.pop("name", "")), float(payload.pop("value", 0)), **payload)
+    elif event_type == "artifact":
+        adapter.emit_artifact_candidate(
+            str(payload.pop("kind", "artifact")),
+            str(payload.pop("path", "")),
+            message=str(payload.pop("message", "")),
+            **payload,
+        )
+    elif event_type == "completed":
+        adapter.emit_completed(str(payload.pop("message", "official export completed")), **payload)
+    elif event_type == "failed":
+        adapter.emit_failed(
+            str(payload.pop("message", "official export failed")),
+            str(payload.pop("code", "ultralytics_export_failed")),
+            payload.pop("details", {}),
+        )
+    else:
+        raise ValueError(f"unsupported adapter event type: {event_type}")
 
 
 def fail(message: str, code: str = "ultralytics_export_failed", details: dict[str, Any] | None = None) -> int:
-    return emit_failed(BACKEND_ID, message, code, details)
+    return active_adapter().emit_failed(message, code, details)
 
 
 def now_iso() -> str:
@@ -356,6 +425,87 @@ def inspect_onnx_io_shapes(path: Path) -> dict[str, Any]:
         return {"available": False, "reason": "onnx_shape_inspection_failed", "error": str(exc)}
 
 
+def _contract_shape(value: Any) -> list[int]:
+    """Turn ONNX dimensions into the V2 contract's positive-or--1 form."""
+    if not isinstance(value, list):
+        return []
+    result: list[int] = []
+    for dimension in value:
+        if isinstance(dimension, int) and dimension > 0:
+            result.append(dimension)
+        else:
+            result.append(-1)
+    return result
+
+
+def class_names_from_evaluation_report(path_value: Any) -> list[str]:
+    """Read class names only from the preceding official evaluation evidence."""
+    path = Path(str(path_value or "")).expanduser()
+    report = read_json_object(path)
+    rows = report.get("perClass")
+    if not isinstance(rows, list):
+        return []
+    indexed: list[tuple[int, str]] = []
+    for fallback_index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("className") or "").strip()
+        if not name:
+            continue
+        raw_index = row.get("classId", fallback_index)
+        try:
+            index = int(raw_index)
+        except (TypeError, ValueError):
+            index = fallback_index
+        indexed.append((index, name))
+    return [name for _, name in sorted(indexed)]
+
+
+def v2_model_contract(model_family: str, output_shapes: dict[str, Any], evaluation_report_path: Any) -> dict[str, Any]:
+    """Build only verifiable model facts for C++ V2 registration.
+
+    Identity, source artifact hash and the final verified flag are intentionally
+    absent: they are assigned by the V2 Workspace after immutable artifact
+    submission, never trusted from this Python sidecar.
+    """
+    task_type = task_from_model_family(model_family)
+    inputs = output_shapes.get("inputs") if isinstance(output_shapes, dict) else []
+    outputs = output_shapes.get("outputs") if isinstance(output_shapes, dict) else []
+    return {
+        "source": "ultralytics_official_export",
+        "modelFamily": model_family,
+        "taskType": task_type,
+        "inputs": [
+            {"name": str(item.get("name") or "images"), "layout": "NCHW", "shape": _contract_shape(item.get("shape"))}
+            for item in inputs if isinstance(item, dict)
+        ],
+        "outputs": [
+            {
+                "name": str(item.get("name") or "output0"),
+                "layout": (
+                    "NCHW"
+                    if model_family == "yolo_segmentation" and len(_contract_shape(item.get("shape"))) == 4
+                    else "NCN"
+                ),
+                "shape": _contract_shape(item.get("shape")),
+            }
+            for item in outputs if isinstance(item, dict)
+        ],
+        "preprocessing": {"id": "letterbox_rgb_0_1"},
+        "postprocessing": {
+            "id": (
+                "yolo_obb_nms"
+                if model_family == "yolo_obb"
+                else ("yolo_segmentation_masks_v8" if model_family == "yolo_segmentation" else "yolo_detection_nms")
+            )
+        },
+        "decoder": "yolo_obb_v8" if model_family == "yolo_obb" else ("yolo_segmentation_v8" if model_family == "yolo_segmentation" else "yolo_detection_v8"),
+        "classNames": class_names_from_evaluation_report(evaluation_report_path),
+        "runtimeRoutes": ["aitrain_onnxruntime"] if model_family in {"yolo_detection", "yolo_segmentation", "yolo_obb"} else [],
+        "evaluationReportPath": str(evaluation_report_path or ""),
+    }
+
+
 def export_report_path(export_path: Path) -> Path:
     return export_path.with_name(f"{export_path.stem}.aitrain-export.json")
 
@@ -541,6 +691,8 @@ def run_official_export(request: dict[str, Any]) -> int:
 
     final_path = copy_exported_artifact(exported_path, output_path)
     report_path = export_report_path(final_path)
+    output_shapes = inspect_onnx_io_shapes(final_path)
+    evaluation_report_path = request.get("evaluationReportPath")
     report = {
         "ok": True,
         "backend": BACKEND_ID,
@@ -556,7 +708,8 @@ def run_official_export(request: dict[str, Any]) -> int:
         "exportPath": str(final_path),
         "ultralyticsVersion": getattr(ultralytics, "__version__", "unknown"),
         "ultralyticsExportArgs": plan["normalized"],
-        "outputShapes": inspect_onnx_io_shapes(final_path),
+        "outputShapes": output_shapes,
+        "modelContract": v2_model_contract(model_family, output_shapes, evaluation_report_path),
         "exportedAt": now_iso(),
         "licenseNote": LICENSE_NOTE,
     }
@@ -586,13 +739,17 @@ def main() -> int:
     parser.add_argument("--request", required=True, type=Path)
     args = parser.parse_args()
     try:
-        request = read_request(args.request)
-    except Exception as exc:
-        return fail(f"failed to read export request: {exc}", "bad_request", exception_details(exc))
-    try:
-        return run_official_export(request)
-    except Exception as exc:
-        return fail("Unhandled official YOLO export failure.", "unhandled_exception", exception_details(exc))
+        configure_adapter(BACKEND_ID)
+        try:
+            request = read_request(args.request)
+        except Exception as exc:
+            return fail(f"failed to read export request: {exc}", "bad_request", exception_details(exc))
+        try:
+            return run_official_export(request)
+        except Exception as exc:
+            return fail("Unhandled official YOLO export failure.", "unhandled_exception", exception_details(exc))
+    finally:
+        close_adapter()
 
 
 if __name__ == "__main__":

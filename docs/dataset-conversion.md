@@ -1,8 +1,18 @@
 # 数据集格式转换指南
 
-最后更新：2026-06-18
+最后更新：2026-07-16
 
 本文说明 AITrain Studio 当前已实现的数据集格式转换能力、GUI 使用流程、输出产物和限制。阶段状态以 `docs/harness/current-status.md` 为准。
+
+## V2 迁移边界
+
+下方“当前支持矩阵”记录尚未完成 V2 接线的既有 GUI/V1 转换入口，不能据此认定对应路线已经满足 V2 Artifact 合同。当前 V2 Core 只接受以下三条可由现有目标 Driver 完整校验的路线：
+
+- COCO bbox → YOLO Detection。
+- COCO instance polygon → YOLO Segmentation；COCO RLE 不属于该路线。
+- Pascal VOC bbox → YOLO Detection。
+
+V2 转换先冻结完整源文件哈希和确定输出清单，只允许写 Artifact staging，两次核对文件集合并通过目标 Driver 校验后才原子提交。YOLO → COCO/VOC 因 COCO/VOC 尚无 V2 目标 Driver 而返回 `BackendUnsupported`；YOLO ↔ X-AnyLabeling 因外部 CLI 不能在执行前给出可冻结的确定输出清单而返回 `BackendUnsupported`；VOC → YOLO Segmentation 因 VOC bbox 不具备 polygon 语义而返回 `BackendUnsupported`。这些拒绝是数据完整性边界，不应通过跳过校验或伪造目标 Driver 绕过。V2 Worker/GUI 接线完成前，下方旧入口仍属于待迁移范围。
 
 ## 当前支持矩阵
 
@@ -51,17 +61,9 @@ GUI 只暴露已经接入 Worker 和核心转换实现的组合：
 
 涉及 X-AnyLabeling XLABEL 的组合会自动切换为 `conversionEngine=xanylabeling_cli`。Worker 只调用本机 `xanylabeling` CLI，不内嵌 X-AnyLabeling GUI，也不把 X-AnyLabeling 作为产品包默认二进制。可执行文件优先从 `AITRAIN_XANYLABELING_EXE`、程序目录、`tools/x-anylabeling`、`.deps/tools/annotation-tools/X-AnyLabeling`、旧 `.deps/annotation-tools/X-AnyLabeling` 和 `PATH` 查找。YOLO -> XLABEL 会优先从 `data.yaml` 自动生成 `classes.txt`；XLABEL -> YOLO 需要源目录已有 `classes.txt`，否则报告 `classes_missing`。XLABEL -> YOLO 默认从 XLABEL 的 `imagePath`、`images` 子目录或源目录推断图片目录；图片在其他位置时需通过 `imagesPath` 传入。
 
-## X-AnyLabeling 用户流程验收
+## X-AnyLabeling 转换验收
 
-可以用独立 smoke 脚本模拟用户从 AITrain 打开 X-AnyLabeling、准备会话、同步标注产物，以及执行 YOLO Detection / Segmentation / OBB 与 XLABEL 双向转换的流程：
-
-```powershell
-.\tools\xanylabeling-user-flow-smoke.ps1
-.\tools\xanylabeling-user-flow-smoke.ps1 -UseRealTool
-.\tools\xanylabeling-user-flow-smoke.ps1 -FakeOnly
-```
-
-脚本只写 `.deps\xanylabeling-user-flow`，不会修改原始数据集。默认模式会使用本机真实 X-AnyLabeling CLI（如存在）和 fake CLI 两条 lane；`-FakeOnly` 用于隔离验证 AITrain 自身的请求、会话和路径推断链路；`-UseRealTool` 会额外短暂启动外部 X-AnyLabeling GUI 并由脚本收尾，不自动在 GUI 内画框。最终结果写入 `xanylabeling_user_flow_summary.json`，每个 lane 会记录 `passed` / `failed` / `blocked`、命令、报告路径、关键产物和失败原因。
+独立 X-AnyLabeling smoke 脚本已在 V2 破坏性重构中删除。转换只通过 `runDatasetConversionWorkflowV2` 执行：请求在导入边界携带外部源路径，Core 冻结 inventory/hash，Worker 重新校验并提交自包含 Artifact；标注复核只通过 GUI↔Worker Annotation Session V2 的 ArtifactId 合同执行。不得直接调用外部目录或旧 CLI。
 
 ## 输出产物
 

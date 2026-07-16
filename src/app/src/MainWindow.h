@@ -5,7 +5,8 @@
 #include "Sidebar.h"
 #include "StatusPill.h"
 #include "WorkerClient.h"
-#include "aitrain/core/ProjectRepository.h"
+#include "aitrain/v2/ProjectWorkspaceV2.h"
+#include "aitrain/v2/ProjectQueryServiceV2.h"
 
 #include <QComboBox>
 #include <QCheckBox>
@@ -14,6 +15,8 @@
 #include <QLineEdit>
 #include <QMainWindow>
 #include <QPlainTextEdit>
+#include <QPointer>
+#include <QPair>
 #include <QProgressBar>
 #include <QStackedWidget>
 #include <QStringList>
@@ -24,75 +27,22 @@
 class InfoPanel;
 class EvaluationReportView;
 class TaskArtifactPanel;
+class TaskArtifactPresenterV2;
+class ProjectSummaryPresenterV2;
+class DiagnosticBundlePresenterV2;
+class EnvironmentCheckPresenterV2;
+class ModelRegistryPresenterV2;
 class QPushButton;
 class QTabWidget;
 class QToolButton;
 class QFrame;
 class QResizeEvent;
+class WorkspaceRouter;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
-    explicit MainWindow(const QString& licenseOwner = QString(), const QString& licenseExpiry = QString(),
-        QWidget* parent = nullptr);
-
-protected:
-    void resizeEvent(QResizeEvent* event) override;
-
-private slots:
-    void createProject();
-    void browseDataset();
-    void browseDatasetConversionInput();
-    void browseDatasetConversionOutput();
-    void updateDatasetConversionTargetFormats();
-    void startDatasetConversion();
-    void cancelDatasetConversion();
-    void validateDataset();
-    void splitDataset();
-    void curateDataset();
-    void createDatasetSnapshot();
-    void openDatasetQualityReport();
-    void openDatasetQualityFixList();
-    void launchXAnyLabelingForQualityFix();
-    void prepareXAnyLabelingAnnotationSession();
-    void syncXAnyLabelingAnnotationSession();
-    void browseSampleReviewFile();
-    void loadSampleReviewFile();
-    void generateFilteredReviewList();
-    void openSelectedReviewSample();
-    void launchXAnyLabelingForReview();
-    void startTraining();
-    void startModelExport();
-    void validateDeploymentArtifact();
-    void startInference();
-    void runCustomerOcrAcceptance();
-    void collectDiagnosticsBundle();
-    void importAcceptanceEvidence();
-    void cancelSelectedTask();
-    void runEnvironmentCheck();
-    void handleWorkerMessage(const QString& type, const QJsonObject& payload);
-    void refreshBuiltInCapabilities();
-    void showPage(int pageIndex, const QString& title);
-    void updateSelectedTaskDetails();
-    void openSelectedArtifactDirectory();
-    void copySelectedArtifactPath();
-    void useSelectedArtifactForInference();
-    void useSelectedArtifactForExport();
-    void registerSelectedArtifactAsModelVersion();
-    void evaluateSelectedArtifact();
-    void benchmarkSelectedArtifact();
-    void generateDeliveryReportFromSelectedArtifact();
-    void runLocalPipelinePlanFromCurrentDataset();
-    void reproduceSelectedTrainingTask();
-    void refreshModelRegistry();
-    void useSelectedComparisonForInference();
-    void useSelectedComparisonForExport();
-    void openSelectedComparisonReport();
-    void updateSelectedEvaluationReportDetails();
-    void openEvaluationReportsPage();
-
-private:
     enum PageIndex {
         DashboardPage = 0,
         ProjectPage,
@@ -106,6 +56,52 @@ private:
         PageCount
     };
 
+    explicit MainWindow(const QString& licenseOwner = QString(), const QString& licenseExpiry = QString(),
+        QWidget* parent = nullptr);
+
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+
+private slots:
+    void createProject();
+    void browseDataset();
+    void browseDatasetConversionInput();
+    void updateDatasetConversionTargetFormats();
+    void startDatasetConversion();
+    void cancelDatasetConversion();
+    void validateDataset();
+    void splitDataset();
+    void curateDataset();
+    void createDatasetSnapshot();
+    void openDatasetQualityReport();
+    void openDatasetQualityFixList();
+    void createXAnyLabelingAnnotationSessionV2();
+    void syncXAnyLabelingAnnotationSessionV2();
+    void browseSampleReviewFile();
+    void loadSampleReviewFile();
+    void openSelectedReviewSample();
+    void startTraining();
+    void validateDeploymentModelPackageV2();
+    void startInference();
+    void importV2ModelPackage();
+    void importOcrOfficialReportsV2();
+    void runOcrAcceptanceWorkflowV2();
+    void collectDiagnosticsBundle();
+    void importAcceptanceEvidence();
+    void cancelSelectedTask();
+    void runEnvironmentCheck();
+    void handleWorkerMessage(const QString& type, const QJsonObject& payload);
+    void refreshBuiltInCapabilities();
+    void showPage(int pageIndex, const QString& title);
+    void updateSelectedTaskDetails();
+    void openSelectedArtifactDirectory();
+    void copySelectedArtifactPath();
+    void useSelectedArtifactForInference();
+    void refreshModelRegistry();
+    void updateSelectedEvaluationReportDetails();
+    void openEvaluationReportsPage();
+
+private:
     QWidget* buildTopBar();
     QWidget* buildPageHeading();
     QWidget* buildInspector();
@@ -118,7 +114,7 @@ private:
     QWidget* buildModelRegistryPage();
     QWidget* buildEvaluationReportsPanel();
     QWidget* buildDeploymentPage();
-    QWidget* buildModelExportPanel();
+    QWidget* buildDeploymentValidationPanel();
     QWidget* buildInferenceValidationPanel();
     QWidget* buildDeliveryEvidencePanel();
     QWidget* buildCapabilitiesPanel();
@@ -146,37 +142,27 @@ private:
     void handleMetricMessage(const QJsonObject& payload);
     void handleArtifactMessage(const QJsonObject& payload);
     void handleTaskStateMessage(const QString& type, const QJsonObject& payload);
-    void handleDatasetQualityMessage(const QJsonObject& payload);
+    void handleDataQualityWorkflowV2Message(const QJsonObject& payload);
     void handleAnnotationSessionMessage(const QJsonObject& payload);
     void handleAnnotationSyncMessage(const QJsonObject& payload);
-    void handleDatasetSnapshotMessage(const QJsonObject& payload);
-    void handleEvaluationReportMessage(const QJsonObject& payload);
-    void handlePipelinePlanMessage(const QJsonObject& payload);
-    void handleModelExportMessage(const QJsonObject& payload);
-    void handleDeploymentValidationMessage(const QJsonObject& payload);
-    void handleInferenceResultMessage(const QJsonObject& payload);
-    void handleCustomerOcrAcceptanceMessage(const QJsonObject& payload);
-    void handleDiagnosticBundleMessage(const QJsonObject& payload);
+    void handleDatasetSnapshotImportWorkflowV2(const QJsonObject& payload);
+    void handleOcrOfficialReportsImportedV2(const QJsonObject& payload);
+    void handleOcrAcceptanceWorkflowV2(const QJsonObject& payload);
+    void handleDiagnosticsWorkflowV2(const QJsonObject& payload);
     void updateRecentTasks();
+    void updateV2TaskTable();
     void updateDatasetList();
-    void updateTaskTable(QTableWidget* table, const QVector<aitrain::TaskRecord>& tasks);
     void updateHeaderState();
     void updateResponsiveChrome();
     void ensureWorkspacePage(int pageIndex);
     void updateEnvironmentTable(const QJsonObject& payload);
-    void updateDatasetValidationResult(const QJsonObject& payload);
-    void updateDatasetSplitResult(const QJsonObject& payload);
-    void updateDatasetConversionResult(const QJsonObject& payload);
+    void handleDatasetSplitWorkflowV2(const QJsonObject& payload);
+    void handleDatasetConversionWorkflowV2(const QJsonObject& payload);
     void setDatasetConversionFormRunning(bool running);
     void clearDatasetConversionErrors();
     void appendDatasetConversionLog(const QString& text);
     void refreshDatasetConversionDefaultsFromCurrentDataset();
-    void updateDatasetRepairLoopFromQuality(const QJsonObject& payload);
-    void updateDatasetRepairLoopFromValidation(const QJsonObject& payload);
     void setDatasetRepairLoopRows(const QString& summary, const QVector<QStringList>& rows);
-    void startQueuedTraining(const QString& taskId, const aitrain::TrainingRequest& request);
-    void startNextQueuedTask();
-    void startSnapshotForQueuedTraining(const PendingTrainingTask& pending);
     void configureTable(QTableWidget* table) const;
     void updateDashboardSummary();
     void updateProjectSummary();
@@ -187,7 +173,6 @@ private:
     void refreshSampleReviewTable();
     QJsonArray filteredSampleReviewRows() const;
     void updateTrainingSelectionSummary();
-    void refreshModelExportFormatOptions();
     void refreshTrainingDefaults();
     void storeLanguagePreference(const QString& languageCode);
     void updateLanguageButtonState();
@@ -195,28 +180,26 @@ private:
     void openLocalDirectory(const QString& path);
     void copyLocalPath(const QString& path, const QString& label);
     void updateAnnotationToolStatus();
-    void refreshAfterAnnotation();
     void applyTaskFilters();
     void ensureVisibleTaskSelection();
     void clearSelectedTaskDetails();
     void updateModelRegistry();
-    void updateModelComparison(
-        const QVector<aitrain::ModelVersionRecord>& models,
-        const QVector<aitrain::EvaluationReportRecord>& reports);
-    bool attachLatestSnapshotToRequest(aitrain::TrainingRequest& request, int datasetId, QString* error);
-    int recordExperimentRunForRequest(const aitrain::TrainingRequest& request, int datasetId, QString* error);
-    void updateExperimentRunSummary(const QString& taskId);
     QLabel* trainingLiveValueLabel(const QString& objectName) const;
-    void registerPipelineModelVersion(const QJsonObject& payload);
-    QString createRepositoryTask(aitrain::TaskKind kind, const QString& taskType, const QString& capabilityId, const QString& workDir, const QString& message, const QString& requestedTaskId = {});
     QString selectedTaskId() const;
     QString selectedArtifactPath() const;
     QString selectedEvaluationReportPath() const;
-    QString selectedComparisonModelPath() const;
-    QString selectedComparisonReportPath() const;
 
-    aitrain::ProjectRepository repository_;
+    aitrain::v2::ProjectWorkspaceV2 v2Workspace_;
+    aitrain::v2::ProjectQueryServiceV2 v2QueryService_;
+    ProjectSummaryPresenterV2* projectSummaryPresenter_ = nullptr;
+    TaskArtifactPresenterV2* taskArtifactPresenter_ = nullptr;
+    DiagnosticBundlePresenterV2* diagnosticBundlePresenter_ = nullptr;
+    EnvironmentCheckPresenterV2* environmentCheckPresenter_ = nullptr;
+    ModelRegistryPresenterV2* modelRegistryPresenter_ = nullptr;
+    QString activeV2TaskId_;
+    QString activeV2WorkflowKind_;
     WorkerClient worker_;
+    WorkspaceRouter* workspaceRouter_ = nullptr;
     MainWindowState state_;
 
     QString currentProjectPath_;
@@ -284,6 +267,10 @@ private:
     QTableWidget* taskQueueTable_ = nullptr;
     TaskArtifactPanel* taskArtifactPanel_ = nullptr;
     QTableWidget* modelVersionTable_ = nullptr;
+    QTableWidget* v2ModelPackageTable_ = nullptr;
+    QLineEdit* v2ModelImportSourceEdit_ = nullptr;
+    QLineEdit* v2ModelImportManifestEdit_ = nullptr;
+    QLabel* v2ModelImportResultLabel_ = nullptr;
     QTableWidget* evaluationReportTable_ = nullptr;
     QTableWidget* pipelineRunTable_ = nullptr;
     QTableWidget* datasetListTable_ = nullptr;
@@ -295,26 +282,36 @@ private:
     QLineEdit* projectRootEdit_ = nullptr;
     QLineEdit* taskSearchEdit_ = nullptr;
     QLineEdit* datasetPathEdit_ = nullptr;
-    QLineEdit* splitOutputEdit_ = nullptr;
+    QLineEdit* splitSourceDatasetIdEdit_ = nullptr;
+    QLineEdit* splitSourceDatasetVersionIdEdit_ = nullptr;
+    QLineEdit* splitSourceSnapshotIdEdit_ = nullptr;
+    QLineEdit* splitSourceSnapshotArtifactIdEdit_ = nullptr;
+    QLineEdit* splitTargetDatasetIdEdit_ = nullptr;
+    QLineEdit* splitTargetDatasetNameEdit_ = nullptr;
     QLineEdit* splitTrainRatioEdit_ = nullptr;
     QLineEdit* splitValRatioEdit_ = nullptr;
     QLineEdit* splitTestRatioEdit_ = nullptr;
     QLineEdit* splitSeedEdit_ = nullptr;
     QComboBox* datasetFormatCombo_ = nullptr;
+    QLineEdit* dataQualityDatasetIdEdit_ = nullptr;
+    QLineEdit* dataQualityDatasetVersionIdEdit_ = nullptr;
+    QLineEdit* dataQualitySnapshotIdEdit_ = nullptr;
+    QLineEdit* dataQualitySnapshotArtifactIdEdit_ = nullptr;
+    QLineEdit* datasetSnapshotTargetDatasetIdEdit_ = nullptr;
+    QLineEdit* datasetSnapshotTargetDatasetNameEdit_ = nullptr;
     QComboBox* datasetConversionSourceFormatCombo_ = nullptr;
     QComboBox* datasetConversionTargetFormatCombo_ = nullptr;
     QLineEdit* datasetConversionInputEdit_ = nullptr;
-    QLineEdit* datasetConversionOutputEdit_ = nullptr;
+    QLineEdit* datasetConversionTargetDatasetIdEdit_ = nullptr;
+    QLineEdit* datasetConversionTargetDatasetNameEdit_ = nullptr;
     QLabel* datasetConversionStatusLabel_ = nullptr;
     QLabel* datasetConversionSourceErrorLabel_ = nullptr;
     QLabel* datasetConversionTargetErrorLabel_ = nullptr;
     QLabel* datasetConversionInputErrorLabel_ = nullptr;
-    QLabel* datasetConversionOutputErrorLabel_ = nullptr;
     QLabel* datasetConversionResultLabel_ = nullptr;
     QPushButton* datasetConversionStartButton_ = nullptr;
     QPushButton* datasetConversionCancelButton_ = nullptr;
     QPushButton* datasetConversionBrowseInputButton_ = nullptr;
-    QPushButton* datasetConversionBrowseOutputButton_ = nullptr;
     QProgressBar* datasetConversionProgressBar_ = nullptr;
     QPlainTextEdit* datasetConversionLog_ = nullptr;
     QComboBox* capabilityCombo_ = nullptr;
@@ -340,13 +337,11 @@ private:
     QLineEdit* imageSizeEdit_ = nullptr;
     QLineEdit* gridSizeEdit_ = nullptr;
     QLineEdit* resumeCheckpointEdit_ = nullptr;
-    QLineEdit* conversionCheckpointEdit_ = nullptr;
-    QComboBox* conversionFormatCombo_ = nullptr;
-    QLineEdit* conversionOutputEdit_ = nullptr;
-    QLineEdit* conversionValidationImageEdit_ = nullptr;
-    QLabel* exportResultLabel_ = nullptr;
+    QLineEdit* deploymentValidationImageEdit_ = nullptr;
     QLabel* deploymentValidationResultLabel_ = nullptr;
-    QLineEdit* inferenceCheckpointEdit_ = nullptr;
+    QComboBox* deploymentModelPackageCombo_ = nullptr;
+    QComboBox* inferenceModelPackageCombo_ = nullptr;
+    bool v2ModelImportInProgress_ = false;
     QLineEdit* inferenceImageEdit_ = nullptr;
     QLineEdit* inferenceOutputEdit_ = nullptr;
     QLabel* inferenceResultLabel_ = nullptr;
@@ -359,20 +354,29 @@ private:
     QLineEdit* reviewSearchEdit_ = nullptr;
     QTableWidget* sampleReviewTable_ = nullptr;
     QLabel* sampleReviewSummaryLabel_ = nullptr;
-    QLineEdit* customerOcrDetDatasetEdit_ = nullptr;
-    QLineEdit* customerOcrRecDatasetEdit_ = nullptr;
-    QLineEdit* customerOcrSystemImagesEdit_ = nullptr;
     QLineEdit* customerOcrDetReportEdit_ = nullptr;
     QLineEdit* customerOcrRecReportEdit_ = nullptr;
     QLineEdit* customerOcrSystemReportEdit_ = nullptr;
-    QLineEdit* customerOcrOutputEdit_ = nullptr;
+    QLineEdit* customerOcrDetSnapshotIdEdit_ = nullptr;
+    QLineEdit* customerOcrDetSnapshotArtifactIdEdit_ = nullptr;
+    QLineEdit* customerOcrRecSnapshotIdEdit_ = nullptr;
+    QLineEdit* customerOcrRecSnapshotArtifactIdEdit_ = nullptr;
+    QLineEdit* customerOcrSystemSnapshotIdEdit_ = nullptr;
+    QLineEdit* customerOcrSystemSnapshotArtifactIdEdit_ = nullptr;
+    QLineEdit* customerOcrCohortIdEdit_ = nullptr;
+    QLineEdit* customerOcrDomainIdEdit_ = nullptr;
+    QComboBox* customerOcrEvidenceClassCombo_ = nullptr;
+    QLineEdit* customerOcrDetReportArtifactIdEdit_ = nullptr;
+    QLineEdit* customerOcrRecReportArtifactIdEdit_ = nullptr;
+    QLineEdit* customerOcrSystemReportArtifactIdEdit_ = nullptr;
+    QLineEdit* customerOcrMinDetHmeanEdit_ = nullptr;
     QLineEdit* customerOcrMinAccEdit_ = nullptr;
     QLineEdit* customerOcrMaxCerEdit_ = nullptr;
-    QCheckBox* customerOcrAllowPublicCheck_ = nullptr;
+    QLineEdit* customerOcrMinSystemAccEdit_ = nullptr;
     QLabel* customerOcrStatusLabel_ = nullptr;
     QLabel* diagnosticsStatusLabel_ = nullptr;
-    QLabel* deliveryAcceptanceSummaryLabel_ = nullptr;
-    QTableWidget* deliveryAcceptanceTable_ = nullptr;
+    QPointer<QLabel> deliveryAcceptanceSummaryLabel_;
+    QPointer<QTableWidget> deliveryAcceptanceTable_;
     QProgressBar* progressBar_ = nullptr;
     QLabel* trainingPhaseLabel_ = nullptr;
     QLabel* trainingEpochValueLabel_ = nullptr;
@@ -388,5 +392,5 @@ private:
     QLabel* latestPreviewImageLabel_ = nullptr;
     QTextEdit* logEdit_ = nullptr;
     MetricsWidget* metricsWidget_ = nullptr;
-    EvaluationReportView* evaluationReportView_ = nullptr;
+    QPointer<EvaluationReportView> evaluationReportView_;
 };

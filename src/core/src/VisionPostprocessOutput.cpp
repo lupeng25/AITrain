@@ -1,6 +1,7 @@
 #include "DetectionTrainerInternal.h"
 
 #include "aitrain/core/Deployment.h"
+#include "aitrain/core/SemanticMask.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -290,7 +291,7 @@ QImage renderSemanticSegmentationPrediction(
     QPainter painter(&output);
     for (int y = 0; y < output.height(); ++y) {
         for (int x = 0; x < output.width(); ++x) {
-            const int classId = qGray(mask.pixel(x, y));
+            const int classId = semanticMaskClassId(mask, x, y);
             if (classId <= 0) {
                 continue;
             }

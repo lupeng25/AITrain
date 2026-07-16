@@ -22,10 +22,68 @@ if str(TRAINER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRAINER_ROOT))
 REPO_ROOT = TRAINER_ROOT.parent
 
-from trainer_protocol import configure_stdio, emit_event, emit_failed, unhandled_failure
+from adapter_event_channel_v2 import AdapterEventChannelV2, event_channel_from_environment
+from adapter_sdk import AdapterSdk
+from dataset_snapshot_v2 import materialize_dataset_snapshot_v2
+from trainer_protocol import configure_stdio, exception_details
 
 
 configure_stdio()
+
+_adapter: Optional[AdapterSdk] = None
+_event_channel: Optional[AdapterEventChannelV2] = None
+
+
+def configure_adapter(backend: str) -> AdapterSdk:
+    """Create the SDK and prefer the authenticated Worker V2 event channel."""
+    global _adapter, _event_channel
+    if _event_channel is None and os.environ.get("AITRAIN_EVENT_PORT"):
+        _event_channel = event_channel_from_environment()
+        _event_channel.connect()
+    if _adapter is None or _adapter.backend != backend:
+        sink = _event_channel.emit_legacy_event if _event_channel is not None else None
+        _adapter = AdapterSdk(backend, event_sink=sink)
+    return _adapter
+
+
+def close_adapter() -> None:
+    global _adapter, _event_channel
+    if _event_channel is not None:
+        _event_channel.close()
+    _adapter = None
+    _event_channel = None
+
+
+def emit_event(backend: str, event_type: str, **payload: Any) -> None:
+    adapter = configure_adapter(backend)
+    payload.pop("backend", None)
+    if event_type == "log":
+        adapter.emit_log(str(payload.pop("message", "")), level=str(payload.pop("level", "info")), **payload)
+    elif event_type == "progress":
+        adapter.emit_progress(float(payload.pop("percent", 0)), message=str(payload.pop("message", "")), **payload)
+    elif event_type == "metric":
+        adapter.emit_metric(str(payload.pop("name", "")), float(payload.pop("value", 0)), **payload)
+    elif event_type == "artifact":
+        adapter.emit_artifact_candidate(
+            str(payload.pop("kind", "artifact")),
+            str(payload.pop("path", "")),
+            message=str(payload.pop("message", "")),
+            **payload,
+        )
+    elif event_type == "completed":
+        adapter.emit_completed(str(payload.pop("message", "Anomalib operation completed.")), **payload)
+    elif event_type == "failed":
+        adapter.emit_failed(
+            str(payload.pop("message", "Anomalib operation failed.")),
+            str(payload.pop("code", "anomalib_failed")),
+            payload.pop("details", {}),
+        )
+    else:
+        raise ValueError(f"Unsupported adapter event type: {event_type}")
+
+
+def emit_failed(backend: str, message: str, code: str, details: Optional[Dict[str, Any]] = None) -> int:
+    return configure_adapter(backend).emit_failed(message, code, details)
 
 
 BACKEND_PATCHCORE = "anomalib_patchcore"
@@ -271,6 +329,30 @@ def dataset_inventory(dataset_path: Path) -> Dict[str, Any]:
         "evaluationLimited": anomaly_count == 0,
         "pixelEvaluationAvailable": mask_count > 0,
     }
+
+
+def materialize_request_dataset(
+    request: Dict[str, Any], params: Dict[str, Any], dataset_path: Path
+) -> Tuple[Path, str]:
+    """Resolve an immutable Dataset Snapshot V2 for train/evaluate requests."""
+    options = request.get("options") if isinstance(request.get("options"), dict) else {}
+    manifest = str(
+        params.get("datasetSnapshotManifest")
+        or options.get("datasetSnapshotManifest")
+        or request.get("datasetSnapshotManifest")
+        or ""
+    ).strip()
+    staging = str(
+        params.get("datasetSnapshotStagingPath")
+        or options.get("datasetSnapshotStagingPath")
+        or request.get("datasetSnapshotStagingPath")
+        or ""
+    ).strip()
+    if bool(manifest) != bool(staging):
+        raise ValueError("Dataset Snapshot V2 requires both manifest and staging paths.")
+    if manifest:
+        dataset_path = materialize_dataset_snapshot_v2(dataset_path, manifest, staging)
+    return dataset_path, manifest
 
 
 def merge_preset(backend: str, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -597,6 +679,7 @@ def training_report(
         "modelFamily": "anomaly_detection",
         "runtime": RUNTIME,
         "datasetPath": request.get("datasetPath", ""),
+        "datasetSnapshotManifest": params.get("datasetSnapshotManifest", ""),
         "outputPath": request.get("outputPath", ""),
         "modelPreset": params.get("modelPreset", ""),
         "parameters": params,
@@ -669,6 +752,13 @@ def train(request: Dict[str, Any]) -> int:
     datamodule_params = dict(params)
     datamodule_params["_aitrainDatasetViewRoot"] = str(output_path / "_aitrain_dataset_views")
     dataset_path = Path(str(request.get("datasetPath") or "")).resolve()
+    try:
+        dataset_path, snapshot_manifest = materialize_request_dataset(request, params, dataset_path)
+        if snapshot_manifest:
+            params["datasetSnapshotManifest"] = snapshot_manifest
+    except Exception as exc:
+        emit_failed(backend, str(exc), "dataset_snapshot_invalid", exception_details(exc))
+        return 1
     inventory = dataset_inventory(dataset_path)
 
     emit_event(backend, "progress", message="Starting Anomalib training.", percent=1)
@@ -682,7 +772,7 @@ def train(request: Dict[str, Any]) -> int:
             "efficientad_imagenet_dir_missing",
             "blocked",
         )
-        emit_event(backend, "artifact", kind="report", path=str(report_path), message="Blocked Anomalib training report")
+        emit_event(backend, "artifact", kind="training_report", path=str(report_path), message="Blocked Anomalib training report")
         emit_failed(backend, "EfficientAD ImageNet directory is missing.", "efficientad_imagenet_dir_missing", {"reportPath": str(report_path)})
         return 1
 
@@ -695,6 +785,11 @@ def train(request: Dict[str, Any]) -> int:
         engine.fit(model=model, datamodule=datamodule)
         emit_event(backend, "progress", message="Collecting Anomalib artifacts.", percent=90)
         checkpoint = latest_checkpoint(output_path)
+        if checkpoint is not None:
+            canonical_checkpoint = output_path / "model.ckpt"
+            if checkpoint.resolve() != canonical_checkpoint.resolve():
+                shutil.copy2(checkpoint, canonical_checkpoint)
+            checkpoint = canonical_checkpoint
         metrics: Dict[str, Any] = {}
         if not inventory.get("evaluationLimited"):
             try:
@@ -711,7 +806,7 @@ def train(request: Dict[str, Any]) -> int:
         write_json(report_path, report)
         sidecar_path = output_path / "anomaly_sidecar.json"
         write_json(sidecar_path, sidecar_payload(request, params, checkpoint, report_path, inventory))
-        emit_event(backend, "artifact", kind="report", path=str(report_path), message="Anomalib training report")
+        emit_event(backend, "artifact", kind="training_report", path=str(report_path), message="Anomalib training report")
         emit_event(backend, "artifact", kind="anomaly_sidecar", path=str(sidecar_path), message="Anomaly model sidecar")
         if checkpoint:
             emit_event(backend, "artifact", kind="checkpoint", path=str(checkpoint), message="Anomalib checkpoint")
@@ -721,14 +816,14 @@ def train(request: Dict[str, Any]) -> int:
     except FileNotFoundError as exc:
         code = str(exc) or "file_missing"
         report_path = write_failed_report(output_path, request, params, inventory, code, code, "blocked")
-        emit_event(backend, "artifact", kind="report", path=str(report_path), message="Blocked Anomalib training report")
+        emit_event(backend, "artifact", kind="training_report", path=str(report_path), message="Blocked Anomalib training report")
         emit_failed(backend, code, code, {"reportPath": str(report_path)})
         return 1
     except Exception as exc:
         message = f"{exc}\n{traceback.format_exc()}"
         error_code = "anomalib_missing" if "Required Python module is unavailable" in str(exc) else "anomalib_training_failed"
         report_path = write_failed_report(output_path, request, params, inventory, message, error_code)
-        emit_event(backend, "artifact", kind="report", path=str(report_path), message="Failed Anomalib training report")
+        emit_event(backend, "artifact", kind="training_report", path=str(report_path), message="Failed Anomalib training report")
         emit_failed(backend, str(exc), error_code, {"reportPath": str(report_path)})
         return 1
 
@@ -740,6 +835,14 @@ def load_sidecar(model_path: Path) -> Dict[str, Any]:
     if sidecar.exists():
         return read_json(sidecar)
     return {"checkpointPath": str(model_path), "threshold": 0.5, "trainingBackend": BACKEND_PATCHCORE}
+
+
+def checkpoint_from_sidecar(model_path: Path, sidecar: Dict[str, Any]) -> Path:
+    raw = Path(str(sidecar.get("checkpointPath") or model_path))
+    if raw.is_absolute():
+        return raw.resolve()
+    sidecar_path = model_path if model_path.name == "anomaly_sidecar.json" else model_path.parent / "anomaly_sidecar.json"
+    return (sidecar_path.parent / raw).resolve()
 
 
 def save_prediction_images(image_path: Path, output_path: Path, result: Any) -> Tuple[str, str, str]:
@@ -798,7 +901,7 @@ def infer(request: Dict[str, Any]) -> int:
     try:
         sidecar = load_sidecar(model_path)
         backend = str(sidecar.get("trainingBackend") or backend).strip().lower()
-        checkpoint = Path(str(sidecar.get("checkpointPath") or model_path)).resolve()
+        checkpoint = checkpoint_from_sidecar(model_path, sidecar)
         if not checkpoint.exists():
             raise FileNotFoundError(f"checkpoint_missing: {checkpoint}")
         if not image_path.exists():
@@ -838,7 +941,7 @@ def infer(request: Dict[str, Any]) -> int:
         }
         report = {
             "schemaVersion": 1,
-            "kind": "inference_predictions",
+            "kind": "deployment_validation_report",
             "createdAt": now_iso(),
             "ok": True,
             "taskType": TASK_TYPE,
@@ -849,19 +952,24 @@ def infer(request: Dict[str, Any]) -> int:
             "elapsedMs": int(elapsed_ms),
             "predictions": [prediction],
         }
-        predictions_path = output_path / "inference_predictions.json"
-        write_json(predictions_path, report)
-        emit_event(backend, "artifact", kind="inference_predictions", path=str(predictions_path), message="Anomaly predictions")
-        emit_event(backend, "artifact", kind="inference_overlay", path=overlay_path, message="Anomaly overlay")
-        emit_event(backend, "completed", message="Anomalib inference completed.", predictionsPath=str(predictions_path), overlayPath=overlay_path)
+        report_path = output_path / "deployment_validation_report.json"
+        predictions_path = output_path / "deployment_predictions.json"
+        write_json(report_path, report)
+        write_json(predictions_path, {**report, "kind": "deployment_predictions"})
+        emit_event(backend, "artifact", kind="deployment_validation_report", path=str(report_path), message="Anomaly deployment validation report")
+        emit_event(backend, "artifact", kind="deployment_predictions", path=str(predictions_path), message="Anomaly deployment predictions")
+        emit_event(backend, "artifact", kind="deployment_heatmap", path=heatmap_path, message="Anomaly heatmap")
+        emit_event(backend, "artifact", kind="deployment_overlay", path=overlay_path, message="Anomaly overlay")
+        emit_event(backend, "artifact", kind="deployment_mask", path=mask_path, message="Anomaly binary mask")
+        emit_event(backend, "completed", message="Anomalib inference completed.", reportPath=str(report_path), predictionsPath=str(predictions_path), overlayPath=overlay_path)
         return 0
     except Exception as exc:
-        failure_path = output_path / "inference_predictions.json"
+        failure_path = output_path / "deployment_validation_report.json"
         write_json(
             failure_path,
             {
                 "schemaVersion": 1,
-                "kind": "inference_predictions",
+                "kind": "deployment_validation_report",
                 "createdAt": now_iso(),
                 "ok": False,
                 "status": "failed",
@@ -874,6 +982,7 @@ def infer(request: Dict[str, Any]) -> int:
                 "predictions": [],
             },
         )
+        emit_event(backend, "artifact", kind="deployment_validation_report", path=str(failure_path), message="Failed anomaly deployment validation report")
         emit_failed(backend, str(exc), "anomalib_inference_failed", {"predictionsPath": str(failure_path)})
         return 1
 
@@ -881,10 +990,17 @@ def infer(request: Dict[str, Any]) -> int:
 def evaluate(request: Dict[str, Any]) -> int:
     output_path = Path(str(request.get("outputPath") or ".")).resolve()
     output_path.mkdir(parents=True, exist_ok=True)
-    dataset_path = Path(str(request.get("datasetPath") or "")).resolve()
-    inventory = dataset_inventory(dataset_path)
     backend = str(request.get("backend") or BACKEND_PATCHCORE)
     params = merge_preset(backend, dict(request.get("parameters") or {}))
+    dataset_path = Path(str(request.get("datasetPath") or "")).resolve()
+    try:
+        dataset_path, snapshot_manifest = materialize_request_dataset(request, params, dataset_path)
+        if snapshot_manifest:
+            params["datasetSnapshotManifest"] = snapshot_manifest
+    except Exception as exc:
+        emit_failed(backend, str(exc), "dataset_snapshot_invalid", exception_details(exc))
+        return 1
+    inventory = dataset_inventory(dataset_path)
     model_path = Path(str(request.get("modelPath") or "")).resolve()
     threshold = float(params.get("threshold") or params.get("quantile") or 0.5)
     report = {
@@ -915,7 +1031,8 @@ def evaluate(request: Dict[str, Any]) -> int:
             datamodule_params = dict(params)
             datamodule_params["_aitrainDatasetViewRoot"] = str(output_path / "_aitrain_dataset_views")
             threshold = float(sidecar.get("threshold") or params.get("threshold") or params.get("quantile") or 0.5)
-            checkpoint = Path(str(sidecar.get("checkpointPath") or model_path)).resolve()
+            checkpoint = Path(str(request.get("checkpointPath") or "")).resolve() \
+                if str(request.get("checkpointPath") or "").strip() else checkpoint_from_sidecar(model_path, sidecar)
             if not checkpoint.exists():
                 raise FileNotFoundError(f"checkpoint_missing: {checkpoint}")
             _, folder_cls, engine_cls, patchcore_cls, efficientad_cls = import_anomalib_symbols()
@@ -940,6 +1057,21 @@ def evaluate(request: Dict[str, Any]) -> int:
     report_path = output_path / "evaluation_report.json"
     write_json(report_path, report)
     emit_event(backend, "artifact", kind="evaluation_report", path=str(report_path), message="Anomaly evaluation report")
+    if report.get("status") == "blocked":
+        emit_failed(backend, str(report.get("message") or "Anomalib evaluation blocked."), "anomalib_evaluation_blocked", {"reportPath": str(report_path)})
+        return 1
+    # Export 必须只消费 Evaluate 的不可变输出 Artifact，因此评估步骤显式向后
+    # 传递已验证的 sidecar/checkpoint，而不是让 Export 回读 Train 暂存目录。
+    sidecar_path = model_path if model_path.name == "anomaly_sidecar.json" else model_path.parent / "anomaly_sidecar.json"
+    sidecar = load_sidecar(model_path)
+    checkpoint = Path(str(request.get("checkpointPath") or "")).resolve() \
+        if str(request.get("checkpointPath") or "").strip() else checkpoint_from_sidecar(model_path, sidecar)
+    if not sidecar_path.is_file() or not checkpoint.is_file():
+        emit_failed(backend, "Anomalib evaluation cannot forward its model bundle.", "anomalib_evaluation_bundle_missing", {"reportPath": str(report_path)})
+        return 1
+    emit_event(backend, "artifact", kind="anomaly_sidecar", path=str(sidecar_path), message="Evaluated Anomalib sidecar")
+    emit_event(backend, "artifact", kind="checkpoint", path=str(checkpoint), message="Evaluated Anomalib checkpoint")
+    emit_event(backend, "completed", message="Anomalib evaluation completed.", reportPath=str(report_path))
     return 0
 
 
@@ -1000,24 +1132,31 @@ def benchmark(request: Dict[str, Any]) -> int:
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--request", required=True)
-    parser.add_argument("--mode", choices=["train", "evaluate", "infer", "benchmark"], default="")
+    parser.add_argument("--mode", choices=["train", "evaluate", "infer", "deployment_validate", "benchmark"], default="")
     args = parser.parse_args(argv)
-    request = read_json(Path(args.request))
-    mode = args.mode or str(request.get("mode") or "train")
     try:
-        if mode == "train":
-            return train(request)
-        if mode == "evaluate":
-            return evaluate(request)
-        if mode == "infer":
-            return infer(request)
-        if mode == "benchmark":
-            return benchmark(request)
-        raise ValueError(f"Unsupported mode: {mode}")
-    except Exception:
+        try:
+            request = read_json(Path(args.request))
+        except Exception as exc:
+            emit_failed(BACKEND_PATCHCORE, f"Failed to read request: {exc}", "bad_request", exception_details(exc))
+            return 2
         backend = str(request.get("backend") or BACKEND_PATCHCORE)
-        unhandled_failure(backend, sys.exc_info()[1])
-        return 1
+        mode = (args.mode or str(request.get("mode") or "train")).strip().lower().replace("-", "_")
+        try:
+            if mode == "train":
+                return train(request)
+            if mode == "evaluate":
+                return evaluate(request)
+            if mode in {"infer", "deployment_validate", "deploymentvalidate"}:
+                return infer(request)
+            if mode == "benchmark":
+                return benchmark(request)
+            raise ValueError(f"Unsupported mode: {mode}")
+        except Exception as exc:
+            emit_failed(backend, str(exc), "anomalib_adapter_failed", exception_details(exc))
+            return 1
+    finally:
+        close_adapter()
 
 
 if __name__ == "__main__":

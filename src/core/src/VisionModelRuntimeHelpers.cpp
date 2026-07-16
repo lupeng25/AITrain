@@ -206,7 +206,9 @@ bool loadCudaRuntime(TensorRtRuntimeLibraries* libraries, QString* error)
         && resolveRuntimeSymbol(libraries->cudart, "cudaFree", &libraries->cudaFree, error)
         && resolveRuntimeSymbol(libraries->cudart, "cudaMemcpy", &libraries->cudaMemcpy, error)
         && resolveRuntimeSymbol(libraries->cudart, "cudaDeviceSynchronize", &libraries->cudaDeviceSynchronize, error)
-        && resolveRuntimeSymbol(libraries->cudart, "cudaGetErrorString", &libraries->cudaGetErrorString, error);
+        && resolveRuntimeSymbol(libraries->cudart, "cudaGetErrorString", &libraries->cudaGetErrorString, error)
+        && resolveRuntimeSymbol(libraries->cudart, "cudaGetDeviceCount", &libraries->cudaGetDeviceCount, error)
+        && resolveRuntimeSymbol(libraries->cudart, "cudaGetDeviceProperties", &libraries->cudaGetDeviceProperties, error);
 }
 
 QString cudaErrorText(const TensorRtRuntimeLibraries& libraries, cudaError_t code)

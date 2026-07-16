@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,13 +16,71 @@ TRAINER_ROOT = Path(__file__).resolve().parents[1]
 if str(TRAINER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRAINER_ROOT))
 
+from adapter_event_channel_v2 import AdapterEventChannelV2, event_channel_from_environment  # noqa: E402
+from adapter_sdk import AdapterSdk  # noqa: E402
+from dataset_snapshot_v2 import materialize_dataset_snapshot_v2  # noqa: E402
 from trainer_protocol import configure_stdio, exception_details  # noqa: E402
 
 MEAN = [0.485, 0.456, 0.406]
 STD = [0.229, 0.224, 0.225]
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
+BACKEND_ID = "smp_semantic_segmentation_eval"
 
 configure_stdio()
+
+_adapter: AdapterSdk | None = None
+_event_channel: AdapterEventChannelV2 | None = None
+
+
+def configure_adapter() -> None:
+    global _adapter, _event_channel
+    if _event_channel is None and os.environ.get("AITRAIN_EVENT_PORT"):
+        _event_channel = event_channel_from_environment()
+        _event_channel.connect()
+    if _adapter is None:
+        sink = _event_channel.emit_legacy_event if _event_channel is not None else None
+        _adapter = AdapterSdk(BACKEND_ID, event_sink=sink)
+
+
+def close_adapter() -> None:
+    global _event_channel
+    if _event_channel is not None:
+        _event_channel.close()
+        _event_channel = None
+
+
+def active_adapter() -> AdapterSdk:
+    configure_adapter()
+    assert _adapter is not None
+    return _adapter
+
+
+def emit(event_type: str, **payload: Any) -> None:
+    payload.pop("backend", None)
+    adapter = active_adapter()
+    if event_type == "log":
+        adapter.emit_log(str(payload.pop("message", "")), level=str(payload.pop("level", "info")), **payload)
+    elif event_type == "progress":
+        adapter.emit_progress(float(payload.pop("percent", 0)), message=str(payload.pop("message", "")), **payload)
+    elif event_type == "metric":
+        adapter.emit_metric(str(payload.pop("name", "")), float(payload.pop("value", 0)), **payload)
+    elif event_type == "artifact":
+        adapter.emit_artifact_candidate(
+            str(payload.pop("kind", "artifact")),
+            str(payload.pop("path", "")),
+            message=str(payload.pop("message", "")),
+            **payload,
+        )
+    elif event_type == "completed":
+        adapter.emit_completed(str(payload.pop("message", "SMP evaluation completed")), **payload)
+    elif event_type == "failed":
+        adapter.emit_failed(
+            str(payload.pop("message", "SMP evaluation failed")),
+            str(payload.pop("code", "smp_evaluation_failed")),
+            payload.pop("details", {}),
+        )
+    else:
+        raise ValueError(f"unsupported adapter event type: {event_type}")
 
 
 def now_iso() -> str:
@@ -34,6 +93,16 @@ def read_json(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"JSON file must contain an object: {path}")
     return value
+
+
+def materialize_request_dataset(request: dict[str, Any], options: dict[str, Any], dataset_path: Path) -> tuple[Path, str]:
+    snapshot_manifest = str(options.get("datasetSnapshotManifest") or request.get("datasetSnapshotManifest") or "").strip()
+    snapshot_staging = str(options.get("datasetSnapshotStagingPath") or request.get("datasetSnapshotStagingPath") or "").strip()
+    if bool(snapshot_manifest) != bool(snapshot_staging):
+        raise ValueError("Dataset Snapshot V2 requires both manifest and staging paths.")
+    if snapshot_manifest:
+        dataset_path = materialize_dataset_snapshot_v2(dataset_path, snapshot_manifest, snapshot_staging)
+    return dataset_path, snapshot_manifest
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -77,6 +146,20 @@ def read_classes(dataset_path: Path) -> list[str]:
     return classes
 
 
+def load_mask_ids(mask_path: Path) -> Any:
+    """Load raw semantic class IDs without converting palette colors to grayscale."""
+    import numpy as np  # type: ignore
+    from PIL import Image  # type: ignore
+
+    mask = Image.open(mask_path)
+    if mask.mode not in {"L", "P"}:
+        raise ValueError(f"Semantic mask must use L or P mode: {mask_path}")
+    values = np.asarray(mask)
+    if values.ndim != 2:
+        raise ValueError(f"Semantic mask must be single-channel: {mask_path}")
+    return values.astype(np.int64, copy=False)
+
+
 def split_samples(dataset_path: Path, split: str) -> list[tuple[Path, Path]]:
     image_dir = dataset_path / "images" / split
     mask_dir = dataset_path / "masks" / split
@@ -102,15 +185,26 @@ def resolve_onnx(model_path: Path) -> Path:
     raise ValueError(f"SMP evaluation requires an ONNX model or best.onnx beside the checkpoint: {model_path}")
 
 
-def sidecar_for_onnx(onnx_path: Path) -> dict[str, Any]:
-    candidates = [
-        onnx_path.with_suffix(".aitrain-export.json"),
-        onnx_path.parent / "semantic_segmentation_sidecar.json",
-    ]
-    for candidate in candidates:
+def sidecar_for_onnx(onnx_path: Path, explicit_path: Path | None = None) -> dict[str, Any]:
+    if explicit_path is not None and explicit_path.is_file():
+        return read_json(explicit_path)
+    for candidate in sidecar_candidates(onnx_path):
         if candidate.exists():
             return read_json(candidate)
     return {}
+
+
+def sidecar_candidates(onnx_path: Path) -> list[Path]:
+    return [
+        onnx_path.with_suffix(".aitrain-export.json"),
+        onnx_path.parent / "semantic_segmentation_sidecar.json",
+    ]
+
+
+def existing_sidecar(onnx_path: Path, explicit_path: Path | None = None) -> Path | None:
+    if explicit_path is not None and explicit_path.is_file():
+        return explicit_path
+    return next((candidate for candidate in sidecar_candidates(onnx_path) if candidate.is_file()), None)
 
 
 def metrics_from_confusion(confusion: Any, class_names: list[str]) -> dict[str, Any]:
@@ -189,8 +283,13 @@ def evaluate(request: dict[str, Any]) -> int:
     max_overlays = max(0, int(options.get("maxOverlays", 12)))
     output_path.mkdir(parents=True, exist_ok=True)
 
+    dataset_path, snapshot_manifest = materialize_request_dataset(request, options, dataset_path)
+
     onnx_path = resolve_onnx(model_path)
-    sidecar = sidecar_for_onnx(onnx_path)
+    requested_sidecar = str(request.get("sidecarPath") or options.get("sidecarPath") or "").strip()
+    explicit_sidecar = Path(requested_sidecar).resolve() if requested_sidecar else None
+    sidecar = sidecar_for_onnx(onnx_path, explicit_sidecar)
+    sidecar_path = existing_sidecar(onnx_path, explicit_sidecar)
     class_names = [str(item) for item in sidecar.get("classNames", []) if str(item)]
     if not class_names:
         class_names = read_classes(dataset_path)
@@ -227,7 +326,7 @@ def evaluate(request: dict[str, Any]) -> int:
         pred = np.asarray(logits).argmax(axis=1)[0].astype(np.uint8)
         pred_image = Image.fromarray(pred, mode="L").resize(source_size, Image.NEAREST)
         pred_array = np.asarray(pred_image, dtype=np.int64)
-        target = np.asarray(Image.open(mask_path).convert("L"), dtype=np.int64)
+        target = load_mask_ids(mask_path)
         valid = target != ignore_index
         encoded = target[valid] * class_count + pred_array[valid]
         counts = np.bincount(encoded, minlength=class_count * class_count).reshape(class_count, class_count)
@@ -274,6 +373,9 @@ def evaluate(request: dict[str, Any]) -> int:
         "modelPath": str(model_path),
         "onnxPath": str(onnx_path),
         "datasetPath": str(dataset_path),
+        "datasetSnapshotId": str(options.get("datasetSnapshotId") or request.get("datasetSnapshotId") or ""),
+        "datasetSnapshotHash": str(options.get("datasetSnapshotHash") or request.get("datasetSnapshotHash") or ""),
+        "datasetSnapshotManifest": snapshot_manifest,
         "taskType": "semantic_segmentation",
         "datasetFormat": "semantic_segmentation_mask",
         "runtime": "onnxruntime",
@@ -298,6 +400,21 @@ def evaluate(request: dict[str, Any]) -> int:
     report_path = output_path / "evaluation_report.json"
     report["reportPath"] = str(report_path)
     write_json(report_path, report)
+    artifacts = [
+        ("onnx_model", onnx_path, "Verified SMP ONNX model for downstream export"),
+        ("evaluation_report", report_path, "SMP semantic segmentation evaluation report"),
+        ("per_class_metrics", per_class_path, "SMP per-class evaluation metrics"),
+        ("confusion_matrix", confusion_path, "SMP evaluation confusion matrix"),
+        ("error_samples", low_quality_path, "SMP low-quality sample inventory"),
+        ("evaluation_summary", summary_path, "SMP evaluation summary"),
+    ]
+    if sidecar_path is not None:
+        artifacts.insert(1, ("model_sidecar", sidecar_path, "Verified SMP model sidecar for downstream export"))
+    if model_path.is_file() and model_path != onnx_path:
+        artifacts.insert(0, ("checkpoint", model_path, "Verified SMP checkpoint for downstream export"))
+    for kind, path, message in artifacts:
+        emit("artifact", kind=kind, path=str(path), message=message)
+    emit("completed", reportPath=str(report_path), onnxPath=str(onnx_path), metrics=report["metrics"])
     return 0
 
 
@@ -306,27 +423,37 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--request", required=True, help="Path to AITrain SMP evaluation request JSON")
     args = parser.parse_args(argv)
     try:
-        return evaluate(read_json(Path(args.request)))
-    except Exception as exc:
-        output_path = Path(".")
+        configure_adapter()
         try:
             request = read_json(Path(args.request))
+        except Exception as exc:
+            emit("failed", code="bad_request", message=f"failed to read evaluation request: {exc}", details=exception_details(exc))
+            return 2
+        try:
+            return evaluate(request)
+        except Exception as exc:
             output_path = Path(str(request.get("outputPath") or ".")).resolve()
-        except Exception:
-            pass
-        report = {
-            "ok": False,
-            "kind": "evaluation_report",
-            "createdAt": now_iso(),
-            "taskType": "semantic_segmentation",
-            "runtime": "onnxruntime",
-            "status": "failed",
-            "failureCategory": "smp_evaluation_failed",
-            "message": str(exc),
-        }
-        write_json(output_path / "evaluation_report.json", report)
-        print(json.dumps({"type": "failed", "message": str(exc), "details": exception_details(exc)}, ensure_ascii=False), flush=True)
-        return 1
+            report = {
+                "ok": False,
+                "kind": "evaluation_report",
+                "createdAt": now_iso(),
+                "taskType": "semantic_segmentation",
+                "runtime": "onnxruntime",
+                "status": "failed",
+                "failureCategory": "smp_evaluation_failed",
+                "message": str(exc),
+            }
+            report_path = output_path / "evaluation_report.json"
+            write_json(report_path, report)
+            emit(
+                "failed",
+                code="smp_evaluation_failed",
+                message=str(exc),
+                details={**exception_details(exc), "reportPath": str(report_path)},
+            )
+            return 1
+    finally:
+        close_adapter()
 
 
 if __name__ == "__main__":

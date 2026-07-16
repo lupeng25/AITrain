@@ -1,7 +1,5 @@
 #pragma once
 
-#include "aitrain/core/TaskModels.h"
-
 #include <QByteArray>
 #include <QFileInfoList>
 #include <QJsonObject>
@@ -35,7 +33,6 @@ QJsonObject compactEvaluationSummary(const QString& reportPath);
 QJsonObject compactBenchmarkSummary(const QString& reportPath);
 QString metricValueText(const QJsonObject& metrics, const QStringList& keys);
 QString modelSummaryText(const QJsonObject& summary);
-QString exportComboLabel(const QString& format);
 InfoPanel* createCompactSummaryCard(const QString& label, const QString& value, const QString& caption);
 QLabel* inferenceBadge(const QString& text);
 QFrame* createInferenceStep(const QString& index, const QString& title, const QString& caption);
@@ -48,8 +45,6 @@ QFrame* createWorkbenchHeader(
     const QStringList& badges);
 void setInferenceOverlayText(QLabel* label, const QString& text);
 void loadInferenceOverlay(QLabel* label, const QString& path);
-QString taskStateLabel(aitrain::TaskState state);
-QString taskKindLabel(aitrain::TaskKind kind);
 QString environmentStatusLabel(const QString& status);
 QString issueSeverityLabel(const QString& severity);
 QString inferenceTaskTypeLabel(const QString& taskType);
@@ -71,10 +66,6 @@ QJsonObject trainingPreflightReport(
     int batchSize,
     int imageSize);
 QString trainingPreflightSummaryText(const QJsonObject& preflight);
-QString exportFormatLabel(const QString& format);
-QString defaultExportFileName(const QString& format);
-QString exportFileFilter(const QString& format);
-QString exportFormatNote(const QString& format);
 QString compactListSummary(const QStringList& values, int maxItems = 3);
 int uniqueStringCount(const QStringList& values);
 bool setComboCurrentData(QComboBox* combo, const QString& data);

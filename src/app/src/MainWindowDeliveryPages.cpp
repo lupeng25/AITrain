@@ -46,7 +46,7 @@ QWidget* MainWindow::buildDeploymentPage()
     layout->addWidget(createWorkbenchHeader(
         QStringLiteral("DEPLOYMENT VALIDATION"),
         uiText("部署验证"),
-        uiText("导出模型，运行推理验证，并查看部署验证状态。"),
+        uiText("基于已登记且校验通过的 V2 模型包运行推理与部署验证。"),
         nullptr,
         QStringList()
             << QStringLiteral("ONNX")
@@ -56,163 +56,52 @@ QWidget* MainWindow::buildDeploymentPage()
 
     deploymentTabs_ = new QTabWidget;
     deploymentTabs_->setObjectName(QStringLiteral("DeploymentTabs"));
-    deploymentTabs_->addTab(buildModelExportPanel(), uiText("模型导出"));
+    deploymentTabs_->addTab(buildDeploymentValidationPanel(), uiText("部署验证"));
     deploymentTabs_->addTab(buildInferenceValidationPanel(), uiText("推理验证"));
     layout->addWidget(deploymentTabs_, 1);
     return page;
 }
 
-QWidget* MainWindow::buildModelExportPanel()
+QWidget* MainWindow::buildDeploymentValidationPanel()
 {
-    auto* page = new QWidget;
-    auto* layout = new QVBoxLayout(page);
+    auto* page = new QScrollArea;
+    page->setWidgetResizable(true);
+    page->setFrameShape(QFrame::NoFrame);
+    page->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    page->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+
+    auto* content = new QWidget;
+    auto* layout = new QVBoxLayout(content);
     layout->setContentsMargins(0, 12, 0, 0);
     layout->setSpacing(16);
 
-    auto* mainSplitter = new QSplitter(Qt::Horizontal);
+    auto* setupPanel = new InfoPanel(QStringLiteral("V2 模型包部署验证"));
+    deploymentModelPackageCombo_ = new QComboBox;
+    deploymentModelPackageCombo_->setObjectName(QStringLiteral("DeploymentModelPackageCombo"));
+    deploymentModelPackageCombo_->setMinimumWidth(0);
+    deploymentModelPackageCombo_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    deploymentModelPackageCombo_->addItem(uiText("请先打开项目并导入已验证 V2 模型包"), QString());
 
-    auto* setupPanel = new InfoPanel(QStringLiteral("导出设置"));
-    setupPanel->setMinimumWidth(0);
-    setupPanel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    conversionCheckpointEdit_ = new QLineEdit;
-    conversionCheckpointEdit_->setPlaceholderText(QStringLiteral("从任务产物带入，或选择 checkpoint / ONNX / AITrain export"));
-    auto* chooseCheckpointButton = new QPushButton(QStringLiteral("选择模型产物"));
-    connect(chooseCheckpointButton, &QPushButton::clicked, this, [this]() {
-        const QString file = QFileDialog::getOpenFileName(this, uiText("选择模型产物"), currentProjectPath_, QStringLiteral("AITrain model (*.aitrain *.json *.onnx *.pt *.pdparams *.engine *.plan);;All files (*.*)"));
-        if (!file.isEmpty()) {
-            conversionCheckpointEdit_->setText(QDir::toNativeSeparators(file));
-        }
-    });
-
-    conversionFormatCombo_ = new QComboBox;
-    conversionFormatCombo_->addItem(exportComboLabel(QStringLiteral("onnx")), QStringLiteral("onnx"));
-    conversionFormatCombo_->addItem(exportComboLabel(QStringLiteral("ncnn")), QStringLiteral("ncnn"));
-    conversionFormatCombo_->addItem(exportComboLabel(QStringLiteral("tensorrt")), QStringLiteral("tensorrt"));
-    connect(conversionCheckpointEdit_, &QLineEdit::textChanged, this, [this]() {
-        refreshModelExportFormatOptions();
-    });
-
-    conversionOutputEdit_ = new QLineEdit;
-    conversionOutputEdit_->setPlaceholderText(QStringLiteral("留空则输出到项目 models/exported；未打开项目时使用输入同目录"));
-    auto* chooseOutputButton = new QPushButton(QStringLiteral("选择输出"));
-    connect(chooseOutputButton, &QPushButton::clicked, this, [this]() {
-        const QString format = conversionFormatCombo_
-            ? conversionFormatCombo_->currentData().toString()
-            : QStringLiteral("onnx");
-        const QString inputPath = QDir::fromNativeSeparators(conversionCheckpointEdit_ ? conversionCheckpointEdit_->text().trimmed() : QString());
-        const QString defaultDir = !currentProjectPath_.isEmpty()
-            ? QDir(currentProjectPath_).filePath(QStringLiteral("models/exported"))
-            : QFileInfo(inputPath).absolutePath();
-        const QString selected = QFileDialog::getSaveFileName(
-            this,
-            uiText("选择导出路径"),
-            QDir(defaultDir).filePath(defaultExportFileName(format)),
-            exportFileFilter(format));
-        if (!selected.isEmpty()) {
-            conversionOutputEdit_->setText(QDir::toNativeSeparators(selected));
-        }
-    });
-    conversionValidationImageEdit_ = new QLineEdit;
-    conversionValidationImageEdit_->setPlaceholderText(uiText("用于导出后验证的样本图片；ONNX / TensorRT 需要该图片完成推理验收"));
+    deploymentValidationImageEdit_ = new QLineEdit;
+    deploymentValidationImageEdit_->setPlaceholderText(uiText("选择用于部署验证的样本图片"));
     auto* chooseValidationImageButton = new QPushButton(uiText("选择图片"));
     connect(chooseValidationImageButton, &QPushButton::clicked, this, [this]() {
-        const QString file = QFileDialog::getOpenFileName(this, uiText("选择验证图片"), currentProjectPath_, QStringLiteral("Images (*.png *.jpg *.jpeg *.bmp);;All files (*.*)"));
-        if (!file.isEmpty() && conversionValidationImageEdit_) {
-            conversionValidationImageEdit_->setText(QDir::toNativeSeparators(file));
-        }
-    });
-    auto* exportButton = primaryButton(QStringLiteral("开始导出"));
-    auto* validateExportButton = new QPushButton(uiText("验证导出产物"));
-    connect(exportButton, &QPushButton::clicked, this, &MainWindow::startModelExport);
-    connect(validateExportButton, &QPushButton::clicked, this, &MainWindow::validateDeploymentArtifact);
-
-    auto* inputRow = new QWidget;
-    auto* inputLayout = new QHBoxLayout(inputRow);
-    inputLayout->setContentsMargins(0, 0, 0, 0);
-    inputLayout->setSpacing(8);
-    inputLayout->addWidget(conversionCheckpointEdit_, 1);
-    inputLayout->addWidget(chooseCheckpointButton);
-
-    auto* outputRow = new QWidget;
-    auto* outputLayout = new QHBoxLayout(outputRow);
-    outputLayout->setContentsMargins(0, 0, 0, 0);
-    outputLayout->setSpacing(8);
-    outputLayout->addWidget(conversionOutputEdit_, 1);
-    outputLayout->addWidget(chooseOutputButton);
-
-    auto* validationImageRow = new QWidget;
-    auto* validationImageLayout = new QHBoxLayout(validationImageRow);
-    validationImageLayout->setContentsMargins(0, 0, 0, 0);
-    validationImageLayout->setSpacing(8);
-    validationImageLayout->addWidget(conversionValidationImageEdit_, 1);
-    validationImageLayout->addWidget(chooseValidationImageButton);
-
-    auto* exportArgsBox = new QWidget;
-    exportArgsBox->setObjectName(QStringLiteral("ExportAdvancedArgs"));
-    auto* exportArgsLayout = new QFormLayout(exportArgsBox);
-    exportArgsLayout->setContentsMargins(10, 10, 10, 10);
-    exportArgsLayout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-    exportArgsLayout->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    exportArgsLayout->setHorizontalSpacing(12);
-    exportArgsLayout->setVerticalSpacing(8);
-    auto* dynamicCheck = new QCheckBox(QStringLiteral("dynamic"));
-    dynamicCheck->setObjectName(QStringLiteral("YoloModelExportArg_dynamic"));
-    auto* halfCheck = new QCheckBox(QStringLiteral("half"));
-    halfCheck->setObjectName(QStringLiteral("YoloModelExportArg_half"));
-    auto* int8Check = new QCheckBox(QStringLiteral("int8"));
-    int8Check->setObjectName(QStringLiteral("YoloModelExportArg_int8"));
-    auto* endToEndCombo = new QComboBox;
-    endToEndCombo->setObjectName(QStringLiteral("YoloModelExportArg_end2end"));
-    endToEndCombo->addItem(QStringLiteral("end2end auto"), QStringLiteral("auto"));
-    endToEndCombo->addItem(QStringLiteral("end2end true"), QStringLiteral("true"));
-    endToEndCombo->addItem(QStringLiteral("end2end false"), QStringLiteral("false"));
-    auto* exportImageSizeEdit = new QLineEdit;
-    exportImageSizeEdit->setObjectName(QStringLiteral("YoloModelExportArg_imgsz"));
-    exportImageSizeEdit->setPlaceholderText(QStringLiteral("imgsz 640"));
-    auto* exportBatchEdit = new QLineEdit;
-    exportBatchEdit->setObjectName(QStringLiteral("YoloModelExportArg_batch"));
-    exportBatchEdit->setPlaceholderText(QStringLiteral("batch 1"));
-    auto* exportDeviceEdit = new QLineEdit;
-    exportDeviceEdit->setObjectName(QStringLiteral("YoloModelExportArg_device"));
-    exportDeviceEdit->setPlaceholderText(QStringLiteral("device cpu / 0"));
-    auto* exportDataEdit = new QLineEdit;
-    exportDataEdit->setObjectName(QStringLiteral("YoloModelExportArg_data"));
-    exportDataEdit->setPlaceholderText(QStringLiteral("TensorRT INT8 calibration data.yaml"));
-    auto* chooseExportDataButton = new QPushButton(uiText("选择 data.yaml"));
-    connect(chooseExportDataButton, &QPushButton::clicked, this, [this, exportDataEdit]() {
-        const QString inputPath = QDir::fromNativeSeparators(conversionCheckpointEdit_ ? conversionCheckpointEdit_->text().trimmed() : QString());
-        const QString defaultDir = !currentProjectPath_.isEmpty()
-            ? currentProjectPath_
-            : QFileInfo(inputPath).absolutePath();
-        const QString selected = QFileDialog::getOpenFileName(
+        const QString file = QFileDialog::getOpenFileName(
             this,
-            uiText("选择 calibration data.yaml"),
-            defaultDir,
-            QStringLiteral("YOLO data yaml (*.yaml *.yml);;All files (*.*)"));
-        if (!selected.isEmpty()) {
-            exportDataEdit->setText(QDir::toNativeSeparators(selected));
+            uiText("选择验证图片"),
+            currentProjectPath_,
+            QStringLiteral("Images (*.png *.jpg *.jpeg *.bmp);;All files (*.*)"));
+        if (!file.isEmpty() && deploymentValidationImageEdit_) {
+            deploymentValidationImageEdit_->setText(QDir::toNativeSeparators(file));
         }
     });
-    auto* exportDataRow = new QWidget;
-    auto* exportDataLayout = new QHBoxLayout(exportDataRow);
-    exportDataLayout->setContentsMargins(0, 0, 0, 0);
-    exportDataLayout->setSpacing(8);
-    exportDataLayout->addWidget(exportDataEdit, 1);
-    exportDataLayout->addWidget(chooseExportDataButton);
-    auto* precisionRow = new QWidget;
-    auto* precisionLayout = new QHBoxLayout(precisionRow);
-    precisionLayout->setContentsMargins(0, 0, 0, 0);
-    precisionLayout->setSpacing(12);
-    precisionLayout->addWidget(dynamicCheck);
-    precisionLayout->addWidget(halfCheck);
-    precisionLayout->addWidget(int8Check);
-    precisionLayout->addStretch();
-    exportArgsLayout->addRow(uiText("尺寸与精度"), precisionRow);
-    exportArgsLayout->addRow(QStringLiteral("End-to-end"), endToEndCombo);
-    exportArgsLayout->addRow(uiText("图像尺寸"), exportImageSizeEdit);
-    exportArgsLayout->addRow(uiText("批大小"), exportBatchEdit);
-    exportArgsLayout->addRow(uiText("运行设备"), exportDeviceEdit);
-    exportArgsLayout->addRow(uiText("校准数据"), exportDataRow);
+
+    auto* imageRow = new QWidget;
+    auto* imageLayout = new QHBoxLayout(imageRow);
+    imageLayout->setContentsMargins(0, 0, 0, 0);
+    imageLayout->setSpacing(8);
+    imageLayout->addWidget(deploymentValidationImageEdit_, 1);
+    imageLayout->addWidget(chooseValidationImageButton);
 
     auto* form = new QFormLayout;
     form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
@@ -220,102 +109,37 @@ QWidget* MainWindow::buildModelExportPanel()
     form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     form->setHorizontalSpacing(14);
     form->setVerticalSpacing(10);
-    form->addRow(QStringLiteral("模型输入"), inputRow);
-    form->addRow(QStringLiteral("目标格式"), conversionFormatCombo_);
-    form->addRow(QStringLiteral("输出路径"), outputRow);
-    form->addRow(uiText("验证图片"), validationImageRow);
+    form->addRow(uiText("已验证模型包"), deploymentModelPackageCombo_);
+    form->addRow(uiText("验证图片"), imageRow);
     setupPanel->bodyLayout()->addLayout(form);
 
-    auto* exportAdvancedToggle = new QPushButton(uiText("展开高级导出参数"));
-    exportAdvancedToggle->setObjectName(QStringLiteral("AdvancedToggle"));
-    exportAdvancedToggle->setCheckable(true);
-    exportArgsBox->setVisible(false);
-    connect(exportAdvancedToggle, &QPushButton::toggled, this,
-        [exportAdvancedToggle, exportArgsBox, this](bool expanded) {
-            exportAdvancedToggle->setText(expanded
-                ? uiText("收起高级导出参数")
-                : uiText("展开高级导出参数"));
-            exportArgsBox->setVisible(expanded);
-        });
-    setupPanel->bodyLayout()->addWidget(exportAdvancedToggle);
-    setupPanel->bodyLayout()->addWidget(exportArgsBox);
+    auto* boundary = emptyStateLabel(uiText(
+        "此入口只接受由 ModelPackageId 解析、Manifest 校验和 SHA-256 校验通过的模型包；"
+        "不再接受 checkpoint、ONNX、engine 等裸路径。"));
+    allowLabelToShrink(boundary);
+    setupPanel->bodyLayout()->addWidget(boundary);
 
-    auto* sourceHelp = emptyStateLabel(QStringLiteral("从“任务与产物”中选中 best.onnx、checkpoint 或官方导出目录后，可点击“用作导出输入”自动带入这里。"));
-    allowLabelToShrink(sourceHelp);
-    setupPanel->bodyLayout()->addWidget(sourceHelp);
-
+    auto* validateButton = primaryButton(uiText("运行完整 Runtime Delivery"));
+    connect(validateButton, &QPushButton::clicked, this, &MainWindow::validateDeploymentModelPackageV2);
     auto* actionStrip = new QFrame;
     actionStrip->setObjectName(QStringLiteral("ActionStrip"));
     auto* actionLayout = new QHBoxLayout(actionStrip);
     actionLayout->setContentsMargins(10, 8, 10, 8);
-    actionLayout->setSpacing(10);
-    auto* exportActionHint = mutedLabel(QStringLiteral("导出任务会记录到任务历史，完成后可直接作为推理输入。"));
-    allowLabelToShrink(exportActionHint);
-    actionLayout->addWidget(exportActionHint, 1);
-    actionLayout->addWidget(validateExportButton);
-    actionLayout->addWidget(exportButton);
+    actionLayout->addStretch();
+    actionLayout->addWidget(validateButton);
     setupPanel->bodyLayout()->addWidget(actionStrip);
-    setupPanel->bodyLayout()->addStretch();
-
-    auto* rightStack = new QWidget;
-    auto* rightLayout = new QVBoxLayout(rightStack);
-    rightLayout->setContentsMargins(0, 0, 0, 0);
-    rightLayout->setSpacing(16);
-
-    auto* matrixPanel = new InfoPanel(QStringLiteral("格式矩阵"));
-    auto* matrixTable = new QTableWidget(3, 4);
-    matrixTable->setWordWrap(true);
-    matrixTable->setHorizontalHeaderLabels(QStringList()
-        << QStringLiteral("格式")
-        << QStringLiteral("输入")
-        << QStringLiteral("产物")
-        << QStringLiteral("状态"));
-    configureTable(matrixTable);
-    matrixTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    matrixTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
-    matrixTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
-    matrixTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-    matrixTable->setMinimumHeight(170);
-    matrixTable->verticalHeader()->setDefaultSectionSize(44);
-    const QStringList formats = {
-        QStringLiteral("onnx"),
-        QStringLiteral("ncnn"),
-        QStringLiteral("tensorrt")
-    };
-    for (int row = 0; row < formats.size(); ++row) {
-        const QString format = formats.at(row);
-        matrixTable->setItem(row, 0, new QTableWidgetItem(exportFormatLabel(format)));
-        matrixTable->setItem(row, 1, new QTableWidgetItem(uiText("官方 ONNX")));
-        matrixTable->setItem(row, 2, new QTableWidgetItem(defaultExportFileName(format)));
-        matrixTable->setItem(row, 3, new QTableWidgetItem(exportFormatNote(format)));
-    }
-    matrixPanel->bodyLayout()->addWidget(matrixTable);
 
     auto* resultPanel = new InfoPanel(QStringLiteral("运行状态"));
-    exportResultLabel_ = inlineStatusLabel(QStringLiteral("暂无导出任务。"));
-    resultPanel->bodyLayout()->addWidget(exportResultLabel_);
-    deploymentValidationResultLabel_ = inlineStatusLabel(uiText("尚未执行导出后验证。"));
+    deploymentValidationResultLabel_ = inlineStatusLabel(uiText("尚未运行 Runtime Delivery 六步工作流。"));
     resultPanel->bodyLayout()->addWidget(deploymentValidationResultLabel_);
-    resultPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("ONNX 会写入 AITrain sidecar；NCNN 导出依赖 onnx2ncnn，部署验证需要 NCNN SDK/runtime 和样本图；TensorRT 需兼容 GPU/runtime，不兼容硬件会记录为 hardware-blocked。")));
-    resultPanel->bodyLayout()->addStretch();
+    resultPanel->bodyLayout()->addWidget(mutedLabel(uiText(
+        "实际 runtime 路由由模型包 Manifest 与 Runtime 能力矩阵共同决定；"
+        "缺少 SDK、依赖、硬件或 decoder 时会返回精确状态。")));
 
-    rightLayout->addWidget(matrixPanel);
-    rightLayout->addWidget(resultPanel, 1);
-
-    auto* setupScroll = new QScrollArea;
-    setupScroll->setWidget(setupPanel);
-    setupScroll->setWidgetResizable(true);
-    setupScroll->setFrameShape(QFrame::NoFrame);
-    setupScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    setupScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    mainSplitter->addWidget(setupScroll);
-    mainSplitter->addWidget(rightStack);
-    mainSplitter->setChildrenCollapsible(false);
-    mainSplitter->setStretchFactor(0, 3);
-    mainSplitter->setStretchFactor(1, 4);
-    mainSplitter->setSizes(QList<int>() << 520 << 680);
-
-    layout->addWidget(mainSplitter, 1);
+    layout->addWidget(setupPanel);
+    layout->addWidget(resultPanel);
+    layout->addStretch();
+    page->setWidget(content);
     return page;
 }
 
@@ -340,26 +164,23 @@ QWidget* MainWindow::buildInferenceValidationPanel()
 
     auto* toolbar = new InfoPanel(QStringLiteral("验证输入"));
     auto* inferForm = new QFormLayout;
-    inferenceCheckpointEdit_ = new QLineEdit;
+    inferenceModelPackageCombo_ = new QComboBox;
     inferenceImageEdit_ = new QLineEdit;
     inferenceOutputEdit_ = new QLineEdit;
-    for (QLineEdit* edit : {inferenceCheckpointEdit_, inferenceImageEdit_, inferenceOutputEdit_}) {
+    for (QLineEdit* edit : {inferenceImageEdit_, inferenceOutputEdit_}) {
         edit->setMinimumWidth(0);
         edit->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     }
-    inferenceCheckpointEdit_->setPlaceholderText(QStringLiteral("从任务产物带入，或选择 ONNX / NCNN param / AITrain export sidecar"));
+    inferenceModelPackageCombo_->setMinimumWidth(0);
+    inferenceModelPackageCombo_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    inferenceModelPackageCombo_->addItem(uiText("请先打开项目并导入已验证模型包"), QString());
     inferenceImageEdit_->setPlaceholderText(QStringLiteral("选择验证图片"));
-    inferenceOutputEdit_->setPlaceholderText(QStringLiteral("输出目录；留空则输出到模型同目录 inference"));
-    auto* chooseModelButton = new QPushButton(QStringLiteral("选择模型文件"));
+    inferenceOutputEdit_->setPlaceholderText(QStringLiteral("输出由 V2 Artifact Store 托管"));
+    inferenceOutputEdit_->setReadOnly(true);
     auto* chooseImageButton = new QPushButton(QStringLiteral("选择图片"));
     auto* chooseOutputButton = new QPushButton(QStringLiteral("选择输出目录"));
-    auto* inferButton = primaryButton(QStringLiteral("开始推理"));
-    connect(chooseModelButton, &QPushButton::clicked, this, [this]() {
-        const QString file = QFileDialog::getOpenFileName(this, uiText("选择模型文件"), currentProjectPath_, QStringLiteral("AITrain model (*.onnx *.param *.aitrain-export.json *.json);;All files (*.*)"));
-        if (!file.isEmpty()) {
-            inferenceCheckpointEdit_->setText(QDir::toNativeSeparators(file));
-        }
-    });
+    chooseOutputButton->setEnabled(false);
+    auto* inferButton = primaryButton(QStringLiteral("运行完整 Runtime Delivery"));
     connect(chooseImageButton, &QPushButton::clicked, this, [this]() {
         const QString file = QFileDialog::getOpenFileName(this, uiText("选择图片"), currentProjectPath_, QStringLiteral("Images (*.png *.jpg *.jpeg *.bmp);;All files (*.*)"));
         if (!file.isEmpty()) {
@@ -367,13 +188,12 @@ QWidget* MainWindow::buildInferenceValidationPanel()
         }
     });
     connect(chooseOutputButton, &QPushButton::clicked, this, [this]() {
-        const QString modelPath = QDir::fromNativeSeparators(inferenceCheckpointEdit_ ? inferenceCheckpointEdit_->text().trimmed() : QString());
         const QString currentOutput = QDir::fromNativeSeparators(inferenceOutputEdit_ ? inferenceOutputEdit_->text().trimmed() : QString());
         const QString defaultDir = !currentOutput.isEmpty()
             ? currentOutput
             : (!currentProjectPath_.isEmpty()
                 ? QDir(currentProjectPath_).filePath(QStringLiteral("inference"))
-                : QFileInfo(modelPath).absoluteDir().filePath(QStringLiteral("inference")));
+                : QDir::homePath());
         const QString dir = QFileDialog::getExistingDirectory(this, uiText("选择推理输出目录"), defaultDir);
         if (!dir.isEmpty() && inferenceOutputEdit_) {
             inferenceOutputEdit_->setText(QDir::toNativeSeparators(dir));
@@ -383,8 +203,7 @@ QWidget* MainWindow::buildInferenceValidationPanel()
     auto* modelRow = new QWidget;
     auto* modelLayout = new QHBoxLayout(modelRow);
     modelLayout->setContentsMargins(0, 0, 0, 0);
-    modelLayout->addWidget(inferenceCheckpointEdit_);
-    modelLayout->addWidget(chooseModelButton);
+    modelLayout->addWidget(inferenceModelPackageCombo_);
     auto* imageRow = new QWidget;
     auto* imageLayout = new QHBoxLayout(imageRow);
     imageLayout->setContentsMargins(0, 0, 0, 0);
@@ -402,11 +221,11 @@ QWidget* MainWindow::buildInferenceValidationPanel()
     inferForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     inferForm->setHorizontalSpacing(14);
     inferForm->setVerticalSpacing(10);
-    inferForm->addRow(QStringLiteral("模型路径"), modelRow);
+    inferForm->addRow(QStringLiteral("已验证 V2 模型包"), modelRow);
     inferForm->addRow(QStringLiteral("图片路径"), imageRow);
     inferForm->addRow(QStringLiteral("推理输出"), outputRow);
     toolbar->bodyLayout()->addLayout(inferForm);
-    auto* sourceHelp = emptyStateLabel(QStringLiteral("从“任务与产物”选中 ONNX、NCNN param 或 AITrain export sidecar 后，可点击“用作推理模型”自动带入这里。输出目录留空会写到模型同目录 inference。TensorRT engine 请使用导出页部署验证。"));
+    auto* sourceHelp = emptyStateLabel(QStringLiteral("推理只能使用模型库中已登记、已校验哈希且声明 ONNX Runtime 路由的 V2 模型包。模型文件裸路径、NCNN 和 TensorRT engine 不会进入此推理链路。"));
     allowLabelToShrink(sourceHelp);
     toolbar->bodyLayout()->addWidget(sourceHelp);
     auto* actionStrip = new QFrame;
@@ -422,7 +241,7 @@ QWidget* MainWindow::buildInferenceValidationPanel()
     toolbar->bodyLayout()->addStretch();
 
     auto* capabilityPanel = new InfoPanel(QStringLiteral("可解析结果"));
-    auto* capabilityHint = mutedLabel(QStringLiteral("推理验证解析 YOLO ONNX / NCNN param 产物；OBB 使用 ONNX Runtime 旋转框后处理；TensorRT engine 当前仅做部署验证状态记录；OCR 端到端结果通过 PaddleOCR 官方任务产物查看。"));
+    auto* capabilityHint = mutedLabel(QStringLiteral("当前 V2 推理仅执行已验证 ONNX Runtime 路由；具体检测、分割、OBB 或语义分割解码由 Model Manifest 声明。TensorRT、NCNN、异常检测和 OCR 不进入此运行时。"));
     allowLabelToShrink(capabilityHint);
     capabilityPanel->bodyLayout()->addWidget(capabilityHint);
     auto* capabilityGrid = new QGridLayout;
@@ -445,14 +264,16 @@ QWidget* MainWindow::buildInferenceValidationPanel()
     rightLayout->setContentsMargins(0, 0, 0, 0);
     rightLayout->setSpacing(16);
 
-    auto* flowPanel = new InfoPanel(QStringLiteral("验证链路"));
+    auto* flowPanel = new InfoPanel(QStringLiteral("Runtime Delivery 六步链路"));
     auto* flowGrid = new QGridLayout;
     flowGrid->setHorizontalSpacing(10);
     flowGrid->setVerticalSpacing(10);
-    flowGrid->addWidget(createInferenceStep(QStringLiteral("1"), QStringLiteral("模型产物"), QStringLiteral("ONNX / NCNN param / AITrain sidecar")), 0, 0);
-    flowGrid->addWidget(createInferenceStep(QStringLiteral("2"), QStringLiteral("样本图片"), QStringLiteral("单张验证图进入预处理")), 0, 1);
-    flowGrid->addWidget(createInferenceStep(QStringLiteral("3"), QStringLiteral("Worker 推理"), QStringLiteral("隔离执行，不阻塞 GUI")), 1, 0);
-    flowGrid->addWidget(createInferenceStep(QStringLiteral("4"), QStringLiteral("结果归档"), QStringLiteral("prediction JSON + overlay")), 1, 1);
+    flowGrid->addWidget(createInferenceStep(QStringLiteral("1"), QStringLiteral("解析模型包"), QStringLiteral("只接受 ModelPackageId 与已提交 Artifact")), 0, 0);
+    flowGrid->addWidget(createInferenceStep(QStringLiteral("2"), QStringLiteral("校验 Manifest"), QStringLiteral("校验 runtime、decoder、哈希与依赖")), 0, 1);
+    flowGrid->addWidget(createInferenceStep(QStringLiteral("3"), QStringLiteral("推理 Smoke"), QStringLiteral("Worker 内同步 Runtime 推理")), 1, 0);
+    flowGrid->addWidget(createInferenceStep(QStringLiteral("4"), QStringLiteral("Benchmark"), QStringLiteral("固定样本 smoke timing，非性能验收")), 1, 1);
+    flowGrid->addWidget(createInferenceStep(QStringLiteral("5"), QStringLiteral("部署验证"), QStringLiteral("提交预测、overlay 与验证报告")), 2, 0);
+    flowGrid->addWidget(createInferenceStep(QStringLiteral("6"), QStringLiteral("交付报告"), QStringLiteral("生成终态 Evidence 与 Model Card")), 2, 1);
     flowGrid->setColumnStretch(0, 1);
     flowGrid->setColumnStretch(1, 1);
     flowPanel->bodyLayout()->addLayout(flowGrid);
@@ -462,7 +283,7 @@ QWidget* MainWindow::buildInferenceValidationPanel()
     auto* summaryHint = mutedLabel(QStringLiteral("Worker 返回的 prediction JSON 会压缩显示任务类型、结果数量、首个类别 / 文本、耗时和结果文件路径。"));
     allowLabelToShrink(summaryHint);
     summaryPanel->bodyLayout()->addWidget(summaryHint);
-    inferenceResultLabel_ = inlineStatusLabel(QStringLiteral("尚未推理。"));
+    inferenceResultLabel_ = inlineStatusLabel(QStringLiteral("尚未运行 Runtime Delivery 六步工作流。"));
     inferenceResultLabel_->setObjectName(QStringLiteral("InferenceResultSummary"));
     allowLabelToShrink(inferenceResultLabel_);
     summaryPanel->bodyLayout()->addWidget(inferenceResultLabel_);
@@ -525,8 +346,16 @@ QWidget* MainWindow::buildDeliveryEvidencePanel()
 
     auto* summaryPanel = new InfoPanel(uiText("验收证据"));
     deliveryAcceptanceSummaryLabel_ = inlineStatusLabel(uiText("等待导入或运行验收证据。"));
+    deliveryAcceptanceSummaryLabel_->setObjectName(QStringLiteral("DeliveryAcceptanceSummary"));
+    connect(deliveryAcceptanceSummaryLabel_, &QObject::destroyed, this, [this]() {
+        deliveryAcceptanceSummaryLabel_ = nullptr;
+    });
     summaryPanel->bodyLayout()->addWidget(deliveryAcceptanceSummaryLabel_);
     deliveryAcceptanceTable_ = new QTableWidget(0, 4);
+    deliveryAcceptanceTable_->setObjectName(QStringLiteral("DeliveryAcceptanceTable"));
+    connect(deliveryAcceptanceTable_, &QObject::destroyed, this, [this]() {
+        deliveryAcceptanceTable_ = nullptr;
+    });
     deliveryAcceptanceTable_->setHorizontalHeaderLabels(QStringList()
         << uiText("项目")
         << uiText("状态")
@@ -550,19 +379,18 @@ QWidget* MainWindow::buildDeliveryEvidencePanel()
     rightLayout->setContentsMargins(0, 0, 0, 0);
     rightLayout->setSpacing(16);
 
-    auto* ocrPanel = new InfoPanel(uiText("客户域 OCR 验收"));
-    const auto makePathRow = [this](QLineEdit** target, const QString& placeholder, bool directory) {
+    auto* ocrPanel = new InfoPanel(uiText("客户域 OCR 官方报告受控验收 V2"));
+    const auto makePathRow = [this](QLineEdit** target, const QString& placeholder) {
         auto* row = new QWidget;
         auto* rowLayout = new QHBoxLayout(row);
         rowLayout->setContentsMargins(0, 0, 0, 0);
         rowLayout->setSpacing(8);
         *target = new QLineEdit;
         (*target)->setPlaceholderText(placeholder);
-        auto* button = new QPushButton(directory ? uiText("选择目录") : uiText("选择文件"));
-        connect(button, &QPushButton::clicked, this, [this, target, directory]() {
-            const QString selected = directory
-                ? QFileDialog::getExistingDirectory(this, uiText("选择目录"), currentProjectPath_)
-                : QFileDialog::getOpenFileName(this, uiText("选择文件"), currentProjectPath_, QStringLiteral("Reports (*.json *.md *.txt);;All files (*.*)"));
+        auto* button = new QPushButton(uiText("选择文件"));
+        connect(button, &QPushButton::clicked, this, [this, target]() {
+            const QString selected = QFileDialog::getOpenFileName(this, uiText("选择文件"),
+                currentProjectPath_, QStringLiteral("PaddleOCR official reports (*.json);;All files (*.*)"));
             if (!selected.isEmpty() && *target) {
                 (*target)->setText(QDir::toNativeSeparators(selected));
             }
@@ -572,43 +400,97 @@ QWidget* MainWindow::buildDeliveryEvidencePanel()
         return row;
     };
 
+    const auto makeIdPair = [](QLineEdit** snapshotId, QLineEdit** snapshotArtifactId,
+                                const QString& objectPrefix) {
+        auto* row = new QWidget;
+        auto* layout = new QHBoxLayout(row);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(8);
+        *snapshotId = new QLineEdit;
+        (*snapshotId)->setObjectName(objectPrefix + QStringLiteral("SnapshotId"));
+        (*snapshotId)->setPlaceholderText(QStringLiteral("SnapshotId（可选）"));
+        *snapshotArtifactId = new QLineEdit;
+        (*snapshotArtifactId)->setObjectName(objectPrefix + QStringLiteral("SnapshotArtifactId"));
+        (*snapshotArtifactId)->setPlaceholderText(QStringLiteral("Snapshot ArtifactId（可选）"));
+        layout->addWidget(*snapshotId, 1);
+        layout->addWidget(*snapshotArtifactId, 1);
+        return row;
+    };
+
     auto* ocrForm = new QFormLayout;
     ocrForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     ocrForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     ocrForm->setHorizontalSpacing(12);
     ocrForm->setVerticalSpacing(9);
-    ocrForm->addRow(uiText("Det 数据集"), makePathRow(&customerOcrDetDatasetEdit_, uiText("客户域 PaddleOCR Det 数据集目录"), true));
-    ocrForm->addRow(uiText("Rec 数据集"), makePathRow(&customerOcrRecDatasetEdit_, uiText("客户域 PaddleOCR Rec 数据集目录"), true));
-    ocrForm->addRow(uiText("System 图片"), makePathRow(&customerOcrSystemImagesEdit_, uiText("客户域端到端 OCR 验收图片目录"), true));
-    ocrForm->addRow(uiText("Det 报告"), makePathRow(&customerOcrDetReportEdit_, uiText("官方 Det 评估报告 JSON/Markdown"), false));
-    ocrForm->addRow(uiText("Rec 报告"), makePathRow(&customerOcrRecReportEdit_, uiText("官方 Rec 评估报告，需包含 accuracy / CER"), false));
-    ocrForm->addRow(uiText("System 报告"), makePathRow(&customerOcrSystemReportEdit_, uiText("官方 System 验收报告 JSON/Markdown"), false));
-    customerOcrOutputEdit_ = new QLineEdit;
-    customerOcrOutputEdit_->setPlaceholderText(uiText("留空则写入当前项目 runs/<taskId>"));
-    ocrForm->addRow(uiText("输出目录"), customerOcrOutputEdit_);
+    auto* importTitle = new QLabel(uiText("步骤 1：受控导入（裸路径仅允许停留在此导入边界）"));
+    importTitle->setObjectName(QStringLiteral("OcrImportSectionTitle"));
+    ocrPanel->bodyLayout()->addWidget(importTitle);
+    ocrForm->addRow(uiText("Det 原始报告"), makePathRow(&customerOcrDetReportEdit_, uiText("PaddleOCR Det 官方 JSON")));
+    customerOcrDetReportEdit_->setObjectName(QStringLiteral("OcrDetRawReportPath"));
+    ocrForm->addRow(uiText("Det Snapshot"), makeIdPair(&customerOcrDetSnapshotIdEdit_,
+        &customerOcrDetSnapshotArtifactIdEdit_, QStringLiteral("OcrDet")));
+    ocrForm->addRow(uiText("Rec 原始报告"), makePathRow(&customerOcrRecReportEdit_, uiText("PaddleOCR Rec 官方 JSON（含 accuracy/CER）")));
+    customerOcrRecReportEdit_->setObjectName(QStringLiteral("OcrRecRawReportPath"));
+    ocrForm->addRow(uiText("Rec Snapshot"), makeIdPair(&customerOcrRecSnapshotIdEdit_,
+        &customerOcrRecSnapshotArtifactIdEdit_, QStringLiteral("OcrRec")));
+    ocrForm->addRow(uiText("System 原始报告"), makePathRow(&customerOcrSystemReportEdit_, uiText("PaddleOCR System 官方 JSON（必须含真实 accuracy）")));
+    customerOcrSystemReportEdit_->setObjectName(QStringLiteral("OcrSystemRawReportPath"));
+    ocrForm->addRow(uiText("System Snapshot"), makeIdPair(&customerOcrSystemSnapshotIdEdit_,
+        &customerOcrSystemSnapshotArtifactIdEdit_, QStringLiteral("OcrSystem")));
+    customerOcrCohortIdEdit_ = new QLineEdit;
+    customerOcrCohortIdEdit_->setObjectName(QStringLiteral("OcrAcceptanceCohortId"));
+    customerOcrCohortIdEdit_->setPlaceholderText(uiText("同一验收批次标识"));
+    ocrForm->addRow(uiText("验收批次"), customerOcrCohortIdEdit_);
+    customerOcrDomainIdEdit_ = new QLineEdit;
+    customerOcrDomainIdEdit_->setObjectName(QStringLiteral("OcrCustomerDomainId"));
+    customerOcrDomainIdEdit_->setPlaceholderText(uiText("客户域标识"));
+    ocrForm->addRow(uiText("客户域"), customerOcrDomainIdEdit_);
+    customerOcrEvidenceClassCombo_ = new QComboBox;
+    customerOcrEvidenceClassCombo_->setObjectName(QStringLiteral("OcrEvidenceClass"));
+    customerOcrEvidenceClassCombo_->addItems({QStringLiteral("customer_domain"),
+        QStringLiteral("public"), QStringLiteral("generated"), QStringLiteral("smoke")});
+    ocrForm->addRow(uiText("证据分类"), customerOcrEvidenceClassCombo_);
+    auto* importOcrButton = primaryButton(uiText("受控导入官方报告"));
+    importOcrButton->setObjectName(QStringLiteral("ImportOcrOfficialReportsV2Button"));
+    connect(importOcrButton, &QPushButton::clicked, this, &MainWindow::importOcrOfficialReportsV2);
+    ocrForm->addRow(QString(), importOcrButton);
+
+    auto* acceptanceTitle = new QLabel(uiText("步骤 2：仅使用已提交报告 ArtifactId 运行验收"));
+    acceptanceTitle->setObjectName(QStringLiteral("OcrAcceptanceSectionTitle"));
+    ocrForm->addRow(acceptanceTitle);
+    customerOcrDetReportArtifactIdEdit_ = new QLineEdit;
+    customerOcrDetReportArtifactIdEdit_->setObjectName(QStringLiteral("OcrDetReportArtifactId"));
+    customerOcrRecReportArtifactIdEdit_ = new QLineEdit;
+    customerOcrRecReportArtifactIdEdit_->setObjectName(QStringLiteral("OcrRecReportArtifactId"));
+    customerOcrSystemReportArtifactIdEdit_ = new QLineEdit;
+    customerOcrSystemReportArtifactIdEdit_->setObjectName(QStringLiteral("OcrSystemReportArtifactId"));
+    ocrForm->addRow(uiText("Det 报告 ArtifactId"), customerOcrDetReportArtifactIdEdit_);
+    ocrForm->addRow(uiText("Rec 报告 ArtifactId"), customerOcrRecReportArtifactIdEdit_);
+    ocrForm->addRow(uiText("System 报告 ArtifactId"), customerOcrSystemReportArtifactIdEdit_);
     auto* thresholdRow = new QWidget;
     auto* thresholdLayout = new QHBoxLayout(thresholdRow);
     thresholdLayout->setContentsMargins(0, 0, 0, 0);
     thresholdLayout->setSpacing(8);
+    customerOcrMinDetHmeanEdit_ = new QLineEdit(QStringLiteral("0.50"));
     customerOcrMinAccEdit_ = new QLineEdit(QStringLiteral("0.70"));
     customerOcrMaxCerEdit_ = new QLineEdit(QStringLiteral("0.30"));
+    customerOcrMinSystemAccEdit_ = new QLineEdit(QStringLiteral("0.70"));
+    thresholdLayout->addWidget(new QLabel(uiText("Det hmean ≥")));
+    thresholdLayout->addWidget(customerOcrMinDetHmeanEdit_);
     thresholdLayout->addWidget(new QLabel(uiText("Rec accuracy >=")));
     thresholdLayout->addWidget(customerOcrMinAccEdit_);
     thresholdLayout->addWidget(new QLabel(uiText("CER <=")));
     thresholdLayout->addWidget(customerOcrMaxCerEdit_);
+    thresholdLayout->addWidget(new QLabel(uiText("System accuracy ≥")));
+    thresholdLayout->addWidget(customerOcrMinSystemAccEdit_);
     ocrForm->addRow(uiText("门槛"), thresholdRow);
-    customerOcrAllowPublicCheck_ = new QCheckBox(uiText("允许 public/generated 数据仅作为 smoke"));
-    auto* optionsRow = new QWidget;
-    auto* optionsLayout = new QHBoxLayout(optionsRow);
-    optionsLayout->setContentsMargins(0, 0, 0, 0);
-    optionsLayout->addWidget(customerOcrAllowPublicCheck_);
-    optionsLayout->addStretch();
-    ocrForm->addRow(uiText("选项"), optionsRow);
     ocrPanel->bodyLayout()->addLayout(ocrForm);
-    customerOcrStatusLabel_ = inlineStatusLabel(uiText("尚未运行客户域 OCR 验收。"));
+    customerOcrStatusLabel_ = inlineStatusLabel(uiText("尚未导入官方报告或运行 OCR Acceptance V2。"));
+    customerOcrStatusLabel_->setObjectName(QStringLiteral("OcrAcceptanceV2Status"));
     ocrPanel->bodyLayout()->addWidget(customerOcrStatusLabel_);
-    auto* runOcrButton = primaryButton(uiText("运行 OCR 验收"));
-    connect(runOcrButton, &QPushButton::clicked, this, &MainWindow::runCustomerOcrAcceptance);
+    auto* runOcrButton = primaryButton(uiText("运行 OCR Acceptance V2"));
+    runOcrButton->setObjectName(QStringLiteral("RunOcrAcceptanceWorkflowV2Button"));
+    connect(runOcrButton, &QPushButton::clicked, this, &MainWindow::runOcrAcceptanceWorkflowV2);
     ocrPanel->bodyLayout()->addWidget(runOcrButton, 0, Qt::AlignRight);
     ocrPanel->bodyLayout()->addWidget(mutedLabel(uiText("Total-Text、generated smoke 和 .deps 示例只能证明流程可跑，不能作为客户域生产 OCR 精度证明。")));
 
@@ -632,6 +514,5 @@ QWidget* MainWindow::buildDeliveryEvidencePanel()
 
     layout->addWidget(splitter, 1);
     page->setWidget(content);
-    updateDeliveryAcceptanceSummary();
     return page;
 }

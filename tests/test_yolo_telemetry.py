@@ -19,6 +19,8 @@ if str(YOLO_DIR) not in sys.path:
 import ultralytics_trainer as trainer  # noqa: E402
 import ultralytics_evaluator as evaluator  # noqa: E402
 from yolo import ultralytics_exporter as exporter  # noqa: E402
+from adapter_sdk import AdapterSdk  # noqa: E402
+from dataset_snapshot_v2 import materialize_dataset_snapshot_v2  # noqa: E402
 
 
 class FakeModel:
@@ -57,6 +59,63 @@ def test_sanitize_log_line_removes_ansi_tqdm_noise() -> None:
     assert "useful message" in cleaned
 
 
+def test_snapshot_data_yaml_rejects_paths_outside_materialized_root() -> None:
+    with tempfile.TemporaryDirectory() as raw_dir:
+        root = Path(raw_dir)
+        dataset = root / "snapshot"
+        output = root / "output"
+        dataset.mkdir()
+        output.mkdir()
+        (dataset / "data.yaml").write_text(
+            f"path: {(root / 'external').as_posix()}\ntrain: images/train\nval: images/val\nnc: 1\nnames: [item]\n",
+            encoding="utf-8",
+        )
+        try:
+            trainer.normalize_data_yaml(dataset, output, require_snapshot_containment=True)
+        except ValueError as exc:
+            assert "escapes the immutable dataset snapshot" in str(exc)
+        else:
+            raise AssertionError("snapshot data.yaml path escape was accepted")
+
+
+def test_snapshot_data_yaml_keeps_paths_inside_materialized_root() -> None:
+    with tempfile.TemporaryDirectory() as raw_dir:
+        root = Path(raw_dir)
+        dataset = root / "snapshot"
+        output = root / "output"
+        (dataset / "images" / "train").mkdir(parents=True)
+        (dataset / "images" / "val").mkdir(parents=True)
+        output.mkdir()
+        (dataset / "data.yaml").write_text(
+            "path: .\ntrain: images/train\nval: images/val\nnc: 1\nnames: [item]\n",
+            encoding="utf-8",
+        )
+        normalized = trainer.normalize_data_yaml(dataset, output, require_snapshot_containment=True)
+        text = normalized.read_text(encoding="utf-8")
+        assert f'path: "{dataset.resolve().as_posix()}"' in text
+        assert 'train: "images/train"' in text
+        assert 'val: "images/val"' in text
+
+
+def test_evaluator_rejects_snapshot_data_yaml_paths_outside_materialized_root() -> None:
+    with tempfile.TemporaryDirectory() as raw_dir:
+        root = Path(raw_dir)
+        dataset = root / "snapshot"
+        output = root / "output"
+        dataset.mkdir()
+        output.mkdir()
+        (dataset / "data.yaml").write_text(
+            f"path: {(root / 'external').as_posix()}\ntrain: images/train\nval: images/val\nnames: [item]\n",
+            encoding="utf-8",
+        )
+        try:
+            evaluator.normalize_evaluation_data_yaml(dataset, output, root / "dataset_snapshot.json")
+        except ValueError as exc:
+            assert "escapes the immutable dataset snapshot" in str(exc)
+        else:
+            raise AssertionError("evaluator accepted a snapshot data.yaml path escape")
+
+
 def test_yolo_callbacks_emit_structured_progress_and_epoch_metrics() -> None:
     events: list[tuple[str, dict]] = []
     original_emit = trainer.emit
@@ -84,6 +143,162 @@ def test_yolo_callbacks_emit_structured_progress_and_epoch_metrics() -> None:
     assert any(item["name"] == "boxLoss" and item["epoch"] == 1 for item in metrics)
     assert any(item["name"] == "mAP50" and item["value"] == 0.75 for item in metrics)
     assert sum(1 for item in metrics if item["name"] == "mAP50" and item["epoch"] == 1) == 1
+
+
+def test_ultralytics_event_adapter_uses_sdk_and_preserves_backend() -> None:
+    events: list[dict] = []
+    original_adapter = trainer._adapter
+    original_backend = trainer._adapter_backend
+    original_channel = trainer._event_channel
+    trainer._adapter = AdapterSdk("ultralytics_yolo_detect", event_sink=events.append)
+    trainer._adapter_backend = "ultralytics_yolo_detect"
+    trainer._event_channel = None
+    try:
+        trainer.emit("log", backend="spoofed", level="info", message="sdk event")
+        trainer.emit("progress", percent=5, message="running", epoch=1)
+        trainer.emit("artifact", kind="report", path="out/report.json", message="report")
+        trainer.emit("completed", reportPath="out/report.json")
+    finally:
+        trainer._adapter = original_adapter
+        trainer._adapter_backend = original_backend
+        trainer._event_channel = original_channel
+
+    assert [event["type"] for event in events] == ["log", "progress", "artifact", "completed"]
+    assert all(event["backend"] == "ultralytics_yolo_detect" for event in events)
+    assert events[1]["percent"] == 5.0
+
+
+def test_official_evaluator_event_adapter_uses_sdk_and_preserves_backend() -> None:
+    events: list[dict] = []
+    original_adapter = evaluator._adapter
+    original_backend = evaluator._adapter_backend
+    original_channel = evaluator._event_channel
+    evaluator._adapter = AdapterSdk("ultralytics_yolo_eval", event_sink=events.append)
+    evaluator._adapter_backend = "ultralytics_yolo_eval"
+    evaluator._event_channel = None
+    try:
+        evaluator.emit("artifact", backend="spoofed", kind="evaluation_report", path="out/evaluation_report.json")
+        evaluator.emit("completed", reportPath="out/evaluation_report.json")
+    finally:
+        evaluator._adapter = original_adapter
+        evaluator._adapter_backend = original_backend
+        evaluator._event_channel = original_channel
+
+    assert [event["type"] for event in events] == ["artifact", "completed"]
+    assert all(event["backend"] == "ultralytics_yolo_eval" for event in events)
+
+
+def test_official_evaluator_expands_directory_outputs_for_v2_candidates() -> None:
+    events: list[tuple[str, dict]] = []
+    original_emit = evaluator.emit
+    original_channel = evaluator._event_channel
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        plot = root / "results.png"
+        plot.write_bytes(b"png")
+        evaluator.emit = lambda event_type, **payload: events.append((event_type, payload))
+        evaluator._event_channel = object()  # type: ignore[assignment]
+        try:
+            evaluator.emit_official_artifacts(
+                [{"name": "results.png", "kind": "official_plot", "path": str(plot)}], root)
+        finally:
+            evaluator.emit = original_emit
+            evaluator._event_channel = original_channel
+
+    assert events == [("artifact", {
+        "name": "results.png",
+        "kind": "official_val_001_official_plot",
+        "path": str(plot),
+        "message": "Official Ultralytics validation output",
+    })]
+
+
+def test_official_evaluator_keeps_directory_output_on_v1_jsonl() -> None:
+    events: list[tuple[str, dict]] = []
+    original_emit = evaluator.emit
+    original_channel = evaluator._event_channel
+    evaluator.emit = lambda event_type, **payload: events.append((event_type, payload))
+    evaluator._event_channel = None
+    try:
+        evaluator.emit_official_artifacts([], Path("out/official_val"))
+    finally:
+        evaluator.emit = original_emit
+        evaluator._event_channel = original_channel
+
+    assert events == [("artifact", {
+        "name": "ultralytics_official_val",
+        "kind": "official_run_dir",
+        "path": "out\\official_val" if sys.platform.startswith("win") else "out/official_val",
+    })]
+
+
+def test_dataset_snapshot_v2_materialization_copies_only_verified_files() -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        source = root / "source"
+        source.mkdir()
+        image = source / "images" / "sample.jpg"
+        image.parent.mkdir()
+        image.write_bytes(b"snapshot-data")
+        digest = __import__("hashlib").sha256(image.read_bytes()).hexdigest()
+        manifest = root / "dataset_snapshot.json"
+        manifest.write_text(json.dumps({
+            "schemaVersion": 2,
+            "complete": True,
+            "files": [{"relativePath": "images/sample.jpg", "sha256": digest}],
+        }), encoding="utf-8")
+        destination = root / "staging"
+        result = materialize_dataset_snapshot_v2(source, manifest, destination)
+
+        assert result == destination.resolve()
+        assert (destination / "images" / "sample.jpg").read_bytes() == b"snapshot-data"
+        image.write_bytes(b"mutated")
+        try:
+            materialize_dataset_snapshot_v2(source, manifest, root / "changed")
+        except ValueError as exc:
+            assert "does not match manifest" in str(exc)
+        else:
+            raise AssertionError("mutated dataset source was accepted")
+
+
+def test_official_exporter_event_adapter_uses_sdk_and_preserves_backend() -> None:
+    events: list[dict] = []
+    original_adapter = exporter._adapter
+    original_backend = exporter._adapter_backend
+    original_channel = exporter._event_channel
+    exporter._adapter = AdapterSdk("ultralytics_yolo_export", event_sink=events.append)
+    exporter._adapter_backend = "ultralytics_yolo_export"
+    exporter._event_channel = None
+    try:
+        exporter.emit("artifact", backend="spoofed", kind="export", path="out/model.onnx")
+        exporter.emit("completed", exportPath="out/model.onnx")
+    finally:
+        exporter._adapter = original_adapter
+        exporter._adapter_backend = original_backend
+        exporter._event_channel = original_channel
+
+    assert [event["type"] for event in events] == ["artifact", "completed"]
+    assert all(event["backend"] == "ultralytics_yolo_export" for event in events)
+
+
+def test_official_exporter_keeps_model_export_frame_on_v1_jsonl() -> None:
+    events: list[dict] = []
+    original_emit_event = exporter.emit_event
+    original_channel = exporter._event_channel
+    exporter.emit_event = lambda backend, event_type, **payload: events.append({"backend": backend, "type": event_type, **payload})
+    exporter._event_channel = None
+    try:
+        exporter.emit("modelExport", exportPath="out/model.onnx", reportPath="out/model.aitrain.json")
+    finally:
+        exporter.emit_event = original_emit_event
+        exporter._event_channel = original_channel
+
+    assert events == [{
+        "backend": "ultralytics_yolo_export",
+        "type": "modelExport",
+        "exportPath": "out/model.onnx",
+        "reportPath": "out/model.aitrain.json",
+    }]
 
 
 def test_ultralytics_train_args_are_sanitized_and_merged() -> None:
@@ -455,6 +670,54 @@ def test_exporter_infers_obb_family_from_training_report() -> None:
     assert report["backend"] == "ultralytics_yolo_obb"
 
 
+def test_exporter_builds_v2_contract_only_from_official_evaluation_evidence() -> None:
+    with tempfile.TemporaryDirectory() as raw_dir:
+        root = Path(raw_dir)
+        evaluation_path = root / "evaluation_report.json"
+        evaluation_path.write_text(json.dumps({
+            "runtime": "ultralytics_official_val",
+            "perClass": [
+                {"classId": 1, "className": "scratch"},
+                {"classId": 0, "className": "part"},
+            ],
+        }), encoding="utf-8")
+        contract = exporter.v2_model_contract("yolo_detection", {
+            "available": True,
+            "inputs": [{"name": "images", "shape": [1, 3, 640, 640]}],
+            "outputs": [{"name": "output0", "shape": [1, 84, "anchors"]}],
+        }, evaluation_path)
+
+    assert contract["modelFamily"] == "yolo_detection"
+    assert contract["taskType"] == "detection"
+    assert contract["inputs"] == [{"name": "images", "layout": "NCHW", "shape": [1, 3, 640, 640]}]
+    assert contract["outputs"] == [{"name": "output0", "layout": "NCN", "shape": [1, 84, -1]}]
+    assert contract["classNames"] == ["part", "scratch"]
+    assert contract["runtimeRoutes"] == ["aitrain_onnxruntime"]
+
+
+def test_exporter_builds_variant_specific_v2_contracts() -> None:
+    segmentation = exporter.v2_model_contract("yolo_segmentation", {
+        "inputs": [{"name": "images", "shape": [1, 3, 640, 640]}],
+        "outputs": [
+            {"name": "output0", "shape": [1, 37, "anchors"]},
+            {"name": "output1", "shape": [1, 32, 160, 160]},
+        ],
+    }, None)
+    assert segmentation["taskType"] == "segmentation"
+    assert segmentation["decoder"] == "yolo_segmentation_v8"
+    assert segmentation["postprocessing"] == {"id": "yolo_segmentation_masks_v8"}
+    assert [item["layout"] for item in segmentation["outputs"]] == ["NCN", "NCHW"]
+
+    obb = exporter.v2_model_contract("yolo_obb", {
+        "inputs": [{"name": "images", "shape": [1, 3, 640, 640]}],
+        "outputs": [{"name": "output0", "shape": [1, 6, "anchors"]}],
+    }, None)
+    assert obb["taskType"] == "obb"
+    assert obb["decoder"] == "yolo_obb_v8"
+    assert obb["postprocessing"] == {"id": "yolo_obb_nms"}
+    assert obb["runtimeRoutes"] == ["aitrain_onnxruntime"]
+
+
 if __name__ == "__main__":
     test_sanitize_log_line_removes_ansi_tqdm_noise()
     test_yolo_callbacks_emit_structured_progress_and_epoch_metrics()
@@ -480,3 +743,4 @@ if __name__ == "__main__":
     test_ultralytics_export_args_accept_tensorrt_int8_with_data()
     test_exporter_infers_segmentation_family_from_training_report()
     test_exporter_infers_obb_family_from_training_report()
+    test_exporter_builds_v2_contract_only_from_official_evaluation_evidence()

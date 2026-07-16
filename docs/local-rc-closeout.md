@@ -62,7 +62,7 @@ The default RC command runs the fixed 1280x820 walkthrough wrapper:
 .\tools\ui-workbench-walkthrough.ps1
 ```
 
-It covers `总览`, `项目`, `数据集`, `训练实验`, `任务与产物`, `模型库`, `部署验证`, `环境`, and `系统设置`, and writes `.deps\UI-Walkthrough\rc\ui_walkthrough_rc_summary.json`. Tab-level areas such as `数据集 > 质量与复核`, `模型库 > 评估报告`, `部署验证 > 模型导出 / 推理验证`, `系统设置 > 内置能力 / 应用设置`, and `环境 > 交付证据` are covered by QtTest rather than the main-page walkthrough.
+该检查覆盖 `总览`、`项目`、`数据集`、`训练实验`、`任务与产物`、`模型库`、`部署验证`、`环境` 与 `系统设置`，并写入 `.deps\UI-Walkthrough\rc\ui_walkthrough_rc_summary.json`。`数据集 > 质量与复核`、`模型库 > 评估报告`、`部署验证 > 部署验证 / 推理验证`、`系统设置 > 内置能力 / 应用设置` 与 `环境 > 交付证据` 等页签由 QtTest 覆盖。
 
 If the app opens the offline registration dialog before the workbench, the wrapper writes a blocked summary with `errorCode=license_required`. Treat that as environment/configuration blocked evidence: configure a valid offline license token and build-time `AITRAIN_LICENSE_PUBLIC_KEY`, then rerun the walkthrough instead of marking the GUI gate passed.
 
@@ -78,7 +78,7 @@ For manual exploration beyond the automated gate, walk through these screens:
 | Training | Official/upstream YOLO/OBB, SMP, Anomalib, and OCR backends should be the only product training choices; removed diagnostic/scaffold backends must not reappear in the GUI. |
 | Task Artifacts | Select recent tasks and preview JSON/TXT/CSV/image/ONNX/model artifacts; unsupported artifacts should show a clear message. |
 | Model Library | Registered model versions, evaluation reports, comparison rows, pipeline records, lineage, benchmarks, artifacts, and limitation summaries should be visible. |
-| Deployment Validation | Export and inference validation controls should be visible under the `模型导出` and `推理验证` tabs. |
+| 部署验证 | `部署验证` 与 `推理验证` 页签都应只允许选择已验证 V2 模型包，不显示裸路径模型导出入口。 |
 | System Settings | Built-in capability matrix and application settings should be visible under `内置能力` and `应用设置`. |
 | Delivery Report | Generate a delivery report and confirm HTML, model card, and artifact inventory are present and previewable. |
 | Delivery Evidence | Open `环境 > 交付证据`; local RC, clean Windows, TensorRT, customer OCR, package integrity, diagnostics, and deployment validation states should render as `passed`, `blocked`, `failed`, `hardware-blocked`, or `not-run` without horizontal overflow. |

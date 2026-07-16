@@ -3,6 +3,7 @@
 #include "InfoPanel.h"
 #include "MainWindowSupport.h"
 #include "TaskArtifactPanel.h"
+#include "TaskArtifactPresenterV2.h"
 
 #include <QAbstractItemView>
 #include <QComboBox>
@@ -44,34 +45,31 @@ QWidget* MainWindow::buildTaskQueuePage()
     auto* refreshButton = primaryButton(QStringLiteral("刷新历史"));
     auto* cancelButton = dangerButton(QStringLiteral("取消选中任务"));
     auto* reproduceButton = new QPushButton(QStringLiteral("复现实验"));
+    cancelButton->setEnabled(false);
+    cancelButton->setToolTip(uiText("选中任务取消尚未迁移到 V2 Application Service。"));
+    reproduceButton->setEnabled(false);
+    reproduceButton->setToolTip(uiText("复现实验写用例尚未迁移到 V2 Application Service。"));
     taskKindFilterCombo_ = new QComboBox;
     taskKindFilterCombo_->setMinimumWidth(140);
     taskKindFilterCombo_->addItem(uiText("全部类别"), QString());
-    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Train), QStringLiteral("train"));
-    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Validate), QStringLiteral("validate"));
-    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Export), QStringLiteral("export"));
-    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Infer), QStringLiteral("infer"));
-    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Evaluate), QStringLiteral("evaluate"));
-    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Benchmark), QStringLiteral("benchmark"));
-    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Curate), QStringLiteral("curate"));
-    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Snapshot), QStringLiteral("snapshot"));
-    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Pipeline), QStringLiteral("pipeline"));
-    taskKindFilterCombo_->addItem(taskKindLabel(aitrain::TaskKind::Report), QStringLiteral("report"));
+    taskKindFilterCombo_->addItem(uiText("V2 持久化任务"), QStringLiteral("v2"));
     taskStateFilterCombo_ = new QComboBox;
     taskStateFilterCombo_->setMinimumWidth(140);
     taskStateFilterCombo_->addItem(uiText("全部状态"), QString());
-    taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Queued), QStringLiteral("queued"));
-    taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Running), QStringLiteral("running"));
-    taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Completed), QStringLiteral("completed"));
-    taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Failed), QStringLiteral("failed"));
-    taskStateFilterCombo_->addItem(taskStateLabel(aitrain::TaskState::Canceled), QStringLiteral("canceled"));
+    taskStateFilterCombo_->addItem(uiText("排队中"), QStringLiteral("queued"));
+    taskStateFilterCombo_->addItem(uiText("运行中"), QStringLiteral("running"));
+    taskStateFilterCombo_->addItem(uiText("失败"), QStringLiteral("failed"));
+    taskStateFilterCombo_->addItem(uiText("已取消"), QStringLiteral("canceled"));
+    taskStateFilterCombo_->addItem(uiText("已创建"), QStringLiteral("created"));
+    taskStateFilterCombo_->addItem(uiText("启动中"), QStringLiteral("starting"));
+    taskStateFilterCombo_->addItem(uiText("取消中"), QStringLiteral("cancel_requested"));
+    taskStateFilterCombo_->addItem(uiText("已完成"), QStringLiteral("succeeded"));
     taskSearchEdit_ = new QLineEdit;
     taskSearchEdit_->setMinimumWidth(0);
     taskSearchEdit_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     taskSearchEdit_->setPlaceholderText(QStringLiteral("搜索任务、后端、消息"));
     connect(refreshButton, &QPushButton::clicked, this, &MainWindow::updateRecentTasks);
     connect(cancelButton, &QPushButton::clicked, this, &MainWindow::cancelSelectedTask);
-    connect(reproduceButton, &QPushButton::clicked, this, &MainWindow::reproduceSelectedTrainingTask);
     connect(taskKindFilterCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::applyTaskFilters);
     connect(taskStateFilterCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::applyTaskFilters);
     connect(taskSearchEdit_, &QLineEdit::textChanged, this, &MainWindow::applyTaskFilters);
@@ -107,12 +105,13 @@ QWidget* MainWindow::buildTaskQueuePage()
     actionLayout->setColumnStretch(5, 1);
 
     toolbar->bodyLayout()->addWidget(controlStrip);
-    toolbar->bodyLayout()->addWidget(mutedLabel(QStringLiteral("这里统一追踪训练、校验、划分、导出和推理任务；运行产物在下方详情区集中查看。")));
+    toolbar->bodyLayout()->addWidget(mutedLabel(QStringLiteral("这里只读展示 V2 已持久化任务；已提交产物、指标和工作流步骤在下方集中查看。")));
 
     auto* tablePanel = new InfoPanel(QStringLiteral("任务历史"));
     tablePanel->setMinimumWidth(300);
     tablePanel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     taskQueueTable_ = new QTableWidget(0, 7);
+    taskQueueTable_->setObjectName(QStringLiteral("TaskQueueTableV2"));
     taskQueueTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("任务")
         << QStringLiteral("类别")
@@ -145,14 +144,15 @@ QWidget* MainWindow::buildTaskQueuePage()
     detailPanel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     detailPanel->bodyLayout()->setSpacing(12);
     taskArtifactPanel_ = new TaskArtifactPanel;
+    taskArtifactPanel_->setObjectName(QStringLiteral("TaskArtifactPanelV2"));
+    if (taskArtifactPresenter_) {
+        connect(taskArtifactPresenter_, &TaskArtifactPresenterV2::detailsChanged, this, [this]() {
+            if (taskArtifactPanel_) taskArtifactPanel_->setV2Details(taskArtifactPresenter_->details());
+        });
+    }
     connect(taskArtifactPanel_, &TaskArtifactPanel::openDirectoryRequested, this, &MainWindow::openSelectedArtifactDirectory);
     connect(taskArtifactPanel_, &TaskArtifactPanel::copyPathRequested, this, &MainWindow::copySelectedArtifactPath);
     connect(taskArtifactPanel_, &TaskArtifactPanel::useForInferenceRequested, this, &MainWindow::useSelectedArtifactForInference);
-    connect(taskArtifactPanel_, &TaskArtifactPanel::useForExportRequested, this, &MainWindow::useSelectedArtifactForExport);
-    connect(taskArtifactPanel_, &TaskArtifactPanel::registerModelRequested, this, &MainWindow::registerSelectedArtifactAsModelVersion);
-    connect(taskArtifactPanel_, &TaskArtifactPanel::evaluateRequested, this, &MainWindow::evaluateSelectedArtifact);
-    connect(taskArtifactPanel_, &TaskArtifactPanel::benchmarkRequested, this, &MainWindow::benchmarkSelectedArtifact);
-    connect(taskArtifactPanel_, &TaskArtifactPanel::deliveryReportRequested, this, &MainWindow::generateDeliveryReportFromSelectedArtifact);
     detailPanel->bodyLayout()->addWidget(taskArtifactPanel_, 1);
     auto* bodySplitter = new QSplitter(Qt::Horizontal);
     bodySplitter->addWidget(tablePanel);
@@ -165,7 +165,7 @@ QWidget* MainWindow::buildTaskQueuePage()
     layout->addWidget(createWorkbenchHeader(
         QStringLiteral("TASK ARTIFACT CENTER"),
         uiText("任务与产物工作台"),
-        uiText("按任务追踪 Worker 产物、指标、导出和评估报告；选中产物后进入部署验证、注册、评估或交付报告。"),
+        uiText("按任务追踪 V2 已提交产物、指标和工作流步骤；页面不读取 Worker 原始消息，也不暴露 Artifact Store 裸路径。"),
         headerRefreshButton,
         QStringList()
             << uiText("任务历史")
@@ -176,4 +176,21 @@ QWidget* MainWindow::buildTaskQueuePage()
     layout->addWidget(bodySplitter, 1);
     page->setWidget(content);
     return page;
+}
+
+void MainWindow::cancelSelectedTask()
+{
+    if (!activeV2TaskId_.isEmpty() && worker_.isRunning()) {
+        aitrain::v2::TaskId taskId;
+        QString error;
+        if (!aitrain::v2::TaskId::parse(activeV2TaskId_, &taskId, &error)
+            || !v2Workspace_.requestTaskCancellation(taskId, &error)) {
+            QMessageBox::warning(this, uiText("任务队列"), error);
+            return;
+        }
+        worker_.cancel();
+        return;
+    }
+    QMessageBox::information(this, uiText("任务队列"),
+        uiText("只能取消当前 GUI 会话派发且仍在运行的 V2 任务。历史任务为只读。"));
 }

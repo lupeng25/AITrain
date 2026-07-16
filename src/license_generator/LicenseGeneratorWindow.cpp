@@ -1,6 +1,7 @@
 #include "LicenseGeneratorWindow.h"
 
 #include "aitrain/core/LicenseManager.h"
+#include "aitrain/core/LicenseSecurity.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -11,11 +12,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
-#include <QFileInfo>
 #include <QFormLayout>
 #include <QHBoxLayout>
-#include <QJsonDocument>
-#include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
@@ -35,20 +33,6 @@ QPushButton* primaryButton(const QString& text)
     return button;
 }
 
-bool writeJsonFile(const QString& path, const QJsonObject& object, QString* error)
-{
-    QDir().mkpath(QFileInfo(path).absolutePath());
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        if (error) {
-            *error = file.errorString();
-        }
-        return false;
-    }
-    file.write(QJsonDocument(object).toJson(QJsonDocument::Indented));
-    return true;
-}
-
 } // namespace
 
 LicenseGeneratorWindow::LicenseGeneratorWindow(QWidget* parent)
@@ -62,16 +46,16 @@ LicenseGeneratorWindow::LicenseGeneratorWindow(QWidget* parent)
 
     auto* title = new QLabel(QStringLiteral("离线注册码签发"));
     title->setObjectName(QStringLiteral("PageTitle"));
-    auto* hint = new QLabel(QStringLiteral("生成或加载 ECDSA P-256 私钥，输入客户名称和机器码后签发注册码。生成器默认不随客户包安装。"));
+    auto* hint = new QLabel(QStringLiteral("生成或加载由 Windows DPAPI（当前用户）保护的 ECDSA P-256 私钥，输入客户名称和机器码后签发注册码。生成器默认不随客户包安装，也不展示或导出明文私钥。"));
     hint->setObjectName(QStringLiteral("MutedText"));
     hint->setWordWrap(true);
 
     auto* keyRow = new QHBoxLayout;
     keyPathEdit_ = new QLineEdit;
     keyPathEdit_->setReadOnly(true);
-    keyPathEdit_->setPlaceholderText(QStringLiteral("尚未加载私钥文件"));
-    auto* loadKeyButton = new QPushButton(QStringLiteral("加载私钥"));
-    auto* generateKeyButton = primaryButton(QStringLiteral("生成私钥"));
+    keyPathEdit_->setPlaceholderText(QStringLiteral("尚未加载受保护私钥文件"));
+    auto* loadKeyButton = new QPushButton(QStringLiteral("加载受保护私钥"));
+    auto* generateKeyButton = primaryButton(QStringLiteral("生成受保护私钥"));
     keyRow->addWidget(keyPathEdit_, 1);
     keyRow->addWidget(loadKeyButton);
     keyRow->addWidget(generateKeyButton);
@@ -144,9 +128,9 @@ void LicenseGeneratorWindow::generateKeyFile()
 {
     const QString path = QFileDialog::getSaveFileName(
         this,
-        QStringLiteral("保存私钥文件"),
-        QDir::home().filePath(QStringLiteral("aitrain-license-private-key.json")),
-        QStringLiteral("JSON (*.json)"));
+        QStringLiteral("保存受保护私钥文件"),
+        QDir::home().filePath(QStringLiteral("aitrain-license-private-key.aitrainkey")),
+        QStringLiteral("AITrain protected key (*.aitrainkey)"));
     if (path.isEmpty()) {
         return;
     }
@@ -158,65 +142,38 @@ void LicenseGeneratorWindow::generateKeyFile()
         return;
     }
 
-    QJsonObject object;
-    object.insert(QStringLiteral("type"), QStringLiteral("aitrain-license-key"));
-    object.insert(QStringLiteral("curve"), QStringLiteral("P-256"));
-    object.insert(QStringLiteral("createdAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
-    object.insert(QStringLiteral("publicKey"), QString::fromLatin1(keyPair.publicKeyBase64));
-    object.insert(QStringLiteral("privateKey"), QString::fromLatin1(keyPair.privateKeyBase64));
-    if (!writeJsonFile(path, object, &error)) {
+    if (!aitrain::writeProtectedLicenseKeyFile(path, keyPair, &error)) {
         QMessageBox::critical(this, QStringLiteral("保存私钥"), error);
         return;
     }
 
     updateKeyFields(keyPair.privateKeyBase64, keyPair.publicKeyBase64, path);
-    setStatus(QStringLiteral("私钥已生成并保存。请妥善保管该文件，不要随客户包分发。"));
+    setStatus(QStringLiteral("私钥已由 Windows DPAPI 加密并以仅当前用户 ACL 保存。请不要随客户包分发。"));
 }
 
 void LicenseGeneratorWindow::loadKeyFile()
 {
     const QString path = QFileDialog::getOpenFileName(
         this,
-        QStringLiteral("加载私钥文件"),
+        QStringLiteral("加载受保护私钥文件"),
         QDir::homePath(),
-        QStringLiteral("JSON or key files (*.json *.key *.txt);;All files (*.*)"));
+        QStringLiteral("AITrain protected key (*.aitrainkey);;All files (*.*)"));
     if (path.isEmpty()) {
         return;
     }
 
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
-        QMessageBox::critical(this, QStringLiteral("加载私钥"), file.errorString());
-        return;
-    }
-    const QByteArray data = file.readAll();
-    QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(data, &parseError);
-
-    QByteArray privateKey;
-    QByteArray publicKey;
-    if (document.isObject()) {
-        const QJsonObject object = document.object();
-        privateKey = object.value(QStringLiteral("privateKey")).toString().toLatin1();
-        publicKey = object.value(QStringLiteral("publicKey")).toString().toLatin1();
-    } else {
-        privateKey = data.trimmed();
-    }
     QString error;
-    if (privateKey.isEmpty()) {
-        QMessageBox::critical(this, QStringLiteral("加载私钥"), QStringLiteral("文件中没有 privateKey 字段。"));
+    aitrain::LicenseKeyPair keyPair;
+    if (!aitrain::readProtectedLicenseKeyFile(path, &keyPair, &error)) {
+        QMessageBox::critical(
+            this,
+            QStringLiteral("加载私钥"),
+            QStringLiteral("无法解密受保护私钥。文件必须由当前 Windows 用户生成且未被修改。\n\n%1").arg(error));
         return;
     }
-    if (publicKey.isEmpty()) {
-        publicKey = aitrain::publicKeyFromPrivateKey(privateKey, &error);
-        if (publicKey.isEmpty()) {
-            QMessageBox::critical(this, QStringLiteral("加载私钥"), error);
-            return;
-        }
-    }
 
-    updateKeyFields(privateKey, publicKey, path);
-    setStatus(QStringLiteral("私钥已加载。"));
+    updateKeyFields(keyPair.privateKeyBase64, keyPair.publicKeyBase64, path);
+    setStatus(QStringLiteral("受保护私钥已由当前 Windows 用户解密到进程内存。"));
 }
 
 void LicenseGeneratorWindow::copyPublicKey()

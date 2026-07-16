@@ -53,11 +53,13 @@ QWidget* MainWindow::buildDashboardPage()
     auto* projectCard = createMetricCard(QStringLiteral("项目"), QStringLiteral("未打开"), QStringLiteral("当前本地工作目录"));
     dashboardProjectValue_ = projectCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
     grid->addWidget(projectCard, 0, 0);
-    auto* datasetCard = createMetricCard(QStringLiteral("数据集"), QStringLiteral("0"), QStringLiteral("已登记并校验的数据集"));
+    auto* datasetCard = createMetricCard(QStringLiteral("数据集"), QStringLiteral("0"), QStringLiteral("V2 快照 / 数据集"));
     dashboardDatasetValue_ = datasetCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
+    dashboardDatasetValue_->setObjectName(QStringLiteral("DashboardDatasetSummaryV2"));
     grid->addWidget(datasetCard, 0, 1);
     auto* taskCard = createMetricCard(QStringLiteral("任务"), QStringLiteral("0"), QStringLiteral("训练、校验、导出、推理记录"));
     dashboardTaskValue_ = taskCard->findChild<QLabel*>(QStringLiteral("MetricValue"));
+    dashboardTaskValue_->setObjectName(QStringLiteral("DashboardTaskSummaryV2"));
     grid->addWidget(taskCard, 0, 2);
 
     auto* bottom = new QWidget;
@@ -144,7 +146,7 @@ QWidget* MainWindow::buildProjectPage()
     contextLabel->setObjectName(QStringLiteral("WorkspaceToolbarTitle"));
     projectConsoleStatusLabel_ = inlineStatusLabel(QStringLiteral("未打开项目。"));
     projectConsoleStatusLabel_->setObjectName(QStringLiteral("WorkspaceToolbarStatus"));
-    auto* policyStatus = inlineStatusLabel(QStringLiteral("项目会生成 datasets、runs、models 和 project.sqlite。"));
+    auto* policyStatus = inlineStatusLabel(QStringLiteral("V2 工作区会生成 artifacts、logs 和 project-v2.sqlite。"));
     policyStatus->setObjectName(QStringLiteral("WorkspaceToolbarMeta"));
     allowLabelToShrink(projectConsoleStatusLabel_);
     allowLabelToShrink(policyStatus);
@@ -186,7 +188,7 @@ QWidget* MainWindow::buildProjectPage()
     actionLayout->setContentsMargins(10, 8, 10, 8);
     actionLayout->setHorizontalSpacing(10);
     actionLayout->setVerticalSpacing(8);
-    auto* projectActionHint = mutedLabel(QStringLiteral("打开项目后，数据集、任务、导出记录和环境检查都会写入 project.sqlite。"));
+    auto* projectActionHint = mutedLabel(QStringLiteral("打开项目后，项目摘要只读取 project-v2.sqlite 中已持久化的 V2 事实。"));
     allowLabelToShrink(projectActionHint);
     actionLayout->addWidget(projectActionHint, 0, 0);
     actionLayout->setColumnStretch(0, 1);
@@ -203,10 +205,13 @@ QWidget* MainWindow::buildProjectPage()
     projectSqliteSummaryLabel_ = sqliteCard->findChild<QLabel*>(QStringLiteral("CompactMetricValue"));
     auto* datasetCard = createCompactSummaryCard(QStringLiteral("数据集"), QStringLiteral("0"), QStringLiteral("已登记数据集"));
     projectDatasetSummaryLabel_ = datasetCard->findChild<QLabel*>(QStringLiteral("CompactMetricValue"));
+    projectDatasetSummaryLabel_->setObjectName(QStringLiteral("ProjectDatasetSummaryV2"));
     auto* taskCard = createCompactSummaryCard(QStringLiteral("任务"), QStringLiteral("0"), QStringLiteral("训练、校验、导出、推理"));
     projectTaskSummaryLabel_ = taskCard->findChild<QLabel*>(QStringLiteral("CompactMetricValue"));
-    auto* exportCard = createCompactSummaryCard(QStringLiteral("模型导出"), QStringLiteral("0"), QStringLiteral("已记录导出产物"));
+    projectTaskSummaryLabel_->setObjectName(QStringLiteral("ProjectTaskSummaryV2"));
+    auto* exportCard = createCompactSummaryCard(QStringLiteral("模型包"), QStringLiteral("0"), QStringLiteral("V2 已登记模型包"));
     projectExportSummaryLabel_ = exportCard->findChild<QLabel*>(QStringLiteral("CompactMetricValue"));
+    projectExportSummaryLabel_->setObjectName(QStringLiteral("ProjectModelPackageSummaryV2"));
     summaryGrid->addWidget(pathCard, 0, 0, 1, 2);
     summaryGrid->addWidget(sqliteCard, 0, 2);
     summaryGrid->addWidget(datasetCard, 1, 0);
@@ -221,7 +226,7 @@ QWidget* MainWindow::buildProjectPage()
     auto* structure = new QPlainTextEdit;
     structure->setReadOnly(true);
     structure->setMaximumHeight(170);
-    structure->setPlainText(QStringLiteral("datasets/\n  raw/\n  normalized/\nruns/\n  <task-id>/\nmodels/\n  exported/\nproject.sqlite"));
+    structure->setPlainText(QStringLiteral("artifacts/\n  committed/\n  .staging/\nlogs/\nproject-v2.sqlite"));
     structurePanel->bodyLayout()->addWidget(structure);
     structurePanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("项目页只负责创建和打开工作区；训练、导出和推理仍通过 Worker 执行。")));
     summaryPanel->bodyLayout()->addWidget(structurePanel);

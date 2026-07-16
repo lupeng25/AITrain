@@ -4,11 +4,9 @@
 #include "aitrain/core/Deployment.h"
 #include "aitrain/core/DetectionDataset.h"
 #include "aitrain/core/DetectionTrainer.h"
-#include "aitrain/core/JsonProtocol.h"
 #include "aitrain/core/LicenseManager.h"
 #include "aitrain/core/OcrRecDataset.h"
-#include "aitrain/core/ProjectRepository.h"
-#include "aitrain/core/ProductWorkflow.h"
+#include "aitrain/core/WorkflowResult.h"
 #include "aitrain/core/SegmentationDataset.h"
 #include "aitrain/core/WorkerProtocol.h"
 
@@ -120,6 +118,16 @@ void writeTinySegmentationDataset(const QString& root)
     writeTinyPng(QDir(root).filePath(QStringLiteral("images/val/a.png")));
     writeTextFile(QDir(root).filePath(QStringLiteral("labels/train/a.txt")), QStringLiteral("0 0.125 0.125 0.875 0.125 0.875 0.875 0.125 0.875\n"));
     writeTextFile(QDir(root).filePath(QStringLiteral("labels/val/a.txt")), QStringLiteral("0 0.125 0.125 0.875 0.125 0.875 0.875 0.125 0.875\n"));
+}
+
+void writeTinyObbDataset(const QString& root)
+{
+    writeTextFile(QDir(root).filePath(QStringLiteral("data.yaml")), QStringLiteral("nc: 2\nnames: [ship, plane]\n"));
+    writeTinyPng(QDir(root).filePath(QStringLiteral("images/train/a.png")));
+    writeTinyPng(QDir(root).filePath(QStringLiteral("images/val/a.png")));
+    const QString plane = QStringLiteral("1 0.25 0.25 0.75 0.25 0.75 0.75 0.25 0.75\n");
+    writeTextFile(QDir(root).filePath(QStringLiteral("labels/train/a.txt")), plane);
+    writeTextFile(QDir(root).filePath(QStringLiteral("labels/val/a.txt")), plane);
 }
 
 void writeTinySemanticMaskDataset(const QString& root)
@@ -325,31 +333,66 @@ void writeFakeUltralyticsPackage(const QString& root)
     writeTextFile(
         QDir(root).filePath(QStringLiteral("ultralytics/__init__.py")),
         QStringLiteral(
-            "from pathlib import Path\n"
-            "from types import SimpleNamespace\n"
+             "from pathlib import Path\n"
+             "from types import SimpleNamespace\n"
+             "import time\n"
             "\n"
-            "class YOLO:\n"
-            "    def __init__(self, model):\n"
-            "        self.model = str(model)\n"
+             "class YOLO:\n"
+             "    def __init__(self, model):\n"
+             "        self.model = str(model)\n"
+             "        lower = self.model.lower()\n"
+             "        self.family = 'segmentation' if ('-seg' in lower or 'segment' in lower) else ('obb' if '-obb' in lower else 'detection')\n"
+             "        model_path = Path(self.model)\n"
+             "        if model_path.is_file():\n"
+             "            contents = model_path.read_text(encoding='utf-8', errors='ignore').lower()\n"
+             "            self.family = 'segmentation' if 'segmentation' in contents else ('obb' if 'obb' in contents else self.family)\n"
             "\n"
-            "    def train(self, data, epochs, imgsz, batch, device, workers, project, name, exist_ok, verbose):\n"
+            "    def add_callback(self, event, callback):\n"
+            "        return None\n"
+            "\n"
+             "    def train(self, **kwargs):\n"
+             "        if 'fail' in self.model.lower():\n"
+             "            raise RuntimeError('intentional fake Ultralytics training failure')\n"
+             "        if 'slow' in self.model.lower():\n"
+             "            time.sleep(10)\n"
+             "        project = kwargs.get('project', 'runs')\n"
+            "        name = kwargs.get('name', 'train')\n"
             "        save_dir = Path(project) / name\n"
             "        weights_dir = save_dir / 'weights'\n"
             "        weights_dir.mkdir(parents=True, exist_ok=True)\n"
-            "        (weights_dir / 'best.pt').write_text('fake best checkpoint\\n', encoding='utf-8')\n"
-            "        (weights_dir / 'last.pt').write_text('fake last checkpoint\\n', encoding='utf-8')\n"
-            "        (save_dir / 'results.csv').write_text(\n"
-            "            'epoch,train/box_loss,train/cls_loss,train/dfl_loss,metrics/precision(B),metrics/recall(B),metrics/mAP50(B),metrics/mAP50-95(B)\\n'\n"
-            "            '1,0.2,0.3,0.4,0.81,0.72,0.63,0.54\\n',\n"
-            "            encoding='utf-8')\n"
+             "        (weights_dir / 'best.pt').write_text(f'fake {self.family} best checkpoint\\n', encoding='utf-8')\n"
+             "        (weights_dir / 'last.pt').write_text(f'fake {self.family} last checkpoint\\n', encoding='utf-8')\n"
             "        (save_dir / 'args.yaml').write_text('model: fake\\n', encoding='utf-8')\n"
             "        return SimpleNamespace(save_dir=str(save_dir))\n"
             "\n"
-            "    def export(self, format, imgsz, device):\n"
+            "    def export(self, format, imgsz, device, **kwargs):\n"
             "        model_path = Path(self.model)\n"
             "        output_path = model_path.with_suffix('.onnx') if model_path.suffix else Path('model.onnx')\n"
             "        output_path.parent.mkdir(parents=True, exist_ok=True)\n"
-            "        output_path.write_text('fake onnx\\n', encoding='utf-8')\n"
+            "        import onnx\n"
+            "        from onnx import TensorProto, helper\n"
+            "        input_info = helper.make_tensor_value_info('images', TensorProto.FLOAT, [1, 3, 32, 32])\n"
+             "        if self.family == 'segmentation':\n"
+             "            output_info = helper.make_tensor_value_info('output0', TensorProto.FLOAT, [1, 37, 1])\n"
+             "            proto_info = helper.make_tensor_value_info('output1', TensorProto.FLOAT, [1, 32, 8, 8])\n"
+             "            values = helper.make_tensor('values', TensorProto.FLOAT, [1, 37, 1], [16.0, 16.0, 8.0, 8.0, 0.10] + [0.0] * 32)\n"
+             "            proto = helper.make_tensor('proto', TensorProto.FLOAT, [1, 32, 8, 8], [0.0] * (32 * 8 * 8))\n"
+             "            nodes = [helper.make_node('Constant', inputs=[], outputs=['output0'], value=values), helper.make_node('Constant', inputs=[], outputs=['output1'], value=proto)]\n"
+             "            outputs = [output_info, proto_info]\n"
+             "        elif self.family == 'obb':\n"
+             "            output_info = helper.make_tensor_value_info('output0', TensorProto.FLOAT, [1, 7, 1])\n"
+             "            values = helper.make_tensor('values', TensorProto.FLOAT, [1, 7, 1], [16.0, 16.0, 12.0, 8.0, 0.10, 0.90, 0.25])\n"
+             "            nodes = [helper.make_node('Constant', inputs=[], outputs=['output0'], value=values)]\n"
+             "            outputs = [output_info]\n"
+             "        else:\n"
+             "            output_info = helper.make_tensor_value_info('output0', TensorProto.FLOAT, [1, 5, 1])\n"
+             "            values = helper.make_tensor('values', TensorProto.FLOAT, [1, 5, 1], [16.0, 16.0, 8.0, 8.0, 0.10])\n"
+             "            nodes = [helper.make_node('Constant', inputs=[], outputs=['output0'], value=values)]\n"
+             "            outputs = [output_info]\n"
+             "        graph = helper.make_graph(nodes, 'aitrain_fake_yolo', [input_info], outputs)\n"
+            "        model = helper.make_model(graph, producer_name='aitrain-test', opset_imports=[helper.make_opsetid('', 13)])\n"
+            "        model.ir_version = 8\n"
+            "        onnx.save(model, output_path)\n"
             "        return str(output_path)\n"
             "\n"
             "    def val(self, **kwargs):\n"

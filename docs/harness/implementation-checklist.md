@@ -9,9 +9,9 @@
 - 如果是 UI 任务，读取 `docs/harness/ui-guidelines.md`。
 - 确认是否会修改公共接口：
   - `CapabilityRegistry.h`
-  - `JsonProtocol.h`
-  - `TaskModels.h`
-  - `ProjectRepository.h`
+  - `WorkerProtocol.h`（V2 控制面）
+  - `StorageV2.h`（SQLite V2 元数据）
+  - `WorkflowResult.h`（跨模块结构化结果）
 - 确认是否需要新增测试。
 
 ## 开发中
@@ -65,7 +65,7 @@ C:\Users\73200\.codex\skills\qt-gui-walkthrough\scripts\qt_walkthrough.ps1 `
   -Height 820
 ```
 
-Tab-level areas such as `数据集 > 质量与复核`, `模型库 > 评估报告`, `部署验证 > 模型导出 / 推理验证`, `系统设置 > 内置能力 / 应用设置`, and `环境 > 交付证据` should be covered by focused QtTest or manual notes when touched.
+涉及 `数据集 > 质量与复核`、`模型库 > 评估报告`、`部署验证 > 部署验证 / 推理验证`、`系统设置 > 内置能力 / 应用设置` 与 `环境 > 交付证据` 时，应增加定向 QtTest 或手工验收记录。
 
 验收重点：关键操作按钮不能被非全屏首屏裁切；长路径、长状态文本和表格不能造成横向溢出；允许页面纵向滚动。
 

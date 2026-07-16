@@ -4,10 +4,13 @@
 #include "MainWindow.h"
 #include "RegistrationDialog.h"
 #include "aitrain/core/LicenseManager.h"
+#include "aitrain/core/LicenseSecurity.h"
 
 #include <QApplication>
 #include <QIcon>
+#include <QDir>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QTranslator>
 
 #include <memory>
@@ -23,10 +26,15 @@ int main(int argc, char* argv[])
     AppStyle::apply(app);
 
     const QByteArray publicKeyBase64(AITRAIN_LICENSE_PUBLIC_KEY_B64);
+    const QString trustedClockPath = QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
+        .filePath(QStringLiteral("license/trusted-utc.dat"));
     QSettings settings;
     const QString storedToken = settings.value(QStringLiteral("license/token")).toString();
     aitrain::LicenseValidationResult license =
-        aitrain::validateLicenseToken(storedToken, publicKeyBase64);
+        aitrain::validateLicenseTokenWithTrustedClock(
+            storedToken,
+            publicKeyBase64,
+            trustedClockPath);
     if (!license.isValid()) {
         RegistrationDialog dialog(publicKeyBase64);
         dialog.setWindowIcon(QIcon(QStringLiteral(":/icons/app.ico")));

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -21,11 +22,46 @@ if str(DETECTION_ADAPTER_DIR) not in sys.path:
     sys.path.insert(0, str(DETECTION_ADAPTER_DIR))
 
 import ultralytics_trainer as shared  # type: ignore  # noqa: E402
+from adapter_event_channel_v2 import AdapterEventChannelV2, event_channel_from_environment  # noqa: E402
+from adapter_sdk import AdapterSdk  # noqa: E402
+from dataset_snapshot_v2 import materialize_dataset_snapshot_v2  # noqa: E402
 from trainer_protocol import configure_stdio, exception_details  # noqa: E402
 
 
 configure_stdio()
 EVALUATION_SOURCE = "ultralytics_official_val"
+BACKEND_ID = "ultralytics_yolo_eval"
+
+
+_adapter: AdapterSdk | None = None
+_adapter_backend = ""
+_event_channel: AdapterEventChannelV2 | None = None
+
+
+def configure_adapter(backend: str | None = None) -> None:
+    """Select JSONL fallback or the V2 authenticated event channel once."""
+    global _adapter, _adapter_backend, _event_channel
+    selected_backend = backend or BACKEND_ID
+    if _event_channel is None and os.environ.get("AITRAIN_EVENT_PORT"):
+        _event_channel = event_channel_from_environment()
+        _event_channel.connect()
+    if _adapter is None or _adapter_backend != selected_backend:
+        sink = _event_channel.emit_legacy_event if _event_channel is not None else None
+        _adapter = AdapterSdk(selected_backend, event_sink=sink)
+        _adapter_backend = selected_backend
+
+
+def close_adapter() -> None:
+    global _event_channel
+    if _event_channel is not None:
+        _event_channel.close()
+        _event_channel = None
+
+
+def active_adapter() -> AdapterSdk:
+    configure_adapter(BACKEND_ID)
+    assert _adapter is not None
+    return _adapter
 
 
 VAL_ARG_TYPES: dict[str, str] = {
@@ -70,9 +106,31 @@ IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 
 
 def emit(event_type: str, **payload: Any) -> None:
-    message = {"type": event_type, "timestamp": time.time()}
-    message.update(payload)
-    print(json.dumps(message, ensure_ascii=False), flush=True)
+    payload.pop("backend", None)
+    adapter = active_adapter()
+    if event_type == "log":
+        adapter.emit_log(str(payload.pop("message", "")), level=str(payload.pop("level", "info")), **payload)
+    elif event_type == "progress":
+        adapter.emit_progress(float(payload.pop("percent", 0)), message=str(payload.pop("message", "")), **payload)
+    elif event_type == "metric":
+        adapter.emit_metric(str(payload.pop("name", "")), float(payload.pop("value", 0)), **payload)
+    elif event_type == "artifact":
+        adapter.emit_artifact_candidate(
+            str(payload.pop("kind", "artifact")),
+            str(payload.pop("path", "")),
+            message=str(payload.pop("message", "")),
+            **payload,
+        )
+    elif event_type == "completed":
+        adapter.emit_completed(str(payload.pop("message", "official evaluation completed")), **payload)
+    elif event_type == "failed":
+        adapter.emit_failed(
+            str(payload.pop("message", "official evaluation failed")),
+            str(payload.pop("code", "ultralytics_evaluator_failed")),
+            payload.pop("details", {}),
+        )
+    else:
+        raise ValueError(f"unsupported adapter event type: {event_type}")
 
 
 def read_request(path: Path) -> dict[str, Any]:
@@ -179,6 +237,19 @@ def class_names_from_data_yaml(dataset_path: Path) -> list[str]:
     except (TypeError, ValueError):
         count = 0
     return [f"class_{index}" for index in range(max(0, count))]
+
+
+def normalize_evaluation_data_yaml(
+    dataset_path: Path,
+    output_path: Path,
+    snapshot_manifest: str | Path | None = None,
+) -> Path:
+    """Normalize evaluator input without weakening an immutable snapshot boundary."""
+    return shared.normalize_data_yaml(
+        dataset_path,
+        output_path,
+        require_snapshot_containment=bool(str(snapshot_manifest or "").strip()),
+    )
 
 
 def build_val_kwargs(options: dict[str, Any], data_yaml: Path, output_path: Path, dataset_path: Path) -> dict[str, Any]:
@@ -298,6 +369,32 @@ def official_artifacts(save_dir: Path) -> list[dict[str, str]]:
     return artifacts
 
 
+def emit_official_artifacts(artifacts: list[dict[str, str]], save_dir: Path) -> None:
+    """Emit only regular candidate files on V2; retain the V1 run-directory frame.
+
+    `TaskExecutionHostV2` deliberately refuses directory candidates because it
+    cannot make an immutable promise about a directory whose contents may still
+    change. The V1 Worker historically indexes the official run directory as a
+    single artifact, so that JSONL-only behavior remains available during the
+    destructive migration.
+    """
+    if _event_channel is None:
+        emit("artifact", name="ultralytics_official_val", kind="official_run_dir", path=str(save_dir))
+        return
+    for index, artifact in enumerate(artifacts, start=1):
+        path = Path(str(artifact.get("path") or ""))
+        if not path.is_file():
+            continue
+        original_kind = str(artifact.get("kind") or "official_artifact")
+        emit(
+            "artifact",
+            name=str(artifact.get("name") or path.name),
+            kind=f"official_val_{index:03d}_{original_kind}",
+            path=str(path),
+            message="Official Ultralytics validation output",
+        )
+
+
 def decision_summary(task_type: str, metrics: dict[str, float], sample_count: int) -> dict[str, Any]:
     primary = "maskMap50" if task_type == "segmentation" and "maskMap50" in metrics else "mAP50"
     return {
@@ -393,6 +490,21 @@ def run(request: dict[str, Any]) -> int:
     shared.prepend_python_paths(options)
 
     output_path.mkdir(parents=True, exist_ok=True)
+    snapshot_manifest = str(options.get("datasetSnapshotManifest") or request.get("datasetSnapshotManifest") or "").strip()
+    snapshot_staging = str(options.get("datasetSnapshotStagingPath") or request.get("datasetSnapshotStagingPath") or "").strip()
+    if bool(snapshot_manifest) != bool(snapshot_staging):
+        report_path = write_failure_report(output_path, request,
+            "Dataset Snapshot V2 requires both manifest and staging paths.", "dataset_snapshot_request_invalid", {})
+        emit("failed", code="dataset_snapshot_request_invalid", reportPath=str(report_path), message="Dataset Snapshot V2 request is incomplete.")
+        return 2
+    if snapshot_manifest:
+        try:
+            dataset_path = materialize_dataset_snapshot_v2(dataset_path, snapshot_manifest, snapshot_staging)
+        except Exception as exc:
+            report_path = write_failure_report(output_path, request,
+                "Dataset Snapshot V2 materialization failed.", "dataset_snapshot_invalid", exception_details(exc))
+            emit("failed", code="dataset_snapshot_invalid", reportPath=str(report_path), message="Dataset Snapshot V2 materialization failed.")
+            return 2
     if not model_path.exists():
         report_path = write_failure_report(output_path, request, f"model path does not exist: {model_path}", "model_missing", {})
         emit("failed", code="model_missing", reportPath=str(report_path), message="Model path does not exist.")
@@ -403,7 +515,7 @@ def run(request: dict[str, Any]) -> int:
         return 2
 
     try:
-        data_yaml = shared.normalize_data_yaml(dataset_path, output_path)
+        data_yaml = normalize_evaluation_data_yaml(dataset_path, output_path, snapshot_manifest)
         val_kwargs = build_val_kwargs(options, data_yaml, output_path, dataset_path)
     except Exception as exc:
         report_path = write_failure_report(output_path, request, str(exc), "official_val_args_invalid", exception_details(exc))
@@ -470,7 +582,9 @@ def run(request: dict[str, Any]) -> int:
         "split": split,
         "runtime": EVALUATION_SOURCE,
         "evaluationSource": EVALUATION_SOURCE,
-        "datasetSnapshotId": int(options.get("datasetSnapshotId") or 0),
+        # V2 snapshot identifiers are UUID strings.  Keep lineage opaque to the
+        # official evaluator instead of applying the legacy integer conversion.
+        "datasetSnapshotId": str(options.get("datasetSnapshotId") or ""),
         "datasetSnapshotHash": str(options.get("datasetSnapshotHash") or ""),
         "datasetSnapshotManifest": str(options.get("datasetSnapshotManifest") or ""),
         "scaffold": False,
@@ -496,7 +610,8 @@ def run(request: dict[str, Any]) -> int:
     write_summary(summary_path, report)
     emit("artifact", name="evaluation_report.json", kind="evaluation_report", path=str(report_path))
     emit("artifact", name="ultralytics_official_metrics.json", kind="official_metrics", path=str(metrics_path))
-    emit("artifact", name="ultralytics_official_val", kind="official_run_dir", path=str(save_dir))
+    emit("artifact", name=model_path.name, kind="checkpoint", path=str(model_path), message="Verified source checkpoint for downstream export")
+    emit_official_artifacts(artifacts, save_dir)
     emit("completed", reportPath=str(report_path), metrics=metrics, officialRunDir=str(save_dir))
     return 0
 
@@ -506,19 +621,23 @@ def main() -> int:
     parser.add_argument("--request", required=True, type=Path)
     args = parser.parse_args()
     try:
-        request = read_request(args.request)
-    except Exception as exc:
-        output_path = Path("aitrain-yolo-evaluation").resolve()
-        report_path = write_failure_report(output_path, {}, f"failed to read evaluation request: {exc}", "bad_request", exception_details(exc))
-        emit("failed", code="bad_request", reportPath=str(report_path), message=f"failed to read evaluation request: {exc}")
-        return 2
-    try:
-        return run(request)
-    except Exception as exc:
-        output_path = Path(str(request.get("outputPath") or "aitrain-yolo-evaluation")).resolve()
-        report_path = write_failure_report(output_path, request, f"Unhandled Ultralytics evaluation failure: {exc}", "ultralytics_evaluator_failed", exception_details(exc))
-        emit("failed", code="ultralytics_evaluator_failed", reportPath=str(report_path), message=f"Unhandled Ultralytics evaluation failure: {exc}")
-        return 5
+        configure_adapter(BACKEND_ID)
+        try:
+            request = read_request(args.request)
+        except Exception as exc:
+            output_path = Path("aitrain-yolo-evaluation").resolve()
+            report_path = write_failure_report(output_path, {}, f"failed to read evaluation request: {exc}", "bad_request", exception_details(exc))
+            emit("failed", code="bad_request", reportPath=str(report_path), message=f"failed to read evaluation request: {exc}")
+            return 2
+        try:
+            return run(request)
+        except Exception as exc:
+            output_path = Path(str(request.get("outputPath") or "aitrain-yolo-evaluation")).resolve()
+            report_path = write_failure_report(output_path, request, f"Unhandled Ultralytics evaluation failure: {exc}", "ultralytics_evaluator_failed", exception_details(exc))
+            emit("failed", code="ultralytics_evaluator_failed", reportPath=str(report_path), message=f"Unhandled Ultralytics evaluation failure: {exc}")
+            return 5
+    finally:
+        close_adapter()
 
 
 if __name__ == "__main__":

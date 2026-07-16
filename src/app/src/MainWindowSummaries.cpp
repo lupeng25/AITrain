@@ -1,9 +1,12 @@
 #include "MainWindow.h"
 
+#include "ProjectSummaryPresenterV2.h"
+
 #include "EvaluationReportView.h"
 #include "InfoPanel.h"
 #include "LanguageSupport.h"
 #include "MainWindowSupport.h"
+#include "WorkspaceRouter.h"
 #include "aitrain/core/CapabilityRegistry.h"
 #include "aitrain/core/DetectionTrainer.h"
 
@@ -69,6 +72,12 @@ void MainWindow::showPage(int pageIndex, const QString& title)
 {
     ensureWorkspacePage(pageIndex);
     stack_->setCurrentIndex(pageIndex);
+    if (workspaceRouter_) {
+        workspaceRouter_->synchronize(pageIndex, title);
+    }
+    if (pageIndex == TrainingPage) {
+        loadCapabilityCombos();
+    }
     pageTitle_->setText(title);
     pageCaption_->setText(QStringLiteral("%1 / %2")
         .arg(currentProjectName_.isEmpty() ? uiText("本地工作台") : currentProjectName_, title));
@@ -185,10 +194,6 @@ void MainWindow::ensureWorkspacePage(int pageIndex)
     default: return;
     }
 
-    if (pageIndex == DatasetPage || pageIndex == TrainingPage) {
-        loadCapabilityCombos();
-    }
-
     page->setProperty("workspaceInitialized", true);
     stack_->removeWidget(placeholder);
     delete placeholder;
@@ -218,7 +223,8 @@ void MainWindow::updateEnvironmentTable(const QJsonObject& payload)
             hasWarning = true;
         }
     };
-    const auto appendRow = [this, &payload, &markStatus](const QString& name, const QString& status, const QString& message, const QJsonObject& details = {}) {
+    const auto appendRow = [this, &markStatus](const QString& name, const QString& status, const QString& message, const QJsonObject& details = {}) {
+        Q_UNUSED(details)
         markStatus(status);
         const int row = environmentTable_->rowCount();
         environmentTable_->insertRow(row);
@@ -227,19 +233,6 @@ void MainWindow::updateEnvironmentTable(const QJsonObject& payload)
         statusItem->setData(Qt::UserRole, status);
         environmentTable_->setItem(row, 1, statusItem);
         environmentTable_->setItem(row, 2, new QTableWidgetItem(message));
-
-        if (repository_.isOpen()) {
-            aitrain::EnvironmentCheckRecord record;
-            record.name = name;
-            record.status = status;
-            record.message = message;
-            if (!details.isEmpty()) {
-                record.detailsJson = QString::fromUtf8(QJsonDocument(details).toJson(QJsonDocument::Compact));
-            }
-            record.checkedAt = QDateTime::fromString(payload.value(QStringLiteral("checkedAt")).toString(), Qt::ISODateWithMs);
-            QString error;
-            repository_.insertEnvironmentCheck(record, &error);
-        }
     };
 
     environmentTable_->setRowCount(0);
@@ -307,11 +300,20 @@ void MainWindow::updateEnvironmentTable(const QJsonObject& payload)
 
 void MainWindow::updateProjectSummary()
 {
-    const bool hasProject = !currentProjectPath_.isEmpty() && repository_.isOpen();
+    const bool workspaceOpen = !currentProjectPath_.isEmpty() && v2Workspace_.isOpen();
+    if (workspaceOpen) {
+        projectSummaryPresenter_->refresh();
+    } else {
+        projectSummaryPresenter_->clear();
+    }
+    const ProjectSummaryViewModelV2& summary = projectSummaryPresenter_->viewModel();
+    const bool hasProject = workspaceOpen && summary.available;
     if (projectConsoleStatusLabel_) {
         projectConsoleStatusLabel_->setText(hasProject
             ? uiText("已打开：%1").arg(currentProjectName_)
-            : uiText("未打开项目。"));
+            : (workspaceOpen
+                    ? uiText("V2 项目汇总读取失败：%1").arg(projectSummaryPresenter_->lastError())
+                    : uiText("未打开项目。")));
     }
     if (projectPathSummaryLabel_) {
         projectPathSummaryLabel_->setText(hasProject
@@ -322,26 +324,28 @@ void MainWindow::updateProjectSummary()
             : QString());
     }
     if (projectSqliteSummaryLabel_) {
-        projectSqliteSummaryLabel_->setText(hasProject ? uiText("已连接") : uiText("未连接"));
+        projectSqliteSummaryLabel_->setText(hasProject ? uiText("V2 已连接") : uiText("未连接"));
     }
 
-    int datasetCount = 0;
-    int taskCount = 0;
-    int exportCount = 0;
-    if (hasProject) {
-        QString error;
-        datasetCount = repository_.recentDatasets(200, &error).size();
-        taskCount = repository_.recentTasks(200, &error).size();
-        exportCount = repository_.recentExports(200, &error).size();
-    }
     if (projectDatasetSummaryLabel_) {
-        projectDatasetSummaryLabel_->setText(QString::number(datasetCount));
+        projectDatasetSummaryLabel_->setText(QString::number(summary.datasetCount));
+        projectDatasetSummaryLabel_->setToolTip(uiText("版本 %1，快照 %2")
+            .arg(summary.datasetVersionCount)
+            .arg(summary.datasetSnapshotCount));
     }
     if (projectTaskSummaryLabel_) {
-        projectTaskSummaryLabel_->setText(QString::number(taskCount));
+        projectTaskSummaryLabel_->setText(QString::number(summary.taskCount));
+        projectTaskSummaryLabel_->setToolTip(uiText("活动 %1，成功 %2，失败 %3，取消 %4")
+            .arg(summary.activeTaskCount)
+            .arg(summary.succeededTaskCount)
+            .arg(summary.failedTaskCount)
+            .arg(summary.canceledTaskCount));
     }
     if (projectExportSummaryLabel_) {
-        projectExportSummaryLabel_->setText(QString::number(exportCount));
+        projectExportSummaryLabel_->setText(QString::number(summary.modelPackageCount));
+        projectExportSummaryLabel_->setToolTip(uiText("已校验模型包 %1；已提交产物 %2")
+            .arg(summary.verifiedModelPackageCount)
+            .arg(summary.committedArtifactCount));
     }
 }
 
@@ -516,7 +520,10 @@ void MainWindow::updateDeliveryAcceptanceSummary()
 
 void MainWindow::updateDashboardSummary()
 {
-    const bool hasProject = !currentProjectPath_.isEmpty() && repository_.isOpen();
+    updateProjectSummary();
+    const ProjectSummaryViewModelV2& summary = projectSummaryPresenter_->viewModel();
+    const bool hasProject = !currentProjectPath_.isEmpty()
+        && v2Workspace_.isOpen() && summary.available;
     if (dashboardProjectValue_) {
         dashboardProjectValue_->setText(hasProject ? currentProjectName_ : uiText("未打开"));
     }
@@ -526,36 +533,24 @@ void MainWindow::updateDashboardSummary()
             : uiText("未打开项目。先创建或打开本地项目，后续数据集、任务和模型产物都会写入项目目录。"));
     }
 
-    int datasetCount = 0;
-    int validDatasetCount = 0;
-    int taskCount = 0;
-    int exportCount = 0;
-    int modelVersionCount = 0;
-    if (hasProject) {
-        QString error;
-        const QVector<aitrain::DatasetRecord> datasets = repository_.recentDatasets(200, &error);
-        datasetCount = datasets.size();
-        for (const aitrain::DatasetRecord& dataset : datasets) {
-            if (dataset.validationStatus == QStringLiteral("valid")) {
-                ++validDatasetCount;
-            }
-        }
-        taskCount = repository_.recentTasks(200, &error).size();
-        exportCount = repository_.recentExports(200, &error).size();
-        modelVersionCount = repository_.recentModelVersions(200, &error).size();
-    }
-
     if (dashboardDatasetValue_) {
         dashboardDatasetValue_->setText(hasProject
-            ? QStringLiteral("%1 / %2").arg(validDatasetCount).arg(datasetCount)
+            ? QStringLiteral("%1 / %2").arg(summary.datasetSnapshotCount).arg(summary.datasetCount)
             : QStringLiteral("0"));
+        dashboardDatasetValue_->setToolTip(uiText("快照 / 数据集；版本 %1")
+            .arg(summary.datasetVersionCount));
     }
     if (dashboardTaskValue_) {
-        dashboardTaskValue_->setText(QString::number(taskCount));
+        dashboardTaskValue_->setText(QString::number(summary.taskCount));
+        dashboardTaskValue_->setToolTip(uiText("活动任务 %1；成功 %2；失败 %3；取消 %4")
+            .arg(summary.activeTaskCount)
+            .arg(summary.succeededTaskCount)
+            .arg(summary.failedTaskCount)
+            .arg(summary.canceledTaskCount));
     }
     if (dashboardModelValue_) {
         dashboardModelValue_->setText(hasProject
-            ? QStringLiteral("%1 / %2").arg(modelVersionCount).arg(exportCount)
+            ? QStringLiteral("%1 / %2").arg(summary.verifiedModelPackageCount).arg(summary.modelPackageCount)
             : QStringLiteral("0"));
     }
     if (dashboardCapabilityValue_) {
@@ -581,7 +576,6 @@ void MainWindow::updateDashboardSummary()
     if (dashboardEnvironmentValue_) {
         dashboardEnvironmentValue_->setText(environmentText);
     }
-    updateProjectSummary();
     updateCapabilitySummary();
     updateEnvironmentSummary();
 
@@ -589,14 +583,14 @@ void MainWindow::updateDashboardSummary()
         QString nextStep;
         if (!hasProject) {
             nextStep = uiText("先创建或打开一个本地项目。项目目录会集中保存数据集索引、任务历史、训练报告和模型产物。");
-        } else if (validDatasetCount == 0) {
-            nextStep = uiText("下一步：导入并校验 detection、segmentation 或 OCR Rec 数据集。只有通过校验的数据集会进入训练主流程。");
-        } else if (taskCount == 0) {
-            nextStep = uiText("下一步：进入训练实验，选择已校验数据集。平台会按任务类型优先选择官方 YOLO / OCR 后端。");
-        } else if (exportCount == 0) {
-            nextStep = uiText("下一步：在任务与产物中查看 checkpoint / report / ONNX，注册到模型库后再进入部署验证。");
+        } else if (summary.datasetSnapshotCount == 0) {
+            nextStep = uiText("下一步：导入数据并创建 V2 数据集快照。训练工作流只消费已登记的不可变快照。");
+        } else if (summary.taskCount == 0) {
+            nextStep = uiText("下一步：进入训练实验，选择已登记的数据集快照并启动官方后端工作流。");
+        } else if (summary.modelPackageCount == 0) {
+            nextStep = uiText("下一步：在任务与产物中检查工作流产物，并完成 V2 模型包登记后进入部署验证。");
         } else {
-            nextStep = uiText("项目已具备可复验闭环：数据集、任务历史和模型导出均已记录。可继续进入部署验证或追加实验。");
+            nextStep = uiText("项目已记录 V2 数据集快照、任务与模型包。可继续进入部署验证或追加实验。");
         }
         dashboardNextStepLabel_->setText(nextStep);
     }
@@ -617,25 +611,13 @@ void MainWindow::updateTrainingSelectionSummary()
         ? uiText("未选择")
         : (datasetName.isEmpty() ? compactPathForStatus(datasetPath, 36) : datasetName);
     const QString detailPathText = datasetPath.isEmpty() ? uiText("未选择") : compactPathForStatus(datasetPath, 92);
-    QString snapshotText = uiText("快照：未选择数据集");
-    QString snapshotManifestPath;
+    const QString snapshotId = dataQualitySnapshotIdEdit_ ? dataQualitySnapshotIdEdit_->text().trimmed() : QString();
+    const QString snapshotArtifactId = dataQualitySnapshotArtifactIdEdit_ ? dataQualitySnapshotArtifactIdEdit_->text().trimmed() : QString();
+    QString snapshotText = snapshotId.isEmpty()
+        ? uiText("快照：尚未选择 committed Snapshot 身份")
+        : uiText("快照：%1 | Artifact %2").arg(snapshotId.left(12), snapshotArtifactId.left(12));
     bool datasetReady = state_.dataset.currentValid && state_.dataset.currentPath == datasetPath && state_.dataset.currentFormat == datasetFormat;
-    if (!datasetPath.isEmpty() && repository_.isOpen()) {
-        QString error;
-        const aitrain::DatasetRecord dataset = repository_.datasetByRootPath(datasetPath, &error);
-        datasetReady = datasetReady
-            || (dataset.rootPath == datasetPath
-                && dataset.format == datasetFormat
-                && dataset.validationStatus == QStringLiteral("valid"));
-        const aitrain::DatasetSnapshotRecord snapshot = repository_.latestDatasetSnapshot(dataset.id, &error);
-        snapshotManifestPath = snapshot.manifestPath;
-        snapshotText = snapshot.id > 0
-            ? uiText("快照：#%1 | %2 文件 | hash %3")
-                .arg(snapshot.id)
-                .arg(snapshot.fileCount)
-                .arg(snapshot.contentHash.left(12))
-            : uiText("快照：暂无，启动训练时将自动创建。");
-    }
+    datasetReady = datasetReady && !snapshotId.isEmpty() && !snapshotArtifactId.isEmpty();
 
     if (trainingDatasetSummaryLabel_) {
         trainingDatasetSummaryLabel_->setText(datasetPath.isEmpty()
@@ -644,8 +626,8 @@ void MainWindow::updateTrainingSelectionSummary()
                 .arg(datasetFormatLabel(datasetFormat), state, headerPathText, snapshotText));
         trainingDatasetSummaryLabel_->setToolTip(datasetPath.isEmpty()
             ? QString()
-            : uiText("数据集：%1\n快照：%2")
-                .arg(fullPathText, QDir::toNativeSeparators(snapshotManifestPath)));
+            : uiText("数据集：%1\n%2")
+                .arg(fullPathText, snapshotText));
     }
     if (datasetDetailLabel_) {
         datasetDetailLabel_->setText(datasetPath.isEmpty()
@@ -682,17 +664,6 @@ void MainWindow::updateTrainingSelectionSummary()
             ? trainingBackendCombo_->currentData().toString()
             : defaultBackendForTask(currentTaskType());
         const QString model = modelPresetCombo_ ? modelPresetCombo_->currentText().trimmed() : QString();
-        const QJsonObject preflight = trainingPreflightReport(
-            datasetPath,
-            datasetFormat,
-            datasetReady,
-            snapshotManifestPath,
-            currentTaskType(),
-            backend,
-            model,
-            epochsEdit_ ? epochsEdit_->text().toInt() : 0,
-            batchEdit_ ? batchEdit_->text().toInt() : 0,
-            imageSizeEdit_ ? imageSizeEdit_->text().toInt() : 0);
         trainingRunSummaryLabel_->setText(uiText("运行摘要：%1 | 后端 %2 | 模型 %3 | epoch %4 / batch %5 / image %6")
             .arg(taskTypeLabel(currentTaskType()),
                 backend.isEmpty() ? uiText("未选择") : backend,
@@ -700,7 +671,11 @@ void MainWindow::updateTrainingSelectionSummary()
                 epochsEdit_ ? epochsEdit_->text() : QStringLiteral("-"),
                 batchEdit_ ? batchEdit_->text() : QStringLiteral("-"),
                 imageSizeEdit_ ? imageSizeEdit_->text() : QStringLiteral("-")));
-        trainingRunSummaryLabel_->setToolTip(trainingPreflightSummaryText(preflight));
+        trainingRunSummaryLabel_->setToolTip(uiText("训练只消费 V2 四重身份：Dataset %1 / Version %2 / Snapshot %3 / Artifact %4")
+            .arg(dataQualityDatasetIdEdit_ ? dataQualityDatasetIdEdit_->text().trimmed() : QString(),
+                dataQualityDatasetVersionIdEdit_ ? dataQualityDatasetVersionIdEdit_->text().trimmed() : QString(),
+                snapshotId,
+                snapshotArtifactId));
     }
 }
 

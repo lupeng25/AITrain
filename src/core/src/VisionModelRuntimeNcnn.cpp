@@ -993,6 +993,33 @@ QString inferNcnnModelFamily(const QString& paramPath)
     return config.modelFamily;
 }
 
+bool validateNcnnRuntimeModel(
+    const QString& paramPath,
+    const QJsonObject& runtimeOptions,
+    QString* error)
+{
+#ifndef AITRAIN_WITH_NCNN
+    Q_UNUSED(paramPath)
+    Q_UNUSED(runtimeOptions)
+    if (error) *error = ncnnBackendStatus().message;
+    return false;
+#else
+    if (!QFileInfo::exists(paramPath)) {
+        if (error) *error = QStringLiteral("NCNN param file does not exist: %1").arg(paramPath);
+        return false;
+    }
+    const NcnnRuntimeConfig config = resolveNcnnRuntimeConfig(paramPath, runtimeOptions);
+    if (!QFileInfo::exists(config.binPath)) {
+        if (error) *error = QStringLiteral("NCNN bin file does not exist: %1").arg(config.binPath);
+        return false;
+    }
+    const QString family = runtimeOptions.value(QStringLiteral("modelFamily")).toString();
+    if (!validateNcnnRuntimeConfig(config, family, error)) return false;
+    ncnn::Net net;
+    return loadNcnnNet(paramPath, config.binPath, &net, error);
+#endif
+}
+
 QVector<DetectionPrediction> predictDetectionNcnnRuntime(
     const QString& paramPath,
     const QString& imagePath,

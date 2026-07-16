@@ -1,9 +1,15 @@
 #include "MainWindow.h"
 
 #include "EvaluationReportView.h"
+#include "DiagnosticBundlePresenterV2.h"
+#include "EnvironmentCheckPresenterV2.h"
+#include "ModelRegistryPresenterV2.h"
 #include "InfoPanel.h"
 #include "LanguageSupport.h"
 #include "MainWindowSupport.h"
+#include "ProjectSummaryPresenterV2.h"
+#include "WorkspaceRouter.h"
+#include "TaskArtifactPresenterV2.h"
 #include "aitrain/core/CapabilityRegistry.h"
 #include "aitrain/core/DetectionTrainer.h"
 
@@ -53,9 +59,15 @@ using namespace aitrain_app;
 
 MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry, QWidget* parent)
     : QMainWindow(parent)
+    , v2QueryService_(&v2Workspace_)
     , licenseOwner_(licenseOwner)
     , licenseExpiry_(licenseExpiry)
 {
+    projectSummaryPresenter_ = new ProjectSummaryPresenterV2(&v2QueryService_, this);
+    taskArtifactPresenter_ = new TaskArtifactPresenterV2(&v2QueryService_, this);
+    diagnosticBundlePresenter_ = new DiagnosticBundlePresenterV2(&v2QueryService_, this);
+    environmentCheckPresenter_ = new EnvironmentCheckPresenterV2(&v2QueryService_, this);
+    modelRegistryPresenter_ = new ModelRegistryPresenterV2(&v2QueryService_, this);
     setWindowTitle(QStringLiteral("AITrain Studio"));
     setMinimumSize(1180, 760);
 
@@ -65,6 +77,7 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     rootLayout->setSpacing(0);
 
     sidebar_ = new Sidebar;
+    sidebar_->setObjectName(QStringLiteral("WorkspaceSidebar"));
     sidebar_->addSection(tr("工作台"));
     sidebar_->addItem(tr("总览"), DashboardPage);
     sidebar_->addItem(tr("项目"), ProjectPage);
@@ -88,6 +101,7 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     contentLayout->addWidget(buildPageHeading());
 
     stack_ = new QStackedWidget;
+    stack_->setObjectName(QStringLiteral("WorkspaceStack"));
     QWidget* dashboardPage = buildDashboardPage();
     dashboardPage->setProperty("workspaceInitialized", true);
     stack_->addWidget(dashboardPage);
@@ -106,60 +120,36 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     statusBar()->showMessage(tr("就绪"));
     statusBar()->setVisible(false);
 
-    connect(sidebar_, &Sidebar::pageRequested, this, &MainWindow::showPage);
+    workspaceRouter_ = new WorkspaceRouter(PageCount, this);
+    connect(sidebar_, &Sidebar::pageRequested, workspaceRouter_, &WorkspaceRouter::navigate);
+    connect(workspaceRouter_, &WorkspaceRouter::pageRequested, this, &MainWindow::showPage);
     connect(&worker_, &WorkerClient::messageReceived, this, &MainWindow::handleWorkerMessage);
     connect(&worker_, &WorkerClient::logLine, this, &MainWindow::appendLog);
     connect(&worker_, &WorkerClient::connected, this, [this]() {
         workerPill_->setStatus(tr("Worker 已连接"), StatusPill::Tone::Success);
         updateHeaderState();
     });
-    connect(&worker_, &WorkerClient::idle, this, [this]() {
-        QTimer::singleShot(0, this, &MainWindow::startNextQueuedTask);
-    });
     connect(&worker_, &WorkerClient::finished, this, [this](bool ok, const QString& message) {
         progressBar_->setValue(ok ? 100 : progressBar_->value());
-        if (trainingPhaseLabel_ && !state_.training.currentTaskId.isEmpty()) {
-            trainingPhaseLabel_->setText(ok
-                ? uiText("阶段：快照 -> 训练 -> 验证 -> 导出 -> 完成 | 当前：完成")
-                : uiText("阶段：快照 -> 训练 -> 验证 -> 导出 -> 完成 | 当前：失败 | %1").arg(message));
-        }
         if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingEtaValue")); label && ok) {
             label->setText(QStringLiteral("0s"));
         }
         workerPill_->setStatus(ok ? tr("任务完成") : tr("任务失败"),
             ok ? StatusPill::Tone::Success : StatusPill::Tone::Error);
+        if (v2ModelImportInProgress_) {
+            v2ModelImportInProgress_ = false;
+            if (v2ModelImportResultLabel_) {
+                v2ModelImportResultLabel_->setText(ok
+                    ? uiText("V2 模型导入完成。")
+                    : uiText("V2 模型导入失败：%1").arg(message));
+            }
+            updateModelRegistry();
+        }
         updateHeaderState();
         appendLog(ok ? tr("任务完成：%1").arg(message) : tr("任务失败：%1").arg(message));
-        if (!state_.dataset.currentConversionTaskId.isEmpty()) {
-            if (datasetConversionProgressBar_ && ok) {
-                datasetConversionProgressBar_->setValue(100);
-            }
-            setDatasetConversionFormRunning(false);
-            if (datasetConversionStatusLabel_) {
-                datasetConversionStatusLabel_->setText(ok
-                        ? uiText("数据集转换已完成。")
-                        : uiText("数据集转换失败：%1").arg(message));
-            }
-            if (!ok) {
-                appendDatasetConversionLog(uiText("数据集转换失败：%1").arg(message));
-            }
-            state_.dataset.currentConversionTaskId.clear();
-        }
         const QString kind;
         const QString path;
-        if (!state_.training.currentTaskId.isEmpty()) {
-            QString error;
-            repository_.updateTaskState(state_.training.currentTaskId, ok ? aitrain::TaskState::Completed : aitrain::TaskState::Failed, message, &error);
-            if (ok) {
-                updateExperimentRunSummary(state_.training.currentTaskId);
-            }
-            state_.training.currentTaskId.clear();
-            updateRecentTasks();
-            updateSelectedTaskDetails();
-            updateModelRegistry();
-        } else if (kind == QStringLiteral("export") && exportResultLabel_) {
-            exportResultLabel_->setText(tr("导出完成：%1").arg(QDir::toNativeSeparators(path)));
-        } else if (kind == QStringLiteral("inference_overlay") && inferenceOverlayLabel_) {
+        if (kind == QStringLiteral("inference_overlay") && inferenceOverlayLabel_) {
             loadInferenceOverlay(inferenceOverlayLabel_, path);
         } else if (kind == QStringLiteral("inference_predictions") && inferenceResultLabel_) {
             inferenceResultLabel_->setText(inferenceSummaryFromPredictions(path));
@@ -266,35 +256,44 @@ void MainWindow::loadCapabilityCombos()
     QStringList formats;
     const QVector<aitrain::CapabilityDescriptor> capabilities =
         aitrain::BuiltinCapabilityRegistry::instance().capabilities();
+    for (const aitrain::CapabilityDescriptor& capability : capabilities) {
+        for (const QString& format : capability.datasetFormats) {
+            if (!formats.contains(format)) {
+                formats.append(format);
+            }
+        }
+    }
+
     if (capabilityCombo_) {
-        const QSignalBlocker blocker(capabilityCombo_);
-        capabilityCombo_->clear();
-        for (const aitrain::CapabilityDescriptor& capability : capabilities) {
-            capabilityCombo_->addItem(capability.displayName, capability.id);
-            for (const QString& format : capability.datasetFormats) {
-                if (!formats.contains(format)) {
-                    formats.append(format);
-                }
+        bool capabilityItemsMatch = capabilityCombo_->count() == capabilities.size();
+        for (int index = 0; capabilityItemsMatch && index < capabilities.size(); ++index) {
+            if (capabilityCombo_->itemData(index).toString() != capabilities.at(index).id
+                || capabilityCombo_->itemText(index) != capabilities.at(index).displayName) {
+                capabilityItemsMatch = false;
             }
         }
-        if (!currentCapability.isEmpty()) {
-            const int index = capabilityCombo_->findData(currentCapability);
-            if (index >= 0) {
-                capabilityCombo_->setCurrentIndex(index);
+
+        if (!capabilityItemsMatch) {
+            const QSignalBlocker blocker(capabilityCombo_);
+            if (capabilityCombo_->count() > 0) {
+                capabilityCombo_->clear();
             }
-        }
-    } else {
-        for (const aitrain::CapabilityDescriptor& capability : capabilities) {
-            for (const QString& format : capability.datasetFormats) {
-                if (!formats.contains(format)) {
-                    formats.append(format);
+            for (const aitrain::CapabilityDescriptor& capability : capabilities) {
+                capabilityCombo_->addItem(capability.displayName, capability.id);
+            }
+            if (!currentCapability.isEmpty()) {
+                const int index = capabilityCombo_->findData(currentCapability);
+                if (index >= 0) {
+                    capabilityCombo_->setCurrentIndex(index);
                 }
             }
         }
     }
     if (datasetFormatCombo_) {
         const QSignalBlocker blocker(datasetFormatCombo_);
-        datasetFormatCombo_->clear();
+        if (datasetFormatCombo_->count() > 0) {
+            datasetFormatCombo_->clear();
+        }
         for (const QString& format : formats) {
             datasetFormatCombo_->addItem(datasetFormatLabel(format), format);
         }

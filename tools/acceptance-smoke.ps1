@@ -3,7 +3,6 @@ param(
     [switch]$Package,
     [switch]$PublicDatasets,
     [switch]$CpuTrainingSmoke,
-    [switch]$TensorRT,
     [switch]$SkipBuild,
     [switch]$SkipOfficialOcr,
     [switch]$RequirePublicDatasets,
@@ -11,8 +10,7 @@ param(
     [string]$BuildDir = "build-vscode",
     [string]$WorkDir = ".deps\acceptance-smoke",
     [string]$PythonExe = "",
-    [string]$PackagedRoot = "",
-    [string]$TensorRtOnnxPath = ""
+    [string]$PackagedRoot = ""
 )
 
 Set-StrictMode -Version Latest
@@ -555,105 +553,9 @@ function Invoke-PublicDatasetSmoke {
     }
 }
 
-function Resolve-TensorRtOfficialOnnxArtifact {
-    param([string]$TensorRtWork)
-
-    if ($TensorRtOnnxPath) {
-        $resolved = Resolve-AcceptancePath $TensorRtOnnxPath
-        Assert-PathExists $resolved "TensorRT official ONNX artifact"
-        return $resolved
-    }
-
-    $python = Resolve-PythonExe
-    Ensure-PythonModules -Python $python -Modules @("ultralytics") -RequirementsFile "python_trainers\requirements-yolo.txt" -CapabilityName "Ultralytics YOLO"
-
-    $generator = Join-Path $script:Root "examples\create-minimal-datasets.py"
-    Assert-PathExists $generator "minimal dataset generator"
-    $generated = Join-Path $TensorRtWork "official-yolo"
-    Invoke-Checked -FilePath $python -Arguments @($generator, "--output", $generated, "--profile", "minimal")
-
-    $requestPath = Join-Path $generated "yolo_detect_request.json"
-    Invoke-Checked -FilePath $python -Arguments @((Join-Path $script:Root "python_trainers\detection\ultralytics_trainer.py"), "--request", $requestPath)
-
-    $reportPath = Join-Path $generated "runs\yolo_detect\ultralytics_training_report.json"
-    Assert-TrainingReport -ReportPath $reportPath -ArtifactProperties @("checkpointPath", "onnxPath")
-    $report = Get-Content -Raw -Encoding UTF8 -LiteralPath $reportPath | ConvertFrom-Json
-    $onnxPath = [string]$report.onnxPath
-    if (!$onnxPath) {
-        throw "TensorRT official YOLO smoke did not produce an ONNX path: $reportPath"
-    }
-    Assert-PathExists $onnxPath "TensorRT official ONNX artifact"
-    return [System.IO.Path]::GetFullPath($onnxPath)
-}
-
-function Get-GpuComputeCapability {
-    $nvidiaSmi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
-    if (!$nvidiaSmi) {
-        return $null
-    }
-    $output = & $nvidiaSmi.Source --query-gpu=name,compute_cap --format=csv,noheader 2>$null
-    if ($LASTEXITCODE -ne 0 -or !$output) {
-        return $null
-    }
-    $best = $null
-    foreach ($line in $output) {
-        $parts = $line -split ","
-        if ($parts.Count -lt 2) {
-            continue
-        }
-        $capText = $parts[$parts.Count - 1].Trim()
-        $cap = 0.0
-        if ([double]::TryParse($capText, [ref]$cap)) {
-            if ($null -eq $best -or $cap -gt $best) {
-                $best = $cap
-            }
-        }
-    }
-    return $best
-}
-
-function Invoke-TensorRtAcceptance {
-    $worker = Resolve-WorkerExe
-    $selfCheck = Invoke-WorkerSelfCheck -WorkerExe $worker
-    if (-not $selfCheck.tensorRtBackend.exportAvailable) {
-        throw "TensorRT export backend is unavailable: $($selfCheck.tensorRtBackend.message)"
-    }
-    if (-not $selfCheck.tensorRtBackend.inferenceAvailable) {
-        Write-Host "  [warn] TensorRT runtime inference is not enabled in this build; running official ONNX -> engine export smoke only." -ForegroundColor Yellow
-    }
-
-    $computeCapability = Get-GpuComputeCapability
-    if ($null -ne $computeCapability -and $computeCapability -lt 7.5) {
-        throw "hardware-blocked: detected GPU compute capability $computeCapability. TensorRT 10 acceptance requires RTX / SM 75+."
-    }
-    if ($null -eq $computeCapability) {
-        Write-Host "  [warn] Could not query GPU compute capability; running TensorRT smoke and relying on Worker diagnostics." -ForegroundColor Yellow
-    } else {
-        Write-Host ("  [ok] GPU compute capability={0}" -f $computeCapability)
-    }
-
-    $tensorRtWork = Join-Path (Resolve-AcceptancePath $WorkDir) "tensorrt"
-    New-Item -ItemType Directory -Force $tensorRtWork | Out-Null
-    $onnxPath = Resolve-TensorRtOfficialOnnxArtifact -TensorRtWork $tensorRtWork
-    Write-Step "TensorRT worker smoke"
-    $output = & $worker --tensorrt-smoke $onnxPath 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        $text = $output -join [Environment]::NewLine
-        if ($text -match "SM 61|not supported|unsupported") {
-            throw "hardware-blocked: TensorRT smoke failed on unsupported GPU. Output: $text"
-        }
-        throw "TensorRT smoke failed with exit code $LASTEXITCODE. Output: $text"
-    }
-    $json = $output | Select-Object -Last 1 | ConvertFrom-Json
-    if (-not $json.ok) {
-        throw "TensorRT smoke reported ok=false: $($output -join [Environment]::NewLine)"
-    }
-    Write-Host ("  [ok] TensorRT engine export={0}" -f $json.enginePath)
-}
-
 try {
-    if (-not ($LocalBaseline -or $Package -or $PublicDatasets -or $CpuTrainingSmoke -or $TensorRT)) {
-        throw "Select at least one mode: -LocalBaseline, -Package, -PublicDatasets, -CpuTrainingSmoke, or -TensorRT."
+    if (-not ($LocalBaseline -or $Package -or $PublicDatasets -or $CpuTrainingSmoke)) {
+        throw "Select at least one mode: -LocalBaseline, -Package, -PublicDatasets, or -CpuTrainingSmoke."
     }
 
     if ($LocalBaseline) {
@@ -672,11 +574,6 @@ try {
         $script:AcceptanceModes += "CpuTrainingSmoke"
         Invoke-CpuTrainingSmoke
     }
-    if ($TensorRT) {
-        $script:AcceptanceModes += "TensorRT"
-        Invoke-TensorRtAcceptance
-    }
-
     Write-AcceptanceSummary -Status "passed"
     Write-Host "Acceptance smoke completed." -ForegroundColor Green
     exit 0

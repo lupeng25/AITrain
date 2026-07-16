@@ -1,6 +1,6 @@
 ﻿# AITrain Studio Acceptance Runbook
 
-This runbook is the Phase 17-50 plus P1 acceptance path, with YOLO26 tracked as a separate compatibility phase, SMP tracked as the first dedicated semantic segmentation route, and OBB tracked as an Ultralytics official OBB + AITrain ONNX Runtime route. It freezes the local baseline, validates the packaged layout, prepares TensorRT external acceptance, runs small training smoke checks, covers the current local usability additions, includes the external acceptance handoff package, records a traceable release-freeze package identity, validates newer YOLO detection/segmentation model-family candidates, documents the delivery-closeout workbench, adds the PP-OCRv5 GPU official-chain gate, defines the P1 full YOLO preset/export-argument matrix, adds the independent YOLO26 detection/instance-segmentation matrix, adds PP-OCRv6 Det/Rec/System official-chain acceptance, adds an SMP semantic segmentation smoke, and adds an OBB smoke/matrix path. OCR acceptance is official-only through PaddleOCR Det/Rec/System reports. RTX 4090 D TensorRT smoke evidence is recorded under `.deps\\rtx4090-validation\\acceptance-tensorrt`; clean Windows and customer-domain OCR production evidence still require returned external/customer data.
+本手册中的 Phase 记录保留历史验收证据。2026-07-16 破坏性重构后，旧 YOLO26/SMP/OBB/NCNN smoke 脚本、X-AnyLabeling 独立脚本以及 Worker 的裸路径和 `--*-smoke` CLI 均已删除，不得按历史命令执行。当前验收入口是 `tools\\harness-check.ps1`、`tools\\acceptance-smoke.ps1` 的 LocalBaseline/Package/PublicDatasets/CpuTrainingSmoke 模式，以及各 V2 Workflow 的 QtTest；TensorRT、NCNN 和 OCR 只通过其 V2/官方适配器边界报告。
 
 ## Acceptance Modes
 
@@ -14,14 +14,9 @@ Run the unified smoke script from the repository root:
 .\tools\acceptance-smoke.ps1 -CpuTrainingSmoke
 .\tools\phase45-yolo-model-matrix-smoke.ps1
 .\tools\phase-p1-yolo-full-matrix-smoke.ps1
-.\tools\phase-yolo26-model-matrix-smoke.ps1
 .\tools\phase-ppocrv6-model-matrix-smoke.ps1
 .\tools\phase-smp-semantic-segmentation-smoke.ps1
-.\tools\phase-smp-4090d-gpu-realtest.ps1
 .\tools\phase-anomaly-anomalib-smoke.ps1
-.\tools\phase-obb-ultralytics-smoke.ps1 -Epochs 1 -ImageSize 640 -BatchSize 2 -Device cpu
-.\tools\phase-obb-dota-quality-matrix.ps1 -Dataset DOTA8 -Epochs 30 -Device 0
-.\tools\acceptance-smoke.ps1 -TensorRT
 .\tools\customer-ocr-validation.ps1
 ```
 
@@ -29,7 +24,6 @@ The same script is also installed into packaged builds under `tools\acceptance-s
 
 ```powershell
 .\tools\acceptance-smoke.ps1 -Package
-.\tools\acceptance-smoke.ps1 -TensorRT
 ```
 
 All generated datasets, official downloads, trainer outputs, and smoke artifacts must stay under `.deps\` or another explicitly supplied work directory. Do not add them to source control.
@@ -48,19 +42,15 @@ For SMP semantic segmentation, use:
 
 ```powershell
 .\tools\phase-smp-semantic-segmentation-smoke.ps1
-.\tools\phase-smp-4090d-gpu-realtest.ps1
 ```
 
 `phase-smp-semantic-segmentation-smoke.ps1` remains the minimal adapter smoke: it generates a tiny Mask PNG semantic dataset, compiles the SMP trainer/evaluator, checks `segmentation_models_pytorch`, Torch, timm, ONNX, ONNX Runtime, Pillow, NumPy, and PyYAML, trains only when dependencies are available, exports `best.onnx`, runs evaluation, and verifies overlays. If dependencies are absent, use `-SkipTraining` for package/layout validation or treat the smoke summary as `blocked`, not passed.
 
-`phase-smp-4090d-gpu-realtest.ps1` is the RTX 4090D validation lane. It creates or repairs `.deps\envs\smp-gpu`, requires CUDA PyTorch, runs `smp_unet_resnet34` as the 20-epoch GPU mainline, runs the remaining public SMP presets as short GPU matrix rows, evaluates the exported ONNX, and calls `aitrain_worker.exe --semantic-onnx-smoke` to prove AITrain C++ ONNX Runtime inference, overlay, benchmark, and deployment validation. CPU fallback is not counted as a pass for this lane. The generated synthetic data validates engineering lifecycle only, not industrial accuracy.
+历史 SMP GPU realtest 仅保留在归档证据中；当前 SMP 产品验收由官方 Python 适配器和 `runRuntimeDeliveryWorkflowV2` 负责，不再调用 Worker smoke CLI。
 
 For OBB rotated-box detection, use:
 
 ```powershell
-.\tools\phase-obb-ultralytics-smoke.ps1 -Epochs 1 -ImageSize 640 -BatchSize 2 -Device cpu
-.\tools\phase-obb-ultralytics-smoke.ps1 -Epochs 20 -Device 0
-.\tools\phase-obb-dota-quality-matrix.ps1 -Dataset DOTA8 -Epochs 30 -Device 0
 ```
 
 OBB v1 accepts `taskType=obb_detection`, `datasetFormat=yolo_obb`, `trainingBackend=ultralytics_yolo_obb`, and `modelFamily=yolo_obb`. Training, first ONNX export, and evaluation are official Ultralytics OBB operations. Packaged inference, overlay, benchmark, and deployment validation use AITrain C++ ONNX Runtime with rotated quadrilateral output. NCNN is not an OBB v1 deployment target and must be reported as unsupported/rejected, not failed acceptance. TensorRT engine export is optional status evidence only. Public DOTA/DOTA-subset matrix results are workflow/benchmark evidence and must not be represented as customer-domain industrial precision.
@@ -84,7 +74,7 @@ Current GUI surfaces:
 
 - `数据集 > 质量与复核`: load `problem_samples.json`, `error_samples.json`, `rework_sample_set.json`, or evaluation reports; filter by source, reason, class, split, OCR edit distance / CER, or search text; export an X-AnyLabeling review list.
 - `模型库 > 评估报告`: review model evaluation report records and visualized report details.
-- `部署验证 > 模型导出 / 推理验证`: export deployable artifacts, run export post-validation, and run single-image inference validation.
+- `部署验证 > 部署验证 / 推理验证`：两者都只接受已登记、Manifest 和哈希校验通过的 V2 模型包；分别运行部署验证与单图推理。
 - `系统设置 > 内置能力`: review the built-in capability matrix and backend boundaries.
 - `环境 > 交付证据`: summarize local RC, clean Windows, TensorRT, package integrity, customer OCR, diagnostics, and deployment validation evidence.
 - Customer OCR acceptance wizard: collect Det dataset, Rec dataset, System images, official Det/Rec/System reports, and write customer OCR manifest/summary outputs.
@@ -97,12 +87,11 @@ The real execution entries remain:
 .\tools\local-rc-closeout.ps1
 .\tools\release-freeze-handoff.ps1
 .\tools\customer-ocr-validation.ps1
-.\tools\phase-ncnn-runtime-smoke.ps1 -NcnnRoot <ncnn-sdk-root> -OnnxPath <best.onnx> -SampleImagePath <sample.png> -OutputDir <smoke-output> -TaskType detection
 .\build-vscode\bin\aitrain_worker.exe --ncnn-param-smoke <model.param> --image <sample.png> --output <smoke-output> --task-type segmentation
 .\tools\ui-workbench-walkthrough.ps1
 ```
 
-Worker command equivalents are `runCustomerOcrAcceptance`, `collectDiagnostics`, and `validateDeploymentArtifact`. These are report/validation commands and must stay outside `MainWindow`.
+当前 Worker 产品协议保留 `runCustomerOcrAcceptance` 与 `collectDiagnostics` 报告命令；V2-503 已完成，推理与部署验证统一使用 `runRuntimeDeliveryWorkflowV2` 六步工作流，并且只能通过 `ModelPackageId`、Manifest 与 Artifact Store 解析模型。已删除的单步命令和裸路径部署命令不得再作为验收入口。长任务实现仍必须位于 Worker/core 边界，不能进入 `MainWindow`。底层 ONNX Runtime 单次同步 `infer` 进入后不可中途抢占，取消会在该次调用返回后收口。NCNN V2 验收只覆盖产品矩阵允许且 Manifest 合同完整的 Detection/Segmentation，不得扩展到 OBB、SMP、异常检测、OCR 或未知 decoder；TensorRT V2 的官方 YOLO decoder 与真实 `infer` 尚未实现，probe/engine 或历史外部证据不能作为本六步工作流的 TensorRT 推理通过结论。
 
 NCNN evidence refresh on 2026-05-16:
 
@@ -187,7 +176,7 @@ Acceptance requires:
 
 - Worker self-check resolves CUDA, cuDNN, TensorRT, TensorRT Plugin, TensorRT ONNX Parser, and ONNX Runtime components needed for ONNX-to-engine export.
 - `acceptance-smoke.ps1 -TensorRT` generates a small official Ultralytics YOLO ONNX artifact, or uses `-TensorRtOnnxPath <official.onnx>` when supplied.
-- `aitrain_worker.exe --tensorrt-smoke <official.onnx>` builds a TensorRT engine from an official Ultralytics ONNX artifact. This is an official-artifact smoke with AITrain TensorRT export/runtime checks; it does not use the removed tiny-detector TensorRT inference fixture and is not an end-to-end Ultralytics Python runtime check.
+- 历史 TensorRT smoke CLI 已删除；当前 TensorRT 仅报告 V2 Adapter 的 SDK/依赖/硬件/decoder 状态，不宣称真实推理通过。
 - The result is recorded back in `docs\harness\current-status.md`; the current RTX 4090 D pass is already recorded.
 
 ## Phase 43 Lite: External Acceptance Handoff
@@ -284,10 +273,6 @@ The full P1 matrix is intentionally separate from `harness-check.ps1` because it
 Run the separate YOLO26 detection/instance-segmentation matrix:
 
 ```powershell
-.\tools\phase-yolo26-model-matrix-smoke.ps1
-.\tools\phase-yolo26-model-matrix-smoke.ps1 -PrepareEnvironment -ProbeOnly -Device 0
-.\tools\phase-yolo26-model-matrix-smoke.ps1 -Focused -Epochs 1 -Device 0
-.\tools\phase-yolo26-model-matrix-smoke.ps1 -Full -Epochs 100 -Device 0
 ```
 
 Full mode writes `yolo26_model_matrix_summary.json` under `.deps\phase-yolo26-model-matrix` by default and has 20 required rows:
@@ -435,7 +420,7 @@ Suggested manual GUI walkthrough:
 .\tools\ui-workbench-walkthrough.ps1
 ```
 
-The RC walkthrough wrapper runs the 1280x820 non-fullscreen main page set: `总览`, `项目`, `数据集`, `训练实验`, `任务与产物`, `模型库`, `部署验证`, `环境`, and `系统设置`. It writes `ui_walkthrough_rc_summary.json` under `.deps\UI-Walkthrough\rc` by default and should be treated as the repeatable GUI usability gate. Tab-level coverage for `数据集 > 质量与复核`, `模型库 > 评估报告`, `部署验证 > 模型导出 / 推理验证`, `系统设置 > 内置能力 / 应用设置`, and `环境 > 交付证据` is handled by QtTest.
+RC walkthrough wrapper 会在 1280x820 非全屏视口覆盖 `总览`、`项目`、`数据集`、`训练实验`、`任务与产物`、`模型库`、`部署验证`、`环境` 和 `系统设置`，默认把 `ui_walkthrough_rc_summary.json` 写到 `.deps\UI-Walkthrough\rc`。QtTest 另外覆盖 `数据集 > 质量与复核`、`模型库 > 评估报告`、`部署验证 > 部署验证 / 推理验证`、`系统设置 > 内置能力 / 应用设置` 与 `环境 > 交付证据`。
 
 If offline licensing stops startup at the registration dialog, the wrapper records `status=blocked` and `errorCode=license_required`. That is not a GUI layout pass; configure a valid license token and build-time public key, then rerun the wrapper.
 

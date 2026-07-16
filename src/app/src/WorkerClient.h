@@ -1,6 +1,6 @@
 #pragma once
 
-#include "aitrain/core/TaskModels.h"
+#include "aitrain/v2/ProtocolV2.h"
 
 #include <QLocalServer>
 #include <QLocalSocket>
@@ -16,27 +16,97 @@ public:
     explicit WorkerClient(QObject* parent = nullptr);
     ~WorkerClient() override;
 
-    bool startTraining(const QString& workerProgram, const aitrain::TrainingRequest& request, QString* error);
-    bool requestEnvironmentCheck(const QString& workerProgram, QString* error);
-    bool requestDatasetValidation(const QString& workerProgram, const QString& datasetPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId = {}, const QString& outputPath = {});
-    bool requestDatasetSplit(const QString& workerProgram, const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId = {});
-    bool requestDatasetConversion(const QString& workerProgram, const QString& sourcePath, const QString& outputPath, const QString& sourceFormat, const QString& targetFormat, const QJsonObject& options, QString* error, const QString& taskId = {});
-    bool requestDatasetCuration(const QString& workerProgram, const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId = {});
-    bool requestAnnotationSession(const QString& workerProgram, const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId = {});
-    bool requestAnnotationSync(const QString& workerProgram, const QString& sessionManifestPath, const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId = {});
-    bool requestDatasetSnapshot(const QString& workerProgram, const QString& datasetPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId = {});
-    bool requestModelEvaluation(const QString& workerProgram, const QString& modelPath, const QString& datasetPath, const QString& outputPath, const QString& taskType, const QJsonObject& options, QString* error, const QString& taskId = {});
-    bool requestModelBenchmark(const QString& workerProgram, const QString& modelPath, const QString& outputPath, const QJsonObject& options, QString* error, const QString& taskId = {});
-    bool requestLocalPipeline(const QString& workerProgram, const QString& outputPath, const QString& templateId, const QJsonObject& options, QString* error, const QString& taskId = {});
-    bool requestDeliveryReport(const QString& workerProgram, const QString& outputPath, const QJsonObject& context, QString* error, const QString& taskId = {});
-    bool requestCustomerOcrAcceptance(const QString& workerProgram, const QString& outputPath, const QJsonObject& options, QString* error, const QString& taskId = {});
-    bool requestDiagnosticsBundle(const QString& workerProgram, const QString& outputPath, const QJsonObject& context, QString* error, const QString& taskId = {});
-    bool requestDeploymentValidation(const QString& workerProgram, const QString& modelPath, const QString& outputPath, const QString& format, const QString& sampleImagePath, const QJsonObject& options, QString* error, const QString& taskId = {});
-    bool requestModelExport(const QString& workerProgram, const QString& checkpointPath, const QString& outputPath, const QString& format, QString* error, const QString& taskId = {});
-    bool requestModelExport(const QString& workerProgram, const QString& checkpointPath, const QString& outputPath, const QString& format, const QJsonObject& options, QString* error, const QString& taskId = {});
-    bool requestInference(const QString& workerProgram, const QString& checkpointPath, const QString& imagePath, const QString& outputPath, QString* error, const QString& taskId = {});
+    bool requestEnvironmentCheckWorkflowV2(const QString& workerProgram,
+        const QString& projectRoot, QString* error, const QString& taskId = {});
+    bool requestDatasetSplitWorkflowV2(const QString& workerProgram,
+        const QString& projectRoot,
+        const QString& sourceDatasetId,
+        const QString& sourceDatasetVersionId,
+        const QString& sourceSnapshotId,
+        const QString& sourceSnapshotArtifactId,
+        const QString& targetDatasetId,
+        const QString& targetDatasetName,
+        const QJsonObject& options,
+        QString* error,
+        const QString& taskId = {});
+    bool requestDatasetConversionWorkflowV2(const QString& workerProgram,
+        const QString& projectRoot,
+        const QString& sourcePath,
+        const QString& sourceFormat,
+        const QString& targetFormat,
+        const QString& targetDatasetId,
+        const QString& targetDatasetName,
+        const QJsonObject& options,
+        QString* error,
+        const QString& taskId = {});
+    bool requestDataQualityWorkflowV2(const QString& workerProgram,
+        const QString& projectRoot,
+        const QString& datasetId,
+        const QString& datasetVersionId,
+        const QString& snapshotId,
+        const QString& snapshotArtifactId,
+        const QJsonObject& options,
+        QString* error,
+        const QString& taskId = {});
+    bool requestAnnotationSessionCreateV2(const QString& workerProgram,
+        const QString& projectRoot,
+        const QString& repairManifestArtifactId,
+        const QString& workingDirectory,
+        const QJsonObject& toolSummary,
+        const QJsonObject& options,
+        QString* error,
+        const QString& taskId = {});
+    bool requestAnnotationSessionSyncV2(const QString& workerProgram,
+        const QString& projectRoot,
+        const QString& sessionArtifactId,
+        const QString& workingDirectory,
+        const QJsonObject& options,
+        QString* error,
+        const QString& taskId = {});
+    bool requestDatasetSnapshotImportWorkflowV2(const QString& workerProgram,
+        const QString& projectRoot,
+        const QString& sourcePath,
+        const QString& sourceFormat,
+        const QString& targetDatasetId,
+        const QString& targetDatasetName,
+        const QJsonObject& options,
+        QString* error,
+        const QString& taskId = {});
+    bool requestOcrOfficialReportImportV2(const QString& workerProgram,
+        const QString& projectRoot,
+        const QJsonObject& det,
+        const QJsonObject& rec,
+        const QJsonObject& system,
+        const QString& acceptanceCohortId,
+        const QString& customerDomainId,
+        const QString& evidenceClass,
+        QString* error,
+        const QString& taskId = {});
+    bool requestOcrAcceptanceWorkflowV2(const QString& workerProgram,
+        const QString& projectRoot,
+        const QString& detReportArtifactId,
+        const QString& recReportArtifactId,
+        const QString& systemReportArtifactId,
+        const QJsonObject& thresholds,
+        QString* error,
+        const QString& taskId = {});
+    bool requestDiagnosticsWorkflowV2(const QString& workerProgram,
+        const QString& projectRoot,
+        const QJsonObject& options,
+        QString* error,
+        const QString& taskId = {});
+    bool requestRuntimeDeliveryWorkflowV2(const QString& workerProgram,
+        const QString& projectRoot,
+        const QString& modelPackageId,
+        const QString& runtimeRoute,
+        const QString& sampleImagePath,
+        const QJsonObject& options,
+        QString* error,
+        const QString& taskId = {});
+    bool requestModelImportV2(const QString& workerProgram, const QString& projectRoot, const QString& sourceFilePath, const QJsonObject& manifestDraft, QString* error, const QString& taskId = {});
+    // 完整 V2 训练工作流由 Worker 独占持久化和步骤收口；GUI 只传递已校验的请求并展示事件。
+    bool requestTrainingWorkflowV2(const QString& workerProgram, const QJsonObject& request, QString* error);
     void cancel();
-    void requestHeartbeat();
     bool isRunning() const;
 
 signals:
@@ -50,10 +120,15 @@ private slots:
     void acceptConnection();
     void readLines();
     void workerFinished(int exitCode, QProcess::ExitStatus status);
+    void workerProcessError(QProcess::ProcessError error);
 
 private:
     bool startWorkerCommand(const QString& workerProgram, const QString& commandType, const QJsonObject& payload, QString* error);
-    void send(const QString& type, const QJsonObject& payload);
+    void finalizeWorkerExit();
+    void sendStartTask();
+    void sendCancelTask();
+    bool sendEnvelope(const aitrain::v2::ProtocolEnvelope& envelope, QString* error = nullptr);
+    void rejectProtocol(const QString& message);
     void cleanupSocket();
 
     QLocalServer server_;
@@ -62,8 +137,17 @@ private:
     QByteArray buffer_;
     QString pendingCommandType_;
     QJsonObject pendingRequest_;
+    aitrain::v2::RequestId activeRequestId_;
+    aitrain::v2::TaskId activeTaskId_;
+    aitrain::v2::ProtocolV2SequenceTracker incomingSequenceTracker_;
+    quint64 outgoingSequence_ = 0;
     bool finishedEmitted_ = false;
+    bool startTaskSent_ = false;
+    bool terminalEnvelopeReceived_ = false;
     QTimer cancelTimer_;
+    QTimer terminalShutdownTimer_;
     bool cancelRequested_ = false;
     bool finishing_ = false;
+    int pendingExitCode_ = 0;
+    QProcess::ExitStatus pendingExitStatus_ = QProcess::NormalExit;
 };

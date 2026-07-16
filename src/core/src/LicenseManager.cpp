@@ -1,5 +1,7 @@
 #include "aitrain/core/LicenseManager.h"
 
+#include <QJsonObject>
+
 #include <QCryptographicHash>
 #include <QJsonDocument>
 #include <QJsonValue>
@@ -326,7 +328,7 @@ bool licenseCryptoAvailable()
 #endif
 }
 
-QJsonObject licensePayloadToJson(const LicensePayload& payload)
+static QJsonObject licensePayloadToJson(const LicensePayload& payload)
 {
     QJsonObject object;
     object.insert(QStringLiteral("product"), payload.product);
@@ -342,7 +344,7 @@ QJsonObject licensePayloadToJson(const LicensePayload& payload)
     return object;
 }
 
-bool licensePayloadFromJson(const QJsonObject& object, LicensePayload* payload, QString* error)
+static bool licensePayloadFromJson(const QJsonObject& object, LicensePayload* payload, QString* error)
 {
     if (!payload) {
         if (error) {
@@ -601,23 +603,6 @@ QString createLicenseToken(const LicensePayload& payload, const QByteArray& priv
             QString::fromLatin1(payloadPart),
             QString::fromLatin1(base64UrlEncode(signature)));
 #endif
-}
-
-QString licenseStatusText(LicenseStatus status)
-{
-    switch (status) {
-    case LicenseStatus::Valid: return QStringLiteral("Valid");
-    case LicenseStatus::MissingToken: return QStringLiteral("Missing license token");
-    case LicenseStatus::MissingPublicKey: return QStringLiteral("Missing public key");
-    case LicenseStatus::MalformedToken: return QStringLiteral("Malformed license token");
-    case LicenseStatus::PayloadInvalid: return QStringLiteral("Invalid license payload");
-    case LicenseStatus::ProductMismatch: return QStringLiteral("Product mismatch");
-    case LicenseStatus::MachineMismatch: return QStringLiteral("Machine mismatch");
-    case LicenseStatus::Expired: return QStringLiteral("Expired license");
-    case LicenseStatus::SignatureInvalid: return QStringLiteral("Invalid signature");
-    case LicenseStatus::CryptoUnavailable: return QStringLiteral("Crypto unavailable");
-    }
-    return QStringLiteral("Unknown license status");
 }
 
 } // namespace aitrain

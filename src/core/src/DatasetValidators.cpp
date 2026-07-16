@@ -1,4 +1,5 @@
 #include "aitrain/core/DatasetValidators.h"
+#include "aitrain/core/SemanticMask.h"
 
 #include "YoloDatasetLayout.h"
 
@@ -222,12 +223,7 @@ QStringList readClassesTxt(const QString& classesPath, DatasetValidationResult& 
 
 bool semanticMaskFormatAcceptable(const QImage& mask)
 {
-    return mask.format() == QImage::Format_Grayscale8
-#if QT_VERSION >= QT_VERSION_CHECK(5, 13, 0)
-        || mask.format() == QImage::Format_Alpha8
-#endif
-        || mask.format() == QImage::Format_Indexed8
-        || mask.allGray();
+    return isSupportedSemanticMask(mask);
 }
 
 QJsonObject semanticClassPixelCounts(const QString& datasetPath, int classCount, int ignoreIndex)
@@ -247,7 +243,7 @@ QJsonObject semanticClassPixelCounts(const QString& datasetPath, int classCount,
             }
             for (int y = 0; y < mask.height(); ++y) {
                 for (int x = 0; x < mask.width(); ++x) {
-                    const int classId = qGray(mask.pixel(x, y));
+                    const int classId = semanticMaskClassId(mask, x, y);
                     if (classId == ignoreIndex || classId < 0 || (classCount > 0 && classId >= classCount)) {
                         continue;
                     }
@@ -1359,7 +1355,7 @@ DatasetValidationResult validateSemanticMaskDataset(const QString& datasetPath, 
             int foregroundPixels = 0;
             for (int y = 0; y < mask.height(); ++y) {
                 for (int x = 0; x < mask.width(); ++x) {
-                    const int classId = qGray(mask.pixel(x, y));
+                    const int classId = semanticMaskClassId(mask, x, y);
                     if (classId == ignoreIndex) {
                         continue;
                     }

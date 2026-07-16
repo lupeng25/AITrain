@@ -6,9 +6,9 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import random
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -17,7 +17,10 @@ TRAINER_ROOT = Path(__file__).resolve().parents[1]
 if str(TRAINER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRAINER_ROOT))
 
-from trainer_protocol import configure_stdio, emit_failed, exception_details, unhandled_failure  # noqa: E402
+from adapter_event_channel_v2 import AdapterEventChannelV2, event_channel_from_environment  # noqa: E402
+from adapter_sdk import AdapterSdk  # noqa: E402
+from dataset_snapshot_v2 import materialize_dataset_snapshot_v2  # noqa: E402
+from trainer_protocol import configure_stdio, exception_details  # noqa: E402
 
 
 BACKEND_ID = "smp_semantic_segmentation"
@@ -33,15 +36,64 @@ PRESETS: dict[str, dict[str, Any]] = {
 
 configure_stdio()
 
+_adapter: AdapterSdk | None = None
+_event_channel: AdapterEventChannelV2 | None = None
+
+
+def configure_adapter() -> None:
+    """Use authenticated V2 events when the Worker Host provides a channel."""
+    global _adapter, _event_channel
+    if _event_channel is None and os.environ.get("AITRAIN_EVENT_PORT"):
+        _event_channel = event_channel_from_environment()
+        _event_channel.connect()
+    if _adapter is None:
+        sink = _event_channel.emit_legacy_event if _event_channel is not None else None
+        _adapter = AdapterSdk(BACKEND_ID, event_sink=sink)
+
+
+def close_adapter() -> None:
+    global _event_channel
+    if _event_channel is not None:
+        _event_channel.close()
+        _event_channel = None
+
+
+def active_adapter() -> AdapterSdk:
+    configure_adapter()
+    assert _adapter is not None
+    return _adapter
+
 
 def emit(event_type: str, **payload: Any) -> None:
-    message = {"type": event_type, "timestamp": time.time()}
-    message.update(payload)
-    print(json.dumps(message, ensure_ascii=False), flush=True)
+    payload.pop("backend", None)
+    adapter = active_adapter()
+    if event_type == "log":
+        adapter.emit_log(str(payload.pop("message", "")), level=str(payload.pop("level", "info")), **payload)
+    elif event_type == "progress":
+        adapter.emit_progress(float(payload.pop("percent", 0)), message=str(payload.pop("message", "")), **payload)
+    elif event_type == "metric":
+        adapter.emit_metric(str(payload.pop("name", "")), float(payload.pop("value", 0)), **payload)
+    elif event_type == "artifact":
+        adapter.emit_artifact_candidate(
+            str(payload.pop("kind", "artifact")),
+            str(payload.pop("path", "")),
+            message=str(payload.pop("message", "")),
+            **payload,
+        )
+    elif event_type == "completed":
+        adapter.emit_completed(str(payload.pop("message", "SMP training completed")), **payload)
+    elif event_type == "failed":
+        adapter.emit_failed(
+            str(payload.pop("message", "SMP training failed")),
+            str(payload.pop("code", "smp_trainer_failed")),
+            payload.pop("details", {}),
+        )
+    else:
+        raise ValueError(f"unsupported adapter event type: {event_type}")
 
 
 def fail(message: str, code: str = "smp_trainer_failed", details: dict[str, Any] | None = None) -> int:
-    return emit_failed(BACKEND_ID, message, code, details)
+    return active_adapter().emit_failed(message, code, details)
 
 
 def read_request(path: Path) -> dict[str, Any]:
@@ -50,6 +102,16 @@ def read_request(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("trainer request must be a JSON object")
     return value
+
+
+def materialize_request_dataset(request: dict[str, Any], params: dict[str, Any], dataset_path: Path) -> tuple[Path, str]:
+    snapshot_manifest = str(params.get("datasetSnapshotManifest") or request.get("datasetSnapshotManifest") or "").strip()
+    snapshot_staging = str(params.get("datasetSnapshotStagingPath") or request.get("datasetSnapshotStagingPath") or "").strip()
+    if bool(snapshot_manifest) != bool(snapshot_staging):
+        raise ValueError("Dataset Snapshot V2 requires both manifest and staging paths.")
+    if snapshot_manifest:
+        dataset_path = materialize_dataset_snapshot_v2(dataset_path, snapshot_manifest, snapshot_staging)
+    return dataset_path, snapshot_manifest
 
 
 def now_iso() -> str:
@@ -123,6 +185,22 @@ def read_classes(dataset_path: Path) -> list[str]:
     return classes
 
 
+def load_mask_ids(mask_path: Path, target_size: tuple[int, int] | None = None) -> Any:
+    """Load raw semantic class IDs without converting palette colors to grayscale."""
+    import numpy as np  # type: ignore
+    from PIL import Image  # type: ignore
+
+    mask = Image.open(mask_path)
+    if mask.mode not in {"L", "P"}:
+        raise ValueError(f"Semantic mask must use L or P mode, got {mask.mode}: {mask_path}")
+    if target_size is not None:
+        mask = mask.resize(target_size, Image.NEAREST)
+    values = np.asarray(mask)
+    if values.ndim != 2:
+        raise ValueError(f"Semantic mask must be single-channel: {mask_path}")
+    return values.astype(np.int64, copy=False)
+
+
 class SemanticMaskDataset:
     def __init__(self, samples: list[tuple[Path, Path]], image_size: int) -> None:
         self.samples = samples
@@ -138,11 +216,10 @@ class SemanticMaskDataset:
 
         image_path, mask_path = self.samples[index]
         image = Image.open(image_path).convert("RGB").resize((self.image_size, self.image_size), Image.BILINEAR)
-        mask = Image.open(mask_path).convert("L").resize((self.image_size, self.image_size), Image.NEAREST)
         image_array = np.asarray(image, dtype=np.float32) / 255.0
         image_array = (image_array - np.asarray(MEAN, dtype=np.float32)) / np.asarray(STD, dtype=np.float32)
         image_tensor = torch.from_numpy(image_array.transpose(2, 0, 1)).float()
-        mask_tensor = torch.from_numpy(np.asarray(mask, dtype=np.int64)).long()
+        mask_tensor = torch.from_numpy(load_mask_ids(mask_path, (self.image_size, self.image_size))).long()
         return image_tensor, mask_tensor, image_path.name
 
 
@@ -290,6 +367,12 @@ def run_training(request: dict[str, Any]) -> int:
     output_path = Path(str(request.get("outputPath") or "")).resolve()
     params = request.get("parameters") if isinstance(request.get("parameters"), dict) else {}
     output_path.mkdir(parents=True, exist_ok=True)
+
+    try:
+        dataset_path, snapshot_manifest = materialize_request_dataset(request, params, dataset_path)
+    except Exception as exc:
+        code = "dataset_snapshot_request_invalid" if "requires both" in str(exc) else "dataset_snapshot_invalid"
+        return fail("Dataset Snapshot V2 materialization failed.", code, exception_details(exc))
 
     if not dataset_path.exists():
         return fail(f"Dataset path does not exist: {dataset_path}", "dataset_missing")
@@ -444,6 +527,9 @@ def run_training(request: dict[str, Any]) -> int:
         "taskType": "semantic_segmentation",
         "datasetFormat": "semantic_segmentation_mask",
         "datasetPath": str(dataset_path),
+        "datasetSnapshotId": str(params.get("datasetSnapshotId") or request.get("datasetSnapshotId") or ""),
+        "datasetSnapshotHash": str(params.get("datasetSnapshotHash") or request.get("datasetSnapshotHash") or ""),
+        "datasetSnapshotManifest": snapshot_manifest,
         "checkpointPath": str(best_checkpoint_path),
         "onnxPath": str(best_onnx_path),
         "sidecarPath": str(sidecar_path),
@@ -497,10 +583,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--request", required=True, help="Path to AITrain Python trainer request JSON")
     args = parser.parse_args(argv)
     try:
-        request = read_request(Path(args.request))
-        return run_training(request)
-    except Exception as exc:
-        return unhandled_failure(BACKEND_ID, exc)
+        configure_adapter()
+        try:
+            request = read_request(Path(args.request))
+        except Exception as exc:
+            return fail(f"failed to read training request: {exc}", "bad_request", exception_details(exc))
+        try:
+            return run_training(request)
+        except Exception as exc:
+            return fail("Unhandled SMP training failure.", "unhandled_exception", exception_details(exc))
+    finally:
+        close_adapter()
 
 
 if __name__ == "__main__":

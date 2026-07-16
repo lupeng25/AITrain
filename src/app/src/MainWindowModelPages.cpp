@@ -53,69 +53,101 @@ QWidget* MainWindow::buildModelRegistryPage()
     actionGrid->setContentsMargins(10, 8, 10, 8);
     actionGrid->setHorizontalSpacing(10);
     actionGrid->setVerticalSpacing(8);
-    auto* inferButton = new QPushButton(QStringLiteral("选中模型用于推理"));
-    auto* exportButton = new QPushButton(QStringLiteral("选中模型用于导出"));
-    auto* pipelineButton = new QPushButton(QStringLiteral("执行本地流水线"));
+    auto* inferButton = new QPushButton(QStringLiteral("选中 V2 模型包用于推理"));
     auto* reportsButton = new QPushButton(QStringLiteral("查看评估报告"));
     auto* comparisonInferButton = new QPushButton(QStringLiteral("对比候选用于推理"));
-    auto* comparisonExportButton = new QPushButton(QStringLiteral("对比候选用于导出"));
     auto* comparisonReportButton = new QPushButton(QStringLiteral("打开候选报告"));
     connect(inferButton, &QPushButton::clicked, this, [this]() {
-        if (!modelVersionTable_ || modelVersionTable_->selectedItems().isEmpty()) {
-            QMessageBox::information(this, uiText("模型库"), uiText("请先选择一个模型版本。"));
+        if (!v2ModelPackageTable_ || v2ModelPackageTable_->selectedItems().isEmpty()) {
+            QMessageBox::information(this, uiText("模型库"), uiText("请先选择一个已验证 V2 模型包。"));
             return;
         }
-        const int row = modelVersionTable_->selectedItems().first()->row();
-        QString path = modelVersionTable_->item(row, 4) ? modelVersionTable_->item(row, 4)->data(Qt::UserRole).toString() : QString();
-        if (path.isEmpty()) {
-            path = modelVersionTable_->item(row, 3) ? modelVersionTable_->item(row, 3)->data(Qt::UserRole).toString() : QString();
-        }
-        if (path.isEmpty()) {
-            QMessageBox::information(this, uiText("模型库"), uiText("选中模型版本没有可用 checkpoint 或 ONNX 路径。"));
+        const int row = v2ModelPackageTable_->selectedItems().first()->row();
+        const QString modelPackageId = v2ModelPackageTable_->item(row, 0)
+            ? v2ModelPackageTable_->item(row, 0)->data(Qt::UserRole).toString()
+            : QString();
+        if (modelPackageId.isEmpty() || !inferenceModelPackageCombo_) {
+            QMessageBox::information(this, uiText("模型库"), uiText("选中行不包含可用的 V2 模型包 ID。"));
             return;
         }
-        if (inferenceCheckpointEdit_) {
-            inferenceCheckpointEdit_->setText(QDir::toNativeSeparators(path));
+        const int comboIndex = inferenceModelPackageCombo_->findData(modelPackageId);
+        if (comboIndex < 0) {
+            QMessageBox::warning(this, uiText("模型库"), uiText("模型包目录已变更，请刷新模型库后重试。"));
+            return;
         }
+        inferenceModelPackageCombo_->setCurrentIndex(comboIndex);
         showDeploymentTab(1);
     });
-    connect(exportButton, &QPushButton::clicked, this, [this]() {
-        if (!modelVersionTable_ || modelVersionTable_->selectedItems().isEmpty()) {
-            QMessageBox::information(this, uiText("模型库"), uiText("请先选择一个模型版本。"));
-            return;
-        }
-        const int row = modelVersionTable_->selectedItems().first()->row();
-        QString path = modelVersionTable_->item(row, 3) ? modelVersionTable_->item(row, 3)->data(Qt::UserRole).toString() : QString();
-        if (path.isEmpty()) {
-            path = modelVersionTable_->item(row, 4) ? modelVersionTable_->item(row, 4)->data(Qt::UserRole).toString() : QString();
-        }
-        if (path.isEmpty()) {
-            QMessageBox::information(this, uiText("模型库"), uiText("选中模型版本没有可用 checkpoint 或 ONNX 路径。"));
-            return;
-        }
-        if (conversionCheckpointEdit_) {
-            conversionCheckpointEdit_->setText(QDir::toNativeSeparators(path));
-        }
-        showDeploymentTab(0);
-    });
-    connect(pipelineButton, &QPushButton::clicked, this, &MainWindow::runLocalPipelinePlanFromCurrentDataset);
     connect(reportsButton, &QPushButton::clicked, this, &MainWindow::openEvaluationReportsPage);
-    connect(comparisonInferButton, &QPushButton::clicked, this, &MainWindow::useSelectedComparisonForInference);
-    connect(comparisonExportButton, &QPushButton::clicked, this, &MainWindow::useSelectedComparisonForExport);
-    connect(comparisonReportButton, &QPushButton::clicked, this, &MainWindow::openSelectedComparisonReport);
+    comparisonInferButton->setEnabled(false);
+    comparisonReportButton->setEnabled(false);
+    comparisonInferButton->setToolTip(uiText("旧裸路径模型对比已停用，请使用 V2 模型包。"));
+    comparisonReportButton->setToolTip(uiText("旧评估报告路径入口已停用。"));
     actionGrid->addWidget(inferButton, 0, 0);
-    actionGrid->addWidget(exportButton, 0, 1);
-    actionGrid->addWidget(pipelineButton, 1, 0);
-    actionGrid->addWidget(reportsButton, 1, 1);
+    actionGrid->addWidget(reportsButton, 0, 1);
     for (int column = 0; column < 2; ++column) {
         actionGrid->setColumnStretch(column, 1);
     }
-    modelRegistrySummaryLabel_ = mutedLabel(uiText("训练产物可从“任务与产物”注册为模型版本；评估报告、模型对比和流水线记录集中在当前模型库工作区。"));
+    modelRegistrySummaryLabel_ = mutedLabel(uiText("推理与部署验证只使用已登记且经 Manifest 校验的 V2 模型包；旧模型版本和评估记录仅用于迁移期审计。"));
     allowLabelToShrink(modelRegistrySummaryLabel_);
     toolbar->bodyLayout()->addWidget(actionStrip);
     toolbar->bodyLayout()->addWidget(modelRegistrySummaryLabel_);
 
-    auto* modelPanel = new InfoPanel(QStringLiteral("模型版本"));
+    auto* v2ModelPackagePanel = new InfoPanel(QStringLiteral("已验证 V2 模型包"));
+    auto* importForm = new QFormLayout;
+    importForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    importForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    v2ModelImportSourceEdit_ = new QLineEdit;
+    v2ModelImportSourceEdit_->setPlaceholderText(QStringLiteral("选择待导入的常规模型文件（例如 .onnx）"));
+    v2ModelImportManifestEdit_ = new QLineEdit;
+    v2ModelImportManifestEdit_->setPlaceholderText(QStringLiteral("选择用户确认的 V2 Manifest 草稿 JSON"));
+    const auto makeImportPathRow = [this](QLineEdit* edit, const QString& title, const QString& filter) {
+        auto* row = new QWidget;
+        auto* rowLayout = new QHBoxLayout(row);
+        rowLayout->setContentsMargins(0, 0, 0, 0);
+        auto* browseButton = new QPushButton(uiText("选择文件"));
+        connect(browseButton, &QPushButton::clicked, this, [this, edit, title, filter]() {
+            const QString file = QFileDialog::getOpenFileName(this, title, currentProjectPath_, filter);
+            if (!file.isEmpty()) edit->setText(QDir::toNativeSeparators(file));
+        });
+        rowLayout->addWidget(edit, 1);
+        rowLayout->addWidget(browseButton);
+        return row;
+    };
+    importForm->addRow(QStringLiteral("模型文件"), makeImportPathRow(v2ModelImportSourceEdit_, uiText("选择待导入模型"), QStringLiteral("Model files (*.onnx);;All files (*.*)")));
+    importForm->addRow(QStringLiteral("Manifest 草稿"), makeImportPathRow(v2ModelImportManifestEdit_, uiText("选择 V2 Manifest 草稿"), QStringLiteral("JSON files (*.json);;All files (*.*)")));
+    v2ModelPackagePanel->bodyLayout()->addLayout(importForm);
+    auto* importActionStrip = new QFrame;
+    importActionStrip->setObjectName(QStringLiteral("ActionStrip"));
+    auto* importActionLayout = new QHBoxLayout(importActionStrip);
+    importActionLayout->setContentsMargins(10, 8, 10, 8);
+    v2ModelImportResultLabel_ = mutedLabel(uiText("导入由 Worker 执行；Manifest 草稿必须明确模型语义、张量契约、来源快照和已验证状态。导入过程将生成任务 ID 与模型 SHA-256。"));
+    allowLabelToShrink(v2ModelImportResultLabel_);
+    auto* importButton = primaryButton(uiText("导入 V2 模型包"));
+    connect(importButton, &QPushButton::clicked, this, &MainWindow::importV2ModelPackage);
+    importActionLayout->addWidget(v2ModelImportResultLabel_, 1);
+    importActionLayout->addWidget(importButton);
+    v2ModelPackagePanel->bodyLayout()->addWidget(importActionStrip);
+    v2ModelPackageTable_ = new QTableWidget(0, 6);
+    v2ModelPackageTable_->setHorizontalHeaderLabels(QStringList()
+        << QStringLiteral("模型包 ID")
+        << QStringLiteral("模型族")
+        << QStringLiteral("任务")
+        << QStringLiteral("来源后端")
+        << QStringLiteral("解码器")
+        << QStringLiteral("登记时间"));
+    configureTable(v2ModelPackageTable_);
+    v2ModelPackageTable_->setWordWrap(true);
+    v2ModelPackageTable_->verticalHeader()->setDefaultSectionSize(42);
+    v2ModelPackageTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    v2ModelPackageTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    v2ModelPackageTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    v2ModelPackageTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    v2ModelPackageTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+    v2ModelPackageTable_->horizontalHeader()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
+    v2ModelPackagePanel->bodyLayout()->addWidget(v2ModelPackageTable_);
+
+    auto* modelPanel = new InfoPanel(QStringLiteral("旧模型版本（迁移期审计）"));
     modelVersionTable_ = new QTableWidget(0, 8);
     modelVersionTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("模型")
@@ -172,8 +204,7 @@ QWidget* MainWindow::buildModelRegistryPage()
     comparisonActionLayout->setContentsMargins(10, 8, 10, 8);
     comparisonActionLayout->setHorizontalSpacing(10);
     comparisonActionLayout->addWidget(comparisonInferButton, 0, 0);
-    comparisonActionLayout->addWidget(comparisonExportButton, 0, 1);
-    comparisonActionLayout->addWidget(comparisonReportButton, 0, 2);
+    comparisonActionLayout->addWidget(comparisonReportButton, 0, 1);
     for (int column = 0; column < 3; ++column) {
         comparisonActionLayout->setColumnStretch(column, 1);
     }
@@ -200,7 +231,8 @@ QWidget* MainWindow::buildModelRegistryPage()
     pipelinePanel->bodyLayout()->addWidget(pipelineRunTable_);
     modelWorkspaceTabs_ = new QTabWidget;
     modelWorkspaceTabs_->setObjectName(QStringLiteral("ModelWorkspaceTabs"));
-    modelWorkspaceTabs_->addTab(modelPanel, uiText("模型版本"));
+    modelWorkspaceTabs_->addTab(v2ModelPackagePanel, uiText("V2 模型包"));
+    modelWorkspaceTabs_->addTab(modelPanel, uiText("旧模型版本"));
     modelWorkspaceTabs_->addTab(buildEvaluationReportsPanel(), uiText("评估报告"));
     modelWorkspaceTabs_->addTab(comparisonPanel, uiText("模型对比"));
     modelWorkspaceTabs_->addTab(pipelinePanel, uiText("流水线记录"));
@@ -270,6 +302,9 @@ QWidget* MainWindow::buildEvaluationReportsPanel()
 
     auto* reportDetailPanel = new InfoPanel(QStringLiteral("评估报告详情"));
     evaluationReportView_ = new EvaluationReportView;
+    connect(evaluationReportView_, &QObject::destroyed, this, [this]() {
+        evaluationReportView_ = nullptr;
+    });
     auto* evaluationReportScroll = new QScrollArea;
     evaluationReportScroll->setWidget(evaluationReportView_);
     evaluationReportScroll->setWidgetResizable(true);

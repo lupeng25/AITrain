@@ -227,6 +227,8 @@ def test_train_forces_efficientad_batch_size_one():
         (dataset / "train" / "good").mkdir(parents=True)
         (dataset / "train" / "good" / "good.png").write_bytes(b"fake")
         imagenet.mkdir()
+        checkpoint.parent.mkdir(parents=True)
+        checkpoint.write_bytes(b"checkpoint")
 
         adapter.import_anomalib_symbols = lambda: (None, object, object, object, object)
         adapter.build_datamodule = fake_build_datamodule
@@ -322,9 +324,76 @@ def test_infer_uses_engine_predict_for_lightning_checkpoint():
         assert captured["predict_kwargs"]["ckpt_path"] == str(checkpoint.resolve())
         assert captured["predict_kwargs"]["data_path"] == str(image.resolve())
         assert captured["predict_kwargs"]["return_predictions"] is True
-        report = json.loads((output / "inference_predictions.json").read_text(encoding="utf-8"))
+        report = json.loads((output / "deployment_validation_report.json").read_text(encoding="utf-8"))
         assert report["ok"] is True
+        assert report["kind"] == "deployment_validation_report"
         assert report["predictions"][0]["decision"] == "ng"
+
+
+def test_bundle_exporter_writes_relative_python_runtime_contract():
+    exporter_path = ROOT / "python_trainers" / "anomaly" / "anomalib_exporter.py"
+    spec = importlib.util.spec_from_file_location("aitrain_anomalib_exporter", exporter_path)
+    assert spec and spec.loader
+    exporter = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(exporter)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        training = root / "training"
+        package = root / "package"
+        training.mkdir()
+        checkpoint = training / "source.ckpt"
+        checkpoint.write_bytes(b"anomalib-checkpoint")
+        sidecar = training / "anomaly_sidecar.json"
+        sidecar.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "trainingBackend": "anomalib_patchcore",
+                    "checkpointPath": str(checkpoint),
+                    "threshold": 0.42,
+                    "parameters": {"imageSize": 224},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        assert exporter.run(
+            {
+                "modelPath": str(checkpoint),
+                "sidecarPath": str(sidecar),
+                "outputPath": str(package),
+            }
+        ) == 0
+
+        contract = json.loads((package / "anomaly_sidecar.json").read_text(encoding="utf-8"))
+        assert contract["schemaVersion"] == 2
+        assert contract["kind"] == "anomalib_bundle"
+        assert contract["artifactFormat"] == "anomalib_bundle"
+        assert contract["modelFamily"] == "anomaly_detection"
+        assert contract["taskType"] == "anomaly_detection"
+        assert contract["sourceTrainingBackend"] == "anomalib_patchcore"
+        assert contract["runtimeRoutes"] == ["anomalib_python"]
+        assert contract["decoder"] == "anomalib_python_sidecar_v1"
+        assert contract["exporterVersion"] == "aitrain-anomalib-bundle-exporter-v2"
+        assert contract["checkpointPath"] == "model.ckpt"
+        assert contract["classNames"] == ["normal", "anomaly"]
+        assert contract["preprocessing"]
+        assert contract["postprocessing"]
+        assert (package / "model.ckpt").read_bytes() == b"anomalib-checkpoint"
+        assert (package / "anomalib_export_report.json").is_file()
+
+
+def test_bundle_sidecar_relative_checkpoint_is_resolved_from_package():
+    adapter = load_adapter()
+    with tempfile.TemporaryDirectory() as tmp:
+        package = Path(tmp)
+        checkpoint = package / "model.ckpt"
+        sidecar_path = package / "anomaly_sidecar.json"
+        checkpoint.write_bytes(b"checkpoint")
+        sidecar = {"checkpointPath": "model.ckpt", "trainingBackend": "anomalib_patchcore"}
+        sidecar_path.write_text(json.dumps(sidecar), encoding="utf-8")
+        assert adapter.checkpoint_from_sidecar(sidecar_path, sidecar) == checkpoint.resolve()
 
 
 if __name__ == "__main__":

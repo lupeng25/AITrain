@@ -47,7 +47,6 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QUrl>
-#include <QUuid>
 
 using namespace aitrain_app;
 
@@ -235,112 +234,139 @@ void setFieldErrorLabel(QLabel* label, const QString& text)
 }
 } // namespace
 
-void MainWindow::validateDeploymentArtifact()
+void MainWindow::validateDeploymentModelPackageV2()
 {
     if (worker_.isRunning()) {
-        QMessageBox::warning(this, uiText("部署验证"), uiText("Worker 正在执行任务，稍后再验证部署产物。"));
+        QMessageBox::warning(this, uiText("部署验证"), uiText("Worker 正在执行任务，稍后再运行交付工作流。"));
         return;
     }
-    QString modelPath = QDir::fromNativeSeparators(conversionOutputEdit_ ? conversionOutputEdit_->text().trimmed() : QString());
-    if (modelPath.isEmpty() || !QFileInfo::exists(modelPath)) {
-        modelPath = QDir::fromNativeSeparators(conversionCheckpointEdit_ ? conversionCheckpointEdit_->text().trimmed() : QString());
-    }
-    if (modelPath.isEmpty()) {
-        QMessageBox::warning(this, uiText("部署验证"), uiText("请选择已导出的模型产物或模型输入。"));
+    const QString modelPackageText = deploymentModelPackageCombo_
+        ? deploymentModelPackageCombo_->currentData().toString().trimmed()
+        : QString();
+    const QString sampleImagePath = QDir::fromNativeSeparators(
+        deploymentValidationImageEdit_ ? deploymentValidationImageEdit_->text().trimmed() : QString());
+    aitrain::v2::ModelPackageId modelPackageId;
+    QString error;
+    if (!v2Workspace_.isOpen() || currentProjectPath_.isEmpty()
+        || !aitrain::v2::ModelPackageId::parse(modelPackageText, &modelPackageId, &error)
+        || sampleImagePath.isEmpty() || !QFileInfo(sampleImagePath).isFile()) {
+        QMessageBox::warning(this, uiText("部署验证"), uiText("请选择已验证 V2 模型包和有效验证图片。"));
         return;
-    }
-    const QString sampleImagePath = QDir::fromNativeSeparators(conversionValidationImageEdit_ ? conversionValidationImageEdit_->text().trimmed() : QString());
-    const QString format = conversionFormatCombo_ ? conversionFormatCombo_->currentData().toString() : QString();
-    QString taskId;
-    QString outputPath;
-    if (repository_.isOpen()) {
-        taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        outputPath = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(taskId));
-        taskId = createRepositoryTask(
-            aitrain::TaskKind::Benchmark,
-            QStringLiteral("deployment_validation"),
-            QStringLiteral("yolo"),
-            outputPath,
-            uiText("部署产物验证中。"),
-            taskId);
-        if (taskId.isEmpty()) {
-            return;
-        }
-    } else {
-        outputPath = QFileInfo(modelPath).absoluteDir().filePath(QStringLiteral("deployment_validation"));
     }
 
+    const aitrain::v2::TaskId taskId = aitrain::v2::TaskId::create();
     QJsonObject options;
-    QString error;
-    if (!worker_.requestDeploymentValidation(workerExecutablePath(), modelPath, outputPath, format, sampleImagePath, options, &error, taskId)) {
-        if (!taskId.isEmpty() && repository_.isOpen()) {
-            QString taskError;
-            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
-            state_.training.currentTaskId.clear();
-            updateRecentTasks();
-        }
+    options.insert(QStringLiteral("benchmarkWarmup"), 1);
+    options.insert(QStringLiteral("benchmarkIterations"), 3);
+    activeV2TaskId_ = taskId.toString();
+    if (!worker_.requestRuntimeDeliveryWorkflowV2(workerExecutablePath(), currentProjectPath_,
+            modelPackageId.toString(), QStringLiteral("aitrain_onnxruntime"), sampleImagePath,
+            options, &error, activeV2TaskId_)) {
+        activeV2TaskId_.clear();
         QMessageBox::critical(this, uiText("部署验证"), error);
         return;
     }
     if (deploymentValidationResultLabel_) {
-        deploymentValidationResultLabel_->setText(uiText("正在验证部署产物：%1").arg(QDir::toNativeSeparators(modelPath)));
+        deploymentValidationResultLabel_->setText(uiText(
+            "Runtime Delivery 已派发：等待六步状态与最终 Evidence。\n"
+            "底层 ONNX Runtime 单次同步 infer 返回前不能中途抢占。"));
     }
-    workerPill_->setStatus(uiText("部署验证中"), StatusPill::Tone::Info);
+    workerPill_->setStatus(uiText("Runtime Delivery 运行中"), StatusPill::Tone::Info);
 }
-
-void MainWindow::runCustomerOcrAcceptance()
+void MainWindow::importOcrOfficialReportsV2()
 {
     if (worker_.isRunning()) {
-        QMessageBox::warning(this, uiText("OCR 验收"), uiText("Worker 正在执行任务，稍后再运行 OCR 验收。"));
+        QMessageBox::warning(this, uiText("OCR 报告导入"), uiText("Worker 正在执行任务，稍后再导入。"));
         return;
     }
-    QJsonObject options;
-    options.insert(QStringLiteral("detDatasetPath"), QDir::fromNativeSeparators(customerOcrDetDatasetEdit_ ? customerOcrDetDatasetEdit_->text().trimmed() : QString()));
-    options.insert(QStringLiteral("recDatasetPath"), QDir::fromNativeSeparators(customerOcrRecDatasetEdit_ ? customerOcrRecDatasetEdit_->text().trimmed() : QString()));
-    options.insert(QStringLiteral("systemImagesPath"), QDir::fromNativeSeparators(customerOcrSystemImagesEdit_ ? customerOcrSystemImagesEdit_->text().trimmed() : QString()));
-    options.insert(QStringLiteral("detReportPath"), QDir::fromNativeSeparators(customerOcrDetReportEdit_ ? customerOcrDetReportEdit_->text().trimmed() : QString()));
-    options.insert(QStringLiteral("recReportPath"), QDir::fromNativeSeparators(customerOcrRecReportEdit_ ? customerOcrRecReportEdit_->text().trimmed() : QString()));
-    options.insert(QStringLiteral("systemReportPath"), QDir::fromNativeSeparators(customerOcrSystemReportEdit_ ? customerOcrSystemReportEdit_->text().trimmed() : QString()));
-    options.insert(QStringLiteral("minRecAccuracy"), customerOcrMinAccEdit_ ? customerOcrMinAccEdit_->text().toDouble() : 0.70);
-    options.insert(QStringLiteral("maxRecCer"), customerOcrMaxCerEdit_ ? customerOcrMaxCerEdit_->text().toDouble() : 0.30);
-    options.insert(QStringLiteral("requireFullDomainEvidence"), true);
-    options.insert(QStringLiteral("allowPublicLikeData"), customerOcrAllowPublicCheck_ && customerOcrAllowPublicCheck_->isChecked());
-    options.insert(QStringLiteral("minDetSamples"), 1);
-    options.insert(QStringLiteral("minRecSamples"), 1);
-    options.insert(QStringLiteral("minSystemImages"), 1);
-
-    QString taskId;
-    QString outputPath = QDir::fromNativeSeparators(customerOcrOutputEdit_ ? customerOcrOutputEdit_->text().trimmed() : QString());
-    if (repository_.isOpen()) {
-        taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        if (outputPath.isEmpty()) {
-            outputPath = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(taskId));
-        }
-        taskId = createRepositoryTask(
-            aitrain::TaskKind::Report,
-            QStringLiteral("customer_ocr_acceptance"),
-            QStringLiteral("paddleocr"),
-            outputPath,
-            uiText("客户域 OCR 验收中。"),
-            taskId);
-        if (taskId.isEmpty()) {
-            return;
-        }
+    const auto source = [](QLineEdit* report, QLineEdit* snapshot, QLineEdit* artifact) {
+        return QJsonObject{{QStringLiteral("reportPath"), QDir::fromNativeSeparators(
+                report ? report->text().trimmed() : QString())},
+            {QStringLiteral("snapshotId"), snapshot ? snapshot->text().trimmed() : QString()},
+            {QStringLiteral("snapshotArtifactId"), artifact ? artifact->text().trimmed() : QString()}};
+    };
+    const QJsonObject det = source(customerOcrDetReportEdit_, customerOcrDetSnapshotIdEdit_,
+        customerOcrDetSnapshotArtifactIdEdit_);
+    const QJsonObject rec = source(customerOcrRecReportEdit_, customerOcrRecSnapshotIdEdit_,
+        customerOcrRecSnapshotArtifactIdEdit_);
+    const QJsonObject system = source(customerOcrSystemReportEdit_, customerOcrSystemSnapshotIdEdit_,
+        customerOcrSystemSnapshotArtifactIdEdit_);
+    const auto validSource = [](const QJsonObject& value) {
+        return QFileInfo(value.value(QStringLiteral("reportPath")).toString()).isFile()
+            && (!value.value(QStringLiteral("snapshotId")).toString().isEmpty()
+                || !value.value(QStringLiteral("snapshotArtifactId")).toString().isEmpty());
+    };
+    if (!v2Workspace_.isOpen() || currentProjectPath_.isEmpty()
+        || !validSource(det) || !validSource(rec) || !validSource(system)
+        || !customerOcrCohortIdEdit_ || customerOcrCohortIdEdit_->text().trimmed().isEmpty()
+        || !customerOcrDomainIdEdit_ || customerOcrDomainIdEdit_->text().trimmed().isEmpty()) {
+        QMessageBox::warning(this, uiText("OCR 报告导入"), uiText(
+            "请选择三份官方 JSON，并为每份填写 SnapshotId 或 committed Snapshot ArtifactId；验收批次和客户域不能为空。"));
+        return;
     }
 
+    const aitrain::v2::TaskId taskId = aitrain::v2::TaskId::create();
+    activeV2TaskId_ = taskId.toString();
+    activeV2WorkflowKind_ = QStringLiteral("ocr_report_import_v2");
     QString error;
-    if (!worker_.requestCustomerOcrAcceptance(workerExecutablePath(), outputPath, options, &error, taskId)) {
-        if (!taskId.isEmpty() && repository_.isOpen()) {
-            QString taskError;
-            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
-            state_.training.currentTaskId.clear();
-            updateRecentTasks();
-        }
+    if (!worker_.requestOcrOfficialReportImportV2(workerExecutablePath(), currentProjectPath_,
+            det, rec, system, customerOcrCohortIdEdit_->text().trimmed(),
+            customerOcrDomainIdEdit_->text().trimmed(),
+            customerOcrEvidenceClassCombo_ ? customerOcrEvidenceClassCombo_->currentText()
+                                           : QStringLiteral("customer_domain"),
+            &error, activeV2TaskId_)) {
+        activeV2TaskId_.clear();
+        activeV2WorkflowKind_.clear();
+        QMessageBox::critical(this, uiText("OCR 报告导入"), error);
+        return;
+    }
+    if (customerOcrStatusLabel_) {
+        customerOcrStatusLabel_->setText(uiText("正在受控导入三份官方报告；原始路径不会进入结果事件。"));
+    }
+    workerPill_->setStatus(uiText("OCR 报告导入中"), StatusPill::Tone::Info);
+}
+
+void MainWindow::runOcrAcceptanceWorkflowV2()
+{
+    if (worker_.isRunning()) {
+        QMessageBox::warning(this, uiText("OCR 验收"), uiText("Worker 正在执行任务，稍后再运行验收。"));
+        return;
+    }
+    aitrain::v2::ArtifactId det;
+    aitrain::v2::ArtifactId rec;
+    aitrain::v2::ArtifactId system;
+    QString error;
+    if (!v2Workspace_.isOpen() || currentProjectPath_.isEmpty()
+        || !aitrain::v2::ArtifactId::parse(customerOcrDetReportArtifactIdEdit_
+                ? customerOcrDetReportArtifactIdEdit_->text().trimmed() : QString(), &det, &error)
+        || !aitrain::v2::ArtifactId::parse(customerOcrRecReportArtifactIdEdit_
+                ? customerOcrRecReportArtifactIdEdit_->text().trimmed() : QString(), &rec, &error)
+        || !aitrain::v2::ArtifactId::parse(customerOcrSystemReportArtifactIdEdit_
+                ? customerOcrSystemReportArtifactIdEdit_->text().trimmed() : QString(), &system, &error)) {
+        QMessageBox::warning(this, uiText("OCR 验收"), uiText("验收只接受三个已提交官方报告 ArtifactId。"));
+        return;
+    }
+    const QJsonObject thresholds{
+        {QStringLiteral("minimumDetSamples"), 1},
+        {QStringLiteral("minimumRecSamples"), 1},
+        {QStringLiteral("minimumSystemSamples"), 1},
+        {QStringLiteral("minimumDetHmean"), customerOcrMinDetHmeanEdit_ ? customerOcrMinDetHmeanEdit_->text().toDouble() : 0.50},
+        {QStringLiteral("minimumRecAccuracy"), customerOcrMinAccEdit_ ? customerOcrMinAccEdit_->text().toDouble() : 0.70},
+        {QStringLiteral("maximumRecCer"), customerOcrMaxCerEdit_ ? customerOcrMaxCerEdit_->text().toDouble() : 0.30},
+        {QStringLiteral("minimumSystemAccuracy"), customerOcrMinSystemAccEdit_ ? customerOcrMinSystemAccEdit_->text().toDouble() : 0.70}};
+    const aitrain::v2::TaskId taskId = aitrain::v2::TaskId::create();
+    activeV2TaskId_ = taskId.toString();
+    activeV2WorkflowKind_ = QStringLiteral("ocr_acceptance_v2");
+    if (!worker_.requestOcrAcceptanceWorkflowV2(workerExecutablePath(), currentProjectPath_,
+            det.toString(), rec.toString(), system.toString(), thresholds, &error,
+            activeV2TaskId_)) {
+        activeV2TaskId_.clear();
+        activeV2WorkflowKind_.clear();
         QMessageBox::critical(this, uiText("OCR 验收"), error);
         return;
     }
     if (customerOcrStatusLabel_) {
-        customerOcrStatusLabel_->setText(uiText("客户域 OCR 验收运行中。"));
+        customerOcrStatusLabel_->setText(uiText("OCR Acceptance V2 四步验收运行中。"));
     }
     workerPill_->setStatus(uiText("OCR 验收中"), StatusPill::Tone::Info);
 }
@@ -352,81 +378,18 @@ void MainWindow::collectDiagnosticsBundle()
         return;
     }
 
-    QJsonArray recentTasks;
-    QJsonArray recentFailures;
-    QJsonArray artifactIndex;
-    if (repository_.isOpen()) {
-        QString error;
-        const QVector<aitrain::TaskRecord> tasks = repository_.recentTasks(20, &error);
-        for (const aitrain::TaskRecord& task : tasks) {
-            QJsonObject taskObject;
-            taskObject.insert(QStringLiteral("id"), task.id);
-            taskObject.insert(QStringLiteral("kind"), aitrain::taskKindToString(task.kind));
-            taskObject.insert(QStringLiteral("state"), aitrain::taskStateToString(task.state));
-            taskObject.insert(QStringLiteral("taskType"), task.taskType);
-            taskObject.insert(QStringLiteral("workDir"), task.workDir);
-            taskObject.insert(QStringLiteral("message"), task.message);
-            taskObject.insert(QStringLiteral("updatedAt"), task.updatedAt.toUTC().toString(Qt::ISODateWithMs));
-            recentTasks.append(taskObject);
-            if (task.state == aitrain::TaskState::Failed) {
-                recentFailures.append(taskObject);
-            }
-            const QVector<aitrain::ArtifactRecord> artifacts = repository_.artifactsForTask(task.id, &error);
-            for (const aitrain::ArtifactRecord& artifact : artifacts) {
-                artifactIndex.append(QJsonObject{
-                    {QStringLiteral("taskId"), artifact.taskId},
-                    {QStringLiteral("kind"), artifact.kind},
-                    {QStringLiteral("path"), artifact.path},
-                    {QStringLiteral("message"), artifact.message}
-                });
-            }
-        }
+    if (!v2Workspace_.isOpen() || currentProjectPath_.isEmpty()) {
+        QMessageBox::warning(this, uiText("诊断包"), uiText("请先打开 V2 项目。"));
+        return;
     }
-
-    QJsonObject context;
-    context.insert(QStringLiteral("projectName"), currentProjectName_);
-    context.insert(QStringLiteral("projectPath"), currentProjectPath_);
-    context.insert(QStringLiteral("workerExecutable"), workerExecutablePath());
-    context.insert(QStringLiteral("recentTasks"), recentTasks);
-    context.insert(QStringLiteral("recentFailures"), recentFailures);
-    context.insert(QStringLiteral("artifactIndex"), artifactIndex);
-    context.insert(QStringLiteral("licenseSummary"), QJsonObject{
-        {QStringLiteral("status"), licenseOwner_.isEmpty() ? QStringLiteral("unknown") : QStringLiteral("registered")},
-        {QStringLiteral("owner"), licenseOwner_},
-        {QStringLiteral("expiry"), licenseExpiry_}
-    });
-    context.insert(QStringLiteral("capabilitySummary"), QJsonObject{
-        {QStringLiteral("count"), aitrain::BuiltinCapabilityRegistry::instance().capabilities().size()},
-        {QStringLiteral("source"), QStringLiteral("builtin_registry")}
-    });
-
-    QString taskId;
-    QString outputPath;
-    if (repository_.isOpen()) {
-        taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        outputPath = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(taskId));
-        taskId = createRepositoryTask(
-            aitrain::TaskKind::Report,
-            QStringLiteral("diagnostic_bundle"),
-            QStringLiteral("com.aitrain.system"),
-            outputPath,
-            uiText("诊断包生成中。"),
-            taskId);
-        if (taskId.isEmpty()) {
-            return;
-        }
-    } else {
-        outputPath = QDir(QDir::tempPath()).filePath(QStringLiteral("aitrain-diagnostics"));
-    }
-
+    const aitrain::v2::TaskId taskId = aitrain::v2::TaskId::create();
+    activeV2TaskId_ = taskId.toString();
+    activeV2WorkflowKind_ = QStringLiteral("diagnostics_v2");
     QString error;
-    if (!worker_.requestDiagnosticsBundle(workerExecutablePath(), outputPath, context, &error, taskId)) {
-        if (!taskId.isEmpty() && repository_.isOpen()) {
-            QString taskError;
-            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
-            state_.training.currentTaskId.clear();
-            updateRecentTasks();
-        }
+    if (!worker_.requestDiagnosticsWorkflowV2(workerExecutablePath(), currentProjectPath_,
+            QJsonObject(), &error, activeV2TaskId_)) {
+        activeV2TaskId_.clear();
+        activeV2WorkflowKind_.clear();
         QMessageBox::critical(this, uiText("诊断包"), error);
         return;
     }
@@ -473,67 +436,4 @@ void MainWindow::importAcceptanceEvidence()
     }
     setAcceptanceTableRow(deliveryAcceptanceTable_, stage, status, file, message);
     updateDeliveryAcceptanceSummary();
-}
-
-void MainWindow::generateDeliveryReportFromSelectedArtifact()
-{
-    if (worker_.isRunning()) {
-        QMessageBox::warning(this, uiText("交付报告"), uiText("Worker 正在执行任务，稍后再生成交付报告。"));
-        return;
-    }
-    const QString modelPath = selectedArtifactPath();
-    if (modelPath.isEmpty()) {
-        QMessageBox::warning(this, uiText("交付报告"), uiText("请先选择一个模型或报告产物。"));
-        return;
-    }
-
-    QString taskId;
-    QString outputPath;
-    if (repository_.isOpen()) {
-        taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        outputPath = QDir(currentProjectPath_).filePath(QStringLiteral("runs/%1").arg(taskId));
-        taskId = createRepositoryTask(
-            aitrain::TaskKind::Report,
-            QStringLiteral("delivery_report"),
-            QStringLiteral("com.aitrain.workflow"),
-            outputPath,
-            uiText("训练交付报告生成中。"),
-            taskId);
-        if (taskId.isEmpty()) {
-            return;
-        }
-    }
-
-    QJsonObject context;
-    context.insert(QStringLiteral("projectName"), currentProjectName_);
-    context.insert(QStringLiteral("projectPath"), currentProjectPath_);
-    context.insert(QStringLiteral("modelPath"), modelPath);
-    context.insert(QStringLiteral("datasetPath"), state_.dataset.currentPath);
-    context.insert(QStringLiteral("datasetFormat"), state_.dataset.currentFormat);
-    context.insert(QStringLiteral("taskType"), currentTaskType());
-    context.insert(QStringLiteral("trainingBackend"), trainingBackendCombo_ ? trainingBackendCombo_->currentData().toString() : QString());
-    context.insert(QStringLiteral("modelPreset"), modelPresetCombo_ ? modelPresetCombo_->currentText().trimmed() : QString());
-    context.insert(QStringLiteral("sourceTaskId"), selectedTaskId());
-    if (repository_.isOpen() && !state_.dataset.currentPath.isEmpty()) {
-        QString snapshotError;
-        const aitrain::DatasetRecord dataset = repository_.datasetByRootPath(state_.dataset.currentPath, &snapshotError);
-        const aitrain::DatasetSnapshotRecord snapshot = repository_.latestDatasetSnapshot(dataset.id, &snapshotError);
-        if (snapshot.id > 0) {
-            context.insert(QStringLiteral("datasetSnapshotId"), snapshot.id);
-            context.insert(QStringLiteral("datasetSnapshotHash"), snapshot.contentHash);
-            context.insert(QStringLiteral("datasetSnapshotManifest"), snapshot.manifestPath);
-        }
-    }
-    QString error;
-    if (!worker_.requestDeliveryReport(workerExecutablePath(), outputPath, context, &error, taskId)) {
-        if (!taskId.isEmpty() && repository_.isOpen()) {
-            QString taskError;
-            repository_.updateTaskState(taskId, aitrain::TaskState::Failed, error, &taskError);
-            state_.training.currentTaskId.clear();
-            updateRecentTasks();
-        }
-        QMessageBox::critical(this, uiText("交付报告"), error);
-        return;
-    }
-    workerPill_->setStatus(uiText("交付报告生成中"), StatusPill::Tone::Info);
 }

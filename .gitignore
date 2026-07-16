@@ -22,4 +22,3 @@ demo_project/
 tools/aitrain-license-private-key.json
 aitrain-license-private-key.json
 *aitrain-license-private-key*.json
-!tools/aitrain-license-private-key.example.json
