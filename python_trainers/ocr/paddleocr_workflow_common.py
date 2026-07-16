@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PaddleOCR Det/Rec V2 workflow primitives.
+"""PaddleOCR Det/Rec  workflow primitives.
 
 The module deliberately treats the PaddleOCR checkout as read-only.  Every
 official command is started through :class:`AdapterSdk`; generated configs,
@@ -25,20 +25,20 @@ TRAINER_ROOT = Path(__file__).resolve().parents[1]
 if str(TRAINER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRAINER_ROOT))
 
-from adapter_event_channel_v2 import AdapterEventChannelV2, event_channel_from_environment  # noqa: E402
+from adapter_event_channel import AdapterEventChannel, event_channel_from_environment  # noqa: E402
 from adapter_sdk import AdapterCanceled, AdapterSdk  # noqa: E402
-from dataset_snapshot_v2 import materialize_dataset_snapshot_v2  # noqa: E402
+from dataset_snapshot import materialize_dataset_snapshot  # noqa: E402
 from trainer_protocol import configure_stdio, exception_details  # noqa: E402
 
 configure_stdio()
 
-EXPORTER_VERSION = "aitrain-paddleocr-exporter-v2"
+EXPORTER_VERSION = "aitrain-paddleocr-exporter"
 RUNTIME_ROUTE = "paddleocr_official"
 ARTIFACT_FORMAT = "paddleocr_inference_bundle"
 FIXED_ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 
 _adapter: AdapterSdk | None = None
-_event_channel: AdapterEventChannelV2 | None = None
+_event_channel: AdapterEventChannel | None = None
 
 
 def backend_id(component: str, operation: str) -> str:
@@ -163,10 +163,10 @@ def require_snapshot(request: dict[str, Any], options: dict[str, Any]) -> tuple[
     manifest_value = first_value(request, options, "datasetSnapshotManifest")
     staging_value = first_value(request, options, "datasetSnapshotStagingPath")
     if not manifest_value or not staging_value:
-        raise ValueError("PaddleOCR Train/Evaluate requires Dataset Snapshot V2 manifest and staging path")
+        raise ValueError("PaddleOCR Train/Evaluate requires Dataset Snapshot  manifest and staging path")
     manifest = Path(str(manifest_value)).resolve()
     staging = Path(str(staging_value)).resolve()
-    return materialize_dataset_snapshot_v2(dataset_root, manifest, staging), str(manifest)
+    return materialize_dataset_snapshot(dataset_root, manifest, staging), str(manifest)
 
 
 def _safe_relative(name: str) -> Path:
@@ -341,7 +341,7 @@ def run_train(component: str, request: dict[str, Any]) -> int:
     official_output = output / "official-checkpoint"
     command = [python_program(request, options), str(official_script(repo, "tools/train.py")), "-c", str(config_path), "-o",
                f"Global.save_model_dir={official_output}", *_dataset_overrides(component, dataset, dictionary_path)]
-    sdk.emit_progress(10, message="Materialized verified PaddleOCR Dataset Snapshot V2", datasetSnapshotManifest=manifest)
+    sdk.emit_progress(10, message="Materialized verified PaddleOCR Dataset Snapshot ", datasetSnapshotManifest=manifest)
     tail = _run_official(sdk, command, repo, output / "official_train.log")
     inventory = deterministic_zip(official_output, output / "model.zip")
     report = {

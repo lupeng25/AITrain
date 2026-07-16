@@ -8,7 +8,7 @@
 #include "aitrain/core/CapabilityRegistry.h"
 #include "aitrain/core/DetectionTrainer.h"
 #include "aitrain/core/WorkerProtocol.h"
-#include "aitrain/v2/TrainingWorkflowProfileV2.h"
+#include "aitrain/workflow\TrainingWorkflowProfile.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -396,24 +396,24 @@ void MainWindow::startInference()
         : QString();
     const QString imagePath = QDir::fromNativeSeparators(
         inferenceImageEdit_ ? inferenceImageEdit_->text().trimmed() : QString());
-    aitrain::v2::ModelPackageId modelPackageId;
+    aitrain::ModelPackageId modelPackageId;
     QString error;
-    if (!v2Workspace_.isOpen() || currentProjectPath_.isEmpty()
-        || !aitrain::v2::ModelPackageId::parse(modelPackageText, &modelPackageId, &error)
+    if (!workspace_.isOpen() || currentProjectPath_.isEmpty()
+        || !aitrain::ModelPackageId::parse(modelPackageText, &modelPackageId, &error)
         || imagePath.isEmpty() || !QFileInfo(imagePath).isFile()) {
-        QMessageBox::warning(this, uiText("推理"), uiText("请选择已验证 V2 模型包和有效样本图片。"));
+        QMessageBox::warning(this, uiText("推理"), uiText("请选择已验证  模型包和有效样本图片。"));
         return;
     }
 
-    const aitrain::v2::TaskId taskId = aitrain::v2::TaskId::create();
+    const aitrain::TaskId taskId = aitrain::TaskId::create();
     QJsonObject options;
     options.insert(QStringLiteral("benchmarkWarmup"), 1);
     options.insert(QStringLiteral("benchmarkIterations"), 3);
-    activeV2TaskId_ = taskId.toString();
-    if (!worker_.requestRuntimeDeliveryWorkflowV2(workerExecutablePath(), currentProjectPath_,
+    activeTaskId_ = taskId.toString();
+    if (!worker_.requestRuntimeDeliveryWorkflow(workerExecutablePath(), currentProjectPath_,
             modelPackageId.toString(), QStringLiteral("aitrain_onnxruntime"), imagePath,
-            options, &error, activeV2TaskId_)) {
-        activeV2TaskId_.clear();
+            options, &error, activeTaskId_)) {
+        activeTaskId_.clear();
         QMessageBox::critical(this, uiText("推理"), error);
         return;
     }
@@ -455,22 +455,22 @@ void MainWindow::startTraining()
     const QString snapshotId = dataQualitySnapshotIdEdit_ ? dataQualitySnapshotIdEdit_->text().trimmed() : QString();
     const QString snapshotArtifactId = dataQualitySnapshotArtifactIdEdit_
         ? dataQualitySnapshotArtifactIdEdit_->text().trimmed() : QString();
-    aitrain::v2::DatasetId parsedDatasetId;
-    aitrain::v2::DatasetVersionId parsedDatasetVersionId;
-    aitrain::v2::SnapshotId parsedSnapshotId;
-    aitrain::v2::ArtifactId parsedSnapshotArtifactId;
+    aitrain::DatasetId parsedDatasetId;
+    aitrain::DatasetVersionId parsedDatasetVersionId;
+    aitrain::SnapshotId parsedSnapshotId;
+    aitrain::ArtifactId parsedSnapshotArtifactId;
     QString snapshotIdentityError;
-    if (!aitrain::v2::DatasetId::parse(datasetId, &parsedDatasetId, &snapshotIdentityError)
-        || !aitrain::v2::DatasetVersionId::parse(datasetVersionId, &parsedDatasetVersionId, &snapshotIdentityError)
-        || !aitrain::v2::SnapshotId::parse(snapshotId, &parsedSnapshotId, &snapshotIdentityError)
-        || !aitrain::v2::ArtifactId::parse(snapshotArtifactId, &parsedSnapshotArtifactId, &snapshotIdentityError)) {
+    if (!aitrain::DatasetId::parse(datasetId, &parsedDatasetId, &snapshotIdentityError)
+        || !aitrain::DatasetVersionId::parse(datasetVersionId, &parsedDatasetVersionId, &snapshotIdentityError)
+        || !aitrain::SnapshotId::parse(snapshotId, &parsedSnapshotId, &snapshotIdentityError)
+        || !aitrain::ArtifactId::parse(snapshotArtifactId, &parsedSnapshotArtifactId, &snapshotIdentityError)) {
         QMessageBox::warning(this, uiText("训练"),
-            uiText("训练只消费已登记的 V2 Snapshot。请在“数据集”页填写同一条记录的 DatasetId、DatasetVersionId、SnapshotId 和 Snapshot ArtifactId。\n%1")
+            uiText("训练只消费已登记的  Snapshot。请在“数据集”页填写同一条记录的 DatasetId、DatasetVersionId、SnapshotId 和 Snapshot ArtifactId。\n%1")
                 .arg(snapshotIdentityError));
         return;
     }
 
-    const QString taskId = aitrain::v2::TaskId::create().toString();
+    const QString taskId = aitrain::TaskId::create().toString();
 
     const QString trainingBackend = trainingBackendCombo_
         ? trainingBackendCombo_->currentData().toString().trimmed()
@@ -547,14 +547,14 @@ void MainWindow::startTraining()
         parameters.insert(QStringLiteral("runOfficial"), true);
         parameters.insert(QStringLiteral("prepareOnly"), false);
     }
-    aitrain::v2::TrainingWorkflowProfileV2 workflowProfile;
+    aitrain::TrainingWorkflowProfile workflowProfile;
     QString workflowProfileError;
-    if (!aitrain::v2::resolveTrainingWorkflowProfileV2(
+    if (!aitrain::resolveTrainingWorkflowProfile(
             backendForRequest, &workflowProfile, &workflowProfileError)) {
         QMessageBox::critical(
             this,
             uiText("训练配置"),
-            uiText("所选训练后端没有 V2 训练工作流，已阻止启动：%1").arg(workflowProfileError));
+            uiText("所选训练后端没有  训练工作流，已阻止启动：%1").arg(workflowProfileError));
         return;
     }
     parameters.insert(QStringLiteral("trainingTemplate"), workflowProfile.templateId);
@@ -570,17 +570,17 @@ void MainWindow::startTraining()
     adapterParameters.remove(QStringLiteral("snapshotId"));
     adapterParameters.remove(QStringLiteral("snapshotArtifactId"));
 
-    QJsonObject v2Request;
-    v2Request.insert(wp::field::taskId(), taskId);
-    v2Request.insert(QStringLiteral("projectRoot"), currentProjectPath_);
-    v2Request.insert(QStringLiteral("datasetId"), datasetId);
-    v2Request.insert(QStringLiteral("datasetVersionId"), datasetVersionId);
-    v2Request.insert(QStringLiteral("snapshotId"), snapshotId);
-    v2Request.insert(QStringLiteral("snapshotArtifactId"), snapshotArtifactId);
-    v2Request.insert(QStringLiteral("capabilityId"), capabilityCombo_->currentData().toString());
-    v2Request.insert(wp::field::taskType(), currentTaskType());
-    v2Request.insert(QStringLiteral("trainingBackend"), backendForRequest);
-    v2Request.insert(QStringLiteral("parameters"), adapterParameters);
+    QJsonObject Request;
+    Request.insert(wp::field::taskId(), taskId);
+    Request.insert(QStringLiteral("projectRoot"), currentProjectPath_);
+    Request.insert(QStringLiteral("datasetId"), datasetId);
+    Request.insert(QStringLiteral("datasetVersionId"), datasetVersionId);
+    Request.insert(QStringLiteral("snapshotId"), snapshotId);
+    Request.insert(QStringLiteral("snapshotArtifactId"), snapshotArtifactId);
+    Request.insert(QStringLiteral("capabilityId"), capabilityCombo_->currentData().toString());
+    Request.insert(wp::field::taskType(), currentTaskType());
+    Request.insert(QStringLiteral("trainingBackend"), backendForRequest);
+    Request.insert(QStringLiteral("parameters"), adapterParameters);
 
     metricsWidget_->clear();
     logEdit_->clear();
@@ -603,12 +603,12 @@ void MainWindow::startTraining()
         latestPreviewImageLabel_->setText(uiText("暂无预览图"));
     }
 
-    activeV2TaskId_ = taskId;
-    activeV2WorkflowKind_ = QStringLiteral("training_v2");
+    activeTaskId_ = taskId;
+    activeWorkflowKind_ = QStringLiteral("training");
     QString error;
-    if (!worker_.requestTrainingWorkflowV2(workerExecutablePath(), v2Request, &error)) {
-        activeV2TaskId_.clear();
-        activeV2WorkflowKind_.clear();
+    if (!worker_.requestTrainingWorkflow(workerExecutablePath(), Request, &error)) {
+        activeTaskId_.clear();
+        activeWorkflowKind_.clear();
         updateRecentTasks();
         QMessageBox::critical(this, QStringLiteral("Worker"), error);
         return;
@@ -618,15 +618,15 @@ void MainWindow::startTraining()
     updateRecentTasks();
 }
 
-void MainWindow::importV2ModelPackage()
+void MainWindow::importModelPackage()
 {
     if (worker_.isRunning()) {
         QMessageBox::warning(this, uiText("模型导入"), uiText("Worker 正在执行任务，稍后再导入模型。"));
         return;
     }
-    const QString sourceFilePath = QDir::fromNativeSeparators(v2ModelImportSourceEdit_ ? v2ModelImportSourceEdit_->text().trimmed() : QString());
-    const QString manifestPath = QDir::fromNativeSeparators(v2ModelImportManifestEdit_ ? v2ModelImportManifestEdit_->text().trimmed() : QString());
-    if (!v2Workspace_.isOpen() || !QFileInfo(sourceFilePath).isFile() || !QFileInfo(manifestPath).isFile()) {
+    const QString sourceFilePath = QDir::fromNativeSeparators(modelImportSourceEdit_ ? modelImportSourceEdit_->text().trimmed() : QString());
+    const QString manifestPath = QDir::fromNativeSeparators(modelImportManifestEdit_ ? modelImportManifestEdit_->text().trimmed() : QString());
+    if (!workspace_.isOpen() || !QFileInfo(sourceFilePath).isFile() || !QFileInfo(manifestPath).isFile()) {
         QMessageBox::warning(this, uiText("模型导入"), uiText("请先打开项目，并选择常规模型文件和用户确认的 Manifest 草稿 JSON。"));
         return;
     }
@@ -642,13 +642,13 @@ void MainWindow::importV2ModelPackage()
     }
     const QString taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     QString error;
-    if (!worker_.requestModelImportV2(workerExecutablePath(), currentProjectPath_, sourceFilePath, document.object(), &error, taskId)) {
+    if (!worker_.requestModelImport(workerExecutablePath(), currentProjectPath_, sourceFilePath, document.object(), &error, taskId)) {
         QMessageBox::critical(this, uiText("模型导入"), error);
         return;
     }
-    v2ModelImportInProgress_ = true;
-    if (v2ModelImportResultLabel_) {
-        v2ModelImportResultLabel_->setText(uiText("正在导入模型并计算 SHA-256：%1").arg(QDir::toNativeSeparators(sourceFilePath)));
+    modelImportInProgress_ = true;
+    if (modelImportResultLabel_) {
+        modelImportResultLabel_->setText(uiText("正在导入模型并计算 SHA-256：%1").arg(QDir::toNativeSeparators(sourceFilePath)));
     }
     workerPill_->setStatus(uiText("模型导入中"), StatusPill::Tone::Info);
 }

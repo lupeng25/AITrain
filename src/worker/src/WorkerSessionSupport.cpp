@@ -1,4 +1,4 @@
-﻿#include "WorkerSessionSupport.h"
+#include "WorkerSessionSupport.h"
 
 #include "aitrain/core/Deployment.h"
 #include "aitrain/core/VisionModelRuntime.h"
@@ -15,6 +15,28 @@
 #include <QStandardPaths>
 
 namespace worker_support {
+
+namespace {
+
+constexpr int kProbeKillWaitMs = 500;
+
+void killAndReapBounded(QProcess* process)
+{
+    if (!process || process->state() == QProcess::NotRunning) {
+        return;
+    }
+    process->kill();
+    // Never use the unbounded waitForFinished() overload for environment
+    // probes. A broken executable or inherited pipe can otherwise pin the
+    // Worker thread indefinitely after the timeout has already fired.
+    process->waitForFinished(kProbeKillWaitMs);
+    if (process->state() != QProcess::NotRunning) {
+        process->kill();
+        process->waitForFinished(kProbeKillWaitMs);
+    }
+}
+
+} // namespace
 
 QJsonObject checkObject(const QString& name, const QString& status, const QString& message, const QJsonObject& details)
 {
@@ -50,8 +72,7 @@ QJsonObject nvidiaSmiCheck()
         return checkObject(QStringLiteral("NVIDIA Driver"), QStringLiteral("missing"), QStringLiteral("未找到 nvidia-smi，可能未安装 NVIDIA 驱动。"));
     }
     if (!process.waitForFinished(2500)) {
-        process.kill();
-        process.waitForFinished();
+        killAndReapBounded(&process);
         return checkObject(QStringLiteral("NVIDIA Driver"), QStringLiteral("warning"), QStringLiteral("nvidia-smi 执行超时。"));
     }
 
@@ -160,8 +181,7 @@ QString firstUsablePythonExecutable(const QJsonObject& parameters)
             continue;
         }
         if (!process.waitForFinished(2500)) {
-            process.kill();
-            process.waitForFinished();
+            killAndReapBounded(&process);
             continue;
         }
         if (process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0) {
@@ -188,8 +208,7 @@ QJsonObject runPythonCommandCheck(
         return checkObject(name, QStringLiteral("missing"), QStringLiteral("%1: %2").arg(missingMessage, process.errorString()));
     }
     if (!process.waitForFinished(timeoutMs)) {
-        process.kill();
-        process.waitForFinished();
+        killAndReapBounded(&process);
         return checkObject(name, QStringLiteral("warning"), QStringLiteral("%1 check timed out.").arg(name));
     }
 
@@ -267,7 +286,11 @@ QJsonObject runModuleProbe(const QString& pythonExecutable, const QString& check
     process.start(pythonExecutable, QStringList()
         << QStringLiteral("-c")
         << QStringLiteral("import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('%1') else 3)").arg(moduleName));
-    if (!process.waitForStarted(2000) || !process.waitForFinished(5000)) {
+    if (!process.waitForStarted(2000)) {
+        return profileCheck(checkName, QStringLiteral("warning"), QStringLiteral("Unable to probe module availability quickly."));
+    }
+    if (!process.waitForFinished(5000)) {
+        killAndReapBounded(&process);
         return profileCheck(checkName, QStringLiteral("warning"), QStringLiteral("Unable to probe module availability quickly."));
     }
     if (process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0) {
@@ -437,8 +460,8 @@ QJsonObject anomalibEnvironmentProfile(const QString& pythonExecutable)
     checks.append(runModuleProbe(
         pythonExecutable,
         QStringLiteral("opencv"),
-        QStringLiteral("cv2"),
-        QStringLiteral("opencv-python is missing; anomaly overlays and masks require cv2.")));
+        QStringLiteral("c"),
+        QStringLiteral("opencv-python is missing; anomaly overlays and masks require c.")));
 
     repairHints.append(QStringLiteral("Install Anomalib profile packages: `pip install -r python_trainers/requirements-anomaly.txt`."));
     repairHints.append(QStringLiteral("EfficientAD requires imagenetDir from parameters, AITRAIN_ANOMALIB_IMAGENET_DIR, or `.deps/anomalib/imagenette`; AITrain will not auto-download external data."));

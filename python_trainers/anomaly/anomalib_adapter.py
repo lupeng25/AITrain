@@ -22,20 +22,20 @@ if str(TRAINER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRAINER_ROOT))
 REPO_ROOT = TRAINER_ROOT.parent
 
-from adapter_event_channel_v2 import AdapterEventChannelV2, event_channel_from_environment
-from adapter_sdk import AdapterSdk
-from dataset_snapshot_v2 import materialize_dataset_snapshot_v2
+from adapter_event_channel import AdapterEventChannel, event_channel_from_environment
+from adapter_sdk import AdapterCanceled, AdapterSdk
+from dataset_snapshot import materialize_dataset_snapshot
 from trainer_protocol import configure_stdio, exception_details
 
 
 configure_stdio()
 
 _adapter: Optional[AdapterSdk] = None
-_event_channel: Optional[AdapterEventChannelV2] = None
+_event_channel: Optional[AdapterEventChannel] = None
 
 
 def configure_adapter(backend: str) -> AdapterSdk:
-    """Create the SDK and prefer the authenticated Worker V2 event channel."""
+    """Create the SDK and prefer the authenticated Worker  event channel."""
     global _adapter, _event_channel
     if _event_channel is None and os.environ.get("AITRAIN_EVENT_PORT"):
         _event_channel = event_channel_from_environment()
@@ -334,7 +334,7 @@ def dataset_inventory(dataset_path: Path) -> Dict[str, Any]:
 def materialize_request_dataset(
     request: Dict[str, Any], params: Dict[str, Any], dataset_path: Path
 ) -> Tuple[Path, str]:
-    """Resolve an immutable Dataset Snapshot V2 for train/evaluate requests."""
+    """Resolve an immutable Dataset Snapshot  for train/evaluate requests."""
     options = request.get("options") if isinstance(request.get("options"), dict) else {}
     manifest = str(
         params.get("datasetSnapshotManifest")
@@ -349,9 +349,9 @@ def materialize_request_dataset(
         or ""
     ).strip()
     if bool(manifest) != bool(staging):
-        raise ValueError("Dataset Snapshot V2 requires both manifest and staging paths.")
+        raise ValueError("Dataset Snapshot  requires both manifest and staging paths.")
     if manifest:
-        dataset_path = materialize_dataset_snapshot_v2(dataset_path, manifest, staging)
+        dataset_path = materialize_dataset_snapshot(dataset_path, manifest, staging)
     return dataset_path, manifest
 
 
@@ -746,6 +746,7 @@ def train(request: Dict[str, Any]) -> int:
     output_path.mkdir(parents=True, exist_ok=True)
     backend = str(request.get("backend") or BACKEND_PATCHCORE).strip().lower()
     params = merge_preset(backend, dict(request.get("parameters") or {}))
+    configure_adapter(backend).raise_if_canceled()
     if backend == BACKEND_EFFICIENTAD:
         params["batchSize"] = 1
         params["batch_size"] = 1
@@ -782,8 +783,10 @@ def train(request: Dict[str, Any]) -> int:
         model = build_model(backend, params, patchcore_cls, efficientad_cls)
         engine = make_engine(engine_cls, output_path, params)
         emit_event(backend, "progress", message="Running Anomalib fit().", percent=8)
+        configure_adapter(backend).raise_if_canceled()
         engine.fit(model=model, datamodule=datamodule)
         emit_event(backend, "progress", message="Collecting Anomalib artifacts.", percent=90)
+        configure_adapter(backend).raise_if_canceled()
         checkpoint = latest_checkpoint(output_path)
         if checkpoint is not None:
             canonical_checkpoint = output_path / "model.ckpt"
@@ -793,9 +796,12 @@ def train(request: Dict[str, Any]) -> int:
         metrics: Dict[str, Any] = {}
         if not inventory.get("evaluationLimited"):
             try:
+                configure_adapter(backend).raise_if_canceled()
                 test_result = engine.test(model=model, datamodule=datamodule, ckpt_path=str(checkpoint) if checkpoint else None)
                 threshold = float(params.get("threshold") or params.get("quantile") or 0.5)
                 metrics.update(extract_metrics(test_result, threshold))
+            except AdapterCanceled:
+                raise
             except Exception as exc:
                 metrics["evaluationStatus"] = "limited"
                 metrics["evaluationMessage"] = str(exc)
@@ -813,6 +819,9 @@ def train(request: Dict[str, Any]) -> int:
         emit_event(backend, "metric", name="anomalySampleCount", value=float(inventory.get("anomalyCount") or 0), step=1, epoch=1)
         emit_event(backend, "completed", message="Anomalib training completed.", reportPath=str(report_path))
         return 0
+    except AdapterCanceled:
+        configure_adapter(backend).emit_canceled("Anomalib training canceled by request")
+        return 2
     except FileNotFoundError as exc:
         code = str(exc) or "file_missing"
         report_path = write_failed_report(output_path, request, params, inventory, code, code, "blocked")

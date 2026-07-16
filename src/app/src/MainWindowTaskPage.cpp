@@ -3,7 +3,7 @@
 #include "InfoPanel.h"
 #include "MainWindowSupport.h"
 #include "TaskArtifactPanel.h"
-#include "TaskArtifactPresenterV2.h"
+#include "TaskArtifactPresenter.h"
 
 #include <QAbstractItemView>
 #include <QComboBox>
@@ -46,13 +46,13 @@ QWidget* MainWindow::buildTaskQueuePage()
     auto* cancelButton = dangerButton(QStringLiteral("取消选中任务"));
     auto* reproduceButton = new QPushButton(QStringLiteral("复现实验"));
     cancelButton->setEnabled(false);
-    cancelButton->setToolTip(uiText("选中任务取消尚未迁移到 V2 Application Service。"));
+    cancelButton->setToolTip(uiText("选中任务取消尚未迁移到  Application Service。"));
     reproduceButton->setEnabled(false);
-    reproduceButton->setToolTip(uiText("复现实验写用例尚未迁移到 V2 Application Service。"));
+    reproduceButton->setToolTip(uiText("复现实验写用例尚未迁移到  Application Service。"));
     taskKindFilterCombo_ = new QComboBox;
     taskKindFilterCombo_->setMinimumWidth(140);
     taskKindFilterCombo_->addItem(uiText("全部类别"), QString());
-    taskKindFilterCombo_->addItem(uiText("V2 持久化任务"), QStringLiteral("v2"));
+    taskKindFilterCombo_->addItem(uiText(" 持久化任务"), QStringLiteral(""));
     taskStateFilterCombo_ = new QComboBox;
     taskStateFilterCombo_->setMinimumWidth(140);
     taskStateFilterCombo_->addItem(uiText("全部状态"), QString());
@@ -105,13 +105,13 @@ QWidget* MainWindow::buildTaskQueuePage()
     actionLayout->setColumnStretch(5, 1);
 
     toolbar->bodyLayout()->addWidget(controlStrip);
-    toolbar->bodyLayout()->addWidget(mutedLabel(QStringLiteral("这里只读展示 V2 已持久化任务；已提交产物、指标和工作流步骤在下方集中查看。")));
+    toolbar->bodyLayout()->addWidget(mutedLabel(QStringLiteral("这里只读展示  已持久化任务；已提交产物、指标和工作流步骤在下方集中查看。")));
 
     auto* tablePanel = new InfoPanel(QStringLiteral("任务历史"));
     tablePanel->setMinimumWidth(300);
     tablePanel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     taskQueueTable_ = new QTableWidget(0, 7);
-    taskQueueTable_->setObjectName(QStringLiteral("TaskQueueTableV2"));
+    taskQueueTable_->setObjectName(QStringLiteral("TaskQueueTable"));
     taskQueueTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("任务")
         << QStringLiteral("类别")
@@ -144,10 +144,10 @@ QWidget* MainWindow::buildTaskQueuePage()
     detailPanel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     detailPanel->bodyLayout()->setSpacing(12);
     taskArtifactPanel_ = new TaskArtifactPanel;
-    taskArtifactPanel_->setObjectName(QStringLiteral("TaskArtifactPanelV2"));
+    taskArtifactPanel_->setObjectName(QStringLiteral("TaskArtifactPanel"));
     if (taskArtifactPresenter_) {
-        connect(taskArtifactPresenter_, &TaskArtifactPresenterV2::detailsChanged, this, [this]() {
-            if (taskArtifactPanel_) taskArtifactPanel_->setV2Details(taskArtifactPresenter_->details());
+        connect(taskArtifactPresenter_, &TaskArtifactPresenter::detailsChanged, this, [this]() {
+            if (taskArtifactPanel_) taskArtifactPanel_->setDetails(taskArtifactPresenter_->details());
         });
     }
     connect(taskArtifactPanel_, &TaskArtifactPanel::openDirectoryRequested, this, &MainWindow::openSelectedArtifactDirectory);
@@ -165,7 +165,7 @@ QWidget* MainWindow::buildTaskQueuePage()
     layout->addWidget(createWorkbenchHeader(
         QStringLiteral("TASK ARTIFACT CENTER"),
         uiText("任务与产物工作台"),
-        uiText("按任务追踪 V2 已提交产物、指标和工作流步骤；页面不读取 Worker 原始消息，也不暴露 Artifact Store 裸路径。"),
+        uiText("按任务追踪  已提交产物、指标和工作流步骤；页面不读取 Worker 原始消息，也不暴露 Artifact Store 裸路径。"),
         headerRefreshButton,
         QStringList()
             << uiText("任务历史")
@@ -180,11 +180,11 @@ QWidget* MainWindow::buildTaskQueuePage()
 
 void MainWindow::cancelSelectedTask()
 {
-    if (!activeV2TaskId_.isEmpty() && worker_.isRunning()) {
-        aitrain::v2::TaskId taskId;
+    if (!activeTaskId_.isEmpty() && worker_.isRunning()) {
+        aitrain::TaskId taskId;
         QString error;
-        if (!aitrain::v2::TaskId::parse(activeV2TaskId_, &taskId, &error)
-            || !v2Workspace_.requestTaskCancellation(taskId, &error)) {
+        if (!aitrain::TaskId::parse(activeTaskId_, &taskId, &error)
+            || !workspace_.requestTaskCancellation(taskId, &error)) {
             QMessageBox::warning(this, uiText("任务队列"), error);
             return;
         }
@@ -192,5 +192,5 @@ void MainWindow::cancelSelectedTask()
         return;
     }
     QMessageBox::information(this, uiText("任务队列"),
-        uiText("只能取消当前 GUI 会话派发且仍在运行的 V2 任务。历史任务为只读。"));
+        uiText("只能取消当前 GUI 会话派发且仍在运行的  任务。历史任务为只读。"));
 }

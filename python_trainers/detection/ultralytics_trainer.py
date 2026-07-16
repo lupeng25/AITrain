@@ -23,9 +23,9 @@ TRAINER_ROOT = Path(__file__).resolve().parents[1]
 if str(TRAINER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRAINER_ROOT))
 
-from adapter_event_channel_v2 import AdapterEventChannelV2, event_channel_from_environment  # noqa: E402
-from adapter_sdk import AdapterSdk  # noqa: E402
-from dataset_snapshot_v2 import materialize_dataset_snapshot_v2  # noqa: E402
+from adapter_event_channel import AdapterEventChannel, event_channel_from_environment  # noqa: E402
+from adapter_sdk import AdapterCanceled, AdapterSdk  # noqa: E402
+from dataset_snapshot import materialize_dataset_snapshot  # noqa: E402
 from trainer_protocol import configure_stdio, exception_details  # noqa: E402
 from yolo.ultralytics_exporter import (  # noqa: E402
     LICENSE_NOTE,
@@ -45,11 +45,11 @@ configure_stdio()
 
 _adapter: AdapterSdk | None = None
 _adapter_backend = ""
-_event_channel: AdapterEventChannelV2 | None = None
+_event_channel: AdapterEventChannel | None = None
 
 
 def configure_adapter(backend: str | None = None) -> None:
-    """Select JSONL fallback or the V2 authenticated event channel once."""
+    """Select JSONL fallback or the  authenticated event channel once."""
     global _adapter, _adapter_backend, _event_channel
     selected_backend = backend or BACKEND_ID
     if _event_channel is None and os.environ.get("AITRAIN_EVENT_PORT"):
@@ -72,6 +72,10 @@ def active_adapter() -> AdapterSdk:
     configure_adapter(BACKEND_ID)
     assert _adapter is not None
     return _adapter
+
+
+def check_canceled() -> None:
+    active_adapter().raise_if_canceled()
 
 
 def emit(event_type: str, **payload: Any) -> None:
@@ -827,17 +831,20 @@ def register_training_callbacks(model: Any, epochs: int, device: str) -> dict[st
         return payload
 
     def on_train_start(trainer: Any) -> None:
+        check_canceled()
         state["startedAt"] = time.time()
         state["batches"] = batches_for(trainer)
         emit("progress", **progress_payload(trainer, "train", "训练开始", batch=0, percent=0))
 
     def on_train_epoch_start(trainer: Any) -> None:
+        check_canceled()
         state["epochStartedAt"] = time.time()
         state["batch"] = 0
         state["batches"] = batches_for(trainer)
         emit("progress", **progress_payload(trainer, "train", "开始训练 epoch", batch=0))
 
     def on_train_batch_end(trainer: Any) -> None:
+        check_canceled()
         batches = batches_for(trainer)
         current_batch = int(state.get("batch", 0)) + 1
         state["batch"] = current_batch
@@ -850,11 +857,13 @@ def register_training_callbacks(model: Any, epochs: int, device: str) -> dict[st
         emit("progress", **progress_payload(trainer, "train", "训练 batch 更新", batch=current_batch, metrics=metrics))
 
     def on_train_epoch_end(trainer: Any) -> None:
+        check_canceled()
         batches = batches_for(trainer)
         metrics = trainer_loss_metrics(trainer)
         emit("progress", **progress_payload(trainer, "validate", "训练 epoch 完成，开始验证", batch=batches, metrics=metrics))
 
     def on_fit_epoch_end(trainer: Any) -> None:
+        check_canceled()
         current_epoch = epoch_for(trainer)
         metrics = {}
         metrics.update(trainer_loss_metrics(trainer))
@@ -866,6 +875,7 @@ def register_training_callbacks(model: Any, epochs: int, device: str) -> dict[st
         emit("progress", **progress_payload(trainer, "validate", "验证指标已更新", batch=batches_for(trainer), metrics=metrics))
 
     def on_model_save(trainer: Any) -> None:
+        check_canceled()
         emitted_artifacts = state.setdefault("emittedArtifacts", set())
         for name, path, kind in [
             ("best.pt", getattr(trainer, "best", None), "checkpoint"),
@@ -932,12 +942,12 @@ def run(request: dict[str, Any]) -> int:
     snapshot_manifest = str(parameters.get("datasetSnapshotManifest") or request.get("datasetSnapshotManifest") or "").strip()
     snapshot_staging = str(parameters.get("datasetSnapshotStagingPath") or request.get("datasetSnapshotStagingPath") or "").strip()
     if bool(snapshot_manifest) != bool(snapshot_staging):
-        return fail("Dataset Snapshot V2 requires both manifest and staging paths.", "dataset_snapshot_request_invalid")
+        return fail("Dataset Snapshot  requires both manifest and staging paths.", "dataset_snapshot_request_invalid")
     if snapshot_manifest:
         try:
-            dataset_path = materialize_dataset_snapshot_v2(dataset_path, snapshot_manifest, snapshot_staging)
+            dataset_path = materialize_dataset_snapshot(dataset_path, snapshot_manifest, snapshot_staging)
         except Exception as exc:
-            return fail("Dataset Snapshot V2 materialization failed.", "dataset_snapshot_invalid", exception_details(exc))
+            return fail("Dataset Snapshot  materialization failed.", "dataset_snapshot_invalid", exception_details(exc))
 
     try:
         data_yaml = normalize_data_yaml(
@@ -1026,8 +1036,12 @@ def run(request: dict[str, Any]) -> int:
         return fail(str(exc), "ultralytics_export_args_invalid")
 
     try:
+        check_canceled()
         callback_state = register_training_callbacks(model, epochs, device)
         train_result = model.train(**train_kwargs)
+    except AdapterCanceled:
+        active_adapter().emit_canceled("Ultralytics training canceled by request")
+        return 2
     except Exception as exc:
         return fail("Ultralytics training failed.", "ultralytics_train_failed", {"exception": str(exc)})
     emitted_artifacts = callback_state.setdefault("emittedArtifacts", set())
@@ -1056,6 +1070,7 @@ def run(request: dict[str, Any]) -> int:
     tensorrt_path: Path | None = None
     if export_onnx:
         try:
+            check_canceled()
             emit(
                 "progress",
                 backend=BACKEND_ID,
@@ -1082,11 +1097,15 @@ def run(request: dict[str, Any]) -> int:
                 emit_artifact_once(emitted_artifacts, "model.onnx", onnx_path, "onnx")
             else:
                 return fail("Ultralytics ONNX export completed without producing an ONNX file.", "onnx_missing")
+        except AdapterCanceled:
+            active_adapter().emit_canceled("Ultralytics ONNX export canceled by request")
+            return 2
         except Exception as exc:
             return fail("Ultralytics ONNX export failed.", "onnx_export_failed", {"exception": str(exc)})
 
     if export_plan["productFormat"] == "tensorrt":
         try:
+            check_canceled()
             emit(
                 "progress",
                 backend=BACKEND_ID,
@@ -1113,6 +1132,9 @@ def run(request: dict[str, Any]) -> int:
                 emit_artifact_once(emitted_artifacts, "model.engine", tensorrt_path, "tensorrt")
             else:
                 return fail("Ultralytics TensorRT export completed without producing an engine file.", "tensorrt_export_missing")
+        except AdapterCanceled:
+            active_adapter().emit_canceled("Ultralytics TensorRT export canceled by request")
+            return 2
         except Exception as exc:
             return fail("Ultralytics TensorRT export failed.", "tensorrt_export_failed", {"exception": str(exc)})
 
@@ -1208,6 +1230,9 @@ def main() -> int:
     try:
         configure_adapter(BACKEND_ID)
         return run(request)
+    except AdapterCanceled:
+        active_adapter().emit_canceled("Ultralytics trainer canceled by request")
+        return 2
     except Exception as exc:
         emit("log", backend=BACKEND_ID, level="error",
             message=f"Unhandled Ultralytics trainer exception: {type(exc).__name__}: {exc}")

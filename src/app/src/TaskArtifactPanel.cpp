@@ -56,7 +56,7 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     selectedTaskSummaryLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
 
     artifactTable_ = new QTableWidget(0, 4);
-    artifactTable_->setObjectName(QStringLiteral("TaskArtifactTableV2"));
+    artifactTable_->setObjectName(QStringLiteral("TaskArtifactTable"));
     artifactTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("类型")
         << QStringLiteral("路径")
@@ -73,7 +73,7 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     connect(artifactTable_, &QTableWidget::itemSelectionChanged, this, &TaskArtifactPanel::updatePreviewFromSelection);
 
     metricTable_ = new QTableWidget(0, 4);
-    metricTable_->setObjectName(QStringLiteral("TaskMetricTableV2"));
+    metricTable_->setObjectName(QStringLiteral("TaskMetricTable"));
     metricTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("指标")
         << QStringLiteral("值")
@@ -88,7 +88,7 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     metricTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
 
     exportTable_ = new QTableWidget(0, 3);
-    exportTable_->setObjectName(QStringLiteral("TaskWorkflowTableV2"));
+    exportTable_->setObjectName(QStringLiteral("TaskWorkflowTable"));
     exportTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("格式")
         << QStringLiteral("路径")
@@ -133,7 +133,7 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     auto* actionGridFrame = new QFrame;
     legacyArtifactActions_ = actionGridFrame;
     legacyArtifactActions_->setEnabled(false);
-    legacyArtifactActions_->setToolTip(uiText("V2 页面不暴露 Artifact Store 裸路径；路径驱动的旧操作尚未迁移。"));
+    legacyArtifactActions_->setToolTip(uiText(" 页面不暴露 Artifact Store 裸路径；路径驱动的旧操作尚未迁移。"));
     actionGridFrame->setObjectName(QStringLiteral("ArtifactActionGrid"));
     actionGridFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
     auto* actionGrid = new QGridLayout(actionGridFrame);
@@ -218,21 +218,21 @@ QString TaskArtifactPanel::selectedArtifactPath() const
     return artifactPath.isEmpty() ? exportPath : artifactPath;
 }
 
-void TaskArtifactPanel::setV2Details(const TaskArtifactDetailsV2& details)
+void TaskArtifactPanel::setDetails(const TaskArtifactDetails& details)
 {
     setTaskSummary(details.summary.isEmpty()
-        ? uiText("请选择一个 V2 任务查看已提交产物、指标和工作流。")
+        ? uiText("请选择一个  任务查看已提交产物、指标和工作流。")
         : details.summary);
     if (legacyArtifactActions_) {
         legacyArtifactActions_->setEnabled(false);
-        legacyArtifactActions_->setToolTip(uiText("V2 页面不暴露 Artifact Store 裸路径；路径驱动的旧操作尚未迁移。"));
+        legacyArtifactActions_->setToolTip(uiText(" 页面不暴露 Artifact Store 裸路径；路径驱动的旧操作尚未迁移。"));
     }
 
     artifactTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("产物类型") << QStringLiteral("包内相对路径")
         << QStringLiteral("完整性") << QStringLiteral("提交时间"));
     artifactTable_->setRowCount(0);
-    for (const ArtifactFileItemV2& artifact : details.artifacts) {
+    for (const ArtifactFileItem& artifact : details.artifacts) {
         const int row = artifactTable_->rowCount();
         artifactTable_->insertRow(row);
         artifactTable_->setItem(row, 0, new QTableWidgetItem(artifact.kind));
@@ -257,13 +257,13 @@ void TaskArtifactPanel::setV2Details(const TaskArtifactDetailsV2& details)
     metricTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("指标") << QStringLiteral("值") << QStringLiteral("发生时间") << QStringLiteral("来源"));
     metricTable_->setRowCount(0);
-    for (const MetricItemV2& metric : details.metrics) {
+    for (const MetricItem& metric : details.metrics) {
         const int row = metricTable_->rowCount();
         metricTable_->insertRow(row);
         metricTable_->setItem(row, 0, new QTableWidgetItem(metric.name));
         metricTable_->setItem(row, 1, new QTableWidgetItem(QString::number(metric.value, 'g', 12)));
         metricTable_->setItem(row, 2, new QTableWidgetItem(metric.occurredAt));
-        metricTable_->setItem(row, 3, new QTableWidgetItem(QStringLiteral("V2 持久化事件")));
+        metricTable_->setItem(row, 3, new QTableWidgetItem(QStringLiteral(" 持久化事件")));
     }
     if (details.metrics.isEmpty()) {
         clearTableWithPlaceholder(metricTable_, uiText("暂无指标"));
@@ -272,7 +272,7 @@ void TaskArtifactPanel::setV2Details(const TaskArtifactDetailsV2& details)
     exportTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("步骤") << QStringLiteral("状态 / 后端") << QStringLiteral("输出产物"));
     exportTable_->setRowCount(0);
-    for (const WorkflowStepItemV2& step : details.workflowSteps) {
+    for (const WorkflowStepItem& step : details.workflowSteps) {
         const int row = exportTable_->rowCount();
         exportTable_->insertRow(row);
         exportTable_->setItem(row, 0, new QTableWidgetItem(

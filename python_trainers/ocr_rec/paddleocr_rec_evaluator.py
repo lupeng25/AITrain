@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PaddleOCR REC V2 evaluator entry point."""
+"""PaddleOCR REC  evaluator entry point."""
 
 from __future__ import annotations
 

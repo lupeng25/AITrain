@@ -15,7 +15,7 @@ TRAINERS = ROOT / "python_trainers"
 if str(TRAINERS) not in sys.path:
     sys.path.insert(0, str(TRAINERS))
 
-from adapter_event_channel_v2 import AdapterEventChannelError, AdapterEventChannelV2  # noqa: E402
+from adapter_event_channel import AdapterEventChannelError, AdapterEventChannel  # noqa: E402
 from adapter_sdk import (  # noqa: E402
     MAX_BUFFERED_OUTPUT_LINES,
     MAX_STRUCTURED_LOG_MESSAGE_BYTES,
@@ -123,7 +123,7 @@ def test_sdk_from_environment_observes_cancel_file(monkeypatch=None) -> None:
                 __import__("os").environ["AITRAIN_CANCEL_FILE"] = previous
 
 
-def test_v2_event_channel_authenticates_and_emits_protocol_envelopes() -> None:
+def test_event_channel_authenticates_and_emits_protocol_envelopes() -> None:
     received: list[dict] = []
     ready = threading.Event()
     result: dict[str, int] = {}
@@ -144,7 +144,7 @@ def test_v2_event_channel_authenticates_and_emits_protocol_envelopes() -> None:
     thread = threading.Thread(target=server, daemon=True)
     thread.start()
     assert ready.wait(timeout=2)
-    channel = AdapterEventChannelV2(
+    channel = AdapterEventChannel(
         host="127.0.0.1",
         port=result["port"],
         token="0123456789abcdef",
@@ -155,16 +155,16 @@ def test_v2_event_channel_authenticates_and_emits_protocol_envelopes() -> None:
         envelope = channel.emit_legacy_event({"type": "progress", "backend": "official_test", "percent": 12.5})
     thread.join(timeout=2)
 
-    assert received[0] == {"channel": "aitrain.adapter.v2", "token": "0123456789abcdef"}
+    assert received[0] == {"channel": "aitrain.adapter", "token": "0123456789abcdef"}
     assert received[1] == envelope
-    assert envelope["protocol"] == 2
+    assert envelope["protocol"] == 1
     assert envelope["kind"] == "event.progress"
-    assert envelope["sequence"] == 1
+    assert envelope["sequence"] == "1"
     assert envelope["payload"]["percent"] == 12.5
 
 
-def test_v2_event_channel_marks_sdk_artifacts_as_uncommitted_candidates() -> None:
-    channel = AdapterEventChannelV2(
+def test_event_channel_marks_sdk_artifacts_as_uncommitted_candidates() -> None:
+    channel = AdapterEventChannel(
         host="127.0.0.1",
         port=1,
         token="0123456789abcdef",
@@ -179,8 +179,8 @@ def test_v2_event_channel_marks_sdk_artifacts_as_uncommitted_candidates() -> Non
     assert captured == [("event.artifact_candidate", {"kind": "report", "path": "out/report.json"})]
 
 
-def test_v2_event_channel_preserves_adapter_failure_code_without_overloading_domain_code() -> None:
-    channel = AdapterEventChannelV2(
+def test_event_channel_preserves_adapter_failure_code_without_overloading_domain_code() -> None:
+    channel = AdapterEventChannel(
         host="127.0.0.1", port=1, token="0123456789abcdef",
         request_id=str(uuid.uuid4()), task_id=str(uuid.uuid4()),
     )
@@ -193,9 +193,9 @@ def test_v2_event_channel_preserves_adapter_failure_code_without_overloading_dom
     })]
 
 
-def test_v2_event_channel_rejects_non_loopback_and_bad_handshake() -> None:
+def test_event_channel_rejects_non_loopback_and_bad_handshake() -> None:
     try:
-        AdapterEventChannelV2(
+        AdapterEventChannel(
             host="192.168.1.10", port=1234, token="0123456789abcdef",
             request_id=str(uuid.uuid4()), task_id=str(uuid.uuid4()),
         )
@@ -217,7 +217,7 @@ def test_v2_event_channel_rejects_non_loopback_and_bad_handshake() -> None:
 
         thread = threading.Thread(target=reject, daemon=True)
         thread.start()
-        channel = AdapterEventChannelV2(
+        channel = AdapterEventChannel(
             host="127.0.0.1", port=port, token="0123456789abcdef",
             request_id=str(uuid.uuid4()), task_id=str(uuid.uuid4()),
         )

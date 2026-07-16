@@ -20,7 +20,7 @@ import ultralytics_trainer as trainer  # noqa: E402
 import ultralytics_evaluator as evaluator  # noqa: E402
 from yolo import ultralytics_exporter as exporter  # noqa: E402
 from adapter_sdk import AdapterSdk  # noqa: E402
-from dataset_snapshot_v2 import materialize_dataset_snapshot_v2  # noqa: E402
+from dataset_snapshot import materialize_dataset_snapshot  # noqa: E402
 
 
 class FakeModel:
@@ -188,7 +188,7 @@ def test_official_evaluator_event_adapter_uses_sdk_and_preserves_backend() -> No
     assert all(event["backend"] == "ultralytics_yolo_eval" for event in events)
 
 
-def test_official_evaluator_expands_directory_outputs_for_v2_candidates() -> None:
+def test_official_evaluator_expands_directory_outputs_for_candidates() -> None:
     events: list[tuple[str, dict]] = []
     original_emit = evaluator.emit
     original_channel = evaluator._event_channel
@@ -232,7 +232,7 @@ def test_official_evaluator_keeps_directory_output_on_v1_jsonl() -> None:
     })]
 
 
-def test_dataset_snapshot_v2_materialization_copies_only_verified_files() -> None:
+def test_dataset_snapshot_materialization_copies_only_verified_files() -> None:
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         source = root / "source"
@@ -248,13 +248,13 @@ def test_dataset_snapshot_v2_materialization_copies_only_verified_files() -> Non
             "files": [{"relativePath": "images/sample.jpg", "sha256": digest}],
         }), encoding="utf-8")
         destination = root / "staging"
-        result = materialize_dataset_snapshot_v2(source, manifest, destination)
+        result = materialize_dataset_snapshot(source, manifest, destination)
 
         assert result == destination.resolve()
         assert (destination / "images" / "sample.jpg").read_bytes() == b"snapshot-data"
         image.write_bytes(b"mutated")
         try:
-            materialize_dataset_snapshot_v2(source, manifest, root / "changed")
+            materialize_dataset_snapshot(source, manifest, root / "changed")
         except ValueError as exc:
             assert "does not match manifest" in str(exc)
         else:
@@ -670,7 +670,7 @@ def test_exporter_infers_obb_family_from_training_report() -> None:
     assert report["backend"] == "ultralytics_yolo_obb"
 
 
-def test_exporter_builds_v2_contract_only_from_official_evaluation_evidence() -> None:
+def test_exporter_builds_contract_only_from_official_evaluation_evidence() -> None:
     with tempfile.TemporaryDirectory() as raw_dir:
         root = Path(raw_dir)
         evaluation_path = root / "evaluation_report.json"
@@ -681,7 +681,7 @@ def test_exporter_builds_v2_contract_only_from_official_evaluation_evidence() ->
                 {"classId": 0, "className": "part"},
             ],
         }), encoding="utf-8")
-        contract = exporter.v2_model_contract("yolo_detection", {
+        contract = exporter.model_contract("yolo_detection", {
             "available": True,
             "inputs": [{"name": "images", "shape": [1, 3, 640, 640]}],
             "outputs": [{"name": "output0", "shape": [1, 84, "anchors"]}],
@@ -695,8 +695,8 @@ def test_exporter_builds_v2_contract_only_from_official_evaluation_evidence() ->
     assert contract["runtimeRoutes"] == ["aitrain_onnxruntime"]
 
 
-def test_exporter_builds_variant_specific_v2_contracts() -> None:
-    segmentation = exporter.v2_model_contract("yolo_segmentation", {
+def test_exporter_builds_variant_specific_contracts() -> None:
+    segmentation = exporter.model_contract("yolo_segmentation", {
         "inputs": [{"name": "images", "shape": [1, 3, 640, 640]}],
         "outputs": [
             {"name": "output0", "shape": [1, 37, "anchors"]},
@@ -708,7 +708,7 @@ def test_exporter_builds_variant_specific_v2_contracts() -> None:
     assert segmentation["postprocessing"] == {"id": "yolo_segmentation_masks_v8"}
     assert [item["layout"] for item in segmentation["outputs"]] == ["NCN", "NCHW"]
 
-    obb = exporter.v2_model_contract("yolo_obb", {
+    obb = exporter.model_contract("yolo_obb", {
         "inputs": [{"name": "images", "shape": [1, 3, 640, 640]}],
         "outputs": [{"name": "output0", "shape": [1, 6, "anchors"]}],
     }, None)
@@ -743,4 +743,4 @@ if __name__ == "__main__":
     test_ultralytics_export_args_accept_tensorrt_int8_with_data()
     test_exporter_infers_segmentation_family_from_training_report()
     test_exporter_infers_obb_family_from_training_report()
-    test_exporter_builds_v2_contract_only_from_official_evaluation_evidence()
+    test_exporter_builds_contract_only_from_official_evaluation_evidence()

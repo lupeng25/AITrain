@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Normalize an SMP ONNX export and write its verified V2 model contract."""
+"""Normalize an SMP ONNX export and write its verified  model contract."""
 
 from __future__ import annotations
 
@@ -16,20 +16,20 @@ TRAINER_ROOT = Path(__file__).resolve().parents[1]
 if str(TRAINER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRAINER_ROOT))
 
-from adapter_event_channel_v2 import AdapterEventChannelV2, event_channel_from_environment  # noqa: E402
+from adapter_event_channel import AdapterEventChannel, event_channel_from_environment  # noqa: E402
 from adapter_sdk import AdapterSdk  # noqa: E402
 from trainer_protocol import configure_stdio, exception_details  # noqa: E402
 
 
 BACKEND_ID = "smp_semantic_segmentation_export"
-EXPORTER_VERSION = "aitrain-smp-exporter-v2"
+EXPORTER_VERSION = "aitrain-smp-exporter"
 MEAN = [0.485, 0.456, 0.406]
 STD = [0.229, 0.224, 0.225]
 
 configure_stdio()
 
 _adapter: AdapterSdk | None = None
-_event_channel: AdapterEventChannelV2 | None = None
+_event_channel: AdapterEventChannel | None = None
 
 
 def configure_adapter() -> None:
@@ -207,7 +207,7 @@ def build_model_contract(
     # The trainer intentionally exports opset 13; reject a divergent model
     # instead of advertising an inaccurate product contract.
     if inspected_opset != 13:
-        raise ValueError(f"SMP V2 export requires ONNX opset 13, got {inspected_opset}")
+        raise ValueError(f"SMP  export requires ONNX opset 13, got {inspected_opset}")
     return contract, inspected_opset
 
 
@@ -218,7 +218,7 @@ def run(request: dict[str, Any]) -> int:
     requested_sidecar = request.get("sidecarPath") or options.get("sidecarPath")
     evaluation_report_path = request.get("evaluationReportPath") or options.get("evaluationReportPath")
     if output_path.suffix.lower() != ".onnx":
-        raise ValueError("SMP V2 exporter outputPath must name the destination .onnx file")
+        raise ValueError("SMP  exporter outputPath must name the destination .onnx file")
     source_onnx = resolve_onnx(model_path)
     source_metadata = source_sidecar(source_onnx, requested_sidecar)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -249,7 +249,7 @@ def run(request: dict[str, Any]) -> int:
     }
     write_json(sidecar_path, sidecar)
     emit("artifact", kind="export", path=str(output_path), message="Normalized SMP semantic segmentation ONNX")
-    emit("artifact", kind="export_sidecar", path=str(sidecar_path), message="SMP V2 model contract sidecar")
+    emit("artifact", kind="export_sidecar", path=str(sidecar_path), message="SMP  model contract sidecar")
     emit("progress", percent=100, message="SMP ONNX export completed")
     emit("completed", exportPath=str(output_path), reportPath=str(sidecar_path), sidecarPath=str(sidecar_path))
     return 0

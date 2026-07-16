@@ -1,15 +1,15 @@
 #include "MainWindow.h"
 
 #include "EvaluationReportView.h"
-#include "DiagnosticBundlePresenterV2.h"
-#include "EnvironmentCheckPresenterV2.h"
-#include "ModelRegistryPresenterV2.h"
+#include "DiagnosticBundlePresenter.h"
+#include "EnvironmentCheckPresenter.h"
+#include "ModelRegistryPresenter.h"
 #include "InfoPanel.h"
 #include "LanguageSupport.h"
 #include "MainWindowSupport.h"
-#include "ProjectSummaryPresenterV2.h"
+#include "ProjectSummaryPresenter.h"
 #include "WorkspaceRouter.h"
-#include "TaskArtifactPresenterV2.h"
+#include "TaskArtifactPresenter.h"
 #include "aitrain/core/CapabilityRegistry.h"
 #include "aitrain/core/DetectionTrainer.h"
 
@@ -59,15 +59,15 @@ using namespace aitrain_app;
 
 MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry, QWidget* parent)
     : QMainWindow(parent)
-    , v2QueryService_(&v2Workspace_)
+    , queryService_(&workspace_)
     , licenseOwner_(licenseOwner)
     , licenseExpiry_(licenseExpiry)
 {
-    projectSummaryPresenter_ = new ProjectSummaryPresenterV2(&v2QueryService_, this);
-    taskArtifactPresenter_ = new TaskArtifactPresenterV2(&v2QueryService_, this);
-    diagnosticBundlePresenter_ = new DiagnosticBundlePresenterV2(&v2QueryService_, this);
-    environmentCheckPresenter_ = new EnvironmentCheckPresenterV2(&v2QueryService_, this);
-    modelRegistryPresenter_ = new ModelRegistryPresenterV2(&v2QueryService_, this);
+    projectSummaryPresenter_ = new ProjectSummaryPresenter(&queryService_, this);
+    taskArtifactPresenter_ = new TaskArtifactPresenter(&queryService_, this);
+    diagnosticBundlePresenter_ = new DiagnosticBundlePresenter(&queryService_, this);
+    environmentCheckPresenter_ = new EnvironmentCheckPresenter(&queryService_, this);
+    modelRegistryPresenter_ = new ModelRegistryPresenter(&queryService_, this);
     setWindowTitle(QStringLiteral("AITrain Studio"));
     setMinimumSize(1180, 760);
 
@@ -129,19 +129,21 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
         workerPill_->setStatus(tr("Worker 已连接"), StatusPill::Tone::Success);
         updateHeaderState();
     });
-    connect(&worker_, &WorkerClient::finished, this, [this](bool ok, const QString& message) {
+    connect(&worker_, &WorkerClient::finished, this,
+        [this](WorkerClient::WorkerTerminalStatus status, const QString& message) {
+        const bool ok = status == WorkerClient::WorkerTerminalStatus::Succeeded;
         progressBar_->setValue(ok ? 100 : progressBar_->value());
         if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingEtaValue")); label && ok) {
             label->setText(QStringLiteral("0s"));
         }
         workerPill_->setStatus(ok ? tr("任务完成") : tr("任务失败"),
             ok ? StatusPill::Tone::Success : StatusPill::Tone::Error);
-        if (v2ModelImportInProgress_) {
-            v2ModelImportInProgress_ = false;
-            if (v2ModelImportResultLabel_) {
-                v2ModelImportResultLabel_->setText(ok
-                    ? uiText("V2 模型导入完成。")
-                    : uiText("V2 模型导入失败：%1").arg(message));
+        if (modelImportInProgress_) {
+            modelImportInProgress_ = false;
+            if (modelImportResultLabel_) {
+                modelImportResultLabel_->setText(ok
+                    ? uiText(" 模型导入完成。")
+                    : uiText(" 模型导入失败：%1").arg(message));
             }
             updateModelRegistry();
         }

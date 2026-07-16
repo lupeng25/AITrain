@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PaddleOCR DET V2 trainer entry point."""
+"""PaddleOCR DET  trainer entry point."""
 
 from __future__ import annotations
 

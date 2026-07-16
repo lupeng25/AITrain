@@ -16,18 +16,18 @@ TRAINER_ROOT = Path(__file__).resolve().parents[1]
 if str(TRAINER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRAINER_ROOT))
 
-from adapter_event_channel_v2 import AdapterEventChannelV2, event_channel_from_environment  # noqa: E402
+from adapter_event_channel import AdapterEventChannel, event_channel_from_environment  # noqa: E402
 from adapter_sdk import AdapterSdk  # noqa: E402
 from trainer_protocol import configure_stdio, exception_details  # noqa: E402
 
 
 BACKEND_ID = "anomalib_bundle_export"
-EXPORTER_VERSION = "aitrain-anomalib-bundle-exporter-v2"
+EXPORTER_VERSION = "aitrain-anomalib-bundle-exporter"
 SUPPORTED_BACKENDS = {"anomalib_patchcore", "anomalib_efficientad"}
 
 configure_stdio()
 _adapter: AdapterSdk | None = None
-_event_channel: AdapterEventChannelV2 | None = None
+_event_channel: AdapterEventChannel | None = None
 
 
 def configure_adapter() -> AdapterSdk:

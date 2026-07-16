@@ -735,7 +735,6 @@ install(FILES
     tools/build-inno-installer.ps1
     tools/ui-workbench-walkthrough.ps1
     tools/phase45-yolo-model-matrix-smoke.ps1
-    tools/phase-p1-yolo-full-matrix-smoke.ps1
     tools/phase-yolo26-model-matrix-smoke.ps1
     tools/phase-smp-semantic-segmentation-smoke.ps1
     tools/phase-anomaly-anomalib-smoke.ps1

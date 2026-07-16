@@ -1,6 +1,6 @@
 #include "MainWindow.h"
-#include "ModelRegistryPresenterV2.h"
-#include "TaskArtifactPresenterV2.h"
+#include "ModelRegistryPresenter.h"
+#include "TaskArtifactPresenter.h"
 
 #include "EvaluationReportView.h"
 #include "InfoPanel.h"
@@ -52,22 +52,22 @@ using namespace aitrain_app;
 
 void MainWindow::updateRecentTasks()
 {
-    if (taskQueueTable_ && taskArtifactPresenter_ && v2Workspace_.isOpen()) {
+    if (taskQueueTable_ && taskArtifactPresenter_ && workspace_.isOpen()) {
         taskArtifactPresenter_->refresh(200);
-        updateV2TaskTable();
+        updateTaskTable();
     }
-    const QVector<TaskListItemV2> tasks = taskArtifactPresenter_
-        ? taskArtifactPresenter_->taskRows() : QVector<TaskListItemV2>{};
+    const QVector<TaskListItem> tasks = taskArtifactPresenter_
+        ? taskArtifactPresenter_->taskRows() : QVector<TaskListItem>{};
     if (dashboardTaskValue_) {
         dashboardTaskValue_->setText(QString::number(tasks.size()));
     }
     if (recentTasksTable_) {
         recentTasksTable_->setRowCount(0);
-        for (const TaskListItemV2& task : tasks) {
+        for (const TaskListItem& task : tasks) {
             const int row = recentTasksTable_->rowCount();
             recentTasksTable_->insertRow(row);
             recentTasksTable_->setItem(row, 0, new QTableWidgetItem(task.taskId.left(8)));
-            recentTasksTable_->setItem(row, 1, new QTableWidgetItem(uiText("V2 任务")));
+            recentTasksTable_->setItem(row, 1, new QTableWidgetItem(uiText(" 任务")));
             recentTasksTable_->setItem(row, 2, new QTableWidgetItem(task.capabilityId));
             recentTasksTable_->setItem(row, 3, new QTableWidgetItem(task.taskType));
             recentTasksTable_->setItem(row, 4, new QTableWidgetItem(task.stateLabel));
@@ -77,14 +77,14 @@ void MainWindow::updateRecentTasks()
     }
     updateDashboardSummary();
 }
-void MainWindow::updateV2TaskTable()
+void MainWindow::updateTaskTable()
 {
     if (!taskQueueTable_ || !taskArtifactPresenter_) return;
     taskQueueTable_->setRowCount(0);
-    const QVector<TaskListItemV2>& rows = taskArtifactPresenter_->taskRows();
+    const QVector<TaskListItem>& rows = taskArtifactPresenter_->taskRows();
     if (rows.isEmpty()) {
         taskQueueTable_->insertRow(0);
-        auto* empty = new QTableWidgetItem(uiText("暂无 V2 任务记录"));
+        auto* empty = new QTableWidgetItem(uiText("暂无  任务记录"));
         empty->setData(Qt::UserRole + 1, QStringLiteral("empty"));
         taskQueueTable_->setItem(0, 0, empty);
         for (int column = 1; column < taskQueueTable_->columnCount(); ++column) {
@@ -93,14 +93,14 @@ void MainWindow::updateV2TaskTable()
         clearSelectedTaskDetails();
         return;
     }
-    for (const TaskListItemV2& task : rows) {
+    for (const TaskListItem& task : rows) {
         const int row = taskQueueTable_->rowCount();
         taskQueueTable_->insertRow(row);
         auto* id = new QTableWidgetItem(task.taskId.left(8));
         id->setData(Qt::UserRole, task.taskId);
         taskQueueTable_->setItem(row, 0, id);
-        auto* category = new QTableWidgetItem(uiText("V2 任务"));
-        category->setData(Qt::UserRole, QStringLiteral("v2"));
+        auto* category = new QTableWidgetItem(uiText(" 任务"));
+        category->setData(Qt::UserRole, QStringLiteral(""));
         taskQueueTable_->setItem(row, 1, category);
         taskQueueTable_->setItem(row, 2, new QTableWidgetItem(task.capabilityId));
         auto* type = new QTableWidgetItem(task.taskType);
@@ -118,8 +118,8 @@ void MainWindow::updateV2TaskTable()
 void MainWindow::updateDatasetList()
 {
     QString error;
-    const QVector<aitrain::v2::DatasetCatalogItemV2> datasets = v2Workspace_.isOpen()
-        ? v2Workspace_.datasets(50, &error) : QVector<aitrain::v2::DatasetCatalogItemV2>{};
+    const QVector<aitrain::DatasetCatalogItem> datasets = workspace_.isOpen()
+        ? workspace_.datasets(50, &error) : QVector<aitrain::DatasetCatalogItem>{};
     if (datasetListTable_) {
         datasetListTable_->setRowCount(0);
     }
@@ -134,7 +134,7 @@ void MainWindow::updateDatasetList()
     }
 
     if (datasetListTable_) {
-        for (const aitrain::v2::DatasetCatalogItemV2& dataset : datasets) {
+        for (const aitrain::DatasetCatalogItem& dataset : datasets) {
             const int row = datasetListTable_->rowCount();
             datasetListTable_->insertRow(row);
             auto* nameItem = new QTableWidgetItem(dataset.datasetId.toString().left(12));
@@ -309,42 +309,42 @@ void MainWindow::clearSelectedTaskDetails()
 
 void MainWindow::updateModelRegistry()
 {
-    if (!v2Workspace_.isOpen()) {
+    if (!workspace_.isOpen()) {
         modelRegistryPresenter_->clear();
-        if (modelRegistrySummaryLabel_) modelRegistrySummaryLabel_->setText(uiText("请先打开 V2 项目。"));
+        if (modelRegistrySummaryLabel_) modelRegistrySummaryLabel_->setText(uiText("请先打开  项目。"));
         return;
     }
     if (!modelRegistryPresenter_->refresh(200)) {
         if (modelRegistrySummaryLabel_) {
-            modelRegistrySummaryLabel_->setText(uiText("读取 V2 模型包目录失败：%1")
+            modelRegistrySummaryLabel_->setText(uiText("读取  模型包目录失败：%1")
                 .arg(modelRegistryPresenter_->lastError()));
         }
         return;
     }
-    const QVector<ModelPackageListItemV2>& packages = modelRegistryPresenter_->modelPackages();
+    const QVector<ModelPackageListItem>& packages = modelRegistryPresenter_->modelPackages();
     if (modelRegistrySummaryLabel_) {
-        modelRegistrySummaryLabel_->setText(uiText("已登记 V2 模型包：%1。模型库只展示无路径 Manifest 与 lineage。")
+        modelRegistrySummaryLabel_->setText(uiText("已登记  模型包：%1。模型库只展示无路径 Manifest 与 lineage。")
             .arg(packages.size()));
     }
-    if (v2ModelPackageTable_) {
-        v2ModelPackageTable_->setRowCount(0);
+    if (ModelPackageTable_) {
+        ModelPackageTable_->setRowCount(0);
         if (packages.isEmpty()) {
-            v2ModelPackageTable_->insertRow(0);
-            v2ModelPackageTable_->setItem(0, 0, new QTableWidgetItem(uiText("暂无已验证 V2 模型包")));
-            for (int column = 1; column < v2ModelPackageTable_->columnCount(); ++column)
-                v2ModelPackageTable_->setItem(0, column, new QTableWidgetItem(QString()));
+            ModelPackageTable_->insertRow(0);
+            ModelPackageTable_->setItem(0, 0, new QTableWidgetItem(uiText("暂无已验证  模型包")));
+            for (int column = 1; column < ModelPackageTable_->columnCount(); ++column)
+                ModelPackageTable_->setItem(0, column, new QTableWidgetItem(QString()));
         } else {
-            for (const ModelPackageListItemV2& package : packages) {
-                const int row = v2ModelPackageTable_->rowCount();
-                v2ModelPackageTable_->insertRow(row);
+            for (const ModelPackageListItem& package : packages) {
+                const int row = ModelPackageTable_->rowCount();
+                ModelPackageTable_->insertRow(row);
                 auto* idItem = new QTableWidgetItem(package.modelPackageId);
                 idItem->setData(Qt::UserRole, package.modelPackageId);
-                v2ModelPackageTable_->setItem(row, 0, idItem);
-                v2ModelPackageTable_->setItem(row, 1, new QTableWidgetItem(package.modelFamily));
-                v2ModelPackageTable_->setItem(row, 2, new QTableWidgetItem(package.taskType));
-                v2ModelPackageTable_->setItem(row, 3, new QTableWidgetItem(package.sourceBackend));
-                v2ModelPackageTable_->setItem(row, 4, new QTableWidgetItem(package.decoder));
-                v2ModelPackageTable_->setItem(row, 5, new QTableWidgetItem(package.createdAt));
+                ModelPackageTable_->setItem(row, 0, idItem);
+                ModelPackageTable_->setItem(row, 1, new QTableWidgetItem(package.modelFamily));
+                ModelPackageTable_->setItem(row, 2, new QTableWidgetItem(package.taskType));
+                ModelPackageTable_->setItem(row, 3, new QTableWidgetItem(package.sourceBackend));
+                ModelPackageTable_->setItem(row, 4, new QTableWidgetItem(package.decoder));
+                ModelPackageTable_->setItem(row, 5, new QTableWidgetItem(package.createdAt));
             }
         }
     }
@@ -352,8 +352,8 @@ void MainWindow::updateModelRegistry()
         if (!combo) return;
         const QString selectedId = combo->currentData().toString();
         combo->clear();
-        combo->addItem(uiText("请选择已验证 V2 模型包"), QString());
-        for (const ModelPackageListItemV2& package : packages) {
+        combo->addItem(uiText("请选择已验证  模型包"), QString());
+        for (const ModelPackageListItem& package : packages) {
             combo->addItem(QStringLiteral("%1 · %2 · %3")
                 .arg(package.modelFamily, package.taskType, package.modelPackageId.left(8)),
                 package.modelPackageId);
@@ -376,7 +376,7 @@ void MainWindow::refreshModelRegistry()
     updateModelRegistry();
 }
 
-void MainWindow::handleDatasetConversionWorkflowV2(const QJsonObject& payload)
+void MainWindow::handleDatasetConversionWorkflow(const QJsonObject& payload)
 {
     const QString state = payload.value(QStringLiteral("state")).toString();
     const QString datasetId = payload.value(QStringLiteral("datasetId")).toString();

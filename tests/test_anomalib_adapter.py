@@ -375,7 +375,7 @@ def test_bundle_exporter_writes_relative_python_runtime_contract():
         assert contract["sourceTrainingBackend"] == "anomalib_patchcore"
         assert contract["runtimeRoutes"] == ["anomalib_python"]
         assert contract["decoder"] == "anomalib_python_sidecar_v1"
-        assert contract["exporterVersion"] == "aitrain-anomalib-bundle-exporter-v2"
+        assert contract["exporterVersion"] == "aitrain-anomalib-bundle-exporter"
         assert contract["checkpointPath"] == "model.ckpt"
         assert contract["classNames"] == ["normal", "anomaly"]
         assert contract["preprocessing"]

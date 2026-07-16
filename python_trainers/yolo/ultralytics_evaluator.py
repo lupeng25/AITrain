@@ -22,9 +22,9 @@ if str(DETECTION_ADAPTER_DIR) not in sys.path:
     sys.path.insert(0, str(DETECTION_ADAPTER_DIR))
 
 import ultralytics_trainer as shared  # type: ignore  # noqa: E402
-from adapter_event_channel_v2 import AdapterEventChannelV2, event_channel_from_environment  # noqa: E402
+from adapter_event_channel import AdapterEventChannel, event_channel_from_environment  # noqa: E402
 from adapter_sdk import AdapterSdk  # noqa: E402
-from dataset_snapshot_v2 import materialize_dataset_snapshot_v2  # noqa: E402
+from dataset_snapshot import materialize_dataset_snapshot  # noqa: E402
 from trainer_protocol import configure_stdio, exception_details  # noqa: E402
 
 
@@ -35,11 +35,11 @@ BACKEND_ID = "ultralytics_yolo_eval"
 
 _adapter: AdapterSdk | None = None
 _adapter_backend = ""
-_event_channel: AdapterEventChannelV2 | None = None
+_event_channel: AdapterEventChannel | None = None
 
 
 def configure_adapter(backend: str | None = None) -> None:
-    """Select JSONL fallback or the V2 authenticated event channel once."""
+    """Select JSONL fallback or the  authenticated event channel once."""
     global _adapter, _adapter_backend, _event_channel
     selected_backend = backend or BACKEND_ID
     if _event_channel is None and os.environ.get("AITRAIN_EVENT_PORT"):
@@ -370,9 +370,9 @@ def official_artifacts(save_dir: Path) -> list[dict[str, str]]:
 
 
 def emit_official_artifacts(artifacts: list[dict[str, str]], save_dir: Path) -> None:
-    """Emit only regular candidate files on V2; retain the V1 run-directory frame.
+    """Emit only regular candidate files on ; retain the V1 run-directory frame.
 
-    `TaskExecutionHostV2` deliberately refuses directory candidates because it
+    `TaskExecutionHost` deliberately refuses directory candidates because it
     cannot make an immutable promise about a directory whose contents may still
     change. The V1 Worker historically indexes the official run directory as a
     single artifact, so that JSONL-only behavior remains available during the
@@ -494,16 +494,16 @@ def run(request: dict[str, Any]) -> int:
     snapshot_staging = str(options.get("datasetSnapshotStagingPath") or request.get("datasetSnapshotStagingPath") or "").strip()
     if bool(snapshot_manifest) != bool(snapshot_staging):
         report_path = write_failure_report(output_path, request,
-            "Dataset Snapshot V2 requires both manifest and staging paths.", "dataset_snapshot_request_invalid", {})
-        emit("failed", code="dataset_snapshot_request_invalid", reportPath=str(report_path), message="Dataset Snapshot V2 request is incomplete.")
+            "Dataset Snapshot  requires both manifest and staging paths.", "dataset_snapshot_request_invalid", {})
+        emit("failed", code="dataset_snapshot_request_invalid", reportPath=str(report_path), message="Dataset Snapshot  request is incomplete.")
         return 2
     if snapshot_manifest:
         try:
-            dataset_path = materialize_dataset_snapshot_v2(dataset_path, snapshot_manifest, snapshot_staging)
+            dataset_path = materialize_dataset_snapshot(dataset_path, snapshot_manifest, snapshot_staging)
         except Exception as exc:
             report_path = write_failure_report(output_path, request,
-                "Dataset Snapshot V2 materialization failed.", "dataset_snapshot_invalid", exception_details(exc))
-            emit("failed", code="dataset_snapshot_invalid", reportPath=str(report_path), message="Dataset Snapshot V2 materialization failed.")
+                "Dataset Snapshot  materialization failed.", "dataset_snapshot_invalid", exception_details(exc))
+            emit("failed", code="dataset_snapshot_invalid", reportPath=str(report_path), message="Dataset Snapshot  materialization failed.")
             return 2
     if not model_path.exists():
         report_path = write_failure_report(output_path, request, f"model path does not exist: {model_path}", "model_missing", {})
@@ -582,7 +582,7 @@ def run(request: dict[str, Any]) -> int:
         "split": split,
         "runtime": EVALUATION_SOURCE,
         "evaluationSource": EVALUATION_SOURCE,
-        # V2 snapshot identifiers are UUID strings.  Keep lineage opaque to the
+        #  snapshot identifiers are UUID strings.  Keep lineage opaque to the
         # official evaluator instead of applying the legacy integer conversion.
         "datasetSnapshotId": str(options.get("datasetSnapshotId") or ""),
         "datasetSnapshotHash": str(options.get("datasetSnapshotHash") or ""),

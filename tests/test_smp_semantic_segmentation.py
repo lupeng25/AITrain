@@ -73,7 +73,7 @@ def test_semantic_masks_preserve_raw_palette_indexes() -> None:
         assert evaluator.load_mask_ids(mask_path).tolist() == [[1, 1], [1, 1]]
 
 
-def test_smp_adapters_materialize_verified_dataset_snapshot_v2() -> None:
+def test_smp_adapters_materialize_verified_dataset_snapshot() -> None:
     trainer = load_trainer_module()
     evaluator = load_module("aitrain_smp_evaluator_snapshot_test", EVALUATOR)
     with tempfile.TemporaryDirectory() as directory:
@@ -121,7 +121,7 @@ def test_smp_adapter_events_use_sdk_and_preserve_backend() -> None:
         assert all(event["backend"] == backend for event in events)
 
 
-def test_smp_exporter_writes_complete_v2_contract_and_exact_artifacts() -> None:
+def test_smp_exporter_writes_complete_contract_and_exact_artifacts() -> None:
     exporter = load_module("aitrain_smp_exporter_contract_test", EXPORTER)
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -179,7 +179,7 @@ def test_smp_exporter_writes_complete_v2_contract_and_exact_artifacts() -> None:
         assert [event.get("kind") for event in events if event["type"] == "artifact"] == ["export", "export_sidecar"]
 
 
-def test_smp_evaluator_resubmits_required_v2_artifact_kinds() -> None:
+def test_smp_evaluator_resubmits_required_artifact_kinds() -> None:
     source = EVALUATOR.read_text(encoding="utf-8")
     for kind in ("onnx_model", "model_sidecar", "checkpoint", "evaluation_report"):
         assert f'("{kind}",' in source
@@ -189,7 +189,7 @@ if __name__ == "__main__":
     test_py_compile()
     test_public_presets_registered()
     test_semantic_masks_preserve_raw_palette_indexes()
-    test_smp_adapters_materialize_verified_dataset_snapshot_v2()
+    test_smp_adapters_materialize_verified_dataset_snapshot()
     test_smp_adapter_events_use_sdk_and_preserve_backend()
-    test_smp_exporter_writes_complete_v2_contract_and_exact_artifacts()
-    test_smp_evaluator_resubmits_required_v2_artifact_kinds()
+    test_smp_exporter_writes_complete_contract_and_exact_artifacts()
+    test_smp_evaluator_resubmits_required_artifact_kinds()

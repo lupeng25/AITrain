@@ -5,7 +5,7 @@
 
 namespace aitrain {
 
-// 外部工具探测等 Core 边界返回的结构化结果；V2 产品工作流使用各自的 ResultV2。
+// 外部工具探测等 Core 边界返回的结构化结果； 产品工作流使用各自的 Result。
 struct WorkflowResult {
     bool ok = false;
     QString error;

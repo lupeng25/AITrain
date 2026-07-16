@@ -19,15 +19,15 @@ QString controlEventKind(const QString& businessEvent)
     return QStringLiteral("event.result");
 }
 
-aitrain::v2::ProtocolEnvelope makeControlEnvelope(
-    const aitrain::v2::RequestId& requestId,
-    const aitrain::v2::TaskId& taskId,
+aitrain::ProtocolEnvelope makeControlEnvelope(
+    const aitrain::RequestId& requestId,
+    const aitrain::TaskId& taskId,
     quint64 sequence,
     const QString& kind,
     const QJsonObject& payload)
 {
-    aitrain::v2::ProtocolEnvelope envelope;
-    envelope.messageId = aitrain::v2::MessageId::create();
+    aitrain::ProtocolEnvelope envelope;
+    envelope.messageId = aitrain::MessageId::create();
     envelope.requestId = requestId;
     envelope.taskId = taskId;
     envelope.sequence = sequence;
@@ -39,19 +39,19 @@ aitrain::v2::ProtocolEnvelope makeControlEnvelope(
 } // namespace
 
 namespace command {
-QString runEnvironmentCheckWorkflowV2() { return QStringLiteral("runEnvironmentCheckWorkflowV2"); }
-QString runDatasetSplitWorkflowV2() { return QStringLiteral("runDatasetSplitWorkflowV2"); }
-QString runDatasetConversionWorkflowV2() { return QStringLiteral("runDatasetConversionWorkflowV2"); }
-QString runDataQualityWorkflowV2() { return QStringLiteral("runDataQualityWorkflowV2"); }
-QString runDiagnosticsWorkflowV2() { return QStringLiteral("runDiagnosticsWorkflowV2"); }
-QString createAnnotationSessionV2() { return QStringLiteral("createAnnotationSessionV2"); }
-QString syncAnnotationSessionV2() { return QStringLiteral("syncAnnotationSessionV2"); }
-QString runDatasetSnapshotImportWorkflowV2() { return QStringLiteral("runDatasetSnapshotImportWorkflowV2"); }
-QString importOcrOfficialReportsV2() { return QStringLiteral("importOcrOfficialReportsV2"); }
-QString runOcrAcceptanceWorkflowV2() { return QStringLiteral("runOcrAcceptanceWorkflowV2"); }
-QString runRuntimeDeliveryWorkflowV2() { return QStringLiteral("runRuntimeDeliveryWorkflowV2"); }
-QString importModelV2() { return QStringLiteral("importModelV2"); }
-QString runTrainingWorkflowV2() { return QStringLiteral("runTrainingWorkflowV2"); }
+QString runEnvironmentCheckWorkflow() { return QStringLiteral("runEnvironmentCheckWorkflow"); }
+QString runDatasetSplitWorkflow() { return QStringLiteral("runDatasetSplitWorkflow"); }
+QString runDatasetConversionWorkflow() { return QStringLiteral("runDatasetConversionWorkflow"); }
+QString runDataQualityWorkflow() { return QStringLiteral("runDataQualityWorkflow"); }
+QString runDiagnosticsWorkflow() { return QStringLiteral("runDiagnosticsWorkflow"); }
+QString createAnnotationSession() { return QStringLiteral("createAnnotationSession"); }
+QString syncAnnotationSession() { return QStringLiteral("syncAnnotationSession"); }
+QString runDatasetSnapshotImportWorkflow() { return QStringLiteral("runDatasetSnapshotImportWorkflow"); }
+QString importOcrOfficialReports() { return QStringLiteral("importOcrOfficialReports"); }
+QString runOcrAcceptanceWorkflow() { return QStringLiteral("runOcrAcceptanceWorkflow"); }
+QString runRuntimeDeliveryWorkflow() { return QStringLiteral("runRuntimeDeliveryWorkflow"); }
+QString importModel() { return QStringLiteral("importModel"); }
+QString runTrainingWorkflow() { return QStringLiteral("runTrainingWorkflow"); }
 } // namespace command
 
 namespace event {
@@ -63,18 +63,18 @@ QString artifact() { return QStringLiteral("artifact"); }
 QString completed() { return QStringLiteral("completed"); }
 QString canceled() { return QStringLiteral("canceled"); }
 QString failed() { return QStringLiteral("failed"); }
-QString environmentCheckWorkflowV2() { return QStringLiteral("environmentCheckWorkflowV2"); }
-QString datasetSplitWorkflowV2() { return QStringLiteral("datasetSplitWorkflowV2"); }
-QString datasetConversionWorkflowV2() { return QStringLiteral("datasetConversionWorkflowV2"); }
-QString dataQualityWorkflowV2() { return QStringLiteral("dataQualityWorkflowV2"); }
-QString diagnosticsWorkflowV2() { return QStringLiteral("diagnosticsWorkflowV2"); }
-QString annotationSessionV2() { return QStringLiteral("annotationSessionV2"); }
-QString annotationSyncV2() { return QStringLiteral("annotationSyncV2"); }
-QString datasetSnapshotImportWorkflowV2() { return QStringLiteral("datasetSnapshotImportWorkflowV2"); }
-QString runtimeDeliveryWorkflowV2() { return QStringLiteral("runtimeDeliveryWorkflowV2"); }
-QString modelImportV2() { return QStringLiteral("modelImportV2"); }
-QString ocrOfficialReportsImportedV2() { return QStringLiteral("ocrOfficialReportsImportedV2"); }
-QString ocrAcceptanceWorkflowV2() { return QStringLiteral("ocrAcceptanceWorkflowV2"); }
+QString environmentCheckWorkflow() { return QStringLiteral("environmentCheckWorkflow"); }
+QString datasetSplitWorkflow() { return QStringLiteral("datasetSplitWorkflow"); }
+QString datasetConversionWorkflow() { return QStringLiteral("datasetConversionWorkflow"); }
+QString dataQualityWorkflow() { return QStringLiteral("dataQualityWorkflow"); }
+QString diagnosticsWorkflow() { return QStringLiteral("diagnosticsWorkflow"); }
+QString annotationSession() { return QStringLiteral("annotationSession"); }
+QString annotationSync() { return QStringLiteral("annotationSync"); }
+QString datasetSnapshotImportWorkflow() { return QStringLiteral("datasetSnapshotImportWorkflow"); }
+QString runtimeDeliveryWorkflow() { return QStringLiteral("runtimeDeliveryWorkflow"); }
+QString modelImport() { return QStringLiteral("modelImport"); }
+QString ocrOfficialReportsImported() { return QStringLiteral("ocrOfficialReportsImported"); }
+QString ocrAcceptanceWorkflow() { return QStringLiteral("ocrAcceptanceWorkflow"); }
 } // namespace event
 
 namespace field {
@@ -105,7 +105,7 @@ bool isTaskStateEvent(const QString& type)
     return isTerminalEvent(type);
 }
 
-QJsonObject datasetSplitWorkflowV2Request(
+QJsonObject datasetSplitWorkflowRequest(
     const QString& taskId,
     const QString& projectRoot,
     const QString& sourceDatasetId,
@@ -127,7 +127,7 @@ QJsonObject datasetSplitWorkflowV2Request(
         {field::options(), options}};
 }
 
-QJsonObject datasetConversionWorkflowV2Request(
+QJsonObject datasetConversionWorkflowRequest(
     const QString& taskId,
     const QString& projectRoot,
     const QString& sourcePath,
@@ -147,7 +147,7 @@ QJsonObject datasetConversionWorkflowV2Request(
         {field::options(), options}};
 }
 
-QJsonObject dataQualityWorkflowV2Request(
+QJsonObject dataQualityWorkflowRequest(
     const QString& taskId,
     const QString& projectRoot,
     const QString& datasetId,
@@ -165,7 +165,7 @@ QJsonObject dataQualityWorkflowV2Request(
         {field::options(), options}};
 }
 
-QJsonObject annotationSessionCreateV2Request(
+QJsonObject annotationSessionCreateRequest(
     const QString& taskId,
     const QString& projectRoot,
     const QString& repairManifestArtifactId,
@@ -182,7 +182,7 @@ QJsonObject annotationSessionCreateV2Request(
         {field::options(), options}};
 }
 
-QJsonObject annotationSessionSyncV2Request(
+QJsonObject annotationSessionSyncRequest(
     const QString& taskId,
     const QString& projectRoot,
     const QString& sessionArtifactId,
@@ -197,7 +197,7 @@ QJsonObject annotationSessionSyncV2Request(
         {field::options(), options}};
 }
 
-QJsonObject datasetSnapshotImportWorkflowV2Request(
+QJsonObject datasetSnapshotImportWorkflowRequest(
     const QString& taskId,
     const QString& projectRoot,
     const QString& sourcePath,
@@ -215,7 +215,7 @@ QJsonObject datasetSnapshotImportWorkflowV2Request(
         {field::options(), options}};
 }
 
-QJsonObject ocrOfficialReportImportV2Request(
+QJsonObject ocrOfficialReportImportRequest(
     const QString& taskId,
     const QString& projectRoot,
     const QJsonObject& det,
@@ -235,7 +235,7 @@ QJsonObject ocrOfficialReportImportV2Request(
         {QStringLiteral("evidenceClass"), evidenceClass}};
 }
 
-QJsonObject ocrAcceptanceWorkflowV2Request(
+QJsonObject ocrAcceptanceWorkflowRequest(
     const QString& taskId,
     const QString& projectRoot,
     const QString& detReportArtifactId,
@@ -251,7 +251,7 @@ QJsonObject ocrAcceptanceWorkflowV2Request(
         {QStringLiteral("thresholds"), thresholds}};
 }
 
-QJsonObject diagnosticsWorkflowV2Request(
+QJsonObject diagnosticsWorkflowRequest(
     const QString& taskId,
     const QString& projectRoot,
     const QJsonObject& options)
@@ -261,7 +261,7 @@ QJsonObject diagnosticsWorkflowV2Request(
         {field::options(), options}};
 }
 
-QJsonObject runtimeDeliveryWorkflowV2Request(
+QJsonObject runtimeDeliveryWorkflowRequest(
     const QString& taskId,
     const QString& projectRoot,
     const QString& modelPackageId,
@@ -279,7 +279,7 @@ QJsonObject runtimeDeliveryWorkflowV2Request(
     return payload;
 }
 
-QJsonObject modelImportV2Request(
+QJsonObject modelImportRequest(
     const QString& taskId,
     const QString& projectRoot,
     const QString& sourceFilePath,
@@ -292,10 +292,10 @@ QJsonObject modelImportV2Request(
         {QStringLiteral("manifestDraft"), manifestDraft}};
 }
 
-namespace control_v2 {
-aitrain::v2::ProtocolEnvelope startTaskEnvelope(
-    const aitrain::v2::RequestId& requestId,
-    const aitrain::v2::TaskId& taskId,
+namespace control {
+aitrain::ProtocolEnvelope startTaskEnvelope(
+    const aitrain::RequestId& requestId,
+    const aitrain::TaskId& taskId,
     quint64 sequence,
     const QString& businessCommand,
     const QJsonObject& businessPayload)
@@ -305,17 +305,17 @@ aitrain::v2::ProtocolEnvelope startTaskEnvelope(
             {QStringLiteral("businessPayload"), businessPayload}});
 }
 
-aitrain::v2::ProtocolEnvelope cancelTaskEnvelope(
-    const aitrain::v2::RequestId& requestId,
-    const aitrain::v2::TaskId& taskId,
+aitrain::ProtocolEnvelope cancelTaskEnvelope(
+    const aitrain::RequestId& requestId,
+    const aitrain::TaskId& taskId,
     quint64 sequence)
 {
     return makeControlEnvelope(requestId, taskId, sequence, QStringLiteral("command.cancel_task"), QJsonObject{});
 }
 
-aitrain::v2::ProtocolEnvelope eventEnvelope(
-    const aitrain::v2::RequestId& requestId,
-    const aitrain::v2::TaskId& taskId,
+aitrain::ProtocolEnvelope eventEnvelope(
+    const aitrain::RequestId& requestId,
+    const aitrain::TaskId& taskId,
     quint64 sequence,
     const QString& businessEvent,
     const QJsonObject& businessPayload)
@@ -325,7 +325,7 @@ aitrain::v2::ProtocolEnvelope eventEnvelope(
             {QStringLiteral("businessPayload"), businessPayload}});
 }
 
-bool unpackStartTask(const aitrain::v2::ProtocolEnvelope& envelope,
+bool unpackStartTask(const aitrain::ProtocolEnvelope& envelope,
     QString* businessCommand,
     QJsonObject* businessPayload,
     QString* error)
@@ -341,7 +341,7 @@ bool unpackStartTask(const aitrain::v2::ProtocolEnvelope& envelope,
     return true;
 }
 
-bool unpackBusinessEvent(const aitrain::v2::ProtocolEnvelope& envelope,
+bool unpackBusinessEvent(const aitrain::ProtocolEnvelope& envelope,
     QString* businessEvent,
     QJsonObject* businessPayload,
     QString* error)
@@ -350,14 +350,14 @@ bool unpackBusinessEvent(const aitrain::v2::ProtocolEnvelope& envelope,
     const QJsonValue payloadValue = envelope.payload.value(QStringLiteral("businessPayload"));
     if (!envelope.kind.startsWith(QStringLiteral("event.")) || eventName.isEmpty() || !payloadValue.isObject()
         || controlEventKind(eventName) != envelope.kind) {
-        if (error) *error = QStringLiteral("Protocol V2 事件 payload 必须包含 businessEvent 和对象 businessPayload。");
+        if (error) *error = QStringLiteral("Protocol  事件 payload 必须包含 businessEvent 和对象 businessPayload。");
         return false;
     }
     if (businessEvent) *businessEvent = eventName;
     if (businessPayload) *businessPayload = payloadValue.toObject();
     return true;
 }
-} // namespace control_v2
+} // namespace control
 
 } // namespace worker_protocol
 } // namespace aitrain

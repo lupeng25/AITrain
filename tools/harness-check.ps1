@@ -61,6 +61,9 @@ Set-Location $root
 Write-Host "Harness check: encoding" -ForegroundColor Cyan
 & (Join-Path $PSScriptRoot "encoding-check.ps1") -IncludeUntracked
 
+Write-Host "Harness check: architecture" -ForegroundColor Cyan
+& (Join-Path $PSScriptRoot "architecture-check.ps1")
+
 Write-AITrainToolchainSelection -VcVars $vcvars -QtRoot $qt
 
 $cachedCompiler = Get-CachedCxxCompiler -CachePath (Join-Path $buildPath "CMakeCache.txt")

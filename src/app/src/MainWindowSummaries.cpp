@@ -1,6 +1,6 @@
 #include "MainWindow.h"
 
-#include "ProjectSummaryPresenterV2.h"
+#include "ProjectSummaryPresenter.h"
 
 #include "EvaluationReportView.h"
 #include "InfoPanel.h"
@@ -300,19 +300,19 @@ void MainWindow::updateEnvironmentTable(const QJsonObject& payload)
 
 void MainWindow::updateProjectSummary()
 {
-    const bool workspaceOpen = !currentProjectPath_.isEmpty() && v2Workspace_.isOpen();
+    const bool workspaceOpen = !currentProjectPath_.isEmpty() && workspace_.isOpen();
     if (workspaceOpen) {
         projectSummaryPresenter_->refresh();
     } else {
         projectSummaryPresenter_->clear();
     }
-    const ProjectSummaryViewModelV2& summary = projectSummaryPresenter_->viewModel();
+    const ProjectSummaryViewModel& summary = projectSummaryPresenter_->viewModel();
     const bool hasProject = workspaceOpen && summary.available;
     if (projectConsoleStatusLabel_) {
         projectConsoleStatusLabel_->setText(hasProject
             ? uiText("已打开：%1").arg(currentProjectName_)
             : (workspaceOpen
-                    ? uiText("V2 项目汇总读取失败：%1").arg(projectSummaryPresenter_->lastError())
+                    ? uiText(" 项目汇总读取失败：%1").arg(projectSummaryPresenter_->lastError())
                     : uiText("未打开项目。")));
     }
     if (projectPathSummaryLabel_) {
@@ -324,7 +324,7 @@ void MainWindow::updateProjectSummary()
             : QString());
     }
     if (projectSqliteSummaryLabel_) {
-        projectSqliteSummaryLabel_->setText(hasProject ? uiText("V2 已连接") : uiText("未连接"));
+        projectSqliteSummaryLabel_->setText(hasProject ? uiText(" 已连接") : uiText("未连接"));
     }
 
     if (projectDatasetSummaryLabel_) {
@@ -521,9 +521,9 @@ void MainWindow::updateDeliveryAcceptanceSummary()
 void MainWindow::updateDashboardSummary()
 {
     updateProjectSummary();
-    const ProjectSummaryViewModelV2& summary = projectSummaryPresenter_->viewModel();
+    const ProjectSummaryViewModel& summary = projectSummaryPresenter_->viewModel();
     const bool hasProject = !currentProjectPath_.isEmpty()
-        && v2Workspace_.isOpen() && summary.available;
+        && workspace_.isOpen() && summary.available;
     if (dashboardProjectValue_) {
         dashboardProjectValue_->setText(hasProject ? currentProjectName_ : uiText("未打开"));
     }
@@ -584,13 +584,13 @@ void MainWindow::updateDashboardSummary()
         if (!hasProject) {
             nextStep = uiText("先创建或打开一个本地项目。项目目录会集中保存数据集索引、任务历史、训练报告和模型产物。");
         } else if (summary.datasetSnapshotCount == 0) {
-            nextStep = uiText("下一步：导入数据并创建 V2 数据集快照。训练工作流只消费已登记的不可变快照。");
+            nextStep = uiText("下一步：导入数据并创建  数据集快照。训练工作流只消费已登记的不可变快照。");
         } else if (summary.taskCount == 0) {
             nextStep = uiText("下一步：进入训练实验，选择已登记的数据集快照并启动官方后端工作流。");
         } else if (summary.modelPackageCount == 0) {
-            nextStep = uiText("下一步：在任务与产物中检查工作流产物，并完成 V2 模型包登记后进入部署验证。");
+            nextStep = uiText("下一步：在任务与产物中检查工作流产物，并完成  模型包登记后进入部署验证。");
         } else {
-            nextStep = uiText("项目已记录 V2 数据集快照、任务与模型包。可继续进入部署验证或追加实验。");
+            nextStep = uiText("项目已记录  数据集快照、任务与模型包。可继续进入部署验证或追加实验。");
         }
         dashboardNextStepLabel_->setText(nextStep);
     }
@@ -671,7 +671,7 @@ void MainWindow::updateTrainingSelectionSummary()
                 epochsEdit_ ? epochsEdit_->text() : QStringLiteral("-"),
                 batchEdit_ ? batchEdit_->text() : QStringLiteral("-"),
                 imageSizeEdit_ ? imageSizeEdit_->text() : QStringLiteral("-")));
-        trainingRunSummaryLabel_->setToolTip(uiText("训练只消费 V2 四重身份：Dataset %1 / Version %2 / Snapshot %3 / Artifact %4")
+        trainingRunSummaryLabel_->setToolTip(uiText("训练只消费  四重身份：Dataset %1 / Version %2 / Snapshot %3 / Artifact %4")
             .arg(dataQualityDatasetIdEdit_ ? dataQualityDatasetIdEdit_->text().trimmed() : QString(),
                 dataQualityDatasetVersionIdEdit_ ? dataQualityDatasetVersionIdEdit_->text().trimmed() : QString(),
                 snapshotId,

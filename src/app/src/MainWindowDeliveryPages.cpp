@@ -46,7 +46,7 @@ QWidget* MainWindow::buildDeploymentPage()
     layout->addWidget(createWorkbenchHeader(
         QStringLiteral("DEPLOYMENT VALIDATION"),
         uiText("部署验证"),
-        uiText("基于已登记且校验通过的 V2 模型包运行推理与部署验证。"),
+        uiText("基于已登记且校验通过的  模型包运行推理与部署验证。"),
         nullptr,
         QStringList()
             << QStringLiteral("ONNX")
@@ -75,12 +75,12 @@ QWidget* MainWindow::buildDeploymentValidationPanel()
     layout->setContentsMargins(0, 12, 0, 0);
     layout->setSpacing(16);
 
-    auto* setupPanel = new InfoPanel(QStringLiteral("V2 模型包部署验证"));
+    auto* setupPanel = new InfoPanel(QStringLiteral(" 模型包部署验证"));
     deploymentModelPackageCombo_ = new QComboBox;
     deploymentModelPackageCombo_->setObjectName(QStringLiteral("DeploymentModelPackageCombo"));
     deploymentModelPackageCombo_->setMinimumWidth(0);
     deploymentModelPackageCombo_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
-    deploymentModelPackageCombo_->addItem(uiText("请先打开项目并导入已验证 V2 模型包"), QString());
+    deploymentModelPackageCombo_->addItem(uiText("请先打开项目并导入已验证  模型包"), QString());
 
     deploymentValidationImageEdit_ = new QLineEdit;
     deploymentValidationImageEdit_->setPlaceholderText(uiText("选择用于部署验证的样本图片"));
@@ -120,7 +120,7 @@ QWidget* MainWindow::buildDeploymentValidationPanel()
     setupPanel->bodyLayout()->addWidget(boundary);
 
     auto* validateButton = primaryButton(uiText("运行完整 Runtime Delivery"));
-    connect(validateButton, &QPushButton::clicked, this, &MainWindow::validateDeploymentModelPackageV2);
+    connect(validateButton, &QPushButton::clicked, this, &MainWindow::validateDeploymentModelPackage);
     auto* actionStrip = new QFrame;
     actionStrip->setObjectName(QStringLiteral("ActionStrip"));
     auto* actionLayout = new QHBoxLayout(actionStrip);
@@ -175,7 +175,7 @@ QWidget* MainWindow::buildInferenceValidationPanel()
     inferenceModelPackageCombo_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     inferenceModelPackageCombo_->addItem(uiText("请先打开项目并导入已验证模型包"), QString());
     inferenceImageEdit_->setPlaceholderText(QStringLiteral("选择验证图片"));
-    inferenceOutputEdit_->setPlaceholderText(QStringLiteral("输出由 V2 Artifact Store 托管"));
+    inferenceOutputEdit_->setPlaceholderText(QStringLiteral("输出由  Artifact Store 托管"));
     inferenceOutputEdit_->setReadOnly(true);
     auto* chooseImageButton = new QPushButton(QStringLiteral("选择图片"));
     auto* chooseOutputButton = new QPushButton(QStringLiteral("选择输出目录"));
@@ -221,11 +221,11 @@ QWidget* MainWindow::buildInferenceValidationPanel()
     inferForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     inferForm->setHorizontalSpacing(14);
     inferForm->setVerticalSpacing(10);
-    inferForm->addRow(QStringLiteral("已验证 V2 模型包"), modelRow);
+    inferForm->addRow(QStringLiteral("已验证  模型包"), modelRow);
     inferForm->addRow(QStringLiteral("图片路径"), imageRow);
     inferForm->addRow(QStringLiteral("推理输出"), outputRow);
     toolbar->bodyLayout()->addLayout(inferForm);
-    auto* sourceHelp = emptyStateLabel(QStringLiteral("推理只能使用模型库中已登记、已校验哈希且声明 ONNX Runtime 路由的 V2 模型包。模型文件裸路径、NCNN 和 TensorRT engine 不会进入此推理链路。"));
+    auto* sourceHelp = emptyStateLabel(QStringLiteral("推理只能使用模型库中已登记、已校验哈希且声明 ONNX Runtime 路由的  模型包。模型文件裸路径、NCNN 和 TensorRT engine 不会进入此推理链路。"));
     allowLabelToShrink(sourceHelp);
     toolbar->bodyLayout()->addWidget(sourceHelp);
     auto* actionStrip = new QFrame;
@@ -241,7 +241,7 @@ QWidget* MainWindow::buildInferenceValidationPanel()
     toolbar->bodyLayout()->addStretch();
 
     auto* capabilityPanel = new InfoPanel(QStringLiteral("可解析结果"));
-    auto* capabilityHint = mutedLabel(QStringLiteral("当前 V2 推理仅执行已验证 ONNX Runtime 路由；具体检测、分割、OBB 或语义分割解码由 Model Manifest 声明。TensorRT、NCNN、异常检测和 OCR 不进入此运行时。"));
+    auto* capabilityHint = mutedLabel(QStringLiteral("当前  推理仅执行已验证 ONNX Runtime 路由；具体检测、分割、OBB 或语义分割解码由 Model Manifest 声明。TensorRT、NCNN、异常检测和 OCR 不进入此运行时。"));
     allowLabelToShrink(capabilityHint);
     capabilityPanel->bodyLayout()->addWidget(capabilityHint);
     auto* capabilityGrid = new QGridLayout;
@@ -379,7 +379,7 @@ QWidget* MainWindow::buildDeliveryEvidencePanel()
     rightLayout->setContentsMargins(0, 0, 0, 0);
     rightLayout->setSpacing(16);
 
-    auto* ocrPanel = new InfoPanel(uiText("客户域 OCR 官方报告受控验收 V2"));
+    auto* ocrPanel = new InfoPanel(uiText("客户域 OCR 官方报告受控验收 "));
     const auto makePathRow = [this](QLineEdit** target, const QString& placeholder) {
         auto* row = new QWidget;
         auto* rowLayout = new QHBoxLayout(row);
@@ -451,8 +451,8 @@ QWidget* MainWindow::buildDeliveryEvidencePanel()
         QStringLiteral("public"), QStringLiteral("generated"), QStringLiteral("smoke")});
     ocrForm->addRow(uiText("证据分类"), customerOcrEvidenceClassCombo_);
     auto* importOcrButton = primaryButton(uiText("受控导入官方报告"));
-    importOcrButton->setObjectName(QStringLiteral("ImportOcrOfficialReportsV2Button"));
-    connect(importOcrButton, &QPushButton::clicked, this, &MainWindow::importOcrOfficialReportsV2);
+    importOcrButton->setObjectName(QStringLiteral("ImportOcrOfficialReportsButton"));
+    connect(importOcrButton, &QPushButton::clicked, this, &MainWindow::importOcrOfficialReports);
     ocrForm->addRow(QString(), importOcrButton);
 
     auto* acceptanceTitle = new QLabel(uiText("步骤 2：仅使用已提交报告 ArtifactId 运行验收"));
@@ -485,12 +485,12 @@ QWidget* MainWindow::buildDeliveryEvidencePanel()
     thresholdLayout->addWidget(customerOcrMinSystemAccEdit_);
     ocrForm->addRow(uiText("门槛"), thresholdRow);
     ocrPanel->bodyLayout()->addLayout(ocrForm);
-    customerOcrStatusLabel_ = inlineStatusLabel(uiText("尚未导入官方报告或运行 OCR Acceptance V2。"));
-    customerOcrStatusLabel_->setObjectName(QStringLiteral("OcrAcceptanceV2Status"));
+    customerOcrStatusLabel_ = inlineStatusLabel(uiText("尚未导入官方报告或运行 OCR Acceptance 。"));
+    customerOcrStatusLabel_->setObjectName(QStringLiteral("OcrAcceptanceStatus"));
     ocrPanel->bodyLayout()->addWidget(customerOcrStatusLabel_);
-    auto* runOcrButton = primaryButton(uiText("运行 OCR Acceptance V2"));
-    runOcrButton->setObjectName(QStringLiteral("RunOcrAcceptanceWorkflowV2Button"));
-    connect(runOcrButton, &QPushButton::clicked, this, &MainWindow::runOcrAcceptanceWorkflowV2);
+    auto* runOcrButton = primaryButton(uiText("运行 OCR Acceptance "));
+    runOcrButton->setObjectName(QStringLiteral("RunOcrAcceptanceWorkflowButton"));
+    connect(runOcrButton, &QPushButton::clicked, this, &MainWindow::runOcrAcceptanceWorkflow);
     ocrPanel->bodyLayout()->addWidget(runOcrButton, 0, Qt::AlignRight);
     ocrPanel->bodyLayout()->addWidget(mutedLabel(uiText("Total-Text、generated smoke 和 .deps 示例只能证明流程可跑，不能作为客户域生产 OCR 精度证明。")));
 

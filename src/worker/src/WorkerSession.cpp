@@ -1,4 +1,4 @@
-﻿#include "WorkerSession.h"
+#include "WorkerSession.h"
 #include "WorkerSessionSupport.h"
 
 #include "aitrain/core/DatasetValidators.h"
@@ -32,8 +32,8 @@ WorkerSession::WorkerSession(QObject* parent)
 }
 
 bool WorkerSession::connectToServer(const QString& serverName,
-    const aitrain::v2::RequestId& requestId,
-    const aitrain::v2::TaskId& taskId)
+    const aitrain::RequestId& requestId,
+    const aitrain::TaskId& taskId)
 {
     if (!requestId.isValid() || !taskId.isValid()) {
         return false;
@@ -41,7 +41,7 @@ bool WorkerSession::connectToServer(const QString& serverName,
     controlRequestId_ = requestId;
     controlTaskId_ = taskId;
     incomingSequenceTracker_.reset(controlRequestId_);
-    socket_.setReadBufferSize(aitrain::v2::kProtocolV2MaxControlMessageBytes + 1);
+    socket_.setReadBufferSize(aitrain::kProtocolMaxControlMessageBytes + 1);
     socket_.connectToServer(serverName);
     const bool connected = socket_.waitForConnected(5000);
     if (connected) {
@@ -57,56 +57,56 @@ bool WorkerSession::connectToServer(const QString& serverName,
 void WorkerSession::readLines()
 {
     buffer_.append(socket_.readAll());
-    if (buffer_.size() > aitrain::v2::kProtocolV2MaxControlMessageBytes
+    if (buffer_.size() > aitrain::kProtocolMaxControlMessageBytes
         && !buffer_.contains('\n')) {
-        rejectControlProtocol(QStringLiteral("Protocol V2 frame exceeds maximum size."));
+        rejectControlProtocol(QStringLiteral("Protocol  frame exceeds maximum size."));
         return;
     }
 
     // 同一次读取中可能已经包含多个完整控制帧。必须先无副作用地校验整批帧，
     // 再执行首个 start_task；否则一个业务参数不完整但协议合法的首帧会抢先
     // 产生 worker_failed，掩盖其后已经到达的重复消息或乱序序列错误。
-    aitrain::v2::ProtocolV2SequenceTracker preflightTracker = incomingSequenceTracker_;
+    aitrain::ProtocolSequenceTracker preflightTracker = incomingSequenceTracker_;
     bool preflightStartReceived = startTaskReceived_;
     QByteArray preflightBuffer = buffer_;
     int preflightNewline = preflightBuffer.indexOf('\n');
     while (preflightNewline >= 0) {
         const QByteArray line = preflightBuffer.left(preflightNewline);
         preflightBuffer.remove(0, preflightNewline + 1);
-        if (line.size() > aitrain::v2::kProtocolV2MaxControlMessageBytes) {
-            rejectControlProtocol(QStringLiteral("Protocol V2 frame exceeds maximum size."));
+        if (line.size() > aitrain::kProtocolMaxControlMessageBytes) {
+            rejectControlProtocol(QStringLiteral("Protocol  frame exceeds maximum size."));
             return;
         }
-        aitrain::v2::ProtocolEnvelope envelope;
+        aitrain::ProtocolEnvelope envelope;
         QString error;
-        if (!aitrain::v2::decodeProtocolV2Message(line, &envelope, &error)
+        if (!aitrain::decodeProtocolMessage(line, &envelope, &error)
             || !preflightTracker.observe(envelope, controlRequestId_, controlTaskId_, &error)) {
-            rejectControlProtocol(QStringLiteral("Protocol V2 command rejected: %1").arg(error));
+            rejectControlProtocol(QStringLiteral("Protocol  command rejected: %1").arg(error));
             return;
         }
         if (envelope.kind == QStringLiteral("command.cancel_task")) {
             if (!preflightStartReceived) {
                 rejectControlProtocol(QStringLiteral(
-                    "Protocol V2 command.cancel_task cannot precede command.start_task."));
+                    "Protocol  command.cancel_task cannot precede command.start_task."));
                 return;
             }
         } else if (envelope.kind == QStringLiteral("command.start_task")) {
             if (preflightStartReceived) {
                 rejectControlProtocol(QStringLiteral(
-                    "Protocol V2 command.start_task may only be sent once."));
+                    "Protocol  command.start_task may only be sent once."));
                 return;
             }
             QString businessCommand;
             QJsonObject businessPayload;
-            if (!wp::control_v2::unpackStartTask(
+            if (!wp::control::unpackStartTask(
                     envelope, &businessCommand, &businessPayload, &error)) {
-                rejectControlProtocol(QStringLiteral("Protocol V2 start task rejected: %1").arg(error));
+                rejectControlProtocol(QStringLiteral("Protocol  start task rejected: %1").arg(error));
                 return;
             }
             preflightStartReceived = true;
         } else {
             rejectControlProtocol(QStringLiteral(
-                "Protocol V2 command kind is not allowed: %1").arg(envelope.kind));
+                "Protocol  command kind is not allowed: %1").arg(envelope.kind));
             return;
         }
         preflightNewline = preflightBuffer.indexOf('\n');
@@ -116,15 +116,15 @@ void WorkerSession::readLines()
     while (newline >= 0) {
         const QByteArray line = buffer_.left(newline);
         buffer_.remove(0, newline + 1);
-        if (line.size() > aitrain::v2::kProtocolV2MaxControlMessageBytes) {
-            rejectControlProtocol(QStringLiteral("Protocol V2 frame exceeds maximum size."));
+        if (line.size() > aitrain::kProtocolMaxControlMessageBytes) {
+            rejectControlProtocol(QStringLiteral("Protocol  frame exceeds maximum size."));
             return;
         }
 
-        aitrain::v2::ProtocolEnvelope envelope;
+        aitrain::ProtocolEnvelope envelope;
         QString error;
-        if (!aitrain::v2::decodeProtocolV2Message(line, &envelope, &error)) {
-            rejectControlProtocol(QStringLiteral("Protocol V2 message rejected: %1").arg(error));
+        if (!aitrain::decodeProtocolMessage(line, &envelope, &error)) {
+            rejectControlProtocol(QStringLiteral("Protocol  message rejected: %1").arg(error));
             return;
         }
         if (!acceptControlEnvelope(envelope)) {
@@ -135,35 +135,35 @@ void WorkerSession::readLines()
     }
 }
 
-bool WorkerSession::acceptControlEnvelope(const aitrain::v2::ProtocolEnvelope& envelope)
+bool WorkerSession::acceptControlEnvelope(const aitrain::ProtocolEnvelope& envelope)
 {
     QString error;
     if (!incomingSequenceTracker_.observe(envelope, controlRequestId_, controlTaskId_, &error)) {
-        rejectControlProtocol(QStringLiteral("Protocol V2 command rejected: %1").arg(error));
+        rejectControlProtocol(QStringLiteral("Protocol  command rejected: %1").arg(error));
         return false;
     }
 
     if (envelope.kind == QStringLiteral("command.cancel_task")) {
         if (!startTaskReceived_) {
-            rejectControlProtocol(QStringLiteral("Protocol V2 command.cancel_task cannot precede command.start_task."));
+            rejectControlProtocol(QStringLiteral("Protocol  command.cancel_task cannot precede command.start_task."));
             return false;
         }
         cancelCommand(QJsonObject());
         return true;
     }
     if (envelope.kind != QStringLiteral("command.start_task")) {
-        rejectControlProtocol(QStringLiteral("Protocol V2 command kind is not allowed: %1").arg(envelope.kind));
+        rejectControlProtocol(QStringLiteral("Protocol  command kind is not allowed: %1").arg(envelope.kind));
         return false;
     }
     if (startTaskReceived_) {
-        rejectControlProtocol(QStringLiteral("Protocol V2 command.start_task may only be sent once."));
+        rejectControlProtocol(QStringLiteral("Protocol  command.start_task may only be sent once."));
         return false;
     }
 
     QString businessCommand;
     QJsonObject businessPayload;
-    if (!wp::control_v2::unpackStartTask(envelope, &businessCommand, &businessPayload, &error)) {
-        rejectControlProtocol(QStringLiteral("Protocol V2 start task rejected: %1").arg(error));
+    if (!wp::control::unpackStartTask(envelope, &businessCommand, &businessPayload, &error)) {
+        rejectControlProtocol(QStringLiteral("Protocol  start task rejected: %1").arg(error));
         return false;
     }
     startTaskReceived_ = true;
@@ -173,7 +173,7 @@ bool WorkerSession::acceptControlEnvelope(const aitrain::v2::ProtocolEnvelope& e
 
 void WorkerSession::rejectControlProtocol(const QString& message)
 {
-    failWithDetails(message, QStringLiteral("protocol_v2_rejected"));
+    failWithDetails(message, QStringLiteral("protocol_rejected"));
 }
 
 void WorkerSession::handleMessage(const QString& type, const QJsonObject& payload)
@@ -196,69 +196,69 @@ void WorkerSession::handleMessage(const QString& type, const QJsonObject& payloa
     fail(QStringLiteral("Unsupported command: %1").arg(type));
 }
 
-void WorkerSession::runEnvironmentCheckWorkflowV2Command(const QJsonObject& payload)
+void WorkerSession::runEnvironmentCheckWorkflowCommand(const QJsonObject& payload)
 {
-    runEnvironmentCheckWorkflowV2(payload);
+    runEnvironmentCheckWorkflow(payload);
 }
 
-void WorkerSession::runDatasetSplitWorkflowV2Command(const QJsonObject& payload)
+void WorkerSession::runDatasetSplitWorkflowCommand(const QJsonObject& payload)
 {
-    runDatasetSplitWorkflowV2(payload);
+    runDatasetSplitWorkflow(payload);
 }
 
-void WorkerSession::runDatasetConversionWorkflowV2Command(const QJsonObject& payload)
+void WorkerSession::runDatasetConversionWorkflowCommand(const QJsonObject& payload)
 {
-    runDatasetConversionWorkflowV2(payload);
+    runDatasetConversionWorkflow(payload);
 }
 
-void WorkerSession::runDataQualityWorkflowV2Command(const QJsonObject& payload)
+void WorkerSession::runDataQualityWorkflowCommand(const QJsonObject& payload)
 {
-    runDataQualityWorkflowV2(payload);
+    runDataQualityWorkflow(payload);
 }
 
-void WorkerSession::runDiagnosticsWorkflowV2Command(const QJsonObject& payload)
+void WorkerSession::runDiagnosticsWorkflowCommand(const QJsonObject& payload)
 {
-    runDiagnosticsWorkflowV2(payload);
+    runDiagnosticsWorkflow(payload);
 }
 
-void WorkerSession::createAnnotationSessionV2Command(const QJsonObject& payload)
+void WorkerSession::createAnnotationSessionCommand(const QJsonObject& payload)
 {
-    createAnnotationSessionV2(payload);
+    createAnnotationSession(payload);
 }
 
-void WorkerSession::syncAnnotationSessionV2Command(const QJsonObject& payload)
+void WorkerSession::syncAnnotationSessionCommand(const QJsonObject& payload)
 {
-    syncAnnotationSessionV2(payload);
+    syncAnnotationSession(payload);
 }
 
-void WorkerSession::runDatasetSnapshotImportWorkflowV2Command(const QJsonObject& payload)
+void WorkerSession::runDatasetSnapshotImportWorkflowCommand(const QJsonObject& payload)
 {
-    runDatasetSnapshotImportWorkflowV2(payload);
+    runDatasetSnapshotImportWorkflow(payload);
 }
 
-void WorkerSession::importOcrOfficialReportsV2Command(const QJsonObject& payload)
+void WorkerSession::importOcrOfficialReportsCommand(const QJsonObject& payload)
 {
-    importOcrOfficialReportsV2(payload);
+    importOcrOfficialReports(payload);
 }
 
-void WorkerSession::runOcrAcceptanceWorkflowV2Command(const QJsonObject& payload)
+void WorkerSession::runOcrAcceptanceWorkflowCommand(const QJsonObject& payload)
 {
-    runOcrAcceptanceWorkflowV2(payload);
+    runOcrAcceptanceWorkflow(payload);
 }
 
-void WorkerSession::runRuntimeDeliveryWorkflowV2Command(const QJsonObject& payload)
+void WorkerSession::runRuntimeDeliveryWorkflowCommand(const QJsonObject& payload)
 {
-    runRuntimeDeliveryWorkflowV2(payload);
+    runRuntimeDeliveryWorkflow(payload);
 }
 
-void WorkerSession::importModelV2Command(const QJsonObject& payload)
+void WorkerSession::importModelCommand(const QJsonObject& payload)
 {
-    importModelV2(payload);
+    importModel(payload);
 }
 
-void WorkerSession::runTrainingWorkflowV2Command(const QJsonObject& payload)
+void WorkerSession::runTrainingWorkflowCommand(const QJsonObject& payload)
 {
-    runTrainingWorkflowV2(payload);
+    runTrainingWorkflow(payload);
 }
 
 void WorkerSession::cancelCommand(const QJsonObject& payload)
@@ -267,66 +267,66 @@ void WorkerSession::cancelCommand(const QJsonObject& payload)
     if (finishingSession_) {
         return;
     }
-    if (trainingWorkspaceV2_ && trainingWorkflowTaskIdV2_.isValid()) {
-        cancelTrainingWorkflowV2();
+    if (trainingWorkspace_ && trainingWorkflowTaskId_.isValid()) {
+        cancelTrainingWorkflow();
         return;
     }
-    if (runtimeDeliveryRunningV2_ && runtimeDeliveryWorkspaceV2_
-        && runtimeDeliveryTaskIdV2_.isValid()) {
+    if (runtimeDeliveryRunning_ && runtimeDeliveryWorkspace_
+        && runtimeDeliveryTaskId_.isValid()) {
         // Runtime Delivery Core 在每个同步 Runtime 调用前后轮询该标记。
         // 底层 ONNX Runtime 单次 infer 为同步调用，进入后不能中途抢占；
         // 取消会在该次 infer 返回后收口，不能提前发送第二个终态。
         canceled_ = true;
         return;
     }
-    if (annotationRunningV2_ && annotationWorkspaceV2_ && annotationTaskIdV2_.isValid()) {
+    if (annotationRunning_ && annotationWorkspace_ && annotationTaskId_.isValid()) {
         canceled_ = true;
         QString ignored;
-        annotationWorkspaceV2_->requestTaskCancellation(annotationTaskIdV2_, &ignored);
+        annotationWorkspace_->requestTaskCancellation(annotationTaskId_, &ignored);
         return;
     }
-    if (ocrAcceptanceRunningV2_ && ocrAcceptanceWorkspaceV2_
-        && ocrAcceptanceTaskIdV2_.isValid()) {
+    if (ocrAcceptanceRunning_ && ocrAcceptanceWorkspace_
+        && ocrAcceptanceTaskId_.isValid()) {
         canceled_ = true;
         QString ignored;
-        ocrAcceptanceWorkspaceV2_->requestTaskCancellation(ocrAcceptanceTaskIdV2_, &ignored);
+        ocrAcceptanceWorkspace_->requestTaskCancellation(ocrAcceptanceTaskId_, &ignored);
         return;
     }
-    if (dataQualityRunningV2_ && dataQualityWorkspaceV2_
-        && dataQualityTaskIdV2_.isValid()) {
+    if (dataQualityRunning_ && dataQualityWorkspace_
+        && dataQualityTaskId_.isValid()) {
         canceled_ = true;
         QString ignored;
-        dataQualityWorkspaceV2_->requestTaskCancellation(dataQualityTaskIdV2_, &ignored);
+        dataQualityWorkspace_->requestTaskCancellation(dataQualityTaskId_, &ignored);
         return;
     }
-    if (diagnosticsRunningV2_ && diagnosticsWorkspaceV2_
-        && diagnosticsTaskIdV2_.isValid()) {
+    if (diagnosticsRunning_ && diagnosticsWorkspace_
+        && diagnosticsTaskId_.isValid()) {
         // 外部同步 probe 期间不能抢占；Core 会在每个 probe 前后读取 canceled_。
         canceled_ = true;
         QString ignored;
-        diagnosticsWorkspaceV2_->requestTaskCancellation(diagnosticsTaskIdV2_, &ignored);
+        diagnosticsWorkspace_->requestTaskCancellation(diagnosticsTaskId_, &ignored);
         return;
     }
-    if (datasetConversionRunningV2_ && datasetConversionWorkspaceV2_
-        && datasetConversionTaskIdV2_.isValid()) {
+    if (datasetConversionRunning_ && datasetConversionWorkspace_
+        && datasetConversionTaskId_.isValid()) {
         canceled_ = true;
         QString ignored;
-        datasetConversionWorkspaceV2_->requestTaskCancellation(datasetConversionTaskIdV2_, &ignored);
+        datasetConversionWorkspace_->requestTaskCancellation(datasetConversionTaskId_, &ignored);
         return;
     }
-    if (datasetSnapshotImportRunningV2_ && datasetSnapshotImportWorkspaceV2_
-        && datasetSnapshotImportTaskIdV2_.isValid()) {
+    if (datasetSnapshotImportRunning_ && datasetSnapshotImportWorkspace_
+        && datasetSnapshotImportTaskId_.isValid()) {
         canceled_ = true;
         QString ignored;
-        datasetSnapshotImportWorkspaceV2_->requestTaskCancellation(
-            datasetSnapshotImportTaskIdV2_, &ignored);
+        datasetSnapshotImportWorkspace_->requestTaskCancellation(
+            datasetSnapshotImportTaskId_, &ignored);
         return;
     }
-    if (datasetSplitRunningV2_ && datasetSplitWorkspaceV2_
-        && datasetSplitTaskIdV2_.isValid()) {
+    if (datasetSplitRunning_ && datasetSplitWorkspace_
+        && datasetSplitTaskId_.isValid()) {
         canceled_ = true;
         QString ignored;
-        datasetSplitWorkspaceV2_->requestTaskCancellation(datasetSplitTaskIdV2_, &ignored);
+        datasetSplitWorkspace_->requestTaskCancellation(datasetSplitTaskId_, &ignored);
         return;
     }
     running_ = false;
@@ -343,38 +343,38 @@ void WorkerSession::handleSocketDisconnected()
 
     running_ = false;
     canceled_ = true;
-    if (trainingWorkspaceV2_ && trainingWorkflowTaskIdV2_.isValid()) {
+    if (trainingWorkspace_ && trainingWorkflowTaskId_.isValid()) {
         QString ignored;
-        trainingWorkspaceV2_->requestTaskCancellation(trainingWorkflowTaskIdV2_, &ignored);
+        trainingWorkspace_->requestTaskCancellation(trainingWorkflowTaskId_, &ignored);
     }
-    if (annotationWorkspaceV2_ && annotationTaskIdV2_.isValid()) {
+    if (annotationWorkspace_ && annotationTaskId_.isValid()) {
         QString ignored;
-        annotationWorkspaceV2_->requestTaskCancellation(annotationTaskIdV2_, &ignored);
+        annotationWorkspace_->requestTaskCancellation(annotationTaskId_, &ignored);
     }
-    if (ocrAcceptanceWorkspaceV2_ && ocrAcceptanceTaskIdV2_.isValid()) {
+    if (ocrAcceptanceWorkspace_ && ocrAcceptanceTaskId_.isValid()) {
         QString ignored;
-        ocrAcceptanceWorkspaceV2_->requestTaskCancellation(ocrAcceptanceTaskIdV2_, &ignored);
+        ocrAcceptanceWorkspace_->requestTaskCancellation(ocrAcceptanceTaskId_, &ignored);
     }
-    if (dataQualityWorkspaceV2_ && dataQualityTaskIdV2_.isValid()) {
+    if (dataQualityWorkspace_ && dataQualityTaskId_.isValid()) {
         QString ignored;
-        dataQualityWorkspaceV2_->requestTaskCancellation(dataQualityTaskIdV2_, &ignored);
+        dataQualityWorkspace_->requestTaskCancellation(dataQualityTaskId_, &ignored);
     }
-    if (diagnosticsWorkspaceV2_ && diagnosticsTaskIdV2_.isValid()) {
+    if (diagnosticsWorkspace_ && diagnosticsTaskId_.isValid()) {
         QString ignored;
-        diagnosticsWorkspaceV2_->requestTaskCancellation(diagnosticsTaskIdV2_, &ignored);
+        diagnosticsWorkspace_->requestTaskCancellation(diagnosticsTaskId_, &ignored);
     }
-    if (datasetConversionWorkspaceV2_ && datasetConversionTaskIdV2_.isValid()) {
+    if (datasetConversionWorkspace_ && datasetConversionTaskId_.isValid()) {
         QString ignored;
-        datasetConversionWorkspaceV2_->requestTaskCancellation(datasetConversionTaskIdV2_, &ignored);
+        datasetConversionWorkspace_->requestTaskCancellation(datasetConversionTaskId_, &ignored);
     }
-    if (datasetSnapshotImportWorkspaceV2_ && datasetSnapshotImportTaskIdV2_.isValid()) {
+    if (datasetSnapshotImportWorkspace_ && datasetSnapshotImportTaskId_.isValid()) {
         QString ignored;
-        datasetSnapshotImportWorkspaceV2_->requestTaskCancellation(
-            datasetSnapshotImportTaskIdV2_, &ignored);
+        datasetSnapshotImportWorkspace_->requestTaskCancellation(
+            datasetSnapshotImportTaskId_, &ignored);
     }
-    if (datasetSplitWorkspaceV2_ && datasetSplitTaskIdV2_.isValid()) {
+    if (datasetSplitWorkspace_ && datasetSplitTaskId_.isValid()) {
         QString ignored;
-        datasetSplitWorkspaceV2_->requestTaskCancellation(datasetSplitTaskIdV2_, &ignored);
+        datasetSplitWorkspace_->requestTaskCancellation(datasetSplitTaskId_, &ignored);
     }
     shutdownPythonTrainer(QStringLiteral("Worker client disconnected."), false);
     qApp->quit();
@@ -402,12 +402,12 @@ void WorkerSession::send(const QString& type, const QJsonObject& payload)
         envelopePayload.insert(wp::field::status(), QStringLiteral("canceled"));
     }
     const bool terminal = wp::isTerminalEvent(type);
-    const aitrain::v2::ProtocolEnvelope envelope = wp::control_v2::eventEnvelope(
+    const aitrain::ProtocolEnvelope envelope = wp::control::eventEnvelope(
         controlRequestId_, controlTaskId_, ++outgoingSequence_, type, envelopePayload);
     QString error;
-    const QByteArray bytes = aitrain::v2::encodeProtocolV2Message(envelope, &error);
+    const QByteArray bytes = aitrain::encodeProtocolMessage(envelope, &error);
     if (bytes.isEmpty()) {
-        qCritical().noquote() << QStringLiteral("Cannot encode Protocol V2 event: %1").arg(error);
+        qCritical().noquote() << QStringLiteral("Cannot encode Protocol  event: %1").arg(error);
         terminalEnvelopeSent_ = true;
         qApp->quit();
         return;
@@ -453,24 +453,24 @@ bool WorkerSession::pollPendingCancel(int timeoutMs)
         if (socket_.bytesAvailable()) {
             buffer_.append(socket_.readAll());
         }
-        if (buffer_.size() > aitrain::v2::kProtocolV2MaxControlMessageBytes
+        if (buffer_.size() > aitrain::kProtocolMaxControlMessageBytes
             && !buffer_.contains('\n')) {
-            rejectControlProtocol(QStringLiteral("Protocol V2 frame exceeds maximum size."));
+            rejectControlProtocol(QStringLiteral("Protocol  frame exceeds maximum size."));
             return true;
         }
         int newline = buffer_.indexOf('\n');
         while (newline >= 0) {
             const QByteArray line = buffer_.left(newline);
             buffer_.remove(0, newline + 1);
-            if (line.size() > aitrain::v2::kProtocolV2MaxControlMessageBytes) {
-                rejectControlProtocol(QStringLiteral("Protocol V2 frame exceeds maximum size."));
+            if (line.size() > aitrain::kProtocolMaxControlMessageBytes) {
+                rejectControlProtocol(QStringLiteral("Protocol  frame exceeds maximum size."));
                 return true;
             }
 
-            aitrain::v2::ProtocolEnvelope envelope;
+            aitrain::ProtocolEnvelope envelope;
             QString error;
-            if (!aitrain::v2::decodeProtocolV2Message(line, &envelope, &error)) {
-                rejectControlProtocol(QStringLiteral("Protocol V2 message rejected: %1").arg(error));
+            if (!aitrain::decodeProtocolMessage(line, &envelope, &error)) {
+                rejectControlProtocol(QStringLiteral("Protocol  message rejected: %1").arg(error));
                 return true;
             }
             if (!acceptControlEnvelope(envelope)) {
@@ -549,10 +549,11 @@ void WorkerSession::finishSession()
         socket_.waitForBytesWritten(25);
         QCoreApplication::processEvents(QEventLoop::AllEvents, 25);
     }
-    if (socket_.state() == QLocalSocket::ConnectedState) {
-        socket_.disconnectFromServer();
-    }
-    qApp->quit();
+    // Keep the local socket connected while the controller's event loop drains
+    // the terminal frame. Calling disconnectFromServer immediately after a
+    // successful flush can still discard the frame before the peer observes
+    // it, especially when the Worker is under Python-process load.
+    QTimer::singleShot(750, qApp, [] { qApp->quit(); });
 }
 
 void WorkerSession::fail(const QString& message)

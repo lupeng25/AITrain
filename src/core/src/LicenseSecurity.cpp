@@ -19,7 +19,7 @@
 namespace aitrain {
 namespace {
 
-const QByteArray kPrivateKeyEntropy = QByteArrayLiteral("AITrain/LicenseGenerator/PrivateKey/v2");
+const QByteArray kPrivateKeyEntropy = QByteArrayLiteral("AITrain/LicenseGenerator/PrivateKey/v1");
 const QByteArray kTrustedClockEntropy = QByteArrayLiteral("AITrain/Studio/TrustedUtc/v1");
 
 LicenseValidationResult securityResult(LicenseStatus status, const QString& message)

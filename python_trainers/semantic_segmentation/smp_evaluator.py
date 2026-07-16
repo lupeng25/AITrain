@@ -16,9 +16,9 @@ TRAINER_ROOT = Path(__file__).resolve().parents[1]
 if str(TRAINER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRAINER_ROOT))
 
-from adapter_event_channel_v2 import AdapterEventChannelV2, event_channel_from_environment  # noqa: E402
+from adapter_event_channel import AdapterEventChannel, event_channel_from_environment  # noqa: E402
 from adapter_sdk import AdapterSdk  # noqa: E402
-from dataset_snapshot_v2 import materialize_dataset_snapshot_v2  # noqa: E402
+from dataset_snapshot import materialize_dataset_snapshot  # noqa: E402
 from trainer_protocol import configure_stdio, exception_details  # noqa: E402
 
 MEAN = [0.485, 0.456, 0.406]
@@ -29,7 +29,7 @@ BACKEND_ID = "smp_semantic_segmentation_eval"
 configure_stdio()
 
 _adapter: AdapterSdk | None = None
-_event_channel: AdapterEventChannelV2 | None = None
+_event_channel: AdapterEventChannel | None = None
 
 
 def configure_adapter() -> None:
@@ -99,9 +99,9 @@ def materialize_request_dataset(request: dict[str, Any], options: dict[str, Any]
     snapshot_manifest = str(options.get("datasetSnapshotManifest") or request.get("datasetSnapshotManifest") or "").strip()
     snapshot_staging = str(options.get("datasetSnapshotStagingPath") or request.get("datasetSnapshotStagingPath") or "").strip()
     if bool(snapshot_manifest) != bool(snapshot_staging):
-        raise ValueError("Dataset Snapshot V2 requires both manifest and staging paths.")
+        raise ValueError("Dataset Snapshot  requires both manifest and staging paths.")
     if snapshot_manifest:
-        dataset_path = materialize_dataset_snapshot_v2(dataset_path, snapshot_manifest, snapshot_staging)
+        dataset_path = materialize_dataset_snapshot(dataset_path, snapshot_manifest, snapshot_staging)
     return dataset_path, snapshot_manifest
 
 

@@ -3,7 +3,7 @@
 #include "aitrain/core/CapabilityRegistry.h"
 #include "aitrain/core/Deployment.h"
 #include "aitrain/core/VisionModelRuntime.h"
-#include "aitrain/v2/RuntimeCapabilityMatrixV2.h"
+#include "aitrain/runtime/RuntimeCapabilityMatrix.h"
 
 #include <QCommandLineParser>
 #include <QCoreApplication>
@@ -37,7 +37,9 @@ int runSelfCheck()
     }
 
     QJsonObject result;
-    result.insert(QStringLiteral("ok"), true);
+    // A missing required runtime dependency is a failed self-check, not a
+    // warning-only report. Callers use the exit code to gate package startup.
+    result.insert(QStringLiteral("ok"), !hasMissing);
     result.insert(QStringLiteral("status"), hasMissing
         ? QStringLiteral("missing")
         : (hasWarning ? QStringLiteral("warning") : QStringLiteral("ok")));
@@ -45,10 +47,10 @@ int runSelfCheck()
     result.insert(QStringLiteral("ncnnBackend"), aitrain::ncnnBackendStatus().toJson());
     result.insert(QStringLiteral("tensorRtBackend"), aitrain::tensorRtBackendStatus().toJson());
     result.insert(QStringLiteral("builtinCapabilities"), aitrain::BuiltinCapabilityRegistry::instance().toJson());
-    result.insert(QStringLiteral("runtimeCapabilityMatrix"), aitrain::v2::RuntimeCapabilityMatrixV2().toJson());
+    result.insert(QStringLiteral("runtimeCapabilityMatrix"), aitrain::RuntimeCapabilityMatrix().toJson());
     result.insert(QStringLiteral("checks"), checks);
     writeJsonLine(result);
-    return 0;
+    return hasMissing ? 4 : 0;
 }
 
 int runBuiltinCapabilityCheck()
@@ -73,11 +75,11 @@ int main(int argc, char* argv[])
     QCommandLineParser parser;
     parser.addHelpOption();
     QCommandLineOption serverOption(
-        QStringLiteral("server"), QStringLiteral("Protocol V2 本地服务名。"), QStringLiteral("name"));
+        QStringLiteral("server"), QStringLiteral("Protocol  本地服务名。"), QStringLiteral("name"));
     QCommandLineOption requestIdOption(
-        QStringLiteral("request-id"), QStringLiteral("Protocol V2 RequestId。"), QStringLiteral("uuid"));
+        QStringLiteral("request-id"), QStringLiteral("Protocol  RequestId。"), QStringLiteral("uuid"));
     QCommandLineOption taskIdOption(
-        QStringLiteral("task-id"), QStringLiteral("Protocol V2 TaskId。"), QStringLiteral("uuid"));
+        QStringLiteral("task-id"), QStringLiteral("Protocol  TaskId。"), QStringLiteral("uuid"));
     QCommandLineOption selfCheckOption(
         QStringLiteral("self-check"), QStringLiteral("执行运行时依赖自检并输出 JSON。"));
     QCommandLineOption capabilityCheckOption(
@@ -102,14 +104,14 @@ int main(int argc, char* argv[])
         return 2;
     }
 
-    aitrain::v2::RequestId requestId;
-    aitrain::v2::TaskId taskId;
+    aitrain::RequestId requestId;
+    aitrain::TaskId taskId;
     QString identityError;
-    if (!aitrain::v2::RequestId::parse(parser.value(requestIdOption), &requestId, &identityError)) {
+    if (!aitrain::RequestId::parse(parser.value(requestIdOption), &requestId, &identityError)) {
         qCritical().noquote() << QStringLiteral("无效或缺少 --request-id：%1").arg(identityError);
         return 2;
     }
-    if (!aitrain::v2::TaskId::parse(parser.value(taskIdOption), &taskId, &identityError)) {
+    if (!aitrain::TaskId::parse(parser.value(taskIdOption), &taskId, &identityError)) {
         qCritical().noquote() << QStringLiteral("无效或缺少 --task-id：%1").arg(identityError);
         return 2;
     }

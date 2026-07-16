@@ -1,286 +1,287 @@
-add_library(aitrain_v2_domain STATIC
-    include/aitrain/v2/DomainTypes.h
-    src/v2/DomainTypes.cpp
+add_library(aitrain_domain STATIC
+    include/aitrain/domain/DomainTypes.h
+    src/domain/DomainTypes.cpp
 )
 
-target_include_directories(aitrain_v2_domain
+target_include_directories(aitrain_domain
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(aitrain_v2_domain
+target_link_libraries(aitrain_domain
     PUBLIC
         Qt${QT_VERSION_MAJOR}::Core
 )
 
-target_compile_definitions(aitrain_v2_domain
+target_compile_definitions(aitrain_domain
     PUBLIC
         QT_NO_CAST_FROM_ASCII
 )
 
-add_library(aitrain_v2_protocol STATIC
-    include/aitrain/v2/ProtocolV2.h
-    src/v2/ProtocolV2.cpp
+add_library(aitrain_protocol STATIC
+    include/aitrain/protocol/Protocol.h
+    src/protocol/Protocol.cpp
 )
 
-target_include_directories(aitrain_v2_protocol
+target_include_directories(aitrain_protocol
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(aitrain_v2_protocol
+target_link_libraries(aitrain_protocol
     PUBLIC
-        aitrain_v2_domain
+        aitrain_domain
         Qt${QT_VERSION_MAJOR}::Core
 )
 
-target_compile_definitions(aitrain_v2_protocol
+target_compile_definitions(aitrain_protocol
     PUBLIC
         QT_NO_CAST_FROM_ASCII
 )
 
-add_library(aitrain_v2_storage STATIC
-    include/aitrain/v2/StorageV2.h
-    src/v2/StorageV2.cpp
+add_library(aitrain_storage STATIC
+    include/aitrain/storage/ProjectStore.h
+    src/storage/ProjectStore.cpp
 )
 
-add_library(aitrain_v2_training_workflow_profile STATIC
-    include/aitrain/v2/TrainingWorkflowProfileV2.h
-    src/v2/TrainingWorkflowProfileV2.cpp
+add_library(aitrain_training_workflow_profile STATIC
+    include/aitrain/workflow/TrainingWorkflowProfile.h
+    src/workflow/TrainingWorkflowProfile.cpp
 )
 
-target_include_directories(aitrain_v2_training_workflow_profile
+target_include_directories(aitrain_training_workflow_profile
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(aitrain_v2_training_workflow_profile
+target_link_libraries(aitrain_training_workflow_profile
     PUBLIC
         Qt${QT_VERSION_MAJOR}::Core
 )
 
-target_compile_definitions(aitrain_v2_training_workflow_profile
+target_compile_definitions(aitrain_training_workflow_profile
     PUBLIC
         QT_NO_CAST_FROM_ASCII
 )
 
-target_include_directories(aitrain_v2_storage
+target_include_directories(aitrain_storage
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(aitrain_v2_storage
+target_link_libraries(aitrain_storage
     PUBLIC
-        aitrain_v2_domain
-        aitrain_v2_model
+        aitrain_domain
+        aitrain_model
+        aitrain_protocol
         Qt${QT_VERSION_MAJOR}::Core
         Qt${QT_VERSION_MAJOR}::Sql
 )
 
-target_compile_definitions(aitrain_v2_storage
+target_compile_definitions(aitrain_storage
     PUBLIC
         QT_NO_CAST_FROM_ASCII
 )
 
-add_library(aitrain_v2_application STATIC
-    include/aitrain/v2/CapabilityPlannerV2.h
-    include/aitrain/v2/TaskCoordinator.h
-    include/aitrain/v2/TaskExecutionHostV2.h
-    include/aitrain/v2/WorkflowRunnerV2.h
-    include/aitrain/v2/EvidenceBundleV2.h
-    include/aitrain/v2/EvidenceRendererV2.h
-    include/aitrain/v2/ModelImportServiceV2.h
-    include/aitrain/v2/ModelPackageRuntimeServiceV2.h
-    include/aitrain/v2/ProjectWorkspaceV2.h
-    include/aitrain/v2/ProjectQueryServiceV2.h
-    src/v2/CapabilityPlannerV2.cpp
-    src/v2/TaskCoordinator.cpp
-    src/v2/TaskExecutionHostV2.cpp
-    src/v2/WorkflowRunnerV2.cpp
-    src/v2/EvidenceBundleV2.cpp
-    src/v2/EvidenceRendererV2.cpp
-    src/v2/ModelImportServiceV2.cpp
-    src/v2/ModelPackageRuntimeServiceV2.cpp
-    src/v2/ProjectWorkspaceV2.cpp
-    src/v2/ProjectWorkspaceAnnotationV2.cpp
-    src/v2/ProjectWorkspaceDataQualityV2.cpp
-    src/v2/ProjectWorkspaceDiagnosticsV2.cpp
-    src/v2/ProjectWorkspaceDatasetConversionV2.cpp
-    src/v2/ProjectWorkspaceDatasetSnapshotImportV2.cpp
-    src/v2/ProjectWorkspaceDatasetSplitV2.cpp
-    src/v2/ProjectWorkspaceOcrAcceptanceV2.cpp
-    src/v2/ProjectWorkspaceOcrReportPackagerV2.cpp
-    src/v2/ProjectWorkspaceRuntimeDeliveryV2.cpp
-    src/v2/ProjectQueryServiceV2.cpp
+add_library(aitrain_application STATIC
+    include/aitrain/workflow/CapabilityPlanner.h
+    include/aitrain/workflow/TaskCoordinator.h
+    include/aitrain/workflow/TaskExecutionHost.h
+    include/aitrain/workflow/WorkflowRunner.h
+    include/aitrain/workflow/EvidenceBundle.h
+    include/aitrain/workflow/EvidenceRenderer.h
+    include/aitrain/model/ModelImportService.h
+    include/aitrain/runtime/ModelPackageRuntimeService.h
+    include/aitrain/workflow/ProjectWorkspace.h
+    include/aitrain/workflow/ProjectQueryService.h
+    src/workflow/CapabilityPlanner.cpp
+    src/workflow/TaskCoordinator.cpp
+    src/workflow/TaskExecutionHost.cpp
+    src/workflow/WorkflowRunner.cpp
+    src/workflow/EvidenceBundle.cpp
+    src/workflow/EvidenceRenderer.cpp
+    src/model/ModelImportService.cpp
+    src/runtime/ModelPackageRuntimeService.cpp
+    src/workflow/ProjectWorkspace.cpp
+    src/workflow/ProjectWorkspaceAnnotation.cpp
+    src/workflow/ProjectWorkspaceDataQuality.cpp
+    src/workflow/ProjectWorkspaceDiagnostics.cpp
+    src/workflow/ProjectWorkspaceDatasetConversion.cpp
+    src/workflow/ProjectWorkspaceDatasetSnapshotImport.cpp
+    src/workflow/ProjectWorkspaceDatasetSplit.cpp
+    src/workflow/ProjectWorkspaceOcrAcceptance.cpp
+    src/workflow/ProjectWorkspaceOcrReportPackager.cpp
+    src/workflow/ProjectWorkspaceRuntimeDelivery.cpp
+    src/workflow/ProjectQueryService.cpp
 )
 
-add_library(aitrain_v2_dataset_conversion STATIC
-    include/aitrain/v2/DatasetConversionServiceV2.h
-    src/v2/DatasetConversionServiceV2.cpp
+add_library(aitrain_dataset_conversion STATIC
+    include/aitrain/dataset/DatasetConversionService.h
+    src/dataset/DatasetConversionService.cpp
 )
 
-target_include_directories(aitrain_v2_dataset_conversion PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(aitrain_v2_dataset_conversion
+target_include_directories(aitrain_dataset_conversion PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(aitrain_dataset_conversion
     PUBLIC
-        aitrain_v2_artifact
-        aitrain_v2_dataset
-        aitrain_core
+        aitrain_artifact
+        aitrain_dataset
+        aitrain_foundation
         Qt${QT_VERSION_MAJOR}::Core
 )
-target_compile_definitions(aitrain_v2_dataset_conversion PUBLIC QT_NO_CAST_FROM_ASCII)
+target_compile_definitions(aitrain_dataset_conversion PUBLIC QT_NO_CAST_FROM_ASCII)
 
-target_include_directories(aitrain_v2_application
+target_include_directories(aitrain_application
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(aitrain_v2_application
+target_link_libraries(aitrain_application
     PUBLIC
-        aitrain_v2_training_workflow_profile
-        aitrain_v2_protocol
-        aitrain_v2_process
-        aitrain_v2_storage
-        aitrain_v2_artifact
-        aitrain_v2_runtime_matrix
-        aitrain_v2_onnx_runtime
-        aitrain_v2_native_runtimes
-        aitrain_v2_dataset
-        aitrain_v2_dataset_conversion
-        aitrain_core
+        aitrain_training_workflow_profile
+        aitrain_protocol
+        aitrain_process
+        aitrain_storage
+        aitrain_artifact
+        aitrain_runtime_matrix
+        aitrain_onnx_runtime
+        aitrain_native_runtimes
+        aitrain_dataset
+        aitrain_dataset_conversion
+        aitrain_foundation
         Qt${QT_VERSION_MAJOR}::Core
 )
 
-target_compile_definitions(aitrain_v2_application
+target_compile_definitions(aitrain_application
     PUBLIC
         QT_NO_CAST_FROM_ASCII
 )
 
-add_library(aitrain_v2_artifact STATIC
-    include/aitrain/v2/ArtifactStoreV2.h
-    src/v2/ArtifactStoreV2.cpp
+add_library(aitrain_artifact STATIC
+    include/aitrain/artifact/ArtifactStore.h
+    src/artifact/ArtifactStore.cpp
 )
 
-add_library(aitrain_v2_model STATIC
-    include/aitrain/v2/ModelManifestV2.h
-    include/aitrain/v2/RuntimeAdapterV2.h
-    include/aitrain/v2/RuntimeInvocationV2.h
-    src/v2/ModelManifestV2.cpp
-    src/v2/RuntimeAdapterV2.cpp
-    src/v2/RuntimeInvocationV2.cpp
+add_library(aitrain_model STATIC
+    include/aitrain/model/ModelManifest.h
+    include/aitrain/runtime/RuntimeAdapter.h
+    include/aitrain/runtime/RuntimeInvocation.h
+    src/model/ModelManifest.cpp
+    src/runtime/RuntimeAdapter.cpp
+    src/runtime/RuntimeInvocation.cpp
 )
-target_include_directories(aitrain_v2_model PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(aitrain_v2_model PUBLIC aitrain_v2_domain Qt${QT_VERSION_MAJOR}::Core)
-target_compile_definitions(aitrain_v2_model PUBLIC QT_NO_CAST_FROM_ASCII)
+target_include_directories(aitrain_model PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(aitrain_model PUBLIC aitrain_domain Qt${QT_VERSION_MAJOR}::Core)
+target_compile_definitions(aitrain_model PUBLIC QT_NO_CAST_FROM_ASCII)
 
-add_library(aitrain_v2_onnx_runtime STATIC
-    include/aitrain/v2/OnnxRuntimeAdapterV2.h
-    src/v2/OnnxRuntimeAdapterV2.cpp
+add_library(aitrain_onnx_runtime STATIC
+    include/aitrain/runtime/OnnxRuntimeAdapter.h
+    src/runtime/OnnxRuntimeAdapter.cpp
 )
-target_include_directories(aitrain_v2_onnx_runtime PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(aitrain_v2_onnx_runtime PUBLIC aitrain_v2_model aitrain_core Qt${QT_VERSION_MAJOR}::Core)
-target_compile_definitions(aitrain_v2_onnx_runtime PUBLIC QT_NO_CAST_FROM_ASCII)
+target_include_directories(aitrain_onnx_runtime PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(aitrain_onnx_runtime PUBLIC aitrain_model aitrain_foundation Qt${QT_VERSION_MAJOR}::Core)
+target_compile_definitions(aitrain_onnx_runtime PUBLIC QT_NO_CAST_FROM_ASCII)
 
-add_library(aitrain_v2_native_runtimes STATIC
-    include/aitrain/v2/NcnnRuntimeAdapterV2.h
-    include/aitrain/v2/TensorRtRuntimeAdapterV2.h
-    src/v2/NcnnRuntimeAdapterV2.cpp
-    src/v2/TensorRtRuntimeAdapterV2.cpp
+add_library(aitrain_native_runtimes STATIC
+    include/aitrain/runtime/NcnnRuntimeAdapter.h
+    include/aitrain/runtime/TensorRtRuntimeAdapter.h
+    src/runtime/NcnnRuntimeAdapter.cpp
+    src/runtime/TensorRtRuntimeAdapter.cpp
 )
-target_include_directories(aitrain_v2_native_runtimes PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(aitrain_v2_native_runtimes PUBLIC aitrain_v2_model aitrain_core Qt${QT_VERSION_MAJOR}::Core)
-target_compile_definitions(aitrain_v2_native_runtimes PUBLIC QT_NO_CAST_FROM_ASCII)
+target_include_directories(aitrain_native_runtimes PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(aitrain_native_runtimes PUBLIC aitrain_model aitrain_foundation Qt${QT_VERSION_MAJOR}::Core)
+target_compile_definitions(aitrain_native_runtimes PUBLIC QT_NO_CAST_FROM_ASCII)
 
-add_library(aitrain_v2_runtime_matrix STATIC
-    include/aitrain/v2/RuntimeCapabilityMatrixV2.h
-    src/v2/RuntimeCapabilityMatrixV2.cpp
+add_library(aitrain_runtime_matrix STATIC
+    include/aitrain/runtime/RuntimeCapabilityMatrix.h
+    src/runtime/RuntimeCapabilityMatrix.cpp
 )
-target_include_directories(aitrain_v2_runtime_matrix PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(aitrain_v2_runtime_matrix PUBLIC aitrain_v2_model aitrain_core Qt${QT_VERSION_MAJOR}::Core)
-target_compile_definitions(aitrain_v2_runtime_matrix PUBLIC QT_NO_CAST_FROM_ASCII)
+target_include_directories(aitrain_runtime_matrix PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(aitrain_runtime_matrix PUBLIC aitrain_model aitrain_foundation Qt${QT_VERSION_MAJOR}::Core)
+target_compile_definitions(aitrain_runtime_matrix PUBLIC QT_NO_CAST_FROM_ASCII)
 
-target_include_directories(aitrain_v2_artifact
+target_include_directories(aitrain_artifact
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(aitrain_v2_artifact
+target_link_libraries(aitrain_artifact
     PUBLIC
-        aitrain_v2_storage
+        aitrain_storage
         Qt${QT_VERSION_MAJOR}::Core
 )
 
-target_compile_definitions(aitrain_v2_artifact
+target_compile_definitions(aitrain_artifact
     PUBLIC
         QT_NO_CAST_FROM_ASCII
 )
 
-add_library(aitrain_v2_process STATIC
-    include/aitrain/v2/AdapterEventServerV2.h
-    include/aitrain/v2/ProcessTreeSupervisor.h
-    include/aitrain/v2/PythonAdapterHostV2.h
-    src/v2/AdapterEventServerV2.cpp
-    src/v2/ProcessTreeSupervisor.cpp
-    src/v2/PythonAdapterHostV2.cpp
+add_library(aitrain_process STATIC
+    include/aitrain/process/AdapterEventServer.h
+    include/aitrain/process/ProcessTreeSupervisor.h
+    include/aitrain/process/PythonAdapterHost.h
+    src/process/AdapterEventServer.cpp
+    src/process/ProcessTreeSupervisor.cpp
+    src/process/PythonAdapterHost.cpp
 )
 
-target_include_directories(aitrain_v2_process
+target_include_directories(aitrain_process
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(aitrain_v2_process
+target_link_libraries(aitrain_process
     PUBLIC
-        aitrain_v2_protocol
+        aitrain_protocol
         Qt${QT_VERSION_MAJOR}::Core
         Qt${QT_VERSION_MAJOR}::Network
 )
 
-target_compile_definitions(aitrain_v2_process
+target_compile_definitions(aitrain_process
     PUBLIC
         QT_NO_CAST_FROM_ASCII
 )
 
-add_library(aitrain_v2_dataset STATIC
-    include/aitrain/v2/AnomalyFolderDatasetDriverV2.h
-    include/aitrain/v2/BuiltinDatasetDriversV2.h
-    include/aitrain/v2/DatasetDriverV2.h
-    include/aitrain/v2/DatasetSnapshotV2.h
-    include/aitrain/v2/PaddleOcrDetDatasetDriverV2.h
-    include/aitrain/v2/PaddleOcrRecDatasetDriverV2.h
-    include/aitrain/v2/ValidatedDatasetDriverV2.h
-    include/aitrain/v2/YoloDetectionDatasetDriverV2.h
-    include/aitrain/v2/YoloObbDatasetDriverV2.h
-    include/aitrain/v2/YoloSegmentationDatasetDriverV2.h
-    src/v2/AnomalyFolderDatasetDriverV2.cpp
-    src/v2/BuiltinDatasetDriversV2.cpp
-    src/v2/DatasetDriverV2.cpp
-    src/v2/DatasetSnapshotV2.cpp
-    src/v2/PaddleOcrDetDatasetDriverV2.cpp
-    src/v2/PaddleOcrRecDatasetDriverV2.cpp
-    src/v2/ValidatedDatasetDriverV2.cpp
-    src/v2/YoloDetectionDatasetDriverV2.cpp
-    src/v2/YoloObbDatasetDriverV2.cpp
-    src/v2/YoloSegmentationDatasetDriverV2.cpp
+add_library(aitrain_dataset STATIC
+    include/aitrain/dataset/AnomalyFolderDatasetDriver.h
+    include/aitrain/dataset/BuiltinDatasetDrivers.h
+    include/aitrain/dataset/DatasetDriver.h
+    include/aitrain/dataset/DatasetSnapshot.h
+    include/aitrain/dataset/PaddleOcrDetDatasetDriver.h
+    include/aitrain/dataset/PaddleOcrRecDatasetDriver.h
+    include/aitrain/dataset/ValidatedDatasetDriver.h
+    include/aitrain/dataset/YoloDetectionDatasetDriver.h
+    include/aitrain/dataset/YoloObbDatasetDriver.h
+    include/aitrain/dataset/YoloSegmentationDatasetDriver.h
+    src/dataset/AnomalyFolderDatasetDriver.cpp
+    src/dataset/BuiltinDatasetDrivers.cpp
+    src/dataset/DatasetDriver.cpp
+    src/dataset/DatasetSnapshot.cpp
+    src/dataset/PaddleOcrDetDatasetDriver.cpp
+    src/dataset/PaddleOcrRecDatasetDriver.cpp
+    src/dataset/ValidatedDatasetDriver.cpp
+    src/dataset/YoloDetectionDatasetDriver.cpp
+    src/dataset/YoloObbDatasetDriver.cpp
+    src/dataset/YoloSegmentationDatasetDriver.cpp
 )
 
-target_include_directories(aitrain_v2_dataset
+target_include_directories(aitrain_dataset
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(aitrain_v2_dataset
+target_link_libraries(aitrain_dataset
     PUBLIC
-        aitrain_v2_domain
-        aitrain_core
+        aitrain_domain
+        aitrain_foundation
         Qt${QT_VERSION_MAJOR}::Core
 )
 
-target_compile_definitions(aitrain_v2_dataset
+target_compile_definitions(aitrain_dataset
     PUBLIC
         QT_NO_CAST_FROM_ASCII
 )
 
-add_library(aitrain_core STATIC
+add_library(aitrain_foundation STATIC
     include/aitrain/core/CapabilityRegistry.h
     include/aitrain/core/DatasetValidation.h
     include/aitrain/core/AnnotationIntegration.h
@@ -333,15 +334,15 @@ add_library(aitrain_core STATIC
     src/WorkerProtocol.cpp
 )
 
-target_include_directories(aitrain_core
+target_include_directories(aitrain_foundation
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(aitrain_core
+target_link_libraries(aitrain_foundation
     PUBLIC
         aitrain_qt5_msvc_compat
-        aitrain_v2_protocol
+        aitrain_protocol
         Qt${QT_VERSION_MAJOR}::Core
         Qt${QT_VERSION_MAJOR}::Gui
         Qt${QT_VERSION_MAJOR}::Network
@@ -349,43 +350,43 @@ target_link_libraries(aitrain_core
         Qt${QT_VERSION_MAJOR}::Xml
 )
 
-target_compile_definitions(aitrain_core
+target_compile_definitions(aitrain_foundation
     PUBLIC
         QT_NO_CAST_FROM_ASCII
 )
 
 if(AITRAIN_WITH_ONNXRUNTIME)
-    target_compile_definitions(aitrain_core
+    target_compile_definitions(aitrain_foundation
         PUBLIC
             AITRAIN_WITH_ONNXRUNTIME
     )
-    target_include_directories(aitrain_core
+    target_include_directories(aitrain_foundation
         PRIVATE
             ${AITRAIN_ONNXRUNTIME_INCLUDE_DIR}
     )
-    target_link_libraries(aitrain_core
+    target_link_libraries(aitrain_foundation
         PRIVATE
             ${AITRAIN_ONNXRUNTIME_LIBRARY}
     )
 endif()
 
 if(AITRAIN_WITH_NCNN)
-    target_compile_definitions(aitrain_core
+    target_compile_definitions(aitrain_foundation
         PUBLIC
             AITRAIN_WITH_NCNN
     )
-    target_include_directories(aitrain_core
+    target_include_directories(aitrain_foundation
         PRIVATE
             ${AITRAIN_NCNN_INCLUDE_DIR}
     )
-    target_link_libraries(aitrain_core
+    target_link_libraries(aitrain_foundation
         PRIVATE
             ${AITRAIN_NCNN_LIBRARY}
     )
 endif()
 
 if(WIN32)
-    target_link_libraries(aitrain_core
+    target_link_libraries(aitrain_foundation
         PRIVATE
             bcrypt
             crypt32
@@ -394,11 +395,11 @@ if(WIN32)
 endif()
 
 if(AITRAIN_WITH_TENSORRT_SDK)
-    target_compile_definitions(aitrain_core
+    target_compile_definitions(aitrain_foundation
         PUBLIC
             AITRAIN_WITH_TENSORRT_SDK
     )
-    target_include_directories(aitrain_core
+    target_include_directories(aitrain_foundation
         PRIVATE
             ${AITRAIN_TENSORRT_INCLUDE_DIR}
             ${AITRAIN_CUDA_INCLUDE_DIR}

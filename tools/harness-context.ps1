@@ -13,7 +13,7 @@ $files = @(
     "HARNESS.md",
     "README.md",
     "src/core/include/aitrain/core/CapabilityRegistry.h",
-    "src/core/include/aitrain/core/StorageV2.h",
+    "src/core/include/aitrain/core/Storage.h",
     "src/core/include/aitrain/core/WorkflowResult.h",
     "src/app/src/MainWindow.cpp",
     "src/worker/src/WorkerSession.cpp",

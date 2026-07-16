@@ -234,7 +234,7 @@ void setFieldErrorLabel(QLabel* label, const QString& text)
 }
 } // namespace
 
-void MainWindow::validateDeploymentModelPackageV2()
+void MainWindow::validateDeploymentModelPackage()
 {
     if (worker_.isRunning()) {
         QMessageBox::warning(this, uiText("部署验证"), uiText("Worker 正在执行任务，稍后再运行交付工作流。"));
@@ -245,24 +245,24 @@ void MainWindow::validateDeploymentModelPackageV2()
         : QString();
     const QString sampleImagePath = QDir::fromNativeSeparators(
         deploymentValidationImageEdit_ ? deploymentValidationImageEdit_->text().trimmed() : QString());
-    aitrain::v2::ModelPackageId modelPackageId;
+    aitrain::ModelPackageId modelPackageId;
     QString error;
-    if (!v2Workspace_.isOpen() || currentProjectPath_.isEmpty()
-        || !aitrain::v2::ModelPackageId::parse(modelPackageText, &modelPackageId, &error)
+    if (!workspace_.isOpen() || currentProjectPath_.isEmpty()
+        || !aitrain::ModelPackageId::parse(modelPackageText, &modelPackageId, &error)
         || sampleImagePath.isEmpty() || !QFileInfo(sampleImagePath).isFile()) {
-        QMessageBox::warning(this, uiText("部署验证"), uiText("请选择已验证 V2 模型包和有效验证图片。"));
+        QMessageBox::warning(this, uiText("部署验证"), uiText("请选择已验证  模型包和有效验证图片。"));
         return;
     }
 
-    const aitrain::v2::TaskId taskId = aitrain::v2::TaskId::create();
+    const aitrain::TaskId taskId = aitrain::TaskId::create();
     QJsonObject options;
     options.insert(QStringLiteral("benchmarkWarmup"), 1);
     options.insert(QStringLiteral("benchmarkIterations"), 3);
-    activeV2TaskId_ = taskId.toString();
-    if (!worker_.requestRuntimeDeliveryWorkflowV2(workerExecutablePath(), currentProjectPath_,
+    activeTaskId_ = taskId.toString();
+    if (!worker_.requestRuntimeDeliveryWorkflow(workerExecutablePath(), currentProjectPath_,
             modelPackageId.toString(), QStringLiteral("aitrain_onnxruntime"), sampleImagePath,
-            options, &error, activeV2TaskId_)) {
-        activeV2TaskId_.clear();
+            options, &error, activeTaskId_)) {
+        activeTaskId_.clear();
         QMessageBox::critical(this, uiText("部署验证"), error);
         return;
     }
@@ -273,7 +273,7 @@ void MainWindow::validateDeploymentModelPackageV2()
     }
     workerPill_->setStatus(uiText("Runtime Delivery 运行中"), StatusPill::Tone::Info);
 }
-void MainWindow::importOcrOfficialReportsV2()
+void MainWindow::importOcrOfficialReports()
 {
     if (worker_.isRunning()) {
         QMessageBox::warning(this, uiText("OCR 报告导入"), uiText("Worker 正在执行任务，稍后再导入。"));
@@ -296,7 +296,7 @@ void MainWindow::importOcrOfficialReportsV2()
             && (!value.value(QStringLiteral("snapshotId")).toString().isEmpty()
                 || !value.value(QStringLiteral("snapshotArtifactId")).toString().isEmpty());
     };
-    if (!v2Workspace_.isOpen() || currentProjectPath_.isEmpty()
+    if (!workspace_.isOpen() || currentProjectPath_.isEmpty()
         || !validSource(det) || !validSource(rec) || !validSource(system)
         || !customerOcrCohortIdEdit_ || customerOcrCohortIdEdit_->text().trimmed().isEmpty()
         || !customerOcrDomainIdEdit_ || customerOcrDomainIdEdit_->text().trimmed().isEmpty()) {
@@ -305,18 +305,18 @@ void MainWindow::importOcrOfficialReportsV2()
         return;
     }
 
-    const aitrain::v2::TaskId taskId = aitrain::v2::TaskId::create();
-    activeV2TaskId_ = taskId.toString();
-    activeV2WorkflowKind_ = QStringLiteral("ocr_report_import_v2");
+    const aitrain::TaskId taskId = aitrain::TaskId::create();
+    activeTaskId_ = taskId.toString();
+    activeWorkflowKind_ = QStringLiteral("ocr_report_import");
     QString error;
-    if (!worker_.requestOcrOfficialReportImportV2(workerExecutablePath(), currentProjectPath_,
+    if (!worker_.requestOcrOfficialReportImport(workerExecutablePath(), currentProjectPath_,
             det, rec, system, customerOcrCohortIdEdit_->text().trimmed(),
             customerOcrDomainIdEdit_->text().trimmed(),
             customerOcrEvidenceClassCombo_ ? customerOcrEvidenceClassCombo_->currentText()
                                            : QStringLiteral("customer_domain"),
-            &error, activeV2TaskId_)) {
-        activeV2TaskId_.clear();
-        activeV2WorkflowKind_.clear();
+            &error, activeTaskId_)) {
+        activeTaskId_.clear();
+        activeWorkflowKind_.clear();
         QMessageBox::critical(this, uiText("OCR 报告导入"), error);
         return;
     }
@@ -326,22 +326,22 @@ void MainWindow::importOcrOfficialReportsV2()
     workerPill_->setStatus(uiText("OCR 报告导入中"), StatusPill::Tone::Info);
 }
 
-void MainWindow::runOcrAcceptanceWorkflowV2()
+void MainWindow::runOcrAcceptanceWorkflow()
 {
     if (worker_.isRunning()) {
         QMessageBox::warning(this, uiText("OCR 验收"), uiText("Worker 正在执行任务，稍后再运行验收。"));
         return;
     }
-    aitrain::v2::ArtifactId det;
-    aitrain::v2::ArtifactId rec;
-    aitrain::v2::ArtifactId system;
+    aitrain::ArtifactId det;
+    aitrain::ArtifactId rec;
+    aitrain::ArtifactId system;
     QString error;
-    if (!v2Workspace_.isOpen() || currentProjectPath_.isEmpty()
-        || !aitrain::v2::ArtifactId::parse(customerOcrDetReportArtifactIdEdit_
+    if (!workspace_.isOpen() || currentProjectPath_.isEmpty()
+        || !aitrain::ArtifactId::parse(customerOcrDetReportArtifactIdEdit_
                 ? customerOcrDetReportArtifactIdEdit_->text().trimmed() : QString(), &det, &error)
-        || !aitrain::v2::ArtifactId::parse(customerOcrRecReportArtifactIdEdit_
+        || !aitrain::ArtifactId::parse(customerOcrRecReportArtifactIdEdit_
                 ? customerOcrRecReportArtifactIdEdit_->text().trimmed() : QString(), &rec, &error)
-        || !aitrain::v2::ArtifactId::parse(customerOcrSystemReportArtifactIdEdit_
+        || !aitrain::ArtifactId::parse(customerOcrSystemReportArtifactIdEdit_
                 ? customerOcrSystemReportArtifactIdEdit_->text().trimmed() : QString(), &system, &error)) {
         QMessageBox::warning(this, uiText("OCR 验收"), uiText("验收只接受三个已提交官方报告 ArtifactId。"));
         return;
@@ -354,19 +354,19 @@ void MainWindow::runOcrAcceptanceWorkflowV2()
         {QStringLiteral("minimumRecAccuracy"), customerOcrMinAccEdit_ ? customerOcrMinAccEdit_->text().toDouble() : 0.70},
         {QStringLiteral("maximumRecCer"), customerOcrMaxCerEdit_ ? customerOcrMaxCerEdit_->text().toDouble() : 0.30},
         {QStringLiteral("minimumSystemAccuracy"), customerOcrMinSystemAccEdit_ ? customerOcrMinSystemAccEdit_->text().toDouble() : 0.70}};
-    const aitrain::v2::TaskId taskId = aitrain::v2::TaskId::create();
-    activeV2TaskId_ = taskId.toString();
-    activeV2WorkflowKind_ = QStringLiteral("ocr_acceptance_v2");
-    if (!worker_.requestOcrAcceptanceWorkflowV2(workerExecutablePath(), currentProjectPath_,
+    const aitrain::TaskId taskId = aitrain::TaskId::create();
+    activeTaskId_ = taskId.toString();
+    activeWorkflowKind_ = QStringLiteral("ocr_acceptance");
+    if (!worker_.requestOcrAcceptanceWorkflow(workerExecutablePath(), currentProjectPath_,
             det.toString(), rec.toString(), system.toString(), thresholds, &error,
-            activeV2TaskId_)) {
-        activeV2TaskId_.clear();
-        activeV2WorkflowKind_.clear();
+            activeTaskId_)) {
+        activeTaskId_.clear();
+        activeWorkflowKind_.clear();
         QMessageBox::critical(this, uiText("OCR 验收"), error);
         return;
     }
     if (customerOcrStatusLabel_) {
-        customerOcrStatusLabel_->setText(uiText("OCR Acceptance V2 四步验收运行中。"));
+        customerOcrStatusLabel_->setText(uiText("OCR Acceptance  四步验收运行中。"));
     }
     workerPill_->setStatus(uiText("OCR 验收中"), StatusPill::Tone::Info);
 }
@@ -378,18 +378,18 @@ void MainWindow::collectDiagnosticsBundle()
         return;
     }
 
-    if (!v2Workspace_.isOpen() || currentProjectPath_.isEmpty()) {
-        QMessageBox::warning(this, uiText("诊断包"), uiText("请先打开 V2 项目。"));
+    if (!workspace_.isOpen() || currentProjectPath_.isEmpty()) {
+        QMessageBox::warning(this, uiText("诊断包"), uiText("请先打开  项目。"));
         return;
     }
-    const aitrain::v2::TaskId taskId = aitrain::v2::TaskId::create();
-    activeV2TaskId_ = taskId.toString();
-    activeV2WorkflowKind_ = QStringLiteral("diagnostics_v2");
+    const aitrain::TaskId taskId = aitrain::TaskId::create();
+    activeTaskId_ = taskId.toString();
+    activeWorkflowKind_ = QStringLiteral("diagnostics");
     QString error;
-    if (!worker_.requestDiagnosticsWorkflowV2(workerExecutablePath(), currentProjectPath_,
-            QJsonObject(), &error, activeV2TaskId_)) {
-        activeV2TaskId_.clear();
-        activeV2WorkflowKind_.clear();
+    if (!worker_.requestDiagnosticsWorkflow(workerExecutablePath(), currentProjectPath_,
+            QJsonObject(), &error, activeTaskId_)) {
+        activeTaskId_.clear();
+        activeWorkflowKind_.clear();
         QMessageBox::critical(this, uiText("诊断包"), error);
         return;
     }

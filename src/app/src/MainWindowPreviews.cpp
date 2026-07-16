@@ -4,7 +4,7 @@
 #include "LanguageSupport.h"
 #include "MainWindowSupport.h"
 #include "TaskArtifactPanel.h"
-#include "TaskArtifactPresenterV2.h"
+#include "TaskArtifactPresenter.h"
 
 #include <QApplication>
 #include <QClipboard>
@@ -98,6 +98,6 @@ void MainWindow::copySelectedArtifactPath()
 
 void MainWindow::useSelectedArtifactForInference()
 {
-    QMessageBox::information(this, uiText("推理"), uiText("V2 推理不接受任务产物的裸路径。请先将模型导入为已验证的 V2 模型包。"));
+    QMessageBox::information(this, uiText("推理"), uiText(" 推理不接受任务产物的裸路径。请先将模型导入为已验证的  模型包。"));
     showDeploymentTab(1);
 }

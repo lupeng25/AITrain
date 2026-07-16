@@ -5,8 +5,8 @@
 #include "Sidebar.h"
 #include "StatusPill.h"
 #include "WorkerClient.h"
-#include "aitrain/v2/ProjectWorkspaceV2.h"
-#include "aitrain/v2/ProjectQueryServiceV2.h"
+#include "aitrain/workflow\ProjectWorkspace.h"
+#include "aitrain/workflow\ProjectQueryService.h"
 
 #include <QComboBox>
 #include <QCheckBox>
@@ -27,11 +27,11 @@
 class InfoPanel;
 class EvaluationReportView;
 class TaskArtifactPanel;
-class TaskArtifactPresenterV2;
-class ProjectSummaryPresenterV2;
-class DiagnosticBundlePresenterV2;
-class EnvironmentCheckPresenterV2;
-class ModelRegistryPresenterV2;
+class TaskArtifactPresenter;
+class ProjectSummaryPresenter;
+class DiagnosticBundlePresenter;
+class EnvironmentCheckPresenter;
+class ModelRegistryPresenter;
 class QPushButton;
 class QTabWidget;
 class QToolButton;
@@ -75,17 +75,17 @@ private slots:
     void createDatasetSnapshot();
     void openDatasetQualityReport();
     void openDatasetQualityFixList();
-    void createXAnyLabelingAnnotationSessionV2();
-    void syncXAnyLabelingAnnotationSessionV2();
+    void createXAnyLabelingAnnotationSession();
+    void syncXAnyLabelingAnnotationSession();
     void browseSampleReviewFile();
     void loadSampleReviewFile();
     void openSelectedReviewSample();
     void startTraining();
-    void validateDeploymentModelPackageV2();
+    void validateDeploymentModelPackage();
     void startInference();
-    void importV2ModelPackage();
-    void importOcrOfficialReportsV2();
-    void runOcrAcceptanceWorkflowV2();
+    void importModelPackage();
+    void importOcrOfficialReports();
+    void runOcrAcceptanceWorkflow();
     void collectDiagnosticsBundle();
     void importAcceptanceEvidence();
     void cancelSelectedTask();
@@ -142,22 +142,22 @@ private:
     void handleMetricMessage(const QJsonObject& payload);
     void handleArtifactMessage(const QJsonObject& payload);
     void handleTaskStateMessage(const QString& type, const QJsonObject& payload);
-    void handleDataQualityWorkflowV2Message(const QJsonObject& payload);
+    void handleDataQualityWorkflowMessage(const QJsonObject& payload);
     void handleAnnotationSessionMessage(const QJsonObject& payload);
     void handleAnnotationSyncMessage(const QJsonObject& payload);
-    void handleDatasetSnapshotImportWorkflowV2(const QJsonObject& payload);
-    void handleOcrOfficialReportsImportedV2(const QJsonObject& payload);
-    void handleOcrAcceptanceWorkflowV2(const QJsonObject& payload);
-    void handleDiagnosticsWorkflowV2(const QJsonObject& payload);
+    void handleDatasetSnapshotImportWorkflow(const QJsonObject& payload);
+    void handleOcrOfficialReportsImported(const QJsonObject& payload);
+    void handleOcrAcceptanceWorkflow(const QJsonObject& payload);
+    void handleDiagnosticsWorkflow(const QJsonObject& payload);
     void updateRecentTasks();
-    void updateV2TaskTable();
+    void updateTaskTable();
     void updateDatasetList();
     void updateHeaderState();
     void updateResponsiveChrome();
     void ensureWorkspacePage(int pageIndex);
     void updateEnvironmentTable(const QJsonObject& payload);
-    void handleDatasetSplitWorkflowV2(const QJsonObject& payload);
-    void handleDatasetConversionWorkflowV2(const QJsonObject& payload);
+    void handleDatasetSplitWorkflow(const QJsonObject& payload);
+    void handleDatasetConversionWorkflow(const QJsonObject& payload);
     void setDatasetConversionFormRunning(bool running);
     void clearDatasetConversionErrors();
     void appendDatasetConversionLog(const QString& text);
@@ -189,15 +189,15 @@ private:
     QString selectedArtifactPath() const;
     QString selectedEvaluationReportPath() const;
 
-    aitrain::v2::ProjectWorkspaceV2 v2Workspace_;
-    aitrain::v2::ProjectQueryServiceV2 v2QueryService_;
-    ProjectSummaryPresenterV2* projectSummaryPresenter_ = nullptr;
-    TaskArtifactPresenterV2* taskArtifactPresenter_ = nullptr;
-    DiagnosticBundlePresenterV2* diagnosticBundlePresenter_ = nullptr;
-    EnvironmentCheckPresenterV2* environmentCheckPresenter_ = nullptr;
-    ModelRegistryPresenterV2* modelRegistryPresenter_ = nullptr;
-    QString activeV2TaskId_;
-    QString activeV2WorkflowKind_;
+    aitrain::ProjectWorkspace workspace_;
+    aitrain::ProjectQueryService queryService_;
+    ProjectSummaryPresenter* projectSummaryPresenter_ = nullptr;
+    TaskArtifactPresenter* taskArtifactPresenter_ = nullptr;
+    DiagnosticBundlePresenter* diagnosticBundlePresenter_ = nullptr;
+    EnvironmentCheckPresenter* environmentCheckPresenter_ = nullptr;
+    ModelRegistryPresenter* modelRegistryPresenter_ = nullptr;
+    QString activeTaskId_;
+    QString activeWorkflowKind_;
     WorkerClient worker_;
     WorkspaceRouter* workspaceRouter_ = nullptr;
     MainWindowState state_;
@@ -267,10 +267,10 @@ private:
     QTableWidget* taskQueueTable_ = nullptr;
     TaskArtifactPanel* taskArtifactPanel_ = nullptr;
     QTableWidget* modelVersionTable_ = nullptr;
-    QTableWidget* v2ModelPackageTable_ = nullptr;
-    QLineEdit* v2ModelImportSourceEdit_ = nullptr;
-    QLineEdit* v2ModelImportManifestEdit_ = nullptr;
-    QLabel* v2ModelImportResultLabel_ = nullptr;
+    QTableWidget* ModelPackageTable_ = nullptr;
+    QLineEdit* modelImportSourceEdit_ = nullptr;
+    QLineEdit* modelImportManifestEdit_ = nullptr;
+    QLabel* modelImportResultLabel_ = nullptr;
     QTableWidget* evaluationReportTable_ = nullptr;
     QTableWidget* pipelineRunTable_ = nullptr;
     QTableWidget* datasetListTable_ = nullptr;
@@ -341,7 +341,7 @@ private:
     QLabel* deploymentValidationResultLabel_ = nullptr;
     QComboBox* deploymentModelPackageCombo_ = nullptr;
     QComboBox* inferenceModelPackageCombo_ = nullptr;
-    bool v2ModelImportInProgress_ = false;
+    bool modelImportInProgress_ = false;
     QLineEdit* inferenceImageEdit_ = nullptr;
     QLineEdit* inferenceOutputEdit_ = nullptr;
     QLabel* inferenceResultLabel_ = nullptr;

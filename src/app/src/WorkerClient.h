@@ -1,6 +1,6 @@
 #pragma once
 
-#include "aitrain/v2/ProtocolV2.h"
+#include "aitrain/protocol/Protocol.h"
 
 #include <QLocalServer>
 #include <QLocalSocket>
@@ -13,12 +13,19 @@ class WorkerClient : public QObject {
     Q_OBJECT
 
 public:
+    enum class WorkerTerminalStatus {
+        Succeeded,
+        Failed,
+        Canceled,
+    };
+    Q_ENUM(WorkerTerminalStatus)
+
     explicit WorkerClient(QObject* parent = nullptr);
     ~WorkerClient() override;
 
-    bool requestEnvironmentCheckWorkflowV2(const QString& workerProgram,
+    bool requestEnvironmentCheckWorkflow(const QString& workerProgram,
         const QString& projectRoot, QString* error, const QString& taskId = {});
-    bool requestDatasetSplitWorkflowV2(const QString& workerProgram,
+    bool requestDatasetSplitWorkflow(const QString& workerProgram,
         const QString& projectRoot,
         const QString& sourceDatasetId,
         const QString& sourceDatasetVersionId,
@@ -29,7 +36,7 @@ public:
         const QJsonObject& options,
         QString* error,
         const QString& taskId = {});
-    bool requestDatasetConversionWorkflowV2(const QString& workerProgram,
+    bool requestDatasetConversionWorkflow(const QString& workerProgram,
         const QString& projectRoot,
         const QString& sourcePath,
         const QString& sourceFormat,
@@ -39,7 +46,7 @@ public:
         const QJsonObject& options,
         QString* error,
         const QString& taskId = {});
-    bool requestDataQualityWorkflowV2(const QString& workerProgram,
+    bool requestDataQualityWorkflow(const QString& workerProgram,
         const QString& projectRoot,
         const QString& datasetId,
         const QString& datasetVersionId,
@@ -48,7 +55,7 @@ public:
         const QJsonObject& options,
         QString* error,
         const QString& taskId = {});
-    bool requestAnnotationSessionCreateV2(const QString& workerProgram,
+    bool requestAnnotationSessionCreate(const QString& workerProgram,
         const QString& projectRoot,
         const QString& repairManifestArtifactId,
         const QString& workingDirectory,
@@ -56,14 +63,14 @@ public:
         const QJsonObject& options,
         QString* error,
         const QString& taskId = {});
-    bool requestAnnotationSessionSyncV2(const QString& workerProgram,
+    bool requestAnnotationSessionSync(const QString& workerProgram,
         const QString& projectRoot,
         const QString& sessionArtifactId,
         const QString& workingDirectory,
         const QJsonObject& options,
         QString* error,
         const QString& taskId = {});
-    bool requestDatasetSnapshotImportWorkflowV2(const QString& workerProgram,
+    bool requestDatasetSnapshotImportWorkflow(const QString& workerProgram,
         const QString& projectRoot,
         const QString& sourcePath,
         const QString& sourceFormat,
@@ -72,7 +79,7 @@ public:
         const QJsonObject& options,
         QString* error,
         const QString& taskId = {});
-    bool requestOcrOfficialReportImportV2(const QString& workerProgram,
+    bool requestOcrOfficialReportImport(const QString& workerProgram,
         const QString& projectRoot,
         const QJsonObject& det,
         const QJsonObject& rec,
@@ -82,7 +89,7 @@ public:
         const QString& evidenceClass,
         QString* error,
         const QString& taskId = {});
-    bool requestOcrAcceptanceWorkflowV2(const QString& workerProgram,
+    bool requestOcrAcceptanceWorkflow(const QString& workerProgram,
         const QString& projectRoot,
         const QString& detReportArtifactId,
         const QString& recReportArtifactId,
@@ -90,12 +97,12 @@ public:
         const QJsonObject& thresholds,
         QString* error,
         const QString& taskId = {});
-    bool requestDiagnosticsWorkflowV2(const QString& workerProgram,
+    bool requestDiagnosticsWorkflow(const QString& workerProgram,
         const QString& projectRoot,
         const QJsonObject& options,
         QString* error,
         const QString& taskId = {});
-    bool requestRuntimeDeliveryWorkflowV2(const QString& workerProgram,
+    bool requestRuntimeDeliveryWorkflow(const QString& workerProgram,
         const QString& projectRoot,
         const QString& modelPackageId,
         const QString& runtimeRoute,
@@ -103,9 +110,9 @@ public:
         const QJsonObject& options,
         QString* error,
         const QString& taskId = {});
-    bool requestModelImportV2(const QString& workerProgram, const QString& projectRoot, const QString& sourceFilePath, const QJsonObject& manifestDraft, QString* error, const QString& taskId = {});
-    // 完整 V2 训练工作流由 Worker 独占持久化和步骤收口；GUI 只传递已校验的请求并展示事件。
-    bool requestTrainingWorkflowV2(const QString& workerProgram, const QJsonObject& request, QString* error);
+    bool requestModelImport(const QString& workerProgram, const QString& projectRoot, const QString& sourceFilePath, const QJsonObject& manifestDraft, QString* error, const QString& taskId = {});
+    // 完整  训练工作流由 Worker 独占持久化和步骤收口；GUI 只传递已校验的请求并展示事件。
+    bool requestTrainingWorkflow(const QString& workerProgram, const QJsonObject& request, QString* error);
     void cancel();
     bool isRunning() const;
 
@@ -113,7 +120,7 @@ signals:
     void connected();
     void messageReceived(const QString& type, const QJsonObject& payload);
     void logLine(const QString& line);
-    void finished(bool ok, const QString& message);
+    void finished(WorkerTerminalStatus status, const QString& message);
     void idle();
 
 private slots:
@@ -127,7 +134,7 @@ private:
     void finalizeWorkerExit();
     void sendStartTask();
     void sendCancelTask();
-    bool sendEnvelope(const aitrain::v2::ProtocolEnvelope& envelope, QString* error = nullptr);
+    bool sendEnvelope(const aitrain::ProtocolEnvelope& envelope, QString* error = nullptr);
     void rejectProtocol(const QString& message);
     void cleanupSocket();
 
@@ -137,17 +144,21 @@ private:
     QByteArray buffer_;
     QString pendingCommandType_;
     QJsonObject pendingRequest_;
-    aitrain::v2::RequestId activeRequestId_;
-    aitrain::v2::TaskId activeTaskId_;
-    aitrain::v2::ProtocolV2SequenceTracker incomingSequenceTracker_;
+    aitrain::RequestId activeRequestId_;
+    aitrain::TaskId activeTaskId_;
+    aitrain::ProtocolSequenceTracker incomingSequenceTracker_;
     quint64 outgoingSequence_ = 0;
     bool finishedEmitted_ = false;
     bool startTaskSent_ = false;
     bool terminalEnvelopeReceived_ = false;
     QTimer cancelTimer_;
+    QTimer connectionTimer_;
     QTimer terminalShutdownTimer_;
     bool cancelRequested_ = false;
+    bool workerReady_ = false;
     bool finishing_ = false;
     int pendingExitCode_ = 0;
     QProcess::ExitStatus pendingExitStatus_ = QProcess::NormalExit;
 };
+
+Q_DECLARE_METATYPE(WorkerClient::WorkerTerminalStatus)

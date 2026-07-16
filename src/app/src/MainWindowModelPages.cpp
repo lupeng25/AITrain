@@ -53,21 +53,21 @@ QWidget* MainWindow::buildModelRegistryPage()
     actionGrid->setContentsMargins(10, 8, 10, 8);
     actionGrid->setHorizontalSpacing(10);
     actionGrid->setVerticalSpacing(8);
-    auto* inferButton = new QPushButton(QStringLiteral("选中 V2 模型包用于推理"));
+    auto* inferButton = new QPushButton(QStringLiteral("选中  模型包用于推理"));
     auto* reportsButton = new QPushButton(QStringLiteral("查看评估报告"));
     auto* comparisonInferButton = new QPushButton(QStringLiteral("对比候选用于推理"));
     auto* comparisonReportButton = new QPushButton(QStringLiteral("打开候选报告"));
     connect(inferButton, &QPushButton::clicked, this, [this]() {
-        if (!v2ModelPackageTable_ || v2ModelPackageTable_->selectedItems().isEmpty()) {
-            QMessageBox::information(this, uiText("模型库"), uiText("请先选择一个已验证 V2 模型包。"));
+        if (!ModelPackageTable_ || ModelPackageTable_->selectedItems().isEmpty()) {
+            QMessageBox::information(this, uiText("模型库"), uiText("请先选择一个已验证  模型包。"));
             return;
         }
-        const int row = v2ModelPackageTable_->selectedItems().first()->row();
-        const QString modelPackageId = v2ModelPackageTable_->item(row, 0)
-            ? v2ModelPackageTable_->item(row, 0)->data(Qt::UserRole).toString()
+        const int row = ModelPackageTable_->selectedItems().first()->row();
+        const QString modelPackageId = ModelPackageTable_->item(row, 0)
+            ? ModelPackageTable_->item(row, 0)->data(Qt::UserRole).toString()
             : QString();
         if (modelPackageId.isEmpty() || !inferenceModelPackageCombo_) {
-            QMessageBox::information(this, uiText("模型库"), uiText("选中行不包含可用的 V2 模型包 ID。"));
+            QMessageBox::information(this, uiText("模型库"), uiText("选中行不包含可用的  模型包 ID。"));
             return;
         }
         const int comboIndex = inferenceModelPackageCombo_->findData(modelPackageId);
@@ -81,26 +81,26 @@ QWidget* MainWindow::buildModelRegistryPage()
     connect(reportsButton, &QPushButton::clicked, this, &MainWindow::openEvaluationReportsPage);
     comparisonInferButton->setEnabled(false);
     comparisonReportButton->setEnabled(false);
-    comparisonInferButton->setToolTip(uiText("旧裸路径模型对比已停用，请使用 V2 模型包。"));
+    comparisonInferButton->setToolTip(uiText("旧裸路径模型对比已停用，请使用  模型包。"));
     comparisonReportButton->setToolTip(uiText("旧评估报告路径入口已停用。"));
     actionGrid->addWidget(inferButton, 0, 0);
     actionGrid->addWidget(reportsButton, 0, 1);
     for (int column = 0; column < 2; ++column) {
         actionGrid->setColumnStretch(column, 1);
     }
-    modelRegistrySummaryLabel_ = mutedLabel(uiText("推理与部署验证只使用已登记且经 Manifest 校验的 V2 模型包；旧模型版本和评估记录仅用于迁移期审计。"));
+    modelRegistrySummaryLabel_ = mutedLabel(uiText("推理与部署验证只使用已登记且经 Manifest 校验的  模型包；旧模型版本和评估记录仅用于迁移期审计。"));
     allowLabelToShrink(modelRegistrySummaryLabel_);
     toolbar->bodyLayout()->addWidget(actionStrip);
     toolbar->bodyLayout()->addWidget(modelRegistrySummaryLabel_);
 
-    auto* v2ModelPackagePanel = new InfoPanel(QStringLiteral("已验证 V2 模型包"));
+    auto* ModelPackagePanel = new InfoPanel(QStringLiteral("已验证  模型包"));
     auto* importForm = new QFormLayout;
     importForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     importForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    v2ModelImportSourceEdit_ = new QLineEdit;
-    v2ModelImportSourceEdit_->setPlaceholderText(QStringLiteral("选择待导入的常规模型文件（例如 .onnx）"));
-    v2ModelImportManifestEdit_ = new QLineEdit;
-    v2ModelImportManifestEdit_->setPlaceholderText(QStringLiteral("选择用户确认的 V2 Manifest 草稿 JSON"));
+    modelImportSourceEdit_ = new QLineEdit;
+    modelImportSourceEdit_->setPlaceholderText(QStringLiteral("选择待导入的常规模型文件（例如 .onnx）"));
+    modelImportManifestEdit_ = new QLineEdit;
+    modelImportManifestEdit_->setPlaceholderText(QStringLiteral("选择用户确认的  Manifest 草稿 JSON"));
     const auto makeImportPathRow = [this](QLineEdit* edit, const QString& title, const QString& filter) {
         auto* row = new QWidget;
         auto* rowLayout = new QHBoxLayout(row);
@@ -114,38 +114,38 @@ QWidget* MainWindow::buildModelRegistryPage()
         rowLayout->addWidget(browseButton);
         return row;
     };
-    importForm->addRow(QStringLiteral("模型文件"), makeImportPathRow(v2ModelImportSourceEdit_, uiText("选择待导入模型"), QStringLiteral("Model files (*.onnx);;All files (*.*)")));
-    importForm->addRow(QStringLiteral("Manifest 草稿"), makeImportPathRow(v2ModelImportManifestEdit_, uiText("选择 V2 Manifest 草稿"), QStringLiteral("JSON files (*.json);;All files (*.*)")));
-    v2ModelPackagePanel->bodyLayout()->addLayout(importForm);
+    importForm->addRow(QStringLiteral("模型文件"), makeImportPathRow(modelImportSourceEdit_, uiText("选择待导入模型"), QStringLiteral("Model files (*.onnx);;All files (*.*)")));
+    importForm->addRow(QStringLiteral("Manifest 草稿"), makeImportPathRow(modelImportManifestEdit_, uiText("选择  Manifest 草稿"), QStringLiteral("JSON files (*.json);;All files (*.*)")));
+    ModelPackagePanel->bodyLayout()->addLayout(importForm);
     auto* importActionStrip = new QFrame;
     importActionStrip->setObjectName(QStringLiteral("ActionStrip"));
     auto* importActionLayout = new QHBoxLayout(importActionStrip);
     importActionLayout->setContentsMargins(10, 8, 10, 8);
-    v2ModelImportResultLabel_ = mutedLabel(uiText("导入由 Worker 执行；Manifest 草稿必须明确模型语义、张量契约、来源快照和已验证状态。导入过程将生成任务 ID 与模型 SHA-256。"));
-    allowLabelToShrink(v2ModelImportResultLabel_);
-    auto* importButton = primaryButton(uiText("导入 V2 模型包"));
-    connect(importButton, &QPushButton::clicked, this, &MainWindow::importV2ModelPackage);
-    importActionLayout->addWidget(v2ModelImportResultLabel_, 1);
+    modelImportResultLabel_ = mutedLabel(uiText("导入由 Worker 执行；Manifest 草稿必须明确模型语义、张量契约、来源快照和已验证状态。导入过程将生成任务 ID 与模型 SHA-256。"));
+    allowLabelToShrink(modelImportResultLabel_);
+    auto* importButton = primaryButton(uiText("导入  模型包"));
+    connect(importButton, &QPushButton::clicked, this, &MainWindow::importModelPackage);
+    importActionLayout->addWidget(modelImportResultLabel_, 1);
     importActionLayout->addWidget(importButton);
-    v2ModelPackagePanel->bodyLayout()->addWidget(importActionStrip);
-    v2ModelPackageTable_ = new QTableWidget(0, 6);
-    v2ModelPackageTable_->setHorizontalHeaderLabels(QStringList()
+    ModelPackagePanel->bodyLayout()->addWidget(importActionStrip);
+    ModelPackageTable_ = new QTableWidget(0, 6);
+    ModelPackageTable_->setHorizontalHeaderLabels(QStringList()
         << QStringLiteral("模型包 ID")
         << QStringLiteral("模型族")
         << QStringLiteral("任务")
         << QStringLiteral("来源后端")
         << QStringLiteral("解码器")
         << QStringLiteral("登记时间"));
-    configureTable(v2ModelPackageTable_);
-    v2ModelPackageTable_->setWordWrap(true);
-    v2ModelPackageTable_->verticalHeader()->setDefaultSectionSize(42);
-    v2ModelPackageTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-    v2ModelPackageTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    v2ModelPackageTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    v2ModelPackageTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-    v2ModelPackageTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
-    v2ModelPackageTable_->horizontalHeader()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
-    v2ModelPackagePanel->bodyLayout()->addWidget(v2ModelPackageTable_);
+    configureTable(ModelPackageTable_);
+    ModelPackageTable_->setWordWrap(true);
+    ModelPackageTable_->verticalHeader()->setDefaultSectionSize(42);
+    ModelPackageTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    ModelPackageTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    ModelPackageTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    ModelPackageTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    ModelPackageTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+    ModelPackageTable_->horizontalHeader()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
+    ModelPackagePanel->bodyLayout()->addWidget(ModelPackageTable_);
 
     auto* modelPanel = new InfoPanel(QStringLiteral("旧模型版本（迁移期审计）"));
     modelVersionTable_ = new QTableWidget(0, 8);
@@ -231,7 +231,7 @@ QWidget* MainWindow::buildModelRegistryPage()
     pipelinePanel->bodyLayout()->addWidget(pipelineRunTable_);
     modelWorkspaceTabs_ = new QTabWidget;
     modelWorkspaceTabs_->setObjectName(QStringLiteral("ModelWorkspaceTabs"));
-    modelWorkspaceTabs_->addTab(v2ModelPackagePanel, uiText("V2 模型包"));
+    modelWorkspaceTabs_->addTab(ModelPackagePanel, uiText(" 模型包"));
     modelWorkspaceTabs_->addTab(modelPanel, uiText("旧模型版本"));
     modelWorkspaceTabs_->addTab(buildEvaluationReportsPanel(), uiText("评估报告"));
     modelWorkspaceTabs_->addTab(comparisonPanel, uiText("模型对比"));

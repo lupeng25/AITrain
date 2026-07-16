@@ -3,27 +3,27 @@ add_executable(aitrain_worker
     src/WorkerSession.h
     src/WorkerSession.cpp
     src/WorkerSessionCommandRegistry.cpp
-    src/WorkerSessionDatasetSplitV2.cpp
-    src/WorkerSessionDataQualityV2.cpp
-    src/WorkerSessionDiagnosticsV2.cpp
-    src/WorkerSessionDatasetConversionV2.cpp
-    src/WorkerSessionDatasetSnapshotImportV2.cpp
-    src/WorkerSessionAnnotationV2.cpp
+    src/WorkerSessionDatasetSplit.cpp
+    src/WorkerSessionDataQuality.cpp
+    src/WorkerSessionDiagnostics.cpp
+    src/WorkerSessionDatasetConversion.cpp
+    src/WorkerSessionDatasetSnapshotImport.cpp
+    src/WorkerSessionAnnotation.cpp
     src/WorkerSessionEnvironment.cpp
     src/WorkerSessionModelCommands.cpp
-    src/WorkerSessionOcrAcceptanceV2.cpp
-    src/WorkerSessionRuntimeDeliveryV2.cpp
+    src/WorkerSessionOcrAcceptance.cpp
+    src/WorkerSessionRuntimeDelivery.cpp
     src/WorkerSessionSupport.h
     src/WorkerSessionSupport.cpp
-    src/WorkerSessionTrainingWorkflowV2.cpp
+    src/WorkerSessionTrainingWorkflow.cpp
 )
 
 target_link_libraries(aitrain_worker
     PRIVATE
-        aitrain_core
-        aitrain_v2_onnx_runtime
-        aitrain_v2_application
-        aitrain_v2_runtime_matrix
+        aitrain_foundation
+        aitrain_onnx_runtime
+        aitrain_application
+        aitrain_runtime_matrix
         Qt${QT_VERSION_MAJOR}::Core
         Qt${QT_VERSION_MAJOR}::Network
 )

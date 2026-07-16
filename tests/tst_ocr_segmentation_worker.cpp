@@ -1,8 +1,8 @@
 #include "TestSupport.h"
 #include "aitrain/core/WorkerProtocol.h"
-#include "aitrain/v2/ProtocolV2.h"
-#include "aitrain/v2/ProjectWorkspaceV2.h"
-#include "aitrain/v2/StorageV2.h"
+#include "aitrain/protocol/Protocol.h"
+#include "aitrain/workflow/ProjectWorkspace.h"
+#include "aitrain/storage/ProjectStore.h"
 
 #include <QEventLoop>
 #include <QLocalServer>
@@ -48,32 +48,32 @@ private:
     QVector<Entry> entries_;
 };
 
-aitrain::v2::DatasetSnapshotArtifactBundleV2 commitTrainingSnapshotFixture(
+aitrain::DatasetSnapshotArtifactBundle commitTrainingSnapshotFixture(
     const QString& projectRoot,
     const QString& datasetRoot,
     const QString& datasetFormat,
     QString* error)
 {
-    aitrain::v2::ProjectWorkspaceV2 workspace;
-    aitrain::v2::DatasetSnapshotArtifactBundleV2 snapshot;
-    aitrain::v2::TaskSnapshot task;
-    const aitrain::v2::TaskId producerTaskId = aitrain::v2::TaskId::create();
-    aitrain::v2::DatasetSnapshotCommitRequestV2 request;
+    aitrain::ProjectWorkspace workspace;
+    aitrain::DatasetSnapshotArtifactBundle snapshot;
+    aitrain::TaskSnapshot task;
+    const aitrain::TaskId producerTaskId = aitrain::TaskId::create();
+    aitrain::DatasetSnapshotCommitRequest request;
     request.datasetRoot = datasetRoot;
     request.datasetFormat = datasetFormat;
-    request.driverId = QStringLiteral("worker-training-fixture.%1.v2").arg(datasetFormat);
+    request.driverId = QStringLiteral("worker-training-fixture.%1").arg(datasetFormat);
     request.driverVersion = QStringLiteral("2");
     if (!workspace.open(projectRoot, error)
         || !workspace.startTask(producerTaskId, QStringLiteral("dataset.snapshot"),
             QStringLiteral("dataset_snapshot"), &task, error)
         || !workspace.commitDatasetSnapshot(producerTaskId, request, &snapshot, error)
-        || !workspace.finalizeTask(producerTaskId, aitrain::v2::TaskState::Succeeded, {}, error)) {
+        || !workspace.finalizeTask(producerTaskId, aitrain::TaskState::Succeeded, {}, error)) {
         return {};
     }
     return snapshot;
 }
 
-QJsonObject trainingSnapshotIdentity(const aitrain::v2::DatasetSnapshotArtifactBundleV2& snapshot)
+QJsonObject trainingSnapshotIdentity(const aitrain::DatasetSnapshotArtifactBundle& snapshot)
 {
     return {
         {QStringLiteral("datasetId"), snapshot.snapshot.datasetId.toString()},
@@ -103,6 +103,22 @@ QString workerWithLocalTrainersFixture(const QString& root, bool anomaly, QStrin
             return {};
         }
     }
+    const QDir sourceSqlDrivers(sourceDirectory.filePath(QStringLiteral("sqldrivers")));
+    const QStringList sqlPlugins = sourceSqlDrivers.entryList(
+        {QStringLiteral("qsqlite*.dll")}, QDir::Files);
+    if (!sqlPlugins.isEmpty()) {
+        const QDir targetSqlDrivers(QDir(runtimeRoot).filePath(QStringLiteral("sqldrivers")));
+        if (!targetSqlDrivers.mkpath(QStringLiteral("."))) {
+            if (error) *error = QStringLiteral("无法创建隔离 Worker 的 SQLite Driver 目录。");
+            return {};
+        }
+        for (const QString& plugin : sqlPlugins) {
+            if (!QFile::copy(sourceSqlDrivers.filePath(plugin), targetSqlDrivers.filePath(plugin))) {
+                if (error) *error = QStringLiteral("无法复制隔离 Worker 的 SQLite Driver：%1").arg(plugin);
+                return {};
+            }
+        }
+    }
     const bool written = anomaly
         ? writeFakeAnomalibWorkflowAdapters(trainers)
         : writeFakeSmpWorkflowAdapters(trainers);
@@ -118,7 +134,7 @@ QString committedArtifactEventPath(const QString& projectRoot, const QJsonObject
     const QString artifactId = payload.value(QStringLiteral("artifactId")).toString();
     const QString relativePath = payload.value(QStringLiteral("relativePath")).toString();
     if (artifactId.isEmpty() || relativePath.isEmpty()) return {};
-    return QDir(projectRoot).filePath(QStringLiteral(".aitrain-v2/artifact-store/artifacts/%1/%2")
+    return QDir(projectRoot).filePath(QStringLiteral(".aitrain/artifacts/artifacts/%1/%2")
         .arg(artifactId, relativePath));
 }
 
@@ -380,7 +396,7 @@ bool writeFakeSmpWorkflowAdapters(const QString& root)
 {
     QDir directory(root);
     if (!directory.mkpath(QStringLiteral("semantic_segmentation"))) return false;
-    for (const QString& module : {QStringLiteral("adapter_event_channel_v2.py"),
+    for (const QString& module : {QStringLiteral("adapter_event_channel.py"),
              QStringLiteral("adapter_sdk.py"), QStringLiteral("trainer_protocol.py")}) {
         if (!QFile::copy(repoRelativeFilePath(QStringLiteral("python_trainers/%1").arg(module)),
                 directory.filePath(module))) return false;
@@ -392,7 +408,7 @@ bool writeFakeSmpWorkflowAdapters(const QString& root)
         "import json, os\n"
         "from pathlib import Path\n"
         "os.sys.path.insert(0,str(Path(__file__).resolve().parents[1]))\n"
-        "from adapter_event_channel_v2 import event_channel_from_environment\n"
+        "from adapter_event_channel import event_channel_from_environment\n"
         "from adapter_sdk import AdapterSdk\n"
         "request=json.loads(Path(os.sys.argv[os.sys.argv.index('--request')+1]).read_text(encoding='utf-8'))\n"
         "out=Path(request['outputPath']); out.mkdir(parents=True, exist_ok=True)\n");
@@ -432,7 +448,7 @@ bool writeFakeAnomalibWorkflowAdapters(const QString& root)
 {
     QDir directory(root);
     if (!directory.mkpath(QStringLiteral("anomaly"))) return false;
-    for (const QString& module : {QStringLiteral("adapter_event_channel_v2.py"),
+    for (const QString& module : {QStringLiteral("adapter_event_channel.py"),
              QStringLiteral("adapter_sdk.py"), QStringLiteral("trainer_protocol.py")}) {
         if (!QFile::copy(repoRelativeFilePath(QStringLiteral("python_trainers/%1").arg(module)),
                 directory.filePath(module))) return false;
@@ -443,7 +459,7 @@ bool writeFakeAnomalibWorkflowAdapters(const QString& root)
         "import json, os, shutil\n"
         "from pathlib import Path\n"
         "os.sys.path.insert(0,str(Path(__file__).resolve().parents[1]))\n"
-        "from adapter_event_channel_v2 import event_channel_from_environment\n"
+        "from adapter_event_channel import event_channel_from_environment\n"
         "from adapter_sdk import AdapterSdk\n"
         "request=json.loads(Path(os.sys.argv[os.sys.argv.index('--request')+1]).read_text(encoding='utf-8'))\n"
         "out=Path(request['outputPath']); out.mkdir(parents=True,exist_ok=True)\n"
@@ -500,16 +516,16 @@ QString createRuntimeDeliveryModel(const QString& projectRoot, const QString& fi
         return {};
     }
 
-    aitrain::v2::ProjectWorkspaceV2 workspace;
+    aitrain::ProjectWorkspace workspace;
     if (!workspace.open(projectRoot, error)) return {};
-    aitrain::v2::ModelImportRequestV2 request;
-    request.taskId = aitrain::v2::TaskId::create();
+    aitrain::ModelImportRequest request;
+    request.taskId = aitrain::TaskId::create();
     request.sourceFilePath = modelPath;
-    request.manifest.modelPackageId = aitrain::v2::ModelPackageId::create();
+    request.manifest.modelPackageId = aitrain::ModelPackageId::create();
     request.manifest.modelFamily = QStringLiteral("yolo_detection");
     request.manifest.taskType = QStringLiteral("detection");
     request.manifest.sourceBackend = QStringLiteral("runtime_delivery_worker_fixture");
-    request.manifest.sourceSnapshotId = aitrain::v2::SnapshotId::create();
+    request.manifest.sourceSnapshotId = aitrain::SnapshotId::create();
     request.manifest.artifactEntryPath = QStringLiteral("model/model.onnx");
     request.manifest.inputs.append({QStringLiteral("images"), QStringLiteral("NCHW"), {1, 3, 32, 32}});
     request.manifest.outputs.append({QStringLiteral("output0"), QStringLiteral("NCN"), {1, 5, 1}});
@@ -522,7 +538,7 @@ QString createRuntimeDeliveryModel(const QString& projectRoot, const QString& fi
     request.manifest.runtimeRoutes.append(QStringLiteral("aitrain_onnxruntime"));
     request.manifest.runtimeRoutes.append(QStringLiteral("aitrain_ncnn"));
     request.manifest.verified = true;
-    aitrain::v2::ModelImportResultV2 imported;
+    aitrain::ModelImportResult imported;
     if (!workspace.importModel(request, &imported, error)) return {};
     return imported.modelPackage.manifest.modelPackageId.toString();
 }
@@ -564,7 +580,7 @@ QString createWorkerYoloSnapshotImportFixture(const QString& root)
 }
 
 QString createAnnotationRepairFixture(const QString& projectRoot, const QString& datasetRoot, QString* error,
-    aitrain::v2::DatasetSnapshotRecordV2* snapshotRecord = nullptr)
+    aitrain::DatasetSnapshotRecord* snapshotRecord = nullptr)
 {
     QDir root(datasetRoot);
     if (!root.mkpath(QStringLiteral("images/train"))
@@ -583,33 +599,33 @@ QString createAnnotationRepairFixture(const QString& projectRoot, const QString&
     writeTextFile(root.filePath(QStringLiteral("labels/val/b.txt")),
         QStringLiteral("0 0.5 0.5 0.5 0.5\n"));
 
-    aitrain::v2::ProjectWorkspaceV2 workspace;
+    aitrain::ProjectWorkspace workspace;
     if (!workspace.open(projectRoot, error)) return {};
-    aitrain::v2::TaskSnapshot task;
-    const aitrain::v2::TaskId snapshotTaskId = aitrain::v2::TaskId::create();
+    aitrain::TaskSnapshot task;
+    const aitrain::TaskId snapshotTaskId = aitrain::TaskId::create();
     if (!workspace.startTask(snapshotTaskId, QStringLiteral("dataset.snapshot"),
             QStringLiteral("dataset_snapshot"), &task, error)) return {};
-    aitrain::v2::DatasetSnapshotCommitRequestV2 snapshotRequest;
+    aitrain::DatasetSnapshotCommitRequest snapshotRequest;
     snapshotRequest.datasetRoot = datasetRoot;
     snapshotRequest.datasetFormat = QStringLiteral("yolo_detection");
     snapshotRequest.driverId = QStringLiteral("yolo_detection");
     snapshotRequest.driverVersion = QStringLiteral("2.0");
     snapshotRequest.options.classDefinitions = QJsonArray{
         QJsonObject{{QStringLiteral("id"), 0}, {QStringLiteral("name"), QStringLiteral("item")}}};
-    aitrain::v2::DatasetSnapshotArtifactBundleV2 snapshot;
+    aitrain::DatasetSnapshotArtifactBundle snapshot;
     if (!workspace.commitDatasetSnapshot(snapshotTaskId, snapshotRequest, &snapshot, error)
-        || !workspace.finalizeTask(snapshotTaskId, aitrain::v2::TaskState::Succeeded, {}, error)) return {};
+        || !workspace.finalizeTask(snapshotTaskId, aitrain::TaskState::Succeeded, {}, error)) return {};
     if (snapshotRecord) *snapshotRecord = snapshot.snapshot;
 
-    const aitrain::v2::TaskId qualityTaskId = aitrain::v2::TaskId::create();
-    if (!workspace.startTask(qualityTaskId, QStringLiteral("dataset.quality.v2"),
+    const aitrain::TaskId qualityTaskId = aitrain::TaskId::create();
+    if (!workspace.startTask(qualityTaskId, QStringLiteral("dataset.quality"),
             QStringLiteral("dataset_quality"), &task, error)) return {};
-    aitrain::v2::DataQualityWorkflowRequestV2 qualityRequest;
+    aitrain::DataQualityWorkflowRequest qualityRequest;
     qualityRequest.snapshotId = snapshot.snapshot.id;
     qualityRequest.datasetId = snapshot.snapshot.datasetId;
     qualityRequest.datasetVersionId = snapshot.snapshot.datasetVersionId;
     qualityRequest.snapshotArtifactId = snapshot.snapshot.artifactId;
-    aitrain::v2::DataQualityWorkflowResultV2 quality;
+    aitrain::DataQualityWorkflowResult quality;
     if (!workspace.runDataQualityWorkflow(qualityTaskId, qualityRequest,
             &quality, error)) return {};
     return quality.repairManifestArtifactId.toString();
@@ -639,24 +655,24 @@ OcrAcceptanceWorkerFixture createOcrAcceptanceWorkerFixture(const QString& proje
     writeTextFile(QDir(recRoot).filePath(QStringLiteral("rec_gt_train.txt")),
         QStringLiteral("images/a.png\tA\nimages/b.png\tB\n"));
 
-    aitrain::v2::ProjectWorkspaceV2 workspace;
+    aitrain::ProjectWorkspace workspace;
     if (!workspace.open(projectRoot, error)) return {};
     const auto commitSnapshot = [&](const QString& root, const QString& format,
-                                    aitrain::v2::DatasetSnapshotArtifactBundleV2* snapshot) -> bool {
-        const aitrain::v2::TaskId taskId = aitrain::v2::TaskId::create();
-        aitrain::v2::TaskSnapshot task;
-        aitrain::v2::DatasetSnapshotCommitRequestV2 request;
+                                    aitrain::DatasetSnapshotArtifactBundle* snapshot) -> bool {
+        const aitrain::TaskId taskId = aitrain::TaskId::create();
+        aitrain::TaskSnapshot task;
+        aitrain::DatasetSnapshotCommitRequest request;
         request.datasetRoot = root;
         request.datasetFormat = format;
-        request.driverId = QStringLiteral("worker.%1.v2").arg(format);
+        request.driverId = QStringLiteral("worker.%1").arg(format);
         request.driverVersion = QStringLiteral("2");
         return workspace.startTask(taskId, QStringLiteral("dataset.snapshot"),
                    QStringLiteral("dataset_snapshot"), &task, error)
             && workspace.commitDatasetSnapshot(taskId, request, snapshot, error)
-            && workspace.finalizeTask(taskId, aitrain::v2::TaskState::Succeeded, {}, error);
+            && workspace.finalizeTask(taskId, aitrain::TaskState::Succeeded, {}, error);
     };
-    aitrain::v2::DatasetSnapshotArtifactBundleV2 detSnapshot;
-    aitrain::v2::DatasetSnapshotArtifactBundleV2 recSnapshot;
+    aitrain::DatasetSnapshotArtifactBundle detSnapshot;
+    aitrain::DatasetSnapshotArtifactBundle recSnapshot;
     if (!commitSnapshot(detRoot, QStringLiteral("paddleocr_det"), &detSnapshot)
         || !commitSnapshot(recRoot, QStringLiteral("paddleocr_rec"), &recSnapshot)) return {};
 
@@ -698,29 +714,29 @@ OcrAcceptanceWorkerFixture createOcrAcceptanceWorkerFixture(const QString& proje
     return fixture;
 }
 
-aitrain::v2::OcrOfficialReportImportResultV2 importOcrFixtureDirect(
+aitrain::OcrOfficialReportImportResult importOcrFixtureDirect(
     const QString& projectRoot, const OcrAcceptanceWorkerFixture& fixture,
     const QString& evidenceClass, QString* error)
 {
-    aitrain::v2::ProjectWorkspaceV2 workspace;
-    aitrain::v2::OcrOfficialReportImportResultV2 result;
+    aitrain::ProjectWorkspace workspace;
+    aitrain::OcrOfficialReportImportResult result;
     if (!workspace.open(projectRoot, error)) return result;
-    const aitrain::v2::TaskId taskId = aitrain::v2::TaskId::create();
-    aitrain::v2::TaskSnapshot task;
-    if (!workspace.startTask(taskId, QStringLiteral("paddleocr.official.report.import.v2"),
+    const aitrain::TaskId taskId = aitrain::TaskId::create();
+    aitrain::TaskSnapshot task;
+    if (!workspace.startTask(taskId, QStringLiteral("paddleocr.official.report.import"),
             QStringLiteral("ocr_official_report_import"), &task, error)) return result;
-    aitrain::v2::OcrOfficialReportImportRequestV2 request;
+    aitrain::OcrOfficialReportImportRequest request;
     request.det.reportPath = fixture.detReportPath;
     request.rec.reportPath = fixture.recReportPath;
     request.system.reportPath = fixture.systemReportPath;
-    if (!aitrain::v2::SnapshotId::parse(fixture.detSnapshotId, &request.det.datasetSnapshotId, error)
-        || !aitrain::v2::SnapshotId::parse(fixture.recSnapshotId, &request.rec.datasetSnapshotId, error)
-        || !aitrain::v2::SnapshotId::parse(fixture.systemSnapshotId, &request.system.datasetSnapshotId, error)) return {};
+    if (!aitrain::SnapshotId::parse(fixture.detSnapshotId, &request.det.datasetSnapshotId, error)
+        || !aitrain::SnapshotId::parse(fixture.recSnapshotId, &request.rec.datasetSnapshotId, error)
+        || !aitrain::SnapshotId::parse(fixture.systemSnapshotId, &request.system.datasetSnapshotId, error)) return {};
     request.acceptanceCohortId = QStringLiteral("customer-batch-a");
     request.customerDomainId = QStringLiteral("line-a");
     request.evidenceClass = evidenceClass;
     if (!workspace.importOcrOfficialReports(taskId, request, &result, error)
-        || !workspace.finalizeTask(taskId, aitrain::v2::TaskState::Succeeded, {}, error)) return {};
+        || !workspace.finalizeTask(taskId, aitrain::TaskState::Succeeded, {}, error)) return {};
     return result;
 }
 
@@ -743,7 +759,6 @@ private slots:
         QTest::newRow("evaluate-model") << QStringLiteral("evaluateModel");
         QTest::newRow("benchmark-model") << QStringLiteral("benchmarkModel");
         QTest::newRow("validate-deployment-artifact") << QStringLiteral("validateDeploymentArtifact");
-        QTest::newRow("customer-ocr-acceptance") << QStringLiteral("runCustomerOcrAcceptance");
         QTest::newRow("validate-dataset") << QStringLiteral("validateDataset");
         QTest::newRow("curate-dataset") << QStringLiteral("curateDataset");
         QTest::newRow("convert-dataset") << QStringLiteral("convertDataset");
@@ -766,9 +781,9 @@ private slots:
         QVERIFY2(server.listen(serverName), qPrintable(server.errorString()));
 
         QProcess process;
-        const aitrain::v2::RequestId controlRequestId = aitrain::v2::RequestId::create();
-        const aitrain::v2::TaskId controlTaskId = aitrain::v2::TaskId::create();
-        aitrain::v2::ProtocolV2SequenceTracker eventTracker;
+        const aitrain::RequestId controlRequestId = aitrain::RequestId::create();
+        const aitrain::TaskId controlTaskId = aitrain::TaskId::create();
+        aitrain::ProtocolSequenceTracker eventTracker;
         QLocalSocket* socket = nullptr;
         QByteArray buffer;
         QStringList terminalTypes;
@@ -787,18 +802,18 @@ private slots:
                 while (newline >= 0) {
                     const QByteArray line = buffer.left(newline + 1);
                     buffer.remove(0, newline + 1);
-                    aitrain::v2::ProtocolEnvelope envelope;
+                    aitrain::ProtocolEnvelope envelope;
                     QString error;
-                    QVERIFY2(aitrain::v2::decodeProtocolV2Message(line, &envelope, &error), qPrintable(error));
+                    QVERIFY2(aitrain::decodeProtocolMessage(line, &envelope, &error), qPrintable(error));
                     QVERIFY2(eventTracker.observe(envelope, controlRequestId, controlTaskId, &error), qPrintable(error));
                     QString type;
                     QJsonObject payload;
-                    QVERIFY2(wp::control_v2::unpackBusinessEvent(envelope, &type, &payload, &error), qPrintable(error));
+                    QVERIFY2(wp::control::unpackBusinessEvent(envelope, &type, &payload, &error), qPrintable(error));
                     if (type == wp::event::ready()) {
-                        const aitrain::v2::ProtocolEnvelope start = wp::control_v2::startTaskEnvelope(
+                        const aitrain::ProtocolEnvelope start = wp::control::startTaskEnvelope(
                             controlRequestId, controlTaskId, 1, command,
                             QJsonObject{{wp::field::taskId(), QStringLiteral("removed-command-test")}});
-                        socket->write(aitrain::v2::encodeProtocolV2Message(start, &error));
+                        socket->write(aitrain::encodeProtocolMessage(start, &error));
                         socket->flush();
                     }
                     if (wp::isTerminalEvent(type)) {
@@ -827,7 +842,7 @@ private slots:
         QCOMPARE(terminalMessage, QStringLiteral("Unsupported command: %1").arg(command));
     }
 
-    void workerControlV2RejectsInvalidEnvelope_data()
+    void workerControlRejectsInvalidEnvelope_data()
     {
         QTest::addColumn<QString>("scenario");
         QTest::newRow("duplicate-message") << QStringLiteral("duplicate");
@@ -838,20 +853,20 @@ private slots:
         QTest::newRow("cancel-before-start") << QStringLiteral("cancel-before-start");
     }
 
-    void workerControlV2RejectsInvalidEnvelope()
+    void workerControlRejectsInvalidEnvelope()
     {
         QFETCH(QString, scenario);
         namespace wp = aitrain::worker_protocol;
 
-        const QString serverName = QStringLiteral("aitrain_invalid_v2_%1")
+        const QString serverName = QStringLiteral("aitrain_invalid_%1")
             .arg(QUuid::createUuid().toString(QUuid::Id128));
         QLocalServer::removeServer(serverName);
         QLocalServer server;
         QVERIFY2(server.listen(serverName), qPrintable(server.errorString()));
 
-        const aitrain::v2::RequestId requestId = aitrain::v2::RequestId::create();
-        const aitrain::v2::TaskId taskId = aitrain::v2::TaskId::create();
-        aitrain::v2::ProtocolV2SequenceTracker eventTracker;
+        const aitrain::RequestId requestId = aitrain::RequestId::create();
+        const aitrain::TaskId taskId = aitrain::TaskId::create();
+        aitrain::ProtocolSequenceTracker eventTracker;
         QProcess process;
         QLocalSocket* socket = nullptr;
         QByteArray buffer;
@@ -872,13 +887,13 @@ private slots:
                 while (newline >= 0) {
                     const QByteArray line = buffer.left(newline + 1);
                     buffer.remove(0, newline + 1);
-                    aitrain::v2::ProtocolEnvelope envelope;
+                    aitrain::ProtocolEnvelope envelope;
                     QString error;
-                    QVERIFY2(aitrain::v2::decodeProtocolV2Message(line, &envelope, &error), qPrintable(error));
+                    QVERIFY2(aitrain::decodeProtocolMessage(line, &envelope, &error), qPrintable(error));
                     QVERIFY2(eventTracker.observe(envelope, requestId, taskId, &error), qPrintable(error));
                     QString type;
                     QJsonObject payload;
-                    QVERIFY2(wp::control_v2::unpackBusinessEvent(envelope, &type, &payload, &error), qPrintable(error));
+                    QVERIFY2(wp::control::unpackBusinessEvent(envelope, &type, &payload, &error), qPrintable(error));
                     if (type == wp::event::ready()) {
                         QByteArray invalidBytes;
                         if (scenario == QStringLiteral("duplicate")) {
@@ -887,9 +902,9 @@ private slots:
                                 {wp::field::sourcePath(), QDir::tempPath()},
                                 {wp::field::sourceFormat(), QStringLiteral("coco_detection")},
                                 {wp::field::targetFormat(), QStringLiteral("yolo_detection")}};
-                            const QByteArray start = aitrain::v2::encodeProtocolV2Message(
-                                wp::control_v2::startTaskEnvelope(requestId, taskId, 1,
-                                    wp::command::runDatasetConversionWorkflowV2(), businessPayload), &error);
+                            const QByteArray start = aitrain::encodeProtocolMessage(
+                                wp::control::startTaskEnvelope(requestId, taskId, 1,
+                                    wp::command::runDatasetConversionWorkflow(), businessPayload), &error);
                             invalidBytes = start + start;
                         } else if (scenario == QStringLiteral("out-of-order")) {
                             const QJsonObject businessPayload{
@@ -897,29 +912,29 @@ private slots:
                                 {wp::field::sourcePath(), QDir::tempPath()},
                                 {wp::field::sourceFormat(), QStringLiteral("coco_detection")},
                                 {wp::field::targetFormat(), QStringLiteral("yolo_detection")}};
-                            invalidBytes = aitrain::v2::encodeProtocolV2Message(
-                                wp::control_v2::startTaskEnvelope(requestId, taskId, 2,
-                                    wp::command::runDatasetConversionWorkflowV2(), businessPayload), &error);
-                            invalidBytes += aitrain::v2::encodeProtocolV2Message(
-                                wp::control_v2::startTaskEnvelope(requestId, taskId, 1,
-                                    wp::command::runDatasetConversionWorkflowV2(), businessPayload), &error);
+                            invalidBytes = aitrain::encodeProtocolMessage(
+                                wp::control::startTaskEnvelope(requestId, taskId, 2,
+                                    wp::command::runDatasetConversionWorkflow(), businessPayload), &error);
+                            invalidBytes += aitrain::encodeProtocolMessage(
+                                wp::control::startTaskEnvelope(requestId, taskId, 1,
+                                    wp::command::runDatasetConversionWorkflow(), businessPayload), &error);
                         } else if (scenario == QStringLiteral("cross-request")) {
-                            invalidBytes = aitrain::v2::encodeProtocolV2Message(
-                                wp::control_v2::cancelTaskEnvelope(
-                                    aitrain::v2::RequestId::create(), taskId, 1), &error);
+                            invalidBytes = aitrain::encodeProtocolMessage(
+                                wp::control::cancelTaskEnvelope(
+                                    aitrain::RequestId::create(), taskId, 1), &error);
                         } else if (scenario == QStringLiteral("unknown-kind")) {
-                            const QByteArray valid = aitrain::v2::encodeProtocolV2Message(
-                                wp::control_v2::cancelTaskEnvelope(requestId, taskId, 1), &error);
+                            const QByteArray valid = aitrain::encodeProtocolMessage(
+                                wp::control::cancelTaskEnvelope(requestId, taskId, 1), &error);
                             QJsonObject object = QJsonDocument::fromJson(valid.trimmed()).object();
                             object.insert(QStringLiteral("kind"), QStringLiteral("command.unknown"));
                             invalidBytes = QJsonDocument(object).toJson(QJsonDocument::Compact) + '\n';
                         } else if (scenario == QStringLiteral("oversized")) {
                             invalidBytes = QByteArray(
-                                aitrain::v2::kProtocolV2MaxControlMessageBytes + 1, 'x');
+                                aitrain::kProtocolMaxControlMessageBytes + 1, 'x');
                             invalidBytes.append('\n');
                         } else {
-                            invalidBytes = aitrain::v2::encodeProtocolV2Message(
-                                wp::control_v2::cancelTaskEnvelope(requestId, taskId, 1), &error);
+                            invalidBytes = aitrain::encodeProtocolMessage(
+                                wp::control::cancelTaskEnvelope(requestId, taskId, 1), &error);
                         }
                         QVERIFY2(!invalidBytes.isEmpty(), qPrintable(error));
                         socket->write(invalidBytes);
@@ -949,10 +964,10 @@ private slots:
         }
         QCOMPARE(terminalCount, 1);
         QCOMPARE(terminalType, wp::event::failed());
-        QCOMPARE(terminalErrorCode, QStringLiteral("protocol_v2_rejected"));
+        QCOMPARE(terminalErrorCode, QStringLiteral("protocol_rejected"));
     }
 
-    void workerControlV2RequiresLaunchIdentity()
+    void workerControlRequiresLaunchIdentity()
     {
         QProcess process;
         process.setProgram(workerExecutablePath());
@@ -985,13 +1000,15 @@ private slots:
         QJsonObject workflowResult;
         connect(&client, &WorkerClient::messageReceived, this,
             [&](const QString& type, const QJsonObject& payload) {
-                if (type == wp::event::runtimeDeliveryWorkflowV2()) workflowResult = payload;
+                if (type == wp::event::runtimeDeliveryWorkflow()) workflowResult = payload;
                 if (wp::isTerminalEvent(type)) ++terminalCount;
             });
         connect(&client, &WorkerClient::finished, this,
-            [&](bool value, const QString&) { ok = value; finished = true; });
+            [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
+                ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
+            });
         const QString taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        QVERIFY2(client.requestRuntimeDeliveryWorkflowV2(workerExecutablePath(), projectRoot,
+        QVERIFY2(client.requestRuntimeDeliveryWorkflow(workerExecutablePath(), projectRoot,
             modelPackageId, QStringLiteral("aitrain_onnxruntime"), imagePath,
             QJsonObject(), &error, taskId), qPrintable(error));
         QTRY_VERIFY_WITH_TIMEOUT(finished, 30000);
@@ -1002,13 +1019,13 @@ private slots:
         QVERIFY(!workflowResult.value(QStringLiteral("evidenceArtifactId")).toString().isEmpty());
         QVERIFY(!workflowResult.contains(QStringLiteral("evidencePath")));
         QVERIFY(!workflowResult.contains(QStringLiteral("runtimeInvocation")));
-        aitrain::v2::StorageV2 storage;
-        QVERIFY2(storage.open(QDir(projectRoot).filePath(QStringLiteral(".aitrain-v2/project-v2.sqlite")), &error), qPrintable(error));
-        aitrain::v2::TaskId parsedTaskId;
-        QVERIFY2(aitrain::v2::TaskId::parse(taskId, &parsedTaskId, &error), qPrintable(error));
-        aitrain::v2::TaskSnapshot stored;
+        aitrain::ProjectStore storage;
+        QVERIFY2(storage.open(QDir(projectRoot).filePath(QStringLiteral(".aitrain/project.sqlite")), &error), qPrintable(error));
+        aitrain::TaskId parsedTaskId;
+        QVERIFY2(aitrain::TaskId::parse(taskId, &parsedTaskId, &error), qPrintable(error));
+        aitrain::TaskSnapshot stored;
         QVERIFY2(storage.task(parsedTaskId, &stored, &error), qPrintable(error));
-        QCOMPARE(stored.state, aitrain::v2::TaskState::Succeeded);
+        QCOMPARE(stored.state, aitrain::TaskState::Succeeded);
     }
 
     void dataQualityWorkerUsesRegisteredIdentitiesAndReturnsOnlyArtifactIds()
@@ -1019,7 +1036,7 @@ private slots:
         const QString datasetRoot = directory.filePath(QStringLiteral("dataset"));
         QVERIFY(QDir().mkpath(projectRoot));
         QString error;
-        aitrain::v2::DatasetSnapshotRecordV2 snapshot;
+        aitrain::DatasetSnapshotRecord snapshot;
         QVERIFY2(!createAnnotationRepairFixture(projectRoot, datasetRoot, &error, &snapshot).isEmpty(), qPrintable(error));
 
         WorkerClient client;
@@ -1029,12 +1046,14 @@ private slots:
         QJsonObject result;
         connect(&client, &WorkerClient::messageReceived, this,
             [&](const QString& type, const QJsonObject& payload) {
-                if (type == wp::event::dataQualityWorkflowV2()) result = payload;
+                if (type == wp::event::dataQualityWorkflow()) result = payload;
                 if (wp::isTerminalEvent(type)) ++terminalCount;
             });
         connect(&client, &WorkerClient::finished, this,
-            [&](bool value, const QString&) { ok = value; finished = true; });
-        QVERIFY2(client.requestDataQualityWorkflowV2(workerExecutablePath(), projectRoot,
+            [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
+                ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
+            });
+        QVERIFY2(client.requestDataQualityWorkflow(workerExecutablePath(), projectRoot,
             snapshot.datasetId.toString(), snapshot.datasetVersionId.toString(),
             snapshot.id.toString(), snapshot.artifactId.toString(), QJsonObject(), &error,
             QUuid::createUuid().toString(QUuid::WithoutBraces)), qPrintable(error));
@@ -1066,14 +1085,16 @@ private slots:
         QJsonObject result;
         connect(&client, &WorkerClient::messageReceived, this,
             [&](const QString& type, const QJsonObject& payload) {
-                if (type == wp::event::datasetConversionWorkflowV2()) result = payload;
+                if (type == wp::event::datasetConversionWorkflow()) result = payload;
                 if (wp::isTerminalEvent(type)) ++terminalCount;
             });
         connect(&client, &WorkerClient::finished, this,
-            [&](bool value, const QString&) { ok = value; finished = true; });
+            [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
+                ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
+            });
         QString error;
-        const QString targetDatasetId = aitrain::v2::DatasetId::create().toString();
-        QVERIFY2(client.requestDatasetConversionWorkflowV2(workerExecutablePath(), projectRoot,
+        const QString targetDatasetId = aitrain::DatasetId::create().toString();
+        QVERIFY2(client.requestDatasetConversionWorkflow(workerExecutablePath(), projectRoot,
             sourcePath, QStringLiteral("coco_json"), QStringLiteral("yolo_detection"),
             targetDatasetId, QStringLiteral("导入数据集"), QJsonObject(), &error,
             QUuid::createUuid().toString(QUuid::WithoutBraces)), qPrintable(error));
@@ -1108,15 +1129,17 @@ private slots:
         QJsonObject result;
         connect(&client, &WorkerClient::messageReceived, this,
             [&](const QString& type, const QJsonObject& payload) {
-                if (type == wp::event::datasetConversionWorkflowV2()) result = payload;
+                if (type == wp::event::datasetConversionWorkflow()) result = payload;
                 if (wp::isTerminalEvent(type)) ++terminalCount;
             });
         connect(&client, &WorkerClient::finished, this,
-            [&](bool value, const QString&) { ok = value; finished = true; });
+            [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
+                ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
+            });
         QString error;
-        QVERIFY2(client.requestDatasetConversionWorkflowV2(workerExecutablePath(), projectRoot,
+        QVERIFY2(client.requestDatasetConversionWorkflow(workerExecutablePath(), projectRoot,
             sourcePath, QStringLiteral("coco_json"), QStringLiteral("voc_xml"),
-            aitrain::v2::DatasetId::create().toString(), QStringLiteral("unsupported"),
+            aitrain::DatasetId::create().toString(), QStringLiteral("unsupported"),
             QJsonObject(), &error, QUuid::createUuid().toString(QUuid::WithoutBraces)), qPrintable(error));
         QTRY_VERIFY_WITH_TIMEOUT(finished, 30000);
         QVERIFY(!ok);
@@ -1143,15 +1166,17 @@ private slots:
         QJsonObject result;
         connect(&client, &WorkerClient::messageReceived, this,
             [&](const QString& type, const QJsonObject& payload) {
-                if (type == wp::event::datasetConversionWorkflowV2()) result = payload;
+                if (type == wp::event::datasetConversionWorkflow()) result = payload;
                 if (wp::isTerminalEvent(type)) { ++terminalCount; terminalType = type; }
             });
         connect(&client, &WorkerClient::finished, this,
-            [&](bool value, const QString&) { ok = value; finished = true; });
+            [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
+                ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
+            });
         QString error;
-        QVERIFY2(client.requestDatasetConversionWorkflowV2(workerExecutablePath(), projectRoot,
+        QVERIFY2(client.requestDatasetConversionWorkflow(workerExecutablePath(), projectRoot,
             sourcePath, QStringLiteral("coco_json"), QStringLiteral("yolo_detection"),
-            aitrain::v2::DatasetId::create().toString(), QStringLiteral("cancel"),
+            aitrain::DatasetId::create().toString(), QStringLiteral("cancel"),
             QJsonObject(), &error, QUuid::createUuid().toString(QUuid::WithoutBraces)), qPrintable(error));
         client.cancel();
         QTRY_VERIFY_WITH_TIMEOUT(finished, 30000);
@@ -1181,11 +1206,11 @@ private slots:
                 if (wp::isTerminalEvent(type)) ++terminalCount;
             });
         connect(&client, &WorkerClient::finished, this,
-            [&](bool value, const QString& valueMessage) {
-                ok = value; message = valueMessage; finished = true;
+            [&](WorkerClient::WorkerTerminalStatus value, const QString& valueMessage) {
+                ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; message = valueMessage; finished = true;
             });
         QString error;
-        QVERIFY2(client.requestDatasetConversionWorkflowV2(workerExecutablePath(), projectRoot,
+        QVERIFY2(client.requestDatasetConversionWorkflow(workerExecutablePath(), projectRoot,
             sourcePath, QStringLiteral("coco_json"), QStringLiteral("yolo_detection"),
             QStringLiteral("not-a-uuid"), QStringLiteral("invalid"), QJsonObject(), &error,
             QUuid::createUuid().toString(QUuid::WithoutBraces)), qPrintable(error));
@@ -1210,14 +1235,16 @@ private slots:
         QJsonObject result;
         connect(&client, &WorkerClient::messageReceived, this,
             [&](const QString& type, const QJsonObject& payload) {
-                if (type == wp::event::datasetSnapshotImportWorkflowV2()) result = payload;
+                if (type == wp::event::datasetSnapshotImportWorkflow()) result = payload;
                 if (wp::isTerminalEvent(type)) ++terminalCount;
             });
         connect(&client, &WorkerClient::finished, this,
-            [&](bool value, const QString&) { ok = value; finished = true; });
+            [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
+                ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
+            });
         QString error;
-        const QString datasetId = aitrain::v2::DatasetId::create().toString();
-        QVERIFY2(client.requestDatasetSnapshotImportWorkflowV2(workerExecutablePath(), projectRoot,
+        const QString datasetId = aitrain::DatasetId::create().toString();
+        QVERIFY2(client.requestDatasetSnapshotImportWorkflow(workerExecutablePath(), projectRoot,
             sourcePath, QStringLiteral("yolo_detection"), datasetId, QStringLiteral("导入快照"),
             QJsonObject{{QStringLiteral("maxFiles"), 20000}}, &error,
             QUuid::createUuid().toString(QUuid::WithoutBraces)), qPrintable(error));
@@ -1237,13 +1264,13 @@ private slots:
         QVERIFY(!result.contains(QStringLiteral("artifactPath")));
         QVERIFY(!result.contains(QStringLiteral("evidencePath")));
 
-        aitrain::v2::StorageV2 storage;
+        aitrain::ProjectStore storage;
         QVERIFY2(storage.open(QDir(projectRoot).filePath(
-            QStringLiteral(".aitrain-v2/project-v2.sqlite")), &error), qPrintable(error));
-        aitrain::v2::SnapshotId snapshotId;
-        QVERIFY(aitrain::v2::SnapshotId::parse(
+            QStringLiteral(".aitrain/project.sqlite")), &error), qPrintable(error));
+        aitrain::SnapshotId snapshotId;
+        QVERIFY(aitrain::SnapshotId::parse(
             result.value(QStringLiteral("snapshotId")).toString(), &snapshotId, &error));
-        aitrain::v2::DatasetSnapshotRecordV2 snapshot;
+        aitrain::DatasetSnapshotRecord snapshot;
         QVERIFY2(storage.datasetSnapshot(snapshotId, &snapshot, &error), qPrintable(error));
         QVERIFY(QFileInfo(QDir(snapshot.rootPath).filePath(QStringLiteral("images/train/a.png"))).isFile());
         QVERIFY(QFileInfo(QDir(snapshot.rootPath).filePath(QStringLiteral("dataset_snapshot.json"))).isFile());
@@ -1266,15 +1293,17 @@ private slots:
         QJsonObject result;
         connect(&client, &WorkerClient::messageReceived, this,
             [&](const QString& type, const QJsonObject& payload) {
-                if (type == wp::event::datasetSnapshotImportWorkflowV2()) result = payload;
+                if (type == wp::event::datasetSnapshotImportWorkflow()) result = payload;
                 if (wp::isTerminalEvent(type)) { ++terminalCount; terminalType = type; }
             });
         connect(&client, &WorkerClient::finished, this,
-            [&](bool value, const QString&) { ok = value; finished = true; });
+            [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
+                ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
+            });
         QString error;
-        QVERIFY2(client.requestDatasetSnapshotImportWorkflowV2(workerExecutablePath(), projectRoot,
+        QVERIFY2(client.requestDatasetSnapshotImportWorkflow(workerExecutablePath(), projectRoot,
             sourcePath, QStringLiteral("yolo_detection"),
-            aitrain::v2::DatasetId::create().toString(), QStringLiteral("取消"), QJsonObject(),
+            aitrain::DatasetId::create().toString(), QStringLiteral("取消"), QJsonObject(),
             &error, QUuid::createUuid().toString(QUuid::WithoutBraces)), qPrintable(error));
         client.cancel();
         QTRY_VERIFY_WITH_TIMEOUT(finished, 30000);
@@ -1295,18 +1324,18 @@ private slots:
             directory.filePath(QStringLiteral("source")));
         QVERIFY(QDir().mkpath(projectRoot));
         QString error;
-        aitrain::v2::ProjectWorkspaceV2 workspace;
+        aitrain::ProjectWorkspace workspace;
         QVERIFY2(workspace.open(projectRoot, &error), qPrintable(error));
-        const aitrain::v2::TaskId importTaskId = aitrain::v2::TaskId::create();
-        aitrain::v2::TaskSnapshot task;
-        QVERIFY2(workspace.startTask(importTaskId, QStringLiteral("dataset.snapshot.import.v2"),
+        const aitrain::TaskId importTaskId = aitrain::TaskId::create();
+        aitrain::TaskSnapshot task;
+        QVERIFY2(workspace.startTask(importTaskId, QStringLiteral("dataset.snapshot.import"),
             QStringLiteral("dataset_snapshot_import"), &task, &error), qPrintable(error));
-        aitrain::v2::DatasetSnapshotImportWorkflowRequestV2 importRequest;
+        aitrain::DatasetSnapshotImportWorkflowRequest importRequest;
         importRequest.sourcePath = sourcePath;
         importRequest.sourceFormat = QStringLiteral("yolo_detection");
-        importRequest.targetDatasetId = aitrain::v2::DatasetId::create();
+        importRequest.targetDatasetId = aitrain::DatasetId::create();
         importRequest.targetDatasetName = QStringLiteral("源数据集");
-        aitrain::v2::DatasetSnapshotImportWorkflowResultV2 imported;
+        aitrain::DatasetSnapshotImportWorkflowResult imported;
         QVERIFY2(workspace.runDatasetSnapshotImportWorkflow(importTaskId, importRequest,
             &imported, &error), qPrintable(error));
         workspace.close();
@@ -1318,13 +1347,15 @@ private slots:
         QJsonObject result;
         connect(&client, &WorkerClient::messageReceived, this,
             [&](const QString& type, const QJsonObject& payload) {
-                if (type == wp::event::datasetSplitWorkflowV2()) result = payload;
+                if (type == wp::event::datasetSplitWorkflow()) result = payload;
                 if (wp::isTerminalEvent(type)) ++terminalCount;
             });
         connect(&client, &WorkerClient::finished, this,
-            [&](bool value, const QString&) { ok = value; finished = true; });
-        const QString targetDatasetId = aitrain::v2::DatasetId::create().toString();
-        QVERIFY2(client.requestDatasetSplitWorkflowV2(workerExecutablePath(), projectRoot,
+            [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
+                ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
+            });
+        const QString targetDatasetId = aitrain::DatasetId::create().toString();
+        QVERIFY2(client.requestDatasetSplitWorkflow(workerExecutablePath(), projectRoot,
             imported.datasetSnapshot.datasetId.toString(),
             imported.datasetSnapshot.datasetVersionId.toString(),
             imported.datasetSnapshot.id.toString(), imported.datasetSnapshot.artifactId.toString(),
@@ -1348,16 +1379,16 @@ private slots:
         QVERIFY(!result.contains(QStringLiteral("reportPath")));
         QVERIFY(!result.contains(QStringLiteral("artifactPath")));
 
-        aitrain::v2::StorageV2 storage;
+        aitrain::ProjectStore storage;
         QVERIFY2(storage.open(QDir(projectRoot).filePath(
-            QStringLiteral(".aitrain-v2/project-v2.sqlite")), &error), qPrintable(error));
-        aitrain::v2::SnapshotId snapshotId;
-        QVERIFY(aitrain::v2::SnapshotId::parse(result.value(QStringLiteral("snapshotId")).toString(),
+            QStringLiteral(".aitrain/project.sqlite")), &error), qPrintable(error));
+        aitrain::SnapshotId snapshotId;
+        QVERIFY(aitrain::SnapshotId::parse(result.value(QStringLiteral("snapshotId")).toString(),
             &snapshotId, &error));
-        aitrain::v2::DatasetSnapshotRecordV2 snapshot;
+        aitrain::DatasetSnapshotRecord snapshot;
         QVERIFY2(storage.datasetSnapshot(snapshotId, &snapshot, &error), qPrintable(error));
         QVERIFY(QFileInfo(QDir(snapshot.rootPath).filePath(QStringLiteral("dataset_snapshot.json"))).isFile());
-        QVERIFY(!QFileInfo(QDir(snapshot.rootPath).filePath(QStringLiteral("split_plan_v2.json"))).exists());
+        QVERIFY(!QFileInfo(QDir(snapshot.rootPath).filePath(QStringLiteral("split_plan.json"))).exists());
     }
 
     void diagnosticsWorkerReturnsIdsOnly()
@@ -1372,12 +1403,14 @@ private slots:
         QJsonObject result;
         connect(&client, &WorkerClient::messageReceived, this,
             [&](const QString& type, const QJsonObject& payload) {
-                if (type == wp::event::diagnosticsWorkflowV2()) result = payload;
+                if (type == wp::event::diagnosticsWorkflow()) result = payload;
             });
         connect(&client, &WorkerClient::finished, this,
-            [&](bool value, const QString&) { ok = value; finished = true; });
+            [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
+                ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
+            });
         QString error;
-        QVERIFY2(client.requestDiagnosticsWorkflowV2(workerExecutablePath(), projectRoot,
+        QVERIFY2(client.requestDiagnosticsWorkflow(workerExecutablePath(), projectRoot,
             QJsonObject{{QStringLiteral("probeTimeoutMs"), 500},
                 {QStringLiteral("probeOutputBytes"), 1024}}, &error,
             QUuid::createUuid().toString(QUuid::WithoutBraces)), qPrintable(error));
@@ -1407,13 +1440,15 @@ private slots:
         QJsonObject result;
         connect(&client, &WorkerClient::messageReceived, this,
             [&](const QString& type, const QJsonObject& payload) {
-                if (type == wp::event::diagnosticsWorkflowV2()) result = payload;
+                if (type == wp::event::diagnosticsWorkflow()) result = payload;
                 if (wp::isTerminalEvent(type)) terminalType = type;
             });
         connect(&client, &WorkerClient::finished, this,
-            [&](bool value, const QString&) { ok = value; finished = true; });
+            [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
+                ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
+            });
         QString error;
-        QVERIFY2(client.requestDiagnosticsWorkflowV2(workerExecutablePath(), projectRoot,
+        QVERIFY2(client.requestDiagnosticsWorkflow(workerExecutablePath(), projectRoot,
             QJsonObject{{QStringLiteral("probeTimeoutMs"), 500}}, &error,
             QUuid::createUuid().toString(QUuid::WithoutBraces)), qPrintable(error));
         client.cancel();
@@ -1433,7 +1468,7 @@ private slots:
         const QString datasetRoot = directory.filePath(QStringLiteral("dataset"));
         QVERIFY(QDir().mkpath(projectRoot));
         QString error;
-        aitrain::v2::DatasetSnapshotRecordV2 snapshot;
+        aitrain::DatasetSnapshotRecord snapshot;
         QVERIFY2(!createAnnotationRepairFixture(projectRoot, datasetRoot, &error, &snapshot).isEmpty(), qPrintable(error));
         WorkerClient client;
         bool finished = false;
@@ -1442,13 +1477,15 @@ private slots:
         QJsonObject result;
         connect(&client, &WorkerClient::messageReceived, this,
             [&](const QString& type, const QJsonObject& payload) {
-                if (type == wp::event::dataQualityWorkflowV2()) result = payload;
+                if (type == wp::event::dataQualityWorkflow()) result = payload;
                 if (wp::isTerminalEvent(type)) ++terminalCount;
             });
         connect(&client, &WorkerClient::finished, this,
-            [&](bool value, const QString&) { ok = value; finished = true; });
-        QVERIFY2(client.requestDataQualityWorkflowV2(workerExecutablePath(), projectRoot,
-            aitrain::v2::DatasetId::create().toString(), snapshot.datasetVersionId.toString(),
+            [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
+                ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
+            });
+        QVERIFY2(client.requestDataQualityWorkflow(workerExecutablePath(), projectRoot,
+            aitrain::DatasetId::create().toString(), snapshot.datasetVersionId.toString(),
             snapshot.id.toString(), snapshot.artifactId.toString(), QJsonObject(), &error,
             QUuid::createUuid().toString(QUuid::WithoutBraces)), qPrintable(error));
         QTRY_VERIFY_WITH_TIMEOUT(finished, 30000);
@@ -1469,7 +1506,7 @@ private slots:
         const QString datasetRoot = directory.filePath(QStringLiteral("dataset"));
         QVERIFY(QDir().mkpath(projectRoot));
         QString error;
-        aitrain::v2::DatasetSnapshotRecordV2 snapshot;
+        aitrain::DatasetSnapshotRecord snapshot;
         QVERIFY2(!createAnnotationRepairFixture(projectRoot, datasetRoot, &error, &snapshot).isEmpty(), qPrintable(error));
         WorkerClient client;
         bool finished = false;
@@ -1479,12 +1516,14 @@ private slots:
         QJsonObject result;
         connect(&client, &WorkerClient::messageReceived, this,
             [&](const QString& type, const QJsonObject& payload) {
-                if (type == wp::event::dataQualityWorkflowV2()) result = payload;
+                if (type == wp::event::dataQualityWorkflow()) result = payload;
                 if (wp::isTerminalEvent(type)) { ++terminalCount; terminalType = type; }
             });
         connect(&client, &WorkerClient::finished, this,
-            [&](bool value, const QString&) { ok = value; finished = true; });
-        QVERIFY2(client.requestDataQualityWorkflowV2(workerExecutablePath(), projectRoot,
+            [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
+                ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
+            });
+        QVERIFY2(client.requestDataQualityWorkflow(workerExecutablePath(), projectRoot,
             snapshot.datasetId.toString(), snapshot.datasetVersionId.toString(),
             snapshot.id.toString(), snapshot.artifactId.toString(), QJsonObject(), &error,
             QUuid::createUuid().toString(QUuid::WithoutBraces)), qPrintable(error));
@@ -1517,13 +1556,15 @@ private slots:
         QJsonObject createResult;
         connect(&createClient, &WorkerClient::messageReceived, this,
             [&](const QString& type, const QJsonObject& payload) {
-                if (type == wp::event::annotationSessionV2()) createResult = payload;
+                if (type == wp::event::annotationSession()) createResult = payload;
                 if (wp::isTerminalEvent(type)) ++createTerminalCount;
             });
         connect(&createClient, &WorkerClient::finished, this,
-            [&](bool value, const QString&) { createOk = value; createFinished = true; });
+            [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
+                createOk = value == WorkerClient::WorkerTerminalStatus::Succeeded; createFinished = true;
+            });
         const QString createTaskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        QVERIFY2(createClient.requestAnnotationSessionCreateV2(workerExecutablePath(), projectRoot,
+        QVERIFY2(createClient.requestAnnotationSessionCreate(workerExecutablePath(), projectRoot,
             repairArtifactId, workingDirectory,
             QJsonObject{{QStringLiteral("tool"), QStringLiteral("X-AnyLabeling")}},
             QJsonObject(), &error, createTaskId), qPrintable(error));
@@ -1545,13 +1586,15 @@ private slots:
         QJsonObject syncResult;
         connect(&syncClient, &WorkerClient::messageReceived, this,
             [&](const QString& type, const QJsonObject& payload) {
-                if (type == wp::event::annotationSyncV2()) syncResult = payload;
+                if (type == wp::event::annotationSync()) syncResult = payload;
                 if (wp::isTerminalEvent(type)) ++syncTerminalCount;
             });
         connect(&syncClient, &WorkerClient::finished, this,
-            [&](bool value, const QString&) { syncOk = value; syncFinished = true; });
+            [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
+                syncOk = value == WorkerClient::WorkerTerminalStatus::Succeeded; syncFinished = true;
+            });
         const QString syncTaskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        QVERIFY2(syncClient.requestAnnotationSessionSyncV2(workerExecutablePath(), projectRoot,
+        QVERIFY2(syncClient.requestAnnotationSessionSync(workerExecutablePath(), projectRoot,
             sessionArtifactId, workingDirectory, QJsonObject(), &error, syncTaskId), qPrintable(error));
         QTRY_VERIFY_WITH_TIMEOUT(syncFinished, 30000);
         QVERIFY(syncOk);
@@ -1586,13 +1629,15 @@ private slots:
         QJsonObject result;
         connect(&client, &WorkerClient::messageReceived, this,
             [&](const QString& type, const QJsonObject& payload) {
-                if (type == wp::event::annotationSessionV2()) result = payload;
+                if (type == wp::event::annotationSession()) result = payload;
                 if (wp::isTerminalEvent(type)) { ++terminalCount; terminalType = type; }
             });
         connect(&client, &WorkerClient::finished, this,
-            [&](bool value, const QString&) { ok = value; finished = true; });
+            [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
+                ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
+            });
         const QString taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        QVERIFY2(client.requestAnnotationSessionCreateV2(workerExecutablePath(), projectRoot,
+        QVERIFY2(client.requestAnnotationSessionCreate(workerExecutablePath(), projectRoot,
             repairArtifactId, workingDirectory, QJsonObject(), QJsonObject(),
             &error, taskId), qPrintable(error));
         client.cancel();
@@ -1629,13 +1674,15 @@ private slots:
         QJsonObject importResult;
         connect(&importClient, &WorkerClient::messageReceived, this,
             [&](const QString& type, const QJsonObject& payload) {
-                if (type == wp::event::ocrOfficialReportsImportedV2()) importResult = payload;
+                if (type == wp::event::ocrOfficialReportsImported()) importResult = payload;
                 if (wp::isTerminalEvent(type)) ++importTerminalCount;
             });
         connect(&importClient, &WorkerClient::finished, this,
-            [&](bool ok, const QString&) { importOk = ok; importFinished = true; });
+            [&](WorkerClient::WorkerTerminalStatus status, const QString&) {
+                importOk = status == WorkerClient::WorkerTerminalStatus::Succeeded; importFinished = true;
+            });
         const QString importTaskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        QVERIFY2(importClient.requestOcrOfficialReportImportV2(workerExecutablePath(), projectRoot,
+        QVERIFY2(importClient.requestOcrOfficialReportImport(workerExecutablePath(), projectRoot,
             source(fixture.detReportPath, fixture.detSnapshotId),
             source(fixture.recReportPath, fixture.recSnapshotId),
             source(fixture.systemReportPath, fixture.systemSnapshotId),
@@ -1660,13 +1707,15 @@ private slots:
         QJsonObject acceptanceResult;
         connect(&acceptanceClient, &WorkerClient::messageReceived, this,
             [&](const QString& type, const QJsonObject& payload) {
-                if (type == wp::event::ocrAcceptanceWorkflowV2()) acceptanceResult = payload;
+                if (type == wp::event::ocrAcceptanceWorkflow()) acceptanceResult = payload;
                 if (wp::isTerminalEvent(type)) ++acceptanceTerminalCount;
             });
         connect(&acceptanceClient, &WorkerClient::finished, this,
-            [&](bool ok, const QString&) { acceptanceOk = ok; acceptanceFinished = true; });
+            [&](WorkerClient::WorkerTerminalStatus status, const QString&) {
+                acceptanceOk = status == WorkerClient::WorkerTerminalStatus::Succeeded; acceptanceFinished = true;
+            });
         const QString acceptanceTaskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        QVERIFY2(acceptanceClient.requestOcrAcceptanceWorkflowV2(workerExecutablePath(), projectRoot,
+        QVERIFY2(acceptanceClient.requestOcrAcceptanceWorkflow(workerExecutablePath(), projectRoot,
             detArtifactId, recArtifactId, systemArtifactId, QJsonObject(),
             &error, acceptanceTaskId), qPrintable(error));
         QTRY_VERIFY_WITH_TIMEOUT(acceptanceFinished, 30000);
@@ -1702,13 +1751,15 @@ private slots:
         QJsonObject result;
         connect(&client, &WorkerClient::messageReceived, this,
             [&](const QString& type, const QJsonObject& payload) {
-                if (type == wp::event::ocrOfficialReportsImportedV2()) result = payload;
+                if (type == wp::event::ocrOfficialReportsImported()) result = payload;
                 if (wp::isTerminalEvent(type)) ++terminalCount;
             });
         connect(&client, &WorkerClient::finished, this,
-            [&](bool value, const QString&) { ok = value; finished = true; });
+            [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
+                ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
+            });
         const QString taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        QVERIFY2(client.requestOcrOfficialReportImportV2(workerExecutablePath(), projectRoot,
+        QVERIFY2(client.requestOcrOfficialReportImport(workerExecutablePath(), projectRoot,
             source(fixture.detReportPath, fixture.detSnapshotId),
             source(fixture.recReportPath, fixture.recSnapshotId),
             source(fixture.systemReportPath, fixture.systemSnapshotId),
@@ -1722,10 +1773,10 @@ private slots:
         QVERIFY(result.value(QStringLiteral("detReportArtifactId")).toString().isEmpty());
         QVERIFY(result.value(QStringLiteral("evidenceArtifactId")).toString().isEmpty());
 
-        aitrain::v2::StorageV2 storage;
-        QVERIFY2(storage.open(QDir(projectRoot).filePath(QStringLiteral(".aitrain-v2/project-v2.sqlite")), &error), qPrintable(error));
-        aitrain::v2::TaskId parsedTaskId;
-        QVERIFY2(aitrain::v2::TaskId::parse(taskId, &parsedTaskId, &error), qPrintable(error));
+        aitrain::ProjectStore storage;
+        QVERIFY2(storage.open(QDir(projectRoot).filePath(QStringLiteral(".aitrain/project.sqlite")), &error), qPrintable(error));
+        aitrain::TaskId parsedTaskId;
+        QVERIFY2(aitrain::TaskId::parse(taskId, &parsedTaskId, &error), qPrintable(error));
         QCOMPARE(storage.artifactsForTask(parsedTaskId, &error).size(), 0);
     }
 
@@ -1738,7 +1789,7 @@ private slots:
         QString error;
         const OcrAcceptanceWorkerFixture fixture = createOcrAcceptanceWorkerFixture(
             projectRoot, directory.path(), true, &error);
-        const aitrain::v2::OcrOfficialReportImportResultV2 imported =
+        const aitrain::OcrOfficialReportImportResult imported =
             importOcrFixtureDirect(projectRoot, fixture, QStringLiteral("public"), &error);
         QVERIFY2(imported.detReportArtifactId.isValid(), qPrintable(error));
         WorkerClient client;
@@ -1748,12 +1799,14 @@ private slots:
         QJsonObject result;
         connect(&client, &WorkerClient::messageReceived, this,
             [&](const QString& type, const QJsonObject& payload) {
-                if (type == wp::event::ocrAcceptanceWorkflowV2()) result = payload;
+                if (type == wp::event::ocrAcceptanceWorkflow()) result = payload;
                 if (wp::isTerminalEvent(type)) ++terminalCount;
             });
         connect(&client, &WorkerClient::finished, this,
-            [&](bool value, const QString&) { ok = value; finished = true; });
-        QVERIFY2(client.requestOcrAcceptanceWorkflowV2(workerExecutablePath(), projectRoot,
+            [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
+                ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
+            });
+        QVERIFY2(client.requestOcrAcceptanceWorkflow(workerExecutablePath(), projectRoot,
             imported.detReportArtifactId.toString(), imported.recReportArtifactId.toString(),
             imported.systemReportArtifactId.toString(), QJsonObject(), &error,
             QUuid::createUuid().toString(QUuid::WithoutBraces)), qPrintable(error));
@@ -1776,7 +1829,7 @@ private slots:
         QString error;
         const OcrAcceptanceWorkerFixture fixture = createOcrAcceptanceWorkerFixture(
             projectRoot, directory.path(), true, &error);
-        const aitrain::v2::OcrOfficialReportImportResultV2 imported =
+        const aitrain::OcrOfficialReportImportResult imported =
             importOcrFixtureDirect(projectRoot, fixture, QStringLiteral("customer_domain"), &error);
         QVERIFY2(imported.detReportArtifactId.isValid(), qPrintable(error));
         WorkerClient client;
@@ -1787,12 +1840,14 @@ private slots:
         QJsonObject result;
         connect(&client, &WorkerClient::messageReceived, this,
             [&](const QString& type, const QJsonObject& payload) {
-                if (type == wp::event::ocrAcceptanceWorkflowV2()) result = payload;
+                if (type == wp::event::ocrAcceptanceWorkflow()) result = payload;
                 if (wp::isTerminalEvent(type)) { ++terminalCount; terminalType = type; }
             });
         connect(&client, &WorkerClient::finished, this,
-            [&](bool value, const QString&) { ok = value; finished = true; });
-        QVERIFY2(client.requestOcrAcceptanceWorkflowV2(workerExecutablePath(), projectRoot,
+            [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
+                ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
+            });
+        QVERIFY2(client.requestOcrAcceptanceWorkflow(workerExecutablePath(), projectRoot,
             imported.detReportArtifactId.toString(), imported.recReportArtifactId.toString(),
             imported.systemReportArtifactId.toString(), QJsonObject(), &error,
             QUuid::createUuid().toString(QUuid::WithoutBraces)), qPrintable(error));
@@ -1825,13 +1880,15 @@ private slots:
         QJsonObject workflowResult;
         connect(&client, &WorkerClient::messageReceived, this,
             [&](const QString& type, const QJsonObject& payload) {
-                if (type == wp::event::runtimeDeliveryWorkflowV2()) workflowResult = payload;
+                if (type == wp::event::runtimeDeliveryWorkflow()) workflowResult = payload;
                 if (wp::isTerminalEvent(type)) ++terminalCount;
             });
         connect(&client, &WorkerClient::finished, this,
-            [&](bool value, const QString&) { ok = value; finished = true; });
+            [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
+                ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
+            });
         const QString taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        QVERIFY2(client.requestRuntimeDeliveryWorkflowV2(workerExecutablePath(), projectRoot,
+        QVERIFY2(client.requestRuntimeDeliveryWorkflow(workerExecutablePath(), projectRoot,
             modelPackageId, QStringLiteral("aitrain_ncnn"), imagePath,
             QJsonObject(), &error, taskId), qPrintable(error));
         QTRY_VERIFY_WITH_TIMEOUT(finished, 30000);
@@ -1863,13 +1920,15 @@ private slots:
         QString terminalType;
         connect(&client, &WorkerClient::messageReceived, this,
             [&](const QString& type, const QJsonObject& payload) {
-                if (type == wp::event::runtimeDeliveryWorkflowV2()) workflowResult = payload;
+                if (type == wp::event::runtimeDeliveryWorkflow()) workflowResult = payload;
                 if (wp::isTerminalEvent(type)) { ++terminalCount; terminalType = type; }
             });
         connect(&client, &WorkerClient::finished, this,
-            [&](bool value, const QString&) { ok = value; finished = true; });
+            [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
+                ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
+            });
         const QString taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        QVERIFY2(client.requestRuntimeDeliveryWorkflowV2(workerExecutablePath(), projectRoot,
+        QVERIFY2(client.requestRuntimeDeliveryWorkflow(workerExecutablePath(), projectRoot,
             modelPackageId, QStringLiteral("aitrain_onnxruntime"), imagePath,
             QJsonObject(), &error, taskId), qPrintable(error));
         client.cancel();
@@ -1900,9 +1959,11 @@ private slots:
                 if (wp::isTerminalEvent(type)) { ++terminalCount; terminalType = type; }
             });
         connect(&client, &WorkerClient::finished, this,
-            [&](bool value, const QString&) { ok = value; finished = true; });
+            [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
+                ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
+            });
         QString error;
-        QVERIFY2(client.requestRuntimeDeliveryWorkflowV2(workerExecutablePath(), projectRoot,
+        QVERIFY2(client.requestRuntimeDeliveryWorkflow(workerExecutablePath(), projectRoot,
             QUuid::createUuid().toString(QUuid::WithoutBraces), QStringLiteral("aitrain_onnxruntime"),
             imagePath, QJsonObject(), &error, QStringLiteral("not-a-task-uuid")), qPrintable(error));
         QTRY_VERIFY_WITH_TIMEOUT(finished, 10000);
@@ -1911,7 +1972,7 @@ private slots:
         QCOMPARE(terminalType, wp::event::failed());
     }
 
-    void v2MismatchedCapabilityProfileIsRejected()
+    void mismatchedCapabilityProfileIsRejected()
     {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
@@ -1937,12 +1998,13 @@ private slots:
         QString message;
         QStringList logs;
         connect(&client, &WorkerClient::logLine, this, [&logs](const QString& line) { logs.append(line); });
-        connect(&client, &WorkerClient::finished, this, [&finished, &ok, &message](bool result, const QString& value) {
+        connect(&client, &WorkerClient::finished, this,
+            [&finished, &ok, &message](WorkerClient::WorkerTerminalStatus result, const QString& value) {
             finished = true;
-            ok = result;
+            ok = result == WorkerClient::WorkerTerminalStatus::Succeeded;
             message = value;
         });
-        QVERIFY2(client.requestTrainingWorkflowV2(workerExecutablePath(), request, &error), qPrintable(error));
+        QVERIFY2(client.requestTrainingWorkflow(workerExecutablePath(), request, &error), qPrintable(error));
         QTRY_VERIFY_WITH_TIMEOUT(finished, 10000);
         QVERIFY(!ok);
         const QString evidence = message + QStringLiteral("\n") + logs.join(QStringLiteral("\n"));
@@ -1950,19 +2012,19 @@ private slots:
             || evidence.contains(QStringLiteral("Workflow Profile")), qPrintable(evidence));
     }
 
-    void v2YoloWorkflowTerminalEvidence_data()
+    void yoloWorkflowTerminalEvidence_data()
     {
         QTest::addColumn<QString>("modelName");
         QTest::addColumn<bool>("requestCancel");
         QTest::addColumn<QString>("terminalEvent");
         QTest::addColumn<int>("expectedState");
         QTest::newRow("failed") << QStringLiteral("fake-yolo-fail.yaml") << false
-                                 << QStringLiteral("failed") << static_cast<int>(aitrain::v2::TaskState::Failed);
+                                 << QStringLiteral("failed") << static_cast<int>(aitrain::TaskState::Failed);
         QTest::newRow("canceled") << QStringLiteral("fake-yolo-slow.yaml") << true
-                                   << QStringLiteral("canceled") << static_cast<int>(aitrain::v2::TaskState::Canceled);
+                                   << QStringLiteral("canceled") << static_cast<int>(aitrain::TaskState::Canceled);
     }
 
-    void v2YoloWorkflowTerminalEvidence()
+    void yoloWorkflowTerminalEvidence()
     {
         QFETCH(QString, modelName);
         QFETCH(bool, requestCancel);
@@ -2021,7 +2083,7 @@ private slots:
                 if (type == QStringLiteral("artifact")) {
                     const QString kind = payload.value(QStringLiteral("kind")).toString();
                     artifactKinds.insert(kind);
-                    if (kind == QStringLiteral("evidence_bundle_v2")) evidencePath = committedArtifactEventPath(projectRoot, payload);
+                    if (kind == QStringLiteral("evidence_bundle")) evidencePath = committedArtifactEventPath(projectRoot, payload);
                 }
                 if (type == QStringLiteral("failed") || type == QStringLiteral("canceled")) {
                     observedTerminal = type;
@@ -2034,34 +2096,35 @@ private slots:
                 }
             });
         connect(&client, &WorkerClient::logLine, this, [&logs](const QString& line) { logs.append(line); });
-        connect(&client, &WorkerClient::finished, this, [&finished, &ok](bool result, const QString&) {
+        connect(&client, &WorkerClient::finished, this,
+            [&finished, &ok](WorkerClient::WorkerTerminalStatus result, const QString&) {
             finished = true;
-            ok = result;
+            ok = result == WorkerClient::WorkerTerminalStatus::Succeeded;
         });
-        QVERIFY2(client.requestTrainingWorkflowV2(workerExecutablePath(), request, &error), qPrintable(error));
+        QVERIFY2(client.requestTrainingWorkflow(workerExecutablePath(), request, &error), qPrintable(error));
         QTRY_VERIFY2_WITH_TIMEOUT(finished, qPrintable(logs.join(QStringLiteral("\n"))), 20000);
         QVERIFY(!ok);
         if (requestCancel) QVERIFY(cancelSent);
         QCOMPARE(observedTerminal, terminalEvent);
-        QVERIFY(artifactKinds.contains(QStringLiteral("evidence_bundle_v2")));
-        QVERIFY(!artifactKinds.contains(QStringLiteral("model_manifest_v2")));
+        QVERIFY(artifactKinds.contains(QStringLiteral("evidence_bundle")));
+        QVERIFY(!artifactKinds.contains(QStringLiteral("model_manifest")));
         const QJsonObject terminalEvidence = readJsonObject(evidencePath);
         QCOMPARE(terminalEvidence.value(QStringLiteral("task")).toObject().value(QStringLiteral("state")).toString(),
             terminalEvent == QStringLiteral("failed") ? QStringLiteral("failed") : QStringLiteral("canceled"));
         QVERIFY(!terminalEvidence.value(QStringLiteral("task")).toObject()
             .value(QStringLiteral("failure")).toObject().value(QStringLiteral("code")).toString().isEmpty());
 
-        aitrain::v2::StorageV2 storage;
-        QVERIFY2(storage.open(QDir(projectRoot).filePath(QStringLiteral(".aitrain-v2/project-v2.sqlite")), &error), qPrintable(error));
-        aitrain::v2::TaskId taskId;
-        QVERIFY2(aitrain::v2::TaskId::parse(taskIdText, &taskId, &error), qPrintable(error));
-        aitrain::v2::TaskSnapshot task;
+        aitrain::ProjectStore storage;
+        QVERIFY2(storage.open(QDir(projectRoot).filePath(QStringLiteral(".aitrain/project.sqlite")), &error), qPrintable(error));
+        aitrain::TaskId taskId;
+        QVERIFY2(aitrain::TaskId::parse(taskIdText, &taskId, &error), qPrintable(error));
+        aitrain::TaskSnapshot task;
         QVERIFY2(storage.task(taskId, &task, &error), qPrintable(error));
         QCOMPARE(static_cast<int>(task.state), expectedState);
-        QVERIFY(task.failure.code != aitrain::v2::FailureCode::None);
+        QVERIFY(task.failure.code != aitrain::FailureCode::None);
     }
 
-    void v2LegacyTrainingPathFieldsAreRejected()
+    void legacyTrainingPathFieldsAreRejected()
     {
         QTemporaryDir dir;
         QVERIFY(dir.isValid());
@@ -2084,13 +2147,14 @@ private slots:
         QString terminalMessage;
         QStringList logs;
         connect(&client, &WorkerClient::logLine, this, [&logs](const QString& line) { logs.append(line); });
-        connect(&client, &WorkerClient::finished, this, [&finished, &ok, &terminalMessage](bool result, const QString& message) {
+        connect(&client, &WorkerClient::finished, this,
+            [&finished, &ok, &terminalMessage](WorkerClient::WorkerTerminalStatus result, const QString& message) {
             finished = true;
-            ok = result;
+            ok = result == WorkerClient::WorkerTerminalStatus::Succeeded;
             terminalMessage = message;
         });
         QString error;
-        QVERIFY2(client.requestTrainingWorkflowV2(workerExecutablePath(), request, &error), qPrintable(error));
+        QVERIFY2(client.requestTrainingWorkflow(workerExecutablePath(), request, &error), qPrintable(error));
         QTRY_VERIFY2_WITH_TIMEOUT(finished, qPrintable(logs.join(QStringLiteral("\n"))), 10000);
         QVERIFY(!ok);
         const QString diagnostic = terminalMessage + QStringLiteral("\n") + logs.join(QStringLiteral("\n"));
@@ -2098,7 +2162,7 @@ private slots:
             && diagnostic.contains(QStringLiteral("原始路径")), qPrintable(diagnostic));
     }
 
-    void workerRunsV2ProfiledTrainingWorkflowEndToEnd_data()
+    void workerRunsProfiledTrainingWorkflowEndToEnd_data()
     {
         QTest::addColumn<QString>("datasetFormat");
         QTest::addColumn<QString>("taskType");
@@ -2165,7 +2229,7 @@ private slots:
             << QStringLiteral("paddleocr_official_rec_v1");
     }
 
-    void workerRunsV2ProfiledTrainingWorkflowEndToEnd()
+    void workerRunsProfiledTrainingWorkflowEndToEnd()
     {
         QFETCH(QString, datasetFormat);
         QFETCH(QString, taskType);
@@ -2180,7 +2244,7 @@ private slots:
         if (datasetFormat != QStringLiteral("anomaly_folder")
             && !datasetFormat.startsWith(QStringLiteral("paddleocr_"))
             && !pythonCanImportModule(python, QStringLiteral("onnx"))) {
-            QSKIP("Python onnx package is not available for the V2 YOLO workflow fixture.");
+            QSKIP("Python onnx package is not available for the  YOLO workflow fixture.");
         }
 
         QTemporaryDir dir;
@@ -2286,15 +2350,16 @@ private slots:
         connect(&client, &WorkerClient::logLine, this, [&logs](const QString& line) {
             logs.append(line);
         });
-        connect(&client, &WorkerClient::finished, this, [&finished, &ok, &finishedMessage](bool result, const QString& message) {
+        connect(&client, &WorkerClient::finished, this,
+            [&finished, &ok, &finishedMessage](WorkerClient::WorkerTerminalStatus result, const QString& message) {
             finished = true;
-            ok = result;
+            ok = result == WorkerClient::WorkerTerminalStatus::Succeeded;
             finishedMessage = message;
         });
 
-        QVERIFY2(client.requestTrainingWorkflowV2(trainingWorker, request, &error), qPrintable(error));
+        QVERIFY2(client.requestTrainingWorkflow(trainingWorker, request, &error), qPrintable(error));
         QTRY_VERIFY2_WITH_TIMEOUT(finished,
-            qPrintable(QStringLiteral("V2 Worker did not finish. Logs:\n%1").arg(logs.join(QStringLiteral("\n")))), 60000);
+            qPrintable(QStringLiteral(" Worker did not finish. Logs:\n%1").arg(logs.join(QStringLiteral("\n")))), 60000);
         QVERIFY2(ok, qPrintable(QStringList({finishedMessage, logs.join(QStringLiteral("\n"))}).join(QStringLiteral("\n"))));
         QTRY_VERIFY_WITH_TIMEOUT(!client.isRunning(), 5000);
 
@@ -2326,14 +2391,14 @@ private slots:
         QVERIFY(!sawFailure);
         QCOMPARE(stepKinds, QStringList({QStringLiteral("Train"), QStringLiteral("Evaluate"), QStringLiteral("Export"),
             QStringLiteral("DeploymentValidate"), QStringLiteral("RegisterModel"), QStringLiteral("RenderDeliveryReport")}));
-        QVERIFY(artifactKinds.contains(QStringLiteral("model_manifest_v2")));
+        QVERIFY(artifactKinds.contains(QStringLiteral("model_manifest")));
         const bool paddleOcr = datasetFormat.startsWith(QStringLiteral("paddleocr_"));
         const QString deploymentReportKind = paddleOcr
             ? QStringLiteral("deployment_report") : QStringLiteral("deployment_validation_report");
         QVERIFY(artifactKinds.contains(deploymentReportKind));
         QVERIFY(artifactKinds.contains(paddleOcr ? QStringLiteral("prediction") : QStringLiteral("deployment_predictions")));
         QVERIFY(artifactKinds.contains(paddleOcr ? QStringLiteral("preview") : QStringLiteral("deployment_overlay")));
-        const QJsonObject manifest = readJsonObject(artifactPaths.value(QStringLiteral("model_manifest_v2")));
+        const QJsonObject manifest = readJsonObject(artifactPaths.value(QStringLiteral("model_manifest")));
         QCOMPARE(manifest.value(QStringLiteral("modelFamily")).toString(), modelFamily);
         QCOMPARE(manifest.value(QStringLiteral("decoder")).toString(), decoder);
         QCOMPARE(manifest.value(QStringLiteral("runtimeRoutes")).toArray(),
@@ -2395,8 +2460,8 @@ private slots:
             QVERIFY(values.first().toObject().value(QStringLiteral("pixelCounts")).isObject());
         }
         const QStringList evidenceLogs = logs.filter(QStringLiteral("Evidence Bundle"));
-        QVERIFY2(artifactKinds.contains(QStringLiteral("evidence_bundle_v2")), qPrintable(evidenceLogs.join(QStringLiteral("\n"))));
-        const QJsonObject evidence = readJsonObject(artifactPaths.value(QStringLiteral("evidence_bundle_v2")));
+        QVERIFY2(artifactKinds.contains(QStringLiteral("evidence_bundle")), qPrintable(evidenceLogs.join(QStringLiteral("\n"))));
+        const QJsonObject evidence = readJsonObject(artifactPaths.value(QStringLiteral("evidence_bundle")));
         QVERIFY(!evidence.value(QStringLiteral("datasetSnapshotId")).toString().isEmpty());
         QCOMPARE(evidence.value(QStringLiteral("runtimeStatus")).toObject()
             .value(QStringLiteral("steps")).toArray().size(), 8);
@@ -2588,7 +2653,7 @@ private slots:
     {
         QTemporaryDir projectDir;
         QVERIFY(projectDir.isValid());
-        const aitrain::v2::TaskId taskId = aitrain::v2::TaskId::create();
+        const aitrain::TaskId taskId = aitrain::TaskId::create();
 
         WorkerClient client;
         QVector<QPair<QString, QJsonObject>> messages;
@@ -2601,7 +2666,7 @@ private slots:
         });
 
         QString error;
-        QVERIFY2(client.requestEnvironmentCheckWorkflowV2(workerExecutablePath(), projectDir.path(),
+        QVERIFY2(client.requestEnvironmentCheckWorkflow(workerExecutablePath(), projectDir.path(),
             &error, taskId.toString()), qPrintable(error));
         // 环境检查会探测多个本地 Python/SDK 配置；在繁忙 Windows 主机上已观测到超过 15 秒。
         // 该超时只覆盖异步 Worker 完成，不放宽检查结果断言。
@@ -2609,7 +2674,7 @@ private slots:
 
         bool sawResult = false;
         for (const auto& message : messages) {
-            if (message.first != QStringLiteral("environmentCheckWorkflowV2")) continue;
+            if (message.first != QStringLiteral("environmentCheckWorkflow")) continue;
             sawResult = true;
             QCOMPARE(message.second.value(QStringLiteral("taskId")).toString(), taskId.toString());
             QVERIFY(!message.second.value(QStringLiteral("reportArtifactId")).toString().isEmpty());
@@ -2620,7 +2685,7 @@ private slots:
         }
         QVERIFY(sawResult);
 
-        aitrain::v2::ProjectWorkspaceV2 workspace;
+        aitrain::ProjectWorkspace workspace;
         QVERIFY2(workspace.open(projectDir.path(), &error), qPrintable(error));
         QJsonObject report;
         QVERIFY2(workspace.environmentCheckReportForTask(taskId, &report, &error), qPrintable(error));

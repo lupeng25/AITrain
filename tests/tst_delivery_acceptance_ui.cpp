@@ -40,14 +40,14 @@ private slots:
     void capabilityPanelEnglishFallbackIsComplete();
     void workerStartFailureIsReportedAsynchronously();
     void runtimeDeliveryPagesExposeOneSixStepProductEntry();
-    void annotationSessionUiUsesV2ArtifactBoundary();
-    void dataQualityUiUsesV2RegisteredIdentityBoundary();
+    void annotationSessionUiUsesArtifactBoundary();
+    void dataQualityUiUsesRegisteredIdentityBoundary();
     void datasetConversionUiUsesExplicitImportBoundary();
     void datasetSnapshotImportUiUsesExplicitImportBoundary();
     void datasetSplitUiUsesRegisteredIdentityBoundary();
     void ocrAcceptanceUiUsesControlledImportAndArtifactOnlyAcceptance();
-    void taskPageExposesV2ReadOnlyObjects();
-    void projectAndDashboardExposeV2SummaryPresenter();
+    void taskPageExposesReadOnlyObjects();
+    void projectAndDashboardExposeSummaryPresenter();
 
 private:
     QString previousLanguage_;
@@ -196,7 +196,7 @@ void EnvironmentDeliveryEvidenceUiTests::embeddedWorkspaceTabsExist()
     auto* modelTabs = window.findChild<QTabWidget*>(QStringLiteral("ModelWorkspaceTabs"));
     QVERIFY(modelTabs != nullptr);
     QCOMPARE(modelTabs->count(), 5);
-    QCOMPARE(modelTabs->tabText(0), QStringLiteral("V2 模型包"));
+    QCOMPARE(modelTabs->tabText(0), QStringLiteral(" 模型包"));
     QCOMPARE(modelTabs->tabText(1), QStringLiteral("旧模型版本"));
     QCOMPARE(modelTabs->tabText(2), QStringLiteral("评估报告"));
     QCOMPARE(modelTabs->tabText(3), QStringLiteral("模型对比"));
@@ -219,38 +219,38 @@ void EnvironmentDeliveryEvidenceUiTests::embeddedWorkspaceTabsExist()
     QCOMPARE(settingsTabs->tabText(1), QStringLiteral("应用设置"));
 }
 
-void EnvironmentDeliveryEvidenceUiTests::taskPageExposesV2ReadOnlyObjects()
+void EnvironmentDeliveryEvidenceUiTests::taskPageExposesReadOnlyObjects()
 {
     MainWindow& window = *window_;
     QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
         Q_ARG(int, MainWindow::TaskQueuePage), Q_ARG(QString, QStringLiteral("任务与产物"))));
 
-    QObject* presenter = window.findChild<QObject*>(QStringLiteral("TaskArtifactPresenterV2"));
+    QObject* presenter = window.findChild<QObject*>(QStringLiteral("TaskArtifactPresenter"));
     QVERIFY(presenter != nullptr);
     QVERIFY(presenter->property("taskCount").isValid());
     QVERIFY(presenter->property("selectedTaskId").isValid());
-    QVERIFY(window.findChild<QTableWidget*>(QStringLiteral("TaskQueueTableV2")) != nullptr);
-    QVERIFY(window.findChild<QTableWidget*>(QStringLiteral("TaskArtifactTableV2")) != nullptr);
-    QVERIFY(window.findChild<QTableWidget*>(QStringLiteral("TaskMetricTableV2")) != nullptr);
-    QVERIFY(window.findChild<QTableWidget*>(QStringLiteral("TaskWorkflowTableV2")) != nullptr);
+    QVERIFY(window.findChild<QTableWidget*>(QStringLiteral("TaskQueueTable")) != nullptr);
+    QVERIFY(window.findChild<QTableWidget*>(QStringLiteral("TaskArtifactTable")) != nullptr);
+    QVERIFY(window.findChild<QTableWidget*>(QStringLiteral("TaskMetricTable")) != nullptr);
+    QVERIFY(window.findChild<QTableWidget*>(QStringLiteral("TaskWorkflowTable")) != nullptr);
     auto* detailTabs = window.findChild<QTabWidget*>(QStringLiteral("TaskDetailTabs"));
     QVERIFY(detailTabs != nullptr);
     QCOMPARE(detailTabs->tabText(2), QStringLiteral("工作流"));
 }
 
-void EnvironmentDeliveryEvidenceUiTests::annotationSessionUiUsesV2ArtifactBoundary()
+void EnvironmentDeliveryEvidenceUiTests::annotationSessionUiUsesArtifactBoundary()
 {
     MainWindow& window = *window_;
     QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
         Q_ARG(int, MainWindow::DatasetPage), Q_ARG(QString, QStringLiteral("数据集"))));
-    QVERIFY(window.findChild<QPushButton*>(QStringLiteral("CreateAnnotationSessionV2Button")) != nullptr);
-    QVERIFY(window.findChild<QPushButton*>(QStringLiteral("SyncAnnotationSessionV2Button")) != nullptr);
+    QVERIFY(window.findChild<QPushButton*>(QStringLiteral("CreateAnnotationSessionButton")) != nullptr);
+    QVERIFY(window.findChild<QPushButton*>(QStringLiteral("SyncAnnotationSessionButton")) != nullptr);
 
     namespace wp = aitrain::worker_protocol;
     const QString taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     const QString repairArtifactId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     const QString sessionArtifactId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    const QJsonObject createPayload = wp::annotationSessionCreateV2Request(taskId,
+    const QJsonObject createPayload = wp::annotationSessionCreateRequest(taskId,
         QStringLiteral("C:/project"), repairArtifactId, QStringLiteral("C:/work/session"),
         QJsonObject{{QStringLiteral("tool"), QStringLiteral("X-AnyLabeling")}}, QJsonObject());
     QCOMPARE(createPayload.value(QStringLiteral("repairManifestArtifactId")).toString(), repairArtifactId);
@@ -259,7 +259,7 @@ void EnvironmentDeliveryEvidenceUiTests::annotationSessionUiUsesV2ArtifactBounda
     QVERIFY(!createPayload.contains(QStringLiteral("reportPath")));
     QVERIFY(!createPayload.contains(QStringLiteral("sessionManifestPath")));
 
-    const QJsonObject syncPayload = wp::annotationSessionSyncV2Request(taskId,
+    const QJsonObject syncPayload = wp::annotationSessionSyncRequest(taskId,
         QStringLiteral("C:/project"), sessionArtifactId, QStringLiteral("C:/work/session"), QJsonObject());
     QCOMPARE(syncPayload.value(QStringLiteral("sessionArtifactId")).toString(), sessionArtifactId);
     QVERIFY(!syncPayload.contains(QStringLiteral("datasetPath")));
@@ -268,12 +268,12 @@ void EnvironmentDeliveryEvidenceUiTests::annotationSessionUiUsesV2ArtifactBounda
     QVERIFY(!syncPayload.contains(QStringLiteral("sessionManifestPath")));
 }
 
-void EnvironmentDeliveryEvidenceUiTests::dataQualityUiUsesV2RegisteredIdentityBoundary()
+void EnvironmentDeliveryEvidenceUiTests::dataQualityUiUsesRegisteredIdentityBoundary()
 {
     MainWindow& window = *window_;
     QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
         Q_ARG(int, MainWindow::DatasetPage), Q_ARG(QString, QStringLiteral("数据集"))));
-    QVERIFY(window.findChild<QPushButton*>(QStringLiteral("RunDataQualityWorkflowV2Button")) != nullptr);
+    QVERIFY(window.findChild<QPushButton*>(QStringLiteral("RunDataQualityWorkflowButton")) != nullptr);
     QVERIFY(window.findChild<QLineEdit*>(QStringLiteral("DataQualityDatasetId")) != nullptr);
     QVERIFY(window.findChild<QLineEdit*>(QStringLiteral("DataQualityDatasetVersionId")) != nullptr);
     QVERIFY(window.findChild<QLineEdit*>(QStringLiteral("DataQualitySnapshotId")) != nullptr);
@@ -285,7 +285,7 @@ void EnvironmentDeliveryEvidenceUiTests::dataQualityUiUsesV2RegisteredIdentityBo
     const QString versionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     const QString snapshotId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     const QString artifactId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    const QJsonObject payload = wp::dataQualityWorkflowV2Request(taskId,
+    const QJsonObject payload = wp::dataQualityWorkflowRequest(taskId,
         QStringLiteral("C:/project"), datasetId, versionId, snapshotId, artifactId,
         QJsonObject{{QStringLiteral("maxIssues"), 500}});
     QCOMPARE(payload.value(QStringLiteral("datasetId")).toString(), datasetId);
@@ -302,11 +302,11 @@ void EnvironmentDeliveryEvidenceUiTests::datasetConversionUiUsesExplicitImportBo
     MainWindow& window = *window_;
     QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
         Q_ARG(int, MainWindow::DatasetPage), Q_ARG(QString, QStringLiteral("数据集"))));
-    QVERIFY(window.findChild<QPushButton*>(QStringLiteral("RunDatasetConversionWorkflowV2Button")) != nullptr);
+    QVERIFY(window.findChild<QPushButton*>(QStringLiteral("RunDatasetConversionWorkflowButton")) != nullptr);
     QVERIFY(window.findChild<QLineEdit*>(QStringLiteral("DatasetConversionTargetDatasetId")) != nullptr);
     QVERIFY(window.findChild<QLineEdit*>(QStringLiteral("DatasetConversionTargetDatasetName")) != nullptr);
     namespace wp = aitrain::worker_protocol;
-    const QJsonObject payload = wp::datasetConversionWorkflowV2Request(
+    const QJsonObject payload = wp::datasetConversionWorkflowRequest(
         QUuid::createUuid().toString(QUuid::WithoutBraces), QStringLiteral("C:/project"),
         QStringLiteral("C:/incoming/annotations.json"), QStringLiteral("coco_json"),
         QStringLiteral("yolo_detection"),
@@ -326,11 +326,11 @@ void EnvironmentDeliveryEvidenceUiTests::datasetSnapshotImportUiUsesExplicitImpo
     QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
         Q_ARG(int, MainWindow::DatasetPage), Q_ARG(QString, QStringLiteral("数据集"))));
     QVERIFY(window.findChild<QPushButton*>(
-        QStringLiteral("RunDatasetSnapshotImportWorkflowV2Button")) != nullptr);
+        QStringLiteral("RunDatasetSnapshotImportWorkflowButton")) != nullptr);
     QVERIFY(window.findChild<QLineEdit*>(QStringLiteral("DatasetSnapshotTargetDatasetId")) != nullptr);
     QVERIFY(window.findChild<QLineEdit*>(QStringLiteral("DatasetSnapshotTargetDatasetName")) != nullptr);
     namespace wp = aitrain::worker_protocol;
-    const QJsonObject payload = wp::datasetSnapshotImportWorkflowV2Request(
+    const QJsonObject payload = wp::datasetSnapshotImportWorkflowRequest(
         QUuid::createUuid().toString(QUuid::WithoutBraces), QStringLiteral("C:/project"),
         QStringLiteral("C:/incoming/dataset"), QStringLiteral("yolo_detection"),
         QUuid::createUuid().toString(QUuid::WithoutBraces), QStringLiteral("导入快照"),
@@ -357,7 +357,7 @@ void EnvironmentDeliveryEvidenceUiTests::datasetSplitUiUsesRegisteredIdentityBou
     QVERIFY(window.findChild<QLineEdit*>(QStringLiteral("SplitTargetDatasetName")) != nullptr);
     namespace wp = aitrain::worker_protocol;
     const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    const QJsonObject payload = wp::datasetSplitWorkflowV2Request(id,
+    const QJsonObject payload = wp::datasetSplitWorkflowRequest(id,
         QStringLiteral("C:/project"), id, id, id, id, id, QStringLiteral("划分目标"),
         QJsonObject{{QStringLiteral("trainRatio"), 0.8},
             {QStringLiteral("valRatio"), 0.2}, {QStringLiteral("seed"), 42}});
@@ -378,8 +378,8 @@ void EnvironmentDeliveryEvidenceUiTests::ocrAcceptanceUiUsesControlledImportAndA
     MainWindow& window = *window_;
     QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
         Q_ARG(int, MainWindow::EnvironmentPage), Q_ARG(QString, QStringLiteral("环境"))));
-    QVERIFY(window.findChild<QPushButton*>(QStringLiteral("ImportOcrOfficialReportsV2Button")) != nullptr);
-    QVERIFY(window.findChild<QPushButton*>(QStringLiteral("RunOcrAcceptanceWorkflowV2Button")) != nullptr);
+    QVERIFY(window.findChild<QPushButton*>(QStringLiteral("ImportOcrOfficialReportsButton")) != nullptr);
+    QVERIFY(window.findChild<QPushButton*>(QStringLiteral("RunOcrAcceptanceWorkflowButton")) != nullptr);
     QVERIFY(window.findChild<QLineEdit*>(QStringLiteral("OcrDetRawReportPath")) != nullptr);
     QVERIFY(window.findChild<QLineEdit*>(QStringLiteral("OcrDetReportArtifactId")) != nullptr);
 
@@ -391,14 +391,14 @@ void EnvironmentDeliveryEvidenceUiTests::ocrAcceptanceUiUsesControlledImportAndA
     const QJsonObject source{{QStringLiteral("reportPath"), QStringLiteral("C:/incoming/report.json")},
         {QStringLiteral("snapshotId"), QUuid::createUuid().toString(QUuid::WithoutBraces)},
         {QStringLiteral("snapshotArtifactId"), QString()}};
-    const QJsonObject importPayload = wp::ocrOfficialReportImportV2Request(taskId,
+    const QJsonObject importPayload = wp::ocrOfficialReportImportRequest(taskId,
         QStringLiteral("C:/project"), source, source, source, QStringLiteral("batch-a"),
         QStringLiteral("line-a"), QStringLiteral("customer_domain"));
     QVERIFY(importPayload.value(QStringLiteral("det")).toObject().contains(QStringLiteral("reportPath")));
     QVERIFY(!importPayload.contains(QStringLiteral("datasetPath")));
     QVERIFY(!importPayload.contains(QStringLiteral("outputPath")));
 
-    const QJsonObject acceptancePayload = wp::ocrAcceptanceWorkflowV2Request(taskId,
+    const QJsonObject acceptancePayload = wp::ocrAcceptanceWorkflowRequest(taskId,
         QStringLiteral("C:/project"), detArtifactId, recArtifactId, systemArtifactId,
         QJsonObject{{QStringLiteral("minimumSystemAccuracy"), 0.7}});
     QCOMPARE(acceptancePayload.value(QStringLiteral("detReportArtifactId")).toString(), detArtifactId);
@@ -408,27 +408,27 @@ void EnvironmentDeliveryEvidenceUiTests::ocrAcceptanceUiUsesControlledImportAndA
     QVERIFY(!acceptancePayload.contains(QStringLiteral("systemImagesPath")));
 }
 
-void EnvironmentDeliveryEvidenceUiTests::projectAndDashboardExposeV2SummaryPresenter()
+void EnvironmentDeliveryEvidenceUiTests::projectAndDashboardExposeSummaryPresenter()
 {
     MainWindow& window = *window_;
     QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
         Q_ARG(int, MainWindow::DashboardPage), Q_ARG(QString, QStringLiteral("总览"))));
 
-    QObject* presenter = window.findChild<QObject*>(QStringLiteral("ProjectSummaryPresenterV2"));
+    QObject* presenter = window.findChild<QObject*>(QStringLiteral("ProjectSummaryPresenter"));
     QVERIFY(presenter != nullptr);
-    QVERIFY(window.findChild<QObject*>(QStringLiteral("DiagnosticBundlePresenterV2")) != nullptr);
+    QVERIFY(window.findChild<QObject*>(QStringLiteral("DiagnosticBundlePresenter")) != nullptr);
     QVERIFY(presenter->property("available").isValid());
     QVERIFY(presenter->property("taskCount").isValid());
     QVERIFY(presenter->property("datasetCount").isValid());
     QVERIFY(presenter->property("modelPackageCount").isValid());
-    QVERIFY(window.findChild<QLabel*>(QStringLiteral("DashboardDatasetSummaryV2")) != nullptr);
-    QVERIFY(window.findChild<QLabel*>(QStringLiteral("DashboardTaskSummaryV2")) != nullptr);
+    QVERIFY(window.findChild<QLabel*>(QStringLiteral("DashboardDatasetSummary")) != nullptr);
+    QVERIFY(window.findChild<QLabel*>(QStringLiteral("DashboardTaskSummary")) != nullptr);
 
     QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
         Q_ARG(int, MainWindow::ProjectPage), Q_ARG(QString, QStringLiteral("项目"))));
-    QVERIFY(window.findChild<QLabel*>(QStringLiteral("ProjectDatasetSummaryV2")) != nullptr);
-    QVERIFY(window.findChild<QLabel*>(QStringLiteral("ProjectTaskSummaryV2")) != nullptr);
-    QVERIFY(window.findChild<QLabel*>(QStringLiteral("ProjectModelPackageSummaryV2")) != nullptr);
+    QVERIFY(window.findChild<QLabel*>(QStringLiteral("ProjectDatasetSummary")) != nullptr);
+    QVERIFY(window.findChild<QLabel*>(QStringLiteral("ProjectTaskSummary")) != nullptr);
+    QVERIFY(window.findChild<QLabel*>(QStringLiteral("ProjectModelPackageSummary")) != nullptr);
 
     QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
         Q_ARG(int, MainWindow::TaskQueuePage), Q_ARG(QString, QStringLiteral("任务与产物"))));
@@ -576,12 +576,13 @@ void EnvironmentDeliveryEvidenceUiTests::workerStartFailureIsReportedAsynchronou
     QString error;
     QElapsedTimer elapsed;
     elapsed.start();
-    QVERIFY2(client.requestEnvironmentCheckWorkflowV2(invalidWorker, directory.path(), &error,
-        aitrain::v2::TaskId::create().toString()), qPrintable(error));
+    QVERIFY2(client.requestEnvironmentCheckWorkflow(invalidWorker, directory.path(), &error,
+        aitrain::TaskId::create().toString()), qPrintable(error));
     QVERIFY2(elapsed.elapsed() < 500, "Worker 启动请求不应同步等待进程创建结果。");
     QVERIFY2(finishedSpy.wait(5000), "异步启动失败必须通过 finished 信号收口。");
     QCOMPARE(finishedSpy.count(), 1);
-    QVERIFY(!finishedSpy.first().at(0).toBool());
+    QCOMPARE(qvariant_cast<WorkerClient::WorkerTerminalStatus>(finishedSpy.first().at(0)),
+        WorkerClient::WorkerTerminalStatus::Failed);
     QVERIFY(finishedSpy.first().at(1).toString().contains(QStringLiteral("failed to start"), Qt::CaseInsensitive));
 }
 

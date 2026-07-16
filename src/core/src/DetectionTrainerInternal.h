@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "aitrain/core/DetectionTrainer.h"
 

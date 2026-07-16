@@ -30,7 +30,7 @@ python python_trainers/obb/ultralytics_trainer.py --request <request-json>
 
 OBB uses `taskType=obb_detection`, `datasetFormat=yolo_obb`, and `modelFamily=yolo_obb`. Training, first ONNX export, and evaluation are official Ultralytics OBB operations. Packaged OBB inference, overlay, benchmark, and deployment validation use AITrain C++ ONNX Runtime with rotated-box output. NCNN is not an OBB v1 target, and TensorRT runtime OBB inference is not claimed.
 
-YOLO detection/segmentation/OBB 的评估由 V2 八步训练 Workflow 的 `Evaluate` 步骤启动官方 evaluator；已删除独立的裸模型路径 `evaluateModel` Worker 命令：
+YOLO detection/segmentation/OBB 的评估由  八步训练 Workflow 的 `Evaluate` 步骤启动官方 evaluator；已删除独立的裸模型路径 `evaluateModel` Worker 命令：
 
 ```powershell
 python python_trainers/yolo/ultralytics_evaluator.py --request <request-json>
@@ -132,9 +132,9 @@ Supported message types:
 - `completed`
 - `failed`
 
-The Worker adds `taskId` when a payload omits it, then forwards the business event to the GUI inside the Protocol V2 control envelope described below.
+The Worker adds `taskId` when a payload omits it, then forwards the business event to the GUI inside the Protocol  control envelope described below.
 
-## GUI ↔ Worker Protocol V2 外层控制面
+## GUI ↔ Worker Protocol  外层控制面
 
 GUI 启动 Worker 时必须同时传入 `--server`、`--request-id` 与 `--task-id`。Worker 连接本地 Socket 后先发送 `event.ready`；GUI 随后只发送一次 `command.start_task`，取消只使用 `command.cancel_task`。旧 Dataset、Annotation、Report 等业务命令在迁移期放入 `command.start_task.payload.businessCommand/businessPayload`，不再直接作为 Socket 顶层 `type`。
 
@@ -142,7 +142,7 @@ Worker 事件统一使用 `event.ready`、`event.progress`、`event.metric`、`e
 
 ## Cancellation
 
-The Worker owns cancellation. If the GUI sends Protocol V2 `command.cancel_task`, the Worker terminates the Python subprocess and emits `event.canceled`；业务映射层再向现有 GUI signal 暴露 `canceled`。
+The Worker owns cancellation. If the GUI sends Protocol  `command.cancel_task`, the Worker terminates the Python subprocess and emits `event.canceled`；业务映射层再向现有 GUI signal 暴露 `canceled`。
 
 ## Official Backends
 

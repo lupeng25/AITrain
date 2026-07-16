@@ -1,7 +1,7 @@
 #pragma once
 
 #include "aitrain/core/Cancellation.h"
-#include "aitrain/v2/ProjectWorkspaceV2.h"
+#include "aitrain/workflow/ProjectWorkspace.h"
 
 #include <QJsonArray>
 #include <QLocalSocket>
@@ -17,8 +17,8 @@ class WorkerSession : public QObject {
 public:
     explicit WorkerSession(QObject* parent = nullptr);
     bool connectToServer(const QString& serverName,
-        const aitrain::v2::RequestId& requestId,
-        const aitrain::v2::TaskId& taskId);
+        const aitrain::RequestId& requestId,
+        const aitrain::TaskId& taskId);
 
 private slots:
     void readLines();
@@ -33,40 +33,40 @@ private:
     static QVector<CommandBinding> commandBindings();
 
     void handleMessage(const QString& type, const QJsonObject& payload);
-    void runEnvironmentCheckWorkflowV2Command(const QJsonObject& payload);
-    void runDatasetSplitWorkflowV2Command(const QJsonObject& payload);
-    void runDatasetConversionWorkflowV2Command(const QJsonObject& payload);
-    void runDataQualityWorkflowV2Command(const QJsonObject& payload);
-    void runDiagnosticsWorkflowV2Command(const QJsonObject& payload);
-    void createAnnotationSessionV2Command(const QJsonObject& payload);
-    void syncAnnotationSessionV2Command(const QJsonObject& payload);
-    void runDatasetSnapshotImportWorkflowV2Command(const QJsonObject& payload);
-    void importOcrOfficialReportsV2Command(const QJsonObject& payload);
-    void runOcrAcceptanceWorkflowV2Command(const QJsonObject& payload);
-    void runRuntimeDeliveryWorkflowV2Command(const QJsonObject& payload);
-    void importModelV2Command(const QJsonObject& payload);
-    void runTrainingWorkflowV2Command(const QJsonObject& payload);
+    void runEnvironmentCheckWorkflowCommand(const QJsonObject& payload);
+    void runDatasetSplitWorkflowCommand(const QJsonObject& payload);
+    void runDatasetConversionWorkflowCommand(const QJsonObject& payload);
+    void runDataQualityWorkflowCommand(const QJsonObject& payload);
+    void runDiagnosticsWorkflowCommand(const QJsonObject& payload);
+    void createAnnotationSessionCommand(const QJsonObject& payload);
+    void syncAnnotationSessionCommand(const QJsonObject& payload);
+    void runDatasetSnapshotImportWorkflowCommand(const QJsonObject& payload);
+    void importOcrOfficialReportsCommand(const QJsonObject& payload);
+    void runOcrAcceptanceWorkflowCommand(const QJsonObject& payload);
+    void runRuntimeDeliveryWorkflowCommand(const QJsonObject& payload);
+    void importModelCommand(const QJsonObject& payload);
+    void runTrainingWorkflowCommand(const QJsonObject& payload);
     void cancelCommand(const QJsonObject& payload);
-    void runEnvironmentCheckWorkflowV2(const QJsonObject& payload);
-    void runDatasetSplitWorkflowV2(const QJsonObject& payload);
-    void runDatasetConversionWorkflowV2(const QJsonObject& payload);
-    void runDataQualityWorkflowV2(const QJsonObject& payload);
-    void runDiagnosticsWorkflowV2(const QJsonObject& payload);
-    void createAnnotationSessionV2(const QJsonObject& payload);
-    void syncAnnotationSessionV2(const QJsonObject& payload);
-    void runDatasetSnapshotImportWorkflowV2(const QJsonObject& payload);
-    void importOcrOfficialReportsV2(const QJsonObject& payload);
-    void runOcrAcceptanceWorkflowV2(const QJsonObject& payload);
-    void runRuntimeDeliveryWorkflowV2(const QJsonObject& payload);
-    void importModelV2(const QJsonObject& payload);
-    void runTrainingWorkflowV2(const QJsonObject& payload);
-    void dispatchTrainingWorkflowV2(const aitrain::v2::TrainingWorkflowDispatchV2& dispatch);
-    void runTrainingWorkflowV2LocalStep(const aitrain::v2::TrainingWorkflowDispatchV2& dispatch);
-    void finishTrainingWorkflowV2(const aitrain::v2::TrainingWorkflowDispatchV2& dispatch);
-    void forwardTrainingWorkflowAdapterEvent(const aitrain::v2::ProtocolEnvelope& event);
-    void cancelTrainingWorkflowV2();
+    void runEnvironmentCheckWorkflow(const QJsonObject& payload);
+    void runDatasetSplitWorkflow(const QJsonObject& payload);
+    void runDatasetConversionWorkflow(const QJsonObject& payload);
+    void runDataQualityWorkflow(const QJsonObject& payload);
+    void runDiagnosticsWorkflow(const QJsonObject& payload);
+    void createAnnotationSession(const QJsonObject& payload);
+    void syncAnnotationSession(const QJsonObject& payload);
+    void runDatasetSnapshotImportWorkflow(const QJsonObject& payload);
+    void importOcrOfficialReports(const QJsonObject& payload);
+    void runOcrAcceptanceWorkflow(const QJsonObject& payload);
+    void runRuntimeDeliveryWorkflow(const QJsonObject& payload);
+    void importModel(const QJsonObject& payload);
+    void runTrainingWorkflow(const QJsonObject& payload);
+    void dispatchTrainingWorkflow(const aitrain::TrainingWorkflowDispatch& dispatch);
+    void runTrainingWorkflowLocalStep(const aitrain::TrainingWorkflowDispatch& dispatch);
+    void finishTrainingWorkflow(const aitrain::TrainingWorkflowDispatch& dispatch);
+    void forwardTrainingWorkflowAdapterEvent(const aitrain::ProtocolEnvelope& event);
+    void cancelTrainingWorkflow();
     void send(const QString& type, const QJsonObject& payload);
-    bool acceptControlEnvelope(const aitrain::v2::ProtocolEnvelope& envelope);
+    bool acceptControlEnvelope(const aitrain::ProtocolEnvelope& envelope);
     void rejectControlProtocol(const QString& message);
     aitrain::CancellationCallback cancellationCallback();
     aitrain::CancellationCallback pollingCancellationCallback(int timeoutMs = 0);
@@ -87,38 +87,38 @@ private:
     bool startTaskReceived_ = false;
     bool terminalEnvelopeSent_ = false;
     quint64 outgoingSequence_ = 0;
-    aitrain::v2::RequestId controlRequestId_;
-    aitrain::v2::TaskId controlTaskId_;
-    aitrain::v2::ProtocolV2SequenceTracker incomingSequenceTracker_;
+    aitrain::RequestId controlRequestId_;
+    aitrain::TaskId controlTaskId_;
+    aitrain::ProtocolSequenceTracker incomingSequenceTracker_;
     QString activeTaskId_;
     QString activeCommand_;
-    std::unique_ptr<aitrain::v2::ProjectWorkspaceV2> trainingWorkspaceV2_;
-    aitrain::v2::TaskId trainingWorkflowTaskIdV2_;
-    aitrain::v2::WorkflowRunId trainingWorkflowRunIdV2_;
+    std::unique_ptr<aitrain::ProjectWorkspace> trainingWorkspace_;
+    aitrain::TaskId trainingWorkflowTaskId_;
+    aitrain::WorkflowRunId trainingWorkflowRunId_;
     QString trainingWorkflowDeploymentSampleRelativePath_;
-    aitrain::v2::TrainingWorkflowAdapterConfigV2 trainingWorkflowAdapterConfigV2_;
-    std::unique_ptr<aitrain::v2::ProjectWorkspaceV2> runtimeDeliveryWorkspaceV2_;
-    aitrain::v2::TaskId runtimeDeliveryTaskIdV2_;
-    bool runtimeDeliveryRunningV2_ = false;
-    std::unique_ptr<aitrain::v2::ProjectWorkspaceV2> annotationWorkspaceV2_;
-    aitrain::v2::TaskId annotationTaskIdV2_;
-    bool annotationRunningV2_ = false;
-    std::unique_ptr<aitrain::v2::ProjectWorkspaceV2> ocrAcceptanceWorkspaceV2_;
-    aitrain::v2::TaskId ocrAcceptanceTaskIdV2_;
-    bool ocrAcceptanceRunningV2_ = false;
-    std::unique_ptr<aitrain::v2::ProjectWorkspaceV2> dataQualityWorkspaceV2_;
-    aitrain::v2::TaskId dataQualityTaskIdV2_;
-    bool dataQualityRunningV2_ = false;
-    std::unique_ptr<aitrain::v2::ProjectWorkspaceV2> datasetConversionWorkspaceV2_;
-    aitrain::v2::TaskId datasetConversionTaskIdV2_;
-    bool datasetConversionRunningV2_ = false;
-    std::unique_ptr<aitrain::v2::ProjectWorkspaceV2> datasetSnapshotImportWorkspaceV2_;
-    aitrain::v2::TaskId datasetSnapshotImportTaskIdV2_;
-    bool datasetSnapshotImportRunningV2_ = false;
-    std::unique_ptr<aitrain::v2::ProjectWorkspaceV2> datasetSplitWorkspaceV2_;
-    aitrain::v2::TaskId datasetSplitTaskIdV2_;
-    bool datasetSplitRunningV2_ = false;
-    std::unique_ptr<aitrain::v2::ProjectWorkspaceV2> diagnosticsWorkspaceV2_;
-    aitrain::v2::TaskId diagnosticsTaskIdV2_;
-    bool diagnosticsRunningV2_ = false;
+    aitrain::TrainingWorkflowAdapterConfig trainingWorkflowAdapterConfig_;
+    std::unique_ptr<aitrain::ProjectWorkspace> runtimeDeliveryWorkspace_;
+    aitrain::TaskId runtimeDeliveryTaskId_;
+    bool runtimeDeliveryRunning_ = false;
+    std::unique_ptr<aitrain::ProjectWorkspace> annotationWorkspace_;
+    aitrain::TaskId annotationTaskId_;
+    bool annotationRunning_ = false;
+    std::unique_ptr<aitrain::ProjectWorkspace> ocrAcceptanceWorkspace_;
+    aitrain::TaskId ocrAcceptanceTaskId_;
+    bool ocrAcceptanceRunning_ = false;
+    std::unique_ptr<aitrain::ProjectWorkspace> dataQualityWorkspace_;
+    aitrain::TaskId dataQualityTaskId_;
+    bool dataQualityRunning_ = false;
+    std::unique_ptr<aitrain::ProjectWorkspace> datasetConversionWorkspace_;
+    aitrain::TaskId datasetConversionTaskId_;
+    bool datasetConversionRunning_ = false;
+    std::unique_ptr<aitrain::ProjectWorkspace> datasetSnapshotImportWorkspace_;
+    aitrain::TaskId datasetSnapshotImportTaskId_;
+    bool datasetSnapshotImportRunning_ = false;
+    std::unique_ptr<aitrain::ProjectWorkspace> datasetSplitWorkspace_;
+    aitrain::TaskId datasetSplitTaskId_;
+    bool datasetSplitRunning_ = false;
+    std::unique_ptr<aitrain::ProjectWorkspace> diagnosticsWorkspace_;
+    aitrain::TaskId diagnosticsTaskId_;
+    bool diagnosticsRunning_ = false;
 };

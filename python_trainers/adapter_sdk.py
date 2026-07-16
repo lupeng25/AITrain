@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""V2 Python Adapter SDK.
+""" Python Adapter SDK.
 
 The SDK keeps the existing JSONL event shape while giving adapters one small,
 testable boundary for structured events, cooperative cancellation and child
-process execution.  Process-tree ownership remains with the V2 Worker Host;
+process execution.  Process-tree ownership remains with the  Worker Host;
 this module only owns the direct child it starts.
 """
 
@@ -25,7 +25,7 @@ from trainer_protocol import emit_event
 EventSink = Callable[[dict[str, Any]], None]
 CancellationCheck = Callable[[], bool]
 
-# Protocol V2 allows a complete event.log envelope up to 64 KiB.  Keep the
+# Protocol allows a complete event.log envelope up to 64 KiB.  Keep the
 # message itself below 48 KiB so envelope metadata and multibyte JSON escaping
 # cannot push a child-process log frame over the wire limit.
 MAX_STRUCTURED_LOG_MESSAGE_BYTES = 48 * 1024
@@ -48,7 +48,7 @@ class ChildProcessResult:
 
 
 class AdapterSdk:
-    """Emit V2-compatible adapter events and run a cancellable direct child."""
+    """Emit -compatible adapter events and run a cancellable direct child."""
 
     def __init__(
         self,
@@ -63,7 +63,12 @@ class AdapterSdk:
         self._backend = backend
         self._event_sink = event_sink
         self._cancellation_check = cancellation_check
-        self._cancel_file = Path(cancel_file) if cancel_file is not None else None
+        # Worker hosts always expose the cancellation file through the
+        # environment. Adapters that construct AdapterSdk directly must not
+        # silently lose that signal just because they omitted the optional
+        # constructor argument.
+        resolved_cancel_file = cancel_file if cancel_file is not None else os.environ.get("AITRAIN_CANCEL_FILE")
+        self._cancel_file = Path(resolved_cancel_file) if resolved_cancel_file else None
 
     @property
     def backend(self) -> str:
@@ -147,7 +152,7 @@ class AdapterSdk:
 
         Command arguments and environment values are intentionally not emitted.
         Callers can persist their own redacted command/environment summaries in a
-        report.  A V2 Worker Host must attach the root process to its Job Object
+        report.  A  Worker Host must attach the root process to its Job Object
         to guarantee cleanup of descendants.
         """
         if not command or not command[0]:
@@ -255,6 +260,6 @@ class AdapterSdk:
 
 
 def sdk_from_environment(backend: str, *, event_sink: EventSink | None = None) -> AdapterSdk:
-    """Create an SDK that observes the V2 host's optional cancel-file signal."""
+    """Create an SDK that observes the  host's optional cancel-file signal."""
     cancel_file = os.environ.get("AITRAIN_CANCEL_FILE")
     return AdapterSdk(backend, event_sink=event_sink, cancel_file=cancel_file)

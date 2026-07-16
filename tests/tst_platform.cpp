@@ -3,7 +3,7 @@
 #include "aitrain/core/CapabilityRegistry.h"
 #include "aitrain/core/Deployment.h"
 #include "aitrain/core/WorkerProtocol.h"
-#include "aitrain/v2/ProtocolV2.h"
+#include "aitrain/protocol/Protocol.h"
 
 class PlatformTests final : public QObject {
     Q_OBJECT
@@ -66,7 +66,7 @@ private slots:
     {
         namespace wp = aitrain::worker_protocol;
         const QJsonObject options{{QStringLiteral("dryRun"), true}};
-        const QJsonObject request = wp::dataQualityWorkflowV2Request(
+        const QJsonObject request = wp::dataQualityWorkflowRequest(
             QStringLiteral("task-1"), QStringLiteral("project"), QStringLiteral("dataset-id"),
             QStringLiteral("version-id"), QStringLiteral("snapshot-id"),
             QStringLiteral("artifact-id"), options);
@@ -78,30 +78,30 @@ private slots:
         QVERIFY(wp::isTerminalEvent(wp::event::completed()));
     }
 
-    void workerControlBridgeUsesProtocolV2Envelope()
+    void workerControlBridgeUsesProtocolEnvelope()
     {
         namespace wp = aitrain::worker_protocol;
-        const aitrain::v2::RequestId requestId = aitrain::v2::RequestId::create();
-        const aitrain::v2::TaskId taskId = aitrain::v2::TaskId::create();
+        const aitrain::RequestId requestId = aitrain::RequestId::create();
+        const aitrain::TaskId taskId = aitrain::TaskId::create();
         const QJsonObject businessPayload{{QStringLiteral("taskId"), taskId.toString()}};
 
-        const aitrain::v2::ProtocolEnvelope start = wp::control_v2::startTaskEnvelope(
-            requestId, taskId, 1, wp::command::runDataQualityWorkflowV2(), businessPayload);
+        const aitrain::ProtocolEnvelope start = wp::control::startTaskEnvelope(
+            requestId, taskId, 1, wp::command::runDataQualityWorkflow(), businessPayload);
         QCOMPARE(start.kind, QStringLiteral("command.start_task"));
         QString command;
         QJsonObject decodedPayload;
         QString error;
-        QVERIFY2(wp::control_v2::unpackStartTask(start, &command, &decodedPayload, &error), qPrintable(error));
-        QCOMPARE(command, wp::command::runDataQualityWorkflowV2());
+        QVERIFY2(wp::control::unpackStartTask(start, &command, &decodedPayload, &error), qPrintable(error));
+        QCOMPARE(command, wp::command::runDataQualityWorkflow());
         QCOMPARE(decodedPayload, businessPayload);
 
-        const aitrain::v2::ProtocolEnvelope result = wp::control_v2::eventEnvelope(
-            requestId, taskId, 2, wp::event::dataQualityWorkflowV2(), businessPayload);
+        const aitrain::ProtocolEnvelope result = wp::control::eventEnvelope(
+            requestId, taskId, 2, wp::event::dataQualityWorkflow(), businessPayload);
         QCOMPARE(result.kind, QStringLiteral("event.result"));
-        QVERIFY(aitrain::v2::isKnownProtocolV2Kind(result.kind));
+        QVERIFY(aitrain::isKnownProtocolKind(result.kind));
         QString event;
-        QVERIFY2(wp::control_v2::unpackBusinessEvent(result, &event, &decodedPayload, &error), qPrintable(error));
-        QCOMPARE(event, wp::event::dataQualityWorkflowV2());
+        QVERIFY2(wp::control::unpackBusinessEvent(result, &event, &decodedPayload, &error), qPrintable(error));
+        QCOMPARE(event, wp::event::dataQualityWorkflow());
         QCOMPARE(decodedPayload, businessPayload);
     }
 

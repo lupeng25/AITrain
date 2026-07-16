@@ -17,9 +17,9 @@ TRAINER_ROOT = Path(__file__).resolve().parents[1]
 if str(TRAINER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRAINER_ROOT))
 
-from adapter_event_channel_v2 import AdapterEventChannelV2, event_channel_from_environment  # noqa: E402
-from adapter_sdk import AdapterSdk  # noqa: E402
-from dataset_snapshot_v2 import materialize_dataset_snapshot_v2  # noqa: E402
+from adapter_event_channel import AdapterEventChannel, event_channel_from_environment  # noqa: E402
+from adapter_sdk import AdapterCanceled, AdapterSdk  # noqa: E402
+from dataset_snapshot import materialize_dataset_snapshot  # noqa: E402
 from trainer_protocol import configure_stdio, exception_details  # noqa: E402
 
 
@@ -37,11 +37,11 @@ PRESETS: dict[str, dict[str, Any]] = {
 configure_stdio()
 
 _adapter: AdapterSdk | None = None
-_event_channel: AdapterEventChannelV2 | None = None
+_event_channel: AdapterEventChannel | None = None
 
 
 def configure_adapter() -> None:
-    """Use authenticated V2 events when the Worker Host provides a channel."""
+    """Use authenticated  events when the Worker Host provides a channel."""
     global _adapter, _event_channel
     if _event_channel is None and os.environ.get("AITRAIN_EVENT_PORT"):
         _event_channel = event_channel_from_environment()
@@ -62,6 +62,10 @@ def active_adapter() -> AdapterSdk:
     configure_adapter()
     assert _adapter is not None
     return _adapter
+
+
+def check_canceled() -> None:
+    active_adapter().raise_if_canceled()
 
 
 def emit(event_type: str, **payload: Any) -> None:
@@ -108,9 +112,9 @@ def materialize_request_dataset(request: dict[str, Any], params: dict[str, Any],
     snapshot_manifest = str(params.get("datasetSnapshotManifest") or request.get("datasetSnapshotManifest") or "").strip()
     snapshot_staging = str(params.get("datasetSnapshotStagingPath") or request.get("datasetSnapshotStagingPath") or "").strip()
     if bool(snapshot_manifest) != bool(snapshot_staging):
-        raise ValueError("Dataset Snapshot V2 requires both manifest and staging paths.")
+        raise ValueError("Dataset Snapshot  requires both manifest and staging paths.")
     if snapshot_manifest:
-        dataset_path = materialize_dataset_snapshot_v2(dataset_path, snapshot_manifest, snapshot_staging)
+        dataset_path = materialize_dataset_snapshot(dataset_path, snapshot_manifest, snapshot_staging)
     return dataset_path, snapshot_manifest
 
 
@@ -367,12 +371,13 @@ def run_training(request: dict[str, Any]) -> int:
     output_path = Path(str(request.get("outputPath") or "")).resolve()
     params = request.get("parameters") if isinstance(request.get("parameters"), dict) else {}
     output_path.mkdir(parents=True, exist_ok=True)
+    check_canceled()
 
     try:
         dataset_path, snapshot_manifest = materialize_request_dataset(request, params, dataset_path)
     except Exception as exc:
         code = "dataset_snapshot_request_invalid" if "requires both" in str(exc) else "dataset_snapshot_invalid"
-        return fail("Dataset Snapshot V2 materialization failed.", code, exception_details(exc))
+        return fail("Dataset Snapshot  materialization failed.", code, exception_details(exc))
 
     if not dataset_path.exists():
         return fail(f"Dataset path does not exist: {dataset_path}", "dataset_missing")
@@ -425,10 +430,12 @@ def run_training(request: dict[str, Any]) -> int:
 
     emit("log", taskId=task_id, backend=BACKEND_ID, message=f"Starting SMP training preset={preset_id} encoder={encoder} classes={class_count}")
     for epoch in range(1, epochs + 1):
+        check_canceled()
         model.train()
         running_loss = 0.0
         sample_count = 0
         for images, masks, _names in train_loader:
+            check_canceled()
             images = images.to(device)
             masks = masks.to(device)
             optimizer.zero_grad(set_to_none=True)
@@ -443,6 +450,7 @@ def run_training(request: dict[str, Any]) -> int:
         confusion = torch.zeros((class_count, class_count), dtype=torch.int64, device="cpu")
         with torch.no_grad():
             for images, masks, _names in val_loader:
+                check_canceled()
                 images = images.to(device)
                 logits = model(images).detach().cpu()
                 predictions = logits.argmax(dim=1)
@@ -477,6 +485,7 @@ def run_training(request: dict[str, Any]) -> int:
             )
 
     try:
+        check_canceled()
         checkpoint = torch.load(best_checkpoint_path, map_location=device, weights_only=False)
     except TypeError:
         checkpoint = torch.load(best_checkpoint_path, map_location=device)
@@ -591,6 +600,9 @@ def main(argv: list[str] | None = None) -> int:
         try:
             return run_training(request)
         except Exception as exc:
+            if isinstance(exc, AdapterCanceled):
+                active_adapter().emit_canceled("SMP training canceled by request")
+                return 2
             return fail("Unhandled SMP training failure.", "unhandled_exception", exception_details(exc))
     finally:
         close_adapter()

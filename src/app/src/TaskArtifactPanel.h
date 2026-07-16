@@ -1,6 +1,6 @@
 #pragma once
 
-#include "TaskArtifactPresenterV2.h"
+#include "TaskArtifactPresenter.h"
 
 #include <QWidget>
 #include <QVector>
@@ -20,7 +20,7 @@ public:
 
     void clear();
     void setTaskSummary(const QString& summary);
-    void setV2Details(const TaskArtifactDetailsV2& details);
+    void setDetails(const TaskArtifactDetails& details);
     QString selectedArtifactPath() const;
     int artifactRowCount() const;
     int metricRowCount() const;

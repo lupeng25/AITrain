@@ -1,830 +1,597 @@
-#include "TestSupport.h"
+#include "aitrain/dataset/BuiltinDatasetDrivers.h"
+#include "aitrain/dataset/DatasetConversionService.h"
 
-#include "aitrain/core/DatasetConversion.h"
-
+#include <QColor>
+#include <QDateTime>
+#include <QDir>
 #include <QFile>
+#include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
-#include <QJsonObject>
-#include <QImage>
 #include <QTemporaryDir>
 #include <QTest>
 
-class DatasetConversionTests : public QObject {
+#include <memory>
+
+namespace {
+
+bool writeImage(const QString& path, int marker = 0)
+{
+    if (!QDir().mkpath(QFileInfo(path).absolutePath())) return false;
+    QImage image(16, 12, QImage::Format_RGB32);
+    image.fill(QColor(marker, 255 - marker, 32));
+    return image.save(path);
+}
+
+bool writeUtf8(const QString& path, const QString& text)
+{
+    if (!QDir().mkpath(QFileInfo(path).absolutePath())) return false;
+    QFile file(path);
+    const QByteArray bytes = text.toUtf8();
+    return file.open(QIODevice::WriteOnly | QIODevice::Truncate)
+        && file.write(bytes) == bytes.size();
+}
+
+bool createSparseFile(const QString& path, qint64 bytes)
+{
+    if (!QDir().mkpath(QFileInfo(path).absolutePath())) return false;
+    QFile file(path);
+    return file.open(QIODevice::WriteOnly | QIODevice::Truncate) && file.resize(bytes);
+}
+
+QString createCocoFixtureWithFileName(const QString& root, const QString& relative)
+{
+    if (!writeImage(QDir(root).filePath(relative), 31)) qFatal("write named COCO image failed");
+    const QJsonObject coco{
+        {QStringLiteral("images"), QJsonArray{QJsonObject{{QStringLiteral("id"), 1},
+             {QStringLiteral("file_name"), relative}, {QStringLiteral("width"), 16}, {QStringLiteral("height"), 12}}}},
+        {QStringLiteral("categories"), QJsonArray{QJsonObject{{QStringLiteral("id"), 7},
+             {QStringLiteral("name"), QStringLiteral("零件")}}}},
+        {QStringLiteral("annotations"), QJsonArray{QJsonObject{{QStringLiteral("id"), 1},
+             {QStringLiteral("image_id"), 1}, {QStringLiteral("category_id"), 7},
+             {QStringLiteral("bbox"), QJsonArray{2, 2, 8, 6}}}}}};
+    const QString path = QDir(root).filePath(QStringLiteral("annotations.json"));
+    if (!writeUtf8(path, QString::fromUtf8(QJsonDocument(coco).toJson(QJsonDocument::Compact)))) {
+        qFatal("write named COCO json failed");
+    }
+    return path;
+}
+
+aitrain::TaskSnapshot createTask(aitrain::ProjectStore* storage)
+{
+    aitrain::TaskSnapshot task;
+    task.id = aitrain::TaskId::create();
+    task.requestId = aitrain::RequestId::create();
+    task.capabilityId = QStringLiteral("dataset_conversion");
+    task.taskType = QStringLiteral("dataset_conversion");
+    task.state = aitrain::TaskState::Created;
+    task.createdAt = QDateTime::currentDateTimeUtc();
+    task.updatedAt = task.createdAt;
+    QString error;
+    if (!storage->createTask(task, &error)) qFatal("createTask failed: %s", qPrintable(error));
+    return task;
+}
+
+QString createCocoFixture(const QString& root, int imageCount, bool duplicateBasename = false, bool segmentation = false)
+{
+    QJsonArray images;
+    QJsonArray annotations;
+    for (int index = 0; index < imageCount; ++index) {
+        const QString relative = duplicateBasename
+            ? QStringLiteral("images/%1/a.png").arg(index)
+            : QStringLiteral("images/样本 %1.png").arg(index);
+        if (!writeImage(QDir(root).filePath(relative), index % 200)) qFatal("writeImage failed");
+        images.append(QJsonObject{{QStringLiteral("id"), index + 1},
+            {QStringLiteral("file_name"), relative}, {QStringLiteral("width"), 16}, {QStringLiteral("height"), 12}});
+        QJsonObject annotation{{QStringLiteral("id"), index + 1},
+            {QStringLiteral("image_id"), index + 1}, {QStringLiteral("category_id"), 7},
+            {QStringLiteral("bbox"), QJsonArray{2, 2, 8, 6}}};
+        if (segmentation) {
+            annotation.insert(QStringLiteral("segmentation"),
+                QJsonArray{QJsonArray{2, 2, 10, 2, 10, 8, 2, 8}});
+        }
+        annotations.append(annotation);
+    }
+    const QJsonObject coco{{QStringLiteral("images"), images},
+        {QStringLiteral("categories"), QJsonArray{QJsonObject{{QStringLiteral("id"), 7}, {QStringLiteral("name"), QStringLiteral("零件")}}}},
+        {QStringLiteral("annotations"), annotations}};
+    const QString path = QDir(root).filePath(QStringLiteral("标注 文件.json"));
+    if (!writeUtf8(path, QString::fromUtf8(QJsonDocument(coco).toJson(QJsonDocument::Compact)))) qFatal("write coco failed");
+    return path;
+}
+
+QString createVocFixture(const QString& root)
+{
+    const QString annotations = QDir(root).filePath(QStringLiteral("Annotations"));
+    const QString images = QDir(root).filePath(QStringLiteral("JPEGImages"));
+    if (!writeImage(QDir(images).filePath(QStringLiteral("零件 a.png")), 17)) qFatal("write VOC image failed");
+    const QString xml = QStringLiteral(
+        "<annotation><filename>零件 a.png</filename><size><width>16</width><height>12</height></size>"
+        "<object><name>缺陷</name><bndbox><xmin>2</xmin><ymin>2</ymin><xmax>10</xmax><ymax>8</ymax>"
+        "</bndbox></object></annotation>");
+    if (!writeUtf8(QDir(annotations).filePath(QStringLiteral("零件 a.xml")), xml)) qFatal("write VOC XML failed");
+    return annotations;
+}
+
+struct Fixture final {
+    QTemporaryDir directory;
+    aitrain::ProjectStore storage;
+    std::unique_ptr<aitrain::ArtifactStore> artifacts;
+    aitrain::DatasetDriverRegistry drivers;
+
+    Fixture()
+    {
+        if (!directory.isValid()) qFatal("temporary directory unavailable");
+        QString error;
+        if (!storage.open(directory.filePath(QStringLiteral("workspace.sqlite")), &error)) qFatal("storage open failed: %s", qPrintable(error));
+        artifacts = std::make_unique<aitrain::ArtifactStore>(directory.filePath(QStringLiteral("artifact-store")));
+        if (!aitrain::registerBuiltinDatasetDrivers(&drivers, &error)) qFatal("drivers failed: %s", qPrintable(error));
+    }
+};
+
+aitrain::DatasetArtifactConversionRequest requestFor(const QString& sourcePath)
+{
+    aitrain::DatasetArtifactConversionRequest request;
+    request.sourcePath = sourcePath;
+    request.sourceFormat = QStringLiteral("coco_json");
+    request.targetFormat = QStringLiteral("yolo_detection");
+    request.options.insert(QStringLiteral("copyImages"), true);
+    return request;
+}
+
+aitrain::DatasetArtifactConversionRequest requestForPair(const QString& sourcePath,
+    const QString& sourceFormat,
+    const QString& targetFormat)
+{
+    auto request = requestFor(sourcePath);
+    request.sourceFormat = sourceFormat;
+    request.targetFormat = targetFormat;
+    return request;
+}
+
+} // namespace
+
+class DatasetConversionTests final : public QObject {
     Q_OBJECT
 
 private slots:
-    void unsupportedFormatFails();
-    void cocoDetectionConvertsBboxToYolo();
-    void cocoInPlaceYoloCopyDoesNotDeleteSourceImage();
-    void cocoDuplicateImageBasenamesReportIssueAndKeepFirstOutput();
-    void cocoDetectionRefusesToOverwriteExistingYoloImageTarget();
-    void cocoSegmentationConvertsPolygonToYolo();
-    void cocoSegmentationSkipsRleMasks();
-    void vocXmlConvertsBoxesToYoloDetection();
-    void yoloDetectionConvertsToCoco();
-    void yoloDetectionInPlaceCocoCopyDoesNotDeleteSourceImage();
-    void yoloDetectionRefusesToOverwriteExistingCocoImageTarget();
-    void yoloDetectionConvertsToVocXml();
-    void yoloSegmentationConvertsToCocoPolygons();
-    void yoloSegmentationCustomSplitPathsAreHonored();
-    void copyImagesFalseKeepsReferencedPaths();
-    void invalidYoloLabelsReportIssues();
-    void yoloDataYamlCustomSplitPathsAreHonored();
-    void missingYoloSourcePathFailsAsSourceReadFailed();
-    void yoloDetectionToVocReportsDuplicateOutputTargets();
-    void yoloBlockListNamesPreserveCategoryNames();
-    void customSplitPathsCopyToControlledImageLayout();
-    void unsafeSplitPathsCannotWriteOutsideOutputRoot();
-    void immediateCancellationReturnsCanceled();
-    void sampleLoopCancellationDoesNotWriteCompletionReport();
+    void supportedEntryPoints_data();
+    void supportedEntryPoints();
+    void rejectedRoutesAreExplicitBackendUnsupported_data();
+    void rejectedRoutesAreExplicitBackendUnsupported();
+    void commitsOnlyAfterTargetDriverValidation();
+    void targetConflictIsRejectedBeforeMaterialization();
+    void sourceChangeAfterPlanLeavesNoArtifact();
+    void vocImageChangeAfterPlanLeavesNoArtifact();
+    void imageOutsideFrozenSourceRootLeavesNoArtifact();
+    void injectedWriteFailureLeavesNoArtifact();
+    void unplannedOutputIsRejected();
+    void cancellationDuringCopyLeavesNoArtifact();
+    void sourceAndArtifactRootOverlapIsRejected();
+    void manySmallFilesAreFrozenAndCommitted();
+    void sparseLargeFileIsHashedWithoutLargeAllocation();
+    void portableRelativePathBoundaryIsDeterministic();
+    void injectedIoFailuresLeaveNoArtifact_data();
+    void injectedIoFailuresLeaveNoArtifact();
+    void abandonedStagingIsRecoveredWithoutArtifact();
 };
 
-void DatasetConversionTests::unsupportedFormatFails()
+void DatasetConversionTests::supportedEntryPoints_data()
 {
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-
-    aitrain::DatasetConversionRequest request;
-    request.sourcePath = temp.path();
-    request.outputPath = QDir(temp.path()).filePath(QStringLiteral("out"));
-    request.sourceFormat = QStringLiteral("unknown_format");
-    request.targetFormat = QStringLiteral("yolo_detection");
-
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
-    QVERIFY(!result.ok);
-    QCOMPARE(result.errorCode, QStringLiteral("unsupported_source_format"));
-    QVERIFY(result.reportPath.isEmpty());
+    QTest::addColumn<QString>("sourceFormat");
+    QTest::addColumn<QString>("targetFormat");
+    QTest::newRow("coco-detection") << QStringLiteral("coco_json") << QStringLiteral("yolo_detection");
+    QTest::newRow("coco-segmentation") << QStringLiteral("coco_json") << QStringLiteral("yolo_segmentation");
+    QTest::newRow("voc-detection") << QStringLiteral("voc_xml") << QStringLiteral("yolo_detection");
 }
 
-void writeTinyPngWithSize(const QString& path, int width, int height)
+void DatasetConversionTests::supportedEntryPoints()
 {
-    QDir().mkpath(QFileInfo(path).absolutePath());
-    QImage image(width, height, QImage::Format_RGB888);
-    image.fill(Qt::white);
-    QVERIFY(image.save(path));
+    QFETCH(QString, sourceFormat);
+    QFETCH(QString, targetFormat);
+    Fixture fixture;
+    const auto task = createTask(&fixture.storage);
+    const QString source = sourceFormat == QStringLiteral("voc_xml")
+        ? createVocFixture(fixture.directory.filePath(QStringLiteral("voc-source")))
+        : createCocoFixture(fixture.directory.filePath(QStringLiteral("coco-source")), 1, false,
+              targetFormat == QStringLiteral("yolo_segmentation"));
+    aitrain::DatasetConversionService service(fixture.artifacts.get(), &fixture.storage, &fixture.drivers);
+    aitrain::DatasetArtifactConversion result;
+    QString error;
+    QVERIFY2(service.convert(task.id, requestForPair(source, sourceFormat, targetFormat), &result, &error), qPrintable(error));
+    QVERIFY(result.targetValidation.valid);
+    QCOMPARE(result.plan.value(QStringLiteral("sourceFormat")).toString(), sourceFormat);
+    QCOMPARE(result.plan.value(QStringLiteral("targetFormat")).toString(), targetFormat);
+    QCOMPARE(fixture.storage.artifactCount(task.id, &error), 1);
 }
 
-QString readTextForConversionTest(const QString& path)
+void DatasetConversionTests::rejectedRoutesAreExplicitBackendUnsupported_data()
 {
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        return {};
+    QTest::addColumn<QString>("sourceFormat");
+    QTest::addColumn<QString>("targetFormat");
+    QTest::addColumn<QString>("reason");
+    QTest::newRow("voc-segmentation") << QStringLiteral("voc_xml") << QStringLiteral("yolo_segmentation")
+                                        << QStringLiteral("voc_has_no_polygon_semantics");
+    QTest::newRow("yolo-coco") << QStringLiteral("yolo_detection") << QStringLiteral("coco_json")
+                                 << QStringLiteral("coco_or_voc_target_has_no_driver");
+    QTest::newRow("yolo-voc") << QStringLiteral("yolo_detection") << QStringLiteral("voc_xml")
+                                << QStringLiteral("coco_or_voc_target_has_no_driver");
+    QTest::newRow("yolo-xlabel") << QStringLiteral("yolo_segmentation") << QStringLiteral("xanylabeling_xlabel")
+                                   << QStringLiteral("external_cli_output_cannot_be_frozen_before_materialize");
+    QTest::newRow("xlabel-yolo") << QStringLiteral("xanylabeling_xlabel") << QStringLiteral("yolo_obb")
+                                   << QStringLiteral("external_cli_output_cannot_be_frozen_before_materialize");
+    QTest::newRow("ocr-cross-family") << QStringLiteral("paddleocr_rec") << QStringLiteral("yolo_detection")
+                                       << QStringLiteral("no_target_driver");
+}
+
+void DatasetConversionTests::rejectedRoutesAreExplicitBackendUnsupported()
+{
+    QFETCH(QString, sourceFormat);
+    QFETCH(QString, targetFormat);
+    QFETCH(QString, reason);
+    Fixture fixture;
+    const auto task = createTask(&fixture.storage);
+    const QString source = fixture.directory.filePath(QStringLiteral("unsupported-source"));
+    QVERIFY(QDir().mkpath(source));
+    QVERIFY(writeUtf8(QDir(source).filePath(QStringLiteral("input.txt")), QStringLiteral("input")));
+    aitrain::DatasetConversionService service(fixture.artifacts.get(), &fixture.storage, &fixture.drivers);
+    aitrain::DatasetArtifactConversion result;
+    QString error;
+    QVERIFY(!service.convert(task.id, requestForPair(source, sourceFormat, targetFormat), &result, &error));
+    QVERIFY2(error.startsWith(QStringLiteral("dataset_conversion_backend_unsupported:")), qPrintable(error));
+    QVERIFY2(error.endsWith(reason), qPrintable(error));
+    QCOMPARE(fixture.storage.artifactCount(task.id, &error), 0);
+    QVERIFY(!QDir(fixture.directory.filePath(QStringLiteral("artifact-store/.staging"))).exists());
+}
+
+void DatasetConversionTests::commitsOnlyAfterTargetDriverValidation()
+{
+    Fixture fixture;
+    const auto task = createTask(&fixture.storage);
+    const QString source = createCocoFixture(fixture.directory.filePath(QStringLiteral("含 空格的源")), 2);
+    aitrain::DatasetConversionService service(fixture.artifacts.get(), &fixture.storage, &fixture.drivers);
+    aitrain::DatasetArtifactConversion result;
+    QString error;
+    QVERIFY2(service.convert(task.id, requestFor(source), &result, &error), qPrintable(error));
+    QVERIFY(result.targetValidation.valid);
+    QVERIFY(QFileInfo::exists(result.planPath));
+    QVERIFY(QFileInfo::exists(result.conversionReportPath));
+    QVERIFY(QFileInfo::exists(QDir(result.artifactPath).filePath(QStringLiteral("data.yaml"))));
+    QCOMPARE(fixture.storage.artifactCount(task.id, &error), 1);
+    aitrain::ArtifactSnapshot artifact;
+    QVERIFY(fixture.storage.artifact(result.artifactId, &artifact, &error));
+    QCOMPARE(artifact.kind, QStringLiteral("dataset_conversion"));
+    QVERIFY(artifact.files.size() >= 7);
+    QCOMPARE(result.plan.value(QStringLiteral("overwritePolicy")).toString(), QStringLiteral("reject"));
+}
+
+void DatasetConversionTests::targetConflictIsRejectedBeforeMaterialization()
+{
+    Fixture fixture;
+    const auto task = createTask(&fixture.storage);
+    const QString source = createCocoFixture(fixture.directory.filePath(QStringLiteral("conflict-source")), 2, true);
+    aitrain::DatasetConversionService service(fixture.artifacts.get(), &fixture.storage, &fixture.drivers);
+    aitrain::DatasetArtifactConversion result;
+    QString error;
+    QVERIFY(!service.convert(task.id, requestFor(source), &result, &error));
+    QVERIFY2(error.startsWith(QStringLiteral("dataset_conversion_target_conflict:")), qPrintable(error));
+    QCOMPARE(fixture.storage.artifactCount(task.id, &error), 0);
+    QCOMPARE(QDir(fixture.directory.filePath(QStringLiteral("artifact-store/.staging")))
+                 .entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(), 0);
+}
+
+void DatasetConversionTests::sourceChangeAfterPlanLeavesNoArtifact()
+{
+    Fixture fixture;
+    const auto task = createTask(&fixture.storage);
+    const QString source = createCocoFixture(fixture.directory.filePath(QStringLiteral("source-change")), 1);
+    bool changed = false;
+    aitrain::DatasetConversionService service(fixture.artifacts.get(), &fixture.storage, &fixture.drivers,
+        [&](aitrain::DatasetConversionFailPoint point, const QString&) {
+            if (point == aitrain::DatasetConversionFailPoint::AfterPlan) {
+                changed = writeUtf8(source, QStringLiteral("{}"));
+            }
+            return false;
+        });
+    aitrain::DatasetArtifactConversion result;
+    QString error;
+    QVERIFY(!service.convert(task.id, requestFor(source), &result, &error));
+    QVERIFY(changed);
+    QCOMPARE(error, QStringLiteral("dataset_conversion_source_changed_after_plan"));
+    QCOMPARE(fixture.storage.artifactCount(task.id, &error), 0);
+}
+
+void DatasetConversionTests::vocImageChangeAfterPlanLeavesNoArtifact()
+{
+    Fixture fixture;
+    const auto task = createTask(&fixture.storage);
+    const QString root = fixture.directory.filePath(QStringLiteral("voc-source-change"));
+    const QString source = createVocFixture(root);
+    const QString imagePath = QDir(root).filePath(QStringLiteral("JPEGImages/零件 a.png"));
+    bool changed = false;
+    aitrain::DatasetConversionService service(fixture.artifacts.get(), &fixture.storage, &fixture.drivers,
+        [&](aitrain::DatasetConversionFailPoint point, const QString&) {
+            if (point == aitrain::DatasetConversionFailPoint::AfterPlan) {
+                changed = writeUtf8(imagePath, QStringLiteral("changed"));
+            }
+            return false;
+        });
+    aitrain::DatasetArtifactConversion result;
+    QString error;
+    QVERIFY(!service.convert(task.id,
+        requestForPair(source, QStringLiteral("voc_xml"), QStringLiteral("yolo_detection")),
+        &result, &error));
+    QVERIFY(changed);
+    QCOMPARE(error, QStringLiteral("dataset_conversion_source_changed_after_plan"));
+    QCOMPARE(fixture.storage.artifactCount(task.id, &error), 0);
+}
+
+void DatasetConversionTests::imageOutsideFrozenSourceRootLeavesNoArtifact()
+{
+    Fixture fixture;
+    const auto task = createTask(&fixture.storage);
+    const QString sourceRoot = fixture.directory.filePath(QStringLiteral("frozen-source"));
+    const QString outsideImage = fixture.directory.filePath(QStringLiteral("outside/样本.png"));
+    QVERIFY(writeImage(outsideImage, 23));
+    const QJsonObject coco{
+        {QStringLiteral("images"), QJsonArray{QJsonObject{{QStringLiteral("id"), 1},
+             {QStringLiteral("file_name"), outsideImage}, {QStringLiteral("width"), 16}, {QStringLiteral("height"), 12}}}},
+        {QStringLiteral("categories"), QJsonArray{QJsonObject{{QStringLiteral("id"), 7},
+             {QStringLiteral("name"), QStringLiteral("零件")}}}},
+        {QStringLiteral("annotations"), QJsonArray{QJsonObject{{QStringLiteral("id"), 1},
+             {QStringLiteral("image_id"), 1}, {QStringLiteral("category_id"), 7},
+             {QStringLiteral("bbox"), QJsonArray{2, 2, 8, 6}}}}}};
+    const QString source = QDir(sourceRoot).filePath(QStringLiteral("annotations.json"));
+    QVERIFY(writeUtf8(source, QString::fromUtf8(QJsonDocument(coco).toJson(QJsonDocument::Compact))));
+    aitrain::DatasetConversionService service(fixture.artifacts.get(), &fixture.storage, &fixture.drivers);
+    aitrain::DatasetArtifactConversion result;
+    QString error;
+    QVERIFY(!service.convert(task.id, requestFor(source), &result, &error));
+    QVERIFY2(error.startsWith(QStringLiteral("dataset_conversion_source_image_not_frozen:")), qPrintable(error));
+    QCOMPARE(fixture.storage.artifactCount(task.id, &error), 0);
+}
+
+void DatasetConversionTests::injectedWriteFailureLeavesNoArtifact()
+{
+    Fixture fixture;
+    const auto task = createTask(&fixture.storage);
+    const QString source = createCocoFixture(fixture.directory.filePath(QStringLiteral("write-failure")), 2);
+    aitrain::DatasetConversionService service(fixture.artifacts.get(), &fixture.storage, &fixture.drivers,
+        [](aitrain::DatasetConversionFailPoint point, const QString&) {
+            return point == aitrain::DatasetConversionFailPoint::AfterMaterialize;
+        });
+    aitrain::DatasetArtifactConversion result;
+    QString error;
+    QVERIFY(!service.convert(task.id, requestFor(source), &result, &error));
+    QCOMPARE(error, QStringLiteral("dataset_conversion_injected_failure"));
+    QCOMPARE(fixture.storage.artifactCount(task.id, &error), 0);
+    QVERIFY(!QDir(fixture.directory.filePath(QStringLiteral("artifact-store/.staging"))).exists()
+        || QDir(fixture.directory.filePath(QStringLiteral("artifact-store/.staging")))
+               .entryList(QDir::Dirs | QDir::NoDotAndDotDot).isEmpty());
+}
+
+void DatasetConversionTests::unplannedOutputIsRejected()
+{
+    Fixture fixture;
+    const auto task = createTask(&fixture.storage);
+    const QString source = createCocoFixture(fixture.directory.filePath(QStringLiteral("unplanned-output")), 1);
+    aitrain::DatasetConversionService service(fixture.artifacts.get(), &fixture.storage, &fixture.drivers,
+        [](aitrain::DatasetConversionFailPoint point, const QString& staging) {
+            if (point == aitrain::DatasetConversionFailPoint::AfterMaterialize) {
+                writeUtf8(QDir(staging).filePath(QStringLiteral("未计划 文件.bin")), QStringLiteral("rogue"));
+            }
+            return false;
+        });
+    aitrain::DatasetArtifactConversion result;
+    QString error;
+    QVERIFY(!service.convert(task.id, requestFor(source), &result, &error));
+    QVERIFY2(error.startsWith(QStringLiteral("dataset_conversion_output_plan_mismatch:")), qPrintable(error));
+    QCOMPARE(fixture.storage.artifactCount(task.id, &error), 0);
+}
+
+void DatasetConversionTests::cancellationDuringCopyLeavesNoArtifact()
+{
+    Fixture fixture;
+    const auto task = createTask(&fixture.storage);
+    const QString source = createCocoFixture(fixture.directory.filePath(QStringLiteral("cancel-source")), 30);
+    bool planWritten = false;
+    int pollsAfterPlan = 0;
+    aitrain::DatasetConversionService service(fixture.artifacts.get(), &fixture.storage, &fixture.drivers,
+        [&](aitrain::DatasetConversionFailPoint point, const QString&) {
+            if (point == aitrain::DatasetConversionFailPoint::AfterPlan) planWritten = true;
+            return false;
+        });
+    aitrain::DatasetArtifactConversion result;
+    QString error;
+    QVERIFY(!service.convert(task.id, requestFor(source), &result, &error, [&]() {
+        // plan 后完整源复核约消耗 62 次轮询；再允许转换器复制若干样本后取消。
+        return planWritten && ++pollsAfterPlan > 75;
+    }));
+    QVERIFY(error.contains(QStringLiteral("canceled")));
+    QCOMPARE(fixture.storage.artifactCount(task.id, &error), 0);
+}
+
+void DatasetConversionTests::sourceAndArtifactRootOverlapIsRejected()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    aitrain::ProjectStore storage;
+    QString error;
+    QVERIFY(storage.open(directory.filePath(QStringLiteral("workspace.sqlite")), &error));
+    const auto task = createTask(&storage);
+    const QString sourceRoot = directory.filePath(QStringLiteral("source"));
+    const QString source = createCocoFixture(sourceRoot, 1);
+    aitrain::ArtifactStore artifacts(QDir(sourceRoot).filePath(QStringLiteral("nested-artifact-store")));
+    aitrain::DatasetDriverRegistry drivers;
+    QVERIFY(aitrain::registerBuiltinDatasetDrivers(&drivers, &error));
+    aitrain::DatasetConversionService service(&artifacts, &storage, &drivers);
+    aitrain::DatasetArtifactConversion result;
+    QVERIFY(!service.convert(task.id, requestFor(source), &result, &error));
+    QCOMPARE(error, QStringLiteral("dataset_conversion_source_artifact_root_overlap"));
+    QCOMPARE(storage.artifactCount(task.id, &error), 0);
+    QVERIFY(!QFileInfo::exists(QDir(sourceRoot).filePath(QStringLiteral("nested-artifact-store/.staging"))));
+}
+
+void DatasetConversionTests::manySmallFilesAreFrozenAndCommitted()
+{
+    Fixture fixture;
+    const auto task = createTask(&fixture.storage);
+    const QString root = fixture.directory.filePath(QStringLiteral("many-small-files"));
+    const QString source = createCocoFixture(root, 16);
+    for (int index = 0; index < 192; ++index) {
+        QVERIFY(writeUtf8(QDir(root).filePath(QStringLiteral("sidecars/批次-%1/meta-%2.txt")
+            .arg(index % 8).arg(index)), QStringLiteral("frozen-%1").arg(index)));
     }
-    return QString::fromUtf8(file.readAll());
+    aitrain::DatasetConversionService service(fixture.artifacts.get(), &fixture.storage, &fixture.drivers);
+    aitrain::DatasetArtifactConversion result;
+    QString error;
+    QVERIFY2(service.convert(task.id, requestFor(source), &result, &error), qPrintable(error));
+    QVERIFY(result.plan.value(QStringLiteral("sourceFiles")).toArray().size() >= 209);
+    QCOMPARE(fixture.storage.artifactCount(task.id, &error), 1);
 }
 
-QJsonObject readJsonObjectForConversionTest(const QString& path)
+void DatasetConversionTests::sparseLargeFileIsHashedWithoutLargeAllocation()
 {
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
-        return {};
-    }
-    return QJsonDocument::fromJson(file.readAll()).object();
-}
+    Fixture fixture;
+    const auto task = createTask(&fixture.storage);
+    const QString root = fixture.directory.filePath(QStringLiteral("sparse-large-file"));
+    const QString source = createCocoFixture(root, 1);
+    constexpr qint64 kSparseBytes = 32LL * 1024LL * 1024LL;
+    const QString sparseRelative = QStringLiteral("sidecars/large-sparse.bin");
+    QVERIFY(createSparseFile(QDir(root).filePath(sparseRelative), kSparseBytes));
 
-QJsonObject firstObjectWithValue(const QJsonArray& array, const QString& key, const QJsonValue& expected)
-{
-    for (const QJsonValue& value : array) {
-        const QJsonObject object = value.toObject();
-        if (object.value(key) == expected) {
-            return object;
+    aitrain::DatasetConversionService service(fixture.artifacts.get(), &fixture.storage, &fixture.drivers);
+    aitrain::DatasetArtifactConversion result;
+    QString error;
+    QVERIFY2(service.convert(task.id, requestFor(source), &result, &error), qPrintable(error));
+    bool found = false;
+    for (const QJsonValue& value : result.plan.value(QStringLiteral("sourceFiles")).toArray()) {
+        const QJsonObject file = value.toObject();
+        if (file.value(QStringLiteral("relativePath")).toString() == sparseRelative) {
+            QCOMPARE(file.value(QStringLiteral("bytes")).toString(), QString::number(kSparseBytes));
+            QCOMPARE(file.value(QStringLiteral("sha256")).toString().size(), 64);
+            found = true;
         }
     }
-    return {};
+    QVERIFY(found);
+    QCOMPARE(fixture.storage.artifactCount(task.id, &error), 1);
 }
 
-bool issuesContainCode(const QVector<aitrain::DatasetConversionIssue>& issues, const QString& code)
+void DatasetConversionTests::portableRelativePathBoundaryIsDeterministic()
 {
-    for (const aitrain::DatasetConversionIssue& issue : issues) {
-        if (issue.code == code) {
-            return true;
-        }
+    {
+        Fixture fixture;
+        const auto task = createTask(&fixture.storage);
+        const QString allowedName = QString(120, QLatin1Char('a')) + QStringLiteral(".png");
+        const QString source = createCocoFixtureWithFileName(
+            fixture.directory.filePath(QStringLiteral("portable-allowed")),
+            QStringLiteral("images/%1").arg(allowedName));
+        aitrain::DatasetConversionService service(fixture.artifacts.get(), &fixture.storage, &fixture.drivers);
+        aitrain::DatasetArtifactConversion result;
+        QString error;
+        QVERIFY2(service.convert(task.id, requestFor(source), &result, &error), qPrintable(error));
+        QCOMPARE(fixture.storage.artifactCount(task.id, &error), 1);
     }
-    return false;
-}
-
-void writeYoloDetectionFixture(const QDir& root)
-{
-    writeTinyPngWithSize(root.filePath(QStringLiteral("images/train/a.png")), 100, 80);
-    writeTinyPngWithSize(root.filePath(QStringLiteral("images/val/b.png")), 120, 60);
-    writeTextFile(root.filePath(QStringLiteral("labels/train/a.txt")), QStringLiteral("0 0.500000 0.500000 0.500000 0.400000\n"));
-    writeTextFile(root.filePath(QStringLiteral("labels/val/b.txt")), QStringLiteral("1 0.250000 0.500000 0.300000 0.500000\n"));
-    writeTextFile(root.filePath(QStringLiteral("data.yaml")),
-        QStringLiteral("path: .\ntrain: images/train\nval: images/val\nnc: 2\nnames:\n  0: widget\n  1: part\n"));
-}
-
-void writeYoloSegmentationFixture(const QDir& root)
-{
-    writeTinyPngWithSize(root.filePath(QStringLiteral("images/train/seg.png")), 100, 100);
-    writeTinyPngWithSize(root.filePath(QStringLiteral("images/val/seg_val.png")), 100, 100);
-    writeTextFile(root.filePath(QStringLiteral("labels/train/seg.txt")),
-        QStringLiteral("0 0.100000 0.100000 0.900000 0.100000 0.900000 0.900000 0.100000 0.900000\n"));
-    writeTextFile(root.filePath(QStringLiteral("labels/val/seg_val.txt")),
-        QStringLiteral("0 0.200000 0.200000 0.800000 0.200000 0.800000 0.800000 0.200000 0.800000\n"));
-    writeTextFile(root.filePath(QStringLiteral("data.yaml")),
-        QStringLiteral("path: .\ntrain: images/train\nval: images/val\nnc: 1\nnames:\n  0: part\n"));
-}
-
-void DatasetConversionTests::cocoDetectionConvertsBboxToYolo()
-{
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-    const QDir root(temp.path());
-
-    writeTinyPng(root.filePath(QStringLiteral("images/a.png")));
-    writeTextFile(root.filePath(QStringLiteral("annotations.json")),
-        QStringLiteral("{\"images\":[{\"id\":1,\"file_name\":\"images/a.png\",\"width\":8,\"height\":8}],"
-                       "\"categories\":[{\"id\":7,\"name\":\"widget\"}],"
-                       "\"annotations\":[{\"id\":10,\"image_id\":1,\"category_id\":7,\"bbox\":[2,2,4,2]}]}"));
-
-    aitrain::DatasetConversionRequest request;
-    request.sourcePath = root.filePath(QStringLiteral("annotations.json"));
-    request.sourceFormat = QStringLiteral("coco_json");
-    request.targetFormat = QStringLiteral("yolo_detection");
-    request.outputPath = root.filePath(QStringLiteral("converted"));
-    request.options.insert(QStringLiteral("copyImages"), true);
-
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
-    QVERIFY2(result.ok, qPrintable(result.errorMessage));
-    QCOMPARE(result.convertedSampleCount, 1);
-    QCOMPARE(result.convertedAnnotationCount, 1);
-
-    QVERIFY(QFileInfo::exists(root.filePath(QStringLiteral("converted/data.yaml"))));
-    QVERIFY(QFileInfo::exists(root.filePath(QStringLiteral("converted/images/train/a.png"))));
-    QFile labelFile(root.filePath(QStringLiteral("converted/labels/train/a.txt")));
-    QVERIFY(labelFile.open(QIODevice::ReadOnly | QIODevice::Text));
-    const QString label = QString::fromUtf8(labelFile.readAll()).trimmed();
-    QCOMPARE(label, QStringLiteral("0 0.500000 0.375000 0.500000 0.250000"));
-
-    QFile reportFile(result.reportPath);
-    QVERIFY(reportFile.open(QIODevice::ReadOnly));
-    const QJsonObject report = QJsonDocument::fromJson(reportFile.readAll()).object();
-    QCOMPARE(report.value(QStringLiteral("sourceFormat")).toString(), QStringLiteral("coco_json"));
-    QCOMPARE(report.value(QStringLiteral("targetFormat")).toString(), QStringLiteral("yolo_detection"));
-    QVERIFY(report.value(QStringLiteral("targetValidation")).toObject().value(QStringLiteral("ok")).toBool());
-}
-
-void DatasetConversionTests::cocoInPlaceYoloCopyDoesNotDeleteSourceImage()
-{
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-    const QDir root(temp.path());
-
-    writeTinyPngWithSize(root.filePath(QStringLiteral("images/train/a.png")), 100, 80);
-    writeTextFile(root.filePath(QStringLiteral("annotations.json")),
-        QStringLiteral("{\"images\":[{\"id\":1,\"file_name\":\"images/train/a.png\",\"width\":100,\"height\":80}],"
-                       "\"categories\":[{\"id\":7,\"name\":\"widget\"}],"
-                       "\"annotations\":[{\"id\":10,\"image_id\":1,\"category_id\":7,\"bbox\":[25,24,50,32]}]}"));
-
-    const QString sourceImagePath = root.filePath(QStringLiteral("images/train/a.png"));
-    QVERIFY(QFileInfo::exists(sourceImagePath));
-
-    aitrain::DatasetConversionRequest request;
-    request.sourcePath = root.filePath(QStringLiteral("annotations.json"));
-    request.sourceFormat = QStringLiteral("coco_json");
-    request.targetFormat = QStringLiteral("yolo_detection");
-    request.outputPath = root.absolutePath();
-    request.options.insert(QStringLiteral("copyImages"), true);
-
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
-    QVERIFY2(result.ok, qPrintable(result.errorMessage));
-    QVERIFY(QFileInfo::exists(sourceImagePath));
-    QVERIFY(QFileInfo::exists(root.filePath(QStringLiteral("labels/train/a.txt"))));
-}
-
-void DatasetConversionTests::cocoDuplicateImageBasenamesReportIssueAndKeepFirstOutput()
-{
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-    const QDir root(temp.path());
-
-    writeTinyPngWithSize(root.filePath(QStringLiteral("source/left/a.png")), 100, 80);
-    writeTinyPngWithSize(root.filePath(QStringLiteral("source/right/a.png")), 120, 60);
-    writeTextFile(root.filePath(QStringLiteral("source/annotations.json")),
-        QStringLiteral("{\"images\":["
-                       "{\"id\":1,\"file_name\":\"left/a.png\",\"width\":100,\"height\":80},"
-                       "{\"id\":2,\"file_name\":\"right/a.png\",\"width\":120,\"height\":60}],"
-                       "\"categories\":[{\"id\":7,\"name\":\"widget\"}],"
-                       "\"annotations\":["
-                       "{\"id\":10,\"image_id\":1,\"category_id\":7,\"bbox\":[25,24,50,32]},"
-                       "{\"id\":11,\"image_id\":2,\"category_id\":7,\"bbox\":[12,15,36,30]}]}"));
-
-    aitrain::DatasetConversionRequest request;
-    request.sourcePath = root.filePath(QStringLiteral("source/annotations.json"));
-    request.sourceFormat = QStringLiteral("coco_json");
-    request.targetFormat = QStringLiteral("yolo_detection");
-    request.outputPath = root.filePath(QStringLiteral("converted_duplicate_yolo"));
-    request.options.insert(QStringLiteral("copyImages"), true);
-
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
-    QVERIFY2(result.ok, qPrintable(result.errorMessage));
-    QCOMPARE(result.convertedSampleCount, 1);
-    QCOMPARE(result.convertedAnnotationCount, 1);
-    QVERIFY(issuesContainCode(result.issues, QStringLiteral("duplicate_output_target")));
-
-    const QString label = readTextForConversionTest(root.filePath(QStringLiteral("converted_duplicate_yolo/labels/train/a.txt"))).trimmed();
-    QCOMPARE(label, QStringLiteral("0 0.500000 0.500000 0.500000 0.400000"));
-    const QImage copied(root.filePath(QStringLiteral("converted_duplicate_yolo/images/train/a.png")));
-    QCOMPARE(copied.width(), 100);
-    QCOMPARE(copied.height(), 80);
-}
-
-void DatasetConversionTests::cocoDetectionRefusesToOverwriteExistingYoloImageTarget()
-{
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-    const QDir root(temp.path());
-    writeTinyPngWithSize(root.filePath(QStringLiteral("images/a.png")), 100, 80);
-    writeTinyPngWithSize(root.filePath(QStringLiteral("converted/images/train/a.png")), 9, 9);
-    writeTextFile(root.filePath(QStringLiteral("annotations.json")),
-        QStringLiteral("{\"images\":[{\"id\":1,\"file_name\":\"images/a.png\",\"width\":100,\"height\":80}],"
-                       "\"categories\":[{\"id\":7,\"name\":\"widget\"}],"
-                       "\"annotations\":[{\"id\":10,\"image_id\":1,\"category_id\":7,\"bbox\":[25,24,50,32]}]}"));
-
-    aitrain::DatasetConversionRequest request;
-    request.sourcePath = root.filePath(QStringLiteral("annotations.json"));
-    request.sourceFormat = QStringLiteral("coco_json");
-    request.targetFormat = QStringLiteral("yolo_detection");
-    request.outputPath = root.filePath(QStringLiteral("converted"));
-    request.options.insert(QStringLiteral("copyImages"), true);
-
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
-    QVERIFY(!result.ok);
-    QVERIFY(issuesContainCode(result.issues, QStringLiteral("image_copy_failed")));
-    QCOMPARE(QImage(root.filePath(QStringLiteral("converted/images/train/a.png"))).size(), QSize(9, 9));
-}
-
-void DatasetConversionTests::cocoSegmentationConvertsPolygonToYolo()
-{
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-    const QDir root(temp.path());
-    writeTinyPngWithSize(root.filePath(QStringLiteral("images/seg.png")), 100, 100);
-    writeTextFile(root.filePath(QStringLiteral("annotations.json")),
-        QStringLiteral("{\"images\":[{\"id\":1,\"file_name\":\"images/seg.png\",\"width\":100,\"height\":100}],"
-                       "\"categories\":[{\"id\":1,\"name\":\"part\"}],"
-                       "\"annotations\":[{\"id\":1,\"image_id\":1,\"category_id\":1,"
-                       "\"segmentation\":[[10,10,90,10,90,90,10,90]]}]}"));
-
-    aitrain::DatasetConversionRequest request;
-    request.sourcePath = root.filePath(QStringLiteral("annotations.json"));
-    request.sourceFormat = QStringLiteral("coco_json");
-    request.targetFormat = QStringLiteral("yolo_segmentation");
-    request.outputPath = root.filePath(QStringLiteral("converted_seg"));
-    request.options.insert(QStringLiteral("copyImages"), true);
-
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
-    QVERIFY2(result.ok, qPrintable(result.errorMessage));
-    QFile segLabelFile(root.filePath(QStringLiteral("converted_seg/labels/train/seg.txt")));
-    QVERIFY(segLabelFile.open(QIODevice::ReadOnly | QIODevice::Text));
-    const QString label = QString::fromUtf8(segLabelFile.readAll()).trimmed();
-    QCOMPARE(label, QStringLiteral("0 0.100000 0.100000 0.900000 0.100000 0.900000 0.900000 0.100000 0.900000"));
-    QVERIFY(result.targetValidation.ok);
-}
-
-void DatasetConversionTests::cocoSegmentationSkipsRleMasks()
-{
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-    const QDir root(temp.path());
-    writeTinyPngWithSize(root.filePath(QStringLiteral("images/rle.png")), 20, 20);
-    writeTextFile(root.filePath(QStringLiteral("annotations.json")),
-        QStringLiteral("{\"images\":[{\"id\":1,\"file_name\":\"images/rle.png\",\"width\":20,\"height\":20}],"
-                       "\"categories\":[{\"id\":1,\"name\":\"mask\"}],"
-                       "\"annotations\":[{\"id\":1,\"image_id\":1,\"category_id\":1,"
-                       "\"segmentation\":{\"counts\":\"abc\",\"size\":[20,20]}}]}"));
-
-    aitrain::DatasetConversionRequest request;
-    request.sourcePath = root.filePath(QStringLiteral("annotations.json"));
-    request.sourceFormat = QStringLiteral("coco_json");
-    request.targetFormat = QStringLiteral("yolo_segmentation");
-    request.outputPath = root.filePath(QStringLiteral("converted_rle"));
-
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
-    QVERIFY(!result.ok);
-    QCOMPARE(result.errorCode, QStringLiteral("no_convertible_samples"));
-    QVERIFY(!result.issues.isEmpty());
-    QCOMPARE(result.issues.first().code, QStringLiteral("rle_not_supported"));
-}
-
-void DatasetConversionTests::vocXmlConvertsBoxesToYoloDetection()
-{
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-    const QDir root(temp.path());
-    writeTinyPngWithSize(root.filePath(QStringLiteral("JPEGImages/a.png")), 100, 80);
-    writeTextFile(root.filePath(QStringLiteral("Annotations/a.xml")),
-        QStringLiteral("<annotation>"
-                       "<filename>a.png</filename>"
-                       "<size><width>100</width><height>80</height></size>"
-                       "<object><name>part</name><bndbox>"
-                       "<xmin>10</xmin><ymin>20</ymin><xmax>40</xmax><ymax>36</ymax>"
-                       "</bndbox></object>"
-                       "</annotation>"));
-
-    aitrain::DatasetConversionRequest request;
-    request.sourcePath = root.filePath(QStringLiteral("Annotations"));
-    request.sourceFormat = QStringLiteral("voc_xml");
-    request.targetFormat = QStringLiteral("yolo_detection");
-    request.outputPath = root.filePath(QStringLiteral("converted_voc"));
-    request.options.insert(QStringLiteral("copyImages"), true);
-
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
-    QVERIFY2(result.ok, qPrintable(result.errorMessage));
-    QFile vocLabelFile(root.filePath(QStringLiteral("converted_voc/labels/train/a.txt")));
-    QVERIFY(vocLabelFile.open(QIODevice::ReadOnly | QIODevice::Text));
-    const QString label = QString::fromUtf8(vocLabelFile.readAll()).trimmed();
-    QCOMPARE(label, QStringLiteral("0 0.250000 0.350000 0.300000 0.200000"));
-}
-
-void DatasetConversionTests::yoloDetectionConvertsToCoco()
-{
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-    const QDir root(temp.path());
-    const QDir source(root.filePath(QStringLiteral("source_yolo")));
-    writeYoloDetectionFixture(source);
-
-    aitrain::DatasetConversionRequest request;
-    request.sourcePath = source.absolutePath();
-    request.sourceFormat = QStringLiteral("yolo_detection");
-    request.targetFormat = QStringLiteral("coco_json");
-    request.outputPath = root.filePath(QStringLiteral("converted_coco"));
-    request.options.insert(QStringLiteral("copyImages"), true);
-
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
-    QVERIFY2(result.ok, qPrintable(result.errorMessage));
-    QCOMPARE(result.convertedSampleCount, 2);
-    QCOMPARE(result.convertedAnnotationCount, 2);
-
-    const QJsonObject train = readJsonObjectForConversionTest(root.filePath(QStringLiteral("converted_coco/annotations/train.json")));
-    const QJsonArray trainImages = train.value(QStringLiteral("images")).toArray();
-    const QJsonArray trainAnnotations = train.value(QStringLiteral("annotations")).toArray();
-    const QJsonArray categories = train.value(QStringLiteral("categories")).toArray();
-    QCOMPARE(trainImages.size(), 1);
-    QCOMPARE(trainAnnotations.size(), 1);
-    QCOMPARE(categories.size(), 2);
-    QCOMPARE(categories.at(0).toObject().value(QStringLiteral("name")).toString(), QStringLiteral("widget"));
-
-    const QJsonArray bbox = trainAnnotations.at(0).toObject().value(QStringLiteral("bbox")).toArray();
-    QCOMPARE(bbox.size(), 4);
-    QCOMPARE(bbox.at(0).toDouble(), 25.0);
-    QCOMPARE(bbox.at(1).toDouble(), 24.0);
-    QCOMPARE(bbox.at(2).toDouble(), 50.0);
-    QCOMPARE(bbox.at(3).toDouble(), 32.0);
-
-    QVERIFY(QFileInfo::exists(root.filePath(QStringLiteral("converted_coco/images/train/a.png"))));
-    QVERIFY(QFileInfo::exists(result.reportPath));
-}
-
-void DatasetConversionTests::yoloDetectionInPlaceCocoCopyDoesNotDeleteSourceImage()
-{
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-    const QDir source(temp.path());
-    writeYoloDetectionFixture(source);
-
-    const QString sourceImagePath = source.filePath(QStringLiteral("images/train/a.png"));
-    QVERIFY(QFileInfo::exists(sourceImagePath));
-
-    aitrain::DatasetConversionRequest request;
-    request.sourcePath = source.absolutePath();
-    request.sourceFormat = QStringLiteral("yolo_detection");
-    request.targetFormat = QStringLiteral("coco_json");
-    request.outputPath = source.absolutePath();
-    request.options.insert(QStringLiteral("copyImages"), true);
-
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
-    QVERIFY2(result.ok, qPrintable(result.errorMessage));
-    QVERIFY(QFileInfo::exists(sourceImagePath));
-    QVERIFY(QFileInfo::exists(source.filePath(QStringLiteral("annotations/train.json"))));
-}
-
-void DatasetConversionTests::yoloDetectionRefusesToOverwriteExistingCocoImageTarget()
-{
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-    const QDir root(temp.path());
-    const QDir source(root.filePath(QStringLiteral("source_yolo_collision")));
-    writeTinyPngWithSize(source.filePath(QStringLiteral("images/train/a.png")), 100, 80);
-    writeTextFile(source.filePath(QStringLiteral("labels/train/a.txt")),
-        QStringLiteral("0 0.500000 0.500000 0.500000 0.400000\n"));
-    writeTextFile(source.filePath(QStringLiteral("data.yaml")),
-        QStringLiteral("path: .\ntrain: images/train\nval: images/train\nnc: 1\nnames: [item]\n"));
-    writeTinyPngWithSize(root.filePath(QStringLiteral("converted_coco/images/train/a.png")), 9, 9);
-
-    aitrain::DatasetConversionRequest request;
-    request.sourcePath = source.absolutePath();
-    request.sourceFormat = QStringLiteral("yolo_detection");
-    request.targetFormat = QStringLiteral("coco_json");
-    request.outputPath = root.filePath(QStringLiteral("converted_coco"));
-    request.options.insert(QStringLiteral("copyImages"), true);
-
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
-    QVERIFY(!result.ok);
-    QVERIFY(issuesContainCode(result.issues, QStringLiteral("image_copy_failed")));
-    QCOMPARE(QImage(root.filePath(QStringLiteral("converted_coco/images/train/a.png"))).size(), QSize(9, 9));
-}
-
-void DatasetConversionTests::yoloDetectionConvertsToVocXml()
-{
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-    const QDir root(temp.path());
-    const QDir source(root.filePath(QStringLiteral("source_yolo")));
-    writeYoloDetectionFixture(source);
-
-    aitrain::DatasetConversionRequest request;
-    request.sourcePath = source.absolutePath();
-    request.sourceFormat = QStringLiteral("yolo_detection");
-    request.targetFormat = QStringLiteral("voc_xml");
-    request.outputPath = root.filePath(QStringLiteral("converted_voc"));
-    request.options.insert(QStringLiteral("copyImages"), true);
-
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
-    QVERIFY2(result.ok, qPrintable(result.errorMessage));
-    QCOMPARE(result.convertedSampleCount, 2);
-    QCOMPARE(result.convertedAnnotationCount, 2);
-
-    const QString xml = readTextForConversionTest(root.filePath(QStringLiteral("converted_voc/Annotations/a.xml")));
-    QVERIFY(xml.contains(QStringLiteral("<filename>a.png</filename>")));
-    QVERIFY(xml.contains(QStringLiteral("<name>widget</name>")));
-    QVERIFY(xml.contains(QStringLiteral("<xmin>25</xmin>")));
-    QVERIFY(xml.contains(QStringLiteral("<ymin>24</ymin>")));
-    QVERIFY(xml.contains(QStringLiteral("<xmax>75</xmax>")));
-    QVERIFY(xml.contains(QStringLiteral("<ymax>56</ymax>")));
-    QVERIFY(QFileInfo::exists(root.filePath(QStringLiteral("converted_voc/JPEGImages/a.png"))));
-}
-
-void DatasetConversionTests::yoloSegmentationConvertsToCocoPolygons()
-{
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-    const QDir root(temp.path());
-    const QDir source(root.filePath(QStringLiteral("source_yolo_seg")));
-    writeYoloSegmentationFixture(source);
-
-    aitrain::DatasetConversionRequest request;
-    request.sourcePath = source.absolutePath();
-    request.sourceFormat = QStringLiteral("yolo_segmentation");
-    request.targetFormat = QStringLiteral("coco_json");
-    request.outputPath = root.filePath(QStringLiteral("converted_coco_seg"));
-    request.options.insert(QStringLiteral("copyImages"), true);
-
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
-    QVERIFY2(result.ok, qPrintable(result.errorMessage));
-    QCOMPARE(result.convertedSampleCount, 2);
-    QCOMPARE(result.convertedAnnotationCount, 2);
-
-    const QJsonObject train = readJsonObjectForConversionTest(root.filePath(QStringLiteral("converted_coco_seg/annotations/train.json")));
-    const QJsonArray annotations = train.value(QStringLiteral("annotations")).toArray();
-    QCOMPARE(annotations.size(), 1);
-    const QJsonArray segmentation = annotations.at(0).toObject().value(QStringLiteral("segmentation")).toArray();
-    QCOMPARE(segmentation.size(), 1);
-    const QJsonArray polygon = segmentation.at(0).toArray();
-    QCOMPARE(polygon.at(0).toDouble(), 10.0);
-    QCOMPARE(polygon.at(1).toDouble(), 10.0);
-    QCOMPARE(polygon.at(6).toDouble(), 10.0);
-    QCOMPARE(polygon.at(7).toDouble(), 90.0);
-    QVERIFY(QFileInfo::exists(root.filePath(QStringLiteral("converted_coco_seg/images/train/seg.png"))));
-}
-
-void DatasetConversionTests::yoloSegmentationCustomSplitPathsAreHonored()
-{
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-    const QDir root(temp.path());
-    const QDir source(root.filePath(QStringLiteral("source_custom_yolo_seg")));
-    writeTinyPngWithSize(source.filePath(QStringLiteral("raw/custom/images/train/seg_train.png")), 100, 80);
-    writeTinyPngWithSize(source.filePath(QStringLiteral("raw/custom/images/val/seg_val.png")), 120, 60);
-    writeTextFile(source.filePath(QStringLiteral("raw/custom/labels/train/seg_train.txt")),
-        QStringLiteral("0 0.100000 0.100000 0.900000 0.100000 0.900000 0.900000 0.100000 0.900000\n"));
-    writeTextFile(source.filePath(QStringLiteral("raw/custom/labels/val/seg_val.txt")),
-        QStringLiteral("0 0.200000 0.200000 0.800000 0.200000 0.800000 0.800000 0.200000 0.800000\n"));
-    writeTextFile(source.filePath(QStringLiteral("data.yaml")),
-        QStringLiteral("path : raw\ntrain : custom/images/train\nval : custom/images/val\nnc : 1\nnames : [part]\n"));
-
-    aitrain::DatasetConversionRequest request;
-    request.sourcePath = source.absolutePath();
-    request.sourceFormat = QStringLiteral("yolo_segmentation");
-    request.targetFormat = QStringLiteral("coco_json");
-    request.outputPath = root.filePath(QStringLiteral("converted_custom_seg"));
-    request.options.insert(QStringLiteral("copyImages"), true);
-
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
-    QVERIFY2(result.ok, qPrintable(result.errorMessage));
-    QCOMPARE(result.convertedSampleCount, 2);
-    QCOMPARE(result.convertedAnnotationCount, 2);
-
-    const QJsonObject train = readJsonObjectForConversionTest(root.filePath(QStringLiteral("converted_custom_seg/annotations/train.json")));
-    const QJsonArray trainImages = train.value(QStringLiteral("images")).toArray();
-    QCOMPARE(trainImages.size(), 1);
-    QCOMPARE(trainImages.at(0).toObject().value(QStringLiteral("file_name")).toString(), QStringLiteral("images/train/seg_train.png"));
-    const QJsonArray trainAnnotations = train.value(QStringLiteral("annotations")).toArray();
-    QCOMPARE(trainAnnotations.size(), 1);
-    QVERIFY(!trainAnnotations.at(0).toObject().value(QStringLiteral("segmentation")).toArray().isEmpty());
-    QVERIFY(QFileInfo::exists(root.filePath(QStringLiteral("converted_custom_seg/images/train/seg_train.png"))));
-
-    const QJsonObject val = readJsonObjectForConversionTest(root.filePath(QStringLiteral("converted_custom_seg/annotations/val.json")));
-    const QJsonArray valImages = val.value(QStringLiteral("images")).toArray();
-    QCOMPARE(valImages.size(), 1);
-    QCOMPARE(valImages.at(0).toObject().value(QStringLiteral("file_name")).toString(), QStringLiteral("images/val/seg_val.png"));
-    QVERIFY(QFileInfo::exists(root.filePath(QStringLiteral("converted_custom_seg/images/val/seg_val.png"))));
-}
-
-void DatasetConversionTests::copyImagesFalseKeepsReferencedPaths()
-{
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-    const QDir root(temp.path());
-    const QDir source(root.filePath(QStringLiteral("source_yolo")));
-    writeYoloDetectionFixture(source);
-
-    aitrain::DatasetConversionRequest request;
-    request.sourcePath = source.absolutePath();
-    request.sourceFormat = QStringLiteral("yolo_detection");
-    request.targetFormat = QStringLiteral("coco_json");
-    request.outputPath = root.filePath(QStringLiteral("converted_reference"));
-    request.options.insert(QStringLiteral("copyImages"), false);
-
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
-    QVERIFY2(result.ok, qPrintable(result.errorMessage));
-    QVERIFY(!QFileInfo::exists(root.filePath(QStringLiteral("converted_reference/images/train/a.png"))));
-    const QJsonObject train = readJsonObjectForConversionTest(root.filePath(QStringLiteral("converted_reference/annotations/train.json")));
-    const QString fileName = train.value(QStringLiteral("images")).toArray().at(0).toObject().value(QStringLiteral("file_name")).toString();
-    QCOMPARE(fileName, QStringLiteral("images/train/a.png"));
-    const QJsonObject report = readJsonObjectForConversionTest(result.reportPath);
-    QCOMPARE(report.value(QStringLiteral("imagePolicy")).toString(), QStringLiteral("referenced"));
-}
-
-void DatasetConversionTests::invalidYoloLabelsReportIssues()
-{
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-    const QDir root(temp.path());
-    const QDir source(root.filePath(QStringLiteral("source_yolo_invalid")));
-    writeTinyPngWithSize(source.filePath(QStringLiteral("images/train/a.png")), 100, 80);
-    writeTextFile(source.filePath(QStringLiteral("labels/train/a.txt")),
-        QStringLiteral("0 0.500000 0.500000 0.500000 0.400000\n9 0.5 0.5 0.2 0.2\n0 0.5 0.5 -0.2 0.2\n"));
-    writeTextFile(source.filePath(QStringLiteral("data.yaml")),
-        QStringLiteral("path: .\ntrain: images/train\nval: images/train\nnc: 1\nnames:\n  0: widget\n"));
-
-    aitrain::DatasetConversionRequest request;
-    request.sourcePath = source.absolutePath();
-    request.sourceFormat = QStringLiteral("yolo_detection");
-    request.targetFormat = QStringLiteral("coco_json");
-    request.outputPath = root.filePath(QStringLiteral("converted_invalid"));
-
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
-    QVERIFY2(result.ok, qPrintable(result.errorMessage));
-    QCOMPARE(result.convertedAnnotationCount, 1);
-    QVERIFY(issuesContainCode(result.issues, QStringLiteral("unknown_class_id")));
-    QVERIFY(issuesContainCode(result.issues, QStringLiteral("invalid_bbox")));
-}
-
-void DatasetConversionTests::yoloDataYamlCustomSplitPathsAreHonored()
-{
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-    const QDir root(temp.path());
-    const QDir source(root.filePath(QStringLiteral("source_custom_yolo")));
-    writeTinyPngWithSize(source.filePath(QStringLiteral("dataset/train/images/custom_train.png")), 100, 80);
-    writeTinyPngWithSize(source.filePath(QStringLiteral("dataset/validation/images/custom_val.png")), 120, 60);
-    writeTextFile(source.filePath(QStringLiteral("dataset/train/labels/custom_train.txt")),
-        QStringLiteral("0 0.500000 0.500000 0.500000 0.400000\n"));
-    writeTextFile(source.filePath(QStringLiteral("dataset/validation/labels/custom_val.txt")),
-        QStringLiteral("0 0.250000 0.500000 0.300000 0.500000\n"));
-    writeTextFile(source.filePath(QStringLiteral("data.yaml")),
-        QStringLiteral("path : dataset\ntrain : train/images\nval : validation/images\nnc : 1\nnames : [custom]\n"));
-
-    aitrain::DatasetConversionRequest request;
-    request.sourcePath = source.absolutePath();
-    request.sourceFormat = QStringLiteral("yolo_detection");
-    request.targetFormat = QStringLiteral("coco_json");
-    request.outputPath = root.filePath(QStringLiteral("converted_custom"));
-    request.options.insert(QStringLiteral("copyImages"), true);
-
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
-    QVERIFY2(result.ok, qPrintable(result.errorMessage));
-    QCOMPARE(result.convertedSampleCount, 2);
-    QCOMPARE(result.convertedAnnotationCount, 2);
-
-    const QJsonObject train = readJsonObjectForConversionTest(root.filePath(QStringLiteral("converted_custom/annotations/train.json")));
-    const QString trainFile = train.value(QStringLiteral("images")).toArray().at(0).toObject().value(QStringLiteral("file_name")).toString();
-    QCOMPARE(trainFile, QStringLiteral("images/train/custom_train.png"));
-    QVERIFY(QFileInfo::exists(root.filePath(QStringLiteral("converted_custom/images/train/custom_train.png"))));
-
-    const QJsonObject val = readJsonObjectForConversionTest(root.filePath(QStringLiteral("converted_custom/annotations/val.json")));
-    const QString valFile = val.value(QStringLiteral("images")).toArray().at(0).toObject().value(QStringLiteral("file_name")).toString();
-    QCOMPARE(valFile, QStringLiteral("images/val/custom_val.png"));
-    QVERIFY(QFileInfo::exists(root.filePath(QStringLiteral("converted_custom/images/val/custom_val.png"))));
-    const QJsonObject report = readJsonObjectForConversionTest(result.reportPath);
-    const QString imagesRoot = report.value(QStringLiteral("outputFiles")).toObject().value(QStringLiteral("imagesRoot")).toString();
-    QVERIFY(QFileInfo::exists(imagesRoot));
-}
-
-void DatasetConversionTests::missingYoloSourcePathFailsAsSourceReadFailed()
-{
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-    const QDir root(temp.path());
-
-    aitrain::DatasetConversionRequest request;
-    request.sourcePath = root.filePath(QStringLiteral("does_not_exist"));
-    request.sourceFormat = QStringLiteral("yolo_detection");
-    request.targetFormat = QStringLiteral("coco_json");
-    request.outputPath = root.filePath(QStringLiteral("converted_missing"));
-
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
-    QVERIFY(!result.ok);
-    QCOMPARE(result.errorCode, QStringLiteral("source_read_failed"));
-    QVERIFY(result.reportPath.isEmpty());
-}
-
-void DatasetConversionTests::yoloDetectionToVocReportsDuplicateOutputTargets()
-{
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-    const QDir root(temp.path());
-    const QDir source(root.filePath(QStringLiteral("source_duplicate_yolo")));
-    writeTinyPngWithSize(source.filePath(QStringLiteral("images/train/left/dup.png")), 100, 80);
-    writeTinyPngWithSize(source.filePath(QStringLiteral("images/train/right/dup.png")), 120, 60);
-    writeTextFile(source.filePath(QStringLiteral("labels/train/left/dup.txt")),
-        QStringLiteral("0 0.500000 0.500000 0.500000 0.400000\n"));
-    writeTextFile(source.filePath(QStringLiteral("labels/train/right/dup.txt")),
-        QStringLiteral("0 0.250000 0.500000 0.300000 0.500000\n"));
-    writeTextFile(source.filePath(QStringLiteral("data.yaml")),
-        QStringLiteral("path: .\ntrain: images/train\nval: images/train\nnc: 1\nnames: [duplicate]\n"));
-
-    aitrain::DatasetConversionRequest request;
-    request.sourcePath = source.absolutePath();
-    request.sourceFormat = QStringLiteral("yolo_detection");
-    request.targetFormat = QStringLiteral("voc_xml");
-    request.outputPath = root.filePath(QStringLiteral("converted_duplicate_voc"));
-    request.options.insert(QStringLiteral("copyImages"), true);
-
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
-    QVERIFY2(result.ok, qPrintable(result.errorMessage));
-    QCOMPARE(result.convertedSampleCount, 1);
-    QCOMPARE(result.convertedAnnotationCount, 1);
-    QVERIFY(issuesContainCode(result.issues, QStringLiteral("duplicate_output_target")));
-    const QString xml = readTextForConversionTest(root.filePath(QStringLiteral("converted_duplicate_voc/Annotations/dup.xml")));
-    QCOMPARE(xml.count(QStringLiteral("<object>")), 1);
-}
-
-void DatasetConversionTests::yoloBlockListNamesPreserveCategoryNames()
-{
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-    const QDir root(temp.path());
-    const QDir source(root.filePath(QStringLiteral("source_block_names")));
-    writeTinyPngWithSize(source.filePath(QStringLiteral("images/train/a.png")), 100, 80);
-    writeTextFile(source.filePath(QStringLiteral("labels/train/a.txt")),
-        QStringLiteral("1 0.500000 0.500000 0.500000 0.400000\n"));
-    writeTextFile(source.filePath(QStringLiteral("data.yaml")),
-        QStringLiteral("path: .\ntrain: images/train\nval: images/train\nnc: 2\nnames:\n  - widget\n  - part\n"));
-
-    aitrain::DatasetConversionRequest cocoRequest;
-    cocoRequest.sourcePath = source.absolutePath();
-    cocoRequest.sourceFormat = QStringLiteral("yolo_detection");
-    cocoRequest.targetFormat = QStringLiteral("coco_json");
-    cocoRequest.outputPath = root.filePath(QStringLiteral("converted_block_coco"));
-
-    const aitrain::DatasetConversionResult cocoResult = aitrain::convertDataset(cocoRequest);
-    QVERIFY2(cocoResult.ok, qPrintable(cocoResult.errorMessage));
-    const QJsonObject train = readJsonObjectForConversionTest(root.filePath(QStringLiteral("converted_block_coco/annotations/train.json")));
-    const QJsonArray categories = train.value(QStringLiteral("categories")).toArray();
-    QCOMPARE(categories.at(0).toObject().value(QStringLiteral("name")).toString(), QStringLiteral("widget"));
-    QCOMPARE(categories.at(1).toObject().value(QStringLiteral("name")).toString(), QStringLiteral("part"));
-
-    aitrain::DatasetConversionRequest vocRequest;
-    vocRequest.sourcePath = source.absolutePath();
-    vocRequest.sourceFormat = QStringLiteral("yolo_detection");
-    vocRequest.targetFormat = QStringLiteral("voc_xml");
-    vocRequest.outputPath = root.filePath(QStringLiteral("converted_block_voc"));
-
-    const aitrain::DatasetConversionResult vocResult = aitrain::convertDataset(vocRequest);
-    QVERIFY2(vocResult.ok, qPrintable(vocResult.errorMessage));
-    const QString xml = readTextForConversionTest(root.filePath(QStringLiteral("converted_block_voc/Annotations/a.xml")));
-    QVERIFY(xml.contains(QStringLiteral("<name>part</name>")));
-}
-
-void DatasetConversionTests::customSplitPathsCopyToControlledImageLayout()
-{
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-    const QDir root(temp.path());
-    const QDir source(root.filePath(QStringLiteral("source_nested_splits")));
-    writeTinyPngWithSize(source.filePath(QStringLiteral("raw/custom/images/train/nested.png")), 100, 80);
-    writeTinyPngWithSize(source.filePath(QStringLiteral("raw/custom/images/val/nested_val.png")), 100, 80);
-    writeTextFile(source.filePath(QStringLiteral("raw/custom/labels/train/nested.txt")),
-        QStringLiteral("0 0.500000 0.500000 0.500000 0.400000\n"));
-    writeTextFile(source.filePath(QStringLiteral("raw/custom/labels/val/nested_val.txt")),
-        QStringLiteral("0 0.500000 0.500000 0.500000 0.400000\n"));
-    writeTextFile(source.filePath(QStringLiteral("data.yaml")),
-        QStringLiteral("path : raw\ntrain : custom/images/train\nval : custom/images/val\nnc : 1\nnames : [item]\n"));
-
-    aitrain::DatasetConversionRequest request;
-    request.sourcePath = source.absolutePath();
-    request.sourceFormat = QStringLiteral("yolo_detection");
-    request.targetFormat = QStringLiteral("coco_json");
-    request.outputPath = root.filePath(QStringLiteral("converted_nested"));
-    request.options.insert(QStringLiteral("copyImages"), true);
-
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
-    QVERIFY2(result.ok, qPrintable(result.errorMessage));
-    QVERIFY(QFileInfo::exists(root.filePath(QStringLiteral("converted_nested/images/train/nested.png"))));
-    QVERIFY(QFileInfo::exists(root.filePath(QStringLiteral("converted_nested/images/val/nested_val.png"))));
-    QVERIFY(!QFileInfo::exists(root.filePath(QStringLiteral("converted_nested/custom/images/train/nested.png"))));
-    const QJsonObject report = readJsonObjectForConversionTest(result.reportPath);
-    QVERIFY(QFileInfo::exists(report.value(QStringLiteral("outputFiles")).toObject().value(QStringLiteral("imagesRoot")).toString()));
-}
-
-void DatasetConversionTests::unsafeSplitPathsCannotWriteOutsideOutputRoot()
-{
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-    const QDir root(temp.path());
-    const QDir source(root.filePath(QStringLiteral("source_unsafe_splits")));
-    writeTinyPngWithSize(root.filePath(QStringLiteral("external/images/train/escape.png")), 100, 80);
-    writeTextFile(root.filePath(QStringLiteral("external/labels/train/escape.txt")),
-        QStringLiteral("0 0.500000 0.500000 0.500000 0.400000\n"));
-    writeTextFile(source.filePath(QStringLiteral("data.yaml")),
-        QStringLiteral("path: .\ntrain: ../external/images/train\nval: ../external/images/train\nnc: 1\nnames: [escape]\n"));
-
-    aitrain::DatasetConversionRequest request;
-    request.sourcePath = source.absolutePath();
-    request.sourceFormat = QStringLiteral("yolo_detection");
-    request.targetFormat = QStringLiteral("coco_json");
-    request.outputPath = root.filePath(QStringLiteral("converted_unsafe"));
-    request.options.insert(QStringLiteral("copyImages"), true);
-
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request);
-    QVERIFY2(result.ok, qPrintable(result.errorMessage));
-    const QString sourceImagePath = root.filePath(QStringLiteral("external/images/train/escape.png"));
-    QVERIFY(QFileInfo::exists(sourceImagePath));
-    QVERIFY(QFileInfo::exists(root.filePath(QStringLiteral("converted_unsafe/images/train/escape.png"))));
-    QVERIFY(!QFileInfo::exists(root.filePath(QStringLiteral("converted_unsafe/external/images/train/escape.png"))));
-    const QJsonObject train = readJsonObjectForConversionTest(root.filePath(QStringLiteral("converted_unsafe/annotations/train.json")));
-    const QString fileName = train.value(QStringLiteral("images")).toArray().at(0).toObject().value(QStringLiteral("file_name")).toString();
-    QCOMPARE(fileName, QStringLiteral("images/train/escape.png"));
-}
-
-void DatasetConversionTests::immediateCancellationReturnsCanceled()
-{
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-    const QDir root(temp.path());
-
-    aitrain::DatasetConversionRequest request;
-    request.sourcePath = root.filePath(QStringLiteral("missing.json"));
-    request.sourceFormat = QStringLiteral("coco_json");
-    request.targetFormat = QStringLiteral("yolo_detection");
-    request.outputPath = root.filePath(QStringLiteral("converted"));
-
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request, []() {
-        return true;
-    });
-    QVERIFY(!result.ok);
-    QCOMPARE(result.errorCode, QStringLiteral("canceled"));
-    QCOMPARE(result.errorMessage, QStringLiteral("Canceled by user"));
-    QVERIFY(result.reportPath.isEmpty());
-    QVERIFY(!QFileInfo::exists(root.filePath(QStringLiteral("converted/dataset_conversion_report.json"))));
-}
-
-void DatasetConversionTests::sampleLoopCancellationDoesNotWriteCompletionReport()
-{
-    QTemporaryDir temp(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("aitrain_dataset_conversion_XXXXXX")));
-    QVERIFY(temp.isValid());
-    const QDir root(temp.path());
-    const QDir source(root.filePath(QStringLiteral("source_many")));
-    QDir().mkpath(source.filePath(QStringLiteral("images/train")));
-    QDir().mkpath(source.filePath(QStringLiteral("labels/train")));
-    for (int index = 0; index < 12; ++index) {
-        const QString name = QStringLiteral("sample_%1").arg(index, 2, 10, QLatin1Char('0'));
-        writeTinyPngWithSize(source.filePath(QStringLiteral("images/train/%1.png").arg(name)), 64, 64);
-        writeTextFile(source.filePath(QStringLiteral("labels/train/%1.txt").arg(name)), QStringLiteral("0 0.5 0.5 0.25 0.25\n"));
+    {
+        Fixture fixture;
+        const auto task = createTask(&fixture.storage);
+        const QString rejectedRelative = QStringLiteral("images/%1.png").arg(QString(161, QLatin1Char('b')));
+        const QJsonObject coco{
+            {QStringLiteral("images"), QJsonArray{QJsonObject{{QStringLiteral("id"), 1},
+                 {QStringLiteral("file_name"), rejectedRelative}, {QStringLiteral("width"), 16}, {QStringLiteral("height"), 12}}}},
+            {QStringLiteral("categories"), QJsonArray{QJsonObject{{QStringLiteral("id"), 7},
+                 {QStringLiteral("name"), QStringLiteral("零件")}}}},
+            {QStringLiteral("annotations"), QJsonArray{QJsonObject{{QStringLiteral("id"), 1},
+                 {QStringLiteral("image_id"), 1}, {QStringLiteral("category_id"), 7},
+                 {QStringLiteral("bbox"), QJsonArray{2, 2, 8, 6}}}}}};
+        const QString source = QDir(fixture.directory.filePath(QStringLiteral("portable-rejected")))
+                                   .filePath(QStringLiteral("annotations.json"));
+        QVERIFY(writeUtf8(source, QString::fromUtf8(QJsonDocument(coco).toJson(QJsonDocument::Compact))));
+        aitrain::DatasetConversionService service(fixture.artifacts.get(), &fixture.storage, &fixture.drivers);
+        aitrain::DatasetArtifactConversion result;
+        QString error;
+        QVERIFY(!service.convert(task.id, requestFor(source), &result, &error));
+        QVERIFY2(error.startsWith(QStringLiteral("dataset_conversion_relative_path_too_long:")), qPrintable(error));
+        QCOMPARE(fixture.storage.artifactCount(task.id, &error), 0);
     }
-    writeTextFile(source.filePath(QStringLiteral("data.yaml")),
-        QStringLiteral("path: .\ntrain: images/train\nval: images/train\nnc: 1\nnames: [item]\n"));
+}
 
-    aitrain::DatasetConversionRequest request;
-    request.sourcePath = source.absolutePath();
-    request.sourceFormat = QStringLiteral("yolo_detection");
-    request.targetFormat = QStringLiteral("coco_json");
-    request.outputPath = root.filePath(QStringLiteral("converted_many"));
-    request.options.insert(QStringLiteral("copyImages"), true);
+void DatasetConversionTests::injectedIoFailuresLeaveNoArtifact_data()
+{
+    QTest::addColumn<int>("operation");
+    QTest::addColumn<QString>("failureCode");
+    QTest::newRow("disk-full-during-materialize")
+        << static_cast<int>(aitrain::DatasetConversionIoOperation::MaterializeWrite)
+        << QStringLiteral("dataset_conversion_io_disk_full");
+    QTest::newRow("report-target-locked")
+        << static_cast<int>(aitrain::DatasetConversionIoOperation::ReportWrite)
+        << QStringLiteral("dataset_conversion_io_target_locked");
+    QTest::newRow("commit-target-busy")
+        << static_cast<int>(aitrain::DatasetConversionIoOperation::Commit)
+        << QStringLiteral("dataset_conversion_io_commit_target_busy");
+}
 
-    int checks = 0;
-    const aitrain::DatasetConversionResult result = aitrain::convertDataset(request, [&checks]() {
-        ++checks;
-        return checks > 4;
-    });
-    QVERIFY(!result.ok);
-    QCOMPARE(result.errorCode, QStringLiteral("canceled"));
-    QVERIFY(result.reportPath.isEmpty());
-    QVERIFY(!QFileInfo::exists(root.filePath(QStringLiteral("converted_many/dataset_conversion_report.json"))));
+void DatasetConversionTests::injectedIoFailuresLeaveNoArtifact()
+{
+    QFETCH(int, operation);
+    QFETCH(QString, failureCode);
+    Fixture fixture;
+    const auto task = createTask(&fixture.storage);
+    const QString source = createCocoFixture(fixture.directory.filePath(QStringLiteral("io-fault")), 2);
+    const auto selected = static_cast<aitrain::DatasetConversionIoOperation>(operation);
+    aitrain::DatasetConversionService service(fixture.artifacts.get(), &fixture.storage, &fixture.drivers,
+        {}, [selected, failureCode](aitrain::DatasetConversionIoOperation point, const QString&) {
+            return point == selected ? failureCode : QString();
+        });
+    aitrain::DatasetArtifactConversion result;
+    QString error;
+    QVERIFY(!service.convert(task.id, requestFor(source), &result, &error));
+    QCOMPARE(error, failureCode);
+    QCOMPARE(fixture.storage.artifactCount(task.id, &error), 0);
+    const QDir staging(fixture.directory.filePath(QStringLiteral("artifact-store/.staging")));
+    QVERIFY(!staging.exists() || staging.entryList(QDir::Dirs | QDir::NoDotAndDotDot).isEmpty());
+}
+
+void DatasetConversionTests::abandonedStagingIsRecoveredWithoutArtifact()
+{
+    Fixture fixture;
+    QString error;
+    const auto committedTask = createTask(&fixture.storage);
+    const QString source = createCocoFixture(fixture.directory.filePath(QStringLiteral("committed-source")), 1);
+    aitrain::DatasetConversionService service(fixture.artifacts.get(), &fixture.storage, &fixture.drivers);
+    aitrain::DatasetArtifactConversion committed;
+    QVERIFY2(service.convert(committedTask.id, requestFor(source), &committed, &error), qPrintable(error));
+    QVERIFY(QFileInfo::exists(committed.artifactPath));
+
+    const auto task = createTask(&fixture.storage);
+    aitrain::ArtifactId artifactId;
+    QString staging;
+    QVERIFY(fixture.artifacts->begin(task.id, QStringLiteral("dataset_conversion"), &artifactId, &staging, &error));
+    QVERIFY(writeUtf8(QDir(staging).filePath(QStringLiteral("partial.bin")), QStringLiteral("partial")));
+    QVERIFY(fixture.storage.transitionTask(task.id, aitrain::TaskState::Created,
+        aitrain::TaskState::Failed,
+        {aitrain::FailureCode::ProcessCrashed, QStringLiteral("worker_killed"),
+            QStringLiteral("清理中断的转换 staging。"), QDateTime::currentDateTimeUtc()}, &error));
+
+    const auto activeTask = createTask(&fixture.storage);
+    aitrain::ArtifactId activeArtifactId;
+    QString activeStaging;
+    QVERIFY(fixture.artifacts->begin(activeTask.id, QStringLiteral("dataset_conversion"),
+        &activeArtifactId, &activeStaging, &error));
+    QVERIFY(writeUtf8(QDir(activeStaging).filePath(QStringLiteral("owned-by-running-task.bin")),
+        QStringLiteral("keep")));
+
+    QStringList diagnostics;
+    QVERIFY2(fixture.artifacts->recoverStaging(&fixture.storage, &diagnostics, &error), qPrintable(error));
+    QVERIFY(!QFileInfo::exists(staging));
+    bool exists = true;
+    QVERIFY(fixture.storage.artifactExists(artifactId, &exists, &error));
+    QVERIFY(!exists);
+    QVERIFY(QFileInfo::exists(activeStaging));
+    QVERIFY(QFileInfo::exists(committed.artifactPath));
+    QVERIFY(fixture.storage.artifactExists(committed.artifactId, &exists, &error));
+    QVERIFY(exists);
+    QVERIFY(!diagnostics.isEmpty());
 }
 
 QTEST_MAIN(DatasetConversionTests)

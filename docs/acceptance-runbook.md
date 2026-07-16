@@ -1,6 +1,6 @@
-﻿# AITrain Studio Acceptance Runbook
+# AITrain Studio Acceptance Runbook
 
-本手册中的 Phase 记录保留历史验收证据。2026-07-16 破坏性重构后，旧 YOLO26/SMP/OBB/NCNN smoke 脚本、X-AnyLabeling 独立脚本以及 Worker 的裸路径和 `--*-smoke` CLI 均已删除，不得按历史命令执行。当前验收入口是 `tools\\harness-check.ps1`、`tools\\acceptance-smoke.ps1` 的 LocalBaseline/Package/PublicDatasets/CpuTrainingSmoke 模式，以及各 V2 Workflow 的 QtTest；TensorRT、NCNN 和 OCR 只通过其 V2/官方适配器边界报告。
+本手册中的 Phase 记录保留历史验收证据。2026-07-16 破坏性重构后，旧 YOLO26/SMP/OBB/NCNN smoke 脚本、X-AnyLabeling 独立脚本以及 Worker 的裸路径和 `--*-smoke` CLI 均已删除，不得按历史命令执行。当前验收入口是 `tools\\harness-check.ps1`、`tools\\acceptance-smoke.ps1` 的 LocalBaseline/Package/PublicDatasets/CpuTrainingSmoke 模式，以及各  Workflow 的 QtTest；TensorRT、NCNN 和 OCR 只通过其 /官方适配器边界报告。
 
 ## Acceptance Modes
 
@@ -13,7 +13,7 @@ Run the unified smoke script from the repository root:
 .\tools\acceptance-smoke.ps1 -PublicDatasets
 .\tools\acceptance-smoke.ps1 -CpuTrainingSmoke
 .\tools\phase45-yolo-model-matrix-smoke.ps1
-.\tools\phase-p1-yolo-full-matrix-smoke.ps1
+.\tools\acceptance-smoke.ps1
 .\tools\phase-ppocrv6-model-matrix-smoke.ps1
 .\tools\phase-smp-semantic-segmentation-smoke.ps1
 .\tools\phase-anomaly-anomalib-smoke.ps1
@@ -46,7 +46,7 @@ For SMP semantic segmentation, use:
 
 `phase-smp-semantic-segmentation-smoke.ps1` remains the minimal adapter smoke: it generates a tiny Mask PNG semantic dataset, compiles the SMP trainer/evaluator, checks `segmentation_models_pytorch`, Torch, timm, ONNX, ONNX Runtime, Pillow, NumPy, and PyYAML, trains only when dependencies are available, exports `best.onnx`, runs evaluation, and verifies overlays. If dependencies are absent, use `-SkipTraining` for package/layout validation or treat the smoke summary as `blocked`, not passed.
 
-历史 SMP GPU realtest 仅保留在归档证据中；当前 SMP 产品验收由官方 Python 适配器和 `runRuntimeDeliveryWorkflowV2` 负责，不再调用 Worker smoke CLI。
+历史 SMP GPU realtest 仅保留在归档证据中；当前 SMP 产品验收由官方 Python 适配器和 `runRuntimeDeliveryWorkflow` 负责，不再调用 Worker smoke CLI。
 
 For OBB rotated-box detection, use:
 
@@ -74,7 +74,7 @@ Current GUI surfaces:
 
 - `数据集 > 质量与复核`: load `problem_samples.json`, `error_samples.json`, `rework_sample_set.json`, or evaluation reports; filter by source, reason, class, split, OCR edit distance / CER, or search text; export an X-AnyLabeling review list.
 - `模型库 > 评估报告`: review model evaluation report records and visualized report details.
-- `部署验证 > 部署验证 / 推理验证`：两者都只接受已登记、Manifest 和哈希校验通过的 V2 模型包；分别运行部署验证与单图推理。
+- `部署验证 > 部署验证 / 推理验证`：两者都只接受已登记、Manifest 和哈希校验通过的  模型包；分别运行部署验证与单图推理。
 - `系统设置 > 内置能力`: review the built-in capability matrix and backend boundaries.
 - `环境 > 交付证据`: summarize local RC, clean Windows, TensorRT, package integrity, customer OCR, diagnostics, and deployment validation evidence.
 - Customer OCR acceptance wizard: collect Det dataset, Rec dataset, System images, official Det/Rec/System reports, and write customer OCR manifest/summary outputs.
@@ -91,7 +91,7 @@ The real execution entries remain:
 .\tools\ui-workbench-walkthrough.ps1
 ```
 
-当前 Worker 产品协议保留 `runCustomerOcrAcceptance` 与 `collectDiagnostics` 报告命令；V2-503 已完成，推理与部署验证统一使用 `runRuntimeDeliveryWorkflowV2` 六步工作流，并且只能通过 `ModelPackageId`、Manifest 与 Artifact Store 解析模型。已删除的单步命令和裸路径部署命令不得再作为验收入口。长任务实现仍必须位于 Worker/core 边界，不能进入 `MainWindow`。底层 ONNX Runtime 单次同步 `infer` 进入后不可中途抢占，取消会在该次调用返回后收口。NCNN V2 验收只覆盖产品矩阵允许且 Manifest 合同完整的 Detection/Segmentation，不得扩展到 OBB、SMP、异常检测、OCR 或未知 decoder；TensorRT V2 的官方 YOLO decoder 与真实 `infer` 尚未实现，probe/engine 或历史外部证据不能作为本六步工作流的 TensorRT 推理通过结论。
+当前 Worker 产品协议保留 `runCustomerOcrAcceptance` 与 `collectDiagnostics` 报告命令；-503 已完成，推理与部署验证统一使用 `runRuntimeDeliveryWorkflow` 六步工作流，并且只能通过 `ModelPackageId`、Manifest 与 Artifact Store 解析模型。已删除的单步命令和裸路径部署命令不得再作为验收入口。长任务实现仍必须位于 Worker/core 边界，不能进入 `MainWindow`。底层 ONNX Runtime 单次同步 `infer` 进入后不可中途抢占，取消会在该次调用返回后收口。NCNN  验收只覆盖产品矩阵允许且 Manifest 合同完整的 Detection/Segmentation，不得扩展到 OBB、SMP、异常检测、OCR 或未知 decoder；TensorRT  的官方 YOLO decoder 与真实 `infer` 尚未实现，probe/engine 或历史外部证据不能作为本六步工作流的 TensorRT 推理通过结论。
 
 NCNN evidence refresh on 2026-05-16:
 
@@ -176,7 +176,7 @@ Acceptance requires:
 
 - Worker self-check resolves CUDA, cuDNN, TensorRT, TensorRT Plugin, TensorRT ONNX Parser, and ONNX Runtime components needed for ONNX-to-engine export.
 - `acceptance-smoke.ps1 -TensorRT` generates a small official Ultralytics YOLO ONNX artifact, or uses `-TensorRtOnnxPath <official.onnx>` when supplied.
-- 历史 TensorRT smoke CLI 已删除；当前 TensorRT 仅报告 V2 Adapter 的 SDK/依赖/硬件/decoder 状态，不宣称真实推理通过。
+- 历史 TensorRT smoke CLI 已删除；当前 TensorRT 仅报告  Adapter 的 SDK/依赖/硬件/decoder 状态，不宣称真实推理通过。
 - The result is recorded back in `docs\harness\current-status.md`; the current RTX 4090 D pass is already recorded.
 
 ## Phase 43 Lite: External Acceptance Handoff
@@ -245,7 +245,7 @@ Required Phase 45 models are `yolo11n.yaml`, `yolo11n-seg.yaml`, `yolo12n.yaml`,
 Run the required full YOLO detection/instance-segmentation matrix:
 
 ```powershell
-.\tools\phase-p1-yolo-full-matrix-smoke.ps1
+.\tools\acceptance-smoke.ps1
 ```
 
 The script writes `p1_yolo_full_matrix_summary.json` under `.deps\phase-p1-yolo-full-matrix` by default. `status=passed` requires every required row with a resolvable official asset to pass; download failures, official model-resolution failures, GPU/TensorRT gaps, and INT8 calibration failures are recorded as failed/blocker evidence rather than skipped or silently downgraded. YOLO12 segmentation `.pt` is the current known model-resolution blocker in Ultralytics 8.3.171 and must be recorded as `blocked_missing_official_weight` or equivalent until upstream weights resolve.

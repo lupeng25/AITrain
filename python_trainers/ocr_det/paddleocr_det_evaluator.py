@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PaddleOCR DET V2 evaluator entry point."""
+"""PaddleOCR DET  evaluator entry point."""
 
 from __future__ import annotations
 

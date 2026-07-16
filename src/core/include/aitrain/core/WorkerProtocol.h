@@ -1,6 +1,6 @@
 #pragma once
 
-#include "aitrain/v2/ProtocolV2.h"
+#include "aitrain/protocol/Protocol.h"
 
 #include <QJsonObject>
 #include <QString>
@@ -9,19 +9,19 @@ namespace aitrain {
 namespace worker_protocol {
 
 namespace command {
-QString runEnvironmentCheckWorkflowV2();
-QString runDatasetSplitWorkflowV2();
-QString runDatasetConversionWorkflowV2();
-QString runDataQualityWorkflowV2();
-QString runDiagnosticsWorkflowV2();
-QString createAnnotationSessionV2();
-QString syncAnnotationSessionV2();
-QString runDatasetSnapshotImportWorkflowV2();
-QString importOcrOfficialReportsV2();
-QString runOcrAcceptanceWorkflowV2();
-QString runRuntimeDeliveryWorkflowV2();
-QString importModelV2();
-QString runTrainingWorkflowV2();
+QString runEnvironmentCheckWorkflow();
+QString runDatasetSplitWorkflow();
+QString runDatasetConversionWorkflow();
+QString runDataQualityWorkflow();
+QString runDiagnosticsWorkflow();
+QString createAnnotationSession();
+QString syncAnnotationSession();
+QString runDatasetSnapshotImportWorkflow();
+QString importOcrOfficialReports();
+QString runOcrAcceptanceWorkflow();
+QString runRuntimeDeliveryWorkflow();
+QString importModel();
+QString runTrainingWorkflow();
 } // namespace command
 
 namespace event {
@@ -33,18 +33,18 @@ QString artifact();
 QString completed();
 QString canceled();
 QString failed();
-QString environmentCheckWorkflowV2();
-QString datasetSplitWorkflowV2();
-QString datasetConversionWorkflowV2();
-QString dataQualityWorkflowV2();
-QString diagnosticsWorkflowV2();
-QString annotationSessionV2();
-QString annotationSyncV2();
-QString datasetSnapshotImportWorkflowV2();
-QString runtimeDeliveryWorkflowV2();
-QString modelImportV2();
-QString ocrOfficialReportsImportedV2();
-QString ocrAcceptanceWorkflowV2();
+QString environmentCheckWorkflow();
+QString datasetSplitWorkflow();
+QString datasetConversionWorkflow();
+QString dataQualityWorkflow();
+QString diagnosticsWorkflow();
+QString annotationSession();
+QString annotationSync();
+QString datasetSnapshotImportWorkflow();
+QString runtimeDeliveryWorkflow();
+QString modelImport();
+QString ocrOfficialReportsImported();
+QString ocrAcceptanceWorkflow();
 } // namespace event
 
 namespace field {
@@ -66,7 +66,7 @@ QString options();
 bool isTerminalEvent(const QString& type);
 bool isTaskStateEvent(const QString& type);
 
-QJsonObject datasetSplitWorkflowV2Request(
+QJsonObject datasetSplitWorkflowRequest(
     const QString& taskId,
     const QString& projectRoot,
     const QString& sourceDatasetId,
@@ -76,7 +76,7 @@ QJsonObject datasetSplitWorkflowV2Request(
     const QString& targetDatasetId,
     const QString& targetDatasetName,
     const QJsonObject& options);
-QJsonObject datasetConversionWorkflowV2Request(
+QJsonObject datasetConversionWorkflowRequest(
     const QString& taskId,
     const QString& projectRoot,
     const QString& sourcePath,
@@ -85,7 +85,7 @@ QJsonObject datasetConversionWorkflowV2Request(
     const QString& targetDatasetId,
     const QString& targetDatasetName,
     const QJsonObject& options);
-QJsonObject dataQualityWorkflowV2Request(
+QJsonObject dataQualityWorkflowRequest(
     const QString& taskId,
     const QString& projectRoot,
     const QString& datasetId,
@@ -93,20 +93,20 @@ QJsonObject dataQualityWorkflowV2Request(
     const QString& snapshotId,
     const QString& snapshotArtifactId,
     const QJsonObject& options);
-QJsonObject annotationSessionCreateV2Request(
+QJsonObject annotationSessionCreateRequest(
     const QString& taskId,
     const QString& projectRoot,
     const QString& repairManifestArtifactId,
     const QString& workingDirectory,
     const QJsonObject& toolSummary,
     const QJsonObject& options);
-QJsonObject annotationSessionSyncV2Request(
+QJsonObject annotationSessionSyncRequest(
     const QString& taskId,
     const QString& projectRoot,
     const QString& sessionArtifactId,
     const QString& workingDirectory,
     const QJsonObject& options);
-QJsonObject datasetSnapshotImportWorkflowV2Request(
+QJsonObject datasetSnapshotImportWorkflowRequest(
     const QString& taskId,
     const QString& projectRoot,
     const QString& sourcePath,
@@ -114,7 +114,7 @@ QJsonObject datasetSnapshotImportWorkflowV2Request(
     const QString& targetDatasetId,
     const QString& targetDatasetName,
     const QJsonObject& options);
-QJsonObject ocrOfficialReportImportV2Request(
+QJsonObject ocrOfficialReportImportRequest(
     const QString& taskId,
     const QString& projectRoot,
     const QJsonObject& det,
@@ -123,56 +123,56 @@ QJsonObject ocrOfficialReportImportV2Request(
     const QString& acceptanceCohortId,
     const QString& customerDomainId,
     const QString& evidenceClass);
-QJsonObject ocrAcceptanceWorkflowV2Request(
+QJsonObject ocrAcceptanceWorkflowRequest(
     const QString& taskId,
     const QString& projectRoot,
     const QString& detReportArtifactId,
     const QString& recReportArtifactId,
     const QString& systemReportArtifactId,
     const QJsonObject& thresholds);
-QJsonObject diagnosticsWorkflowV2Request(
+QJsonObject diagnosticsWorkflowRequest(
     const QString& taskId,
     const QString& projectRoot,
     const QJsonObject& options);
-QJsonObject runtimeDeliveryWorkflowV2Request(
+QJsonObject runtimeDeliveryWorkflowRequest(
     const QString& taskId,
     const QString& projectRoot,
     const QString& modelPackageId,
     const QString& runtimeRoute,
     const QString& sampleImagePath,
     const QJsonObject& options);
-QJsonObject modelImportV2Request(
+QJsonObject modelImportRequest(
     const QString& taskId,
     const QString& projectRoot,
     const QString& sourceFilePath,
     const QJsonObject& manifestDraft);
 
-namespace control_v2 {
-aitrain::v2::ProtocolEnvelope startTaskEnvelope(
-    const aitrain::v2::RequestId& requestId,
-    const aitrain::v2::TaskId& taskId,
+namespace control {
+aitrain::ProtocolEnvelope startTaskEnvelope(
+    const aitrain::RequestId& requestId,
+    const aitrain::TaskId& taskId,
     quint64 sequence,
     const QString& businessCommand,
     const QJsonObject& businessPayload);
-aitrain::v2::ProtocolEnvelope cancelTaskEnvelope(
-    const aitrain::v2::RequestId& requestId,
-    const aitrain::v2::TaskId& taskId,
+aitrain::ProtocolEnvelope cancelTaskEnvelope(
+    const aitrain::RequestId& requestId,
+    const aitrain::TaskId& taskId,
     quint64 sequence);
-aitrain::v2::ProtocolEnvelope eventEnvelope(
-    const aitrain::v2::RequestId& requestId,
-    const aitrain::v2::TaskId& taskId,
+aitrain::ProtocolEnvelope eventEnvelope(
+    const aitrain::RequestId& requestId,
+    const aitrain::TaskId& taskId,
     quint64 sequence,
     const QString& businessEvent,
     const QJsonObject& businessPayload);
-bool unpackStartTask(const aitrain::v2::ProtocolEnvelope& envelope,
+bool unpackStartTask(const aitrain::ProtocolEnvelope& envelope,
     QString* businessCommand,
     QJsonObject* businessPayload,
     QString* error = nullptr);
-bool unpackBusinessEvent(const aitrain::v2::ProtocolEnvelope& envelope,
+bool unpackBusinessEvent(const aitrain::ProtocolEnvelope& envelope,
     QString* businessEvent,
     QJsonObject* businessPayload,
     QString* error = nullptr);
-} // namespace control_v2
+} // namespace control
 
 } // namespace worker_protocol
 } // namespace aitrain

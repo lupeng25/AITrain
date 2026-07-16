@@ -1,7 +1,7 @@
 #include "MainWindow.h"
 
-#include "DiagnosticBundlePresenterV2.h"
-#include "EnvironmentCheckPresenterV2.h"
+#include "DiagnosticBundlePresenter.h"
+#include "EnvironmentCheckPresenter.h"
 #include "EvaluationReportView.h"
 #include "InfoPanel.h"
 #include "LanguageSupport.h"
@@ -154,17 +154,17 @@ QString runtimeDeliverySummary(const QJsonObject& payload)
 void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& payload)
 {
     const QString messageTaskId = payload.value(wp::field::taskId()).toString().trimmed();
-    const bool isActiveV2Task = !activeV2TaskId_.isEmpty()
-        && (messageTaskId.isEmpty() || messageTaskId == activeV2TaskId_);
-    if (isActiveV2Task && type == wp::event::annotationSessionV2()) {
+    const bool isActiveTask = !activeTaskId_.isEmpty()
+        && (messageTaskId.isEmpty() || messageTaskId == activeTaskId_);
+    if (isActiveTask && type == wp::event::annotationSession()) {
         handleAnnotationSessionMessage(payload);
         return;
     }
-    if (isActiveV2Task && type == wp::event::annotationSyncV2()) {
+    if (isActiveTask && type == wp::event::annotationSync()) {
         handleAnnotationSyncMessage(payload);
         return;
     }
-    if (isActiveV2Task && type == wp::event::runtimeDeliveryWorkflowV2()) {
+    if (isActiveTask && type == wp::event::runtimeDeliveryWorkflow()) {
         const QString summary = runtimeDeliverySummary(payload);
         if (inferenceResultLabel_) inferenceResultLabel_->setText(summary);
         if (deploymentValidationResultLabel_) deploymentValidationResultLabel_->setText(summary);
@@ -179,79 +179,79 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
         updateModelRegistry();
         return;
     }
-    if (isActiveV2Task && type == wp::event::dataQualityWorkflowV2()) {
-        handleDataQualityWorkflowV2Message(payload);
+    if (isActiveTask && type == wp::event::dataQualityWorkflow()) {
+        handleDataQualityWorkflowMessage(payload);
         return;
     }
-    if (isActiveV2Task && type == wp::event::diagnosticsWorkflowV2()) {
-        handleDiagnosticsWorkflowV2(payload);
+    if (isActiveTask && type == wp::event::diagnosticsWorkflow()) {
+        handleDiagnosticsWorkflow(payload);
         return;
     }
-    if (isActiveV2Task && type == wp::event::environmentCheckWorkflowV2()) {
-        if (environmentCheckPresenter_->selectTask(activeV2TaskId_)) {
+    if (isActiveTask && type == wp::event::environmentCheckWorkflow()) {
+        if (environmentCheckPresenter_->selectTask(activeTaskId_)) {
             updateEnvironmentTable(environmentCheckPresenter_->viewModel().report);
-            appendLog(uiText("Environment Check V2 已通过 TaskId 加载已提交报告与 Evidence。"));
+            appendLog(uiText("Environment Check 已通过 TaskId 加载已提交报告与 Evidence。"));
         } else {
-            appendLog(uiText("Environment Check V2 报告读取失败：%1")
+            appendLog(uiText("Environment Check 报告读取失败：%1")
                 .arg(environmentCheckPresenter_->lastError()));
         }
         return;
     }
-    if (isActiveV2Task && type == wp::event::datasetConversionWorkflowV2()) {
-        handleDatasetConversionWorkflowV2(payload);
+    if (isActiveTask && type == wp::event::datasetConversionWorkflow()) {
+        handleDatasetConversionWorkflow(payload);
         return;
     }
-    if (isActiveV2Task && type == wp::event::datasetSplitWorkflowV2()) {
-        handleDatasetSplitWorkflowV2(payload);
+    if (isActiveTask && type == wp::event::datasetSplitWorkflow()) {
+        handleDatasetSplitWorkflow(payload);
         return;
     }
-    if (isActiveV2Task && type == wp::event::datasetSnapshotImportWorkflowV2()) {
-        handleDatasetSnapshotImportWorkflowV2(payload);
+    if (isActiveTask && type == wp::event::datasetSnapshotImportWorkflow()) {
+        handleDatasetSnapshotImportWorkflow(payload);
         return;
     }
-    if (isActiveV2Task && type == wp::event::ocrOfficialReportsImportedV2()) {
-        handleOcrOfficialReportsImportedV2(payload);
+    if (isActiveTask && type == wp::event::ocrOfficialReportsImported()) {
+        handleOcrOfficialReportsImported(payload);
         return;
     }
-    if (isActiveV2Task && type == wp::event::ocrAcceptanceWorkflowV2()) {
-        handleOcrAcceptanceWorkflowV2(payload);
+    if (isActiveTask && type == wp::event::ocrAcceptanceWorkflow()) {
+        handleOcrAcceptanceWorkflow(payload);
         return;
     }
-    if (isActiveV2Task && (type == wp::event::completed()
+    if (isActiveTask && (type == wp::event::completed()
             || type == wp::event::failed() || type == wp::event::canceled())) {
         const QString message = payload.value(wp::field::message()).toString();
-        if (activeV2WorkflowKind_ == QStringLiteral("dataset_conversion_v2")) {
+        if (activeWorkflowKind_ == QStringLiteral("dataset_conversion")) {
             setDatasetConversionFormRunning(false);
         }
         QString workflowName = uiText("Runtime Delivery");
-        if (activeV2WorkflowKind_.startsWith(QStringLiteral("annotation"))) {
-            workflowName = uiText("Annotation Session V2");
-        } else if (activeV2WorkflowKind_ == QStringLiteral("ocr_report_import_v2")) {
+        if (activeWorkflowKind_.startsWith(QStringLiteral("annotation"))) {
+            workflowName = uiText("Annotation Session ");
+        } else if (activeWorkflowKind_ == QStringLiteral("ocr_report_import")) {
             workflowName = uiText("OCR 官方报告受控导入");
-        } else if (activeV2WorkflowKind_ == QStringLiteral("ocr_acceptance_v2")) {
-            workflowName = uiText("OCR Acceptance V2");
-        } else if (activeV2WorkflowKind_ == QStringLiteral("data_quality_v2")) {
-            workflowName = uiText("Data Quality V2");
-        } else if (activeV2WorkflowKind_ == QStringLiteral("dataset_conversion_v2")) {
-            workflowName = uiText("Dataset Conversion V2");
-        } else if (activeV2WorkflowKind_ == QStringLiteral("dataset_split_v2")) {
-            workflowName = uiText("Dataset Split V2");
-        } else if (activeV2WorkflowKind_ == QStringLiteral("dataset_snapshot_import_v2")) {
-            workflowName = uiText("Dataset Snapshot Import V2");
-        } else if (activeV2WorkflowKind_ == QStringLiteral("diagnostics_v2")) {
-            workflowName = uiText("Diagnostics Bundle V2");
-        } else if (activeV2WorkflowKind_ == QStringLiteral("environment_check_v2")) {
-            workflowName = uiText("Environment Check V2");
-        } else if (activeV2WorkflowKind_ == QStringLiteral("training_v2")) {
-            workflowName = uiText("Training Workflow V2");
+        } else if (activeWorkflowKind_ == QStringLiteral("ocr_acceptance")) {
+            workflowName = uiText("OCR Acceptance ");
+        } else if (activeWorkflowKind_ == QStringLiteral("data_quality")) {
+            workflowName = uiText("Data Quality ");
+        } else if (activeWorkflowKind_ == QStringLiteral("dataset_conversion")) {
+            workflowName = uiText("Dataset Conversion ");
+        } else if (activeWorkflowKind_ == QStringLiteral("dataset_split")) {
+            workflowName = uiText("Dataset Split ");
+        } else if (activeWorkflowKind_ == QStringLiteral("dataset_snapshot_import")) {
+            workflowName = uiText("Dataset Snapshot Import ");
+        } else if (activeWorkflowKind_ == QStringLiteral("diagnostics")) {
+            workflowName = uiText("Diagnostics Bundle ");
+        } else if (activeWorkflowKind_ == QStringLiteral("environment_check")) {
+            workflowName = uiText("Environment Check ");
+        } else if (activeWorkflowKind_ == QStringLiteral("training")) {
+            workflowName = uiText("Training Workflow ");
         }
         appendLog(type == wp::event::completed()
             ? uiText("%1 已完成：%2").arg(workflowName, message)
             : (type == wp::event::canceled()
                 ? uiText("%1 已取消：%2").arg(workflowName, message)
                 : uiText("%1 失败：%2").arg(workflowName, message)));
-        activeV2TaskId_.clear();
-        activeV2WorkflowKind_.clear();
+        activeTaskId_.clear();
+        activeWorkflowKind_.clear();
         updateRecentTasks();
         updateSelectedTaskDetails();
         updateProjectSummary();
@@ -266,10 +266,10 @@ void MainWindow::handleWorkerMessage(const QString& type, const QJsonObject& pay
         handleArtifactMessage(payload);
     } else if (wp::isTaskStateEvent(type) && type != wp::event::completed()) {
         handleTaskStateMessage(type, payload);
-    } else if (type == wp::event::modelImportV2()) {
-        v2ModelImportInProgress_ = false;
-        if (v2ModelImportResultLabel_) {
-            v2ModelImportResultLabel_->setText(uiText("V2 模型包已登记：%1").arg(payload.value(QStringLiteral("modelPackageId")).toString()));
+    } else if (type == wp::event::modelImport()) {
+        modelImportInProgress_ = false;
+        if (modelImportResultLabel_) {
+            modelImportResultLabel_->setText(uiText(" 模型包已登记：%1").arg(payload.value(QStringLiteral("modelPackageId")).toString()));
         }
         updateModelRegistry();
     }
@@ -284,8 +284,8 @@ void MainWindow::handleProgressMessage(const QJsonObject& payload)
     }
     percent = qBound(0, percent < 0 ? 0 : percent, 100);
     const QString message = payload.value(QStringLiteral("message")).toString();
-    if (activeV2WorkflowKind_ == QStringLiteral("dataset_conversion_v2")
-        && (taskId.isEmpty() || taskId == activeV2TaskId_)) {
+    if (activeWorkflowKind_ == QStringLiteral("dataset_conversion")
+        && (taskId.isEmpty() || taskId == activeTaskId_)) {
         if (datasetConversionProgressBar_) {
             datasetConversionProgressBar_->setValue(percent);
         }
@@ -293,7 +293,7 @@ void MainWindow::handleProgressMessage(const QJsonObject& payload)
             appendDatasetConversionLog(message);
         }
     }
-    if (activeV2WorkflowKind_ == QStringLiteral("training_v2")) {
+    if (activeWorkflowKind_ == QStringLiteral("training")) {
         progressBar_->setValue(percent);
     }
     const QString phase = payload.value(QStringLiteral("phase")).toString();
@@ -430,7 +430,7 @@ void MainWindow::handleTaskStateMessage(const QString& type, const QJsonObject& 
     }
 }
 
-void MainWindow::handleDataQualityWorkflowV2Message(const QJsonObject& payload)
+void MainWindow::handleDataQualityWorkflowMessage(const QJsonObject& payload)
 {
     const QJsonObject summary = payload.value(QStringLiteral("summary")).toObject();
     const QString state = payload.value(QStringLiteral("state")).toString();
@@ -438,7 +438,7 @@ void MainWindow::handleDataQualityWorkflowV2Message(const QJsonObject& payload)
     const QString reportArtifactId = payload.value(QStringLiteral("qualityReportArtifactId")).toString();
     const QString evidenceArtifactId = payload.value(QStringLiteral("evidenceArtifactId")).toString();
     if (validationSummaryLabel_) {
-        validationSummaryLabel_->setText(uiText("Data Quality V2：%1；问题 %2；Report Artifact %3；Evidence %4")
+        validationSummaryLabel_->setText(uiText("Data Quality ：%1；问题 %2；Report Artifact %3；Evidence %4")
             .arg(state)
             .arg(summary.value(QStringLiteral("issueCount")).toInt())
             .arg(reportArtifactId, evidenceArtifactId));
@@ -451,7 +451,7 @@ void MainWindow::handleDataQualityWorkflowV2Message(const QJsonObject& payload)
         validationIssuesTable_->insertRow(0);
         validationIssuesTable_->setItem(0, 0, new QTableWidgetItem(
             state == QStringLiteral("succeeded") ? uiText("完成") : uiText("失败")));
-        validationIssuesTable_->setItem(0, 1, new QTableWidgetItem(QStringLiteral("data_quality_v2")));
+        validationIssuesTable_->setItem(0, 1, new QTableWidgetItem(QStringLiteral("data_quality")));
         validationIssuesTable_->setItem(0, 2, new QTableWidgetItem(reportArtifactId));
         validationIssuesTable_->setItem(0, 3, new QTableWidgetItem(QString()));
         validationIssuesTable_->setItem(0, 4, new QTableWidgetItem(
@@ -461,7 +461,7 @@ void MainWindow::handleDataQualityWorkflowV2Message(const QJsonObject& payload)
         datasetDetailLabel_->setText(uiText("Repair ArtifactId：%1 | Report ArtifactId：%2")
             .arg(repairArtifactId, reportArtifactId));
     }
-    setDatasetRepairLoopRows(uiText("修复闭环：Data Quality V2 已返回受控 Artifact。"),
+    setDatasetRepairLoopRows(uiText("修复闭环：Data Quality 已返回受控 Artifact。"),
         QVector<QStringList>{
             QStringList() << uiText("质量报告") << state << uiText("Report ArtifactId：%1").arg(reportArtifactId),
             QStringList() << uiText("外部修复") << uiText("等待") << uiText("Repair ArtifactId：%1").arg(repairArtifactId),
@@ -470,7 +470,7 @@ void MainWindow::handleDataQualityWorkflowV2Message(const QJsonObject& payload)
     updateSelectedTaskDetails();
 }
 
-void MainWindow::handleDatasetSplitWorkflowV2(const QJsonObject& payload)
+void MainWindow::handleDatasetSplitWorkflow(const QJsonObject& payload)
 {
     const QString state = payload.value(QStringLiteral("state")).toString();
     const QString summary = state == QStringLiteral("succeeded")
@@ -505,7 +505,7 @@ void MainWindow::handleAnnotationSessionMessage(const QJsonObject& payload)
     const QString executable = resolvedXAnyLabelingProgram();
 
     if (datasetDetailLabel_) {
-        datasetDetailLabel_->setText(uiText("Annotation Session V2：%1 | Session ArtifactId %2 | Evidence %3")
+        datasetDetailLabel_->setText(uiText("Annotation Session ：%1 | Session ArtifactId %2 | Evidence %3")
             .arg(status.isEmpty() ? uiText("已准备") : status)
             .arg(state_.dataset.latestAnnotationSessionArtifactId)
             .arg(state_.dataset.latestAnnotationEvidenceArtifactId));
@@ -536,7 +536,7 @@ void MainWindow::handleAnnotationSessionMessage(const QJsonObject& payload)
 
     if (terminalState != QStringLiteral("succeeded")
         || state_.dataset.latestAnnotationSessionArtifactId.isEmpty()) {
-        statusBar()->showMessage(uiText("Annotation Session V2 未创建正式会话；请查看任务 Evidence。"), 6000);
+        statusBar()->showMessage(uiText("Annotation Session 未创建正式会话；请查看任务 Evidence。"), 6000);
         updateRecentTasks();
         updateSelectedTaskDetails();
         return;
@@ -570,7 +570,7 @@ void MainWindow::handleAnnotationSyncMessage(const QJsonObject& payload)
     const QString status = payload.value(QStringLiteral("status")).toString();
     const bool createdVersion = payload.value(QStringLiteral("newDatasetVersionCreated")).toBool();
     if (datasetDetailLabel_) {
-        datasetDetailLabel_->setText(uiText("Annotation Sync V2：%1 | 新版本 %2 | Report ArtifactId %3")
+        datasetDetailLabel_->setText(uiText("Annotation Sync ：%1 | 新版本 %2 | Report ArtifactId %3")
             .arg(status)
             .arg(createdVersion ? uiText("已创建") : uiText("未创建"))
             .arg(state_.dataset.latestAnnotationSyncReportArtifactId));
@@ -585,18 +585,18 @@ void MainWindow::handleAnnotationSyncMessage(const QJsonObject& payload)
         QVector<QStringList>{
             QStringList() << uiText("外部修复") << uiText("已保存") << uiText("工作目录已由 Worker 重新校验。"),
             QStringList() << uiText("同步") << uiText("完成") << uiText("状态 %1；Report ArtifactId %2").arg(status, state_.dataset.latestAnnotationSyncReportArtifactId),
-            QStringList() << uiText("复检") << (createdVersion ? uiText("已生成新版本") : uiText("未生成新版本")) << uiText("任务、Artifact 和 Dataset Version 由 V2 Query/Presenter 刷新。")
+            QStringList() << uiText("复检") << (createdVersion ? uiText("已生成新版本") : uiText("未生成新版本")) << uiText("任务、Artifact 和 Dataset Version 由 Query/Presenter 刷新。")
         });
     statusBar()->showMessage(terminalState == QStringLiteral("succeeded")
-        ? uiText("Annotation Sync V2 已返回结构化状态")
-        : uiText("Annotation Sync V2 未成功；未登记正式新版本"), 5000);
+        ? uiText("Annotation Sync 已返回结构化状态")
+        : uiText("Annotation Sync 未成功；未登记正式新版本"), 5000);
     updateRecentTasks();
     updateSelectedTaskDetails();
     updateProjectSummary();
     updateDashboardSummary();
 }
 
-void MainWindow::handleDatasetSnapshotImportWorkflowV2(const QJsonObject& payload)
+void MainWindow::handleDatasetSnapshotImportWorkflow(const QJsonObject& payload)
 {
     const QString state = payload.value(QStringLiteral("state")).toString();
     const QString datasetId = payload.value(QStringLiteral("datasetId")).toString();
@@ -621,7 +621,7 @@ void MainWindow::handleDatasetSnapshotImportWorkflowV2(const QJsonObject& payloa
     updateDashboardSummary();
 }
 
-void MainWindow::handleOcrOfficialReportsImportedV2(const QJsonObject& payload)
+void MainWindow::handleOcrOfficialReportsImported(const QJsonObject& payload)
 {
     const QString detArtifactId = payload.value(QStringLiteral("detReportArtifactId")).toString();
     const QString recArtifactId = payload.value(QStringLiteral("recReportArtifactId")).toString();
@@ -642,13 +642,13 @@ void MainWindow::handleOcrOfficialReportsImportedV2(const QJsonObject& payload)
     updateSelectedTaskDetails();
 }
 
-void MainWindow::handleOcrAcceptanceWorkflowV2(const QJsonObject& payload)
+void MainWindow::handleOcrAcceptanceWorkflow(const QJsonObject& payload)
 {
     const QString state = payload.value(QStringLiteral("state")).toString();
     const QString evidenceArtifactId = payload.value(QStringLiteral("evidenceArtifactId")).toString();
     const QString acceptanceArtifactId = payload.value(QStringLiteral("acceptanceReportArtifactId")).toString();
     if (customerOcrStatusLabel_) {
-        customerOcrStatusLabel_->setText(uiText("OCR Acceptance V2：%1 | production accepted：%2 | Evidence：%3")
+        customerOcrStatusLabel_->setText(uiText("OCR Acceptance ：%1 | production accepted：%2 | Evidence：%3")
             .arg(state, payload.value(QStringLiteral("productionAccepted")).toBool()
                 ? uiText("是") : uiText("否"), evidenceArtifactId));
     }
@@ -661,18 +661,18 @@ void MainWindow::handleOcrAcceptanceWorkflowV2(const QJsonObject& payload)
     updateSelectedTaskDetails();
 }
 
-void MainWindow::handleDiagnosticsWorkflowV2(const QJsonObject& payload)
+void MainWindow::handleDiagnosticsWorkflow(const QJsonObject& payload)
 {
     const QString taskId = payload.value(wp::field::taskId()).toString();
     const bool loaded = diagnosticBundlePresenter_
         && diagnosticBundlePresenter_->selectTask(taskId);
-    const DiagnosticBundleViewModelV2 model = loaded
-        ? diagnosticBundlePresenter_->viewModel() : DiagnosticBundleViewModelV2();
+    const DiagnosticBundleViewModel model = loaded
+        ? diagnosticBundlePresenter_->viewModel() : DiagnosticBundleViewModel();
     if (diagnosticsStatusLabel_) {
         diagnosticsStatusLabel_->setText(loaded
-            ? uiText("Diagnostics V2：%1；Bundle Artifact：%2；Evidence：%3")
+            ? uiText("Diagnostics ：%1；Bundle Artifact：%2；Evidence：%3")
                 .arg(model.state, model.diagnosticsArtifactId, model.evidenceArtifactId)
-            : uiText("Diagnostics V2 已返回，但无法从 V2 Query 读取任务事实。"));
+            : uiText("Diagnostics 已返回，但无法从 Query 读取任务事实。"));
     }
     setAcceptanceTableRow(
         deliveryAcceptanceTable_,

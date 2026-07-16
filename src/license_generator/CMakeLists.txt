@@ -9,11 +9,12 @@ add_executable(AITrainLicenseGenerator WIN32
 target_include_directories(AITrainLicenseGenerator
     PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app/src
+        ${CMAKE_SOURCE_DIR}/src/core/include
 )
 
 target_link_libraries(AITrainLicenseGenerator
     PRIVATE
-        aitrain_core
+        aitrain_foundation
         Qt${QT_VERSION_MAJOR}::Core
         Qt${QT_VERSION_MAJOR}::Widgets
 )

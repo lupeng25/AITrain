@@ -67,8 +67,8 @@ void MainWindow::createProject()
 
     ensureProjectSubdirs(currentProjectPath_);
     QString error;
-    if (!v2Workspace_.open(currentProjectPath_, &error)) {
-        QMessageBox::critical(this, uiText("项目"), uiText("无法打开 V2 项目工作区：%1").arg(error));
+    if (!workspace_.open(currentProjectPath_, &error)) {
+        QMessageBox::critical(this, uiText("项目"), uiText("无法打开  项目工作区：%1").arg(error));
         return;
     }
 
@@ -93,8 +93,8 @@ void MainWindow::runEnvironmentCheck()
         return;
     }
 
-    if (!v2Workspace_.isOpen() || currentProjectPath_.isEmpty()) {
-        QMessageBox::warning(this, uiText("环境自检"), uiText("请先打开 V2 项目。"));
+    if (!workspace_.isOpen() || currentProjectPath_.isEmpty()) {
+        QMessageBox::warning(this, uiText("环境自检"), uiText("请先打开  项目。"));
         return;
     }
     if (environmentTable_) {
@@ -106,14 +106,14 @@ void MainWindow::runEnvironmentCheck()
     }
     updateEnvironmentSummary();
 
-    const aitrain::v2::TaskId taskId = aitrain::v2::TaskId::create();
-    activeV2TaskId_ = taskId.toString();
-    activeV2WorkflowKind_ = QStringLiteral("environment_check_v2");
+    const aitrain::TaskId taskId = aitrain::TaskId::create();
+    activeTaskId_ = taskId.toString();
+    activeWorkflowKind_ = QStringLiteral("environment_check");
     QString error;
-    if (!worker_.requestEnvironmentCheckWorkflowV2(workerExecutablePath(), currentProjectPath_,
-            &error, activeV2TaskId_)) {
-        activeV2TaskId_.clear();
-        activeV2WorkflowKind_.clear();
+    if (!worker_.requestEnvironmentCheckWorkflow(workerExecutablePath(), currentProjectPath_,
+            &error, activeTaskId_)) {
+        activeTaskId_.clear();
+        activeWorkflowKind_.clear();
         QMessageBox::critical(this, uiText("环境自检"), error);
         return;
     }

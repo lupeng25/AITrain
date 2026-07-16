@@ -19,7 +19,7 @@ TRAINER_ROOT = Path(__file__).resolve().parents[1]
 if str(TRAINER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRAINER_ROOT))
 
-from adapter_event_channel_v2 import AdapterEventChannelV2, event_channel_from_environment  # noqa: E402
+from adapter_event_channel import AdapterEventChannel, event_channel_from_environment  # noqa: E402
 from adapter_sdk import AdapterSdk  # noqa: E402
 from trainer_protocol import configure_stdio, emit_event, exception_details  # noqa: E402
 
@@ -31,11 +31,11 @@ SUPPORTED_EXPORT_ARGS = {"format", "dynamic", "half", "int8", "imgsz", "batch", 
 
 _adapter: AdapterSdk | None = None
 _adapter_backend = ""
-_event_channel: AdapterEventChannelV2 | None = None
+_event_channel: AdapterEventChannel | None = None
 
 
 def configure_adapter(backend: str | None = None) -> None:
-    """Select JSONL fallback or the V2 authenticated event channel once."""
+    """Select JSONL fallback or the  authenticated event channel once."""
     global _adapter, _adapter_backend, _event_channel
     selected_backend = backend or BACKEND_ID
     if _event_channel is None and os.environ.get("AITRAIN_EVENT_PORT"):
@@ -63,7 +63,7 @@ def active_adapter() -> AdapterSdk:
 def emit(event_type: str, **payload: Any) -> None:
     payload.pop("backend", None)
     if event_type == "modelExport":
-        # V1 has a dedicated modelExport message. V2 stores the same metadata in
+        # V1 has a dedicated modelExport message.  stores the same metadata in
         # the immutable export sidecar, so retain the legacy frame only on JSONL.
         if _event_channel is None:
             emit_event(BACKEND_ID, event_type, **payload)
@@ -426,7 +426,7 @@ def inspect_onnx_io_shapes(path: Path) -> dict[str, Any]:
 
 
 def _contract_shape(value: Any) -> list[int]:
-    """Turn ONNX dimensions into the V2 contract's positive-or--1 form."""
+    """Turn ONNX dimensions into the  contract's positive-or--1 form."""
     if not isinstance(value, list):
         return []
     result: list[int] = []
@@ -461,11 +461,11 @@ def class_names_from_evaluation_report(path_value: Any) -> list[str]:
     return [name for _, name in sorted(indexed)]
 
 
-def v2_model_contract(model_family: str, output_shapes: dict[str, Any], evaluation_report_path: Any) -> dict[str, Any]:
-    """Build only verifiable model facts for C++ V2 registration.
+def model_contract(model_family: str, output_shapes: dict[str, Any], evaluation_report_path: Any) -> dict[str, Any]:
+    """Build only verifiable model facts for C++  registration.
 
     Identity, source artifact hash and the final verified flag are intentionally
-    absent: they are assigned by the V2 Workspace after immutable artifact
+    absent: they are assigned by the  Workspace after immutable artifact
     submission, never trusted from this Python sidecar.
     """
     task_type = task_from_model_family(model_family)
@@ -709,7 +709,7 @@ def run_official_export(request: dict[str, Any]) -> int:
         "ultralyticsVersion": getattr(ultralytics, "__version__", "unknown"),
         "ultralyticsExportArgs": plan["normalized"],
         "outputShapes": output_shapes,
-        "modelContract": v2_model_contract(model_family, output_shapes, evaluation_report_path),
+        "modelContract": model_contract(model_family, output_shapes, evaluation_report_path),
         "exportedAt": now_iso(),
         "licenseNote": LICENSE_NOTE,
     }

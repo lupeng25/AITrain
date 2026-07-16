@@ -1,8 +1,8 @@
-﻿# AITrain Studio Training Backends
+# AITrain Studio Training Backends
 
-> 2026-07-16 破坏性重构说明：本文中早期 Phase 的独立矩阵脚本和 Worker 裸路径 smoke 命令均为历史记录，相关脚本已删除。当前训练只能通过注册的 `TrainingWorkflowProfileV2` 和 Worker V2 Workflow 执行；模型交付只能通过 `runRuntimeDeliveryWorkflowV2`，不得直接向 Worker 传入模型/样本路径。
+> 2026-07-16 破坏性重构说明：本文中早期 Phase 的独立矩阵脚本和 Worker 裸路径 smoke 命令均为历史记录，相关脚本已删除。当前训练只能通过注册的 `TrainingWorkflowProfile` 和 Worker  Workflow 执行；模型交付只能通过 `runRuntimeDeliveryWorkflow`，不得直接向 Worker 传入模型/样本路径。
 
-AITrain Studio 将训练置于 GUI 进程之外。真实训练由 `aitrain_worker` 作为 Python 子进程启动，并通过 Worker V2 协议回传换行 JSON 事件。
+AITrain Studio 将训练置于 GUI 进程之外。真实训练由 `aitrain_worker` 作为 Python 子进程启动，并通过 Worker  协议回传换行 JSON 事件。
 
 ## Backend Summary
 
@@ -47,7 +47,7 @@ YOLO model-family status is tracked in `docs\yolo-model-support-matrix.md`. The 
 Run the full P1 productization matrix with:
 
 ```powershell
-.\tools\phase-p1-yolo-full-matrix-smoke.ps1
+.\tools\acceptance-smoke.ps1
 ```
 
 The previous Phase 45 matrix remains useful as a faster YOLO11/YOLO12 nano wiring check:
