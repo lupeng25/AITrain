@@ -8,36 +8,40 @@
 
 namespace wp = aitrain::worker_protocol;
 
-void WorkerSession::runDatasetSplitWorkflow(const QJsonObject& payload)
+void WorkerSession::runDatasetSplitWorkflow(const wp::DatasetSplitCommand& command)
 {
     if (running_ || datasetSplitWorkspace_) {
         fail(QStringLiteral("Worker 已有运行任务，不能并发运行 Dataset Split 。"));
         return;
     }
-    const QString taskIdText = payload.value(wp::field::taskId()).toString().trimmed();
-    const QString projectRoot = payload.value(QStringLiteral("projectRoot")).toString().trimmed();
+    const aitrain::TaskId taskId = command.context.taskId;
+    const QString taskIdText = taskId.toString();
+    const QString projectRoot = command.context.projectRoot.trimmed();
     aitrain::DatasetSplitWorkflowRequest request;
-    request.targetDatasetName = payload.value(QStringLiteral("targetDatasetName")).toString().trimmed();
-    request.options = payload.value(wp::field::options()).toObject();
+    request.targetDatasetName = command.targetDatasetName.trimmed();
+    request.options = command.options;
     QString error;
-    if (!aitrain::TaskId::parse(taskIdText, &datasetSplitTaskId_, &error)
-        || datasetSplitTaskId_ != controlTaskId_
+    if (!taskId.isValid()) {
+        error = QStringLiteral("TaskId 无效。");
+    }
+    if (!taskId.isValid() || taskId != controlTaskId_
         || projectRoot.isEmpty() || !QFileInfo(projectRoot).isDir()
         || request.targetDatasetName.isEmpty()
-        || !aitrain::DatasetId::parse(payload.value(QStringLiteral("sourceDatasetId")).toString(),
+        || !aitrain::DatasetId::parse(command.sourceDatasetId,
             &request.sourceDatasetId, &error)
-        || !aitrain::DatasetVersionId::parse(payload.value(QStringLiteral("sourceDatasetVersionId")).toString(),
+        || !aitrain::DatasetVersionId::parse(command.sourceDatasetVersionId,
             &request.sourceDatasetVersionId, &error)
-        || !aitrain::SnapshotId::parse(payload.value(QStringLiteral("sourceSnapshotId")).toString(),
+        || !aitrain::SnapshotId::parse(command.sourceSnapshotId,
             &request.sourceSnapshotId, &error)
-        || !aitrain::ArtifactId::parse(payload.value(QStringLiteral("sourceSnapshotArtifactId")).toString(),
+        || !aitrain::ArtifactId::parse(command.sourceSnapshotArtifactId,
             &request.sourceSnapshotArtifactId, &error)
-        || !aitrain::DatasetId::parse(payload.value(QStringLiteral("targetDatasetId")).toString(),
+        || !aitrain::DatasetId::parse(command.targetDatasetId,
             &request.targetDatasetId, &error)) {
         datasetSplitTaskId_ = {};
         fail(QStringLiteral("Dataset Split  请求缺少项目、源四重身份或目标 Dataset 身份：%1").arg(error));
         return;
     }
+    datasetSplitTaskId_ = taskId;
 
     datasetSplitWorkspace_ = std::make_unique<aitrain::ProjectWorkspace>();
     if (!datasetSplitWorkspace_->open(projectRoot, &error)) {

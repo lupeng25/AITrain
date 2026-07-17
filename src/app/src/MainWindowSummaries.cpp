@@ -1,6 +1,8 @@
 #include "MainWindow.h"
 
 #include "ProjectSummaryPresenter.h"
+#include "DeliveryEvidencePresenter.h"
+#include "EnvironmentCheckPresenter.h"
 
 #include "EvaluationReportView.h"
 #include "InfoPanel.h"
@@ -36,7 +38,6 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScrollArea>
-#include <QSettings>
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSplitter>
@@ -108,14 +109,6 @@ void MainWindow::showDatasetTab(int tabIndex)
     showPage(DatasetPage, uiText("数据集"));
     if (datasetTabs_) {
         datasetTabs_->setCurrentIndex(tabIndex);
-    }
-}
-
-void MainWindow::showModelWorkspaceTab(int tabIndex)
-{
-    showPage(ModelRegistryPage, uiText("模型库"));
-    if (modelWorkspaceTabs_) {
-        modelWorkspaceTabs_->setCurrentIndex(tabIndex);
     }
 }
 
@@ -205,97 +198,6 @@ void MainWindow::ensureWorkspacePage(int pageIndex)
     if (pageIndex == SystemSettingsPage) {
         refreshBuiltInCapabilities();
     }
-}
-
-void MainWindow::updateEnvironmentTable(const QJsonObject& payload)
-{
-    const QJsonArray checks = payload.value(QStringLiteral("checks")).toArray();
-    if (!environmentTable_) {
-        return;
-    }
-
-    bool hasMissing = false;
-    bool hasWarning = false;
-    const auto markStatus = [&hasMissing, &hasWarning](const QString& status) {
-        if (status == QStringLiteral("missing")) {
-            hasMissing = true;
-        } else if (status == QStringLiteral("warning") || status == QStringLiteral("hardware-blocked")) {
-            hasWarning = true;
-        }
-    };
-    const auto appendRow = [this, &markStatus](const QString& name, const QString& status, const QString& message, const QJsonObject& details = {}) {
-        Q_UNUSED(details)
-        markStatus(status);
-        const int row = environmentTable_->rowCount();
-        environmentTable_->insertRow(row);
-        environmentTable_->setItem(row, 0, new QTableWidgetItem(name));
-        auto* statusItem = new QTableWidgetItem(environmentStatusLabel(status));
-        statusItem->setData(Qt::UserRole, status);
-        environmentTable_->setItem(row, 1, statusItem);
-        environmentTable_->setItem(row, 2, new QTableWidgetItem(message));
-    };
-
-    environmentTable_->setRowCount(0);
-    for (const QJsonValue& value : checks) {
-        const QJsonObject check = value.toObject();
-        const QString name = check.value(QStringLiteral("name")).toString();
-        const QString status = check.value(QStringLiteral("status")).toString();
-        const QString message = check.value(QStringLiteral("message")).toString();
-        appendRow(name, status, message, check.value(QStringLiteral("details")).toObject());
-    }
-
-    const QJsonObject profiles = payload.value(QStringLiteral("profiles")).toObject();
-    for (auto it = profiles.constBegin(); it != profiles.constEnd(); ++it) {
-        const QJsonObject profile = it.value().toObject();
-        const QString title = profile.value(QStringLiteral("title")).toString(it.key());
-        const QString status = profile.value(QStringLiteral("status")).toString(QStringLiteral("warning"));
-        const QJsonArray repairHints = profile.value(QStringLiteral("repairHints")).toArray();
-        QStringList hintText;
-        for (const QJsonValue& value : repairHints) {
-            const QString text = value.toString().trimmed();
-            if (!text.isEmpty()) {
-                hintText.append(text);
-            }
-        }
-        if (hintText.isEmpty()) {
-            hintText.append(uiText("暂无修复建议。"));
-        }
-        appendRow(
-            QStringLiteral("Profile / %1").arg(title),
-            status,
-            hintText.join(QStringLiteral(" | ")),
-            profile);
-
-        const QJsonArray profileChecks = profile.value(QStringLiteral("checks")).toArray();
-        for (const QJsonValue& checkValue : profileChecks) {
-            const QJsonObject check = checkValue.toObject();
-            appendRow(
-                QStringLiteral("%1 / %2").arg(title, check.value(QStringLiteral("name")).toString()),
-                check.value(QStringLiteral("status")).toString(QStringLiteral("warning")),
-                check.value(QStringLiteral("message")).toString(),
-                check.value(QStringLiteral("details")).toObject());
-        }
-    }
-
-    {
-        const int capabilityCount = aitrain::BuiltinCapabilityRegistry::instance().capabilities().size();
-        appendRow(uiText("内置能力"), capabilityCount > 0 ? QStringLiteral("ok") : QStringLiteral("warning"),
-            capabilityCount > 0
-                ? uiText("已注册 %1 个内置能力。").arg(capabilityCount)
-                : uiText("内置能力注册表为空。"));
-    }
-
-    const StatusPill::Tone tone = hasMissing ? StatusPill::Tone::Error : (hasWarning ? StatusPill::Tone::Warning : StatusPill::Tone::Success);
-    const QString text = hasMissing ? uiText("环境缺失") : (hasWarning ? uiText("环境警告") : uiText("环境通过"));
-    gpuPill_->setStatus(text, tone);
-    workerPill_->setStatus(uiText("Worker 空闲"), StatusPill::Tone::Neutral);
-    gpuLabel_->setText(uiText("GPU / 运行时：%1").arg(text));
-    if (dashboardEnvironmentValue_) {
-        dashboardEnvironmentValue_->setText(hasMissing ? uiText("缺失") : (hasWarning ? uiText("警告") : uiText("通过")));
-    }
-    updateEnvironmentSummary();
-    updateDashboardSummary();
-    statusBar()->showMessage(uiText("环境自检完成"), 5000);
 }
 
 void MainWindow::updateProjectSummary()
@@ -446,6 +348,71 @@ void MainWindow::updateEnvironmentSummary()
     }
 }
 
+void MainWindow::refreshEnvironmentReportView()
+{
+    if (!environmentTable_) {
+        return;
+    }
+
+    const QJsonObject report = environmentCheckPresenter_
+        ? environmentCheckPresenter_->viewModel().report : QJsonObject();
+    environmentTable_->setRowCount(0);
+
+    const auto addRow = [this](const QString& name, const QString& status,
+        const QString& message) {
+        const int row = environmentTable_->rowCount();
+        environmentTable_->insertRow(row);
+        auto* nameItem = new QTableWidgetItem(name);
+        auto* statusItem = new QTableWidgetItem(status == QStringLiteral("ok")
+                ? uiText("通过")
+                : status == QStringLiteral("missing")
+                    ? uiText("缺失")
+                    : status == QStringLiteral("hardware-blocked")
+                        ? uiText("硬件受限")
+                        : status == QStringLiteral("warning")
+                            ? uiText("警告") : uiText("未检测"));
+        statusItem->setData(Qt::UserRole, status);
+        auto* messageItem = new QTableWidgetItem(message.isEmpty()
+            ? uiText("未提供说明。") : message);
+        environmentTable_->setItem(row, 0, nameItem);
+        environmentTable_->setItem(row, 1, statusItem);
+        environmentTable_->setItem(row, 2, messageItem);
+    };
+
+    if (report.isEmpty()) {
+        const QStringList rows = {
+            QStringLiteral("NVIDIA Driver"), QStringLiteral("CUDA Runtime"),
+            QStringLiteral("cuDNN"), QStringLiteral("TensorRT"),
+            QStringLiteral("ONNX Runtime"), QStringLiteral("Qt Runtime Modules"),
+            QStringLiteral("内置能力"), QStringLiteral("Worker")};
+        for (const QString& name : rows) {
+            addRow(name, QStringLiteral("unchecked"), uiText("点击执行环境自检。"));
+        }
+        return;
+    }
+
+    for (const QJsonValue& value : report.value(QStringLiteral("checks")).toArray()) {
+        const QJsonObject check = value.toObject();
+        addRow(check.value(QStringLiteral("name")).toString(),
+            check.value(QStringLiteral("status")).toString(),
+            check.value(QStringLiteral("message")).toString());
+    }
+    const QJsonObject profiles = report.value(QStringLiteral("profiles")).toObject();
+    for (auto it = profiles.constBegin(); it != profiles.constEnd(); ++it) {
+        const QJsonObject profile = it.value().toObject();
+        QString message = profile.value(QStringLiteral("message")).toString();
+        if (message.isEmpty()) {
+            QStringList hints;
+            for (const QJsonValue& hint : profile.value(QStringLiteral("repairHints")).toArray()) {
+                hints.append(hint.toString());
+            }
+            message = hints.join(QStringLiteral("；"));
+        }
+        addRow(profile.value(QStringLiteral("title")).toString(it.key()),
+            profile.value(QStringLiteral("status")).toString(), message);
+    }
+}
+
 void MainWindow::updateSettingsSummary()
 {
     if (settingsDefaultProjectPathEdit_) {
@@ -484,6 +451,36 @@ void MainWindow::updateDeliveryAcceptanceSummary()
             deliveryAcceptanceTable_->setItem(row, 1, new QTableWidgetItem(QStringLiteral("not_run")));
             deliveryAcceptanceTable_->setItem(row, 2, new QTableWidgetItem(QString()));
             deliveryAcceptanceTable_->setItem(row, 3, new QTableWidgetItem(uiText("等待导入外部结果或运行对应 Worker/脚本。")));
+        }
+    }
+
+    if (deliveryEvidencePresenter_ && workspace_.isOpen()) {
+        deliveryEvidencePresenter_->refresh();
+        for (const auto& evidence : deliveryEvidencePresenter_->viewModel().records) {
+            QString stage = evidence.evidenceKind;
+            const QString normalized = evidence.evidenceKind.toLower();
+            if (normalized.contains(QStringLiteral("clean"))) stage = uiText("Clean Windows");
+            else if (normalized.contains(QStringLiteral("tensor"))) stage = uiText("TensorRT");
+            else if (normalized.contains(QStringLiteral("ocr"))) stage = uiText("客户域 OCR");
+            int row = -1;
+            for (int index = 0; index < deliveryAcceptanceTable_->rowCount(); ++index) {
+                if (deliveryAcceptanceTable_->item(index, 0)
+                    && deliveryAcceptanceTable_->item(index, 0)->text() == stage) {
+                    row = index;
+                    break;
+                }
+            }
+            if (row < 0) {
+                row = deliveryAcceptanceTable_->rowCount();
+                deliveryAcceptanceTable_->insertRow(row);
+                deliveryAcceptanceTable_->setItem(row, 0, new QTableWidgetItem(stage));
+            }
+            deliveryAcceptanceTable_->setItem(row, 1,
+                new QTableWidgetItem(evidence.verified ? QStringLiteral("passed") : QStringLiteral("collected")));
+            deliveryAcceptanceTable_->setItem(row, 2,
+                new QTableWidgetItem(evidence.evidenceArtifactId.toString()));
+            deliveryAcceptanceTable_->setItem(row, 3,
+                new QTableWidgetItem(evidence.limitations.join(QStringLiteral(" | "))));
         }
     }
 
@@ -584,13 +581,13 @@ void MainWindow::updateDashboardSummary()
         if (!hasProject) {
             nextStep = uiText("先创建或打开一个本地项目。项目目录会集中保存数据集索引、任务历史、训练报告和模型产物。");
         } else if (summary.datasetSnapshotCount == 0) {
-            nextStep = uiText("下一步：导入数据并创建  数据集快照。训练工作流只消费已登记的不可变快照。");
+            nextStep = uiText("下一步：导入数据并创建数据集快照。训练工作流只消费已登记的不可变快照。");
         } else if (summary.taskCount == 0) {
             nextStep = uiText("下一步：进入训练实验，选择已登记的数据集快照并启动官方后端工作流。");
         } else if (summary.modelPackageCount == 0) {
-            nextStep = uiText("下一步：在任务与产物中检查工作流产物，并完成  模型包登记后进入部署验证。");
+            nextStep = uiText("下一步：在任务与产物中检查工作流产物，并完成模型包登记后进入部署验证。");
         } else {
-            nextStep = uiText("项目已记录  数据集快照、任务与模型包。可继续进入部署验证或追加实验。");
+            nextStep = uiText("项目已记录数据集快照、任务与模型包。可继续进入部署验证或追加实验。");
         }
         dashboardNextStepLabel_->setText(nextStep);
     }
@@ -604,7 +601,13 @@ void MainWindow::updateTrainingSelectionSummary()
     const QString datasetFormat = !state_.dataset.currentFormat.isEmpty()
         ? state_.dataset.currentFormat
         : currentDatasetFormat();
-    const QString state = state_.dataset.currentValid ? uiText("已校验") : uiText("待校验");
+    const bool hasCommittedIdentity = state_.dataset.currentValid
+        && !state_.dataset.currentDatasetId.isEmpty()
+        && !state_.dataset.currentDatasetVersionId.isEmpty()
+        && !state_.dataset.currentSnapshotId.isEmpty()
+        && !state_.dataset.currentSnapshotArtifactId.isEmpty();
+    const QString state = hasCommittedIdentity ? uiText("已提交快照")
+        : (state_.dataset.currentValid ? uiText("已校验") : uiText("待校验"));
     const QString fullPathText = datasetPath.isEmpty() ? QString() : QDir::toNativeSeparators(datasetPath);
     const QString datasetName = datasetPath.isEmpty() ? QString() : QFileInfo(datasetPath).fileName();
     const QString headerPathText = datasetPath.isEmpty()
@@ -616,24 +619,34 @@ void MainWindow::updateTrainingSelectionSummary()
     QString snapshotText = snapshotId.isEmpty()
         ? uiText("快照：尚未选择 committed Snapshot 身份")
         : uiText("快照：%1 | Artifact %2").arg(snapshotId.left(12), snapshotArtifactId.left(12));
-    bool datasetReady = state_.dataset.currentValid && state_.dataset.currentPath == datasetPath && state_.dataset.currentFormat == datasetFormat;
+    bool datasetReady = state_.dataset.currentValid
+        && (datasetPath.isEmpty() || state_.dataset.currentPath == datasetPath)
+        && state_.dataset.currentFormat == datasetFormat;
     datasetReady = datasetReady && !snapshotId.isEmpty() && !snapshotArtifactId.isEmpty();
 
     if (trainingDatasetSummaryLabel_) {
-        trainingDatasetSummaryLabel_->setText(datasetPath.isEmpty()
-            ? uiText("当前数据集：未选择。请先在数据集页导入并通过校验。")
-            : uiText("当前数据集：%1 | %2 | %3\n%4")
-                .arg(datasetFormatLabel(datasetFormat), state, headerPathText, snapshotText));
-        trainingDatasetSummaryLabel_->setToolTip(datasetPath.isEmpty()
-            ? QString()
-            : uiText("数据集：%1\n%2")
-                .arg(fullPathText, snapshotText));
+        trainingDatasetSummaryLabel_->setText(hasCommittedIdentity
+            ? uiText("当前数据集：%1 | %2\nDataset %3 / Version %4\n%5")
+                .arg(datasetFormatLabel(datasetFormat), state,
+                    state_.dataset.currentDatasetId.left(12),
+                    state_.dataset.currentDatasetVersionId.left(12), snapshotText)
+            : (datasetPath.isEmpty()
+                ? uiText("当前数据集：未选择。请先选择已登记快照或导入外部数据集。")
+                : uiText("当前数据集：%1 | %2 | %3\n%4")
+                    .arg(datasetFormatLabel(datasetFormat), state, headerPathText, snapshotText)));
+        trainingDatasetSummaryLabel_->setToolTip(hasCommittedIdentity
+            ? snapshotText
+            : (datasetPath.isEmpty() ? QString() : uiText("数据集：%1\n%2").arg(fullPathText, snapshotText)));
     }
     if (datasetDetailLabel_) {
-        datasetDetailLabel_->setText(datasetPath.isEmpty()
-            ? uiText("选择或导入数据集后显示格式、样本数、校验状态和最近报告。")
-            : uiText("格式：%1 | 状态：%2 | 路径：%3\n%4")
-                .arg(datasetFormatLabel(datasetFormat), state, detailPathText, snapshotText));
+        datasetDetailLabel_->setText(hasCommittedIdentity
+            ? uiText("格式：%1 | 状态：%2 | Dataset：%3\n%4")
+                .arg(datasetFormatLabel(datasetFormat), state,
+                    state_.dataset.currentDatasetId.left(12), snapshotText)
+            : (datasetPath.isEmpty()
+                ? uiText("选择已登记快照或导入数据集后显示格式、校验状态和最近报告。")
+                : uiText("格式：%1 | 状态：%2 | 路径：%3\n%4")
+                    .arg(datasetFormatLabel(datasetFormat), state, detailPathText, snapshotText)));
     }
     if (trainingBackendHintLabel_ && trainingBackendCombo_) {
         trainingBackendHintLabel_->setText(trainingBackendDescription(trainingBackendCombo_->currentData().toString()));
@@ -671,7 +684,7 @@ void MainWindow::updateTrainingSelectionSummary()
                 epochsEdit_ ? epochsEdit_->text() : QStringLiteral("-"),
                 batchEdit_ ? batchEdit_->text() : QStringLiteral("-"),
                 imageSizeEdit_ ? imageSizeEdit_->text() : QStringLiteral("-")));
-        trainingRunSummaryLabel_->setToolTip(uiText("训练只消费  四重身份：Dataset %1 / Version %2 / Snapshot %3 / Artifact %4")
+            trainingRunSummaryLabel_->setToolTip(uiText("训练只消费四重身份：Dataset %1 / Version %2 / Snapshot %3 / Artifact %4")
             .arg(dataQualityDatasetIdEdit_ ? dataQualityDatasetIdEdit_->text().trimmed() : QString(),
                 dataQualityDatasetVersionIdEdit_ ? dataQualityDatasetVersionIdEdit_->text().trimmed() : QString(),
                 snapshotId,

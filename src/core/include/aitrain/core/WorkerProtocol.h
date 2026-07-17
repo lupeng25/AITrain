@@ -1,6 +1,7 @@
 #pragma once
 
 #include "aitrain/protocol/Protocol.h"
+#include "aitrain/core/TaskTypes.h"
 
 #include <QJsonObject>
 #include <QString>
@@ -14,6 +15,7 @@ QString runDatasetSplitWorkflow();
 QString runDatasetConversionWorkflow();
 QString runDataQualityWorkflow();
 QString runDiagnosticsWorkflow();
+QString importExternalAcceptanceEvidence();
 QString createAnnotationSession();
 QString syncAnnotationSession();
 QString runDatasetSnapshotImportWorkflow();
@@ -45,6 +47,7 @@ QString runtimeDeliveryWorkflow();
 QString modelImport();
 QString ocrOfficialReportsImported();
 QString ocrAcceptanceWorkflow();
+QString externalAcceptanceEvidenceImported();
 } // namespace event
 
 namespace field {
@@ -60,6 +63,11 @@ QString sourceFormat();
 QString targetFormat();
 QString taskType();
 QString sampleImagePath();
+QString sampleDatasetId();
+QString sampleDatasetVersionId();
+QString sampleSnapshotId();
+QString sampleSnapshotArtifactId();
+QString sampleRelativePath();
 QString options();
 } // namespace field
 
@@ -139,7 +147,11 @@ QJsonObject runtimeDeliveryWorkflowRequest(
     const QString& projectRoot,
     const QString& modelPackageId,
     const QString& runtimeRoute,
-    const QString& sampleImagePath,
+    const QString& sampleDatasetId,
+    const QString& sampleDatasetVersionId,
+    const QString& sampleSnapshotId,
+    const QString& sampleSnapshotArtifactId,
+    const QString& sampleRelativePath,
     const QJsonObject& options);
 QJsonObject modelImportRequest(
     const QString& taskId,
@@ -152,27 +164,37 @@ aitrain::ProtocolEnvelope startTaskEnvelope(
     const aitrain::RequestId& requestId,
     const aitrain::TaskId& taskId,
     quint64 sequence,
-    const QString& businessCommand,
-    const QJsonObject& businessPayload);
+    const TaskCommand& command,
+    const QString& controlToken = {});
 aitrain::ProtocolEnvelope cancelTaskEnvelope(
     const aitrain::RequestId& requestId,
     const aitrain::TaskId& taskId,
-    quint64 sequence);
+    quint64 sequence,
+    const QString& controlToken = {});
 aitrain::ProtocolEnvelope eventEnvelope(
     const aitrain::RequestId& requestId,
     const aitrain::TaskId& taskId,
     quint64 sequence,
-    const QString& businessEvent,
-    const QJsonObject& businessPayload);
+    const TaskEvent& event,
+    const QString& controlToken = {});
 bool unpackStartTask(const aitrain::ProtocolEnvelope& envelope,
-    QString* businessCommand,
-    QJsonObject* businessPayload,
+    TaskCommand* command,
     QString* error = nullptr);
-bool unpackBusinessEvent(const aitrain::ProtocolEnvelope& envelope,
-    QString* businessEvent,
-    QJsonObject* businessPayload,
+bool unpackTaskEvent(const aitrain::ProtocolEnvelope& envelope,
+    TaskEvent* event,
     QString* error = nullptr);
 } // namespace control
+
+QString taskCommandType(const TaskCommand& command);
+bool taskCommandFromPayload(const QString& type,
+    const QJsonObject& payload,
+    TaskCommand* command,
+    QString* error = nullptr);
+QJsonObject taskCommandPayload(const TaskCommand& command);
+
+TaskEventKind taskEventKindFromType(const QString& type, bool* ok = nullptr);
+QString taskEventType(const TaskEvent& event);
+TaskEvent taskEventFromType(const QString& type, const QJsonObject& details);
 
 } // namespace worker_protocol
 } // namespace aitrain

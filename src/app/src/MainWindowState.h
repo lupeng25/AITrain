@@ -7,9 +7,10 @@
 struct DatasetWorkbenchState {
     QString currentPath;
     QString currentFormat;
-    QString latestQualityFixListPath;
-    QString latestQualityFixManifestPath;
-    QString latestQualityReportPath;
+    QString currentDatasetId;
+    QString currentDatasetVersionId;
+    QString currentSnapshotId;
+    QString currentSnapshotArtifactId;
     QString latestAnnotationSessionArtifactId;
     QString latestAnnotationEvidenceArtifactId;
     QString latestAnnotationSyncReportArtifactId;
@@ -18,19 +19,6 @@ struct DatasetWorkbenchState {
     QJsonArray sampleReviewSamples;
 };
 
-struct ModelArtifactState {
-    QString latestExportPath;
-    QString latestInferenceOutputPath;
-    QString latestEvaluationReportPath;
-    QString latestBenchmarkReportPath;
-};
-
-struct DeliveryAcceptanceState {
-    QString latestDeploymentValidationReportPath;
-};
-
 struct MainWindowState {
     DatasetWorkbenchState dataset;
-    ModelArtifactState artifacts;
-    DeliveryAcceptanceState delivery;
 };

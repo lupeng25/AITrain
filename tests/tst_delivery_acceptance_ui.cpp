@@ -23,6 +23,7 @@
 #include <QTableWidget>
 #include <QTest>
 #include <QTemporaryDir>
+#include <QTranslator>
 #include <QUuid>
 
 #include "LanguageSupport.h"
@@ -36,8 +37,9 @@ private slots:
     void mainNavigationUsesNineWorkspaceEntries();
     void embeddedWorkspaceTabsExist();
     void switchingToEnvironmentShowsDeliveryEvidenceTab();
+    void environmentPageUsesRuntimeReportRows();
     void clickingSidebarEnvironmentSwitchesPageWithoutDeliveryEntry();
-    void capabilityPanelEnglishFallbackIsComplete();
+    void capabilityPanelEnglishTranslationIsComplete();
     void workerStartFailureIsReportedAsynchronously();
     void runtimeDeliveryPagesExposeOneSixStepProductEntry();
     void annotationSessionUiUsesArtifactBoundary();
@@ -53,6 +55,7 @@ private:
     QString previousLanguage_;
     bool hadPreviousLanguage_ = false;
     MainWindow* window_ = nullptr;
+    QTranslator translator_;
 };
 
 void EnvironmentDeliveryEvidenceUiTests::initTestCase()
@@ -129,6 +132,7 @@ void EnvironmentDeliveryEvidenceUiTests::initTestCase()
 
 void EnvironmentDeliveryEvidenceUiTests::cleanupTestCase()
 {
+    qApp->removeTranslator(&translator_);
     delete window_;
     window_ = nullptr;
     QSettings settings;
@@ -195,12 +199,8 @@ void EnvironmentDeliveryEvidenceUiTests::embeddedWorkspaceTabsExist()
         Q_ARG(int, MainWindow::ModelRegistryPage), Q_ARG(QString, QStringLiteral("模型库"))));
     auto* modelTabs = window.findChild<QTabWidget*>(QStringLiteral("ModelWorkspaceTabs"));
     QVERIFY(modelTabs != nullptr);
-    QCOMPARE(modelTabs->count(), 5);
+    QCOMPARE(modelTabs->count(), 1);
     QCOMPARE(modelTabs->tabText(0), QStringLiteral(" 模型包"));
-    QCOMPARE(modelTabs->tabText(1), QStringLiteral("旧模型版本"));
-    QCOMPARE(modelTabs->tabText(2), QStringLiteral("评估报告"));
-    QCOMPARE(modelTabs->tabText(3), QStringLiteral("模型对比"));
-    QCOMPARE(modelTabs->tabText(4), QStringLiteral("流水线记录"));
 
     QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
         Q_ARG(int, MainWindow::DeploymentPage), Q_ARG(QString, QStringLiteral("部署验证"))));
@@ -233,6 +233,13 @@ void EnvironmentDeliveryEvidenceUiTests::taskPageExposesReadOnlyObjects()
     QVERIFY(window.findChild<QTableWidget*>(QStringLiteral("TaskArtifactTable")) != nullptr);
     QVERIFY(window.findChild<QTableWidget*>(QStringLiteral("TaskMetricTable")) != nullptr);
     QVERIFY(window.findChild<QTableWidget*>(QStringLiteral("TaskWorkflowTable")) != nullptr);
+    auto* cancelButton = window.findChild<QPushButton*>(QStringLiteral("TaskCancelButton"));
+    QVERIFY(cancelButton != nullptr);
+    QVERIFY(!cancelButton->isEnabled());
+    for (QPushButton* button : window.findChildren<QPushButton*>()) {
+        QVERIFY2(button->text() != QStringLiteral("复现实验"),
+            "任务页不得重新引入未接线的复现实验入口");
+    }
     auto* detailTabs = window.findChild<QTabWidget*>(QStringLiteral("TaskDetailTabs"));
     QVERIFY(detailTabs != nullptr);
     QCOMPARE(detailTabs->tabText(2), QStringLiteral("工作流"));
@@ -432,7 +439,7 @@ void EnvironmentDeliveryEvidenceUiTests::projectAndDashboardExposeSummaryPresent
 
     QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
         Q_ARG(int, MainWindow::TaskQueuePage), Q_ARG(QString, QStringLiteral("任务与产物"))));
-    QVERIFY(window.findChild<QFrame*>(QStringLiteral("ArtifactActionGrid")) != nullptr);
+    QVERIFY(window.findChild<QFrame*>(QStringLiteral("ArtifactActionGrid")) == nullptr);
     const auto buttons = window.findChildren<QPushButton*>();
     for (const QPushButton* button : buttons) {
         QVERIFY(button->text() != QStringLiteral("交付报告"));
@@ -526,7 +533,23 @@ void EnvironmentDeliveryEvidenceUiTests::clickingSidebarEnvironmentSwitchesPageW
     QVERIFY(summary->text().contains(QStringLiteral("not-run 7")));
 }
 
-void EnvironmentDeliveryEvidenceUiTests::capabilityPanelEnglishFallbackIsComplete()
+void EnvironmentDeliveryEvidenceUiTests::environmentPageUsesRuntimeReportRows()
+{
+    MainWindow& window = *window_;
+    QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
+        Q_ARG(int, MainWindow::EnvironmentPage), Q_ARG(QString, QStringLiteral("环境"))));
+    auto* table = window.findChild<QTableWidget*>(QStringLiteral("EnvironmentTable"));
+    QVERIFY(table != nullptr);
+    QVERIFY(table->rowCount() > 0);
+    for (int row = 0; row < table->rowCount(); ++row) {
+        QVERIFY(table->item(row, 0) != nullptr);
+        QVERIFY(table->item(row, 0)->text() != QStringLiteral("LibTorch"));
+        QVERIFY(table->item(row, 1) != nullptr);
+        QCOMPARE(table->item(row, 1)->data(Qt::UserRole).toString(), QStringLiteral("unchecked"));
+    }
+}
+
+void EnvironmentDeliveryEvidenceUiTests::capabilityPanelEnglishTranslationIsComplete()
 {
     const QStringList sources = {
         QStringLiteral("编译期注册的模型、数据集、导出和推理能力。"),
@@ -552,6 +575,8 @@ void EnvironmentDeliveryEvidenceUiTests::capabilityPanelEnglishFallbackIsComplet
     };
 
     aitrain_app::storeLanguageCode(QStringLiteral("en_US"));
+    QVERIFY(aitrain_app::loadTranslator(*qApp, &translator_, QStringLiteral("en_US")));
+    QVERIFY(!translator_.isEmpty());
     QStringList actual;
     for (const QString& source : sources) {
         actual.append(aitrain_app::translateText("MainWindow", source));
@@ -576,8 +601,10 @@ void EnvironmentDeliveryEvidenceUiTests::workerStartFailureIsReportedAsynchronou
     QString error;
     QElapsedTimer elapsed;
     elapsed.start();
-    QVERIFY2(client.requestEnvironmentCheckWorkflow(invalidWorker, directory.path(), &error,
-        aitrain::TaskId::create().toString()), qPrintable(error));
+    const aitrain::worker_protocol::TaskCommand command{
+        aitrain::worker_protocol::EnvironmentCheckCommand{
+            {aitrain::TaskId::create(), directory.path()}}};
+    QVERIFY2(client.startTask(invalidWorker, command, &error), qPrintable(error));
     QVERIFY2(elapsed.elapsed() < 500, "Worker 启动请求不应同步等待进程创建结果。");
     QVERIFY2(finishedSpy.wait(5000), "异步启动失败必须通过 finished 信号收口。");
     QCOMPARE(finishedSpy.count(), 1);

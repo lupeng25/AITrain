@@ -99,11 +99,6 @@ QString uiText(const char* source)
     return aitrain_app::translateText("MainWindow", QString::fromUtf8(source));
 }
 
-QString defaultProjectPathSettingsKey()
-{
-    return QStringLiteral("settings/defaultProjectPath");
-}
-
 QString taskTypeLabel(const QString& taskType)
 {
     if (taskType == QStringLiteral("detection")) {
@@ -188,42 +183,6 @@ QJsonObject readJsonObjectFile(const QString& path)
         return {};
     }
     return document.object();
-}
-
-QJsonObject compactEvaluationSummary(const QString& reportPath)
-{
-    const QJsonObject report = readJsonObjectFile(reportPath);
-    if (report.isEmpty()) {
-        return {};
-    }
-    QJsonObject summary;
-    summary.insert(QStringLiteral("reportPath"), reportPath);
-    summary.insert(QStringLiteral("taskType"), report.value(QStringLiteral("taskType")).toString());
-    summary.insert(QStringLiteral("status"), report.value(QStringLiteral("status")).toString(QStringLiteral("completed")));
-    summary.insert(QStringLiteral("scaffold"), report.value(QStringLiteral("scaffold")).toBool());
-    summary.insert(QStringLiteral("metrics"), report.value(QStringLiteral("metrics")).toObject());
-    summary.insert(QStringLiteral("limitations"), report.value(QStringLiteral("limitations")).toArray());
-    return summary;
-}
-
-QJsonObject compactBenchmarkSummary(const QString& reportPath)
-{
-    const QJsonObject report = readJsonObjectFile(reportPath);
-    if (report.isEmpty()) {
-        return {};
-    }
-    QJsonObject summary;
-    summary.insert(QStringLiteral("reportPath"), reportPath);
-    summary.insert(QStringLiteral("runtime"), report.value(QStringLiteral("runtime")).toString());
-    summary.insert(QStringLiteral("modelFamily"), report.value(QStringLiteral("modelFamily")).toString());
-    summary.insert(QStringLiteral("runtimeStatus"), report.value(QStringLiteral("runtimeStatus")).toString(report.value(QStringLiteral("status")).toString()));
-    summary.insert(QStringLiteral("deploymentConclusion"), report.value(QStringLiteral("deploymentConclusion")).toString());
-    summary.insert(QStringLiteral("timedInference"), report.value(QStringLiteral("timedInference")).toBool());
-    summary.insert(QStringLiteral("averageMs"), report.value(QStringLiteral("averageMs")).toDouble());
-    summary.insert(QStringLiteral("p95Ms"), report.value(QStringLiteral("p95Ms")).toDouble());
-    summary.insert(QStringLiteral("throughput"), report.value(QStringLiteral("throughput")).toDouble());
-    summary.insert(QStringLiteral("failureCategory"), report.value(QStringLiteral("failureCategory")).toString());
-    return summary;
 }
 
 QString metricValueText(const QJsonObject& metrics, const QStringList& keys)
@@ -418,26 +377,6 @@ void setInferenceOverlayText(QLabel* label, const QString& text)
     }
     label->clear();
     label->setText(text);
-}
-
-void loadInferenceOverlay(QLabel* label, const QString& path)
-{
-    if (!label) {
-        return;
-    }
-    QPixmap overlay(path);
-    if (overlay.isNull()) {
-        setInferenceOverlayText(label, uiText("推理 overlay 加载失败"));
-        return;
-    }
-    QSize targetSize = label->size().boundedTo(QSize(900, 560));
-    if (targetSize.width() < 160 || targetSize.height() < 120) {
-        targetSize = QSize(720, 420);
-    }
-    label->setPixmap(overlay.scaled(
-        targetSize,
-        Qt::KeepAspectRatio,
-        Qt::SmoothTransformation));
 }
 
 QString environmentStatusLabel(const QString& status)
@@ -752,8 +691,7 @@ namespace {
 bool paddleOcrOfficialRepoConfigured()
 {
     const QString repo = QString::fromLocal8Bit(qgetenv("AITRAIN_PADDLEOCR_REPO")).trimmed();
-    const QString legacyRepo = QString::fromLocal8Bit(qgetenv("AITRAIN_PADDLEOCR_SOURCE_ROOT")).trimmed();
-    if (!repo.isEmpty() || !legacyRepo.isEmpty()) {
+    if (!repo.isEmpty()) {
         return true;
     }
 
@@ -1173,107 +1111,6 @@ QString comboCurrentDataOrText(const QComboBox* combo)
     }
     const QString data = combo->currentData().toString();
     return data.isEmpty() ? combo->currentText() : data;
-}
-
-QString inferenceSummaryFromPredictions(const QString& predictionsPath, const QJsonObject& fallback)
-{
-    const QString nativePath = QDir::toNativeSeparators(predictionsPath);
-    QFile file(predictionsPath);
-    if (!file.open(QIODevice::ReadOnly)) {
-        const QString taskType = fallback.value(QStringLiteral("taskType")).toString(QStringLiteral("detection"));
-        return uiText("%1：%2 个结果，%3 ms\n结果文件：%4")
-            .arg(inferenceTaskTypeLabel(taskType))
-            .arg(fallback.value(QStringLiteral("predictionCount")).toInt())
-            .arg(fallback.value(QStringLiteral("elapsedMs")).toInt())
-            .arg(nativePath);
-    }
-
-    QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
-    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-        return uiText("预测结果 JSON 无法解析：%1").arg(nativePath);
-    }
-
-    const QJsonObject root = document.object();
-    const QString taskType = root.value(QStringLiteral("taskType")).toString(
-        fallback.value(QStringLiteral("taskType")).toString(QStringLiteral("detection")));
-    const QJsonArray predictions = root.value(QStringLiteral("predictions")).toArray();
-    const int elapsedMs = root.value(QStringLiteral("elapsedMs")).toInt(fallback.value(QStringLiteral("elapsedMs")).toInt());
-    int resultCount = predictions.size();
-    QString detail;
-    if (!predictions.isEmpty()) {
-        const QJsonObject first = predictions.at(0).toObject();
-        if (taskType == QStringLiteral("semantic_segmentation")) {
-            const QJsonObject pixelCounts = first.value(QStringLiteral("pixelCounts")).toObject();
-            const QJsonArray classNames = first.value(QStringLiteral("classNames")).toArray();
-            double totalPixels = 0.0;
-            double foregroundPixels = 0.0;
-            int activeClasses = 0;
-            QStringList classParts;
-            for (auto it = pixelCounts.constBegin(); it != pixelCounts.constEnd(); ++it) {
-                const double count = it.value().toDouble();
-                totalPixels += count;
-                bool classOk = false;
-                const int classId = it.key().toInt(&classOk);
-                if (count <= 0.0 || it.key() == QStringLiteral("0")) {
-                    continue;
-                }
-                foregroundPixels += count;
-                ++activeClasses;
-                if (classParts.size() < 3) {
-                    QString className = classOk && classId >= 0 && classId < classNames.size()
-                        ? classNames.at(classId).toString()
-                        : QStringLiteral("class %1").arg(it.key());
-                    if (className.trimmed().isEmpty()) {
-                        className = QStringLiteral("class %1").arg(it.key());
-                    }
-                    classParts.append(QStringLiteral("%1 %2 px").arg(className).arg(static_cast<qint64>(count)));
-                }
-            }
-            resultCount = activeClasses;
-            detail = uiText("前景 %1 px / 总像素 %2")
-                .arg(static_cast<qint64>(foregroundPixels))
-                .arg(static_cast<qint64>(totalPixels));
-            if (!classParts.isEmpty()) {
-                detail.append(QStringLiteral("，%1").arg(classParts.join(QStringLiteral(", "))));
-            }
-        } else if (taskType == QStringLiteral("anomaly_detection")) {
-            const double score = first.value(QStringLiteral("anomalyScore")).toDouble();
-            const double threshold = first.value(QStringLiteral("threshold")).toDouble();
-            const QString decision = first.value(QStringLiteral("decision")).toString(QStringLiteral("unknown")).toUpper();
-            detail = uiText("%1，score %2 / threshold %3")
-                .arg(decision)
-                .arg(score, 0, 'f', 4)
-                .arg(threshold, 0, 'f', 4);
-            resultCount = 1;
-        } else if (taskType == QStringLiteral("ocr_recognition")) {
-            const QString text = first.value(QStringLiteral("text")).toString();
-            detail = text.isEmpty()
-                ? uiText("未识别出文本")
-                : uiText("文本 \"%1\"").arg(text);
-            if (first.contains(QStringLiteral("confidence"))) {
-                detail.append(uiText("，置信度 %1").arg(confidencePercent(first.value(QStringLiteral("confidence")).toDouble())));
-            }
-        } else {
-            const QString className = first.value(QStringLiteral("className")).toString(
-                QStringLiteral("class %1").arg(first.value(QStringLiteral("classId")).toInt()));
-            detail = uiText("首个 %1，置信度 %2")
-                .arg(className)
-                .arg(confidencePercent(first.value(QStringLiteral("confidence")).toDouble()));
-            if (taskType == QStringLiteral("segmentation")) {
-                detail.append(QStringLiteral("，mask area %1").arg(confidencePercent(first.value(QStringLiteral("maskArea")).toDouble())));
-            }
-        }
-    } else {
-        detail = uiText("无结果");
-    }
-
-    return uiText("%1：%2 个结果，%3，%4 ms\n结果文件：%5")
-        .arg(inferenceTaskTypeLabel(taskType))
-        .arg(resultCount)
-        .arg(detail)
-        .arg(elapsedMs)
-        .arg(nativePath);
 }
 
 } // namespace aitrain_app

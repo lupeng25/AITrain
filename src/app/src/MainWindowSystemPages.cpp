@@ -186,6 +186,7 @@ QWidget* MainWindow::buildEnvironmentPage()
 
     auto* panel = new InfoPanel(QStringLiteral("检查明细"));
     environmentTable_ = new QTableWidget(0, 3);
+    environmentTable_->setObjectName(QStringLiteral("EnvironmentTable"));
     environmentTable_->setHorizontalHeaderLabels(QStringList() << QStringLiteral("检查项") << QStringLiteral("状态") << QStringLiteral("说明"));
     configureTable(environmentTable_);
     environmentTable_->setWordWrap(true);
@@ -193,25 +194,8 @@ QWidget* MainWindow::buildEnvironmentPage()
     environmentTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     environmentTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
     environmentTable_->verticalHeader()->setDefaultSectionSize(42);
-    const QStringList rows = {
-        QStringLiteral("NVIDIA Driver"),
-        QStringLiteral("CUDA Runtime"),
-        QStringLiteral("cuDNN"),
-        QStringLiteral("TensorRT"),
-        QStringLiteral("ONNX Runtime"),
-        QStringLiteral("LibTorch"),
-        QStringLiteral("Qt Runtime Modules"),
-        QStringLiteral("内置能力"),
-        QStringLiteral("Worker")
-    };
-    for (const QString& rowName : rows) {
-        const int row = environmentTable_->rowCount();
-        environmentTable_->insertRow(row);
-        environmentTable_->setItem(row, 0, new QTableWidgetItem(rowName));
-        environmentTable_->setItem(row, 1, new QTableWidgetItem(uiText("未检测")));
-        environmentTable_->setItem(row, 2, new QTableWidgetItem(uiText("点击执行环境自检。")));
-    }
-    panel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("TensorRT 已有 RTX 4090 D 验收证据；不兼容 GPU/runtime 会记录为 hardware-blocked，包体或客户机验收需以实际环境证据为准。")));
+    refreshEnvironmentReportView();
+    panel->bodyLayout()->addWidget(mutedLabel(uiText("状态来自 Worker 已提交的 Environment Check 报告；未提交外部硬件验收证据不会被视为通过。")));
     panel->bodyLayout()->addWidget(environmentTable_);
     auto* runtimeTab = new QWidget;
     auto* runtimeLayout = new QVBoxLayout(runtimeTab);

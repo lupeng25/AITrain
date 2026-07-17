@@ -46,7 +46,7 @@ QWidget* MainWindow::buildDeploymentPage()
     layout->addWidget(createWorkbenchHeader(
         QStringLiteral("DEPLOYMENT VALIDATION"),
         uiText("部署验证"),
-        uiText("基于已登记且校验通过的  模型包运行推理与部署验证。"),
+        uiText("基于已登记且校验通过的模型包运行推理与部署验证。"),
         nullptr,
         QStringList()
             << QStringLiteral("ONNX")
@@ -80,28 +80,24 @@ QWidget* MainWindow::buildDeploymentValidationPanel()
     deploymentModelPackageCombo_->setObjectName(QStringLiteral("DeploymentModelPackageCombo"));
     deploymentModelPackageCombo_->setMinimumWidth(0);
     deploymentModelPackageCombo_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
-    deploymentModelPackageCombo_->addItem(uiText("请先打开项目并导入已验证  模型包"), QString());
+    deploymentModelPackageCombo_->addItem(uiText("请先打开项目并导入已验证模型包"), QString());
 
-    deploymentValidationImageEdit_ = new QLineEdit;
-    deploymentValidationImageEdit_->setPlaceholderText(uiText("选择用于部署验证的样本图片"));
-    auto* chooseValidationImageButton = new QPushButton(uiText("选择图片"));
-    connect(chooseValidationImageButton, &QPushButton::clicked, this, [this]() {
-        const QString file = QFileDialog::getOpenFileName(
-            this,
-            uiText("选择验证图片"),
-            currentProjectPath_,
-            QStringLiteral("Images (*.png *.jpg *.jpeg *.bmp);;All files (*.*)"));
-        if (!file.isEmpty() && deploymentValidationImageEdit_) {
-            deploymentValidationImageEdit_->setText(QDir::toNativeSeparators(file));
-        }
-    });
-
-    auto* imageRow = new QWidget;
-    auto* imageLayout = new QHBoxLayout(imageRow);
-    imageLayout->setContentsMargins(0, 0, 0, 0);
-    imageLayout->setSpacing(8);
-    imageLayout->addWidget(deploymentValidationImageEdit_, 1);
-    imageLayout->addWidget(chooseValidationImageButton);
+    deploymentSampleDatasetIdEdit_ = new QLineEdit;
+    deploymentSampleDatasetVersionIdEdit_ = new QLineEdit;
+    deploymentSampleSnapshotIdEdit_ = new QLineEdit;
+    deploymentSampleSnapshotArtifactIdEdit_ = new QLineEdit;
+    deploymentSampleRelativePathEdit_ = new QLineEdit;
+    for (QLineEdit* edit : {deploymentSampleDatasetIdEdit_, deploymentSampleDatasetVersionIdEdit_,
+             deploymentSampleSnapshotIdEdit_, deploymentSampleSnapshotArtifactIdEdit_,
+             deploymentSampleRelativePathEdit_}) {
+        edit->setMinimumWidth(0);
+        edit->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    }
+    deploymentSampleDatasetIdEdit_->setPlaceholderText(uiText("DatasetId"));
+    deploymentSampleDatasetVersionIdEdit_->setPlaceholderText(uiText("DatasetVersionId"));
+    deploymentSampleSnapshotIdEdit_->setPlaceholderText(uiText("SnapshotId"));
+    deploymentSampleSnapshotArtifactIdEdit_->setPlaceholderText(uiText("Snapshot ArtifactId"));
+    deploymentSampleRelativePathEdit_->setPlaceholderText(uiText("样本在 Snapshot Artifact 内的相对路径，例如 images/0001.png"));
 
     auto* form = new QFormLayout;
     form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
@@ -110,12 +106,16 @@ QWidget* MainWindow::buildDeploymentValidationPanel()
     form->setHorizontalSpacing(14);
     form->setVerticalSpacing(10);
     form->addRow(uiText("已验证模型包"), deploymentModelPackageCombo_);
-    form->addRow(uiText("验证图片"), imageRow);
+    form->addRow(uiText("样本 DatasetId"), deploymentSampleDatasetIdEdit_);
+    form->addRow(uiText("样本 VersionId"), deploymentSampleDatasetVersionIdEdit_);
+    form->addRow(uiText("样本 SnapshotId"), deploymentSampleSnapshotIdEdit_);
+    form->addRow(uiText("样本 ArtifactId"), deploymentSampleSnapshotArtifactIdEdit_);
+    form->addRow(uiText("样本相对路径"), deploymentSampleRelativePathEdit_);
     setupPanel->bodyLayout()->addLayout(form);
 
     auto* boundary = emptyStateLabel(uiText(
-        "此入口只接受由 ModelPackageId 解析、Manifest 校验和 SHA-256 校验通过的模型包；"
-        "不再接受 checkpoint、ONNX、engine 等裸路径。"));
+        "此入口只接受由 ModelPackageId 解析的模型包，以及已提交 Dataset Snapshot Artifact 内的样本；"
+        "不再接受 checkpoint、ONNX、engine 或样本图片裸路径。"));
     allowLabelToShrink(boundary);
     setupPanel->bodyLayout()->addWidget(boundary);
 
@@ -165,28 +165,31 @@ QWidget* MainWindow::buildInferenceValidationPanel()
     auto* toolbar = new InfoPanel(QStringLiteral("验证输入"));
     auto* inferForm = new QFormLayout;
     inferenceModelPackageCombo_ = new QComboBox;
-    inferenceImageEdit_ = new QLineEdit;
+    inferenceSampleDatasetIdEdit_ = new QLineEdit;
+    inferenceSampleDatasetVersionIdEdit_ = new QLineEdit;
+    inferenceSampleSnapshotIdEdit_ = new QLineEdit;
+    inferenceSampleSnapshotArtifactIdEdit_ = new QLineEdit;
+    inferenceSampleRelativePathEdit_ = new QLineEdit;
     inferenceOutputEdit_ = new QLineEdit;
-    for (QLineEdit* edit : {inferenceImageEdit_, inferenceOutputEdit_}) {
+    for (QLineEdit* edit : {inferenceSampleDatasetIdEdit_, inferenceSampleDatasetVersionIdEdit_,
+             inferenceSampleSnapshotIdEdit_, inferenceSampleSnapshotArtifactIdEdit_,
+             inferenceSampleRelativePathEdit_, inferenceOutputEdit_}) {
         edit->setMinimumWidth(0);
         edit->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     }
     inferenceModelPackageCombo_->setMinimumWidth(0);
     inferenceModelPackageCombo_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     inferenceModelPackageCombo_->addItem(uiText("请先打开项目并导入已验证模型包"), QString());
-    inferenceImageEdit_->setPlaceholderText(QStringLiteral("选择验证图片"));
-    inferenceOutputEdit_->setPlaceholderText(QStringLiteral("输出由  Artifact Store 托管"));
+    inferenceSampleDatasetIdEdit_->setPlaceholderText(QStringLiteral("DatasetId"));
+    inferenceSampleDatasetVersionIdEdit_->setPlaceholderText(QStringLiteral("DatasetVersionId"));
+    inferenceSampleSnapshotIdEdit_->setPlaceholderText(QStringLiteral("SnapshotId"));
+    inferenceSampleSnapshotArtifactIdEdit_->setPlaceholderText(QStringLiteral("Snapshot ArtifactId"));
+    inferenceSampleRelativePathEdit_->setPlaceholderText(QStringLiteral("样本在 Snapshot Artifact 内的相对路径，例如 images/0001.png"));
+    inferenceOutputEdit_->setPlaceholderText(QStringLiteral("输出由 Artifact Store 托管"));
     inferenceOutputEdit_->setReadOnly(true);
-    auto* chooseImageButton = new QPushButton(QStringLiteral("选择图片"));
     auto* chooseOutputButton = new QPushButton(QStringLiteral("选择输出目录"));
     chooseOutputButton->setEnabled(false);
     auto* inferButton = primaryButton(QStringLiteral("运行完整 Runtime Delivery"));
-    connect(chooseImageButton, &QPushButton::clicked, this, [this]() {
-        const QString file = QFileDialog::getOpenFileName(this, uiText("选择图片"), currentProjectPath_, QStringLiteral("Images (*.png *.jpg *.jpeg *.bmp);;All files (*.*)"));
-        if (!file.isEmpty()) {
-            inferenceImageEdit_->setText(QDir::toNativeSeparators(file));
-        }
-    });
     connect(chooseOutputButton, &QPushButton::clicked, this, [this]() {
         const QString currentOutput = QDir::fromNativeSeparators(inferenceOutputEdit_ ? inferenceOutputEdit_->text().trimmed() : QString());
         const QString defaultDir = !currentOutput.isEmpty()
@@ -208,8 +211,7 @@ QWidget* MainWindow::buildInferenceValidationPanel()
     auto* imageLayout = new QHBoxLayout(imageRow);
     imageLayout->setContentsMargins(0, 0, 0, 0);
     imageLayout->setSpacing(8);
-    imageLayout->addWidget(inferenceImageEdit_);
-    imageLayout->addWidget(chooseImageButton);
+    imageLayout->addWidget(inferenceSampleRelativePathEdit_);
     modelLayout->setSpacing(8);
     auto* outputRow = new QWidget;
     auto* outputLayout = new QHBoxLayout(outputRow);
@@ -221,11 +223,15 @@ QWidget* MainWindow::buildInferenceValidationPanel()
     inferForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     inferForm->setHorizontalSpacing(14);
     inferForm->setVerticalSpacing(10);
-    inferForm->addRow(QStringLiteral("已验证  模型包"), modelRow);
-    inferForm->addRow(QStringLiteral("图片路径"), imageRow);
+    inferForm->addRow(QStringLiteral("已验证模型包"), modelRow);
+    inferForm->addRow(QStringLiteral("样本 DatasetId"), inferenceSampleDatasetIdEdit_);
+    inferForm->addRow(QStringLiteral("样本 VersionId"), inferenceSampleDatasetVersionIdEdit_);
+    inferForm->addRow(QStringLiteral("样本 SnapshotId"), inferenceSampleSnapshotIdEdit_);
+    inferForm->addRow(QStringLiteral("样本 ArtifactId"), inferenceSampleSnapshotArtifactIdEdit_);
+    inferForm->addRow(QStringLiteral("样本相对路径"), imageRow);
     inferForm->addRow(QStringLiteral("推理输出"), outputRow);
     toolbar->bodyLayout()->addLayout(inferForm);
-    auto* sourceHelp = emptyStateLabel(QStringLiteral("推理只能使用模型库中已登记、已校验哈希且声明 ONNX Runtime 路由的  模型包。模型文件裸路径、NCNN 和 TensorRT engine 不会进入此推理链路。"));
+    auto* sourceHelp = emptyStateLabel(QStringLiteral("推理只能使用模型库中已登记、已校验哈希且声明 ONNX Runtime 路由的模型包，以及已提交 Snapshot Artifact 内的样本。模型文件、样本图片、NCNN 和 TensorRT engine 裸路径不会进入此推理链路。"));
     allowLabelToShrink(sourceHelp);
     toolbar->bodyLayout()->addWidget(sourceHelp);
     auto* actionStrip = new QFrame;
@@ -241,7 +247,7 @@ QWidget* MainWindow::buildInferenceValidationPanel()
     toolbar->bodyLayout()->addStretch();
 
     auto* capabilityPanel = new InfoPanel(QStringLiteral("可解析结果"));
-    auto* capabilityHint = mutedLabel(QStringLiteral("当前  推理仅执行已验证 ONNX Runtime 路由；具体检测、分割、OBB 或语义分割解码由 Model Manifest 声明。TensorRT、NCNN、异常检测和 OCR 不进入此运行时。"));
+    auto* capabilityHint = mutedLabel(QStringLiteral("当前推理仅执行已验证 ONNX Runtime 路由；具体检测、分割、OBB 或语义分割解码由 Model Manifest 声明。TensorRT、NCNN、异常检测和 OCR 不进入此运行时。"));
     allowLabelToShrink(capabilityHint);
     capabilityPanel->bodyLayout()->addWidget(capabilityHint);
     auto* capabilityGrid = new QGridLayout;

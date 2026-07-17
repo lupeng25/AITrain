@@ -1361,6 +1361,8 @@ bool ProjectWorkspace::prepareTrainingWorkflowAdapterLaunch(const WorkflowRunId&
     result->launch.program = config.pythonProgram;
     result->launch.arguments = QStringList{scriptPath, QStringLiteral("--request"), requestPath};
     result->launch.workingDirectory = config.trainersRoot;
+    result->launch.artifactCandidateRoots = QStringList{outputRoot, input.artifactPath, snapshotInput.artifactPath};
+    result->launch.artifactCandidateRoots.removeDuplicates();
     result->launch.environment = config.environment;
     result->launch.cancellationGraceMs = config.cancellationGraceMs;
     return true;
@@ -2101,6 +2103,56 @@ QVector<ArtifactSnapshot> ProjectWorkspace::artifactsForTask(const TaskId& taskI
         return {};
     }
     return storage_.artifactsForTask(taskId, error);
+}
+
+bool ProjectWorkspace::readCommittedArtifactFile(const ArtifactId& artifactId,
+    const QString& relativePath,
+    ArtifactFilePreview* result,
+    qint64 maxBytes,
+    QString* error) const
+{
+    if (error) error->clear();
+    if (!isOpen() || !artifactId.isValid() || !result || maxBytes <= 0 || maxBytes > 4 * 1024 * 1024) {
+        if (error) *error = QStringLiteral("读取 Artifact 预览需要有效工作区、Artifact ID、输出对象和合法大小限制。");
+        return false;
+    }
+
+    const QString normalizedPath = QDir::cleanPath(QDir::fromNativeSeparators(relativePath.trimmed()));
+    if (normalizedPath.isEmpty() || normalizedPath == QStringLiteral(".")
+        || QDir::isAbsolutePath(normalizedPath) || normalizedPath == QStringLiteral("..")
+        || normalizedPath.startsWith(QStringLiteral("../"))) {
+        if (error) *error = QStringLiteral("Artifact 预览相对路径无效。");
+        return false;
+    }
+
+    ArtifactSnapshot snapshot;
+    if (!storage_.artifact(artifactId, &snapshot, error)) return false;
+    const auto fileIt = std::find_if(snapshot.files.cbegin(), snapshot.files.cend(),
+        [&normalizedPath](const ArtifactFileSnapshot& file) {
+            return QDir::cleanPath(QDir::fromNativeSeparators(file.relativePath)) == normalizedPath;
+        });
+    if (fileIt == snapshot.files.cend()) {
+        if (error) *error = QStringLiteral("Artifact 清单中不存在请求的文件。");
+        return false;
+    }
+
+    VerifiedWorkflowArtifactFile verified;
+    if (!verifyArtifactFile(artifactStore_->artifactPath(artifactId), *fileIt, &verified, error)) {
+        return false;
+    }
+    QFile file(verified.absolutePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (error) *error = QStringLiteral("无法读取已提交 Artifact 文件。");
+        return false;
+    }
+    const QByteArray content = file.read(maxBytes + 1);
+    if (file.error() != QFileDevice::NoError) {
+        if (error) *error = QStringLiteral("读取已提交 Artifact 文件失败。");
+        return false;
+    }
+    *result = {verified.relativePath, verified.sha256, verified.byteCount,
+        content.left(maxBytes), content.size() > maxBytes};
+    return true;
 }
 
 QVector<MetricSnapshot> ProjectWorkspace::metricsForTask(const TaskId& taskId, QString* error) const

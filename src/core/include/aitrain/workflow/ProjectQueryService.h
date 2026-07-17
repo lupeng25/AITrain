@@ -36,6 +36,32 @@ struct ModelPackageReadModel final {
     QDateTime createdAt;
 };
 
+// 数据集目录只暴露持久化身份和摘要，不暴露源目录或 Artifact Store 路径。
+struct DatasetCatalogReadModel final {
+    DatasetId datasetId;
+    QString datasetFormat;
+    qint64 versionCount = 0;
+    qint64 snapshotCount = 0;
+    DatasetVersionId latestVersionId;
+    SnapshotId latestSnapshotId;
+    ArtifactId latestArtifactId;
+    QString latestRootHash;
+    qsizetype latestFileCount = 0;
+    QDateTime latestCreatedAt;
+};
+
+struct DeliveryEvidenceReadModel final {
+    TaskId taskId;
+    ArtifactId evidenceArtifactId;
+    QString taskState;
+    QString evidenceKind;
+    QString runtimeStatus;
+    QString producer;
+    QStringList limitations;
+    QDateTime observedAt;
+    bool verified = false;
+};
+
 // 项目总览只读 DTO。底层 Snapshot 本身不包含裸 Artifact 路径或 legacy 数据。
 using ProjectSummaryReadModel = ProjectSummarySnapshot;
 
@@ -47,9 +73,16 @@ public:
 
     QVector<TaskSnapshot> recentTasks(int limit, QString* error = nullptr) const;
     bool taskDetails(const TaskId& taskId, TaskReadModel* result, QString* error = nullptr) const;
+    bool artifactFilePreview(const ArtifactId& artifactId,
+        const QString& relativePath,
+        ArtifactFilePreview* result,
+        qint64 maxBytes = 512 * 1024,
+        QString* error = nullptr) const;
+    QVector<DatasetCatalogReadModel> datasetCatalog(int limit, QString* error = nullptr) const;
     QVector<ModelPackageReadModel> modelPackages(int limit, QString* error = nullptr) const;
     bool projectSummary(ProjectSummaryReadModel* result, QString* error = nullptr) const;
     bool environmentCheckReport(const TaskId& taskId, QJsonObject* result, QString* error = nullptr) const;
+    QVector<DeliveryEvidenceReadModel> deliveryEvidence(int limit, QString* error = nullptr) const;
 
 private:
     const ProjectWorkspace* workspace_ = nullptr;

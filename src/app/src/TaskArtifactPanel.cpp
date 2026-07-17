@@ -2,24 +2,17 @@
 
 #include "EvaluationReportView.h"
 #include "MainWindowSupport.h"
-#include "aitrain/core/DetectionTrainer.h"
 
 #include <QAbstractItemView>
-#include <QApplication>
-#include <QDateTime>
-#include <QDir>
-#include <QFile>
-#include <QFileInfo>
+#include <QByteArray>
 #include <QFrame>
-#include <QGridLayout>
 #include <QHeaderView>
-#include <QJsonArray>
 #include <QJsonDocument>
-#include <QJsonObject>
 #include <QJsonParseError>
 #include <QLabel>
+#include <QFileInfo>
+#include <QPixmap>
 #include <QPlainTextEdit>
-#include <QPushButton>
 #include <QScrollArea>
 #include <QSize>
 #include <QSizePolicy>
@@ -32,15 +25,22 @@
 using namespace aitrain_app;
 
 namespace {
-QString selectedPathFromTable(QTableWidget* table, int pathColumn)
+
+QString formatArtifactJsonText(const QByteArray& data)
 {
-    if (!table || table->selectedItems().isEmpty()) {
-        return QString();
+    QJsonParseError error;
+    const QJsonDocument document = QJsonDocument::fromJson(data, &error);
+    if (error.error != QJsonParseError::NoError) {
+        return QString::fromUtf8(data);
     }
-    const int row = table->selectedItems().first()->row();
-    auto* item = table->item(row, pathColumn);
-    return item ? item->data(Qt::UserRole).toString() : QString();
+    return QString::fromUtf8(document.toJson(QJsonDocument::Indented));
 }
+
+QString suffixFor(const QString& relativePath)
+{
+    return QFileInfo(relativePath).suffix().toLower();
+}
+
 } // namespace
 
 TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
@@ -50,7 +50,7 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
 
-    selectedTaskSummaryLabel_ = inlineStatusLabel(QStringLiteral("请选择一个任务查看产物、指标和导出记录。"));
+    selectedTaskSummaryLabel_ = inlineStatusLabel(QStringLiteral("请选择一个任务查看产物、指标和工作流。"));
     selectedTaskSummaryLabel_->setObjectName(QStringLiteral("TaskDetailSummary"));
     selectedTaskSummaryLabel_->setMinimumHeight(40);
     selectedTaskSummaryLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
@@ -58,10 +58,8 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     artifactTable_ = new QTableWidget(0, 4);
     artifactTable_->setObjectName(QStringLiteral("TaskArtifactTable"));
     artifactTable_->setHorizontalHeaderLabels(QStringList()
-        << QStringLiteral("类型")
-        << QStringLiteral("路径")
-        << QStringLiteral("说明")
-        << QStringLiteral("时间"));
+        << QStringLiteral("产物类型") << QStringLiteral("包内相对路径")
+        << QStringLiteral("完整性") << QStringLiteral("提交时间"));
     configureTable(artifactTable_);
     artifactTable_->setWordWrap(true);
     artifactTable_->setMinimumHeight(170);
@@ -75,10 +73,7 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     metricTable_ = new QTableWidget(0, 4);
     metricTable_->setObjectName(QStringLiteral("TaskMetricTable"));
     metricTable_->setHorizontalHeaderLabels(QStringList()
-        << QStringLiteral("指标")
-        << QStringLiteral("值")
-        << QStringLiteral("Step")
-        << QStringLiteral("Epoch"));
+        << QStringLiteral("指标") << QStringLiteral("值") << QStringLiteral("发生时间") << QStringLiteral("来源"));
     configureTable(metricTable_);
     metricTable_->setMinimumHeight(160);
     metricTable_->verticalHeader()->setDefaultSectionSize(38);
@@ -90,9 +85,7 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     exportTable_ = new QTableWidget(0, 3);
     exportTable_->setObjectName(QStringLiteral("TaskWorkflowTable"));
     exportTable_->setHorizontalHeaderLabels(QStringList()
-        << QStringLiteral("格式")
-        << QStringLiteral("路径")
-        << QStringLiteral("时间"));
+        << QStringLiteral("步骤") << QStringLiteral("状态 / 后端") << QStringLiteral("输出 Artifact"));
     configureTable(exportTable_);
     exportTable_->setWordWrap(true);
     exportTable_->setMinimumHeight(160);
@@ -111,7 +104,7 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     previewText_->setObjectName(QStringLiteral("ArtifactPreviewText"));
     previewText_->setReadOnly(true);
     previewText_->setMinimumHeight(120);
-    previewText_->setPlainText(QStringLiteral("选择一个产物后显示摘要。"));
+    previewText_->setPlainText(QStringLiteral("选择一个已提交文件后显示摘要。"));
     auto* defaultPreview = new QWidget;
     auto* defaultLayout = new QVBoxLayout(defaultPreview);
     defaultLayout->setContentsMargins(0, 0, 0, 0);
@@ -121,40 +114,13 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     previewStack_ = new QStackedWidget;
     previewStack_->setMinimumHeight(180);
     previewStack_->addWidget(defaultPreview);
+
     evaluationReportView_ = new EvaluationReportView;
     auto* evaluationScroll = new QScrollArea;
     evaluationScroll->setWidget(evaluationReportView_);
     evaluationScroll->setWidgetResizable(true);
     evaluationScroll->setFrameShape(QFrame::NoFrame);
-    evaluationScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    evaluationScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     previewStack_->addWidget(evaluationScroll);
-
-    auto* actionGridFrame = new QFrame;
-    legacyArtifactActions_ = actionGridFrame;
-    legacyArtifactActions_->setEnabled(false);
-    legacyArtifactActions_->setToolTip(uiText(" 页面不暴露 Artifact Store 裸路径；路径驱动的旧操作尚未迁移。"));
-    actionGridFrame->setObjectName(QStringLiteral("ArtifactActionGrid"));
-    actionGridFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
-    auto* actionGrid = new QGridLayout(actionGridFrame);
-    actionGrid->setContentsMargins(12, 10, 12, 10);
-    actionGrid->setHorizontalSpacing(12);
-    actionGrid->setVerticalSpacing(8);
-    auto* openDirButton = new QPushButton(QStringLiteral("打开目录"));
-    auto* copyPathButton = new QPushButton(QStringLiteral("复制路径"));
-    auto* useInferButton = new QPushButton(QStringLiteral("用作推理模型"));
-    auto* registerModelButton = new QPushButton(QStringLiteral("注册模型版本"));
-    connect(openDirButton, &QPushButton::clicked, this, &TaskArtifactPanel::openDirectoryRequested);
-    connect(copyPathButton, &QPushButton::clicked, this, &TaskArtifactPanel::copyPathRequested);
-    connect(useInferButton, &QPushButton::clicked, this, &TaskArtifactPanel::useForInferenceRequested);
-    connect(registerModelButton, &QPushButton::clicked, this, &TaskArtifactPanel::registerModelRequested);
-    actionGrid->addWidget(openDirButton, 0, 0);
-    actionGrid->addWidget(copyPathButton, 0, 1);
-    actionGrid->addWidget(useInferButton, 0, 2);
-    actionGrid->addWidget(registerModelButton, 1, 0);
-    for (int column = 0; column < 4; ++column) {
-        actionGrid->setColumnStretch(column, 1);
-    }
 
     auto* artifactTab = new QWidget;
     auto* artifactTabLayout = new QVBoxLayout(artifactTab);
@@ -180,57 +146,42 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     detailTabs_->addTab(exportTab, uiText("工作流"));
     detailTabs_->addTab(previewTab, uiText("预览"));
     connect(detailTabs_, &QTabWidget::currentChanged, this, &TaskArtifactPanel::updatePreviewFromSelection);
-
     detailTabs_->setMinimumHeight(300);
     detailTabs_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     previewStack_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
     layout->addWidget(selectedTaskSummaryLabel_);
-    layout->addWidget(actionGridFrame);
     layout->addWidget(detailTabs_, 1);
-
     clear();
+}
+
+void TaskArtifactPanel::setPresenter(TaskArtifactPresenter* presenter)
+{
+    presenter_ = presenter;
+    previewSelectedArtifact();
 }
 
 void TaskArtifactPanel::clear()
 {
-    setTaskSummary(uiText("请选择一个任务查看产物、指标和导出记录。"));
+    setTaskSummary(uiText("请选择一个任务查看产物、指标和工作流。"));
     clearTableWithPlaceholder(artifactTable_, uiText("暂无产物"));
     clearTableWithPlaceholder(metricTable_, uiText("暂无指标"));
-    clearTableWithPlaceholder(exportTable_, uiText("暂无导出"));
-    previewArtifactPath(QString());
+    clearTableWithPlaceholder(exportTable_, uiText("暂无工作流步骤"));
+    selectedArtifactId_.clear();
+    selectedRelativePath_.clear();
+    previewSelectedArtifact();
 }
 
 void TaskArtifactPanel::setTaskSummary(const QString& summary)
 {
-    if (selectedTaskSummaryLabel_) {
-        selectedTaskSummaryLabel_->setText(summary);
-    }
-}
-
-QString TaskArtifactPanel::selectedArtifactPath() const
-{
-    const QString artifactPath = selectedPathFromTable(artifactTable_, 1);
-    const QString exportPath = selectedPathFromTable(exportTable_, 1);
-    if (detailTabs_ && detailTabs_->currentIndex() == 2 && !exportPath.isEmpty()) {
-        return exportPath;
-    }
-    return artifactPath.isEmpty() ? exportPath : artifactPath;
+    if (selectedTaskSummaryLabel_) selectedTaskSummaryLabel_->setText(summary);
 }
 
 void TaskArtifactPanel::setDetails(const TaskArtifactDetails& details)
 {
     setTaskSummary(details.summary.isEmpty()
-        ? uiText("请选择一个  任务查看已提交产物、指标和工作流。")
-        : details.summary);
-    if (legacyArtifactActions_) {
-        legacyArtifactActions_->setEnabled(false);
-        legacyArtifactActions_->setToolTip(uiText(" 页面不暴露 Artifact Store 裸路径；路径驱动的旧操作尚未迁移。"));
-    }
+        ? uiText("请选择一个任务查看已提交产物、指标和工作流。") : details.summary);
 
-    artifactTable_->setHorizontalHeaderLabels(QStringList()
-        << QStringLiteral("产物类型") << QStringLiteral("包内相对路径")
-        << QStringLiteral("完整性") << QStringLiteral("提交时间"));
     artifactTable_->setRowCount(0);
     for (const ArtifactFileItem& artifact : details.artifacts) {
         const int row = artifactTable_->rowCount();
@@ -238,8 +189,7 @@ void TaskArtifactPanel::setDetails(const TaskArtifactDetails& details)
         artifactTable_->setItem(row, 0, new QTableWidgetItem(artifact.kind));
         auto* relativePath = new QTableWidgetItem(artifact.relativePath.isEmpty()
             ? QStringLiteral("（无文件清单）") : artifact.relativePath);
-        // 仅展示不可变包内相对路径，不把它伪装成可执行的本机裸路径。
-        relativePath->setData(Qt::UserRole, QString());
+        relativePath->setData(Qt::UserRole, artifact.relativePath);
         relativePath->setData(Qt::UserRole + 1, artifact.artifactId);
         artifactTable_->setItem(row, 1, relativePath);
         artifactTable_->setItem(row, 2, new QTableWidgetItem(
@@ -254,8 +204,6 @@ void TaskArtifactPanel::setDetails(const TaskArtifactDetails& details)
         artifactTable_->selectRow(0);
     }
 
-    metricTable_->setHorizontalHeaderLabels(QStringList()
-        << QStringLiteral("指标") << QStringLiteral("值") << QStringLiteral("发生时间") << QStringLiteral("来源"));
     metricTable_->setRowCount(0);
     for (const MetricItem& metric : details.metrics) {
         const int row = metricTable_->rowCount();
@@ -263,14 +211,10 @@ void TaskArtifactPanel::setDetails(const TaskArtifactDetails& details)
         metricTable_->setItem(row, 0, new QTableWidgetItem(metric.name));
         metricTable_->setItem(row, 1, new QTableWidgetItem(QString::number(metric.value, 'g', 12)));
         metricTable_->setItem(row, 2, new QTableWidgetItem(metric.occurredAt));
-        metricTable_->setItem(row, 3, new QTableWidgetItem(QStringLiteral(" 持久化事件")));
+        metricTable_->setItem(row, 3, new QTableWidgetItem(QStringLiteral("持久化事件")));
     }
-    if (details.metrics.isEmpty()) {
-        clearTableWithPlaceholder(metricTable_, uiText("暂无指标"));
-    }
+    if (details.metrics.isEmpty()) clearTableWithPlaceholder(metricTable_, uiText("暂无指标"));
 
-    exportTable_->setHorizontalHeaderLabels(QStringList()
-        << QStringLiteral("步骤") << QStringLiteral("状态 / 后端") << QStringLiteral("输出产物"));
     exportTable_->setRowCount(0);
     for (const WorkflowStepItem& step : details.workflowSteps) {
         const int row = exportTable_->rowCount();
@@ -285,29 +229,13 @@ void TaskArtifactPanel::setDetails(const TaskArtifactDetails& details)
         output->setData(Qt::UserRole + 1, step.outputArtifactId);
         exportTable_->setItem(row, 2, output);
     }
-    if (details.workflowSteps.isEmpty()) {
-        clearTableWithPlaceholder(exportTable_, uiText("暂无工作流步骤"));
-    }
-    if (detailTabs_) {
-        detailTabs_->setTabText(2, uiText("工作流"));
-    }
-    previewArtifactPath(QString());
+    if (details.workflowSteps.isEmpty()) clearTableWithPlaceholder(exportTable_, uiText("暂无工作流步骤"));
+    previewSelectedArtifact();
 }
 
-int TaskArtifactPanel::artifactRowCount() const
-{
-    return artifactTable_ ? artifactTable_->rowCount() : 0;
-}
-
-int TaskArtifactPanel::metricRowCount() const
-{
-    return metricTable_ ? metricTable_->rowCount() : 0;
-}
-
-int TaskArtifactPanel::workflowStepRowCount() const
-{
-    return exportTable_ ? exportTable_->rowCount() : 0;
-}
+int TaskArtifactPanel::artifactRowCount() const { return artifactTable_ ? artifactTable_->rowCount() : 0; }
+int TaskArtifactPanel::metricRowCount() const { return metricTable_ ? metricTable_->rowCount() : 0; }
+int TaskArtifactPanel::workflowStepRowCount() const { return exportTable_ ? exportTable_->rowCount() : 0; }
 
 void TaskArtifactPanel::configureTable(QTableWidget* table) const
 {
@@ -320,174 +248,81 @@ void TaskArtifactPanel::configureTable(QTableWidget* table) const
 
 void TaskArtifactPanel::clearTableWithPlaceholder(QTableWidget* table, const QString& placeholder)
 {
-    if (!table) {
-        return;
-    }
+    if (!table) return;
     table->clearSelection();
     table->setRowCount(0);
     table->insertRow(0);
     table->setItem(0, 0, new QTableWidgetItem(placeholder));
-    for (int column = 1; column < table->columnCount(); ++column) {
+    for (int column = 1; column < table->columnCount(); ++column)
         table->setItem(0, column, new QTableWidgetItem(QString()));
-    }
 }
 
 void TaskArtifactPanel::updatePreviewFromSelection()
 {
-    previewArtifactPath(selectedArtifactPath());
+    previewSelectedArtifact();
 }
 
-void TaskArtifactPanel::previewArtifactPath(const QString& path)
+void TaskArtifactPanel::previewSelectedArtifact()
 {
-    if (!previewText_ || !imagePreviewLabel_ || !previewStack_) {
-        return;
-    }
-
+    if (!previewText_ || !imagePreviewLabel_ || !previewStack_) return;
     previewStack_->setCurrentIndex(0);
-    if (evaluationReportView_) {
-        evaluationReportView_->clear();
-    }
+    if (evaluationReportView_) evaluationReportView_->clear();
     imagePreviewLabel_->clear();
     imagePreviewLabel_->setVisible(false);
     imagePreviewLabel_->setText(uiText("暂无产物预览"));
     previewText_->setVisible(true);
     previewText_->clear();
-    if (path.isEmpty()) {
+
+    if (!detailTabs_ || detailTabs_->currentIndex() != 0
+        || !artifactTable_ || artifactTable_->selectedItems().isEmpty()) {
+        imagePreviewLabel_->setVisible(true);
+        previewText_->setVisible(false);
+        return;
+    }
+    const int row = artifactTable_->selectedItems().first()->row();
+    auto* item = artifactTable_->item(row, 1);
+    selectedRelativePath_ = item ? item->data(Qt::UserRole).toString() : QString();
+    selectedArtifactId_ = item ? item->data(Qt::UserRole + 1).toString() : QString();
+    if (selectedArtifactId_.isEmpty() || selectedRelativePath_.isEmpty() || !presenter_) {
         imagePreviewLabel_->setVisible(true);
         previewText_->setVisible(false);
         return;
     }
 
-    const QFileInfo info(path);
-    if (!info.exists()) {
-        previewText_->setPlainText(uiText("产物不存在：%1").arg(QDir::toNativeSeparators(path)));
+    aitrain::ArtifactFilePreview preview;
+    QString error;
+    if (!presenter_->previewArtifact(selectedArtifactId_, selectedRelativePath_, &preview, &error)) {
+        previewText_->setPlainText(uiText("无法读取已提交 Artifact 预览：%1").arg(error));
         return;
     }
-
-    if (info.isDir()) {
-        previewText_->setPlainText(uiText("目录产物\n路径：%1\n修改时间：%2")
-            .arg(QDir::toNativeSeparators(path), info.lastModified().toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))));
+    const QString suffix = suffixFor(preview.relativePath);
+    const QString fileName = QFileInfo(preview.relativePath).fileName();
+    if (suffix == QStringLiteral("json") && fileName == QStringLiteral("evaluation_report.json") && evaluationReportView_) {
+        evaluationReportView_->loadReportData(preview.content, preview.relativePath);
+        previewStack_->setCurrentIndex(1);
         return;
     }
-
-    const QString suffix = info.suffix().toLower();
-    if (QStringList{QStringLiteral("png"), QStringLiteral("jpg"), QStringLiteral("jpeg"), QStringLiteral("bmp")}.contains(suffix)) {
-        QPixmap image(path);
-        if (!image.isNull()) {
+    if (QStringList{QStringLiteral("png"), QStringLiteral("jpg"), QStringLiteral("jpeg"), QStringLiteral("bmp"), QStringLiteral("webp")}.contains(suffix)) {
+        QPixmap image;
+        if (image.loadFromData(preview.content)) {
             imagePreviewLabel_->setVisible(true);
             imagePreviewLabel_->setPixmap(image.scaled(
                 imagePreviewLabel_->size().boundedTo(QSize(520, 360)),
-                Qt::KeepAspectRatio,
-                Qt::SmoothTransformation));
+                Qt::KeepAspectRatio, Qt::SmoothTransformation));
         }
-        previewText_->setPlainText(uiText("图片产物\n路径：%1\n尺寸：%2 x %3\n大小：%4 bytes")
-            .arg(QDir::toNativeSeparators(path))
-            .arg(image.width())
-            .arg(image.height())
-            .arg(info.size()));
+        previewText_->setPlainText(uiText("图片产物\nArtifact 相对项：%1\n尺寸：%2 x %3\n大小：%4 bytes")
+            .arg(preview.relativePath).arg(image.width()).arg(image.height()).arg(preview.byteCount));
         return;
     }
-
-    if (suffix == QStringLiteral("onnx")) {
-        previewText_->setPlainText(uiText("ONNX 模型\n路径：%1\n模型族：%2\n大小：%3 bytes")
-            .arg(QDir::toNativeSeparators(path), aitrain::inferOnnxModelFamily(path))
-            .arg(info.size()));
-        return;
-    }
-    if (suffix == QStringLiteral("engine") || suffix == QStringLiteral("plan") || suffix == QStringLiteral("pdparams")
-        || suffix == QStringLiteral("aitrain") || suffix == QStringLiteral("param") || suffix == QStringLiteral("bin")) {
-        previewText_->setPlainText(uiText("模型产物\n路径：%1\n类型：%2\n大小：%3 bytes")
-            .arg(QDir::toNativeSeparators(path), suffix)
-            .arg(info.size()));
-        return;
-    }
-
-    if (QStringList{QStringLiteral("json"), QStringLiteral("yaml"), QStringLiteral("yml"), QStringLiteral("txt"), QStringLiteral("csv"), QStringLiteral("log")}.contains(suffix)) {
-        if (suffix == QStringLiteral("json") && info.fileName() == QStringLiteral("evaluation_report.json") && evaluationReportView_) {
-            evaluationReportView_->loadReport(path);
-            previewStack_->setCurrentIndex(1);
-            return;
-        }
-        QFile file(path);
-        if (!file.open(QIODevice::ReadOnly)) {
-            previewText_->setPlainText(uiText("无法读取文本产物：%1").arg(QDir::toNativeSeparators(path)));
-            return;
-        }
-        const qint64 maxBytes = 256 * 1024;
-        const QByteArray data = file.read(maxBytes);
-        QString text = suffix == QStringLiteral("json") ? formatJsonTextForPreview(data) : QString::fromUtf8(data);
-        if (suffix == QStringLiteral("json") && info.fileName() == QStringLiteral("evaluation_report.json")) {
-            QJsonParseError parseError;
-            const QJsonObject report = QJsonDocument::fromJson(data, &parseError).object();
-            if (parseError.error == QJsonParseError::NoError && !report.isEmpty()) {
-                const QJsonObject metrics = report.value(QStringLiteral("metrics")).toObject();
-                QStringList lines;
-                lines << uiText("评估报告摘要");
-                lines << uiText("任务类型：%1").arg(report.value(QStringLiteral("taskType")).toString());
-                lines << uiText("真实评估：%1").arg(report.value(QStringLiteral("scaffold")).toBool() ? uiText("否，scaffold") : uiText("是"));
-                lines << uiText("来源：%1").arg(report.value(QStringLiteral("evaluationSource")).toString(report.value(QStringLiteral("runtime")).toString()));
-                const QString primaryMapKey = metrics.contains(QStringLiteral("maskMap50")) ? QStringLiteral("maskMap50") : QStringLiteral("mAP50");
-                lines << uiText("precision=%1 recall=%2 %3=%4")
-                    .arg(metrics.value(QStringLiteral("precision")).toDouble(), 0, 'f', 4)
-                    .arg(metrics.value(QStringLiteral("recall")).toDouble(), 0, 'f', 4)
-                    .arg(primaryMapKey)
-                    .arg(metrics.value(primaryMapKey).toDouble(), 0, 'f', 4);
-                lines << uiText("错误样本：%1；低置信样本：%2")
-                    .arg(report.value(QStringLiteral("errorSamples")).toArray().size())
-                    .arg(report.value(QStringLiteral("lowConfidenceSamples")).toArray().size());
-                lines << QString();
-                text = lines.join(QLatin1Char('\n')) + text;
-            }
-        } else if (suffix == QStringLiteral("json") && info.fileName() == QStringLiteral("dataset_quality_report.json")) {
-            QJsonParseError parseError;
-            const QJsonObject report = QJsonDocument::fromJson(data, &parseError).object();
-            if (parseError.error == QJsonParseError::NoError && !report.isEmpty()) {
-                const QJsonObject severity = report.value(QStringLiteral("severityCounts")).toObject();
-                const QJsonObject summary = report.value(QStringLiteral("summary")).toObject();
-                QStringList lines;
-                lines << uiText("数据质量报告摘要");
-                lines << uiText("格式：%1；真实分析：%2")
-                    .arg(report.value(QStringLiteral("format")).toString())
-                    .arg(report.value(QStringLiteral("scaffold")).toBool() ? uiText("否，scaffold") : uiText("是"));
-                lines << uiText("error=%1 warning=%2 info=%3 问题样本=%4 重复图片=%5")
-                    .arg(severity.value(QStringLiteral("error")).toInt())
-                    .arg(severity.value(QStringLiteral("warning")).toInt())
-                    .arg(severity.value(QStringLiteral("info")).toInt())
-                    .arg(summary.value(QStringLiteral("problemSampleCount")).toInt())
-                    .arg(summary.value(QStringLiteral("duplicateImageCount")).toInt());
-                lines << uiText("修复清单：%1").arg(QDir::toNativeSeparators(report.value(QStringLiteral("xAnyLabelingFixListPath")).toString()));
-                lines << QString();
-                text = lines.join(QLatin1Char('\n')) + text;
-            }
-        } else if (suffix == QStringLiteral("json") && info.fileName() == QStringLiteral("problem_samples.json")) {
-            QJsonParseError parseError;
-            const QJsonObject report = QJsonDocument::fromJson(data, &parseError).object();
-            if (parseError.error == QJsonParseError::NoError && !report.isEmpty()) {
-                const QJsonArray samples = report.value(QStringLiteral("samples")).toArray();
-                QStringList lines;
-                lines << uiText("问题样本摘要");
-                lines << uiText("问题样本数：%1").arg(samples.size());
-                const int previewCount = qMin(5, samples.size());
-                for (int index = 0; index < previewCount; ++index) {
-                    const QJsonObject sample = samples.at(index).toObject();
-                    lines << QStringLiteral("%1. %2 %3 %4")
-                        .arg(index + 1)
-                        .arg(sample.value(QStringLiteral("severity")).toString())
-                        .arg(sample.value(QStringLiteral("code")).toString())
-                        .arg(QDir::toNativeSeparators(sample.value(QStringLiteral("imagePath")).toString()));
-                }
-                lines << QString();
-                text = lines.join(QLatin1Char('\n')) + text;
-            }
-        }
-        if (info.size() > maxBytes) {
-            text.append(uiText("\n\n[文件超过 256KB，仅显示前部内容]\n路径：%1").arg(QDir::toNativeSeparators(path)));
-        }
+    const bool textLike = QStringList{QStringLiteral("json"), QStringLiteral("yaml"), QStringLiteral("yml"),
+        QStringLiteral("txt"), QStringLiteral("csv"), QStringLiteral("log"), QStringLiteral("md")}.contains(suffix);
+    if (textLike) {
+        QString text = suffix == QStringLiteral("json")
+            ? formatArtifactJsonText(preview.content) : QString::fromUtf8(preview.content);
+        if (preview.truncated) text.append(QStringLiteral("\n\n[文件超过 512KB，仅显示前部内容]"));
         previewText_->setPlainText(text);
         return;
     }
-
-    previewText_->setPlainText(uiText("不支持内联预览的产物\n路径：%1\n大小：%2 bytes")
-        .arg(QDir::toNativeSeparators(path))
-        .arg(info.size()));
+    previewText_->setPlainText(uiText("已提交模型/二进制产物\nArtifact 相对项：%1\nSHA-256：%2\n大小：%3 bytes")
+        .arg(preview.relativePath, preview.sha256).arg(preview.byteCount));
 }

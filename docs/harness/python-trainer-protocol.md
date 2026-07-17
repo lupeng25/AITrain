@@ -136,9 +136,9 @@ The Worker adds `taskId` when a payload omits it, then forwards the business eve
 
 ## GUI ↔ Worker Protocol  外层控制面
 
-GUI 启动 Worker 时必须同时传入 `--server`、`--request-id` 与 `--task-id`。Worker 连接本地 Socket 后先发送 `event.ready`；GUI 随后只发送一次 `command.start_task`，取消只使用 `command.cancel_task`。旧 Dataset、Annotation、Report 等业务命令在迁移期放入 `command.start_task.payload.businessCommand/businessPayload`，不再直接作为 Socket 顶层 `type`。
+GUI 启动 Worker 时必须同时传入 `--server`、`--request-id` 与 `--task-id`。Worker 连接本地 Socket 后先发送 `event.ready`；GUI 随后只发送一次 `command.start_task`，取消只使用 `command.cancel_task`。`command.start_task.payload` 使用 `aitrain.task-command.typed` 的扁平强类型命令对象；每种命令由 `type` 和严格字段集合定义，不再使用通用 business payload。
 
-Worker 事件统一使用 `event.ready`、`event.progress`、`event.metric`、`event.artifact`、`event.result`、`event.log`、`event.succeeded`、`event.failed` 或 `event.canceled`，原业务事件名与 payload 暂放在 `businessEvent/businessPayload`。双向各自维护严格递增的 `sequence`，每帧必须有唯一 `messageId`，且 request/task 身份必须与启动参数完全一致。控制帧上限为 1 MiB，日志帧上限为 64 KiB；跨请求/任务、重复、乱序、未知 kind、超限帧或终态后的事件会被拒绝并唯一收口。
+Worker 事件统一使用 `event.ready`、`event.progress`、`event.metric`、`event.artifact`、`event.result`、`event.log`、`event.succeeded`、`event.failed` 或 `event.canceled`，事件内容由 `aitrain.task-event.typed` 的 `TaskEvent` 承载；业务结果只作为已登记身份和结构化摘要返回。双向各自维护严格递增的 `sequence`，每帧必须有唯一 `messageId`，且 request/task 身份必须与启动参数完全一致。控制帧上限为 1 MiB，日志帧上限为 64 KiB；跨请求/任务、重复、乱序、未知 kind、超限帧或终态后的事件会被拒绝并唯一收口。
 
 ## Cancellation
 

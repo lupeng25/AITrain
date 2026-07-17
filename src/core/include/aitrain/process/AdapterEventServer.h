@@ -55,6 +55,7 @@ private:
     ProtocolSequenceTracker sequenceTracker_;
     EventHandler eventHandler_;
     bool authenticated_ = false;
+    bool terminalEventSeen_ = false;
     QString lastError_;
 };
 

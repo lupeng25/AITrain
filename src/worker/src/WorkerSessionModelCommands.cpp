@@ -7,18 +7,27 @@
 
 namespace wp = aitrain::worker_protocol;
 
-void WorkerSession::importModel(const QJsonObject& payload)
+void WorkerSession::importModel(const wp::ModelImportCommand& command)
 {
-    const QString taskId = payload.value(wp::field::taskId()).toString().trimmed();
-    const QString projectRoot = payload.value(QStringLiteral("projectRoot")).toString().trimmed();
-    const QString sourceFilePath = payload.value(QStringLiteral("sourceFilePath")).toString().trimmed();
-    const QJsonObject manifestDraft = payload.value(QStringLiteral("manifestDraft")).toObject();
+    const QString taskId = command.context.taskId.toString();
+    const QString projectRoot = command.context.projectRoot.trimmed();
+    const QString sourceFilePath = command.sourceFilePath.trimmed();
+    const QJsonObject manifestDraft = command.manifestDraft;
     if (taskId.isEmpty() || projectRoot.isEmpty() || sourceFilePath.isEmpty() || manifestDraft.isEmpty()) {
         fail(QStringLiteral("importModel 需要 taskId、项目目录、模型文件和用户确认的 Manifest 草稿。"));
         return;
     }
-    aitrain::ModelManifest manifest;
+    aitrain::TaskId parsedTaskId;
     QString error;
+    if (!aitrain::TaskId::parse(taskId, &parsedTaskId, &error) || parsedTaskId != controlTaskId_) {
+        const QString reason = error.isEmpty()
+            ? QStringLiteral("payload taskId 与 Protocol 控制 TaskId 不一致。")
+            : error;
+        fail(QStringLiteral("importModel 要求 payload taskId 为有效 UUID 且与 Protocol 控制 TaskId 一致：%1")
+                .arg(reason));
+        return;
+    }
+    aitrain::ModelManifest manifest;
     if (!aitrain::decodeModelManifestImportDraft(manifestDraft, &manifest, &error)) {
         fail(QStringLiteral("importModel 拒绝无效 Manifest 草稿：%1").arg(error));
         return;
@@ -38,10 +47,7 @@ void WorkerSession::importModel(const QJsonObject& payload)
         return;
     }
     aitrain::ModelImportRequest request;
-    if (!aitrain::TaskId::parse(taskId, &request.taskId, &error)) {
-        fail(QStringLiteral("importModel 要求 taskId 为有效 UUID：%1").arg(error));
-        return;
-    }
+    request.taskId = parsedTaskId;
     request.sourceFilePath = sourceFilePath;
     request.manifest = manifest;
     aitrain::ModelImportResult result;
@@ -56,7 +62,6 @@ void WorkerSession::importModel(const QJsonObject& payload)
     QJsonObject response;
     response.insert(wp::field::taskId(), taskId);
     response.insert(QStringLiteral("modelPackageId"), result.modelPackage.manifest.modelPackageId.toString());
-    response.insert(QStringLiteral("artifactPath"), result.artifactPath);
     response.insert(QStringLiteral("modelFamily"), result.modelPackage.manifest.modelFamily);
     response.insert(QStringLiteral("taskType"), result.modelPackage.manifest.taskType);
     response.insert(QStringLiteral("runtimeRoutes"), QJsonArray::fromStringList(result.modelPackage.manifest.runtimeRoutes));

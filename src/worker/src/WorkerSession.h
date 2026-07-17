@@ -1,6 +1,7 @@
 #pragma once
 
 #include "aitrain/core/Cancellation.h"
+#include "aitrain/core/WorkerProtocol.h"
 #include "aitrain/workflow/ProjectWorkspace.h"
 
 #include <QJsonArray>
@@ -18,48 +19,30 @@ public:
     explicit WorkerSession(QObject* parent = nullptr);
     bool connectToServer(const QString& serverName,
         const aitrain::RequestId& requestId,
-        const aitrain::TaskId& taskId);
+        const aitrain::TaskId& taskId,
+        const QString& controlToken);
 
 private slots:
     void readLines();
     void handleSocketDisconnected();
 
 private:
-    struct CommandBinding {
-        QString command;
-        void (WorkerSession::*handler)(const QJsonObject&);
-    };
-
-    static QVector<CommandBinding> commandBindings();
-
-    void handleMessage(const QString& type, const QJsonObject& payload);
-    void runEnvironmentCheckWorkflowCommand(const QJsonObject& payload);
-    void runDatasetSplitWorkflowCommand(const QJsonObject& payload);
-    void runDatasetConversionWorkflowCommand(const QJsonObject& payload);
-    void runDataQualityWorkflowCommand(const QJsonObject& payload);
-    void runDiagnosticsWorkflowCommand(const QJsonObject& payload);
-    void createAnnotationSessionCommand(const QJsonObject& payload);
-    void syncAnnotationSessionCommand(const QJsonObject& payload);
-    void runDatasetSnapshotImportWorkflowCommand(const QJsonObject& payload);
-    void importOcrOfficialReportsCommand(const QJsonObject& payload);
-    void runOcrAcceptanceWorkflowCommand(const QJsonObject& payload);
-    void runRuntimeDeliveryWorkflowCommand(const QJsonObject& payload);
-    void importModelCommand(const QJsonObject& payload);
-    void runTrainingWorkflowCommand(const QJsonObject& payload);
-    void cancelCommand(const QJsonObject& payload);
-    void runEnvironmentCheckWorkflow(const QJsonObject& payload);
-    void runDatasetSplitWorkflow(const QJsonObject& payload);
-    void runDatasetConversionWorkflow(const QJsonObject& payload);
-    void runDataQualityWorkflow(const QJsonObject& payload);
-    void runDiagnosticsWorkflow(const QJsonObject& payload);
-    void createAnnotationSession(const QJsonObject& payload);
-    void syncAnnotationSession(const QJsonObject& payload);
-    void runDatasetSnapshotImportWorkflow(const QJsonObject& payload);
-    void importOcrOfficialReports(const QJsonObject& payload);
-    void runOcrAcceptanceWorkflow(const QJsonObject& payload);
-    void runRuntimeDeliveryWorkflow(const QJsonObject& payload);
-    void importModel(const QJsonObject& payload);
-    void runTrainingWorkflow(const QJsonObject& payload);
+    void handleCommand(const aitrain::worker_protocol::TaskCommand& command);
+    void cancelCommand();
+    void runEnvironmentCheckWorkflow(const aitrain::worker_protocol::EnvironmentCheckCommand& command);
+    void runDatasetSplitWorkflow(const aitrain::worker_protocol::DatasetSplitCommand& command);
+    void runDatasetConversionWorkflow(const aitrain::worker_protocol::DatasetConversionCommand& command);
+    void runDataQualityWorkflow(const aitrain::worker_protocol::DataQualityCommand& command);
+    void runDiagnosticsWorkflow(const aitrain::worker_protocol::DiagnosticsCommand& command);
+    void importExternalAcceptanceEvidence(const aitrain::worker_protocol::ExternalAcceptanceEvidenceImportCommand& command);
+    void createAnnotationSession(const aitrain::worker_protocol::AnnotationSessionCreateCommand& command);
+    void syncAnnotationSession(const aitrain::worker_protocol::AnnotationSessionSyncCommand& command);
+    void runDatasetSnapshotImportWorkflow(const aitrain::worker_protocol::DatasetSnapshotImportCommand& command);
+    void importOcrOfficialReports(const aitrain::worker_protocol::OcrOfficialReportImportCommand& command);
+    void runOcrAcceptanceWorkflow(const aitrain::worker_protocol::OcrAcceptanceCommand& command);
+    void runRuntimeDeliveryWorkflow(const aitrain::worker_protocol::RuntimeDeliveryCommand& command);
+    void importModel(const aitrain::worker_protocol::ModelImportCommand& command);
+    void runTrainingWorkflow(const aitrain::worker_protocol::TrainingCommand& command);
     void dispatchTrainingWorkflow(const aitrain::TrainingWorkflowDispatch& dispatch);
     void runTrainingWorkflowLocalStep(const aitrain::TrainingWorkflowDispatch& dispatch);
     void finishTrainingWorkflow(const aitrain::TrainingWorkflowDispatch& dispatch);
@@ -86,9 +69,13 @@ private:
     bool finishingSession_ = false;
     bool startTaskReceived_ = false;
     bool terminalEnvelopeSent_ = false;
+    // 控制面只允许有限的待写缓存；日志/进度/指标是可丢弃事件，不能反向
+    // 把生产任务的速度绑定到 GUI 消费速度。终态 payload 会带出丢弃计数。
+    quint64 droppedControlEventCount_ = 0;
     quint64 outgoingSequence_ = 0;
     aitrain::RequestId controlRequestId_;
     aitrain::TaskId controlTaskId_;
+    QString controlToken_;
     aitrain::ProtocolSequenceTracker incomingSequenceTracker_;
     QString activeTaskId_;
     QString activeCommand_;

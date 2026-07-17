@@ -20,6 +20,10 @@ struct PythonAdapterLaunch final {
     QString program;
     QStringList arguments;
     QString workingDirectory;
+    // Adapter 候选产物必须位于这些受控根目录之一（当前步骤输出 staging
+    // 或已验证的输入 Artifact）。Host 会重新解析 canonical path，拒绝
+    // 越界、符号链接和不存在的文件。
+    QStringList artifactCandidateRoots;
     QProcessEnvironment environment;
     quint64 eventSequenceOffset = 0;
     int cancellationGraceMs = 5000;

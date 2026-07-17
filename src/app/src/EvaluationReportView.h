@@ -1,6 +1,8 @@
 #pragma once
 
+#include <QByteArray>
 #include <QHash>
+#include <QJsonObject>
 #include <QWidget>
 
 class QLabel;
@@ -14,7 +16,7 @@ public:
     explicit EvaluationReportView(QWidget* parent = nullptr);
 
     void clear();
-    bool loadReport(const QString& reportPath);
+    bool loadReportData(const QByteArray& data, const QString& relativePath = QString());
 
 private slots:
     void updateArtifactPreview();
@@ -26,6 +28,8 @@ private:
     void populatePerClass(const QJsonObject& report);
     void populateOfficialArtifacts(const QJsonObject& report);
     void populateSamples(const QJsonObject& report);
+    bool loadReportObject(const QJsonObject& report);
+    QString resolveArtifactPath(const QString& declaredPath) const;
     void showPreviewImage(const QString& imagePath);
     void showEmptyState(const QString& text);
 

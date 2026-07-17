@@ -73,6 +73,7 @@ bool TaskExecutionHost::startAdapter(const PythonAdapterLaunch& launch, QString*
 {
     lastSequence_ = 0;
     terminalEventSeen_ = false;
+    artifactCandidateRoots_.clear();
     lastError_.clear();
     artifactBundleId_ = {};
     artifactBundleStagingPath_.clear();
@@ -81,6 +82,14 @@ bool TaskExecutionHost::startAdapter(const PythonAdapterLaunch& launch, QString*
     if (!coordinator_ || !coordinator_->storage()
         || !coordinator_->storage()->lastProtocolSequence(activeTask_.id, &normalizedLaunch.eventSequenceOffset, error)) {
         return false;
+    }
+    lastSequence_ = normalizedLaunch.eventSequenceOffset;
+    artifactCandidateRoots_.clear();
+    for (const QString& root : normalizedLaunch.artifactCandidateRoots) {
+        const QString absoluteRoot = QDir::cleanPath(QFileInfo(root).absoluteFilePath());
+        if (!absoluteRoot.isEmpty() && !artifactCandidateRoots_.contains(absoluteRoot)) {
+            artifactCandidateRoots_.append(absoluteRoot);
+        }
     }
     if (!adapterHost_.start(normalizedLaunch, activeTask_.requestId, activeTask_.id,
             [this](const ProtocolEnvelope& event) { consumeAdapterEvent(event); },
@@ -220,7 +229,7 @@ void TaskExecutionHost::consumeAdapterEvent(const ProtocolEnvelope& event)
         qWarning().noquote() << QStringLiteral("[task adapter event rejected] %1").arg(error);
         // 终态已经由事件服务器验过身份/顺序；Workflow 回调失败时不能在
         // 进程退出后再合成第二个终态事件。
-        terminalEventSeen_ = terminal;
+        terminalEventSeen_ = terminalEventSeen_ || terminal;
         QString ignored;
         adapterHost_.forceTerminate(&ignored);
         return;
@@ -243,7 +252,7 @@ void TaskExecutionHost::consumeAdapterEvent(const ProtocolEnvelope& event)
     if (!terminal && adapterEventHandler_) {
         adapterEventHandler_(event);
     }
-    terminalEventSeen_ = terminal;
+    terminalEventSeen_ = terminalEventSeen_ || terminal;
 }
 
 bool TaskExecutionHost::consumeTerminalEvent(const ProtocolEnvelope& event,
@@ -325,12 +334,38 @@ bool TaskExecutionHost::stageArtifactCandidate(const ProtocolEnvelope& event, QS
         return false;
     }
     const QString kind = event.payload.value(QStringLiteral("kind")).toString().trimmed();
-    const QString sourcePath = event.payload.value(QStringLiteral("path")).toString();
-    const QFileInfo source(sourcePath);
-    if (kind.isEmpty() || !source.exists() || !source.isFile() || source.isSymLink()) {
+    const QString declaredPath = event.payload.value(QStringLiteral("path")).toString().trimmed();
+    if (kind.isEmpty() || declaredPath.isEmpty()) {
         if (error) {
-            *error = QStringLiteral("Python Adapter 产物候选必须是存在的常规文件并具有 kind：%1").arg(sourcePath);
+            *error = QStringLiteral("Python Adapter 产物候选必须包含 kind 和 path。" );
         }
+        return false;
+    }
+    if (artifactCandidateRoots_.isEmpty()) {
+        if (error) *error = QStringLiteral("Python Adapter 产物候选缺少受控根目录。" );
+        return false;
+    }
+    const QFileInfo declaredInfo(declaredPath);
+    QString sourceCanonical;
+    for (const QString& root : artifactCandidateRoots_) {
+        const QString rootCanonical = QFileInfo(root).canonicalFilePath();
+        if (rootCanonical.isEmpty()) continue;
+        const QString resolvedPath = declaredInfo.isAbsolute()
+            ? declaredInfo.absoluteFilePath()
+            : QDir(rootCanonical).filePath(declaredPath);
+        const QFileInfo source(resolvedPath);
+        if (!source.exists() || !source.isFile() || source.isSymLink()) continue;
+        const QString candidateCanonical = source.canonicalFilePath();
+        const QString relativeToRoot = QDir(rootCanonical).relativeFilePath(candidateCanonical);
+        const QString normalizedRelative = QDir::fromNativeSeparators(QDir::cleanPath(relativeToRoot));
+        if (!candidateCanonical.isEmpty() && normalizedRelative != QStringLiteral("..")
+            && !normalizedRelative.startsWith(QStringLiteral("../"))) {
+            sourceCanonical = candidateCanonical;
+            break;
+        }
+    }
+    if (sourceCanonical.isEmpty()) {
+        if (error) *error = QStringLiteral("Python Adapter 产物候选必须位于受控根目录内的常规文件：%1").arg(declaredPath);
         return false;
     }
     if (!artifactBundleId_.isValid()
@@ -338,11 +373,11 @@ bool TaskExecutionHost::stageArtifactCandidate(const ProtocolEnvelope& event, QS
         return false;
     }
     const QString safeKind = QString(kind).replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9._-]")), QStringLiteral("_"));
-    const QString relativePath = QStringLiteral("%1/%2").arg(safeKind, source.fileName());
+    const QString relativePath = QStringLiteral("%1/%2").arg(safeKind, QFileInfo(sourceCanonical).fileName());
     const QString destination = QDir(artifactBundleStagingPath_).filePath(relativePath);
-    if (QFileInfo::exists(destination) || !QDir().mkpath(QFileInfo(destination).absolutePath()) || !QFile::copy(source.absoluteFilePath(), destination)) {
+    if (QFileInfo::exists(destination) || !QDir().mkpath(QFileInfo(destination).absolutePath()) || !QFile::copy(sourceCanonical, destination)) {
         if (error) {
-            *error = QStringLiteral("无法复制 Python Adapter 产物候选到 staging：%1").arg(sourcePath);
+            *error = QStringLiteral("无法复制 Python Adapter 产物候选到 staging：%1").arg(declaredPath);
         }
         return false;
     }

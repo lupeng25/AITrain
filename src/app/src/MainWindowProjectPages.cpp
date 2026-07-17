@@ -146,7 +146,7 @@ QWidget* MainWindow::buildProjectPage()
     contextLabel->setObjectName(QStringLiteral("WorkspaceToolbarTitle"));
     projectConsoleStatusLabel_ = inlineStatusLabel(QStringLiteral("未打开项目。"));
     projectConsoleStatusLabel_->setObjectName(QStringLiteral("WorkspaceToolbarStatus"));
-    auto* policyStatus = inlineStatusLabel(QStringLiteral(" 工作区会生成 artifacts、logs 和 project-.sqlite。"));
+    auto* policyStatus = inlineStatusLabel(QStringLiteral("工作区会生成 artifacts、logs 和 project.sqlite。"));
     policyStatus->setObjectName(QStringLiteral("WorkspaceToolbarMeta"));
     allowLabelToShrink(projectConsoleStatusLabel_);
     allowLabelToShrink(policyStatus);
@@ -188,7 +188,7 @@ QWidget* MainWindow::buildProjectPage()
     actionLayout->setContentsMargins(10, 8, 10, 8);
     actionLayout->setHorizontalSpacing(10);
     actionLayout->setVerticalSpacing(8);
-    auto* projectActionHint = mutedLabel(QStringLiteral("打开项目后，项目摘要只读取 project-.sqlite 中已持久化的  事实。"));
+    auto* projectActionHint = mutedLabel(QStringLiteral("打开项目后，项目摘要只读取 project.sqlite 中已持久化的事实。"));
     allowLabelToShrink(projectActionHint);
     actionLayout->addWidget(projectActionHint, 0, 0);
     actionLayout->setColumnStretch(0, 1);
@@ -209,7 +209,7 @@ QWidget* MainWindow::buildProjectPage()
     auto* taskCard = createCompactSummaryCard(QStringLiteral("任务"), QStringLiteral("0"), QStringLiteral("训练、校验、导出、推理"));
     projectTaskSummaryLabel_ = taskCard->findChild<QLabel*>(QStringLiteral("CompactMetricValue"));
     projectTaskSummaryLabel_->setObjectName(QStringLiteral("ProjectTaskSummary"));
-    auto* exportCard = createCompactSummaryCard(QStringLiteral("模型包"), QStringLiteral("0"), QStringLiteral(" 已登记模型包"));
+    auto* exportCard = createCompactSummaryCard(QStringLiteral("模型包"), QStringLiteral("0"), QStringLiteral("已登记模型包"));
     projectExportSummaryLabel_ = exportCard->findChild<QLabel*>(QStringLiteral("CompactMetricValue"));
     projectExportSummaryLabel_->setObjectName(QStringLiteral("ProjectModelPackageSummary"));
     summaryGrid->addWidget(pathCard, 0, 0, 1, 2);
@@ -226,7 +226,7 @@ QWidget* MainWindow::buildProjectPage()
     auto* structure = new QPlainTextEdit;
     structure->setReadOnly(true);
     structure->setMaximumHeight(170);
-    structure->setPlainText(QStringLiteral("artifacts/\n  committed/\n  .staging/\nlogs/\nproject-.sqlite"));
+    structure->setPlainText(QStringLiteral("artifacts/\n  committed/\n  .staging/\nlogs/\nproject.sqlite"));
     structurePanel->bodyLayout()->addWidget(structure);
     structurePanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("项目页只负责创建和打开工作区；训练、导出和推理仍通过 Worker 执行。")));
     summaryPanel->bodyLayout()->addWidget(structurePanel);

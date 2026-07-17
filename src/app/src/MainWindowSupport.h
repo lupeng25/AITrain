@@ -24,13 +24,10 @@ QString compactTextForStatus(const QString& text, int maxChars = 96);
 QPushButton* primaryButton(const QString& text);
 QPushButton* dangerButton(const QString& text);
 QString uiText(const char* source);
-QString defaultProjectPathSettingsKey();
 QString taskTypeLabel(const QString& taskType);
 void addComboItem(QComboBox* combo, const QString& displayText, const QString& value);
 QString backendLabel(const QString& backend);
 QJsonObject readJsonObjectFile(const QString& path);
-QJsonObject compactEvaluationSummary(const QString& reportPath);
-QJsonObject compactBenchmarkSummary(const QString& reportPath);
 QString metricValueText(const QJsonObject& metrics, const QStringList& keys);
 QString modelSummaryText(const QJsonObject& summary);
 InfoPanel* createCompactSummaryCard(const QString& label, const QString& value, const QString& caption);
@@ -44,7 +41,6 @@ QFrame* createWorkbenchHeader(
     QPushButton* actionButton,
     const QStringList& badges);
 void setInferenceOverlayText(QLabel* label, const QString& text);
-void loadInferenceOverlay(QLabel* label, const QString& path);
 QString environmentStatusLabel(const QString& status);
 QString issueSeverityLabel(const QString& severity);
 QString inferenceTaskTypeLabel(const QString& taskType);
@@ -76,6 +72,5 @@ QString detectDatasetFormatFromPath(const QString& path);
 QString formatJsonTextForPreview(const QByteArray& data);
 void addTaskTypeItems(QComboBox* combo, const QStringList& taskTypes);
 QString comboCurrentDataOrText(const QComboBox* combo);
-QString inferenceSummaryFromPredictions(const QString& predictionsPath, const QJsonObject& fallback = {});
 
 } // namespace aitrain_app

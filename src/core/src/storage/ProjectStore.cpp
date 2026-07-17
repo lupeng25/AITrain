@@ -655,8 +655,18 @@ bool ProjectStore::markInterruptedTasksFailed(QString* error)
         interrupted.append({id, state});
     }
     for (const auto& item : interrupted) {
-        if (!transitionTask(item.first, item.second, TaskState::Failed,
-                {FailureCode::ProcessCrashed, QStringLiteral("应用在任务未结束时关闭。")}, error)) {
+        const bool cancellationWasPending = item.second == TaskState::CancelRequested;
+        const TaskState recoveredState = cancellationWasPending ? TaskState::Canceled : TaskState::Failed;
+        const Failure recoveredFailure{
+            cancellationWasPending ? FailureCode::Canceled : FailureCode::ProcessCrashed,
+            cancellationWasPending
+                ? QStringLiteral("应用在取消请求未收口时关闭，恢复时按取消完成。")
+                : QStringLiteral("应用在任务未结束时关闭。"),
+            cancellationWasPending
+                ? QStringLiteral("如需继续，请重新发起该任务。")
+                : QString(),
+            QDateTime::currentDateTimeUtc()};
+        if (!transitionTask(item.first, item.second, recoveredState, recoveredFailure, error)) {
             return false;
         }
     }
@@ -1401,11 +1411,16 @@ QVector<DatasetCatalogItem> ProjectStore::datasets(int limit, QString* error) co
     query.prepare(QStringLiteral(
         "select d.id, d.dataset_format, "
         "(select count(*) from dataset_versions v where v.dataset_id = d.id), "
-        "(select count(*) from dataset_snapshots s where s.dataset_id = d.id), "
-        "s.dataset_version_id, s.id, s.artifact_id, s.root_hash, s.file_count, s.created_at "
-        "from datasets d left join dataset_snapshots s on s.id = ("
-        "select s2.id from dataset_snapshots s2 where s2.dataset_id = d.id "
-        "order by s2.created_at desc, s2.id desc limit 1) "
+        "(select count(*) from dataset_snapshots s "
+            "join dataset_versions version_count on version_count.id = s.dataset_version_id where version_count.dataset_id = d.id), "
+        "s.dataset_version_id, s.id, s.artifact_id, v.root_hash, s.file_count, s.created_at "
+        "from datasets d "
+        "left join dataset_snapshots s on s.id = ("
+            "select s2.id from dataset_snapshots s2 "
+            "join dataset_versions latest_version on latest_version.id = s2.dataset_version_id "
+            "where latest_version.dataset_id = d.id "
+            "order by s2.created_at desc, s2.id desc limit 1) "
+        "left join dataset_versions v on v.id = s.dataset_version_id "
         "order by coalesce(s.created_at, d.created_at) desc, d.id desc limit :limit"));
     query.bindValue(QStringLiteral(":limit"), limit);
     if (!query.exec()) {
@@ -2081,14 +2096,52 @@ bool ProjectStore::retryWorkflowStep(const WorkflowStepId& workflowStepId, QStri
         if (error) *error = QStringLiteral("重试工作流步骤需要有效 ID。");
         return false;
     }
-    QSqlQuery query(db_);
-    query.prepare(QStringLiteral("update workflow_steps set state = 'pending', started_at = null, finished_at = null, failure_code = 'none', failure_details = '', failure_suggested_action = '', failure_occurred_at = null, retry_count = retry_count + 1 where id = :id and state = 'failed'"));
-    query.bindValue(QStringLiteral(":id"), workflowStepId.toString());
-    if (!query.exec() || query.numRowsAffected() != 1) {
-        if (error) *error = query.lastError().isValid() ? sqlError(query) : QStringLiteral("只有失败的工作流步骤可以重试。");
+    QSqlQuery stepQuery(db_);
+    stepQuery.prepare(QStringLiteral("select workflow_run_id, ordinal, state from workflow_steps where id = :id"));
+    stepQuery.bindValue(QStringLiteral(":id"), workflowStepId.toString());
+    if (!stepQuery.exec() || !stepQuery.next()) {
+        if (error) *error = stepQuery.lastError().isValid() ? sqlError(stepQuery)
+            : QStringLiteral("工作流步骤不存在。");
         return false;
     }
-    return true;
+    if (stepQuery.value(2).toString() != QStringLiteral("failed")) {
+        if (error) *error = QStringLiteral("只有失败的工作流步骤可以重试。");
+        return false;
+    }
+    const QString workflowRunId = stepQuery.value(0).toString();
+    const int ordinal = stepQuery.value(1).toInt();
+    if (!db_.transaction()) {
+        if (error) *error = db_.lastError().text();
+        return false;
+    }
+    QSqlQuery query(db_);
+    query.prepare(QStringLiteral(
+        "update workflow_steps set state = 'pending', started_at = null, finished_at = null, "
+        "output_artifact_id = null, failure_code = 'none', failure_details = '', "
+        "failure_suggested_action = '', failure_occurred_at = null, retry_count = retry_count + 1 "
+        "where id = :id and state = 'failed'"));
+    query.bindValue(QStringLiteral(":id"), workflowStepId.toString());
+    if (!query.exec() || query.numRowsAffected() != 1) {
+        if (error) *error = query.lastError().isValid() ? sqlError(query) : QStringLiteral("工作流步骤重试状态已被并发更新。");
+        db_.rollback();
+        return false;
+    }
+    QSqlQuery resetSuccessors(db_);
+    resetSuccessors.prepare(QStringLiteral(
+        "update workflow_steps set state = 'pending', input_artifact_id = null, output_artifact_id = null, "
+        "started_at = null, finished_at = null, failure_code = 'none', failure_details = '', "
+        "failure_suggested_action = '', failure_occurred_at = null "
+        "where workflow_run_id = :workflow_run_id and ordinal > :ordinal and state = 'skipped'"));
+    resetSuccessors.bindValue(QStringLiteral(":workflow_run_id"), workflowRunId);
+    resetSuccessors.bindValue(QStringLiteral(":ordinal"), ordinal);
+    if (!resetSuccessors.exec()) {
+        if (error) *error = sqlError(resetSuccessors);
+        db_.rollback();
+        return false;
+    }
+    if (db_.commit()) return true;
+    if (error) *error = db_.lastError().text();
+    return false;
 }
 
 bool ProjectStore::sealWorkflowTerminalization(const WorkflowRunId& workflowRunId,

@@ -10,7 +10,7 @@
 - 确认是否会修改公共接口：
   - `CapabilityRegistry.h`
   - `WorkerProtocol.h`（ 控制面）
-  - `Storage.h`（SQLite  元数据）
+  - `ProjectStore.h`（SQLite  元数据）
   - `WorkflowResult.h`（跨模块结构化结果）
 - 确认是否需要新增测试。
 

@@ -56,6 +56,7 @@ private:
     TaskSnapshot activeTask_;
     quint64 lastSequence_ = 0;
     bool terminalEventSeen_ = false;
+    QStringList artifactCandidateRoots_;
     QString lastError_;
     ArtifactId artifactBundleId_;
     QString artifactBundleStagingPath_;

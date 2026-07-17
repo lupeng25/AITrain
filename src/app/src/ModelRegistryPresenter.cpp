@@ -29,7 +29,7 @@ bool ModelRegistryPresenter::refresh(int limit)
         ? queryService_->modelPackages(limit, &error)
         : QVector<aitrain::ModelPackageReadModel>();
     if (!queryService_ && error.isEmpty()) {
-        error = QStringLiteral("模型库 Presenter 缺少  项目查询服务。");
+        error = QStringLiteral("模型库 Presenter 缺少项目查询服务。");
     }
     if (!error.isEmpty()) {
         modelPackages_.clear();

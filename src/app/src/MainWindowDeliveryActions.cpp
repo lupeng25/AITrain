@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "TaskExecutionController.h"
 
 #include "DatasetConversionUiModel.h"
 #include "EvaluationReportView.h"
@@ -7,6 +8,7 @@
 #include "MainWindowSupport.h"
 #include "aitrain/core/CapabilityRegistry.h"
 #include "aitrain/core/DetectionTrainer.h"
+#include "aitrain/core/WorkerProtocol.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -34,7 +36,6 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScrollArea>
-#include <QSettings>
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSplitter>
@@ -195,33 +196,8 @@ void setAcceptanceTableRow(QTableWidget* table, const QString& stage, const QStr
     }
     table->setItem(row, 0, new QTableWidgetItem(stage));
     table->setItem(row, 1, new QTableWidgetItem(status));
-    table->setItem(row, 2, new QTableWidgetItem(QDir::toNativeSeparators(evidence)));
+    table->setItem(row, 2, new QTableWidgetItem(evidence));
     table->setItem(row, 3, new QTableWidgetItem(message));
-}
-
-QString defaultDatasetConversionOutputPath(const QString& sourcePath, const QString& projectPath, const QString& targetFormat)
-{
-    const QString normalizedSourcePath = QDir::fromNativeSeparators(sourcePath.trimmed());
-    if (normalizedSourcePath.isEmpty()) {
-        return QString();
-    }
-
-    const QFileInfo sourceInfo(normalizedSourcePath);
-    QString datasetName = sourceInfo.isFile() ? sourceInfo.completeBaseName() : sourceInfo.fileName();
-    if (datasetName.isEmpty()) {
-        datasetName = QStringLiteral("dataset");
-    }
-    const QString suffix = targetFormat.trimmed().isEmpty() ? QStringLiteral("converted") : targetFormat.trimmed();
-    const QString directoryName = QStringLiteral("%1-%2").arg(datasetName, suffix);
-    const QString normalizedProjectPath = QDir::fromNativeSeparators(projectPath.trimmed());
-    if (!normalizedProjectPath.isEmpty()) {
-        const QString conversionRoot = QDir(normalizedProjectPath).filePath(QStringLiteral("datasets/converted"));
-        QDir().mkpath(conversionRoot);
-        return QDir::cleanPath(QDir(conversionRoot).filePath(directoryName));
-    }
-    const QDir sourceDir(sourceInfo.isFile() ? sourceInfo.absolutePath() : normalizedSourcePath);
-    const QString outputPath = sourceDir.absoluteFilePath(QStringLiteral("../converted/%1").arg(directoryName));
-    return QDir::cleanPath(outputPath);
 }
 
 void setFieldErrorLabel(QLabel* label, const QString& text)
@@ -243,14 +219,30 @@ void MainWindow::validateDeploymentModelPackage()
     const QString modelPackageText = deploymentModelPackageCombo_
         ? deploymentModelPackageCombo_->currentData().toString().trimmed()
         : QString();
-    const QString sampleImagePath = QDir::fromNativeSeparators(
-        deploymentValidationImageEdit_ ? deploymentValidationImageEdit_->text().trimmed() : QString());
+    const QString sampleDatasetIdText = deploymentSampleDatasetIdEdit_
+        ? deploymentSampleDatasetIdEdit_->text().trimmed() : QString();
+    const QString sampleDatasetVersionIdText = deploymentSampleDatasetVersionIdEdit_
+        ? deploymentSampleDatasetVersionIdEdit_->text().trimmed() : QString();
+    const QString sampleSnapshotIdText = deploymentSampleSnapshotIdEdit_
+        ? deploymentSampleSnapshotIdEdit_->text().trimmed() : QString();
+    const QString sampleSnapshotArtifactIdText = deploymentSampleSnapshotArtifactIdEdit_
+        ? deploymentSampleSnapshotArtifactIdEdit_->text().trimmed() : QString();
+    const QString sampleRelativePath = QDir::fromNativeSeparators(deploymentSampleRelativePathEdit_
+            ? deploymentSampleRelativePathEdit_->text().trimmed() : QString());
     aitrain::ModelPackageId modelPackageId;
+    aitrain::DatasetId sampleDatasetId;
+    aitrain::DatasetVersionId sampleDatasetVersionId;
+    aitrain::SnapshotId sampleSnapshotId;
+    aitrain::ArtifactId sampleSnapshotArtifactId;
     QString error;
     if (!workspace_.isOpen() || currentProjectPath_.isEmpty()
         || !aitrain::ModelPackageId::parse(modelPackageText, &modelPackageId, &error)
-        || sampleImagePath.isEmpty() || !QFileInfo(sampleImagePath).isFile()) {
-        QMessageBox::warning(this, uiText("部署验证"), uiText("请选择已验证  模型包和有效验证图片。"));
+        || !aitrain::DatasetId::parse(sampleDatasetIdText, &sampleDatasetId, &error)
+        || !aitrain::DatasetVersionId::parse(sampleDatasetVersionIdText, &sampleDatasetVersionId, &error)
+        || !aitrain::SnapshotId::parse(sampleSnapshotIdText, &sampleSnapshotId, &error)
+        || !aitrain::ArtifactId::parse(sampleSnapshotArtifactIdText, &sampleSnapshotArtifactId, &error)
+        || sampleRelativePath.isEmpty()) {
+        QMessageBox::warning(this, uiText("部署验证"), uiText("请选择已验证模型包，并填写样本 Snapshot 身份和 Artifact 内相对路径。"));
         return;
     }
 
@@ -259,9 +251,19 @@ void MainWindow::validateDeploymentModelPackage()
     options.insert(QStringLiteral("benchmarkWarmup"), 1);
     options.insert(QStringLiteral("benchmarkIterations"), 3);
     activeTaskId_ = taskId.toString();
-    if (!worker_.requestRuntimeDeliveryWorkflow(workerExecutablePath(), currentProjectPath_,
-            modelPackageId.toString(), QStringLiteral("aitrain_onnxruntime"), sampleImagePath,
-            options, &error, activeTaskId_)) {
+    aitrain::worker_protocol::RuntimeDeliveryCommand runtimeCommand;
+    runtimeCommand.context.taskId = taskId;
+    runtimeCommand.context.projectRoot = currentProjectPath_;
+    runtimeCommand.modelPackageId = modelPackageId.toString();
+    runtimeCommand.runtimeRoute = QStringLiteral("aitrain_onnxruntime");
+    runtimeCommand.sampleDatasetId = sampleDatasetId.toString();
+    runtimeCommand.sampleDatasetVersionId = sampleDatasetVersionId.toString();
+    runtimeCommand.sampleSnapshotId = sampleSnapshotId.toString();
+    runtimeCommand.sampleSnapshotArtifactId = sampleSnapshotArtifactId.toString();
+    runtimeCommand.sampleRelativePath = sampleRelativePath;
+    runtimeCommand.options = options;
+    if (!taskController_->start(workerExecutablePath(),
+            aitrain::worker_protocol::TaskCommand{runtimeCommand}, &error)) {
         activeTaskId_.clear();
         QMessageBox::critical(this, uiText("部署验证"), error);
         return;
@@ -309,12 +311,18 @@ void MainWindow::importOcrOfficialReports()
     activeTaskId_ = taskId.toString();
     activeWorkflowKind_ = QStringLiteral("ocr_report_import");
     QString error;
-    if (!worker_.requestOcrOfficialReportImport(workerExecutablePath(), currentProjectPath_,
-            det, rec, system, customerOcrCohortIdEdit_->text().trimmed(),
-            customerOcrDomainIdEdit_->text().trimmed(),
-            customerOcrEvidenceClassCombo_ ? customerOcrEvidenceClassCombo_->currentText()
-                                           : QStringLiteral("customer_domain"),
-            &error, activeTaskId_)) {
+    aitrain::worker_protocol::OcrOfficialReportImportCommand importCommand;
+    importCommand.context.taskId = taskId;
+    importCommand.context.projectRoot = currentProjectPath_;
+    importCommand.det = det;
+    importCommand.rec = rec;
+    importCommand.system = system;
+    importCommand.acceptanceCohortId = customerOcrCohortIdEdit_->text().trimmed();
+    importCommand.customerDomainId = customerOcrDomainIdEdit_->text().trimmed();
+    importCommand.evidenceClass = customerOcrEvidenceClassCombo_
+        ? customerOcrEvidenceClassCombo_->currentText() : QStringLiteral("customer_domain");
+    if (!taskController_->start(workerExecutablePath(),
+            aitrain::worker_protocol::TaskCommand{importCommand}, &error)) {
         activeTaskId_.clear();
         activeWorkflowKind_.clear();
         QMessageBox::critical(this, uiText("OCR 报告导入"), error);
@@ -357,16 +365,22 @@ void MainWindow::runOcrAcceptanceWorkflow()
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     activeTaskId_ = taskId.toString();
     activeWorkflowKind_ = QStringLiteral("ocr_acceptance");
-    if (!worker_.requestOcrAcceptanceWorkflow(workerExecutablePath(), currentProjectPath_,
-            det.toString(), rec.toString(), system.toString(), thresholds, &error,
-            activeTaskId_)) {
+    aitrain::worker_protocol::OcrAcceptanceCommand ocrCommand;
+    ocrCommand.context.taskId = taskId;
+    ocrCommand.context.projectRoot = currentProjectPath_;
+    ocrCommand.detReportArtifactId = det.toString();
+    ocrCommand.recReportArtifactId = rec.toString();
+    ocrCommand.systemReportArtifactId = system.toString();
+    ocrCommand.thresholds = thresholds;
+    if (!taskController_->start(workerExecutablePath(),
+            aitrain::worker_protocol::TaskCommand{ocrCommand}, &error)) {
         activeTaskId_.clear();
         activeWorkflowKind_.clear();
         QMessageBox::critical(this, uiText("OCR 验收"), error);
         return;
     }
     if (customerOcrStatusLabel_) {
-        customerOcrStatusLabel_->setText(uiText("OCR Acceptance  四步验收运行中。"));
+        customerOcrStatusLabel_->setText(uiText("OCR Acceptance 四步验收运行中。"));
     }
     workerPill_->setStatus(uiText("OCR 验收中"), StatusPill::Tone::Info);
 }
@@ -379,15 +393,18 @@ void MainWindow::collectDiagnosticsBundle()
     }
 
     if (!workspace_.isOpen() || currentProjectPath_.isEmpty()) {
-        QMessageBox::warning(this, uiText("诊断包"), uiText("请先打开  项目。"));
+        QMessageBox::warning(this, uiText("诊断包"), uiText("请先打开项目。"));
         return;
     }
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     activeTaskId_ = taskId.toString();
     activeWorkflowKind_ = QStringLiteral("diagnostics");
     QString error;
-    if (!worker_.requestDiagnosticsWorkflow(workerExecutablePath(), currentProjectPath_,
-            QJsonObject(), &error, activeTaskId_)) {
+    aitrain::worker_protocol::DiagnosticsCommand diagnosticsCommand;
+    diagnosticsCommand.context.taskId = taskId;
+    diagnosticsCommand.context.projectRoot = currentProjectPath_;
+    if (!taskController_->start(workerExecutablePath(),
+            aitrain::worker_protocol::TaskCommand{diagnosticsCommand}, &error)) {
         activeTaskId_.clear();
         activeWorkflowKind_.clear();
         QMessageBox::critical(this, uiText("诊断包"), error);
@@ -405,35 +422,26 @@ void MainWindow::importAcceptanceEvidence()
         this,
         uiText("导入验收结果"),
         currentProjectPath_,
-        QStringLiteral("Acceptance evidence (*.json *.md *.txt);;All files (*.*)"));
+        QStringLiteral("Structured acceptance evidence (*.json);;All files (*.*)"));
     if (file.isEmpty()) {
         return;
     }
-    QString status = QStringLiteral("imported");
-    QString stage = QFileInfo(file).completeBaseName();
-    QString message = uiText("已导入外部验收结果。");
-    if (QFileInfo(file).suffix().compare(QStringLiteral("json"), Qt::CaseInsensitive) == 0) {
-        QFile jsonFile(file);
-        if (jsonFile.open(QIODevice::ReadOnly)) {
-            const QJsonDocument document = QJsonDocument::fromJson(jsonFile.readAll());
-            const QJsonObject object = document.object();
-            status = object.value(QStringLiteral("status")).toString(object.value(QStringLiteral("ok")).toBool(false) ? QStringLiteral("passed") : QStringLiteral("blocked"));
-            stage = object.value(QStringLiteral("kind")).toString(stage);
-            message = object.value(QStringLiteral("message")).toString(object.value(QStringLiteral("note")).toString(message));
-        }
-    } else {
-        QFile textFile(file);
-        if (textFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            const QString text = QString::fromUtf8(textFile.readAll()).toLower();
-            if (text.contains(QStringLiteral("hardware-blocked"))) {
-                status = QStringLiteral("hardware-blocked");
-            } else if (text.contains(QStringLiteral("blocked")) || text.contains(QStringLiteral("failed"))) {
-                status = QStringLiteral("blocked");
-            } else if (text.contains(QStringLiteral("passed"))) {
-                status = QStringLiteral("passed");
-            }
-        }
+    if (!workspace_.isOpen() || currentProjectPath_.isEmpty()) {
+        QMessageBox::warning(this, uiText("导入验收结果"), uiText("请先打开项目。"));
+        return;
     }
-    setAcceptanceTableRow(deliveryAcceptanceTable_, stage, status, file, message);
-    updateDeliveryAcceptanceSummary();
+    const aitrain::TaskId taskId = aitrain::TaskId::create();
+    aitrain::worker_protocol::ExternalAcceptanceEvidenceImportCommand import;
+    import.context = {taskId, currentProjectPath_};
+    import.sourcePath = QDir::cleanPath(QDir::fromNativeSeparators(file));
+    const aitrain::worker_protocol::TaskCommand command{import};
+    QString error;
+    if (!taskController_->start(workerExecutablePath(), command, &error)) {
+        QMessageBox::critical(this, uiText("导入验收结果"), error);
+        return;
+    }
+    activeTaskId_ = taskId.toString();
+    activeWorkflowKind_ = QStringLiteral("external_acceptance_evidence");
+    workerPill_->setStatus(uiText("外部验收证据校验中"), StatusPill::Tone::Info);
+    statusBar()->showMessage(uiText("已提交结构化外部验收证据，等待 Worker 校验。"), 5000);
 }

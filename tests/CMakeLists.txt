@@ -79,6 +79,7 @@ add_aitrain_qt_test(aitrain_platform_tests tst_platform.cpp)
 target_link_libraries(aitrain_platform_tests PRIVATE aitrain_protocol)
 add_aitrain_qt_test(aitrain_dataset_tests tst_datasets.cpp)
 add_aitrain_qt_test(aitrain_dataset_conversion_tests tst_dataset_conversion.cpp)
+target_link_libraries(aitrain_dataset_conversion_tests PRIVATE aitrain_dataset_conversion)
 add_aitrain_qt_test(aitrain_dataset_conversion_ui_tests tst_dataset_conversion_ui.cpp)
 add_aitrain_qt_test(aitrain_annotation_integration_tests tst_annotation_integration.cpp)
 if(WIN32)
@@ -287,6 +288,25 @@ add_test(NAME aitrain_model_registry_presenter_tests
 set_tests_properties(aitrain_model_registry_presenter_tests PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     ATTACHED_FILES_ON_FAIL "${model_registry_presenter_test_output}")
+
+add_executable(aitrain_dataset_catalog_presenter_tests
+    ../src/app/src/DatasetCatalogPresenter.h
+    ../src/app/src/DatasetCatalogPresenter.cpp
+    tst_dataset_catalog_presenter.cpp
+)
+target_include_directories(aitrain_dataset_catalog_presenter_tests
+    PRIVATE ${CMAKE_SOURCE_DIR}/src/app/src)
+target_link_libraries(aitrain_dataset_catalog_presenter_tests
+    PRIVATE aitrain_application Qt${QT_VERSION_MAJOR}::Core
+        Qt${QT_VERSION_MAJOR}::Sql Qt${QT_VERSION_MAJOR}::Test)
+set(dataset_catalog_presenter_test_output
+    "${CMAKE_BINARY_DIR}/tests/aitrain_dataset_catalog_presenter_tests_ctest.txt")
+add_test(NAME aitrain_dataset_catalog_presenter_tests
+    COMMAND aitrain_dataset_catalog_presenter_tests
+        -o "${dataset_catalog_presenter_test_output},txt")
+set_tests_properties(aitrain_dataset_catalog_presenter_tests PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    ATTACHED_FILES_ON_FAIL "${dataset_catalog_presenter_test_output}")
 
 add_executable(aitrain_evidence_tests
     tst_evidence.cpp
@@ -505,6 +525,10 @@ set_tests_properties(aitrain_annotation_session_tests PROPERTIES
 add_executable(aitrain_delivery_acceptance_ui_tests
     ../src/app/src/AppStyle.h
     ../src/app/src/AppStyle.cpp
+    ../src/app/src/ApplicationEventRouter.h
+    ../src/app/src/ApplicationEventRouter.cpp
+    ../src/app/src/ApplicationSettingsService.h
+    ../src/app/src/ApplicationSettingsService.cpp
     ../src/app/src/DiagnosticBundlePresenter.h
     ../src/app/src/DiagnosticBundlePresenter.cpp
     ../src/app/src/EnvironmentCheckPresenter.h
@@ -513,12 +537,16 @@ add_executable(aitrain_delivery_acceptance_ui_tests
     ../src/app/src/ModelRegistryPresenter.cpp
     ../src/app/src/DatasetConversionUiModel.h
     ../src/app/src/DatasetConversionUiModel.cpp
+    ../src/app/src/DatasetCatalogPresenter.h
+    ../src/app/src/DatasetCatalogPresenter.cpp
     ../src/app/src/EvaluationReportView.h
     ../src/app/src/EvaluationReportView.cpp
     ../src/app/src/InfoPanel.h
     ../src/app/src/InfoPanel.cpp
     ../src/app/src/LanguageSupport.h
     ../src/app/src/LanguageSupport.cpp
+    ../src/app/src/LicenseTokenStore.h
+    ../src/app/src/LicenseTokenStore.cpp
     ../src/app/src/MainWindow.h
     ../src/app/src/MainWindow.cpp
     ../src/app/src/MainWindowActions.cpp
@@ -554,6 +582,10 @@ add_executable(aitrain_delivery_acceptance_ui_tests
     ../src/app/src/TaskArtifactPanel.cpp
     ../src/app/src/TaskArtifactPresenter.h
     ../src/app/src/TaskArtifactPresenter.cpp
+    ../src/app/src/TaskExecutionController.h
+    ../src/app/src/TaskExecutionController.cpp
+    ../src/app/src/DeliveryEvidencePresenter.h
+    ../src/app/src/DeliveryEvidencePresenter.cpp
     ../src/app/src/WorkerClient.h
     ../src/app/src/WorkerClient.cpp
     ../src/app/src/WorkspaceRouter.h

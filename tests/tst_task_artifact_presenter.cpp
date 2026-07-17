@@ -4,6 +4,8 @@
 #include "aitrain/storage/ProjectStore.h"
 
 #include <QDir>
+#include <QCryptographicHash>
+#include <QFile>
 #include <QHash>
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -14,6 +16,7 @@ class TaskArtifactPresenterTests : public QObject {
 
 private slots:
     void readsPersistedTaskArtifactsMetricsAndWorkflowOnly();
+    void readsCommittedArtifactPreviewByIdentity();
     void invalidSelectionClearsReadModelWithoutPrivateAccess();
 };
 
@@ -29,6 +32,10 @@ void TaskArtifactPresenterTests::readsPersistedTaskArtifactsMetricsAndWorkflowOn
     aitrain::TaskSnapshot task;
     QVERIFY2(workspace.startTask(taskId, QStringLiteral("yolo.detect"),
         QStringLiteral("detection"), &task, &error), qPrintable(error));
+    aitrain::Failure failure;
+    failure.code = aitrain::FailureCode::InvalidDataset;
+    failure.message = QStringLiteral("snapshot mismatch");
+    QVERIFY2(workspace.finalizeTask(taskId, aitrain::TaskState::Failed, failure, &error), qPrintable(error));
 
     aitrain::ProjectStore storage;
     QVERIFY2(storage.open(QDir(workspace.workspacePath()).filePath(QStringLiteral("project.sqlite")),
@@ -97,6 +104,9 @@ void TaskArtifactPresenterTests::readsPersistedTaskArtifactsMetricsAndWorkflowOn
     QCOMPARE(deliveryArtifacts.value(QStringLiteral("runtime_delivery_report")).sha256,
         QString(64, QLatin1Char('b')));
     QCOMPARE(presenter.details().workflowSteps.constFirst().kind, QStringLiteral("Evaluate"));
+    QCOMPARE(presenter.details().failureCode, QStringLiteral("invalid_dataset"));
+    QVERIFY(presenter.details().failureAction.contains(QStringLiteral("数据集页")));
+    QVERIFY(presenter.details().summary.contains(QStringLiteral("失败代码：invalid_dataset")));
 }
 
 void TaskArtifactPresenterTests::invalidSelectionClearsReadModelWithoutPrivateAccess()
@@ -109,6 +119,46 @@ void TaskArtifactPresenterTests::invalidSelectionClearsReadModelWithoutPrivateAc
     QCOMPARE(presenter.artifactCount(), 0);
     QCOMPARE(failureSpy.count(), 1);
     QVERIFY(!presenter.lastError().isEmpty());
+}
+
+void TaskArtifactPresenterTests::readsCommittedArtifactPreviewByIdentity()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    aitrain::ProjectWorkspace workspace;
+    QString error;
+    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
+    const aitrain::TaskId taskId = aitrain::TaskId::create();
+    aitrain::TaskSnapshot task;
+    QVERIFY2(workspace.startTask(taskId, QStringLiteral("preview"), QStringLiteral("report"), &task, &error),
+        qPrintable(error));
+
+    const aitrain::ArtifactId artifactId = aitrain::ArtifactId::create();
+    const QByteArray content = QByteArrayLiteral("{\"status\":\"ok\"}\n");
+    const QString sha256 = QString::fromLatin1(QCryptographicHash::hash(content, QCryptographicHash::Sha256).toHex());
+    const QString artifactRoot = QDir(workspace.workspacePath()).filePath(
+        QStringLiteral("artifacts/artifacts/%1").arg(artifactId.toString()));
+    QVERIFY(QDir().mkpath(artifactRoot));
+    QFile file(QDir(artifactRoot).filePath(QStringLiteral("evaluation_report.json")));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QCOMPARE(file.write(content), content.size());
+    file.close();
+
+    aitrain::ProjectStore storage;
+    QVERIFY2(storage.open(QDir(workspace.workspacePath()).filePath(QStringLiteral("project.sqlite")), &error),
+        qPrintable(error));
+    QVERIFY2(storage.recordArtifactWithFiles(artifactId, taskId, QStringLiteral("evaluation_report"),
+        {{QStringLiteral("evaluation_report.json"), sha256, content.size()}},
+        QDateTime::currentDateTimeUtc(), &error), qPrintable(error));
+
+    aitrain::ProjectQueryService query(&workspace);
+    aitrain::ArtifactFilePreview preview;
+    QVERIFY2(query.artifactFilePreview(artifactId, QStringLiteral("evaluation_report.json"), &preview, 1024, &error),
+        qPrintable(error));
+    QCOMPARE(preview.relativePath, QStringLiteral("evaluation_report.json"));
+    QCOMPARE(preview.content, content);
+    QVERIFY(!preview.truncated);
+    QVERIFY(!query.artifactFilePreview(artifactId, QStringLiteral("../project.sqlite"), &preview, 1024, &error));
 }
 
 QTEST_MAIN(TaskArtifactPresenterTests)

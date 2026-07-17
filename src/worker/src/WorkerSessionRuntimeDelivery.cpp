@@ -55,18 +55,22 @@ QJsonArray encodeSteps(const QVector<aitrain::WorkflowStepSnapshot>& values)
 
 } // namespace
 
-void WorkerSession::runRuntimeDeliveryWorkflow(const QJsonObject& payload)
+void WorkerSession::runRuntimeDeliveryWorkflow(const wp::RuntimeDeliveryCommand& command)
 {
     if (running_ || runtimeDeliveryWorkspace_) {
         fail(QStringLiteral("Runtime Delivery Workflow 已在运行。"));
         return;
     }
-    const QString taskIdText = payload.value(wp::field::taskId()).toString().trimmed();
-    const QString projectRoot = payload.value(QStringLiteral("projectRoot")).toString().trimmed();
-    const QString modelPackageIdText = payload.value(QStringLiteral("modelPackageId")).toString().trimmed();
-    const QString runtimeRoute = payload.value(QStringLiteral("runtimeRoute")).toString().trimmed();
-    const QString sampleImagePath = payload.value(wp::field::sampleImagePath()).toString().trimmed();
-    const QJsonObject options = payload.value(wp::field::options()).toObject();
+    const QString taskIdText = command.context.taskId.toString();
+    const QString projectRoot = command.context.projectRoot.trimmed();
+    const QString modelPackageIdText = command.modelPackageId.trimmed();
+    const QString runtimeRoute = command.runtimeRoute.trimmed();
+    const QString sampleDatasetIdText = command.sampleDatasetId.trimmed();
+    const QString sampleDatasetVersionIdText = command.sampleDatasetVersionId.trimmed();
+    const QString sampleSnapshotIdText = command.sampleSnapshotId.trimmed();
+    const QString sampleSnapshotArtifactIdText = command.sampleSnapshotArtifactId.trimmed();
+    const QString sampleRelativePath = command.sampleRelativePath.trimmed();
+    const QJsonObject options = command.options;
     QString error;
     if (!aitrain::TaskId::parse(taskIdText, &runtimeDeliveryTaskId_, &error)
         || runtimeDeliveryTaskId_ != controlTaskId_) {
@@ -74,10 +78,18 @@ void WorkerSession::runRuntimeDeliveryWorkflow(const QJsonObject& payload)
         return;
     }
     aitrain::ModelPackageId modelPackageId;
+    aitrain::DatasetId sampleDatasetId;
+    aitrain::DatasetVersionId sampleDatasetVersionId;
+    aitrain::SnapshotId sampleSnapshotId;
+    aitrain::ArtifactId sampleSnapshotArtifactId;
     if (!aitrain::ModelPackageId::parse(modelPackageIdText, &modelPackageId, &error)
-        || projectRoot.isEmpty() || runtimeRoute.isEmpty() || sampleImagePath.isEmpty()
-        || !QFileInfo(projectRoot).isDir() || !QFileInfo(sampleImagePath).isFile()) {
-        fail(QStringLiteral("Runtime Delivery Workflow 需要有效项目、ModelPackageId、runtime route 和常规样本图。"));
+        || !aitrain::DatasetId::parse(sampleDatasetIdText, &sampleDatasetId, &error)
+        || !aitrain::DatasetVersionId::parse(sampleDatasetVersionIdText, &sampleDatasetVersionId, &error)
+        || !aitrain::SnapshotId::parse(sampleSnapshotIdText, &sampleSnapshotId, &error)
+        || !aitrain::ArtifactId::parse(sampleSnapshotArtifactIdText, &sampleSnapshotArtifactId, &error)
+        || projectRoot.isEmpty() || runtimeRoute.isEmpty() || sampleRelativePath.isEmpty()
+        || !QFileInfo(projectRoot).isDir()) {
+        fail(QStringLiteral("Runtime Delivery Workflow 需要有效项目、ModelPackageId、runtime route、Snapshot 身份和样本相对路径，且不接受 sampleImagePath。"));
         return;
     }
 
@@ -109,8 +121,12 @@ void WorkerSession::runRuntimeDeliveryWorkflow(const QJsonObject& payload)
 
     aitrain::RuntimeDeliveryWorkflowRequest request;
     request.modelPackageId = modelPackageId;
+    request.sampleDatasetId = sampleDatasetId;
+    request.sampleDatasetVersionId = sampleDatasetVersionId;
+    request.sampleSnapshotId = sampleSnapshotId;
+    request.sampleSnapshotArtifactId = sampleSnapshotArtifactId;
+    request.sampleRelativePath = sampleRelativePath;
     request.runtimeRoute = runtimeRoute;
-    request.sampleImagePath = sampleImagePath;
     request.options = options;
     aitrain::RuntimeDeliveryWorkflowResult result;
     const bool executed = runtimeDeliveryWorkspace_->runRuntimeDeliveryWorkflow(

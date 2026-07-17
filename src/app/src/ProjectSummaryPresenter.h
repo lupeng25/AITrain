@@ -4,7 +4,7 @@
 
 #include <QObject>
 
-// “总览 / 项目”页面可消费的  项目级只读 ViewModel。
+// “总览 / 项目”页面可消费的项目级只读 ViewModel。
 // 只保留聚合计数，不包含 Artifact 路径或 Worker payload。
 struct ProjectSummaryViewModel final {
     bool available = false;

@@ -84,12 +84,15 @@ private slots:
     void cancellationTransitionsThroughCancelRequestedAndTerminalCanceled();
     void adapterHostSynthesizesCanceledTerminalAfterForcedCancellation();
     void adapterArtifactCandidatesCommitAsOneBundleBeforeSuccess();
+    void adapterArtifactCandidateRejectsOutsideRoot();
     void adapterHostDelegatesExistingTaskTerminalToWorkflowOwner();
+    void adapterHostSyntheticTerminalUsesPersistedSequenceOffset();
     void importCreatesVerifiedModelPackageWithoutGuessingType();
     void importCancellationLeavesNoRegisteredPackageOrArtifact();
     void runtimeResolutionAcceptsOnlyRegisteredUntamperedModelPackages();
     void projectWorkspaceOwnsRuntimeTaskLifecycle();
     void projectQueryServiceReadsOnlyPersistedTaskState();
+    void externalAcceptanceEvidenceRequiresStrictSchemaAndStaysUnverified();
     void projectWorkspaceCommitsRuntimeArtifactsBeforeSuccess();
     void projectWorkspaceRegistersDatasetSnapshotAndSequencesTrainingWorkflow();
     void datasetSnapshotImportRegistersNewAndExistingDatasetVersions();
@@ -276,6 +279,7 @@ void ApplicationTests::adapterArtifactCandidatesCommitAsOneBundleBeforeSuccess()
     launch.program = QStringLiteral("cmd.exe");
     launch.arguments.append(QStringLiteral("/c"));
     launch.arguments.append(QStringLiteral("ping 127.0.0.1 -n 2 > nul"));
+    launch.artifactCandidateRoots = QStringList{directory.path()};
     aitrain::TaskSnapshot task;
     QVERIFY2(host.start(QStringLiteral("yolo.detect"), QStringLiteral("training"), launch, &task, &error), qPrintable(error));
 
@@ -324,6 +328,61 @@ void ApplicationTests::adapterArtifactCandidatesCommitAsOneBundleBeforeSuccess()
 #endif
 }
 
+void ApplicationTests::adapterArtifactCandidateRejectsOutsideRoot()
+{
+#ifdef Q_OS_WIN
+    QTemporaryDir directory;
+    QTemporaryDir outside;
+    QVERIFY(directory.isValid());
+    QVERIFY(outside.isValid());
+    const QString candidatePath = outside.filePath(QStringLiteral("outside.json"));
+    QVERIFY(writeFile(candidatePath, QByteArrayLiteral("{}")));
+
+    aitrain::ProjectStore storage;
+    QString error;
+    QVERIFY2(storage.open(directory.filePath(QStringLiteral("project.sqlite")), &error), qPrintable(error));
+    aitrain::TaskCoordinator coordinator(&storage);
+    aitrain::ArtifactStore artifacts(directory.filePath(QStringLiteral("store")));
+    aitrain::TaskExecutionHost host(&coordinator, &artifacts);
+    aitrain::PythonAdapterLaunch launch;
+    launch.program = QStringLiteral("cmd.exe");
+    launch.arguments = QStringList{QStringLiteral("/c"), QStringLiteral("ping 127.0.0.1 -n 2 > nul")};
+    launch.artifactCandidateRoots = QStringList{directory.path()};
+    aitrain::TaskSnapshot task;
+    QVERIFY2(host.start(QStringLiteral("yolo.detect"), QStringLiteral("training"), launch, &task, &error), qPrintable(error));
+
+    const aitrain::AdapterEventEndpoint endpoint = host.adapterEndpoint();
+    QTcpSocket socket;
+    socket.connectToHost(endpoint.host, endpoint.port);
+    QVERIFY(socket.waitForConnected(3000));
+    socket.write(QByteArrayLiteral("{\"channel\":\"aitrain.adapter\",\"token\":\"")
+        + endpoint.token.toUtf8() + QByteArrayLiteral("\"}\n"));
+    QTRY_VERIFY(socket.bytesAvailable() > 0);
+    QCOMPARE(QJsonDocument::fromJson(socket.readLine()).object().value(QStringLiteral("status")).toString(), QStringLiteral("accepted"));
+
+    aitrain::ProtocolEnvelope candidate;
+    candidate.messageId = aitrain::MessageId::create();
+    candidate.requestId = task.requestId;
+    candidate.taskId = task.id;
+    candidate.sequence = 1;
+    candidate.kind = QStringLiteral("event.artifact_candidate");
+    candidate.timestamp = QDateTime::currentDateTimeUtc();
+    candidate.payload = QJsonObject{{QStringLiteral("kind"), QStringLiteral("report")}, {QStringLiteral("path"), candidatePath}};
+    const QByteArray wire = aitrain::encodeProtocolMessage(candidate, &error);
+    QVERIFY2(!wire.isEmpty(), qPrintable(error));
+    socket.write(wire);
+    QVERIFY(socket.waitForBytesWritten(3000));
+
+    QTRY_VERIFY(!host.isRunning());
+    aitrain::TaskSnapshot stored;
+    QVERIFY2(storage.task(task.id, &stored, &error), qPrintable(error));
+    QCOMPARE(stored.state, aitrain::TaskState::Failed);
+    QCOMPARE(storage.artifactCount(task.id, &error), 0);
+#else
+    QSKIP(" Adapter Host integration uses Windows Job Object.");
+#endif
+}
+
 void ApplicationTests::adapterHostDelegatesExistingTaskTerminalToWorkflowOwner()
 {
 #ifdef Q_OS_WIN
@@ -346,6 +405,7 @@ void ApplicationTests::adapterHostDelegatesExistingTaskTerminalToWorkflowOwner()
     aitrain::PythonAdapterLaunch launch;
     launch.program = QStringLiteral("cmd.exe");
     launch.arguments = QStringList{QStringLiteral("/c"), QStringLiteral("ping 127.0.0.1 -n 3 > nul")};
+    launch.artifactCandidateRoots = QStringList{directory.path()};
 
     bool callbackCalled = false;
     aitrain::ArtifactId callbackArtifact;
@@ -402,6 +462,58 @@ void ApplicationTests::adapterHostDelegatesExistingTaskTerminalToWorkflowOwner()
     QCOMPARE(storage.artifactCount(task.id, &error), 1);
     QVERIFY2(coordinator.finalizeTask(task.id, aitrain::TaskState::Succeeded, {}, &error), qPrintable(error));
     QTRY_VERIFY(!host.isRunning());
+#else
+    QSKIP(" Adapter Host integration uses Windows Job Object.");
+#endif
+}
+
+void ApplicationTests::adapterHostSyntheticTerminalUsesPersistedSequenceOffset()
+{
+#ifdef Q_OS_WIN
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    aitrain::ProjectStore storage;
+    QString error;
+    QVERIFY2(storage.open(directory.filePath(QStringLiteral("project.sqlite")), &error), qPrintable(error));
+    aitrain::TaskCoordinator coordinator(&storage);
+    aitrain::TaskSnapshot task;
+    QVERIFY2(coordinator.createAndStartTask(QStringLiteral("yolo.detect"), QStringLiteral("training"), &task, &error), qPrintable(error));
+
+    aitrain::ProtocolEnvelope progress;
+    progress.messageId = aitrain::MessageId::create();
+    progress.requestId = task.requestId;
+    progress.taskId = task.id;
+    progress.sequence = 7;
+    progress.kind = QStringLiteral("event.progress");
+    progress.timestamp = QDateTime::currentDateTimeUtc();
+    progress.payload = QJsonObject{{QStringLiteral("percent"), 40}};
+    QVERIFY2(coordinator.consumeWorkerEvent(progress, &error), qPrintable(error));
+    quint64 lastSequence = 0;
+    QVERIFY2(storage.lastProtocolSequence(task.id, &lastSequence, &error), qPrintable(error));
+    QCOMPARE(lastSequence, quint64(7));
+
+    aitrain::ArtifactStore artifacts(directory.filePath(QStringLiteral("store")));
+    aitrain::TaskExecutionHost host(&coordinator, &artifacts);
+    aitrain::PythonAdapterLaunch launch;
+    launch.program = directory.filePath(QStringLiteral("missing-adapter.exe"));
+
+    bool terminalCalled = false;
+    quint64 terminalSequence = 0;
+    QString terminalKind;
+    QVERIFY2(host.startExistingTask(task, launch,
+        [&terminalCalled, &terminalSequence, &terminalKind](const aitrain::ProtocolEnvelope& terminal,
+            const aitrain::ArtifactId& outputArtifactId, QString*) {
+            terminalCalled = true;
+            terminalSequence = terminal.sequence;
+            terminalKind = terminal.kind;
+            return !outputArtifactId.isValid();
+        }, &error), qPrintable(error));
+
+    QTRY_VERIFY_WITH_TIMEOUT(terminalCalled, 5000);
+    QCOMPARE(terminalKind, QStringLiteral("event.failed"));
+    QCOMPARE(terminalSequence, quint64(8));
+    QVERIFY2(storage.lastProtocolSequence(task.id, &lastSequence, &error), qPrintable(error));
+    QCOMPARE(lastSequence, quint64(8));
 #else
     QSKIP(" Adapter Host integration uses Windows Job Object.");
 #endif
@@ -620,6 +732,66 @@ void ApplicationTests::projectQueryServiceReadsOnlyPersistedTaskState()
     QVERIFY2(queries.taskDetails(taskId, &details, &error), qPrintable(error));
     QCOMPARE(details.task.state, aitrain::TaskState::Canceled);
     QCOMPARE(details.task.failure.code, aitrain::FailureCode::Canceled);
+}
+
+void ApplicationTests::externalAcceptanceEvidenceRequiresStrictSchemaAndStaysUnverified()
+{
+    QTemporaryDir project;
+    QTemporaryDir external;
+    QVERIFY(project.isValid());
+    QVERIFY(external.isValid());
+    aitrain::ProjectWorkspace workspace;
+    QString error;
+    QVERIFY2(workspace.open(project.path(), &error), qPrintable(error));
+    const QString sourcePath = QDir(external.path()).filePath(QStringLiteral("acceptance.json"));
+    QVERIFY(writeFile(sourcePath, QJsonDocument(QJsonObject{
+        {QStringLiteral("schemaVersion"), 1},
+        {QStringLiteral("kind"), QStringLiteral("aitrain_external_acceptance_evidence")},
+        {QStringLiteral("evidenceKind"), QStringLiteral("clean_windows")},
+        {QStringLiteral("status"), QStringLiteral("passed")},
+        {QStringLiteral("producer"), QStringLiteral("qa-lab")},
+        {QStringLiteral("observedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
+        {QStringLiteral("limitations"), QJsonArray{QStringLiteral("外部证据")}}}).toJson(QJsonDocument::Compact)));
+
+    const aitrain::TaskId taskId = aitrain::TaskId::create();
+    aitrain::TaskSnapshot task;
+    QVERIFY2(workspace.startTask(taskId, QStringLiteral("delivery.external_acceptance"),
+        QStringLiteral("external_acceptance_evidence"), &task, &error), qPrintable(error));
+    aitrain::ExternalAcceptanceEvidenceImportResult imported;
+    QVERIFY2(workspace.importExternalAcceptanceEvidence(taskId,
+        aitrain::ExternalAcceptanceEvidenceImportRequest{sourcePath}, &imported, &error), qPrintable(error));
+    QVERIFY(imported.evidenceArtifactId.isValid());
+    QCOMPARE(imported.status, QStringLiteral("passed"));
+    QVERIFY2(workspace.finalizeTask(taskId, aitrain::TaskState::Succeeded, {}, &error), qPrintable(error));
+
+    aitrain::ProjectQueryService queries(&workspace);
+    const QVector<aitrain::DeliveryEvidenceReadModel> evidence = queries.deliveryEvidence(20, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(evidence.size(), 1);
+    QCOMPARE(evidence.first().evidenceKind, QStringLiteral("clean_windows"));
+    QCOMPARE(evidence.first().runtimeStatus, QStringLiteral("passed"));
+    QVERIFY(!evidence.first().verified);
+
+    QVERIFY(writeFile(sourcePath, QJsonDocument(QJsonObject{
+        {QStringLiteral("schemaVersion"), 1},
+        {QStringLiteral("kind"), QStringLiteral("aitrain_external_acceptance_evidence")},
+        {QStringLiteral("evidenceKind"), QStringLiteral("tampered")},
+        {QStringLiteral("status"), QStringLiteral("passed")},
+        {QStringLiteral("producer"), QStringLiteral("qa-lab")},
+        {QStringLiteral("observedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
+        {QStringLiteral("unexpected"), true}}).toJson(QJsonDocument::Compact)));
+    const aitrain::TaskId rejectedTaskId = aitrain::TaskId::create();
+    QVERIFY2(workspace.startTask(rejectedTaskId, QStringLiteral("delivery.external_acceptance"),
+        QStringLiteral("external_acceptance_evidence"), &task, &error), qPrintable(error));
+    aitrain::ExternalAcceptanceEvidenceImportResult rejected;
+    QVERIFY(!workspace.importExternalAcceptanceEvidence(rejectedTaskId,
+        aitrain::ExternalAcceptanceEvidenceImportRequest{sourcePath}, &rejected, &error));
+    QVERIFY(error.contains(QStringLiteral("未知字段")));
+    const aitrain::Failure rejectedFailure{
+        aitrain::FailureCode::InvalidRequest, error, QStringLiteral("修正 schema"),
+        QDateTime::currentDateTimeUtc()};
+    QVERIFY2(workspace.finalizeTask(rejectedTaskId, aitrain::TaskState::Failed,
+        rejectedFailure, &error), qPrintable(error));
 }
 
 void ApplicationTests::projectWorkspaceCommitsRuntimeArtifactsBeforeSuccess()
@@ -1530,6 +1702,7 @@ void ApplicationTests::projectWorkspaceDispatchesOfficialAdapterStepThroughTrain
     aitrain::PythonAdapterLaunch launch;
     launch.program = QStringLiteral("cmd.exe");
     launch.arguments = QStringList{QStringLiteral("/c"), QStringLiteral("ping 127.0.0.1 -n 3 > nul")};
+    launch.artifactCandidateRoots = QStringList{directory.path()};
     bool dispatchedNextStep = false;
     aitrain::TrainingWorkflowDispatch next;
     QVERIFY2(workspace.startTrainingWorkflowAdapterStep(workflow.workflowRunId, workflow.dispatch.step.id, launch,

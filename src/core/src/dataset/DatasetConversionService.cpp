@@ -633,18 +633,19 @@ bool DatasetConversionService::convert(const TaskId& taskId,
     }
 
     if (progress) progress(25, QStringLiteral("转换计划已确认，正在写入 Artifact staging。"));
-    aitrain::DatasetConversionRequest legacyRequest;
-    legacyRequest.sourcePath = request.sourcePath;
-    legacyRequest.sourceFormat = request.sourceFormat.trimmed().toLower();
-    legacyRequest.targetFormat = request.targetFormat.trimmed().toLower();
-    legacyRequest.outputPath = stagingPath;
-    legacyRequest.options = request.options;
+    // 这是受控 Artifact staging 内部的物化请求，不是旧 V1 业务边界。
+    aitrain::DatasetConversionRequest materializeRequest;
+    materializeRequest.sourcePath = request.sourcePath;
+    materializeRequest.sourceFormat = request.sourceFormat.trimmed().toLower();
+    materializeRequest.targetFormat = request.targetFormat.trimmed().toLower();
+    materializeRequest.outputPath = stagingPath;
+    materializeRequest.options = request.options;
     if (ioFailureInjected(ioFailureInjector_, DatasetConversionIoOperation::MaterializeWrite,
             stagingPath, error)) {
         abort();
         return false;
     }
-    const aitrain::DatasetConversionResult converted = aitrain::convertDataset(legacyRequest, cancellation);
+    const aitrain::DatasetConversionResult converted = aitrain::convertDataset(materializeRequest, cancellation);
     if (!converted.ok || canceled(cancellation)) {
         if (error) *error = converted.errorCode.isEmpty()
             ? QStringLiteral("dataset_conversion_canceled")

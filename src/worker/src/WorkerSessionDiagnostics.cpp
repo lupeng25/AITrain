@@ -7,16 +7,16 @@
 
 namespace wp = aitrain::worker_protocol;
 
-void WorkerSession::runDiagnosticsWorkflow(const QJsonObject& payload)
+void WorkerSession::runDiagnosticsWorkflow(const wp::DiagnosticsCommand& command)
 {
     if (running_ || diagnosticsWorkspace_) {
         fail(QStringLiteral("Worker 已有运行任务，不能并发运行 Diagnostics Bundle 。"));
         return;
     }
-    const QString taskIdText = payload.value(wp::field::taskId()).toString().trimmed();
-    const QString projectRoot = payload.value(QStringLiteral("projectRoot")).toString().trimmed();
+    const QString taskIdText = command.context.taskId.toString();
+    const QString projectRoot = command.context.projectRoot.trimmed();
     aitrain::DiagnosticsWorkflowRequest request;
-    request.options = payload.value(wp::field::options()).toObject();
+    request.options = command.options;
     QString error;
     if (!aitrain::TaskId::parse(taskIdText, &diagnosticsTaskId_, &error)
         || diagnosticsTaskId_ != controlTaskId_

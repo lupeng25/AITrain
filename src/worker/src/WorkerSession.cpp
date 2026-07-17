@@ -21,8 +21,21 @@
 #include <QThread>
 #include <QTimer>
 
+#include <type_traits>
+
 using namespace worker_support;
 namespace wp = aitrain::worker_protocol;
+
+namespace {
+constexpr qint64 kMaxPendingWorkerControlBytes = 8 * 1024 * 1024;
+
+bool isDroppableControlEvent(const QString& type)
+{
+    return type == wp::event::log()
+        || type == wp::event::progress()
+        || type == wp::event::metric();
+}
+} // namespace
 
 WorkerSession::WorkerSession(QObject* parent)
     : QObject(parent)
@@ -33,13 +46,16 @@ WorkerSession::WorkerSession(QObject* parent)
 
 bool WorkerSession::connectToServer(const QString& serverName,
     const aitrain::RequestId& requestId,
-    const aitrain::TaskId& taskId)
+    const aitrain::TaskId& taskId,
+    const QString& controlToken)
 {
-    if (!requestId.isValid() || !taskId.isValid()) {
+    if (!requestId.isValid() || !taskId.isValid() || controlToken.trimmed().isEmpty()) {
         return false;
     }
     controlRequestId_ = requestId;
     controlTaskId_ = taskId;
+    controlToken_ = controlToken;
+    droppedControlEventCount_ = 0;
     incomingSequenceTracker_.reset(controlRequestId_);
     socket_.setReadBufferSize(aitrain::kProtocolMaxControlMessageBytes + 1);
     socket_.connectToServer(serverName);
@@ -84,6 +100,10 @@ void WorkerSession::readLines()
             rejectControlProtocol(QStringLiteral("Protocol  command rejected: %1").arg(error));
             return;
         }
+        if (envelope.controlToken != controlToken_) {
+            rejectControlProtocol(QStringLiteral("Protocol  control token mismatch."));
+            return;
+        }
         if (envelope.kind == QStringLiteral("command.cancel_task")) {
             if (!preflightStartReceived) {
                 rejectControlProtocol(QStringLiteral(
@@ -96,10 +116,8 @@ void WorkerSession::readLines()
                     "Protocol  command.start_task may only be sent once."));
                 return;
             }
-            QString businessCommand;
-            QJsonObject businessPayload;
-            if (!wp::control::unpackStartTask(
-                    envelope, &businessCommand, &businessPayload, &error)) {
+            wp::TaskCommand command;
+            if (!wp::control::unpackStartTask(envelope, &command, &error)) {
                 rejectControlProtocol(QStringLiteral("Protocol  start task rejected: %1").arg(error));
                 return;
             }
@@ -138,6 +156,10 @@ void WorkerSession::readLines()
 bool WorkerSession::acceptControlEnvelope(const aitrain::ProtocolEnvelope& envelope)
 {
     QString error;
+    if (envelope.controlToken != controlToken_) {
+        rejectControlProtocol(QStringLiteral("Protocol  control token mismatch."));
+        return false;
+    }
     if (!incomingSequenceTracker_.observe(envelope, controlRequestId_, controlTaskId_, &error)) {
         rejectControlProtocol(QStringLiteral("Protocol  command rejected: %1").arg(error));
         return false;
@@ -148,7 +170,7 @@ bool WorkerSession::acceptControlEnvelope(const aitrain::ProtocolEnvelope& envel
             rejectControlProtocol(QStringLiteral("Protocol  command.cancel_task cannot precede command.start_task."));
             return false;
         }
-        cancelCommand(QJsonObject());
+        cancelCommand();
         return true;
     }
     if (envelope.kind != QStringLiteral("command.start_task")) {
@@ -160,14 +182,13 @@ bool WorkerSession::acceptControlEnvelope(const aitrain::ProtocolEnvelope& envel
         return false;
     }
 
-    QString businessCommand;
-    QJsonObject businessPayload;
-    if (!wp::control::unpackStartTask(envelope, &businessCommand, &businessPayload, &error)) {
+    wp::TaskCommand command;
+    if (!wp::control::unpackStartTask(envelope, &command, &error)) {
         rejectControlProtocol(QStringLiteral("Protocol  start task rejected: %1").arg(error));
         return false;
     }
     startTaskReceived_ = true;
-    handleMessage(businessCommand, businessPayload);
+    handleCommand(command);
     return !finishingSession_;
 }
 
@@ -176,94 +197,52 @@ void WorkerSession::rejectControlProtocol(const QString& message)
     failWithDetails(message, QStringLiteral("protocol_rejected"));
 }
 
-void WorkerSession::handleMessage(const QString& type, const QJsonObject& payload)
+void WorkerSession::handleCommand(const wp::TaskCommand& command)
 {
     // finishSession() 会在 flush 期间处理事件；关闭开始后不得让迟到命令产生第二个终态事件。
     if (finishingSession_) {
         return;
     }
-    activeCommand_ = type;
-    activeTaskId_ = payload.value(wp::field::taskId()).toString(activeTaskId_);
-
-    const QVector<CommandBinding> bindings = commandBindings();
-    for (const CommandBinding& binding : bindings) {
-        if (type == binding.command) {
-            (this->*binding.handler)(payload);
-            return;
+    activeCommand_ = wp::taskCommandType(command);
+    activeTaskId_ = std::visit([](const auto& value) {
+        return value.context.taskId.toString();
+    }, command.payload);
+    std::visit([this](const auto& value) {
+        using T = std::decay_t<decltype(value)>;
+        if constexpr (std::is_same_v<T, wp::EnvironmentCheckCommand>) {
+            runEnvironmentCheckWorkflow(value);
+        } else if constexpr (std::is_same_v<T, wp::DatasetSplitCommand>) {
+            runDatasetSplitWorkflow(value);
+        } else if constexpr (std::is_same_v<T, wp::DatasetConversionCommand>) {
+            runDatasetConversionWorkflow(value);
+        } else if constexpr (std::is_same_v<T, wp::DataQualityCommand>) {
+            runDataQualityWorkflow(value);
+        } else if constexpr (std::is_same_v<T, wp::AnnotationSessionCreateCommand>) {
+            createAnnotationSession(value);
+        } else if constexpr (std::is_same_v<T, wp::AnnotationSessionSyncCommand>) {
+            syncAnnotationSession(value);
+        } else if constexpr (std::is_same_v<T, wp::DatasetSnapshotImportCommand>) {
+            runDatasetSnapshotImportWorkflow(value);
+        } else if constexpr (std::is_same_v<T, wp::OcrOfficialReportImportCommand>) {
+            importOcrOfficialReports(value);
+        } else if constexpr (std::is_same_v<T, wp::OcrAcceptanceCommand>) {
+            runOcrAcceptanceWorkflow(value);
+        } else if constexpr (std::is_same_v<T, wp::DiagnosticsCommand>) {
+            runDiagnosticsWorkflow(value);
+        } else if constexpr (std::is_same_v<T, wp::ExternalAcceptanceEvidenceImportCommand>) {
+            importExternalAcceptanceEvidence(value);
+        } else if constexpr (std::is_same_v<T, wp::RuntimeDeliveryCommand>) {
+            runRuntimeDeliveryWorkflow(value);
+        } else if constexpr (std::is_same_v<T, wp::ModelImportCommand>) {
+            importModel(value);
+        } else if constexpr (std::is_same_v<T, wp::TrainingCommand>) {
+            runTrainingWorkflow(value);
         }
-    }
-
-    fail(QStringLiteral("Unsupported command: %1").arg(type));
+    }, command.payload);
 }
 
-void WorkerSession::runEnvironmentCheckWorkflowCommand(const QJsonObject& payload)
+void WorkerSession::cancelCommand()
 {
-    runEnvironmentCheckWorkflow(payload);
-}
-
-void WorkerSession::runDatasetSplitWorkflowCommand(const QJsonObject& payload)
-{
-    runDatasetSplitWorkflow(payload);
-}
-
-void WorkerSession::runDatasetConversionWorkflowCommand(const QJsonObject& payload)
-{
-    runDatasetConversionWorkflow(payload);
-}
-
-void WorkerSession::runDataQualityWorkflowCommand(const QJsonObject& payload)
-{
-    runDataQualityWorkflow(payload);
-}
-
-void WorkerSession::runDiagnosticsWorkflowCommand(const QJsonObject& payload)
-{
-    runDiagnosticsWorkflow(payload);
-}
-
-void WorkerSession::createAnnotationSessionCommand(const QJsonObject& payload)
-{
-    createAnnotationSession(payload);
-}
-
-void WorkerSession::syncAnnotationSessionCommand(const QJsonObject& payload)
-{
-    syncAnnotationSession(payload);
-}
-
-void WorkerSession::runDatasetSnapshotImportWorkflowCommand(const QJsonObject& payload)
-{
-    runDatasetSnapshotImportWorkflow(payload);
-}
-
-void WorkerSession::importOcrOfficialReportsCommand(const QJsonObject& payload)
-{
-    importOcrOfficialReports(payload);
-}
-
-void WorkerSession::runOcrAcceptanceWorkflowCommand(const QJsonObject& payload)
-{
-    runOcrAcceptanceWorkflow(payload);
-}
-
-void WorkerSession::runRuntimeDeliveryWorkflowCommand(const QJsonObject& payload)
-{
-    runRuntimeDeliveryWorkflow(payload);
-}
-
-void WorkerSession::importModelCommand(const QJsonObject& payload)
-{
-    importModel(payload);
-}
-
-void WorkerSession::runTrainingWorkflowCommand(const QJsonObject& payload)
-{
-    runTrainingWorkflow(payload);
-}
-
-void WorkerSession::cancelCommand(const QJsonObject& payload)
-{
-    Q_UNUSED(payload);
     if (finishingSession_) {
         return;
     }
@@ -385,6 +364,12 @@ void WorkerSession::send(const QString& type, const QJsonObject& payload)
     if (terminalEnvelopeSent_) {
         return;
     }
+    const bool terminal = wp::isTerminalEvent(type);
+    if (!terminal && isDroppableControlEvent(type)
+        && socket_.bytesToWrite() > kMaxPendingWorkerControlBytes) {
+        ++droppedControlEventCount_;
+        return;
+    }
     QJsonObject envelopePayload = payload;
     if (!activeTaskId_.isEmpty() && !envelopePayload.contains(wp::field::taskId())) {
         envelopePayload.insert(wp::field::taskId(), activeTaskId_);
@@ -401,9 +386,13 @@ void WorkerSession::send(const QString& type, const QJsonObject& payload)
     if (type == wp::event::canceled() && !envelopePayload.contains(wp::field::status())) {
         envelopePayload.insert(wp::field::status(), QStringLiteral("canceled"));
     }
-    const bool terminal = wp::isTerminalEvent(type);
+    if (terminal && droppedControlEventCount_ > 0) {
+        envelopePayload.insert(QStringLiteral("droppedControlEventCount"),
+            QString::number(droppedControlEventCount_));
+    }
+    const wp::TaskEvent eventValue = wp::taskEventFromType(type, envelopePayload);
     const aitrain::ProtocolEnvelope envelope = wp::control::eventEnvelope(
-        controlRequestId_, controlTaskId_, ++outgoingSequence_, type, envelopePayload);
+        controlRequestId_, controlTaskId_, ++outgoingSequence_, eventValue, controlToken_);
     QString error;
     const QByteArray bytes = aitrain::encodeProtocolMessage(envelope, &error);
     if (bytes.isEmpty()) {

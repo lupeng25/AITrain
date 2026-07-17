@@ -3,13 +3,13 @@
 #include "LanguageSupport.h"
 #include "MainWindow.h"
 #include "RegistrationDialog.h"
+#include "LicenseTokenStore.h"
 #include "aitrain/core/LicenseManager.h"
 #include "aitrain/core/LicenseSecurity.h"
 
 #include <QApplication>
 #include <QIcon>
 #include <QDir>
-#include <QSettings>
 #include <QStandardPaths>
 #include <QTranslator>
 
@@ -28,8 +28,7 @@ int main(int argc, char* argv[])
     const QByteArray publicKeyBase64(AITRAIN_LICENSE_PUBLIC_KEY_B64);
     const QString trustedClockPath = QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
         .filePath(QStringLiteral("license/trusted-utc.dat"));
-    QSettings settings;
-    const QString storedToken = settings.value(QStringLiteral("license/token")).toString();
+    const QString storedToken = aitrain_app::LicenseTokenStore().read();
     aitrain::LicenseValidationResult license =
         aitrain::validateLicenseTokenWithTrustedClock(
             storedToken,

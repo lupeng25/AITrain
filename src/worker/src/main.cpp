@@ -80,6 +80,8 @@ int main(int argc, char* argv[])
         QStringLiteral("request-id"), QStringLiteral("Protocol  RequestId。"), QStringLiteral("uuid"));
     QCommandLineOption taskIdOption(
         QStringLiteral("task-id"), QStringLiteral("Protocol  TaskId。"), QStringLiteral("uuid"));
+    QCommandLineOption controlTokenOption(
+        QStringLiteral("control-token"), QStringLiteral("Protocol  控制令牌。"), QStringLiteral("token"));
     QCommandLineOption selfCheckOption(
         QStringLiteral("self-check"), QStringLiteral("执行运行时依赖自检并输出 JSON。"));
     QCommandLineOption capabilityCheckOption(
@@ -87,6 +89,7 @@ int main(int argc, char* argv[])
     parser.addOption(serverOption);
     parser.addOption(requestIdOption);
     parser.addOption(taskIdOption);
+    parser.addOption(controlTokenOption);
     parser.addOption(selfCheckOption);
     parser.addOption(capabilityCheckOption);
     parser.process(app);
@@ -115,9 +118,14 @@ int main(int argc, char* argv[])
         qCritical().noquote() << QStringLiteral("无效或缺少 --task-id：%1").arg(identityError);
         return 2;
     }
+    const QString controlToken = parser.value(controlTokenOption).trimmed();
+    if (controlToken.isEmpty()) {
+        qCritical("缺少 --control-token 参数。");
+        return 2;
+    }
 
     WorkerSession session;
-    if (!session.connectToServer(serverName, requestId, taskId)) {
+    if (!session.connectToServer(serverName, requestId, taskId, controlToken)) {
         qCritical("无法连接到控制端。");
         return 3;
     }

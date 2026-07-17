@@ -7,19 +7,19 @@
 
 namespace wp = aitrain::worker_protocol;
 
-void WorkerSession::runDatasetSnapshotImportWorkflow(const QJsonObject& payload)
+void WorkerSession::runDatasetSnapshotImportWorkflow(const wp::DatasetSnapshotImportCommand& command)
 {
     if (running_ || datasetSnapshotImportWorkspace_) {
         fail(QStringLiteral("Worker 已有运行任务，不能并发运行 Dataset Snapshot Import 。"));
         return;
     }
-    const QString taskIdText = payload.value(wp::field::taskId()).toString().trimmed();
-    const QString projectRoot = payload.value(QStringLiteral("projectRoot")).toString().trimmed();
+    const QString taskIdText = command.context.taskId.toString();
+    const QString projectRoot = command.context.projectRoot.trimmed();
     aitrain::DatasetSnapshotImportWorkflowRequest request;
-    request.sourcePath = payload.value(wp::field::sourcePath()).toString().trimmed();
-    request.sourceFormat = payload.value(wp::field::sourceFormat()).toString().trimmed();
-    request.targetDatasetName = payload.value(QStringLiteral("targetDatasetName")).toString().trimmed();
-    request.options = payload.value(wp::field::options()).toObject();
+    request.sourcePath = command.sourcePath.trimmed();
+    request.sourceFormat = command.sourceFormat.trimmed();
+    request.targetDatasetName = command.targetDatasetName.trimmed();
+    request.options = command.options;
     QString error;
     if (!aitrain::TaskId::parse(taskIdText, &datasetSnapshotImportTaskId_, &error)
         || datasetSnapshotImportTaskId_ != controlTaskId_
@@ -27,7 +27,7 @@ void WorkerSession::runDatasetSnapshotImportWorkflow(const QJsonObject& payload)
         || request.sourcePath.isEmpty() || request.sourceFormat.isEmpty()
         || request.targetDatasetName.isEmpty()
         || !aitrain::DatasetId::parse(
-            payload.value(QStringLiteral("targetDatasetId")).toString(),
+            command.targetDatasetId,
             &request.targetDatasetId, &error)) {
         datasetSnapshotImportTaskId_ = {};
         fail(QStringLiteral("Dataset Snapshot Import  请求缺少项目、外部源、格式或目标 Dataset 身份：%1")

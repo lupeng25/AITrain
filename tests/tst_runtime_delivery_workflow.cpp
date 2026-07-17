@@ -70,8 +70,25 @@ private:
 
 bool writeFile(const QString& path, const QByteArray& bytes)
 {
+    if (!QDir().mkpath(QFileInfo(path).absolutePath())) return false;
     QFile file(path);
     return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size();
+}
+
+bool createYoloDetectionFixture(const QString& root)
+{
+    QImage image(8, 8, QImage::Format_RGB32);
+    image.fill(Qt::white);
+    return writeFile(QDir(root).filePath(QStringLiteral("data.yaml")),
+               QByteArray("path: .\ntrain: images/train\nval: images/val\nnc: 1\nnames: [item]\n"))
+        && QDir().mkpath(QDir(root).filePath(QStringLiteral("images/train")))
+        && QDir().mkpath(QDir(root).filePath(QStringLiteral("images/val")))
+        && image.save(QDir(root).filePath(QStringLiteral("images/train/a.png")))
+        && image.save(QDir(root).filePath(QStringLiteral("images/val/a.png")))
+        && writeFile(QDir(root).filePath(QStringLiteral("labels/train/a.txt")),
+            QByteArray("0 0.5 0.5 0.25 0.25\n"))
+        && writeFile(QDir(root).filePath(QStringLiteral("labels/val/a.txt")),
+            QByteArray("0 0.5 0.5 0.25 0.25\n"));
 }
 
 aitrain::ModelImportResult importFixtureModel(
@@ -101,6 +118,31 @@ aitrain::ModelImportResult importFixtureModel(
     return imported;
 }
 
+aitrain::DatasetSnapshotRecord importFixtureSnapshot(
+    aitrain::ProjectWorkspace* workspace, const QString& sourcePath, QString* error)
+{
+    const aitrain::TaskId taskId = aitrain::TaskId::create();
+    aitrain::TaskSnapshot task;
+    if (!workspace->startTask(taskId, QStringLiteral("dataset.snapshot.import"),
+            QStringLiteral("dataset_snapshot_import"), &task, error)) {
+        return {};
+    }
+    aitrain::DatasetSnapshotImportWorkflowRequest request;
+    request.sourcePath = sourcePath;
+    request.sourceFormat = QStringLiteral("yolo_detection");
+    request.targetDatasetId = aitrain::DatasetId::create();
+    request.targetDatasetName = QStringLiteral("Runtime Delivery 测试样本");
+    aitrain::DatasetSnapshotImportWorkflowResult result;
+    if (!workspace->runDatasetSnapshotImportWorkflow(taskId, request, &result, error)
+        || result.terminalState != aitrain::TaskState::Succeeded) {
+        if (error && error->isEmpty()) {
+            *error = QStringLiteral("Runtime Delivery 测试 Snapshot 导入失败。");
+        }
+        return {};
+    }
+    return result.datasetSnapshot;
+}
+
 bool evidenceHasAllFormats(const aitrain::EvidenceArtifactBundle& evidence)
 {
     const QStringList names{QStringLiteral("evidence.json"), QStringLiteral("evidence.md"),
@@ -126,21 +168,27 @@ void RuntimeDeliveryWorkflowTests::successCommitsSixChainedStepsAndFourEvidenceF
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
     const QString modelPath = directory.filePath(QStringLiteral("fixture.onnx"));
-    const QString imagePath = directory.filePath(QStringLiteral("sample.png"));
+    const QString datasetRoot = directory.filePath(QStringLiteral("dataset"));
     QVERIFY(writeFile(modelPath, "fixture-model"));
-    QVERIFY(QImage(32, 32, QImage::Format_RGB32).save(imagePath));
+    QVERIFY(createYoloDetectionFixture(datasetRoot));
     aitrain::ProjectWorkspace workspace;
     QString error;
     QVERIFY2(workspace.open(directory.filePath(QStringLiteral("workspace")), &error), qPrintable(error));
     const auto imported = importFixtureModel(&workspace, modelPath, &error);
     QVERIFY2(imported.modelPackage.manifest.modelPackageId.isValid(), qPrintable(error));
+    const auto sampleSnapshot = importFixtureSnapshot(&workspace, datasetRoot, &error);
+    QVERIFY2(sampleSnapshot.id.isValid(), qPrintable(error));
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     aitrain::TaskSnapshot task;
     QVERIFY2(workspace.startTask(taskId, QStringLiteral("runtime.delivery"), QStringLiteral("inference"), &task, &error), qPrintable(error));
     aitrain::RuntimeDeliveryWorkflowRequest request;
     request.modelPackageId = imported.modelPackage.manifest.modelPackageId;
+    request.sampleDatasetId = sampleSnapshot.datasetId;
+    request.sampleDatasetVersionId = sampleSnapshot.datasetVersionId;
+    request.sampleSnapshotId = sampleSnapshot.id;
+    request.sampleSnapshotArtifactId = sampleSnapshot.artifactId;
+    request.sampleRelativePath = QStringLiteral("images/train/a.png");
     request.runtimeRoute = QStringLiteral("aitrain_onnxruntime");
-    request.sampleImagePath = imagePath;
     request.options.insert(QStringLiteral("benchmarkWarmup"), 1);
     request.options.insert(QStringLiteral("benchmarkIterations"), 3);
     aitrain::RuntimeDeliveryWorkflowResult result;
@@ -184,22 +232,28 @@ void RuntimeDeliveryWorkflowTests::cancellationProducesOneTerminalStateAndEviden
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
     const QString modelPath = directory.filePath(QStringLiteral("fixture.onnx"));
-    const QString imagePath = directory.filePath(QStringLiteral("sample.png"));
+    const QString datasetRoot = directory.filePath(QStringLiteral("dataset"));
     QVERIFY(writeFile(modelPath, "fixture-model"));
-    QVERIFY(QImage(32, 32, QImage::Format_RGB32).save(imagePath));
+    QVERIFY(createYoloDetectionFixture(datasetRoot));
     aitrain::ProjectWorkspace workspace;
     QString error;
     QVERIFY2(workspace.open(directory.filePath(QStringLiteral("workspace")), &error), qPrintable(error));
     const auto imported = importFixtureModel(&workspace, modelPath, &error);
     QVERIFY2(imported.modelPackage.manifest.modelPackageId.isValid(), qPrintable(error));
+    const auto sampleSnapshot = importFixtureSnapshot(&workspace, datasetRoot, &error);
+    QVERIFY2(sampleSnapshot.id.isValid(), qPrintable(error));
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     aitrain::TaskSnapshot task;
     QVERIFY2(workspace.startTask(taskId, QStringLiteral("runtime.delivery"), QStringLiteral("inference"), &task, &error), qPrintable(error));
     aitrain::RuntimeDeliveryWorkflowResult result;
     aitrain::RuntimeDeliveryWorkflowRequest request;
     request.modelPackageId = imported.modelPackage.manifest.modelPackageId;
+    request.sampleDatasetId = sampleSnapshot.datasetId;
+    request.sampleDatasetVersionId = sampleSnapshot.datasetVersionId;
+    request.sampleSnapshotId = sampleSnapshot.id;
+    request.sampleSnapshotArtifactId = sampleSnapshot.artifactId;
+    request.sampleRelativePath = QStringLiteral("images/train/a.png");
     request.runtimeRoute = QStringLiteral("aitrain_onnxruntime");
-    request.sampleImagePath = imagePath;
     QVERIFY2(workspace.runRuntimeDeliveryWorkflow(taskId, request,
         &result, &error, []() { return true; }), qPrintable(error));
     QCOMPARE(result.state, aitrain::WorkflowStepState::Canceled);
@@ -223,22 +277,28 @@ void RuntimeDeliveryWorkflowTests::sdkMissingProducesPreciseFailureAndEvidence()
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
     const QString modelPath = directory.filePath(QStringLiteral("fixture.onnx"));
-    const QString imagePath = directory.filePath(QStringLiteral("sample.png"));
+    const QString datasetRoot = directory.filePath(QStringLiteral("dataset"));
     QVERIFY(writeFile(modelPath, "fixture-model"));
-    QVERIFY(QImage(32, 32, QImage::Format_RGB32).save(imagePath));
+    QVERIFY(createYoloDetectionFixture(datasetRoot));
     aitrain::ProjectWorkspace workspace;
     QString error;
     QVERIFY2(workspace.open(directory.filePath(QStringLiteral("workspace")), &error), qPrintable(error));
     const auto imported = importFixtureModel(&workspace, modelPath, &error);
     QVERIFY2(imported.modelPackage.manifest.modelPackageId.isValid(), qPrintable(error));
+    const auto sampleSnapshot = importFixtureSnapshot(&workspace, datasetRoot, &error);
+    QVERIFY2(sampleSnapshot.id.isValid(), qPrintable(error));
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     aitrain::TaskSnapshot task;
     QVERIFY2(workspace.startTask(taskId, QStringLiteral("runtime.delivery"), QStringLiteral("inference"), &task, &error), qPrintable(error));
     aitrain::RuntimeDeliveryWorkflowResult result;
     aitrain::RuntimeDeliveryWorkflowRequest request;
     request.modelPackageId = imported.modelPackage.manifest.modelPackageId;
+    request.sampleDatasetId = sampleSnapshot.datasetId;
+    request.sampleDatasetVersionId = sampleSnapshot.datasetVersionId;
+    request.sampleSnapshotId = sampleSnapshot.id;
+    request.sampleSnapshotArtifactId = sampleSnapshot.artifactId;
+    request.sampleRelativePath = QStringLiteral("images/train/a.png");
     request.runtimeRoute = QStringLiteral("aitrain_onnxruntime");
-    request.sampleImagePath = imagePath;
     QVERIFY2(workspace.runRuntimeDeliveryWorkflow(taskId, request,
         &result, &error, {}, [](const QString&) {
             return std::make_unique<FixtureRuntimeAdapter>(aitrain::RuntimeStatus::SdkMissing);

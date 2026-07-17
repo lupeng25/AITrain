@@ -139,6 +139,58 @@ RuntimeArtifactCandidate runtimeCandidate(const QString& kind, const QString& so
     return candidate;
 }
 
+bool isChildPath(const QString& parentPath, const QString& candidatePath)
+{
+    const QString parent = QDir::cleanPath(QDir(parentPath).absolutePath());
+    const QString candidate = QDir::cleanPath(QFileInfo(candidatePath).absoluteFilePath());
+    return candidate.startsWith(parent + QLatin1Char('/'), Qt::CaseInsensitive);
+}
+
+QString normalizedArtifactRelativePath(const QString& value, QString* error)
+{
+    const QString normalized = QDir::cleanPath(QDir::fromNativeSeparators(value.trimmed()));
+    if (normalized.isEmpty() || normalized == QStringLiteral(".")
+        || normalized == QStringLiteral("..")
+        || normalized.startsWith(QStringLiteral("../"))
+        || normalized.contains(QStringLiteral("/../"))
+        || QDir::isAbsolutePath(normalized)) {
+        if (error) *error = QStringLiteral("Runtime 样本必须是 Snapshot Artifact 包内相对路径。");
+        return {};
+    }
+    return normalized;
+}
+
+bool copyFileIntoStaging(const QString& sourcePath, const QString& destinationPath, QString* error)
+{
+    if (!QDir().mkpath(QFileInfo(destinationPath).absolutePath())) {
+        if (error) *error = QStringLiteral("无法创建 Runtime 样本暂存目录：%1")
+            .arg(QFileInfo(destinationPath).absolutePath());
+        return false;
+    }
+    QFile source(sourcePath);
+    QSaveFile destination(destinationPath);
+    if (!source.open(QIODevice::ReadOnly) || !destination.open(QIODevice::WriteOnly)) {
+        if (error) *error = QStringLiteral("无法打开 Runtime 样本或暂存文件。");
+        return false;
+    }
+    while (!source.atEnd()) {
+        const QByteArray block = source.read(1024 * 1024);
+        if (block.isEmpty() && source.error() != QFile::NoError) {
+            if (error) *error = QStringLiteral("读取 Runtime 样本失败：%1").arg(sourcePath);
+            return false;
+        }
+        if (!block.isEmpty() && destination.write(block) != block.size()) {
+            if (error) *error = QStringLiteral("写入 Runtime 样本暂存失败：%1").arg(destinationPath);
+            return false;
+        }
+    }
+    if (!destination.commit()) {
+        if (error) *error = QStringLiteral("提交 Runtime 样本暂存失败：%1").arg(destinationPath);
+        return false;
+    }
+    return true;
+}
+
 double percentile(const QVector<double>& sortedSamples, double fraction)
 {
     if (sortedSamples.isEmpty()) return 0.0;
@@ -160,27 +212,75 @@ bool ProjectWorkspace::runRuntimeDeliveryWorkflow(const TaskId& taskId,
 {
     if (error) error->clear();
     if (!isOpen() || !artifactStore_ || !taskId.isValid() || !request.modelPackageId.isValid()
-        || request.runtimeRoute.trimmed().isEmpty() || request.sampleImagePath.trimmed().isEmpty() || !result) {
-        if (error) *error = QStringLiteral("运行 Runtime Delivery Workflow 需要已打开工作区、运行中任务、ModelPackageId、Runtime 路由和样本图。");
+        || !request.sampleDatasetId.isValid() || !request.sampleDatasetVersionId.isValid()
+        || !request.sampleSnapshotId.isValid() || !request.sampleSnapshotArtifactId.isValid()
+        || request.runtimeRoute.trimmed().isEmpty() || request.sampleRelativePath.trimmed().isEmpty()
+        || !result) {
+        if (error) *error = QStringLiteral("运行 Runtime Delivery Workflow 需要已打开工作区、运行中任务、ModelPackageId、Runtime 路由和 Snapshot 样本身份。");
         return false;
     }
     *result = {};
     TaskSnapshot task;
     ModelPackageSnapshot modelPackage;
     ArtifactSnapshot sourceArtifact;
+    DatasetSnapshotRecord sampleSnapshot;
+    ArtifactSnapshot sampleArtifact;
     if (!storage_.task(taskId, &task, error) || task.state != TaskState::Running
         || !storage_.modelPackage(request.modelPackageId, &modelPackage, error)
-        || !storage_.artifact(modelPackage.sourceArtifactId, &sourceArtifact, error)) {
-        if (error && error->isEmpty()) *error = QStringLiteral("Runtime Delivery Workflow 只能使用运行中任务和已登记、已提交的 Model Package Artifact。");
+        || !storage_.artifact(modelPackage.sourceArtifactId, &sourceArtifact, error)
+        || !storage_.datasetSnapshot(request.sampleSnapshotId, &sampleSnapshot, error)
+        || !storage_.artifact(request.sampleSnapshotArtifactId, &sampleArtifact, error)) {
+        if (error && error->isEmpty()) *error = QStringLiteral("Runtime Delivery Workflow 只能使用运行中任务、已登记模型包和已登记 Dataset Snapshot Artifact。");
         return false;
     }
-    const QFileInfo sample(request.sampleImagePath);
-    if (!sample.exists() || !sample.isFile() || sample.isSymLink()) {
-        if (error) *error = QStringLiteral("Runtime Delivery Workflow 的样本图不存在、不是文件或为符号链接。");
+    if (sampleSnapshot.datasetId != request.sampleDatasetId
+        || sampleSnapshot.datasetVersionId != request.sampleDatasetVersionId
+        || sampleSnapshot.artifactId != request.sampleSnapshotArtifactId
+        || sampleArtifact.kind != QStringLiteral("dataset_snapshot")
+        || sampleArtifact.taskId != sampleSnapshot.taskId) {
+        if (error) *error = QStringLiteral("Runtime Delivery Workflow 样本 Snapshot 身份与 Artifact lineage 不一致。");
+        return false;
+    }
+    const QString sampleRelativePath = normalizedArtifactRelativePath(request.sampleRelativePath, error);
+    if (sampleRelativePath.isEmpty()) return false;
+    ArtifactFileSnapshot expectedSample;
+    bool sampleListed = false;
+    for (const ArtifactFileSnapshot& file : sampleArtifact.files) {
+        if (file.relativePath == sampleRelativePath) {
+            expectedSample = file;
+            sampleListed = true;
+            break;
+        }
+    }
+    if (!sampleListed || expectedSample.byteCount < 0 || expectedSample.sha256.size() != 64) {
+        if (error) *error = QStringLiteral("Runtime Delivery Workflow 样本不属于 Snapshot Artifact 文件清单：%1")
+            .arg(sampleRelativePath);
+        return false;
+    }
+    const QString sampleArtifactRoot = artifactStore_->artifactPath(sampleSnapshot.artifactId);
+    const QString sampleSourcePath = QDir(sampleArtifactRoot).filePath(sampleRelativePath);
+    const QFileInfo sample(sampleSourcePath);
+    if (!isChildPath(sampleArtifactRoot, sample.absoluteFilePath())
+        || !sample.exists() || !sample.isFile() || sample.isSymLink()
+        || sample.size() != expectedSample.byteCount) {
+        if (error) *error = QStringLiteral("Runtime Delivery Workflow 样本文件越界、丢失或已被修改：%1")
+            .arg(sampleRelativePath);
         return false;
     }
     const QString sampleSha256 = fileSha256(sample.absoluteFilePath(), error);
     if (sampleSha256.isEmpty()) return false;
+    if (sampleSha256 != expectedSample.sha256) {
+        if (error) *error = QStringLiteral("Runtime Delivery Workflow 样本 SHA-256 与 Snapshot Artifact 清单不一致：%1")
+            .arg(sampleRelativePath);
+        return false;
+    }
+    const QString stagingRoot = runtimeStagingPath(taskId);
+    const QString sampleWorkingPath = QDir(stagingRoot).filePath(
+        QStringLiteral("00-sample/%1").arg(sample.fileName()));
+    if (!copyFileIntoStaging(sample.absoluteFilePath(), sampleWorkingPath, error)) {
+        cleanupRuntimeStaging(taskId, nullptr);
+        return false;
+    }
 
     WorkflowRunSnapshot workflow;
     workflow.id = WorkflowRunId::create();
@@ -190,6 +290,11 @@ bool ProjectWorkspace::runRuntimeDeliveryWorkflow(const TaskId& taskId,
     QJsonObject parameters;
     parameters.insert(QStringLiteral("modelPackageId"), request.modelPackageId.toString());
     parameters.insert(QStringLiteral("runtimeRoute"), request.runtimeRoute.trimmed());
+    parameters.insert(QStringLiteral("sampleDatasetId"), request.sampleDatasetId.toString());
+    parameters.insert(QStringLiteral("sampleDatasetVersionId"), request.sampleDatasetVersionId.toString());
+    parameters.insert(QStringLiteral("sampleSnapshotId"), request.sampleSnapshotId.toString());
+    parameters.insert(QStringLiteral("sampleSnapshotArtifactId"), request.sampleSnapshotArtifactId.toString());
+    parameters.insert(QStringLiteral("sampleRelativePath"), sampleRelativePath);
     parameters.insert(QStringLiteral("sampleImageSha256"), sampleSha256);
     parameters.insert(QStringLiteral("options"), request.options);
     QVector<WorkflowStepSnapshot> steps;
@@ -214,7 +319,10 @@ bool ProjectWorkspace::runRuntimeDeliveryWorkflow(const TaskId& taskId,
     input.sourceArtifactKind = sourceArtifact.kind;
     input.modelPackageId = modelPackage.manifest.modelPackageId;
     input.boundAt = QDateTime::currentDateTimeUtc();
-    if (!storage_.createWorkflowRunWithInput(workflow, steps, input, error)) return false;
+    if (!storage_.createWorkflowRunWithInput(workflow, steps, input, error)) {
+        cleanupRuntimeStaging(taskId, nullptr);
+        return false;
+    }
     result->workflowRunId = workflow.id;
 
     ModelPackageRuntimeService resolver(&storage_, artifactStore_->rootPath());
@@ -227,7 +335,6 @@ bool ProjectWorkspace::runRuntimeDeliveryWorkflow(const TaskId& taskId,
     QJsonObject benchmarkFacts;
     benchmarkFacts.insert(QStringLiteral("available"), false);
     QJsonArray deliveryFacts;
-    const QString stagingRoot = runtimeStagingPath(taskId);
 
     const auto observe = [&](RuntimeStatus status, const QString& message) {
         observedStatus = status;
@@ -307,6 +414,11 @@ bool ProjectWorkspace::runRuntimeDeliveryWorkflow(const TaskId& taskId,
                 report.insert(QStringLiteral("modelPackageId"), request.modelPackageId.toString());
                 report.insert(QStringLiteral("sourceArtifactId"), modelPackage.sourceArtifactId.toString());
                 report.insert(QStringLiteral("runtimeRoute"), request.runtimeRoute);
+                report.insert(QStringLiteral("sampleDatasetId"), request.sampleDatasetId.toString());
+                report.insert(QStringLiteral("sampleDatasetVersionId"), request.sampleDatasetVersionId.toString());
+                report.insert(QStringLiteral("sampleSnapshotId"), request.sampleSnapshotId.toString());
+                report.insert(QStringLiteral("sampleSnapshotArtifactId"), request.sampleSnapshotArtifactId.toString());
+                report.insert(QStringLiteral("sampleRelativePath"), sampleRelativePath);
                 report.insert(QStringLiteral("runtimeStatus"), runtimeStatusToString(operation.status));
                 report.insert(QStringLiteral("capability"), capability.toJson());
                 report.insert(QStringLiteral("manifest"), manifest);
@@ -348,7 +460,7 @@ bool ProjectWorkspace::runRuntimeDeliveryWorkflow(const TaskId& taskId,
                             return canceledExecution(QStringLiteral("Runtime Benchmark 预热阶段收到取消请求，暂存产物不会提交。"));
                         }
                         QJsonObject invocation;
-                        invocation.insert(QStringLiteral("imagePath"), sample.absoluteFilePath());
+                        invocation.insert(QStringLiteral("imagePath"), sampleWorkingPath);
                         invocation.insert(QStringLiteral("outputPath"), QDir(outputPath).filePath(
                             QStringLiteral("warmup-%1").arg(iteration + 1)));
                         invocation.insert(QStringLiteral("options"), request.options);
@@ -366,7 +478,7 @@ bool ProjectWorkspace::runRuntimeDeliveryWorkflow(const TaskId& taskId,
                             return canceledExecution(QStringLiteral("Runtime Benchmark 采样阶段收到取消请求，暂存产物不会提交。"));
                         }
                         QJsonObject invocation;
-                        invocation.insert(QStringLiteral("imagePath"), sample.absoluteFilePath());
+                        invocation.insert(QStringLiteral("imagePath"), sampleWorkingPath);
                         invocation.insert(QStringLiteral("outputPath"), QDir(outputPath).filePath(
                             QStringLiteral("iteration-%1").arg(iteration + 1)));
                         invocation.insert(QStringLiteral("options"), request.options);
@@ -394,7 +506,7 @@ bool ProjectWorkspace::runRuntimeDeliveryWorkflow(const TaskId& taskId,
                     benchmarkMeasurement.insert(QStringLiteral("maxMs"), samplesMs.last());
                 } else {
                     QJsonObject invocation;
-                    invocation.insert(QStringLiteral("imagePath"), sample.absoluteFilePath());
+                    invocation.insert(QStringLiteral("imagePath"), sampleWorkingPath);
                     invocation.insert(QStringLiteral("outputPath"), outputPath);
                     invocation.insert(QStringLiteral("options"), request.options);
                     QElapsedTimer timer;
@@ -421,6 +533,11 @@ bool ProjectWorkspace::runRuntimeDeliveryWorkflow(const TaskId& taskId,
                 operationReport.insert(QStringLiteral("modelPackageId"), request.modelPackageId.toString());
                 operationReport.insert(QStringLiteral("runtimeRoute"), request.runtimeRoute);
                 operationReport.insert(QStringLiteral("runtimeStatus"), runtimeStatusToString(operation.status));
+                operationReport.insert(QStringLiteral("sampleDatasetId"), request.sampleDatasetId.toString());
+                operationReport.insert(QStringLiteral("sampleDatasetVersionId"), request.sampleDatasetVersionId.toString());
+                operationReport.insert(QStringLiteral("sampleSnapshotId"), request.sampleSnapshotId.toString());
+                operationReport.insert(QStringLiteral("sampleSnapshotArtifactId"), request.sampleSnapshotArtifactId.toString());
+                operationReport.insert(QStringLiteral("sampleRelativePath"), sampleRelativePath);
                 operationReport.insert(QStringLiteral("sampleImageSha256"), sampleSha256);
                 operationReport.insert(QStringLiteral("elapsedMs"), elapsedMs);
                 operationReport.insert(QStringLiteral("details"), persistedRuntimeDetails(operation));
@@ -467,6 +584,11 @@ bool ProjectWorkspace::runRuntimeDeliveryWorkflow(const TaskId& taskId,
                 report.insert(QStringLiteral("runtimeRoute"), request.runtimeRoute);
                 report.insert(QStringLiteral("runtimeStatus"),
                     statusObserved ? runtimeStatusToString(observedStatus) : QStringLiteral("not_probed"));
+                report.insert(QStringLiteral("sampleDatasetId"), request.sampleDatasetId.toString());
+                report.insert(QStringLiteral("sampleDatasetVersionId"), request.sampleDatasetVersionId.toString());
+                report.insert(QStringLiteral("sampleSnapshotId"), request.sampleSnapshotId.toString());
+                report.insert(QStringLiteral("sampleSnapshotArtifactId"), request.sampleSnapshotArtifactId.toString());
+                report.insert(QStringLiteral("sampleRelativePath"), sampleRelativePath);
                 report.insert(QStringLiteral("sampleImageSha256"), sampleSha256);
                 report.insert(QStringLiteral("benchmark"), benchmarkFacts);
                 report.insert(QStringLiteral("steps"), deliveryFacts);
@@ -546,6 +668,12 @@ bool ProjectWorkspace::runRuntimeDeliveryWorkflow(const TaskId& taskId,
     evidence.runtimeStatus.insert(QStringLiteral("modelSourceArtifactId"), input.sourceArtifactId.toString());
     evidence.runtimeStatus.insert(QStringLiteral("modelSourceArtifactKind"), input.sourceArtifactKind);
     evidence.runtimeStatus.insert(QStringLiteral("runtimeRoute"), request.runtimeRoute);
+    evidence.runtimeStatus.insert(QStringLiteral("sampleDatasetId"), request.sampleDatasetId.toString());
+    evidence.runtimeStatus.insert(QStringLiteral("sampleDatasetVersionId"), request.sampleDatasetVersionId.toString());
+    evidence.runtimeStatus.insert(QStringLiteral("sampleSnapshotId"), request.sampleSnapshotId.toString());
+    evidence.runtimeStatus.insert(QStringLiteral("sampleSnapshotArtifactId"), request.sampleSnapshotArtifactId.toString());
+    evidence.runtimeStatus.insert(QStringLiteral("sampleRelativePath"), sampleRelativePath);
+    evidence.runtimeStatus.insert(QStringLiteral("sampleImageSha256"), sampleSha256);
     evidence.runtimeStatus.insert(QStringLiteral("statusObserved"), statusObserved);
     evidence.runtimeStatus.insert(QStringLiteral("status"),
         statusObserved ? runtimeStatusToString(observedStatus) : QStringLiteral("not_probed"));

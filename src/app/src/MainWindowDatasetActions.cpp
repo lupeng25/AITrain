@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "TaskExecutionController.h"
 
 #include "DatasetConversionUiModel.h"
 #include "EvaluationReportView.h"
@@ -6,6 +7,7 @@
 #include "LanguageSupport.h"
 #include "MainWindowSupport.h"
 #include "aitrain/core/DetectionTrainer.h"
+#include "aitrain/core/WorkerProtocol.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -32,7 +34,6 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScrollArea>
-#include <QSettings>
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSplitter>
@@ -203,53 +204,6 @@ QString reviewClassText(const QJsonObject& sample)
     return QString();
 }
 
-void setAcceptanceTableRow(QTableWidget* table, const QString& stage, const QString& status, const QString& evidence, const QString& message)
-{
-    if (!table) {
-        return;
-    }
-    int row = -1;
-    for (int index = 0; index < table->rowCount(); ++index) {
-        if (table->item(index, 0) && table->item(index, 0)->text() == stage) {
-            row = index;
-            break;
-        }
-    }
-    if (row < 0) {
-        row = table->rowCount();
-        table->insertRow(row);
-    }
-    table->setItem(row, 0, new QTableWidgetItem(stage));
-    table->setItem(row, 1, new QTableWidgetItem(status));
-    table->setItem(row, 2, new QTableWidgetItem(QDir::toNativeSeparators(evidence)));
-    table->setItem(row, 3, new QTableWidgetItem(message));
-}
-
-QString defaultDatasetConversionOutputPath(const QString& sourcePath, const QString& projectPath, const QString& targetFormat)
-{
-    const QString normalizedSourcePath = QDir::fromNativeSeparators(sourcePath.trimmed());
-    if (normalizedSourcePath.isEmpty()) {
-        return QString();
-    }
-
-    const QFileInfo sourceInfo(normalizedSourcePath);
-    QString datasetName = sourceInfo.isFile() ? sourceInfo.completeBaseName() : sourceInfo.fileName();
-    if (datasetName.isEmpty()) {
-        datasetName = QStringLiteral("dataset");
-    }
-    const QString suffix = targetFormat.trimmed().isEmpty() ? QStringLiteral("converted") : targetFormat.trimmed();
-    const QString directoryName = QStringLiteral("%1-%2").arg(datasetName, suffix);
-    const QString normalizedProjectPath = QDir::fromNativeSeparators(projectPath.trimmed());
-    if (!normalizedProjectPath.isEmpty()) {
-        const QString conversionRoot = QDir(normalizedProjectPath).filePath(QStringLiteral("datasets/converted"));
-        QDir().mkpath(conversionRoot);
-        return QDir::cleanPath(QDir(conversionRoot).filePath(directoryName));
-    }
-    const QDir sourceDir(sourceInfo.isFile() ? sourceInfo.absolutePath() : normalizedSourcePath);
-    const QString outputPath = sourceDir.absoluteFilePath(QStringLiteral("../converted/%1").arg(directoryName));
-    return QDir::cleanPath(outputPath);
-}
-
 void setFieldErrorLabel(QLabel* label, const QString& text)
 {
     if (!label) {
@@ -275,7 +229,19 @@ void MainWindow::browseDataset()
         state_.dataset.currentPath = directory;
         const QString selectedFormat = currentDatasetFormat();
         state_.dataset.currentFormat = selectedFormat.isEmpty() ? detectedFormat : selectedFormat;
+        state_.dataset.currentDatasetId.clear();
+        state_.dataset.currentDatasetVersionId.clear();
+        state_.dataset.currentSnapshotId.clear();
+        state_.dataset.currentSnapshotArtifactId.clear();
         state_.dataset.currentValid = false;
+        if (dataQualityDatasetIdEdit_) dataQualityDatasetIdEdit_->clear();
+        if (dataQualityDatasetVersionIdEdit_) dataQualityDatasetVersionIdEdit_->clear();
+        if (dataQualitySnapshotIdEdit_) dataQualitySnapshotIdEdit_->clear();
+        if (dataQualitySnapshotArtifactIdEdit_) dataQualitySnapshotArtifactIdEdit_->clear();
+        if (splitSourceDatasetIdEdit_) splitSourceDatasetIdEdit_->clear();
+        if (splitSourceDatasetVersionIdEdit_) splitSourceDatasetVersionIdEdit_->clear();
+        if (splitSourceSnapshotIdEdit_) splitSourceSnapshotIdEdit_->clear();
+        if (splitSourceSnapshotArtifactIdEdit_) splitSourceSnapshotArtifactIdEdit_->clear();
         updateTrainingSelectionSummary();
         refreshTrainingDefaults();
         refreshDatasetConversionDefaultsFromCurrentDataset();
@@ -433,7 +399,7 @@ void MainWindow::startDatasetConversion()
     clearDatasetConversionErrors();
     if (worker_.isRunning() || currentProjectPath_.isEmpty() || !workspace_.isOpen()) {
         if (datasetConversionStatusLabel_) datasetConversionStatusLabel_->setText(
-            uiText("请先打开  项目，并等待当前 Worker 任务结束。"));
+            uiText("请先打开项目，并等待当前 Worker 任务结束。"));
         return;
     }
     const QString sourceFormat = comboCurrentDataOrText(datasetConversionSourceFormatCombo_);
@@ -478,17 +444,17 @@ void MainWindow::startDatasetConversion()
     activeWorkflowKind_ = QStringLiteral("dataset_conversion");
     setDatasetConversionFormRunning(true);
 
-    if (!worker_.requestDatasetConversionWorkflow(
-            workerExecutablePath(),
-            currentProjectPath_,
-            sourcePath,
-            sourceFormat,
-            targetFormat,
-            targetDatasetId,
-            targetDatasetName,
-            options,
-            &error,
-            activeTaskId_)) {
+    aitrain::worker_protocol::DatasetConversionCommand conversionCommand;
+    conversionCommand.context.taskId = taskId;
+    conversionCommand.context.projectRoot = currentProjectPath_;
+    conversionCommand.sourcePath = sourcePath;
+    conversionCommand.sourceFormat = sourceFormat;
+    conversionCommand.targetFormat = targetFormat;
+    conversionCommand.targetDatasetId = targetDatasetId;
+    conversionCommand.targetDatasetName = targetDatasetName;
+    conversionCommand.options = options;
+    if (!taskController_->start(workerExecutablePath(),
+            aitrain::worker_protocol::TaskCommand{conversionCommand}, &error)) {
         activeTaskId_.clear();
         activeWorkflowKind_.clear();
         setDatasetConversionFormRunning(false);
@@ -512,7 +478,7 @@ void MainWindow::validateDataset()
         return;
     }
     if (currentProjectPath_.isEmpty() || !workspace_.isOpen()) {
-        QMessageBox::warning(this, uiText("数据质量报告"), uiText("请先创建或打开  项目。"));
+        QMessageBox::warning(this, uiText("数据质量报告"), uiText("请先创建或打开项目。"));
         return;
     }
     const QString datasetId = dataQualityDatasetIdEdit_ ? dataQualityDatasetIdEdit_->text().trimmed() : QString();
@@ -531,13 +497,13 @@ void MainWindow::validateDataset()
         || !aitrain::SnapshotId::parse(snapshotId, &parsedSnapshotId, &error)
         || !aitrain::ArtifactId::parse(snapshotArtifactId, &parsedArtifactId, &error)) {
         QMessageBox::warning(this, uiText("数据质量报告"),
-            uiText("请填写同一条  快照记录的 DatasetId、DatasetVersionId、SnapshotId 和 ArtifactId。"));
+            uiText("请填写同一条快照记录的 DatasetId、DatasetVersionId、SnapshotId 和 ArtifactId。"));
         return;
     }
     if (validationIssuesTable_) {
         validationIssuesTable_->setRowCount(0);
     }
-    validationSummaryLabel_->setText(uiText("Data Quality  正在校验已登记快照。"));
+        validationSummaryLabel_->setText(uiText("Data Quality 正在校验已登记快照。"));
     validationOutput_->setPlainText(uiText("结果将以 ArtifactId 返回，文件请在“任务与产物”查看。"));
 
     QJsonObject options;
@@ -548,9 +514,16 @@ void MainWindow::validateDataset()
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     activeTaskId_ = taskId.toString();
     activeWorkflowKind_ = QStringLiteral("data_quality");
-    if (!worker_.requestDataQualityWorkflow(workerExecutablePath(), currentProjectPath_,
-            datasetId, datasetVersionId, snapshotId, snapshotArtifactId, options,
-            &error, activeTaskId_)) {
+    aitrain::worker_protocol::DataQualityCommand qualityCommand;
+    qualityCommand.context.taskId = taskId;
+    qualityCommand.context.projectRoot = currentProjectPath_;
+    qualityCommand.datasetId = datasetId;
+    qualityCommand.datasetVersionId = datasetVersionId;
+    qualityCommand.snapshotId = snapshotId;
+    qualityCommand.snapshotArtifactId = snapshotArtifactId;
+    qualityCommand.options = options;
+    if (!taskController_->start(workerExecutablePath(),
+            aitrain::worker_protocol::TaskCommand{qualityCommand}, &error)) {
         activeTaskId_.clear();
         activeWorkflowKind_.clear();
         validationSummaryLabel_->setText(uiText("无法启动 Data Quality ：%1").arg(error));
@@ -600,10 +573,18 @@ void MainWindow::splitDataset()
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     activeTaskId_ = taskId.toString();
     activeWorkflowKind_ = QStringLiteral("dataset_split");
-    if (!worker_.requestDatasetSplitWorkflow(workerExecutablePath(), currentProjectPath_,
-            sourceDatasetId, sourceDatasetVersionId, sourceSnapshotId,
-            sourceSnapshotArtifactId, targetDatasetId, targetDatasetName,
-            options, &error, taskId.toString())) {
+    aitrain::worker_protocol::DatasetSplitCommand splitCommand;
+    splitCommand.context.taskId = taskId;
+    splitCommand.context.projectRoot = currentProjectPath_;
+    splitCommand.sourceDatasetId = sourceDatasetId;
+    splitCommand.sourceDatasetVersionId = sourceDatasetVersionId;
+    splitCommand.sourceSnapshotId = sourceSnapshotId;
+    splitCommand.sourceSnapshotArtifactId = sourceSnapshotArtifactId;
+    splitCommand.targetDatasetId = targetDatasetId;
+    splitCommand.targetDatasetName = targetDatasetName;
+    splitCommand.options = options;
+    if (!taskController_->start(workerExecutablePath(),
+            aitrain::worker_protocol::TaskCommand{splitCommand}, &error)) {
         activeTaskId_.clear();
         activeWorkflowKind_.clear();
         QMessageBox::critical(this, uiText("数据集划分"), error);
@@ -638,7 +619,7 @@ void MainWindow::createXAnyLabelingAnnotationSession()
     }
 
     if (!workspace_.isOpen() || currentProjectPath_.isEmpty()) {
-        QMessageBox::information(this, uiText("X-AnyLabeling 会话"), uiText("请先打开  项目。"));
+        QMessageBox::information(this, uiText("X-AnyLabeling 会话"), uiText("请先打开项目。"));
         return;
     }
     bool accepted = false;
@@ -666,8 +647,15 @@ void MainWindow::createXAnyLabelingAnnotationSession()
     activeTaskId_ = taskId.toString();
     activeWorkflowKind_ = QStringLiteral("annotation_create");
     state_.dataset.annotationWorkingDirectory = workingDirectory;
-    if (!worker_.requestAnnotationSessionCreate(workerExecutablePath(), currentProjectPath_,
-            repairArtifactId.toString(), workingDirectory, toolSummary, options, &error, activeTaskId_)) {
+    aitrain::worker_protocol::AnnotationSessionCreateCommand createCommand;
+    createCommand.context.taskId = taskId;
+    createCommand.context.projectRoot = currentProjectPath_;
+    createCommand.repairManifestArtifactId = repairArtifactId.toString();
+    createCommand.workingDirectory = workingDirectory;
+    createCommand.toolSummary = toolSummary;
+    createCommand.options = options;
+    if (!taskController_->start(workerExecutablePath(),
+            aitrain::worker_protocol::TaskCommand{createCommand}, &error)) {
         activeTaskId_.clear();
         activeWorkflowKind_.clear();
         QMessageBox::critical(this, uiText("X-AnyLabeling 会话"), error);
@@ -692,7 +680,7 @@ void MainWindow::syncXAnyLabelingAnnotationSession()
     }
 
     if (!workspace_.isOpen() || currentProjectPath_.isEmpty()) {
-        QMessageBox::information(this, uiText("X-AnyLabeling 同步"), uiText("请先打开  项目。"));
+        QMessageBox::information(this, uiText("X-AnyLabeling 同步"), uiText("请先打开项目。"));
         return;
     }
     bool accepted = false;
@@ -717,8 +705,14 @@ void MainWindow::syncXAnyLabelingAnnotationSession()
     activeWorkflowKind_ = QStringLiteral("annotation_sync");
     state_.dataset.latestAnnotationSessionArtifactId = sessionArtifactId.toString();
     state_.dataset.annotationWorkingDirectory = workingDirectory;
-    if (!worker_.requestAnnotationSessionSync(workerExecutablePath(), currentProjectPath_,
-            sessionArtifactId.toString(), workingDirectory, options, &error, activeTaskId_)) {
+    aitrain::worker_protocol::AnnotationSessionSyncCommand syncCommand;
+    syncCommand.context.taskId = taskId;
+    syncCommand.context.projectRoot = currentProjectPath_;
+    syncCommand.sessionArtifactId = sessionArtifactId.toString();
+    syncCommand.workingDirectory = workingDirectory;
+    syncCommand.options = options;
+    if (!taskController_->start(workerExecutablePath(),
+            aitrain::worker_protocol::TaskCommand{syncCommand}, &error)) {
         activeTaskId_.clear();
         activeWorkflowKind_.clear();
         QMessageBox::critical(this, uiText("X-AnyLabeling 同步"), error);
@@ -731,7 +725,7 @@ void MainWindow::syncXAnyLabelingAnnotationSession()
         QVector<QStringList>{
             QStringList() << uiText("外部修复") << uiText("已返回") << uiText("Session ArtifactId：%1").arg(sessionArtifactId.toString()),
             QStringList() << uiText("同步") << uiText("运行中") << uiText("Worker 正在重验基线、编辑白名单、文件集合和哈希。"),
-            QStringList() << uiText("复检") << uiText("等待") << uiText("同步成功后由  Query/Presenter 刷新新 Dataset Version。")
+            QStringList() << uiText("复检") << uiText("等待") << uiText("同步成功后由 Query/Presenter 刷新新 Dataset Version。")
         });
 }
 
@@ -915,9 +909,16 @@ void MainWindow::createDatasetSnapshot()
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     activeTaskId_ = taskId.toString();
     activeWorkflowKind_ = QStringLiteral("dataset_snapshot_import");
-    if (!worker_.requestDatasetSnapshotImportWorkflow(workerExecutablePath(),
-            currentProjectPath_, path, format, targetDatasetId, targetDatasetName,
-            options, &error, taskId.toString())) {
+    aitrain::worker_protocol::DatasetSnapshotImportCommand snapshotCommand;
+    snapshotCommand.context.taskId = taskId;
+    snapshotCommand.context.projectRoot = currentProjectPath_;
+    snapshotCommand.sourcePath = path;
+    snapshotCommand.sourceFormat = format;
+    snapshotCommand.targetDatasetId = targetDatasetId;
+    snapshotCommand.targetDatasetName = targetDatasetName;
+    snapshotCommand.options = options;
+    if (!taskController_->start(workerExecutablePath(),
+            aitrain::worker_protocol::TaskCommand{snapshotCommand}, &error)) {
         activeTaskId_.clear();
         activeWorkflowKind_.clear();
         QMessageBox::critical(this, uiText("数据集快照"), error);

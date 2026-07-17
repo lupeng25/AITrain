@@ -16,7 +16,7 @@ bool ProjectSummaryPresenter::refresh()
     if (!queryService_ || !queryService_->projectSummary(&summary, &error)) {
         viewModel_ = ProjectSummaryViewModel();
         lastError_ = error.isEmpty()
-            ? QStringLiteral("无法读取  项目汇总。")
+            ? QStringLiteral("无法读取项目汇总。")
             : error;
         emit summaryChanged();
         emit queryFailed(lastError_);

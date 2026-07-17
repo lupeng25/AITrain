@@ -3,8 +3,16 @@ add_executable(AITrainStudio WIN32
     src/AiTrainAppConfig.h.in
     src/AppStyle.h
     src/AppStyle.cpp
+    src/ApplicationEventRouter.h
+    src/ApplicationEventRouter.cpp
+    src/ApplicationSettingsService.h
+    src/ApplicationSettingsService.cpp
     src/DatasetConversionUiModel.h
     src/DatasetConversionUiModel.cpp
+    src/DatasetCatalogPresenter.h
+    src/DatasetCatalogPresenter.cpp
+    src/DeliveryEvidencePresenter.h
+    src/DeliveryEvidencePresenter.cpp
     src/EvaluationReportView.h
     src/EvaluationReportView.cpp
     src/DiagnosticBundlePresenter.h
@@ -15,6 +23,8 @@ add_executable(AITrainStudio WIN32
     src/InfoPanel.cpp
     src/LanguageSupport.h
     src/LanguageSupport.cpp
+    src/LicenseTokenStore.h
+    src/LicenseTokenStore.cpp
     src/MainWindow.h
     src/MainWindow.cpp
     src/MainWindowActions.cpp
@@ -52,6 +62,8 @@ add_executable(AITrainStudio WIN32
     src/TaskArtifactPanel.cpp
     src/TaskArtifactPresenter.h
     src/TaskArtifactPresenter.cpp
+    src/TaskExecutionController.h
+    src/TaskExecutionController.cpp
     src/WorkerClient.h
     src/WorkerClient.cpp
     src/WorkspaceRouter.h

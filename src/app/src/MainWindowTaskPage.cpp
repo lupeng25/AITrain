@@ -7,10 +7,7 @@
 
 #include <QAbstractItemView>
 #include <QComboBox>
-#include <QDesktopServices>
 #include <QDir>
-#include <QFileDialog>
-#include <QFileInfo>
 #include <QFrame>
 #include <QGridLayout>
 #include <QHeaderView>
@@ -21,7 +18,6 @@
 #include <QScrollArea>
 #include <QSizePolicy>
 #include <QSplitter>
-#include <QStatusBar>
 #include <QTableWidget>
 #include <QVBoxLayout>
 
@@ -43,12 +39,10 @@ QWidget* MainWindow::buildTaskQueuePage()
     connect(headerRefreshButton, &QPushButton::clicked, this, &MainWindow::updateRecentTasks);
 
     auto* refreshButton = primaryButton(QStringLiteral("刷新历史"));
-    auto* cancelButton = dangerButton(QStringLiteral("取消选中任务"));
-    auto* reproduceButton = new QPushButton(QStringLiteral("复现实验"));
-    cancelButton->setEnabled(false);
-    cancelButton->setToolTip(uiText("选中任务取消尚未迁移到  Application Service。"));
-    reproduceButton->setEnabled(false);
-    reproduceButton->setToolTip(uiText("复现实验写用例尚未迁移到  Application Service。"));
+    taskCancelButton_ = dangerButton(QStringLiteral("取消当前任务"));
+    taskCancelButton_->setObjectName(QStringLiteral("TaskCancelButton"));
+    taskCancelButton_->setEnabled(false);
+    taskCancelButton_->setToolTip(uiText("只允许取消当前 Worker 活动任务；历史任务只读。"));
     taskKindFilterCombo_ = new QComboBox;
     taskKindFilterCombo_->setMinimumWidth(140);
     taskKindFilterCombo_->addItem(uiText("全部类别"), QString());
@@ -69,7 +63,7 @@ QWidget* MainWindow::buildTaskQueuePage()
     taskSearchEdit_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     taskSearchEdit_->setPlaceholderText(QStringLiteral("搜索任务、后端、消息"));
     connect(refreshButton, &QPushButton::clicked, this, &MainWindow::updateRecentTasks);
-    connect(cancelButton, &QPushButton::clicked, this, &MainWindow::cancelSelectedTask);
+    connect(taskCancelButton_, &QPushButton::clicked, this, &MainWindow::cancelSelectedTask);
     connect(taskKindFilterCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::applyTaskFilters);
     connect(taskStateFilterCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::applyTaskFilters);
     connect(taskSearchEdit_, &QLineEdit::textChanged, this, &MainWindow::applyTaskFilters);
@@ -87,8 +81,7 @@ QWidget* MainWindow::buildTaskQueuePage()
     actionCaption->setObjectName(QStringLiteral("TaskFilterLabel"));
     actionLayout->addWidget(actionCaption, 0, 0);
     actionLayout->addWidget(refreshButton, 0, 1);
-    actionLayout->addWidget(cancelButton, 0, 2);
-    actionLayout->addWidget(reproduceButton, 0, 3);
+    actionLayout->addWidget(taskCancelButton_, 0, 2);
 
     auto* categoryLabel = new QLabel(QStringLiteral("类别"));
     categoryLabel->setObjectName(QStringLiteral("TaskFilterLabel"));
@@ -105,7 +98,7 @@ QWidget* MainWindow::buildTaskQueuePage()
     actionLayout->setColumnStretch(5, 1);
 
     toolbar->bodyLayout()->addWidget(controlStrip);
-    toolbar->bodyLayout()->addWidget(mutedLabel(QStringLiteral("这里只读展示  已持久化任务；已提交产物、指标和工作流步骤在下方集中查看。")));
+    toolbar->bodyLayout()->addWidget(mutedLabel(QStringLiteral("这里只读展示已持久化任务；已提交产物、指标和工作流步骤在下方集中查看。")));
 
     auto* tablePanel = new InfoPanel(QStringLiteral("任务历史"));
     tablePanel->setMinimumWidth(300);
@@ -145,14 +138,12 @@ QWidget* MainWindow::buildTaskQueuePage()
     detailPanel->bodyLayout()->setSpacing(12);
     taskArtifactPanel_ = new TaskArtifactPanel;
     taskArtifactPanel_->setObjectName(QStringLiteral("TaskArtifactPanel"));
+    taskArtifactPanel_->setPresenter(taskArtifactPresenter_);
     if (taskArtifactPresenter_) {
         connect(taskArtifactPresenter_, &TaskArtifactPresenter::detailsChanged, this, [this]() {
             if (taskArtifactPanel_) taskArtifactPanel_->setDetails(taskArtifactPresenter_->details());
         });
     }
-    connect(taskArtifactPanel_, &TaskArtifactPanel::openDirectoryRequested, this, &MainWindow::openSelectedArtifactDirectory);
-    connect(taskArtifactPanel_, &TaskArtifactPanel::copyPathRequested, this, &MainWindow::copySelectedArtifactPath);
-    connect(taskArtifactPanel_, &TaskArtifactPanel::useForInferenceRequested, this, &MainWindow::useSelectedArtifactForInference);
     detailPanel->bodyLayout()->addWidget(taskArtifactPanel_, 1);
     auto* bodySplitter = new QSplitter(Qt::Horizontal);
     bodySplitter->addWidget(tablePanel);
@@ -165,7 +156,7 @@ QWidget* MainWindow::buildTaskQueuePage()
     layout->addWidget(createWorkbenchHeader(
         QStringLiteral("TASK ARTIFACT CENTER"),
         uiText("任务与产物工作台"),
-        uiText("按任务追踪  已提交产物、指标和工作流步骤；页面不读取 Worker 原始消息，也不暴露 Artifact Store 裸路径。"),
+        uiText("按任务追踪已提交产物、指标和工作流步骤；页面不读取 Worker 原始消息，也不暴露 Artifact Store 裸路径。"),
         headerRefreshButton,
         QStringList()
             << uiText("任务历史")
@@ -181,16 +172,23 @@ QWidget* MainWindow::buildTaskQueuePage()
 void MainWindow::cancelSelectedTask()
 {
     if (!activeTaskId_.isEmpty() && worker_.isRunning()) {
-        aitrain::TaskId taskId;
-        QString error;
-        if (!aitrain::TaskId::parse(activeTaskId_, &taskId, &error)
-            || !workspace_.requestTaskCancellation(taskId, &error)) {
-            QMessageBox::warning(this, uiText("任务队列"), error);
-            return;
-        }
+        // Worker/Core 是运行任务取消的唯一写入方；GUI 不再直接改写同一 Task
+        // 的 CancelRequested，避免双写和 Worker/Core 状态竞态。
         worker_.cancel();
         return;
     }
     QMessageBox::information(this, uiText("任务队列"),
-        uiText("只能取消当前 GUI 会话派发且仍在运行的  任务。历史任务为只读。"));
+        uiText("只能取消当前 GUI 会话派发且仍在运行的任务。历史任务为只读。"));
+}
+
+void MainWindow::updateTaskCancelButton()
+{
+    if (!taskCancelButton_) {
+        return;
+    }
+    const bool canCancel = !activeTaskId_.isEmpty() && worker_.isRunning();
+    taskCancelButton_->setEnabled(canCancel);
+    taskCancelButton_->setToolTip(canCancel
+        ? uiText("取消当前 Worker 活动任务。")
+        : uiText("只允许取消当前 Worker 活动任务；历史任务只读。"));
 }

@@ -83,26 +83,48 @@ private slots:
         namespace wp = aitrain::worker_protocol;
         const aitrain::RequestId requestId = aitrain::RequestId::create();
         const aitrain::TaskId taskId = aitrain::TaskId::create();
-        const QJsonObject businessPayload{{QStringLiteral("taskId"), taskId.toString()}};
+        const QJsonObject requestPayload{
+            {QStringLiteral("taskId"), taskId.toString()},
+            {QStringLiteral("projectRoot"), QStringLiteral("C:/AITrain/project")},
+            {QStringLiteral("datasetId"), aitrain::DatasetId::create().toString()},
+            {QStringLiteral("datasetVersionId"), aitrain::DatasetVersionId::create().toString()},
+            {QStringLiteral("snapshotId"), aitrain::SnapshotId::create().toString()},
+            {QStringLiteral("snapshotArtifactId"), aitrain::ArtifactId::create().toString()},
+            {QStringLiteral("options"), QJsonObject{}}};
+        wp::TaskCommand commandValue;
+        QString error;
+        QVERIFY2(wp::taskCommandFromPayload(
+            wp::command::runDataQualityWorkflow(), requestPayload, &commandValue, &error), qPrintable(error));
 
         const aitrain::ProtocolEnvelope start = wp::control::startTaskEnvelope(
-            requestId, taskId, 1, wp::command::runDataQualityWorkflow(), businessPayload);
+            requestId, taskId, 1, commandValue);
         QCOMPARE(start.kind, QStringLiteral("command.start_task"));
-        QString command;
-        QJsonObject decodedPayload;
-        QString error;
-        QVERIFY2(wp::control::unpackStartTask(start, &command, &decodedPayload, &error), qPrintable(error));
-        QCOMPARE(command, wp::command::runDataQualityWorkflow());
-        QCOMPARE(decodedPayload, businessPayload);
+        wp::TaskCommand decodedCommand;
+        QVERIFY2(wp::control::unpackStartTask(start, &decodedCommand, &error), qPrintable(error));
+        QCOMPARE(wp::taskCommandType(decodedCommand), wp::command::runDataQualityWorkflow());
+        QCOMPARE(wp::taskCommandPayload(decodedCommand), requestPayload);
 
+        const wp::TaskEvent resultEvent = wp::taskEventFromType(
+            wp::event::dataQualityWorkflow(), requestPayload);
         const aitrain::ProtocolEnvelope result = wp::control::eventEnvelope(
-            requestId, taskId, 2, wp::event::dataQualityWorkflow(), businessPayload);
+            requestId, taskId, 2, resultEvent);
         QCOMPARE(result.kind, QStringLiteral("event.result"));
         QVERIFY(aitrain::isKnownProtocolKind(result.kind));
-        QString event;
-        QVERIFY2(wp::control::unpackBusinessEvent(result, &event, &decodedPayload, &error), qPrintable(error));
-        QCOMPARE(event, wp::event::dataQualityWorkflow());
-        QCOMPARE(decodedPayload, businessPayload);
+        wp::TaskEvent decodedEvent;
+        QVERIFY2(wp::control::unpackTaskEvent(result, &decodedEvent, &error), qPrintable(error));
+        QCOMPARE(wp::taskEventType(decodedEvent), wp::event::dataQualityWorkflow());
+        QCOMPARE(decodedEvent.details, requestPayload);
+
+        const QJsonObject externalPayload{
+            {QStringLiteral("taskId"), taskId.toString()},
+            {QStringLiteral("projectRoot"), QStringLiteral("C:/AITrain/project")},
+            {QStringLiteral("sourcePath"), QStringLiteral("C:/evidence/acceptance.json")}};
+        wp::TaskCommand externalCommand;
+        QVERIFY2(wp::taskCommandFromPayload(
+            wp::command::importExternalAcceptanceEvidence(), externalPayload,
+            &externalCommand, &error), qPrintable(error));
+        QCOMPARE(wp::taskCommandType(externalCommand), wp::command::importExternalAcceptanceEvidence());
+        QCOMPARE(wp::taskCommandPayload(externalCommand), externalPayload);
     }
 
     void packagingLayoutContainsOnlyProductDirectories()

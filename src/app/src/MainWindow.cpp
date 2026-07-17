@@ -1,8 +1,14 @@
 #include "MainWindow.h"
 
+#include "ApplicationEventRouter.h"
+#include "TaskExecutionController.h"
+
 #include "EvaluationReportView.h"
 #include "DiagnosticBundlePresenter.h"
+#include "DatasetCatalogPresenter.h"
+#include "DeliveryEvidencePresenter.h"
 #include "EnvironmentCheckPresenter.h"
+#include "ApplicationSettingsService.h"
 #include "ModelRegistryPresenter.h"
 #include "InfoPanel.h"
 #include "LanguageSupport.h"
@@ -14,6 +20,7 @@
 #include "aitrain/core/DetectionTrainer.h"
 
 #include <QApplication>
+#include <QCloseEvent>
 #include <QCheckBox>
 #include <QClipboard>
 #include <QDateTime>
@@ -40,7 +47,6 @@
 #include <QRegularExpression>
 #include <QResizeEvent>
 #include <QScrollArea>
-#include <QSettings>
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSplitter>
@@ -68,6 +74,8 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     diagnosticBundlePresenter_ = new DiagnosticBundlePresenter(&queryService_, this);
     environmentCheckPresenter_ = new EnvironmentCheckPresenter(&queryService_, this);
     modelRegistryPresenter_ = new ModelRegistryPresenter(&queryService_, this);
+    datasetCatalogPresenter_ = new DatasetCatalogPresenter(&queryService_, this);
+    deliveryEvidencePresenter_ = new DeliveryEvidencePresenter(&queryService_, this);
     setWindowTitle(QStringLiteral("AITrain Studio"));
     setMinimumSize(1180, 760);
 
@@ -121,23 +129,51 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     statusBar()->setVisible(false);
 
     workspaceRouter_ = new WorkspaceRouter(PageCount, this);
+    eventRouter_ = new ApplicationEventRouter(&worker_, this);
+    taskController_ = new TaskExecutionController(&worker_, this);
     connect(sidebar_, &Sidebar::pageRequested, workspaceRouter_, &WorkspaceRouter::navigate);
     connect(workspaceRouter_, &WorkspaceRouter::pageRequested, this, &MainWindow::showPage);
-    connect(&worker_, &WorkerClient::messageReceived, this, &MainWindow::handleWorkerMessage);
+    connect(eventRouter_, &ApplicationEventRouter::taskViewStateChanged,
+        this, &MainWindow::handleTaskViewStateChanged);
+    connect(eventRouter_, &ApplicationEventRouter::taskFactsInvalidated, this,
+        [this](const QString& taskId) {
+            const bool isEnvironmentTask = activeWorkflowKind_ == QStringLiteral("environment_check")
+                || (environmentCheckPresenter_
+                    && environmentCheckPresenter_->viewModel().taskId == taskId);
+            if (isEnvironmentTask && environmentCheckPresenter_
+                && environmentCheckPresenter_->selectTask(taskId)) {
+                refreshEnvironmentReportView();
+                updateEnvironmentSummary();
+                updateDashboardSummary();
+            }
+            updateRecentTasks();
+            updateSelectedTaskDetails();
+            updateProjectSummary();
+            updateDashboardSummary();
+            updateDeliveryAcceptanceSummary();
+            updateModelRegistry();
+        });
+    connect(environmentCheckPresenter_, &EnvironmentCheckPresenter::changed, this, [this]() {
+        refreshEnvironmentReportView();
+        updateEnvironmentSummary();
+        updateDashboardSummary();
+    });
     connect(&worker_, &WorkerClient::logLine, this, &MainWindow::appendLog);
     connect(&worker_, &WorkerClient::connected, this, [this]() {
         workerPill_->setStatus(tr("Worker 已连接"), StatusPill::Tone::Success);
+        updateTaskCancelButton();
         updateHeaderState();
     });
     connect(&worker_, &WorkerClient::finished, this,
         [this](WorkerClient::WorkerTerminalStatus status, const QString& message) {
         const bool ok = status == WorkerClient::WorkerTerminalStatus::Succeeded;
+        const bool canceled = status == WorkerClient::WorkerTerminalStatus::Canceled;
         progressBar_->setValue(ok ? 100 : progressBar_->value());
         if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingEtaValue")); label && ok) {
             label->setText(QStringLiteral("0s"));
         }
-        workerPill_->setStatus(ok ? tr("任务完成") : tr("任务失败"),
-            ok ? StatusPill::Tone::Success : StatusPill::Tone::Error);
+        workerPill_->setStatus(ok ? tr("任务完成") : (canceled ? tr("任务已取消") : tr("任务失败")),
+            ok ? StatusPill::Tone::Success : (canceled ? StatusPill::Tone::Warning : StatusPill::Tone::Error));
         if (modelImportInProgress_) {
             modelImportInProgress_ = false;
             if (modelImportResultLabel_) {
@@ -148,23 +184,37 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
             updateModelRegistry();
         }
         updateHeaderState();
-        appendLog(ok ? tr("任务完成：%1").arg(message) : tr("任务失败：%1").arg(message));
-        const QString kind;
-        const QString path;
-        if (kind == QStringLiteral("inference_overlay") && inferenceOverlayLabel_) {
-            loadInferenceOverlay(inferenceOverlayLabel_, path);
-        } else if (kind == QStringLiteral("inference_predictions") && inferenceResultLabel_) {
-            inferenceResultLabel_->setText(inferenceSummaryFromPredictions(path));
+        updateTaskCancelButton();
+        appendLog(ok ? tr("任务完成：%1").arg(message)
+            : (canceled ? tr("任务已取消：%1").arg(message) : tr("任务失败：%1").arg(message)));
+    });
+    connect(&worker_, &WorkerClient::idle, this, [this]() {
+        updateTaskCancelButton();
+        if (!closePending_) {
+            return;
         }
+        closePending_ = false;
+        QTimer::singleShot(0, this, [this]() { close(); });
     });
 
     refreshBuiltInCapabilities();
-    aitrain_app::translateWidgetTree(this);
     showPage(TrainingPage, tr("训练实验"));
     updateHeaderState();
     updateResponsiveChrome();
     updateDashboardSummary();
     updateLanguageButtonState();
+}
+
+void MainWindow::closeEvent(QCloseEvent* event)
+{
+    if (worker_.isRunning()) {
+        closePending_ = true;
+        worker_.cancel();
+        statusBar()->showMessage(uiText("正在异步取消当前任务，任务结束后关闭窗口。"), 5000);
+        event->ignore();
+        return;
+    }
+    QMainWindow::closeEvent(event);
 }
 
 void MainWindow::resizeEvent(QResizeEvent* event)
@@ -221,8 +271,8 @@ QString MainWindow::defaultProjectPath() const
 
 QString MainWindow::configuredDefaultProjectPath() const
 {
-    QSettings settings;
-    const QString configured = settings.value(defaultProjectPathSettingsKey(), defaultProjectPath()).toString().trimmed();
+    ApplicationSettingsService settings;
+    const QString configured = settings.defaultProjectPath(defaultProjectPath()).trimmed();
     if (configured.isEmpty()) {
         return defaultProjectPath();
     }
@@ -367,8 +417,8 @@ void MainWindow::storeDefaultProjectPathPreference(const QString& path)
         return;
     }
 
-    QSettings settings;
-    settings.setValue(defaultProjectPathSettingsKey(), normalized);
+    ApplicationSettingsService settings;
+    settings.setDefaultProjectPath(normalized);
     const QString native = QDir::toNativeSeparators(normalized);
     if (settingsDefaultProjectPathEdit_) {
         settingsDefaultProjectPathEdit_->setText(native);

@@ -23,7 +23,7 @@ bool EnvironmentCheckPresenter::selectTask(const QString& taskIdText)
     if (!queryService_ || !queryService_->taskDetails(taskId, &model, &error)
         || !queryService_->environmentCheckReport(taskId, &report, &error)) {
         clear();
-        lastError_ = error.isEmpty() ? QStringLiteral("无法读取 Environment Check  任务。") : error;
+        lastError_ = error.isEmpty() ? QStringLiteral("无法读取 Environment Check 任务。") : error;
         emit queryFailed(lastError_);
         return false;
     }
@@ -36,7 +36,7 @@ bool EnvironmentCheckPresenter::selectTask(const QString& taskIdText)
     }
     if (!correctWorkflow) {
         clear();
-        lastError_ = QStringLiteral("所选 Task 不是 Environment Check  工作流。");
+        lastError_ = QStringLiteral("所选 Task 不是 Environment Check 工作流。");
         emit queryFailed(lastError_);
         return false;
     }

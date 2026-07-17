@@ -63,197 +63,16 @@ WorkerClient::~WorkerClient()
         // QObject 析构阶段不能再进入嵌套事件循环等待 Worker。进程树的长期
         // 回收由 Worker/ Job Object 负责；GUI 这里只做立即的最后兜底。
         process_.kill();
-        process_.waitForFinished(2000);
     }
 }
 
-bool WorkerClient::requestTrainingWorkflow(const QString& workerProgram, const QJsonObject& request, QString* error)
+bool WorkerClient::startTask(const QString& workerProgram,
+    const wp::TaskCommand& command,
+    QString* error)
 {
-    return startWorkerCommand(workerProgram, wp::command::runTrainingWorkflow(), request, error);
+    return startWorkerCommand(workerProgram, wp::taskCommandType(command),
+        wp::taskCommandPayload(command), error);
 }
-
-bool WorkerClient::requestEnvironmentCheckWorkflow(const QString& workerProgram,
-    const QString& projectRoot, QString* error, const QString& taskId)
-{
-    return startWorkerCommand(workerProgram, wp::command::runEnvironmentCheckWorkflow(),
-        QJsonObject{{wp::field::taskId(), taskId}, {QStringLiteral("projectRoot"), projectRoot}}, error);
-}
-
-bool WorkerClient::requestDatasetSplitWorkflow(const QString& workerProgram,
-    const QString& projectRoot,
-    const QString& sourceDatasetId,
-    const QString& sourceDatasetVersionId,
-    const QString& sourceSnapshotId,
-    const QString& sourceSnapshotArtifactId,
-    const QString& targetDatasetId,
-    const QString& targetDatasetName,
-    const QJsonObject& options,
-    QString* error,
-    const QString& taskId)
-{
-    return startWorkerCommand(
-        workerProgram,
-        wp::command::runDatasetSplitWorkflow(),
-        wp::datasetSplitWorkflowRequest(taskId, projectRoot, sourceDatasetId,
-            sourceDatasetVersionId, sourceSnapshotId, sourceSnapshotArtifactId,
-            targetDatasetId, targetDatasetName, options),
-        error);
-}
-
-bool WorkerClient::requestDatasetConversionWorkflow(const QString& workerProgram,
-    const QString& projectRoot,
-    const QString& sourcePath,
-    const QString& sourceFormat,
-    const QString& targetFormat,
-    const QString& targetDatasetId,
-    const QString& targetDatasetName,
-    const QJsonObject& options,
-    QString* error,
-    const QString& taskId)
-{
-    return startWorkerCommand(
-        workerProgram,
-        wp::command::runDatasetConversionWorkflow(),
-        wp::datasetConversionWorkflowRequest(taskId, projectRoot, sourcePath,
-            sourceFormat, targetFormat, targetDatasetId, targetDatasetName, options),
-        error);
-}
-
-bool WorkerClient::requestDataQualityWorkflow(const QString& workerProgram,
-    const QString& projectRoot,
-    const QString& datasetId,
-    const QString& datasetVersionId,
-    const QString& snapshotId,
-    const QString& snapshotArtifactId,
-    const QJsonObject& options,
-    QString* error,
-    const QString& taskId)
-{
-    return startWorkerCommand(
-        workerProgram,
-        wp::command::runDataQualityWorkflow(),
-        wp::dataQualityWorkflowRequest(taskId, projectRoot, datasetId,
-            datasetVersionId, snapshotId, snapshotArtifactId, options),
-        error);
-}
-
-bool WorkerClient::requestAnnotationSessionCreate(const QString& workerProgram,
-    const QString& projectRoot,
-    const QString& repairManifestArtifactId,
-    const QString& workingDirectory,
-    const QJsonObject& toolSummary,
-    const QJsonObject& options,
-    QString* error,
-    const QString& taskId)
-{
-    return startWorkerCommand(
-        workerProgram,
-        wp::command::createAnnotationSession(),
-        wp::annotationSessionCreateRequest(taskId, projectRoot, repairManifestArtifactId,
-            workingDirectory, toolSummary, options),
-        error);
-}
-
-bool WorkerClient::requestAnnotationSessionSync(const QString& workerProgram,
-    const QString& projectRoot,
-    const QString& sessionArtifactId,
-    const QString& workingDirectory,
-    const QJsonObject& options,
-    QString* error,
-    const QString& taskId)
-{
-    return startWorkerCommand(
-        workerProgram,
-        wp::command::syncAnnotationSession(),
-        wp::annotationSessionSyncRequest(taskId, projectRoot, sessionArtifactId,
-            workingDirectory, options),
-        error);
-}
-
-bool WorkerClient::requestDatasetSnapshotImportWorkflow(const QString& workerProgram,
-    const QString& projectRoot,
-    const QString& sourcePath,
-    const QString& sourceFormat,
-    const QString& targetDatasetId,
-    const QString& targetDatasetName,
-    const QJsonObject& options,
-    QString* error,
-    const QString& taskId)
-{
-    return startWorkerCommand(
-        workerProgram,
-        wp::command::runDatasetSnapshotImportWorkflow(),
-        wp::datasetSnapshotImportWorkflowRequest(taskId, projectRoot, sourcePath,
-            sourceFormat, targetDatasetId, targetDatasetName, options),
-        error);
-}
-
-bool WorkerClient::requestOcrOfficialReportImport(const QString& workerProgram,
-    const QString& projectRoot,
-    const QJsonObject& det,
-    const QJsonObject& rec,
-    const QJsonObject& system,
-    const QString& acceptanceCohortId,
-    const QString& customerDomainId,
-    const QString& evidenceClass,
-    QString* error,
-    const QString& taskId)
-{
-    return startWorkerCommand(workerProgram, wp::command::importOcrOfficialReports(),
-        wp::ocrOfficialReportImportRequest(taskId, projectRoot, det, rec, system,
-            acceptanceCohortId, customerDomainId, evidenceClass), error);
-}
-
-bool WorkerClient::requestOcrAcceptanceWorkflow(const QString& workerProgram,
-    const QString& projectRoot,
-    const QString& detReportArtifactId,
-    const QString& recReportArtifactId,
-    const QString& systemReportArtifactId,
-    const QJsonObject& thresholds,
-    QString* error,
-    const QString& taskId)
-{
-    return startWorkerCommand(workerProgram, wp::command::runOcrAcceptanceWorkflow(),
-        wp::ocrAcceptanceWorkflowRequest(taskId, projectRoot, detReportArtifactId,
-            recReportArtifactId, systemReportArtifactId, thresholds), error);
-}
-
-bool WorkerClient::requestDiagnosticsWorkflow(const QString& workerProgram,
-    const QString& projectRoot, const QJsonObject& options, QString* error, const QString& taskId)
-{
-    return startWorkerCommand(
-        workerProgram,
-        wp::command::runDiagnosticsWorkflow(),
-        wp::diagnosticsWorkflowRequest(taskId, projectRoot, options),
-        error);
-}
-
-bool WorkerClient::requestRuntimeDeliveryWorkflow(const QString& workerProgram,
-    const QString& projectRoot,
-    const QString& modelPackageId,
-    const QString& runtimeRoute,
-    const QString& sampleImagePath,
-    const QJsonObject& options,
-    QString* error,
-    const QString& taskId)
-{
-    return startWorkerCommand(
-        workerProgram,
-        wp::command::runRuntimeDeliveryWorkflow(),
-        wp::runtimeDeliveryWorkflowRequest(taskId, projectRoot, modelPackageId,
-            runtimeRoute, sampleImagePath, options),
-        error);
-}
-
-bool WorkerClient::requestModelImport(const QString& workerProgram, const QString& projectRoot, const QString& sourceFilePath, const QJsonObject& manifestDraft, QString* error, const QString& taskId)
-{
-    return startWorkerCommand(
-        workerProgram,
-        wp::command::importModel(),
-        wp::modelImportRequest(taskId, projectRoot, sourceFilePath, manifestDraft),
-        error);
-}
-
 void WorkerClient::cancel()
 {
     cancelRequested_ = true;
@@ -299,15 +118,25 @@ bool WorkerClient::startWorkerCommand(const QString& workerProgram, const QStrin
         return false;
     }
 
-    buffer_.clear();
-    pendingCommandType_ = commandType;
-    pendingRequest_ = payload;
-    activeRequestId_ = aitrain::RequestId::create();
-    const QString requestedTaskId = payload.value(wp::field::taskId()).toString();
+    QJsonObject normalizedPayload = payload;
+    aitrain::TaskId requestedTaskId;
     QString taskIdError;
-    if (!aitrain::TaskId::parse(requestedTaskId, &activeTaskId_, &taskIdError)) {
-        activeTaskId_ = aitrain::TaskId::create();
+    if (!aitrain::TaskId::parse(
+            normalizedPayload.value(wp::field::taskId()).toString(),
+            &requestedTaskId, &taskIdError)) {
+        requestedTaskId = aitrain::TaskId::create();
+        normalizedPayload.insert(wp::field::taskId(), requestedTaskId.toString());
     }
+    aitrain::worker_protocol::TaskCommand decodedCommand;
+    if (!wp::taskCommandFromPayload(commandType, normalizedPayload, &decodedCommand, error)) {
+        return false;
+    }
+
+    buffer_.clear();
+    pendingCommand_ = decodedCommand;
+    activeRequestId_ = aitrain::RequestId::create();
+    controlToken_ = QUuid::createUuid().toString(QUuid::Id128);
+    activeTaskId_ = std::visit([](const auto& command) { return command.context.taskId; }, decodedCommand.payload);
     incomingSequenceTracker_.clear();
     outgoingSequence_ = 0;
     finishedEmitted_ = false;
@@ -321,7 +150,8 @@ bool WorkerClient::startWorkerCommand(const QString& workerProgram, const QStrin
     process_.setProgram(workerProgram);
     process_.setArguments({QStringLiteral("--server"), serverName,
         QStringLiteral("--request-id"), activeRequestId_.toString(),
-        QStringLiteral("--task-id"), activeTaskId_.toString()});
+        QStringLiteral("--task-id"), activeTaskId_.toString(),
+        QStringLiteral("--control-token"), controlToken_});
     process_.setProcessChannelMode(QProcess::MergedChannels);
     process_.start();
     connectionTimer_.start(5000);
@@ -366,7 +196,7 @@ void WorkerClient::readLines()
     buffer_.append(socket_->readAll());
     if (buffer_.size() > aitrain::kProtocolMaxControlMessageBytes
         && !buffer_.contains('\n')) {
-        rejectProtocol(QStringLiteral("Protocol  frame exceeds maximum size."));
+        rejectProtocol(QStringLiteral("Protocol frame exceeds maximum size."));
         return;
     }
 
@@ -375,7 +205,7 @@ void WorkerClient::readLines()
         const QByteArray line = buffer_.left(newline + 1);
         buffer_.remove(0, newline + 1);
         if (line.size() > aitrain::kProtocolMaxControlMessageBytes) {
-            rejectProtocol(QStringLiteral("Protocol  frame exceeds maximum size."));
+        rejectProtocol(QStringLiteral("Protocol frame exceeds maximum size."));
             return;
         }
 
@@ -383,20 +213,25 @@ void WorkerClient::readLines()
         QString error;
         if (!aitrain::decodeProtocolMessage(line, &envelope, &error)
             || !incomingSequenceTracker_.observe(envelope, activeRequestId_, activeTaskId_, &error)) {
-            rejectProtocol(QStringLiteral("Protocol  message rejected: %1").arg(error));
+        rejectProtocol(QStringLiteral("Protocol message rejected: %1").arg(error));
+            return;
+        }
+        if (envelope.controlToken != controlToken_) {
+        rejectProtocol(QStringLiteral("Protocol control token mismatch."));
             return;
         }
         if (terminalEnvelopeReceived_) {
-            rejectProtocol(QStringLiteral("Protocol  event received after terminal event."));
+        rejectProtocol(QStringLiteral("Protocol event received after terminal event."));
             return;
         }
 
-        QString type;
-        QJsonObject payload;
-        if (!wp::control::unpackBusinessEvent(envelope, &type, &payload, &error)) {
-            rejectProtocol(QStringLiteral("Protocol  event rejected: %1").arg(error));
+        wp::TaskEvent decodedEvent;
+        if (!wp::control::unpackTaskEvent(envelope, &decodedEvent, &error)) {
+        rejectProtocol(QStringLiteral("Protocol event rejected: %1").arg(error));
             return;
         }
+        const QString type = wp::taskEventType(decodedEvent);
+        const QJsonObject payload = decodedEvent.details;
 
         const bool terminal = envelope.kind == QStringLiteral("event.succeeded")
             || envelope.kind == QStringLiteral("event.failed")
@@ -405,11 +240,11 @@ void WorkerClient::readLines()
             terminalEnvelopeReceived_ = true;
         }
 
-        emit messageReceived(type, payload);
+        publishEvent(decodedEvent);
         if (type == wp::event::ready()) {
             workerReady_ = true;
             connectionTimer_.stop();
-            if (!pendingCommandType_.isEmpty()) {
+            if (pendingCommand_.has_value()) {
                 sendStartTask();
             }
         } else if (type == wp::event::log()) {
@@ -458,6 +293,7 @@ void WorkerClient::readLines()
 void WorkerClient::workerFinished(int exitCode, QProcess::ExitStatus status)
 {
     finishing_ = true;
+    terminalDrainAttempted_ = false;
     pendingExitCode_ = exitCode;
     pendingExitStatus_ = status;
     if (socket_ && socket_->bytesAvailable() > 0) {
@@ -488,24 +324,29 @@ void WorkerClient::finalizeWorkerExit()
     if (socket_ && socket_->bytesAvailable() > 0) {
         readLines();
     }
-    if (socket_ && !finishedEmitted_ && socket_->state() == QLocalSocket::ConnectedState) {
-        socket_->waitForReadyRead(300);
-        if (socket_->bytesAvailable() > 0) {
-            readLines();
-        }
+    if (socket_ && !finishedEmitted_ && socket_->state() == QLocalSocket::ConnectedState
+        && !terminalDrainAttempted_) {
+        // QLocalSocket 的 readyRead 由事件循环异步投递；不要在 GUI 线程
+        // waitForReadyRead，给最后一帧一个有限的非阻塞排空窗口即可。
+        terminalDrainAttempted_ = true;
+        QTimer::singleShot(300, this, &WorkerClient::finalizeWorkerExit);
+        return;
     }
     if (!finishedEmitted_) {
         finishedEmitted_ = true;
         if (cancelRequested_) {
-            const QString message = QStringLiteral("Canceled by user");
+            // 没有收到 Worker 的正式 canceled 终态时，不能伪造业务取消；
+            // 任务可能仍停留在 CancelRequested，必须显式报告 Worker 丢失。
+            const QString message = QStringLiteral("Worker 在取消请求后退出，未收到正式终态。" );
             QJsonObject payload;
-            payload.insert(wp::field::taskId(), pendingRequest_.value(wp::field::taskId()).toString());
-            payload.insert(wp::field::command(), pendingCommandType_);
-            payload.insert(wp::field::status(), QStringLiteral("canceled"));
-            payload.insert(wp::field::errorCode(), QStringLiteral("canceled"));
+            payload.insert(wp::field::taskId(), activeTaskId_.toString());
+            payload.insert(wp::field::command(), pendingCommand_.has_value()
+                ? wp::taskCommandType(*pendingCommand_) : QString());
+            payload.insert(wp::field::status(), QStringLiteral("worker_lost"));
+            payload.insert(wp::field::errorCode(), QStringLiteral("worker_lost"));
             payload.insert(wp::field::message(), message);
-            emit messageReceived(wp::event::canceled(), payload);
-            emit finished(WorkerTerminalStatus::Canceled, message);
+            publishEvent(wp::taskEventFromType(wp::event::failed(), payload));
+            emit finished(WorkerTerminalStatus::Failed, message);
         } else {
             const QString message = pendingExitCode_ < 0
                 ? QStringLiteral("Worker failed to start: %1").arg(process_.errorString())
@@ -521,16 +362,17 @@ void WorkerClient::finalizeWorkerExit()
     terminalShutdownTimer_.stop();
     cleanupSocket();
     server_.close();
-    pendingCommandType_.clear();
-    pendingRequest_ = QJsonObject();
+    pendingCommand_.reset();
     activeRequestId_ = aitrain::RequestId();
     activeTaskId_ = aitrain::TaskId();
+    controlToken_.clear();
     incomingSequenceTracker_.clear();
     outgoingSequence_ = 0;
     startTaskSent_ = false;
     terminalEnvelopeReceived_ = false;
     workerReady_ = false;
     finishing_ = false;
+    terminalDrainAttempted_ = false;
     QTimer::singleShot(0, this, [this]() {
         emit idle();
     });
@@ -539,7 +381,8 @@ void WorkerClient::finalizeWorkerExit()
 void WorkerClient::sendStartTask()
 {
     const aitrain::ProtocolEnvelope envelope = wp::control::startTaskEnvelope(
-        activeRequestId_, activeTaskId_, ++outgoingSequence_, pendingCommandType_, pendingRequest_);
+        activeRequestId_, activeTaskId_, ++outgoingSequence_, *pendingCommand_,
+        controlToken_);
     QString error;
     if (!sendEnvelope(envelope, &error)) {
         rejectProtocol(error);
@@ -557,7 +400,7 @@ void WorkerClient::sendCancelTask()
         return;
     }
     const aitrain::ProtocolEnvelope envelope = wp::control::cancelTaskEnvelope(
-        activeRequestId_, activeTaskId_, ++outgoingSequence_);
+        activeRequestId_, activeTaskId_, ++outgoingSequence_, controlToken_);
     QString error;
     if (!sendEnvelope(envelope, &error)) {
         rejectProtocol(error);
@@ -589,12 +432,13 @@ void WorkerClient::rejectProtocol(const QString& message)
     if (!finishedEmitted_) {
         finishedEmitted_ = true;
         QJsonObject payload;
-        payload.insert(wp::field::taskId(), pendingRequest_.value(wp::field::taskId()).toString());
-        payload.insert(wp::field::command(), pendingCommandType_);
+        payload.insert(wp::field::taskId(), activeTaskId_.toString());
+        payload.insert(wp::field::command(), pendingCommand_.has_value()
+            ? wp::taskCommandType(*pendingCommand_) : QString());
         payload.insert(wp::field::status(), QStringLiteral("failed"));
         payload.insert(wp::field::errorCode(), QStringLiteral("protocol_rejected"));
         payload.insert(wp::field::message(), message);
-        emit messageReceived(wp::event::failed(), payload);
+        publishEvent(wp::taskEventFromType(wp::event::failed(), payload));
         emit finished(WorkerTerminalStatus::Failed, message);
     }
     if (socket_) {
@@ -615,4 +459,9 @@ void WorkerClient::cleanupSocket()
         socket->disconnectFromServer();
     }
     socket->deleteLater();
+}
+
+void WorkerClient::publishEvent(const wp::TaskEvent& eventValue)
+{
+    emit taskEventReceived(eventValue);
 }

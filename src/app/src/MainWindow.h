@@ -25,18 +25,23 @@
 #include <QVector>
 
 class InfoPanel;
-class EvaluationReportView;
 class TaskArtifactPanel;
 class TaskArtifactPresenter;
+class DatasetCatalogPresenter;
+class DeliveryEvidencePresenter;
 class ProjectSummaryPresenter;
 class DiagnosticBundlePresenter;
 class EnvironmentCheckPresenter;
 class ModelRegistryPresenter;
 class QPushButton;
+class QCloseEvent;
 class QTabWidget;
 class QToolButton;
 class QFrame;
 class QResizeEvent;
+class ApplicationEventRouter;
+class TaskExecutionController;
+struct TaskViewState;
 class WorkspaceRouter;
 
 class MainWindow : public QMainWindow {
@@ -60,6 +65,9 @@ public:
         QWidget* parent = nullptr);
 
 protected:
+    void closeEvent(QCloseEvent* event) override;
+
+private:
     void resizeEvent(QResizeEvent* event) override;
 
 private slots:
@@ -90,16 +98,11 @@ private slots:
     void importAcceptanceEvidence();
     void cancelSelectedTask();
     void runEnvironmentCheck();
-    void handleWorkerMessage(const QString& type, const QJsonObject& payload);
+    void handleTaskViewStateChanged(const TaskViewState& state);
     void refreshBuiltInCapabilities();
     void showPage(int pageIndex, const QString& title);
     void updateSelectedTaskDetails();
-    void openSelectedArtifactDirectory();
-    void copySelectedArtifactPath();
-    void useSelectedArtifactForInference();
     void refreshModelRegistry();
-    void updateSelectedEvaluationReportDetails();
-    void openEvaluationReportsPage();
 
 private:
     QWidget* buildTopBar();
@@ -112,7 +115,6 @@ private:
     QWidget* buildTrainingPage();
     QWidget* buildTaskQueuePage();
     QWidget* buildModelRegistryPage();
-    QWidget* buildEvaluationReportsPanel();
     QWidget* buildDeploymentPage();
     QWidget* buildDeploymentValidationPanel();
     QWidget* buildInferenceValidationPanel();
@@ -125,7 +127,6 @@ private:
     InfoPanel* createMetricCard(const QString& label, const QString& value, const QString& caption);
     QString pageCaption(int pageIndex) const;
     void showDatasetTab(int tabIndex);
-    void showModelWorkspaceTab(int tabIndex);
     void showDeploymentTab(int tabIndex);
     void showSystemSettingsTab(int tabIndex);
     QString workerExecutablePath() const;
@@ -138,26 +139,12 @@ private:
     QString currentTaskType() const;
     QString currentTaskKindFilter() const;
     QString currentTaskStateFilter() const;
-    void handleProgressMessage(const QJsonObject& payload);
-    void handleMetricMessage(const QJsonObject& payload);
-    void handleArtifactMessage(const QJsonObject& payload);
-    void handleTaskStateMessage(const QString& type, const QJsonObject& payload);
-    void handleDataQualityWorkflowMessage(const QJsonObject& payload);
-    void handleAnnotationSessionMessage(const QJsonObject& payload);
-    void handleAnnotationSyncMessage(const QJsonObject& payload);
-    void handleDatasetSnapshotImportWorkflow(const QJsonObject& payload);
-    void handleOcrOfficialReportsImported(const QJsonObject& payload);
-    void handleOcrAcceptanceWorkflow(const QJsonObject& payload);
-    void handleDiagnosticsWorkflow(const QJsonObject& payload);
     void updateRecentTasks();
     void updateTaskTable();
     void updateDatasetList();
     void updateHeaderState();
     void updateResponsiveChrome();
     void ensureWorkspacePage(int pageIndex);
-    void updateEnvironmentTable(const QJsonObject& payload);
-    void handleDatasetSplitWorkflow(const QJsonObject& payload);
-    void handleDatasetConversionWorkflow(const QJsonObject& payload);
     void setDatasetConversionFormRunning(bool running);
     void clearDatasetConversionErrors();
     void appendDatasetConversionLog(const QString& text);
@@ -168,8 +155,10 @@ private:
     void updateProjectSummary();
     void updateCapabilitySummary();
     void updateEnvironmentSummary();
+    void refreshEnvironmentReportView();
     void updateSettingsSummary();
     void updateDeliveryAcceptanceSummary();
+    void updateTaskCancelButton();
     void refreshSampleReviewTable();
     QJsonArray filteredSampleReviewRows() const;
     void updateTrainingSelectionSummary();
@@ -186,8 +175,6 @@ private:
     void updateModelRegistry();
     QLabel* trainingLiveValueLabel(const QString& objectName) const;
     QString selectedTaskId() const;
-    QString selectedArtifactPath() const;
-    QString selectedEvaluationReportPath() const;
 
     aitrain::ProjectWorkspace workspace_;
     aitrain::ProjectQueryService queryService_;
@@ -196,9 +183,13 @@ private:
     DiagnosticBundlePresenter* diagnosticBundlePresenter_ = nullptr;
     EnvironmentCheckPresenter* environmentCheckPresenter_ = nullptr;
     ModelRegistryPresenter* modelRegistryPresenter_ = nullptr;
+    DatasetCatalogPresenter* datasetCatalogPresenter_ = nullptr;
+    DeliveryEvidencePresenter* deliveryEvidencePresenter_ = nullptr;
     QString activeTaskId_;
     QString activeWorkflowKind_;
     WorkerClient worker_;
+    ApplicationEventRouter* eventRouter_ = nullptr;
+    TaskExecutionController* taskController_ = nullptr;
     WorkspaceRouter* workspaceRouter_ = nullptr;
     MainWindowState state_;
 
@@ -224,6 +215,7 @@ private:
     QToolButton* inspectorToggleButton_ = nullptr;
     bool inspectorUserOverride_ = false;
     bool applyingResponsiveChrome_ = false;
+    bool closePending_ = false;
     StatusPill* pageContextPill_ = nullptr;
     QToolButton* settingsZhLanguageButton_ = nullptr;
     QToolButton* settingsEnLanguageButton_ = nullptr;
@@ -265,14 +257,12 @@ private:
     QLineEdit* settingsDefaultProjectPathEdit_ = nullptr;
     QTableWidget* recentTasksTable_ = nullptr;
     QTableWidget* taskQueueTable_ = nullptr;
+    QPushButton* taskCancelButton_ = nullptr;
     TaskArtifactPanel* taskArtifactPanel_ = nullptr;
-    QTableWidget* modelVersionTable_ = nullptr;
     QTableWidget* ModelPackageTable_ = nullptr;
     QLineEdit* modelImportSourceEdit_ = nullptr;
     QLineEdit* modelImportManifestEdit_ = nullptr;
     QLabel* modelImportResultLabel_ = nullptr;
-    QTableWidget* evaluationReportTable_ = nullptr;
-    QTableWidget* pipelineRunTable_ = nullptr;
     QTableWidget* datasetListTable_ = nullptr;
     QTableWidget* capabilityTable_ = nullptr;
     QTableWidget* environmentTable_ = nullptr;
@@ -321,7 +311,6 @@ private:
     QLabel* validationSummaryLabel_ = nullptr;
     QLabel* datasetRepairLoopLabel_ = nullptr;
     QLabel* modelRegistrySummaryLabel_ = nullptr;
-    QLabel* modelComparisonSummaryLabel_ = nullptr;
     QLabel* datasetDetailLabel_ = nullptr;
     QLabel* annotationToolStatusLabel_ = nullptr;
     QLabel* trainingDatasetSummaryLabel_ = nullptr;
@@ -329,7 +318,6 @@ private:
     QLabel* trainingRunSummaryLabel_ = nullptr;
     QTableWidget* validationIssuesTable_ = nullptr;
     QTableWidget* datasetRepairLoopTable_ = nullptr;
-    QTableWidget* modelComparisonTable_ = nullptr;
     QTableWidget* datasetPreviewTable_ = nullptr;
     QPlainTextEdit* validationOutput_ = nullptr;
     QLineEdit* epochsEdit_ = nullptr;
@@ -337,12 +325,20 @@ private:
     QLineEdit* imageSizeEdit_ = nullptr;
     QLineEdit* gridSizeEdit_ = nullptr;
     QLineEdit* resumeCheckpointEdit_ = nullptr;
-    QLineEdit* deploymentValidationImageEdit_ = nullptr;
+    QLineEdit* deploymentSampleDatasetIdEdit_ = nullptr;
+    QLineEdit* deploymentSampleDatasetVersionIdEdit_ = nullptr;
+    QLineEdit* deploymentSampleSnapshotIdEdit_ = nullptr;
+    QLineEdit* deploymentSampleSnapshotArtifactIdEdit_ = nullptr;
+    QLineEdit* deploymentSampleRelativePathEdit_ = nullptr;
     QLabel* deploymentValidationResultLabel_ = nullptr;
     QComboBox* deploymentModelPackageCombo_ = nullptr;
     QComboBox* inferenceModelPackageCombo_ = nullptr;
     bool modelImportInProgress_ = false;
-    QLineEdit* inferenceImageEdit_ = nullptr;
+    QLineEdit* inferenceSampleDatasetIdEdit_ = nullptr;
+    QLineEdit* inferenceSampleDatasetVersionIdEdit_ = nullptr;
+    QLineEdit* inferenceSampleSnapshotIdEdit_ = nullptr;
+    QLineEdit* inferenceSampleSnapshotArtifactIdEdit_ = nullptr;
+    QLineEdit* inferenceSampleRelativePathEdit_ = nullptr;
     QLineEdit* inferenceOutputEdit_ = nullptr;
     QLabel* inferenceResultLabel_ = nullptr;
     QLabel* inferenceOverlayLabel_ = nullptr;
@@ -388,9 +384,8 @@ private:
     QLabel* latestCheckpointLabel_ = nullptr;
     QLabel* latestOnnxLabel_ = nullptr;
     QLabel* latestReportLabel_ = nullptr;
-    QLabel* latestPreviewPathLabel_ = nullptr;
+    QLabel* latestPreviewLabel_ = nullptr;
     QLabel* latestPreviewImageLabel_ = nullptr;
     QTextEdit* logEdit_ = nullptr;
     MetricsWidget* metricsWidget_ = nullptr;
-    QPointer<EvaluationReportView> evaluationReportView_;
 };

@@ -93,6 +93,7 @@ private slots:
     void listsTasksAndWorkflowRunsForReadModels();
     void persistsCompleteTaskFailure();
     void rejectsInvalidCasAndRecoversInterruptedTask();
+    void recoversCancelRequestedInterruptionAsCanceled();
     void rejectsLegacyDatabase();
     void enforcesForeignKeys();
     void hostStateEventsDoNotConsumeAdapterProtocolSequence();
@@ -100,6 +101,7 @@ private slots:
     void listsRegisteredModelPackagesNewestFirst();
     void persistsWorkflowStepsWithArtifactAndRetryGuards();
     void persistsCrossTaskWorkflowInputAndEnforcesOwnership();
+    void listsDatasetCatalogThroughVersionJoin();
     void rejectsSchema7AndPersistsTerminalPolicy();
     void enforcesTerminalizationSchemaConstraints();
     void evidenceGatedSuccessSurvivesReopen();
@@ -207,6 +209,26 @@ void StorageTests::rejectsInvalidCasAndRecoversInterruptedTask()
     QVERIFY2(storage.task(source.id, &stored, &error), qPrintable(error));
     QCOMPARE(stored.state, aitrain::TaskState::Failed);
     QCOMPARE(stored.failure.code, aitrain::FailureCode::ProcessCrashed);
+}
+
+void StorageTests::recoversCancelRequestedInterruptionAsCanceled()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    aitrain::ProjectStore storage;
+    QString error;
+    QVERIFY2(storage.open(directory.filePath(QStringLiteral("project.sqlite")), &error), qPrintable(error));
+
+    const aitrain::TaskSnapshot source = makeTask();
+    QVERIFY2(startTask(storage, source, &error), qPrintable(error));
+    QVERIFY2(storage.transitionTask(source.id, aitrain::TaskState::Running,
+        aitrain::TaskState::CancelRequested, {}, &error), qPrintable(error));
+    QVERIFY2(storage.markInterruptedTasksFailed(&error), qPrintable(error));
+
+    aitrain::TaskSnapshot stored;
+    QVERIFY2(storage.task(source.id, &stored, &error), qPrintable(error));
+    QCOMPARE(stored.state, aitrain::TaskState::Canceled);
+    QCOMPARE(stored.failure.code, aitrain::FailureCode::Canceled);
 }
 
 void StorageTests::rejectsLegacyDatabase()
@@ -377,12 +399,19 @@ void StorageTests::persistsWorkflowStepsWithArtifactAndRetryGuards()
     deploy.kind = QStringLiteral("DeploymentValidate");
     deploy.inputArtifactId = outputArtifact;
     deploy.backend = QStringLiteral("aitrain_onnxruntime");
-    QVERIFY2(storage.createWorkflowRun(workflow, {infer, deploy}, &error), qPrintable(error));
+    aitrain::WorkflowStepSnapshot report;
+    report.id = aitrain::WorkflowStepId::create();
+    report.workflowRunId = workflow.id;
+    report.ordinal = 2;
+    report.kind = QStringLiteral("RenderDeliveryReport");
+    report.inputArtifactId = outputArtifact;
+    report.backend = QStringLiteral("evidence_renderer");
+    QVERIFY2(storage.createWorkflowRun(workflow, {infer, deploy, report}, &error), qPrintable(error));
 
     aitrain::WorkflowRunSnapshot loadedRun;
     QVERIFY2(storage.workflowRun(workflow.id, &loadedRun, &error), qPrintable(error));
     QCOMPARE(loadedRun.templateId, workflow.templateId);
-    QCOMPARE(storage.workflowSteps(workflow.id, &error).size(), 2);
+    QCOMPARE(storage.workflowSteps(workflow.id, &error).size(), 3);
 
     QVERIFY2(storage.transitionWorkflowStep(infer.id, aitrain::WorkflowStepState::Pending,
         aitrain::WorkflowStepState::Running, {}, {}, &error), qPrintable(error));
@@ -398,8 +427,11 @@ void StorageTests::persistsWorkflowStepsWithArtifactAndRetryGuards()
         QStringLiteral("缺少部署依赖"), QStringLiteral("安装部署依赖后重试"), QDateTime::currentDateTimeUtc()};
     QVERIFY2(storage.transitionWorkflowStep(deploy.id, aitrain::WorkflowStepState::Running,
         aitrain::WorkflowStepState::Failed, {}, failure, &error), qPrintable(error));
+    QVERIFY2(storage.transitionWorkflowStep(report.id, aitrain::WorkflowStepState::Pending,
+        aitrain::WorkflowStepState::Skipped, {}, {}, &error), qPrintable(error));
     const QVector<aitrain::WorkflowStepSnapshot> failedSteps = storage.workflowSteps(workflow.id, &error);
     QCOMPARE(failedSteps.at(1).failure.code, failure.code);
+    QCOMPARE(failedSteps.at(2).state, aitrain::WorkflowStepState::Skipped);
     QCOMPARE(failedSteps.at(1).failure.message, failure.message);
     QCOMPARE(failedSteps.at(1).failure.suggestedAction, failure.suggestedAction);
     QCOMPARE(failedSteps.at(1).failure.occurredAt, failure.occurredAt);
@@ -413,6 +445,10 @@ void StorageTests::persistsWorkflowStepsWithArtifactAndRetryGuards()
     QCOMPARE(steps.at(1).state, aitrain::WorkflowStepState::Pending);
     QCOMPARE(steps.at(1).retryCount, 1);
     QVERIFY(!steps.at(1).failure.isFailure());
+    QCOMPARE(steps.at(2).state, aitrain::WorkflowStepState::Pending);
+    QVERIFY(!steps.at(2).inputArtifactId.isValid());
+    QVERIFY(!steps.at(2).outputArtifactId.isValid());
+    QVERIFY(!steps.at(2).failure.isFailure());
 }
 
 void StorageTests::persistsCrossTaskWorkflowInputAndEnforcesOwnership()
@@ -536,6 +572,67 @@ void StorageTests::persistsCrossTaskWorkflowInputAndEnforcesOwnership()
     aitrain::WorkflowRunSnapshot notCreated;
     error.clear();
     QVERIFY(!storage.workflowRun(rejectedWorkflow.id, &notCreated, &error));
+}
+
+void StorageTests::listsDatasetCatalogThroughVersionJoin()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    aitrain::ProjectStore storage;
+    QString error;
+    QVERIFY2(storage.open(directory.filePath(QStringLiteral("project.sqlite")), &error), qPrintable(error));
+    storage.setArtifactStoreRoot(directory.filePath(QStringLiteral("artifact-store")));
+
+    const auto producer = makeTask();
+    QVERIFY2(startTask(storage, producer, &error), qPrintable(error));
+    const aitrain::DatasetId datasetId = aitrain::DatasetId::create();
+    const auto registerSnapshot = [&](QChar hashChar, int fileCount) {
+        const aitrain::ArtifactId artifactId = aitrain::ArtifactId::create();
+        const QString manifestSha256(64, hashChar);
+        const QString rootHash(64, QChar(hashChar.unicode() + 1));
+        if (!storage.recordArtifactWithFiles(artifactId, producer.id,
+                QStringLiteral("dataset_snapshot"),
+                {{QStringLiteral("dataset_snapshot.json"), manifestSha256, 64}},
+                QDateTime::currentDateTimeUtc(), &error)) {
+            return aitrain::DatasetSnapshotRecord{};
+        }
+        aitrain::DatasetSnapshotRecord snapshot;
+        snapshot.datasetId = datasetId;
+        snapshot.id = aitrain::SnapshotId::create();
+        snapshot.taskId = producer.id;
+        snapshot.artifactId = artifactId;
+        snapshot.rootPath = QDir(directory.path()).filePath(
+            QStringLiteral("artifact-store/artifacts/%1").arg(artifactId.toString()));
+        snapshot.datasetFormat = QStringLiteral("yolo_detection");
+        snapshot.driverId = QStringLiteral("yolo_detection");
+        snapshot.driverVersion = QStringLiteral("2.0");
+        snapshot.rootHash = rootHash;
+        snapshot.manifestSha256 = manifestSha256;
+        snapshot.fileCount = fileCount;
+        snapshot.totalBytes = fileCount * 10;
+        snapshot.createdAt = QDateTime::currentDateTimeUtc().addSecs(fileCount);
+        if (!storage.registerDatasetSnapshot(&snapshot, &error)) {
+            return aitrain::DatasetSnapshotRecord{};
+        }
+        return snapshot;
+    };
+
+    const auto older = registerSnapshot(QLatin1Char('1'), 1);
+    QVERIFY2(older.id.isValid(), qPrintable(error));
+    const auto newer = registerSnapshot(QLatin1Char('3'), 2);
+    QVERIFY2(newer.id.isValid(), qPrintable(error));
+
+    const auto items = storage.datasets(10, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(items.size(), 1);
+    QCOMPARE(items.first().datasetId, datasetId);
+    QCOMPARE(items.first().versionCount, qint64(2));
+    QCOMPARE(items.first().snapshotCount, qint64(2));
+    QCOMPARE(items.first().latestVersionId, newer.datasetVersionId);
+    QCOMPARE(items.first().latestSnapshotId, newer.id);
+    QCOMPARE(items.first().latestArtifactId, newer.artifactId);
+    QCOMPARE(items.first().latestRootHash, newer.rootHash);
+    QCOMPARE(items.first().latestFileCount, newer.fileCount);
 }
 
 void StorageTests::rejectsSchema7AndPersistsTerminalPolicy()

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "aitrain/workflow\ProjectQueryService.h"
+#include "aitrain/workflow/ProjectQueryService.h"
 
 #include <QObject>
 #include <QVector>
@@ -43,6 +43,8 @@ struct WorkflowStepItem final {
 struct TaskArtifactDetails final {
     QString taskId;
     QString summary;
+    QString failureCode;
+    QString failureAction;
     QVector<ArtifactFileItem> artifacts;
     QVector<MetricItem> metrics;
     QVector<WorkflowStepItem> workflowSteps;
@@ -64,6 +66,10 @@ public:
 
     bool refresh(int limit = 200);
     bool selectTask(const QString& taskId);
+    bool previewArtifact(const QString& artifactId,
+        const QString& relativePath,
+        aitrain::ArtifactFilePreview* result,
+        QString* error = nullptr) const;
     void clearSelection();
 
     int taskCount() const;

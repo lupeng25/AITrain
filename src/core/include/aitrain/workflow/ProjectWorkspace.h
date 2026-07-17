@@ -11,7 +11,10 @@
 #include "aitrain/core/Cancellation.h"
 
 #include <functional>
+#include <QByteArray>
+#include <QDateTime>
 #include <QHash>
+#include <QStringList>
 #include <memory>
 
 namespace aitrain {
@@ -25,6 +28,16 @@ struct RuntimeArtifactBundle final {
     ArtifactId artifactId;
     QString artifactPath;
     QHash<QString, QString> pathsByKind;
+};
+
+// GUI/Query 的只读 Artifact 预览结果。内容来自已提交文件并经过清单哈希复验，
+// 不向上层暴露 Artifact Store 物理路径。
+struct ArtifactFilePreview final {
+    QString relativePath;
+    QString sha256;
+    qint64 byteCount = 0;
+    QByteArray content;
+    bool truncated = false;
 };
 
 struct EvidenceArtifactBundle final {
@@ -102,6 +115,23 @@ struct DiagnosticsWorkflowResult final {
     ArtifactId factsArtifactId;
     ArtifactId diagnosticsArtifactId;
     ArtifactId evidenceArtifactId;
+    QJsonObject summary;
+    Failure failure;
+};
+
+struct ExternalAcceptanceEvidenceImportRequest final {
+    // 仅允许在显式外部验收证据导入边界使用裸路径；内容会在提交前
+    // 经过严格 schema 校验，之后上层只使用 ArtifactId。
+    QString sourcePath;
+};
+
+struct ExternalAcceptanceEvidenceImportResult final {
+    ArtifactId evidenceArtifactId;
+    QString evidenceKind;
+    QString status;
+    QString producer;
+    QDateTime observedAt;
+    QStringList limitations;
     QJsonObject summary;
     Failure failure;
 };
@@ -206,8 +236,12 @@ struct AnnotationSessionSyncResult final {
 
 struct RuntimeDeliveryWorkflowRequest final {
     ModelPackageId modelPackageId;
+    DatasetId sampleDatasetId;
+    DatasetVersionId sampleDatasetVersionId;
+    SnapshotId sampleSnapshotId;
+    ArtifactId sampleSnapshotArtifactId;
+    QString sampleRelativePath;
     QString runtimeRoute;
-    QString sampleImagePath;
     QJsonObject options;
 };
 
@@ -383,6 +417,11 @@ public:
         DiagnosticsWorkflowResult* result,
         QString* error = nullptr,
         const aitrain::CancellationCallback& cancellation = {});
+    bool importExternalAcceptanceEvidence(const TaskId& taskId,
+        const ExternalAcceptanceEvidenceImportRequest& request,
+        ExternalAcceptanceEvidenceImportResult* result,
+        QString* error = nullptr,
+        const aitrain::CancellationCallback& cancellation = {});
     bool runEnvironmentCheckWorkflow(const TaskId& taskId,
         const EnvironmentCheckWorkflowRequest& request,
         EnvironmentCheckWorkflowResult* result,
@@ -489,6 +528,11 @@ public:
     QVector<TaskSnapshot> tasks(int limit, QString* error = nullptr) const;
     bool task(const TaskId& taskId, TaskSnapshot* result, QString* error = nullptr) const;
     QVector<ArtifactSnapshot> artifactsForTask(const TaskId& taskId, QString* error = nullptr) const;
+    bool readCommittedArtifactFile(const ArtifactId& artifactId,
+        const QString& relativePath,
+        ArtifactFilePreview* result,
+        qint64 maxBytes = 512 * 1024,
+        QString* error = nullptr) const;
     QVector<MetricSnapshot> metricsForTask(const TaskId& taskId, QString* error = nullptr) const;
     QVector<WorkflowRunSnapshot> workflowRunsForTask(const TaskId& taskId, QString* error = nullptr) const;
     QVector<WorkflowStepSnapshot> workflowSteps(const WorkflowRunId& workflowRunId, QString* error = nullptr) const;

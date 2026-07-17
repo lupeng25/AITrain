@@ -135,8 +135,7 @@ void configurePackagedPythonEnvironment(QProcessEnvironment* environment)
         environment->insert(QStringLiteral("PATH"), pathEntries.join(QDir::listSeparator()));
     }
 
-    if (!environment->contains(QStringLiteral("AITRAIN_PADDLEOCR_REPO"))
-        && !environment->contains(QStringLiteral("AITRAIN_PADDLEOCR_SOURCE_ROOT"))) {
+    if (!environment->contains(QStringLiteral("AITRAIN_PADDLEOCR_REPO"))) {
         const QString repo = packagedPaddleOcrRepoPath();
         if (!repo.isEmpty()) {
             environment->insert(QStringLiteral("AITRAIN_PADDLEOCR_REPO"), repo);
@@ -525,11 +524,7 @@ QJsonObject ocrEnvironmentProfile(const QString& pythonExecutable)
         QStringLiteral("PaddleOCR is missing; official OCR adapters will be unavailable.")));
 
     const QString repoRoot = QString::fromLocal8Bit(qgetenv("AITRAIN_PADDLEOCR_REPO")).trimmed();
-    const QString sourceRoot = !repoRoot.isEmpty()
-        ? repoRoot
-        : (!QString::fromLocal8Bit(qgetenv("AITRAIN_PADDLEOCR_SOURCE_ROOT")).trimmed().isEmpty()
-                ? QString::fromLocal8Bit(qgetenv("AITRAIN_PADDLEOCR_SOURCE_ROOT")).trimmed()
-                : packagedPaddleOcrRepoPath());
+    const QString sourceRoot = !repoRoot.isEmpty() ? repoRoot : packagedPaddleOcrRepoPath();
     if (sourceRoot.isEmpty()) {
         checks.append(profileCheck(
             QStringLiteral("paddleOcrSourceCheckout"),

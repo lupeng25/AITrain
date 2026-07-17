@@ -26,18 +26,21 @@
 using namespace worker_support;
 namespace wp = aitrain::worker_protocol;
 
-void WorkerSession::runEnvironmentCheckWorkflow(const QJsonObject& payload)
+void WorkerSession::runEnvironmentCheckWorkflow(const wp::EnvironmentCheckCommand& command)
 {
     if (running_) {
         fail(QStringLiteral("Worker 已有运行任务，不能并发运行 Environment Check 。"));
         return;
     }
-    const QString taskIdText = payload.value(wp::field::taskId()).toString().trimmed();
-    const QString projectRoot = payload.value(QStringLiteral("projectRoot")).toString().trimmed();
-    aitrain::TaskId taskId;
+    const aitrain::TaskId taskId = command.context.taskId;
+    const QString taskIdText = taskId.toString();
+    const QString projectRoot = command.context.projectRoot.trimmed();
     QString error;
-    if (!aitrain::TaskId::parse(taskIdText, &taskId, &error)
-        || taskId != controlTaskId_ || projectRoot.isEmpty() || !QFileInfo(projectRoot).isDir()) {
+    if (!taskId.isValid()) {
+        error = QStringLiteral("TaskId 无效。");
+    }
+    if (!taskId.isValid() || taskId != controlTaskId_
+        || projectRoot.isEmpty() || !QFileInfo(projectRoot).isDir()) {
         fail(QStringLiteral("Environment Check  请求缺少有效项目或 TaskId：%1").arg(error));
         return;
     }

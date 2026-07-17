@@ -690,11 +690,11 @@ QWidget* MainWindow::buildTrainingPage()
     latestCheckpointLabel_ = mutedLabel(QStringLiteral("最新 checkpoint：暂无"));
     latestOnnxLabel_ = mutedLabel(uiText("最新 ONNX：暂无"));
     latestReportLabel_ = mutedLabel(uiText("训练报告：暂无"));
-    latestPreviewPathLabel_ = mutedLabel(QStringLiteral("最新预览：暂无"));
+    latestPreviewLabel_ = mutedLabel(QStringLiteral("最新预览：暂无"));
     allowLabelToShrink(latestCheckpointLabel_);
     allowLabelToShrink(latestOnnxLabel_);
     allowLabelToShrink(latestReportLabel_);
-    allowLabelToShrink(latestPreviewPathLabel_);
+    allowLabelToShrink(latestPreviewLabel_);
     latestPreviewImageLabel_ = new QLabel(QStringLiteral("暂无预览图"));
     latestPreviewImageLabel_->setObjectName(QStringLiteral("MutedText"));
     latestPreviewImageLabel_->setAlignment(Qt::AlignCenter);
@@ -704,7 +704,7 @@ QWidget* MainWindow::buildTrainingPage()
     artifactPanel->bodyLayout()->addWidget(latestCheckpointLabel_);
     artifactPanel->bodyLayout()->addWidget(latestOnnxLabel_);
     artifactPanel->bodyLayout()->addWidget(latestReportLabel_);
-    artifactPanel->bodyLayout()->addWidget(latestPreviewPathLabel_);
+    artifactPanel->bodyLayout()->addWidget(latestPreviewLabel_);
     artifactPanel->bodyLayout()->addWidget(latestPreviewImageLabel_);
     artifactPanel->bodyLayout()->addStretch();
 

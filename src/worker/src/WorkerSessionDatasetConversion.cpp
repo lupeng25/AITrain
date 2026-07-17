@@ -8,32 +8,36 @@
 
 namespace wp = aitrain::worker_protocol;
 
-void WorkerSession::runDatasetConversionWorkflow(const QJsonObject& payload)
+void WorkerSession::runDatasetConversionWorkflow(const wp::DatasetConversionCommand& command)
 {
     if (running_ || datasetConversionWorkspace_) {
         fail(QStringLiteral("Worker 已有运行任务，不能并发运行 Dataset Conversion 。"));
         return;
     }
-    const QString taskIdText = payload.value(wp::field::taskId()).toString().trimmed();
-    const QString projectRoot = payload.value(QStringLiteral("projectRoot")).toString().trimmed();
+    const aitrain::TaskId taskId = command.context.taskId;
+    const QString taskIdText = taskId.toString();
+    const QString projectRoot = command.context.projectRoot.trimmed();
     aitrain::DatasetConversionWorkflowRequest request;
-    request.sourcePath = payload.value(wp::field::sourcePath()).toString().trimmed();
-    request.sourceFormat = payload.value(wp::field::sourceFormat()).toString().trimmed();
-    request.targetFormat = payload.value(wp::field::targetFormat()).toString().trimmed();
-    request.targetDatasetName = payload.value(QStringLiteral("targetDatasetName")).toString().trimmed();
-    request.options = payload.value(wp::field::options()).toObject();
+    request.sourcePath = command.sourcePath.trimmed();
+    request.sourceFormat = command.sourceFormat.trimmed();
+    request.targetFormat = command.targetFormat.trimmed();
+    request.targetDatasetName = command.targetDatasetName.trimmed();
+    request.options = command.options;
     QString error;
-    if (!aitrain::TaskId::parse(taskIdText, &datasetConversionTaskId_, &error)
-        || datasetConversionTaskId_ != controlTaskId_
+    if (!taskId.isValid()) {
+        error = QStringLiteral("TaskId 无效。");
+    }
+    if (!taskId.isValid() || taskId != controlTaskId_
         || projectRoot.isEmpty() || !QFileInfo(projectRoot).isDir()
         || request.sourcePath.isEmpty() || request.sourceFormat.isEmpty()
         || request.targetFormat.isEmpty() || request.targetDatasetName.isEmpty()
-        || !aitrain::DatasetId::parse(payload.value(QStringLiteral("targetDatasetId")).toString(),
+        || !aitrain::DatasetId::parse(command.targetDatasetId,
             &request.targetDatasetId, &error)) {
         datasetConversionTaskId_ = {};
         fail(QStringLiteral("Dataset Conversion  请求缺少项目、外部源、格式或目标 Dataset 身份：%1").arg(error));
         return;
     }
+    datasetConversionTaskId_ = taskId;
 
     datasetConversionWorkspace_ = std::make_unique<aitrain::ProjectWorkspace>();
     if (!datasetConversionWorkspace_->open(projectRoot, &error)) {

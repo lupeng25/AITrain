@@ -118,6 +118,9 @@ QByteArray encodeProtocolMessage(const ProtocolEnvelope& envelope, QString* erro
     object.insert(QStringLiteral("messageId"), envelope.messageId.toString());
     object.insert(QStringLiteral("requestId"), envelope.requestId.toString());
     object.insert(QStringLiteral("taskId"), envelope.taskId.toString());
+    if (!envelope.controlToken.isEmpty()) {
+        object.insert(QStringLiteral("controlToken"), envelope.controlToken);
+    }
     object.insert(QStringLiteral("sequence"), QString::number(envelope.sequence));
     object.insert(QStringLiteral("kind"), envelope.kind);
     object.insert(QStringLiteral("timestamp"), envelope.timestamp.toUTC().toString(Qt::ISODateWithMs));
@@ -171,6 +174,12 @@ bool decodeProtocolMessage(const QByteArray& bytes, ProtocolEnvelope* envelope, 
         || !readPositiveSequence(object, &parsed.sequence, error)) {
         return false;
     }
+    if (object.contains(QStringLiteral("controlToken"))
+        && !object.value(QStringLiteral("controlToken")).isString()) {
+        if (error) *error = QStringLiteral("Protocol controlToken must be a string when present.");
+        return false;
+    }
+    parsed.controlToken = object.value(QStringLiteral("controlToken")).toString();
     parsed.kind = object.value(QStringLiteral("kind")).toString();
     parsed.timestamp = QDateTime::fromString(object.value(QStringLiteral("timestamp")).toString(), Qt::ISODateWithMs);
     parsed.payload = object.value(QStringLiteral("payload")).toObject();

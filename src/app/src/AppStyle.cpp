@@ -456,15 +456,13 @@ void apply(QApplication& app)
             background: #F3F5F8;
         }
 
-        QFrame#TaskControlStrip,
-        QFrame#ArtifactActionGrid {
+        QFrame#TaskControlStrip {
             background: #F9FAFB;
             border: 1px solid #E5E7EB;
             border-radius: 6px;
         }
 
-        QFrame#TaskControlStrip QPushButton,
-        QFrame#ArtifactActionGrid QPushButton {
+        QFrame#TaskControlStrip QPushButton {
             min-height: 30px;
             padding: 6px 12px;
         }

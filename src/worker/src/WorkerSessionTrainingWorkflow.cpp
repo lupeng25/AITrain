@@ -140,30 +140,23 @@ bool validateTrainingParameters(const QJsonObject& parameters, QString* error)
 
 } // namespace
 
-void WorkerSession::runTrainingWorkflow(const QJsonObject& payload)
+void WorkerSession::runTrainingWorkflow(const wp::TrainingCommand& command)
 {
     if (running_ || trainingWorkspace_) {
         fail(QStringLiteral("Worker 已有运行任务，不能并发启动  训练 Workflow。"));
         return;
     }
-    const QString taskIdText = payload.value(wp::field::taskId()).toString().trimmed();
-    const QString projectRoot = payload.value(QStringLiteral("projectRoot")).toString().trimmed();
-    const QString capabilityId = payload.value(QStringLiteral("capabilityId")).toString().trimmed();
-    const QString taskType = payload.value(wp::field::taskType()).toString().trimmed();
-    const QString trainingBackend = payload.value(QStringLiteral("trainingBackend")).toString().trimmed();
-    const QJsonObject parameters = payload.value(QStringLiteral("parameters")).toObject();
+    const QString taskIdText = command.context.taskId.toString();
+    const QString projectRoot = command.context.projectRoot.trimmed();
+    const QString capabilityId = command.capabilityId.trimmed();
+    const QString taskType = command.taskType.trimmed();
+    const QString trainingBackend = command.trainingBackend.trimmed();
+    const QJsonObject parameters = command.parameters;
     const QString deploymentSampleRelativePath = QDir::fromNativeSeparators(
-        payload.value(QStringLiteral("deploymentSampleRelativePath")).toString().trimmed());
+        command.deploymentSampleRelativePath.trimmed());
     QString error;
     aitrain::TrainingWorkflowProfile profile;
     aitrain::TrainingWorkflowRequest workflowRequest;
-    if (payload.contains(wp::field::datasetPath()) || payload.contains(wp::field::format())
-        || payload.contains(wp::field::sampleImagePath())
-        || payload.contains(QStringLiteral("pythonExecutable"))
-        || payload.contains(QStringLiteral("trainersRoot"))) {
-        fail(QStringLiteral("runTrainingWorkflow 不接受数据集、部署样本或运行环境原始路径；请使用已登记 Snapshot 身份、包内相对样本路径和 Worker 运行时配置。"));
-        return;
-    }
     if (taskIdText.isEmpty() || projectRoot.isEmpty() || capabilityId.isEmpty()
         || taskType.isEmpty() || trainingBackend.isEmpty()) {
         fail(QStringLiteral("runTrainingWorkflow 需要有效 taskId、项目、完整 Snapshot 身份、能力、任务类型和已注册训练后端。"));
@@ -190,13 +183,13 @@ void WorkerSession::runTrainingWorkflow(const QJsonObject& payload)
     }
     if (!aitrain::TaskId::parse(taskIdText, &trainingWorkflowTaskId_, &error)
         || trainingWorkflowTaskId_ != controlTaskId_
-        || !aitrain::DatasetId::parse(payload.value(QStringLiteral("datasetId")).toString(),
+        || !aitrain::DatasetId::parse(command.datasetId,
             &workflowRequest.datasetId, &error)
-        || !aitrain::DatasetVersionId::parse(payload.value(QStringLiteral("datasetVersionId")).toString(),
+        || !aitrain::DatasetVersionId::parse(command.datasetVersionId,
             &workflowRequest.datasetVersionId, &error)
-        || !aitrain::SnapshotId::parse(payload.value(QStringLiteral("snapshotId")).toString(),
+        || !aitrain::SnapshotId::parse(command.snapshotId,
             &workflowRequest.snapshotId, &error)
-        || !aitrain::ArtifactId::parse(payload.value(QStringLiteral("snapshotArtifactId")).toString(),
+        || !aitrain::ArtifactId::parse(command.snapshotArtifactId,
             &workflowRequest.snapshotArtifactId, &error)) {
         trainingWorkflowTaskId_ = {};
         fail(QStringLiteral("runTrainingWorkflow 要求控制任务一致且 Dataset/Version/Snapshot/Artifact 身份完整：%1").arg(error));

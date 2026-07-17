@@ -10,10 +10,9 @@ namespace wp = aitrain::worker_protocol;
 
 namespace {
 
-bool parseArtifactId(const QJsonObject& payload, const QString& key,
-    aitrain::ArtifactId* value, QString* error)
+bool parseArtifactId(const QString& text, aitrain::ArtifactId* value, QString* error)
 {
-    return aitrain::ArtifactId::parse(payload.value(key).toString().trimmed(), value, error);
+    return aitrain::ArtifactId::parse(text.trimmed(), value, error);
 }
 
 bool parseSnapshotReference(const QJsonObject& object,
@@ -48,29 +47,29 @@ aitrain::Failure normalizedFailure(const aitrain::Failure& source,
 
 } // namespace
 
-void WorkerSession::importOcrOfficialReports(const QJsonObject& payload)
+void WorkerSession::importOcrOfficialReports(const wp::OcrOfficialReportImportCommand& command)
 {
     if (running_ || ocrAcceptanceWorkspace_) {
         fail(QStringLiteral("Worker 已有运行任务，不能并发导入 OCR 官方报告。"));
         return;
     }
-    const QString taskIdText = payload.value(wp::field::taskId()).toString().trimmed();
-    const QString projectRoot = payload.value(QStringLiteral("projectRoot")).toString().trimmed();
+    const QString taskIdText = command.context.taskId.toString();
+    const QString projectRoot = command.context.projectRoot.trimmed();
     QString error;
     aitrain::OcrOfficialReportImportRequest request;
     if (!aitrain::TaskId::parse(taskIdText, &ocrAcceptanceTaskId_, &error)
         || ocrAcceptanceTaskId_ != controlTaskId_
         || projectRoot.isEmpty() || !QFileInfo(projectRoot).isDir()
-        || !parseSnapshotReference(payload.value(QStringLiteral("det")).toObject(), &request.det, &error)
-        || !parseSnapshotReference(payload.value(QStringLiteral("rec")).toObject(), &request.rec, &error)
-        || !parseSnapshotReference(payload.value(QStringLiteral("system")).toObject(), &request.system, &error)) {
+        || !parseSnapshotReference(command.det, &request.det, &error)
+        || !parseSnapshotReference(command.rec, &request.rec, &error)
+        || !parseSnapshotReference(command.system, &request.system, &error)) {
         ocrAcceptanceTaskId_ = {};
         fail(QStringLiteral("OCR 官方报告受控导入请求无效：%1").arg(error));
         return;
     }
-    request.acceptanceCohortId = payload.value(QStringLiteral("acceptanceCohortId")).toString().trimmed();
-    request.customerDomainId = payload.value(QStringLiteral("customerDomainId")).toString().trimmed();
-    request.evidenceClass = payload.value(QStringLiteral("evidenceClass")).toString().trimmed();
+    request.acceptanceCohortId = command.acceptanceCohortId.trimmed();
+    request.customerDomainId = command.customerDomainId.trimmed();
+    request.evidenceClass = command.evidenceClass.trimmed();
 
     ocrAcceptanceWorkspace_ = std::make_unique<aitrain::ProjectWorkspace>();
     if (!ocrAcceptanceWorkspace_->open(projectRoot, &error)) {
@@ -143,23 +142,23 @@ void WorkerSession::importOcrOfficialReports(const QJsonObject& payload)
     }
 }
 
-void WorkerSession::runOcrAcceptanceWorkflow(const QJsonObject& payload)
+void WorkerSession::runOcrAcceptanceWorkflow(const wp::OcrAcceptanceCommand& command)
 {
     if (running_ || ocrAcceptanceWorkspace_) {
         fail(QStringLiteral("Worker 已有运行任务，不能并发运行 OCR Acceptance 。"));
         return;
     }
-    const QString taskIdText = payload.value(wp::field::taskId()).toString().trimmed();
-    const QString projectRoot = payload.value(QStringLiteral("projectRoot")).toString().trimmed();
-    const QJsonObject thresholds = payload.value(QStringLiteral("thresholds")).toObject();
+    const QString taskIdText = command.context.taskId.toString();
+    const QString projectRoot = command.context.projectRoot.trimmed();
+    const QJsonObject thresholds = command.thresholds;
     QString error;
     aitrain::OcrAcceptanceWorkflowRequest request;
     if (!aitrain::TaskId::parse(taskIdText, &ocrAcceptanceTaskId_, &error)
         || ocrAcceptanceTaskId_ != controlTaskId_
         || projectRoot.isEmpty() || !QFileInfo(projectRoot).isDir()
-        || !parseArtifactId(payload, QStringLiteral("detReportArtifactId"), &request.detReportArtifactId, &error)
-        || !parseArtifactId(payload, QStringLiteral("recReportArtifactId"), &request.recReportArtifactId, &error)
-        || !parseArtifactId(payload, QStringLiteral("systemReportArtifactId"), &request.systemReportArtifactId, &error)) {
+        || !parseArtifactId(command.detReportArtifactId, &request.detReportArtifactId, &error)
+        || !parseArtifactId(command.recReportArtifactId, &request.recReportArtifactId, &error)
+        || !parseArtifactId(command.systemReportArtifactId, &request.systemReportArtifactId, &error)) {
         ocrAcceptanceTaskId_ = {};
         fail(QStringLiteral("OCR Acceptance  只接受有效项目和三个官方报告 ArtifactId：%1").arg(error));
         return;

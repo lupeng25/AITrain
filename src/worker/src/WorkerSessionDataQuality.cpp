@@ -8,33 +8,37 @@
 
 namespace wp = aitrain::worker_protocol;
 
-void WorkerSession::runDataQualityWorkflow(const QJsonObject& payload)
+void WorkerSession::runDataQualityWorkflow(const wp::DataQualityCommand& command)
 {
     if (running_ || dataQualityWorkspace_) {
         fail(QStringLiteral("Worker 已有运行任务，不能并发运行 Data Quality 。"));
         return;
     }
 
-    const QString taskIdText = payload.value(wp::field::taskId()).toString().trimmed();
-    const QString projectRoot = payload.value(QStringLiteral("projectRoot")).toString().trimmed();
+    const aitrain::TaskId taskId = command.context.taskId;
+    const QString taskIdText = taskId.toString();
+    const QString projectRoot = command.context.projectRoot.trimmed();
     aitrain::DataQualityWorkflowRequest request;
     QString error;
-    if (!aitrain::TaskId::parse(taskIdText, &dataQualityTaskId_, &error)
-        || dataQualityTaskId_ != controlTaskId_
+    if (!taskId.isValid()) {
+        error = QStringLiteral("TaskId 无效。");
+    }
+    if (!taskId.isValid() || taskId != controlTaskId_
         || projectRoot.isEmpty() || !QFileInfo(projectRoot).isDir()
-        || !aitrain::DatasetId::parse(payload.value(QStringLiteral("datasetId")).toString(),
+        || !aitrain::DatasetId::parse(command.datasetId,
             &request.datasetId, &error)
-        || !aitrain::DatasetVersionId::parse(payload.value(QStringLiteral("datasetVersionId")).toString(),
+        || !aitrain::DatasetVersionId::parse(command.datasetVersionId,
             &request.datasetVersionId, &error)
-        || !aitrain::SnapshotId::parse(payload.value(QStringLiteral("snapshotId")).toString(),
+        || !aitrain::SnapshotId::parse(command.snapshotId,
             &request.snapshotId, &error)
-        || !aitrain::ArtifactId::parse(payload.value(QStringLiteral("snapshotArtifactId")).toString(),
+        || !aitrain::ArtifactId::parse(command.snapshotArtifactId,
             &request.snapshotArtifactId, &error)) {
         dataQualityTaskId_ = {};
         fail(QStringLiteral("Data Quality  只接受有效项目和完整登记身份：%1").arg(error));
         return;
     }
-    request.options = payload.value(wp::field::options()).toObject();
+    dataQualityTaskId_ = taskId;
+    request.options = command.options;
 
     dataQualityWorkspace_ = std::make_unique<aitrain::ProjectWorkspace>();
     if (!dataQualityWorkspace_->open(projectRoot, &error)) {

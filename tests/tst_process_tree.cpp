@@ -92,6 +92,7 @@ class ProcessTreeTests : public QObject {
 private slots:
     void jobObjectOwnsAndTerminatesAttachedProcessTree();
     void adapterEventChannelAuthenticatesAndForwardsBoundEvent();
+    void adapterEventChannelRejectsPostTerminalFrame();
     void adapterEventChannelRejectsBadTokenAndCrossTaskEvent();
     void adapterEventChannelTimesOutUnansweredCandidate();
     void adapterEventChannelRejectsUnterminatedOversizedBuffer();
@@ -168,6 +169,57 @@ void ProcessTreeTests::adapterEventChannelAuthenticatesAndForwardsBoundEvent()
     QTRY_COMPARE(received.size(), 1);
     QCOMPARE(received.constFirst().messageId.toString(), event.messageId.toString());
     QCOMPARE(received.constFirst().payload, event.payload);
+}
+
+void ProcessTreeTests::adapterEventChannelRejectsPostTerminalFrame()
+{
+    const aitrain::RequestId requestId = aitrain::RequestId::create();
+    const aitrain::TaskId taskId = aitrain::TaskId::create();
+    aitrain::AdapterEventServer server;
+    QList<aitrain::ProtocolEnvelope> received;
+    server.setEventHandler([&received](const aitrain::ProtocolEnvelope& event) {
+        received.append(event);
+    });
+    QString error;
+    QVERIFY2(server.start(requestId, taskId, &error), qPrintable(error));
+    const aitrain::AdapterEventEndpoint endpoint = server.endpoint();
+
+    QTcpSocket socket;
+    socket.connectToHost(endpoint.host, endpoint.port);
+    QVERIFY(socket.waitForConnected(3000));
+    const QByteArray handshake = QByteArrayLiteral("{\"channel\":\"aitrain.adapter\",\"token\":\"")
+        + endpoint.token.toUtf8() + QByteArrayLiteral("\"}\n");
+    socket.write(handshake);
+    QTRY_VERIFY(socket.bytesAvailable() > 0);
+    QCOMPARE(QJsonDocument::fromJson(socket.readLine()).object()
+            .value(QStringLiteral("status")).toString(), QStringLiteral("accepted"));
+
+    const auto sendEvent = [&](quint64 sequence, const QString& kind) {
+        aitrain::ProtocolEnvelope event;
+        event.messageId = aitrain::MessageId::create();
+        event.requestId = requestId;
+        event.taskId = taskId;
+        event.sequence = sequence;
+        event.kind = kind;
+        event.timestamp = QDateTime::currentDateTimeUtc();
+        event.payload = QJsonObject{{QStringLiteral("message"), kind}};
+        const QByteArray encoded = aitrain::encodeProtocolMessage(event, &error);
+        QVERIFY2(!encoded.isEmpty(), qPrintable(error));
+        QCOMPARE(socket.write(encoded), encoded.size());
+        QVERIFY(socket.waitForBytesWritten(3000));
+    };
+
+    sendEvent(1, QStringLiteral("event.succeeded"));
+    QTRY_COMPARE(received.size(), 1);
+    QCOMPARE(received.constFirst().kind, QStringLiteral("event.succeeded"));
+
+    sendEvent(2, QStringLiteral("event.log"));
+    QTRY_VERIFY(socket.bytesAvailable() > 0);
+    const QJsonObject reply = QJsonDocument::fromJson(socket.readLine()).object();
+    QCOMPARE(reply.value(QStringLiteral("status")).toString(), QStringLiteral("rejected"));
+    QCOMPARE(reply.value(QStringLiteral("code")).toString(), QStringLiteral("terminal_event_already_seen"));
+    QCOMPARE(received.size(), 1);
+    QVERIFY(server.lastError().contains(QStringLiteral("terminal_event_already_seen")));
 }
 
 void ProcessTreeTests::adapterEventChannelRejectsBadTokenAndCrossTaskEvent()

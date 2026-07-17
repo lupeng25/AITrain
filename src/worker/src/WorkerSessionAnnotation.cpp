@@ -31,18 +31,18 @@ aitrain::Failure workerFailure(const QString& message)
 
 } // namespace
 
-void WorkerSession::createAnnotationSession(const QJsonObject& payload)
+void WorkerSession::createAnnotationSession(const wp::AnnotationSessionCreateCommand& command)
 {
     if (running_ || annotationWorkspace_) {
         fail(QStringLiteral("Worker 已有运行任务，不能并发创建标注会话。"));
         return;
     }
-    const QString taskIdText = payload.value(wp::field::taskId()).toString().trimmed();
-    const QString projectRoot = payload.value(QStringLiteral("projectRoot")).toString().trimmed();
-    const QString repairArtifactText = payload.value(QStringLiteral("repairManifestArtifactId")).toString().trimmed();
-    const QString workingDirectory = payload.value(QStringLiteral("workingDirectory")).toString().trimmed();
-    const QJsonObject toolSummary = payload.value(QStringLiteral("toolSummary")).toObject();
-    const QJsonObject options = payload.value(wp::field::options()).toObject();
+    const QString taskIdText = command.context.taskId.toString();
+    const QString projectRoot = command.context.projectRoot.trimmed();
+    const QString repairArtifactText = command.repairManifestArtifactId.trimmed();
+    const QString workingDirectory = command.workingDirectory.trimmed();
+    const QJsonObject toolSummary = command.toolSummary;
+    const QJsonObject options = command.options;
     QString error;
     aitrain::ArtifactId repairArtifactId;
     if (!aitrain::TaskId::parse(taskIdText, &annotationTaskId_, &error)
@@ -128,17 +128,17 @@ void WorkerSession::createAnnotationSession(const QJsonObject& payload)
     }
 }
 
-void WorkerSession::syncAnnotationSession(const QJsonObject& payload)
+void WorkerSession::syncAnnotationSession(const wp::AnnotationSessionSyncCommand& command)
 {
     if (running_ || annotationWorkspace_) {
         fail(QStringLiteral("Worker 已有运行任务，不能并发同步标注会话。"));
         return;
     }
-    const QString taskIdText = payload.value(wp::field::taskId()).toString().trimmed();
-    const QString projectRoot = payload.value(QStringLiteral("projectRoot")).toString().trimmed();
-    const QString sessionArtifactText = payload.value(QStringLiteral("sessionArtifactId")).toString().trimmed();
-    const QString workingDirectory = payload.value(QStringLiteral("workingDirectory")).toString().trimmed();
-    const QJsonObject options = payload.value(wp::field::options()).toObject();
+    const QString taskIdText = command.context.taskId.toString();
+    const QString projectRoot = command.context.projectRoot.trimmed();
+    const QString sessionArtifactText = command.sessionArtifactId.trimmed();
+    const QString workingDirectory = command.workingDirectory.trimmed();
+    const QJsonObject options = command.options;
     Q_UNUSED(options);
     QString error;
     aitrain::ArtifactId sessionArtifactId;

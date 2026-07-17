@@ -84,6 +84,10 @@ QWidget* MainWindow::buildDatasetPage()
     }
     connect(datasetFormatCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
         state_.dataset.currentFormat = currentDatasetFormat();
+        state_.dataset.currentDatasetId.clear();
+        state_.dataset.currentDatasetVersionId.clear();
+        state_.dataset.currentSnapshotId.clear();
+        state_.dataset.currentSnapshotArtifactId.clear();
         state_.dataset.currentValid = false;
         updateTrainingSelectionSummary();
         refreshTrainingDefaults();
@@ -335,7 +339,7 @@ QWidget* MainWindow::buildDatasetPage()
         << QStringLiteral("格式")
         << QStringLiteral("状态")
         << QStringLiteral("样本")
-        << QStringLiteral("路径"));
+        << QStringLiteral("快照身份"));
     configureTable(datasetListTable_);
     datasetListTable_->setWordWrap(true);
     datasetListTable_->verticalHeader()->setDefaultSectionSize(40);
@@ -349,18 +353,38 @@ QWidget* MainWindow::buildDatasetPage()
             return;
         }
         const int row = datasetListTable_->selectedItems().first()->row();
-        const QString path = datasetListTable_->item(row, 4) ? datasetListTable_->item(row, 4)->data(Qt::UserRole).toString() : QString();
+        const QString datasetId = datasetListTable_->item(row, 0)
+            ? datasetListTable_->item(row, 0)->data(Qt::UserRole).toString() : QString();
         const QString format = datasetListTable_->item(row, 1) ? datasetListTable_->item(row, 1)->data(Qt::UserRole).toString() : QString();
-        if (!path.isEmpty()) {
-            datasetPathEdit_->setText(QDir::toNativeSeparators(path));
+        const QString snapshotId = datasetListTable_->item(row, 2)
+            ? datasetListTable_->item(row, 2)->data(Qt::UserRole).toString() : QString();
+        const QString artifactId = datasetListTable_->item(row, 4)
+            ? datasetListTable_->item(row, 4)->data(Qt::UserRole).toString() : QString();
+        const QString versionId = datasetListTable_->item(row, 4)
+            ? datasetListTable_->item(row, 4)->data(Qt::UserRole + 1).toString() : QString();
+        if (!datasetId.isEmpty()) {
+            // 目录查询只返回 committed 身份；不能把 ArtifactId 当成本地数据集路径。
+            datasetPathEdit_->clear();
             const int formatIndex = datasetFormatCombo_->findData(format);
             if (formatIndex >= 0) {
                 datasetFormatCombo_->setCurrentIndex(formatIndex);
             }
-            state_.dataset.currentPath = path;
+            state_.dataset.currentPath.clear();
             state_.dataset.currentFormat = format;
-            state_.dataset.currentValid = datasetListTable_->item(row, 2)
-                && datasetListTable_->item(row, 2)->data(Qt::UserRole).toString() == QStringLiteral("valid");
+            state_.dataset.currentDatasetId = datasetId;
+            state_.dataset.currentDatasetVersionId = versionId;
+            state_.dataset.currentSnapshotId = snapshotId;
+            state_.dataset.currentSnapshotArtifactId = artifactId;
+            state_.dataset.currentValid = !versionId.isEmpty()
+                && !snapshotId.isEmpty() && !artifactId.isEmpty();
+            if (dataQualityDatasetIdEdit_) dataQualityDatasetIdEdit_->setText(datasetId);
+            if (dataQualityDatasetVersionIdEdit_) dataQualityDatasetVersionIdEdit_->setText(versionId);
+            if (dataQualitySnapshotIdEdit_) dataQualitySnapshotIdEdit_->setText(snapshotId);
+            if (dataQualitySnapshotArtifactIdEdit_) dataQualitySnapshotArtifactIdEdit_->setText(artifactId);
+            if (splitSourceDatasetIdEdit_) splitSourceDatasetIdEdit_->setText(datasetId);
+            if (splitSourceDatasetVersionIdEdit_) splitSourceDatasetVersionIdEdit_->setText(versionId);
+            if (splitSourceSnapshotIdEdit_) splitSourceSnapshotIdEdit_->setText(snapshotId);
+            if (splitSourceSnapshotArtifactIdEdit_) splitSourceSnapshotArtifactIdEdit_->setText(artifactId);
             updateTrainingSelectionSummary();
             refreshTrainingDefaults();
             refreshDatasetConversionDefaultsFromCurrentDataset();
@@ -548,7 +572,7 @@ QWidget* MainWindow::buildSampleReviewPanel()
 
     sampleReviewSummaryLabel_ = inlineStatusLabel(uiText("尚未加载复核样本。"));
     setupPanel->bodyLayout()->addWidget(sampleReviewSummaryLabel_);
-    setupPanel->bodyLayout()->addWidget(emptyStateLabel(uiText("样本复核页只读展示已加载清单；修复必须通过 Data Quality  与 Annotation Session 。")));
+    setupPanel->bodyLayout()->addWidget(emptyStateLabel(uiText("样本复核页只读展示已加载清单；修复必须通过 Data Quality 与 Annotation Session。")));
     setupPanel->bodyLayout()->addStretch();
 
     auto* tablePanel = new InfoPanel(uiText("复核队列"));

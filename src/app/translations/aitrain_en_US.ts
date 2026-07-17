@@ -540,6 +540,10 @@
         <translation>Runtime Policy</translation>
     </message>
     <message>
+        <source>检查 NVIDIA 驱动、CUDA、TensorRT、ONNX Runtime、Qt 运行时模块和 Worker 可用性，并集中查看交付证据、诊断包和客户域 OCR 验收。</source>
+        <translation>Check NVIDIA driver, CUDA, TensorRT, ONNX Runtime, Qt runtime modules, and Worker availability, and review delivery evidence, diagnostics bundles, and customer-domain OCR acceptance in one place.</translation>
+    </message>
+    <message>
         <source>内置</source>
         <translation>Built-in</translation>
     </message>
@@ -638,10 +642,6 @@
     <message>
         <source>X-AnyLabeling 修复</source>
         <translation>X-AnyLabeling Fix</translation>
-    </message>
-    <message>
-        <source>复现实验</source>
-        <translation>Reproduce Run</translation>
     </message>
     <message>
         <source>注册模型版本</source>
@@ -764,32 +764,8 @@
         <translation>Select a training task first.</translation>
     </message>
     <message>
-        <source>只能复现历史训练任务。</source>
-        <translation>Only historical training tasks can be reproduced.</translation>
-    </message>
-    <message>
-        <source>该训练任务没有可复现的 request 记录。</source>
-        <translation>This training task has no reproducible request record.</translation>
-    </message>
-    <message>
         <source>原训练 request JSON 无法解析：%1</source>
         <translation>The original training request JSON could not be parsed: %1</translation>
-    </message>
-    <message>
-        <source>原实验的数据快照 manifest 缺失，无法按同一快照复现。请重新创建快照或选择其他训练任务。</source>
-        <translation>The original run's dataset snapshot manifest is missing, so it cannot be reproduced from the same snapshot. Create a new snapshot or choose another training task.</translation>
-    </message>
-    <message>
-        <source>复现实验已排队。</source>
-        <translation>Reproduction run queued.</translation>
-    </message>
-    <message>
-        <source>复现实验等待 Worker 启动。</source>
-        <translation>Reproduction run is waiting for Worker to start.</translation>
-    </message>
-    <message>
-        <source>复现实验已排队</source>
-        <translation>Reproduction queued</translation>
     </message>
     <message>
         <source>自动数据快照已取消，训练未启动。</source>
@@ -818,10 +794,6 @@
     <message>
         <source>本地闭环流水线</source>
         <translation>Local End-to-End Pipeline</translation>
-    </message>
-    <message>
-        <source>Phase 35 自动记录的本地复现实验。</source>
-        <translation>Local reproduction run recorded automatically in Phase 35.</translation>
     </message>
     <message>
         <source>模型版本：%1；评估报告：%2；流水线记录：%3。评估、基准和报告 v1 通过 Worker 生成 artifact，完整质量分析仍按 scaffold 标注。</source>

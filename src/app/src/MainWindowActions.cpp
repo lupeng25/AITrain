@@ -1,12 +1,14 @@
 #include "MainWindow.h"
+#include "TaskExecutionController.h"
+#include "EnvironmentCheckPresenter.h"
 
 #include "DatasetConversionUiModel.h"
-#include "EvaluationReportView.h"
 #include "InfoPanel.h"
 #include "LanguageSupport.h"
 #include "MainWindowSupport.h"
 #include "aitrain/core/CapabilityRegistry.h"
 #include "aitrain/core/DetectionTrainer.h"
+#include "aitrain/core/WorkerProtocol.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -34,7 +36,6 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScrollArea>
-#include <QSettings>
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSplitter>
@@ -51,11 +52,6 @@
 
 using namespace aitrain_app;
 
-void MainWindow::openEvaluationReportsPage()
-{
-    showModelWorkspaceTab(2);
-}
-
 void MainWindow::createProject()
 {
     currentProjectName_ = projectNameEdit_->text().trimmed();
@@ -68,8 +64,15 @@ void MainWindow::createProject()
     ensureProjectSubdirs(currentProjectPath_);
     QString error;
     if (!workspace_.open(currentProjectPath_, &error)) {
-        QMessageBox::critical(this, uiText("项目"), uiText("无法打开  项目工作区：%1").arg(error));
+        QMessageBox::critical(this, uiText("项目"), uiText("无法打开项目工作区：%1").arg(error));
         return;
+    }
+    state_.dataset = DatasetWorkbenchState();
+    for (QLineEdit* field : {dataQualityDatasetIdEdit_, dataQualityDatasetVersionIdEdit_,
+            dataQualitySnapshotIdEdit_, dataQualitySnapshotArtifactIdEdit_,
+            splitSourceDatasetIdEdit_, splitSourceDatasetVersionIdEdit_,
+            splitSourceSnapshotIdEdit_, splitSourceSnapshotArtifactIdEdit_}) {
+        if (field) field->clear();
     }
 
     projectLabel_->setText(uiText("当前项目：%1").arg(currentProjectPath_));
@@ -94,8 +97,11 @@ void MainWindow::runEnvironmentCheck()
     }
 
     if (!workspace_.isOpen() || currentProjectPath_.isEmpty()) {
-        QMessageBox::warning(this, uiText("环境自检"), uiText("请先打开  项目。"));
+        QMessageBox::warning(this, uiText("环境自检"), uiText("请先打开项目。"));
         return;
+    }
+    if (environmentCheckPresenter_) {
+        environmentCheckPresenter_->clear();
     }
     if (environmentTable_) {
         for (int row = 0; row < environmentTable_->rowCount(); ++row) {
@@ -110,8 +116,11 @@ void MainWindow::runEnvironmentCheck()
     activeTaskId_ = taskId.toString();
     activeWorkflowKind_ = QStringLiteral("environment_check");
     QString error;
-    if (!worker_.requestEnvironmentCheckWorkflow(workerExecutablePath(), currentProjectPath_,
-            &error, activeTaskId_)) {
+    aitrain::worker_protocol::EnvironmentCheckCommand environmentCommand;
+    environmentCommand.context.taskId = taskId;
+    environmentCommand.context.projectRoot = currentProjectPath_;
+    if (!taskController_->start(workerExecutablePath(),
+            aitrain::worker_protocol::TaskCommand{environmentCommand}, &error)) {
         activeTaskId_.clear();
         activeWorkflowKind_.clear();
         QMessageBox::critical(this, uiText("环境自检"), error);

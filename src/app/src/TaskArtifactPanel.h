@@ -18,25 +18,19 @@ class TaskArtifactPanel : public QWidget {
 public:
     explicit TaskArtifactPanel(QWidget* parent = nullptr);
 
+    void setPresenter(TaskArtifactPresenter* presenter);
     void clear();
     void setTaskSummary(const QString& summary);
     void setDetails(const TaskArtifactDetails& details);
-    QString selectedArtifactPath() const;
     int artifactRowCount() const;
     int metricRowCount() const;
     int workflowStepRowCount() const;
-
-signals:
-    void openDirectoryRequested();
-    void copyPathRequested();
-    void useForInferenceRequested();
-    void registerModelRequested();
 
 private:
     void configureTable(QTableWidget* table) const;
     void clearTableWithPlaceholder(QTableWidget* table, const QString& placeholder);
     void updatePreviewFromSelection();
-    void previewArtifactPath(const QString& path);
+    void previewSelectedArtifact();
 
     QLabel* selectedTaskSummaryLabel_ = nullptr;
     QTableWidget* artifactTable_ = nullptr;
@@ -47,5 +41,7 @@ private:
     QPlainTextEdit* previewText_ = nullptr;
     QStackedWidget* previewStack_ = nullptr;
     EvaluationReportView* evaluationReportView_ = nullptr;
-    QWidget* legacyArtifactActions_ = nullptr;
+    TaskArtifactPresenter* presenter_ = nullptr;
+    QString selectedArtifactId_;
+    QString selectedRelativePath_;
 };

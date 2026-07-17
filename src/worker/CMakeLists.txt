@@ -2,10 +2,10 @@ add_executable(aitrain_worker
     src/main.cpp
     src/WorkerSession.h
     src/WorkerSession.cpp
-    src/WorkerSessionCommandRegistry.cpp
     src/WorkerSessionDatasetSplit.cpp
     src/WorkerSessionDataQuality.cpp
     src/WorkerSessionDiagnostics.cpp
+    src/WorkerSessionExternalEvidence.cpp
     src/WorkerSessionDatasetConversion.cpp
     src/WorkerSessionDatasetSnapshotImport.cpp
     src/WorkerSessionAnnotation.cpp

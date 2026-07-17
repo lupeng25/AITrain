@@ -3,6 +3,7 @@
 #include "aitrain/core/LicenseSecurity.h"
 
 #include "LanguageSupport.h"
+#include "LicenseTokenStore.h"
 
 #include <QApplication>
 #include <QDir>
@@ -14,7 +15,6 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
-#include <QSettings>
 #include <QStandardPaths>
 #include <QVBoxLayout>
 
@@ -102,7 +102,6 @@ RegistrationDialog::RegistrationDialog(const QByteArray& publicKeyBase64, QWidge
     connect(activateButton, &QPushButton::clicked, this, &RegistrationDialog::activateLicense);
     connect(languageCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RegistrationDialog::handleLanguageChanged);
 
-    aitrain_app::translateWidgetTree(this, "RegistrationDialog");
 }
 
 aitrain::LicensePayload RegistrationDialog::activatedPayload() const
@@ -132,9 +131,7 @@ void RegistrationDialog::activateLicense()
         return;
     }
 
-    QSettings settings;
-    settings.setValue(QStringLiteral("license/token"), token);
-    settings.sync();
+    aitrain_app::LicenseTokenStore().write(token);
 
     activatedPayload_ = validation.payload;
     statusLabel_->setText(tr("注册成功，正在启动主界面。"));

@@ -21,7 +21,7 @@ bool DiagnosticBundlePresenter::selectTask(const QString& taskIdText)
     aitrain::TaskReadModel model;
     if (!queryService_ || !queryService_->taskDetails(taskId, &model, &error)) {
         clear();
-        lastError_ = error.isEmpty() ? QStringLiteral("无法读取 Diagnostics  任务。") : error;
+        lastError_ = error.isEmpty() ? QStringLiteral("无法读取 Diagnostics 任务。") : error;
         emit queryFailed(lastError_);
         return false;
     }
@@ -34,7 +34,7 @@ bool DiagnosticBundlePresenter::selectTask(const QString& taskIdText)
     }
     if (!diagnosticsWorkflow) {
         clear();
-        lastError_ = QStringLiteral("所选 Task 不是 Diagnostics Bundle  工作流。");
+        lastError_ = QStringLiteral("所选 Task 不是 Diagnostics Bundle 工作流。");
         emit queryFailed(lastError_);
         return false;
     }

@@ -256,16 +256,23 @@ void ModelManifestTests::runtimeDeliveryProtocolCarriesOnlyModelIdentityAndOptio
     options.insert(QStringLiteral("benchmarkIterations"), 3);
     const QJsonObject payload = aitrain::worker_protocol::runtimeDeliveryWorkflowRequest(
         QStringLiteral("task"), QStringLiteral("C:/project"), QStringLiteral("package"),
-        QStringLiteral("aitrain_onnxruntime"), QStringLiteral("C:/samples/part.png"), options);
+        QStringLiteral("aitrain_onnxruntime"), QStringLiteral("dataset"),
+        QStringLiteral("version"), QStringLiteral("snapshot"),
+        QStringLiteral("snapshot-artifact"), QStringLiteral("images/part.png"), options);
     QCOMPARE(payload.value(QStringLiteral("taskId")).toString(), QStringLiteral("task"));
     QCOMPARE(payload.value(QStringLiteral("projectRoot")).toString(), QStringLiteral("C:/project"));
     QCOMPARE(payload.value(QStringLiteral("modelPackageId")).toString(), QStringLiteral("package"));
     QCOMPARE(payload.value(QStringLiteral("runtimeRoute")).toString(), QStringLiteral("aitrain_onnxruntime"));
-    QCOMPARE(payload.value(QStringLiteral("sampleImagePath")).toString(), QStringLiteral("C:/samples/part.png"));
+    QCOMPARE(payload.value(QStringLiteral("sampleDatasetId")).toString(), QStringLiteral("dataset"));
+    QCOMPARE(payload.value(QStringLiteral("sampleDatasetVersionId")).toString(), QStringLiteral("version"));
+    QCOMPARE(payload.value(QStringLiteral("sampleSnapshotId")).toString(), QStringLiteral("snapshot"));
+    QCOMPARE(payload.value(QStringLiteral("sampleSnapshotArtifactId")).toString(), QStringLiteral("snapshot-artifact"));
+    QCOMPARE(payload.value(QStringLiteral("sampleRelativePath")).toString(), QStringLiteral("images/part.png"));
     QCOMPARE(payload.value(QStringLiteral("options")).toObject(), options);
     QVERIFY(!payload.contains(QStringLiteral("runtimeInvocation")));
     QVERIFY(!payload.contains(QStringLiteral("modelPath")));
     QVERIFY(!payload.contains(QStringLiteral("checkpointPath")));
+    QVERIFY(!payload.contains(QStringLiteral("sampleImagePath")));
 }
 
 void ModelManifestTests::modelImportProtocolCarriesDraftInsteadOfRuntimePath()

@@ -106,6 +106,7 @@ add_library(aitrain_application STATIC
     src/workflow/ProjectWorkspaceAnnotation.cpp
     src/workflow/ProjectWorkspaceDataQuality.cpp
     src/workflow/ProjectWorkspaceDiagnostics.cpp
+    src/workflow/ProjectWorkspaceExternalEvidence.cpp
     src/workflow/ProjectWorkspaceDatasetConversion.cpp
     src/workflow/ProjectWorkspaceDatasetSnapshotImport.cpp
     src/workflow/ProjectWorkspaceDatasetSplit.cpp
@@ -296,6 +297,7 @@ add_library(aitrain_foundation STATIC
     include/aitrain/core/SemanticMask.h
     include/aitrain/core/LicenseManager.h
     include/aitrain/core/LicenseSecurity.h
+    include/aitrain/core/TaskTypes.h
     include/aitrain/core/VisionModelExport.h
     include/aitrain/core/VisionModelRuntime.h
     include/aitrain/core/VisionPostprocess.h

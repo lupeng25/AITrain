@@ -16,6 +16,13 @@ namespace {
 constexpr auto kChannelName = "aitrain.adapter";
 constexpr int kHandshakeTimeoutMs = 5000;
 
+bool isTerminalEventKind(const QString& kind)
+{
+    return kind == QStringLiteral("event.succeeded")
+        || kind == QStringLiteral("event.failed")
+        || kind == QStringLiteral("event.canceled");
+}
+
 QByteArray handshakeReply(const char* status, const QString& code = {})
 {
     QJsonObject payload;
@@ -67,6 +74,7 @@ bool AdapterEventServer::start(const RequestId& requestId, const TaskId& taskId,
     pendingSockets_.clear();
     handshakeTimers_.clear();
     server_ = std::move(server);
+    terminalEventSeen_ = false;
     QObject::connect(server_.get(), &QTcpServer::newConnection, server_.get(), [this] {
         acceptPendingConnections();
     });
@@ -94,6 +102,7 @@ void AdapterEventServer::stop()
     }
     handshakeTimers_.clear();
     authenticated_ = false;
+    terminalEventSeen_ = false;
     sequenceTracker_.clear();
     if (server_) {
         server_->close();
@@ -214,8 +223,16 @@ void AdapterEventServer::readSocket(QTcpSocket* socket)
             rejectSocket(socket, QStringLiteral("protocol_violation"));
             return;
         }
+        if (terminalEventSeen_) {
+            setFailure(QStringLiteral("terminal_event_already_seen"));
+            rejectSocket(socket, QStringLiteral("terminal_event_already_seen"));
+            return;
+        }
         if (eventHandler_) {
             eventHandler_(envelope);
+        }
+        if (isTerminalEventKind(envelope.kind)) {
+            terminalEventSeen_ = true;
         }
     }
 }

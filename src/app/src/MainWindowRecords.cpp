@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include "ModelRegistryPresenter.h"
+#include "DatasetCatalogPresenter.h"
 #include "TaskArtifactPresenter.h"
 
 #include "EvaluationReportView.h"
@@ -34,7 +35,6 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScrollArea>
-#include <QSettings>
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSplitter>
@@ -84,7 +84,7 @@ void MainWindow::updateTaskTable()
     const QVector<TaskListItem>& rows = taskArtifactPresenter_->taskRows();
     if (rows.isEmpty()) {
         taskQueueTable_->insertRow(0);
-        auto* empty = new QTableWidgetItem(uiText("暂无  任务记录"));
+        auto* empty = new QTableWidgetItem(uiText("暂无任务记录"));
         empty->setData(Qt::UserRole + 1, QStringLiteral("empty"));
         taskQueueTable_->setItem(0, 0, empty);
         for (int column = 1; column < taskQueueTable_->columnCount(); ++column) {
@@ -117,9 +117,11 @@ void MainWindow::updateTaskTable()
 
 void MainWindow::updateDatasetList()
 {
-    QString error;
-    const QVector<aitrain::DatasetCatalogItem> datasets = workspace_.isOpen()
-        ? workspace_.datasets(50, &error) : QVector<aitrain::DatasetCatalogItem>{};
+    if (datasetCatalogPresenter_) {
+        datasetCatalogPresenter_->refresh(50);
+    }
+    const QVector<DatasetCatalogListItem> datasets = datasetCatalogPresenter_
+        ? datasetCatalogPresenter_->datasets() : QVector<DatasetCatalogListItem>{};
     if (datasetListTable_) {
         datasetListTable_->setRowCount(0);
     }
@@ -134,23 +136,24 @@ void MainWindow::updateDatasetList()
     }
 
     if (datasetListTable_) {
-        for (const aitrain::DatasetCatalogItem& dataset : datasets) {
+        for (const DatasetCatalogListItem& dataset : datasets) {
             const int row = datasetListTable_->rowCount();
             datasetListTable_->insertRow(row);
-            auto* nameItem = new QTableWidgetItem(dataset.datasetId.toString().left(12));
-            nameItem->setData(Qt::UserRole, dataset.datasetId.toString());
+            auto* nameItem = new QTableWidgetItem(dataset.datasetId.left(12));
+            nameItem->setData(Qt::UserRole, dataset.datasetId);
             datasetListTable_->setItem(row, 0, nameItem);
             auto* formatItem = new QTableWidgetItem(datasetFormatLabel(dataset.datasetFormat));
             formatItem->setData(Qt::UserRole, dataset.datasetFormat);
             datasetListTable_->setItem(row, 1, formatItem);
-            auto* statusItem = new QTableWidgetItem(dataset.latestSnapshotId.isValid() ? uiText("已提交快照") : uiText("尚无快照"));
-            statusItem->setData(Qt::UserRole, dataset.latestSnapshotId.toString());
+            auto* statusItem = new QTableWidgetItem(!dataset.latestSnapshotId.isEmpty() ? uiText("已提交快照") : uiText("尚无快照"));
+            statusItem->setData(Qt::UserRole, dataset.latestSnapshotId);
             datasetListTable_->setItem(row, 2, statusItem);
             datasetListTable_->setItem(row, 3, new QTableWidgetItem(QString::number(dataset.latestFileCount)));
-            auto* identityItem = new QTableWidgetItem(dataset.latestSnapshotId.toString());
-            identityItem->setData(Qt::UserRole, dataset.latestArtifactId.toString());
+            auto* identityItem = new QTableWidgetItem(dataset.latestSnapshotId);
+            identityItem->setData(Qt::UserRole, dataset.latestArtifactId);
+            identityItem->setData(Qt::UserRole + 1, dataset.latestVersionId);
             identityItem->setToolTip(uiText("Version %1\nArtifact %2\nRoot hash %3")
-                .arg(dataset.latestVersionId.toString(), dataset.latestArtifactId.toString(), dataset.latestRootHash));
+                .arg(dataset.latestVersionId, dataset.latestArtifactId, dataset.latestRootHash));
             datasetListTable_->setItem(row, 4, identityItem);
         }
     }
@@ -311,26 +314,26 @@ void MainWindow::updateModelRegistry()
 {
     if (!workspace_.isOpen()) {
         modelRegistryPresenter_->clear();
-        if (modelRegistrySummaryLabel_) modelRegistrySummaryLabel_->setText(uiText("请先打开  项目。"));
+        if (modelRegistrySummaryLabel_) modelRegistrySummaryLabel_->setText(uiText("请先打开项目。"));
         return;
     }
     if (!modelRegistryPresenter_->refresh(200)) {
         if (modelRegistrySummaryLabel_) {
-            modelRegistrySummaryLabel_->setText(uiText("读取  模型包目录失败：%1")
+            modelRegistrySummaryLabel_->setText(uiText("读取模型包目录失败：%1")
                 .arg(modelRegistryPresenter_->lastError()));
         }
         return;
     }
     const QVector<ModelPackageListItem>& packages = modelRegistryPresenter_->modelPackages();
     if (modelRegistrySummaryLabel_) {
-        modelRegistrySummaryLabel_->setText(uiText("已登记  模型包：%1。模型库只展示无路径 Manifest 与 lineage。")
+        modelRegistrySummaryLabel_->setText(uiText("已登记模型包：%1。模型库只展示无路径 Manifest 与 lineage。")
             .arg(packages.size()));
     }
     if (ModelPackageTable_) {
         ModelPackageTable_->setRowCount(0);
         if (packages.isEmpty()) {
             ModelPackageTable_->insertRow(0);
-            ModelPackageTable_->setItem(0, 0, new QTableWidgetItem(uiText("暂无已验证  模型包")));
+            ModelPackageTable_->setItem(0, 0, new QTableWidgetItem(uiText("暂无已验证模型包")));
             for (int column = 1; column < ModelPackageTable_->columnCount(); ++column)
                 ModelPackageTable_->setItem(0, column, new QTableWidgetItem(QString()));
         } else {
@@ -352,7 +355,7 @@ void MainWindow::updateModelRegistry()
         if (!combo) return;
         const QString selectedId = combo->currentData().toString();
         combo->clear();
-        combo->addItem(uiText("请选择已验证  模型包"), QString());
+        combo->addItem(uiText("请选择已验证模型包"), QString());
         for (const ModelPackageListItem& package : packages) {
             combo->addItem(QStringLiteral("%1 · %2 · %3")
                 .arg(package.modelFamily, package.taskType, package.modelPackageId.left(8)),
@@ -363,43 +366,10 @@ void MainWindow::updateModelRegistry()
     };
     refreshCombo(inferenceModelPackageCombo_);
     refreshCombo(deploymentModelPackageCombo_);
-    if (modelVersionTable_) modelVersionTable_->setRowCount(0);
-    if (pipelineRunTable_) pipelineRunTable_->setRowCount(0);
-    if (evaluationReportView_) evaluationReportView_->clear();
-    if (modelComparisonSummaryLabel_)
-        modelComparisonSummaryLabel_->setText(uiText("旧裸路径模型对比已停用；后续仅按 ModelPackageId 与 committed Metric 对比。"));
-    return;
+      return;
 }
 
 void MainWindow::refreshModelRegistry()
 {
     updateModelRegistry();
-}
-
-void MainWindow::handleDatasetConversionWorkflow(const QJsonObject& payload)
-{
-    const QString state = payload.value(QStringLiteral("state")).toString();
-    const QString datasetId = payload.value(QStringLiteral("datasetId")).toString();
-    const QString versionId = payload.value(QStringLiteral("datasetVersionId")).toString();
-    const QString snapshotId = payload.value(QStringLiteral("snapshotId")).toString();
-    const QString conversionArtifactId = payload.value(QStringLiteral("conversionArtifactId")).toString();
-    const QString snapshotArtifactId = payload.value(QStringLiteral("snapshotArtifactId")).toString();
-    const QString evidenceArtifactId = payload.value(QStringLiteral("evidenceArtifactId")).toString();
-    if (datasetConversionProgressBar_ && state == QStringLiteral("succeeded"))
-        datasetConversionProgressBar_->setValue(100);
-    const QString summary = uiText("转换 %1：Dataset %2 | Version %3 | Snapshot %4 | Evidence %5")
-        .arg(state, datasetId, versionId, snapshotId, evidenceArtifactId);
-    if (datasetConversionStatusLabel_) datasetConversionStatusLabel_->setText(summary);
-    if (datasetConversionResultLabel_) {
-        datasetConversionResultLabel_->setText(
-            uiText("Conversion Artifact %1 | Snapshot Artifact %2")
-                .arg(conversionArtifactId, snapshotArtifactId));
-    }
-    appendDatasetConversionLog(summary);
-    appendDatasetConversionLog(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Indented)));
-    setDatasetConversionFormRunning(false);
-    updateRecentTasks();
-    updateSelectedTaskDetails();
-    updateProjectSummary();
-    updateDashboardSummary();
 }
