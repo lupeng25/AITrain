@@ -5,6 +5,8 @@
 #include <QJsonObject>
 #include <QWidget>
 
+#include <functional>
+
 class QLabel;
 class QPlainTextEdit;
 class QTableWidget;
@@ -13,9 +15,13 @@ class EvaluationReportView : public QWidget {
     Q_OBJECT
 
 public:
+    using ArtifactPreviewProvider = std::function<bool(
+        const QString& relativePath, QByteArray* content, QString* error)>;
+
     explicit EvaluationReportView(QWidget* parent = nullptr);
 
     void clear();
+    void setArtifactPreviewProvider(ArtifactPreviewProvider provider);
     bool loadReportData(const QByteArray& data, const QString& relativePath = QString());
 
 private slots:
@@ -29,7 +35,7 @@ private:
     void populateOfficialArtifacts(const QJsonObject& report);
     void populateSamples(const QJsonObject& report);
     bool loadReportObject(const QJsonObject& report);
-    QString resolveArtifactPath(const QString& declaredPath) const;
+    QString resolveArtifactRelativePath(const QString& declaredPath) const;
     void showPreviewImage(const QString& imagePath);
     void showEmptyState(const QString& text);
 
@@ -41,7 +47,8 @@ private:
     QTableWidget* sampleTable_ = nullptr;
     QLabel* previewLabel_ = nullptr;
     QPlainTextEdit* detailText_ = nullptr;
-    QString currentReportPath_;
+    QString currentReportRelativePath_;
+    ArtifactPreviewProvider artifactPreviewProvider_;
     QHash<int, QString> artifactPreviewPaths_;
     QHash<int, QString> artifactDetailTexts_;
     QHash<int, QString> samplePreviewPaths_;

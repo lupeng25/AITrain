@@ -49,19 +49,6 @@ QString defaultBackendForTask(const QString& taskType);
 QString defaultModelForBackend(const QString& backend);
 QString trainingBackendDescription(const QString& backend);
 QStringList modelPresetItemsForBackend(const QString& backend);
-bool yoloModelPresetMatchesBackend(const QString& modelPreset, const QString& backend);
-QJsonObject trainingPreflightReport(
-    const QString& datasetPath,
-    const QString& datasetFormat,
-    bool datasetReady,
-    const QString& datasetSnapshotManifest,
-    const QString& taskType,
-    const QString& backend,
-    const QString& modelPreset,
-    int epochs,
-    int batchSize,
-    int imageSize);
-QString trainingPreflightSummaryText(const QJsonObject& preflight);
 QString compactListSummary(const QStringList& values, int maxItems = 3);
 int uniqueStringCount(const QStringList& values);
 bool setComboCurrentData(QComboBox* combo, const QString& data);

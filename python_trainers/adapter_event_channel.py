@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Authenticated loopback event client for a future AITrain  Worker Host.
+"""Authenticated loopback event client for the AITrain Worker Host.
 
 Wire contract:
 1. the first JSONL frame is ``{"channel":"aitrain.adapter","token":"..."}``;
@@ -7,8 +7,7 @@ Wire contract:
 3. all following frames are Protocol envelopes, one compact JSON object per
    line.  The token is deliberately never repeated in task events.
 
-This module is a client-side contract only.  It does not make the existing V1
-Worker accept  adapter connections.
+The channel is the only structured event transport used by official adapters.
 """
 
 from __future__ import annotations
@@ -37,7 +36,7 @@ _KNOWN_KINDS = frozenset({
     "event.failed",
     "event.canceled",
 })
-_LEGACY_EVENT_KIND_MAP = {
+_ADAPTER_EVENT_KIND_MAP = {
     "log": "event.log",
     "progress": "event.progress",
     "metric": "event.metric",
@@ -46,6 +45,58 @@ _LEGACY_EVENT_KIND_MAP = {
     "failed": "event.failed",
     "canceled": "event.canceled",
 }
+
+_DOMAIN_FAILURE_CODES = frozenset({
+    "none",
+    "canceled",
+    "invalid_request",
+    "invalid_dataset",
+    "artifact_incomplete",
+    "backend_unsupported",
+    "runtime_not_implemented",
+    "dependency_missing",
+    "sdk_missing",
+    "hardware_unsupported",
+    "artifact_incompatible",
+    "process_crashed",
+    "protocol_violation",
+    "timeout",
+    "internal_error",
+})
+
+
+def domain_failure_code(adapter_code: str) -> str:
+    """Map a stable adapter origin code to the Worker domain taxonomy.
+
+    Adapter codes remain in ``originCode``/``adapterCode`` for diagnostics;
+    ``failureCode`` is the only value consumed by the C++ failure catalog.
+    Unknown origin codes intentionally fall back to ``internal_error`` because
+    no stronger classification can be proven at this boundary.
+    """
+    normalized = str(adapter_code or "").strip().lower()
+    if normalized in _DOMAIN_FAILURE_CODES:
+        return normalized
+    if normalized in {"bad_request", "official_val_args_invalid", "official_train_args_invalid",
+                      "ultralytics_train_args_invalid", "dataset_snapshot_request_invalid"}:
+        return "invalid_request"
+    if normalized == "model_missing":
+        return "artifact_incomplete"
+    if normalized == "dataset_missing" or normalized == "bad_dataset" \
+            or "dataset_snapshot_invalid" in normalized or normalized.endswith("_dir_missing"):
+        return "invalid_dataset"
+    if normalized.endswith("_missing") or normalized in {
+        "ultralytics_missing", "paddleocr_dependency_missing", "anomalib_dependency_missing",
+    }:
+        return "dependency_missing"
+    if "unsupported" in normalized:
+        return "backend_unsupported"
+    if "timeout" in normalized:
+        return "timeout"
+    if "cancel" in normalized:
+        return "canceled"
+    if "crash" in normalized or "process" in normalized and "failed" in normalized:
+        return "process_crashed"
+    return "internal_error"
 
 
 class AdapterEventChannelError(RuntimeError):
@@ -155,7 +206,11 @@ class AdapterEventChannel:
             "sequence": str(self._sequence),
             "kind": kind,
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-            "payload": dict(payload),
+            # Keep the envelope identity duplicated in the typed payload so
+            # every receiver can validate the same TaskId before dispatch.
+            # The value is owned by the authenticated channel, never by the
+            # adapter callback.
+            "payload": {**dict(payload), "taskId": self._task_id},
         }
         wire = _compact_json_line(event)
         max_bytes = MAX_LOG_MESSAGE_BYTES if kind == "event.log" else MAX_CONTROL_MESSAGE_BYTES
@@ -168,19 +223,29 @@ class AdapterEventChannel:
             raise AdapterEventChannelError("event channel write failed") from exc
         return event
 
-    def emit_legacy_event(self, event: Mapping[str, Any]) -> dict[str, Any]:
-        """Bridge the SDK's current event naming to a Protocol envelope."""
+    def emit_event(self, event: Mapping[str, Any]) -> dict[str, Any]:
+        """Normalize one AdapterSdk event and emit a strict Protocol envelope.
+
+        Every failed event preserves the adapter origin code while exposing a
+        domain failure code.
+        """
         event_type = str(event.get("type") or "")
-        kind = _LEGACY_EVENT_KIND_MAP.get(event_type)
+        kind = _ADAPTER_EVENT_KIND_MAP.get(event_type)
         if kind is None:
             raise ValueError(f"unsupported adapter SDK event type: {event_type}")
         payload = dict(event)
         payload.pop("type", None)
         if event_type == "failed":
-            adapter_code = str(payload.pop("code", ""))
+            adapter_code = str(payload.pop("code", payload.get("originCode", "")) or "").strip()
             if adapter_code:
                 payload["adapterCode"] = adapter_code
-            payload["failureCode"] = "internal_error"
+                payload["originCode"] = adapter_code
+            provided_code = str(payload.get("failureCode", "") or "").strip().lower()
+            payload["failureCode"] = (
+                provided_code if provided_code in _DOMAIN_FAILURE_CODES
+                and provided_code != "internal_error"
+                else domain_failure_code(adapter_code)
+            )
         return self.send_event(kind, payload)
 
 

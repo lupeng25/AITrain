@@ -127,6 +127,53 @@ private slots:
         QCOMPARE(wp::taskCommandPayload(externalCommand), externalPayload);
     }
 
+    void workerEventCodecRejectsInvalidIdentityAndPayload()
+    {
+        namespace wp = aitrain::worker_protocol;
+        const aitrain::RequestId requestId = aitrain::RequestId::create();
+        const aitrain::TaskId taskId = aitrain::TaskId::create();
+        const QJsonObject validDetails{
+            {QStringLiteral("taskId"), taskId.toString()},
+            {QStringLiteral("message"), QStringLiteral("hello")}};
+        const wp::TaskEvent validEvent = wp::taskEventFromType(wp::event::log(), validDetails);
+        const aitrain::ProtocolEnvelope validEnvelope = wp::control::eventEnvelope(
+            requestId, taskId, 1, validEvent);
+        QVERIFY(validEnvelope.taskId.isValid());
+
+        wp::TaskEvent decoded;
+        QString error;
+        QVERIFY2(wp::control::unpackTaskEvent(validEnvelope, &decoded, &error), qPrintable(error));
+        QCOMPARE(decoded.taskId, taskId);
+
+        aitrain::ProtocolEnvelope mismatched = validEnvelope;
+        mismatched.payload.insert(QStringLiteral("taskId"), aitrain::TaskId::create().toString());
+        QVERIFY(!wp::control::unpackTaskEvent(mismatched, &decoded, &error));
+        QVERIFY(error.contains(QStringLiteral("taskId")));
+
+        aitrain::ProtocolEnvelope missingMessage = validEnvelope;
+        missingMessage.payload.remove(QStringLiteral("message"));
+        QVERIFY(!wp::control::unpackTaskEvent(missingMessage, &decoded, &error));
+        QVERIFY(error.contains(QStringLiteral("message")));
+
+        const wp::TaskEvent invalidProgress = wp::taskEventFromType(
+            wp::event::progress(), QJsonObject{{QStringLiteral("taskId"), taskId.toString()},
+                {QStringLiteral("percent"), QStringLiteral("not-a-number")}});
+        const aitrain::ProtocolEnvelope invalidProgressEnvelope = wp::control::eventEnvelope(
+            requestId, taskId, 2, invalidProgress);
+        QVERIFY(invalidProgressEnvelope.kind.isEmpty());
+
+        // 预执行协议拒绝发生在 Worker 尚未绑定 activeTaskId 的窗口，
+        // 诊断 payload 会带空 taskId；封包必须以已认证 envelope 身份补齐它。
+        const wp::TaskEvent earlyFailure = wp::taskEventFromType(
+            wp::event::failed(), QJsonObject{{QStringLiteral("taskId"), QString()},
+                {QStringLiteral("message"), QStringLiteral("protocol rejected")},
+                {QStringLiteral("errorCode"), QStringLiteral("protocol_rejected")}});
+        const aitrain::ProtocolEnvelope earlyFailureEnvelope = wp::control::eventEnvelope(
+            requestId, taskId, 3, earlyFailure);
+        QCOMPARE(earlyFailureEnvelope.kind, QStringLiteral("event.failed"));
+        QCOMPARE(earlyFailureEnvelope.payload.value(QStringLiteral("taskId")).toString(), taskId.toString());
+    }
+
     void packagingLayoutContainsOnlyProductDirectories()
     {
         const aitrain::PackagingLayout layout = aitrain::packagingLayoutForRoot(QStringLiteral("C:/AITrain"));

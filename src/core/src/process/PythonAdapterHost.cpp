@@ -40,6 +40,12 @@ bool PythonAdapterHost::start(const PythonAdapterLaunch& launch,
         }
         return false;
     }
+    if (launch.eventDrainTimeoutMs < 1) {
+        if (error) {
+            *error = QStringLiteral("Python Adapter 事件排空窗口必须为正数。");
+        }
+        return false;
+    }
     if (!processTree_.create(error) || !eventServer_.start(requestId, taskId, error)) {
         processTree_.reset();
         return false;
@@ -71,7 +77,11 @@ bool PythonAdapterHost::start(const PythonAdapterLaunch& launch,
     forceTerminated_ = false;
     terminalEventSeen_ = false;
     exitEmitted_ = false;
+    drainState_ = DrainState::Running;
+    pendingExit_.reset();
+    drainFinalizeScheduled_ = false;
     eventSequenceOffset_ = launch.eventSequenceOffset;
+    eventDrainTimeoutMs_ = launch.eventDrainTimeoutMs;
     lifecycleError_.clear();
     processOutputTail_.clear();
     processOutputDroppedBytes_ = 0;
@@ -101,6 +111,11 @@ bool PythonAdapterHost::start(const PythonAdapterLaunch& launch,
     QObject::connect(cancellationTimer_.get(), &QTimer::timeout, cancellationTimer_.get(), [this] {
         QString ignored;
         forceTerminate(&ignored);
+    });
+    drainTimer_ = std::make_unique<QTimer>();
+    drainTimer_->setSingleShot(true);
+    QObject::connect(drainTimer_.get(), &QTimer::timeout, drainTimer_.get(), [this] {
+        finalizeAfterDrainDeadline();
     });
     eventServer_.setEventHandler([this](const ProtocolEnvelope& event) {
         onAdapterEvent(event);
@@ -216,6 +231,25 @@ void PythonAdapterHost::onAdapterEvent(const ProtocolEnvelope& event)
     if (eventHandler_) {
         eventHandler_(normalized);
     }
+    // QProcess::finished 与 QTcpSocket::readyRead 属于两个独立的事件源。
+    // 若进程先退出，终态帧可能在 finished 回调返回后才到达；此时必须
+    // 在同一 drain 状态内立即收口，而不是依赖固定的短暂 singleShot。
+    if (terminalEventSeen_ && drainState_ == DrainState::WaitingForTerminal
+        && pendingExit_ && !drainFinalizeScheduled_) {
+        drainFinalizeScheduled_ = true;
+        // AdapterEventServer 正在其 readSocket() 回调中调用本函数。必须等
+        // 当前 readyRead/readLine 循环返回后再 stop() 并释放 socket，否则
+        // readSocket() 会继续访问已释放的 QTcpSocket。
+        QTimer::singleShot(0, [this] {
+            drainFinalizeScheduled_ = false;
+            if (drainState_ != DrainState::WaitingForTerminal || !pendingExit_) {
+                return;
+            }
+            const PythonAdapterExit outcome = *pendingExit_;
+            pendingExit_.reset();
+            finalizeProcessExit(outcome);
+        });
+    }
 }
 
 void PythonAdapterHost::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus)
@@ -231,21 +265,54 @@ void PythonAdapterHost::onProcessFinished(int exitCode, QProcess::ExitStatus exi
     outcome.cancelRequested = cancelRequested_;
     outcome.forceTerminated = forceTerminated_;
     outcome.terminalEventSeen = terminalEventSeen_;
-    // Python may close immediately after writing its terminal frame.  The
-    // event server receives that frame on a separate Qt socket callback, so
-    // defer finalization briefly to let the authenticated frame drain.
-    if (!terminalEventSeen_ && !forceTerminated_ && cancellationTimer_) {
-        QTimer::singleShot(100, cancellationTimer_.get(), [this, outcome] {
-            finalizeProcessExit(outcome);
-        });
+    beginProcessDrain(outcome);
+}
+
+void PythonAdapterHost::beginProcessDrain(PythonAdapterExit outcome)
+{
+    if (exitEmitted_ || drainState_ == DrainState::Finalized) {
         return;
     }
+
+    pendingExit_ = outcome;
+    running_ = false;
+    if (forceTerminated_ || terminalEventSeen_ || !eventServer_.lastError().isEmpty()) {
+        const PythonAdapterExit finalOutcome = *pendingExit_;
+        pendingExit_.reset();
+        finalizeProcessExit(finalOutcome);
+        return;
+    }
+
+    drainState_ = DrainState::WaitingForTerminal;
+    if (drainTimer_) {
+        drainTimer_->start(eventDrainTimeoutMs_);
+    } else {
+        // Defensive fallback for a partially constructed host. start() always
+        // creates the timer, but a bounded direct finalize is safer than
+        // leaving the worker alive forever if construction changes later.
+        finalizeAfterDrainDeadline();
+    }
+}
+
+void PythonAdapterHost::finalizeAfterDrainDeadline()
+{
+    if (drainState_ != DrainState::WaitingForTerminal || !pendingExit_) {
+        return;
+    }
+    const PythonAdapterExit outcome = *pendingExit_;
+    pendingExit_.reset();
     finalizeProcessExit(outcome);
 }
 
 void PythonAdapterHost::finalizeProcessExit(PythonAdapterExit outcome)
 {
     if (exitEmitted_) return;
+    if (drainTimer_) {
+        drainTimer_->stop();
+    }
+    drainState_ = DrainState::Finalized;
+    pendingExit_.reset();
+    drainFinalizeScheduled_ = false;
     outcome.cancelRequested = cancelRequested_;
     outcome.forceTerminated = forceTerminated_;
     outcome.terminalEventSeen = terminalEventSeen_;
@@ -273,6 +340,9 @@ void PythonAdapterHost::onProcessError(QProcess::ProcessError processError)
         return;
     }
     running_ = false;
+    drainState_ = DrainState::Finalized;
+    pendingExit_.reset();
+    drainFinalizeScheduled_ = false;
     PythonAdapterExit outcome;
     outcome.cancelRequested = cancelRequested_;
     outcome.forceTerminated = forceTerminated_;
@@ -300,6 +370,10 @@ void PythonAdapterHost::stop()
         cancellationTimer_->stop();
         cancellationTimer_.reset();
     }
+    if (drainTimer_) {
+        drainTimer_->stop();
+        drainTimer_.reset();
+    }
     if (process_ && process_->state() != QProcess::NotRunning) {
         QString ignored;
         processTree_.terminate(&ignored);
@@ -311,6 +385,10 @@ void PythonAdapterHost::stop()
     processTree_.reset();
     cancellationDirectory_.reset();
     running_ = false;
+    drainState_ = DrainState::Idle;
+    pendingExit_.reset();
+    drainFinalizeScheduled_ = false;
+    eventDrainTimeoutMs_ = 1000;
 }
 
 } // namespace aitrain

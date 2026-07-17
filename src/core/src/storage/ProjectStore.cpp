@@ -461,6 +461,7 @@ bool ProjectStore::initialize(QString* error)
         QStringLiteral("create index if not exists idx_tasks_updated_at on tasks(updated_at desc)"),
         QStringLiteral("create index if not exists idx_task_events_task_id on task_events(task_id, sequence)"),
         QStringLiteral("create index if not exists idx_artifacts_task_id on artifacts(task_id)"),
+        QStringLiteral("create index if not exists idx_artifacts_kind_created_at on artifacts(kind, created_at desc, id desc)"),
         QStringLiteral("create index if not exists idx_dataset_versions_dataset_id on dataset_versions(dataset_id, created_at desc)"),
         QStringLiteral("create index if not exists idx_dataset_snapshots_task_id on dataset_snapshots(task_id, created_at desc)"),
         QStringLiteral("create index if not exists idx_workflow_steps_run_ordinal on workflow_steps(workflow_run_id, ordinal)"),
@@ -2580,6 +2581,78 @@ QVector<ArtifactSnapshot> ProjectStore::artifactsForTask(const TaskId& taskId, Q
         ArtifactSnapshot snapshot;
         if (!artifact(artifactId, &snapshot, error)) return {};
         results.append(snapshot);
+    }
+    return results;
+}
+
+QVector<DeliveryEvidenceCandidate> ProjectStore::deliveryEvidenceCandidates(
+    int limit, QString* error) const
+{
+    QVector<DeliveryEvidenceCandidate> results;
+    if (limit <= 0) {
+        if (error) *error = QStringLiteral("查询交付证据候选需要正数 limit。");
+        return results;
+    }
+
+    // 先按 Artifact 排序并限制证据条数，再展开文件清单；不能直接对展开后的
+    // 行使用 LIMIT，否则一个包含多个文件的 Artifact 会占用多个结果名额。
+    QSqlQuery query(db_);
+    query.prepare(QStringLiteral(
+        "select t.id, t.request_id, t.state, t.capability_id, t.task_type, "
+        "t.created_at, t.updated_at, t.failure_code, t.failure_details, "
+        "t.failure_suggested_action, coalesce(t.failure_occurred_at, ''), "
+        "a.id, a.task_id, a.kind, a.created_at, f.relative_path, f.sha256, f.byte_count "
+        "from (select id, created_at from artifacts "
+        "where kind in ('evidence_bundle', 'external_acceptance_evidence') "
+        "order by created_at desc, id desc limit :limit) selected "
+        "join artifacts a on a.id = selected.id "
+        "join tasks t on t.id = a.task_id "
+        "left join artifact_files f on f.artifact_id = a.id "
+        "order by selected.created_at desc, a.id desc, f.relative_path asc"));
+    query.bindValue(QStringLiteral(":limit"), limit);
+    if (!query.exec()) {
+        if (error) *error = sqlError(query);
+        return {};
+    }
+
+    ArtifactId currentArtifactId;
+    while (query.next()) {
+        ArtifactId artifactId;
+        if (!ArtifactId::parse(query.value(11).toString(), &artifactId, error)) {
+            return {};
+        }
+        if (!currentArtifactId.isValid() || artifactId != currentArtifactId) {
+            DeliveryEvidenceCandidate candidate;
+            if (!parseTask(query, &candidate.task, error)
+                || !TaskId::parse(query.value(12).toString(), &candidate.artifact.taskId, error)
+                || candidate.task.id != candidate.artifact.taskId) {
+                if (error && error->isEmpty()) {
+                    *error = QStringLiteral("交付证据候选的任务身份不一致。");
+                }
+                return {};
+            }
+            candidate.artifact.id = artifactId;
+            candidate.artifact.kind = query.value(13).toString();
+            candidate.artifact.createdAt = parseUtc(query.value(14).toString());
+            if (candidate.artifact.kind.isEmpty() || !candidate.artifact.createdAt.isValid()) {
+                if (error) *error = QStringLiteral("交付证据候选 Artifact 记录无效。");
+                return {};
+            }
+            results.append(candidate);
+            currentArtifactId = artifactId;
+        }
+
+        if (!query.value(15).isNull()) {
+            ArtifactFileSnapshot file;
+            file.relativePath = query.value(15).toString();
+            file.sha256 = query.value(16).toString();
+            file.byteCount = query.value(17).toLongLong();
+            if (file.relativePath.isEmpty() || file.sha256.size() != 64 || file.byteCount < 0) {
+                if (error) *error = QStringLiteral("交付证据 Artifact 文件记录无效。");
+                return {};
+            }
+            results.last().artifact.files.append(file);
+        }
     }
     return results;
 }

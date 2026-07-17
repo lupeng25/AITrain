@@ -97,6 +97,7 @@ private slots:
     void adapterEventChannelTimesOutUnansweredCandidate();
     void adapterEventChannelRejectsUnterminatedOversizedBuffer();
     void pythonAdapterHostInjectsEnvironmentAndForcesCancellation();
+    void pythonAdapterHostDrainsTerminalAfterProcessExit();
     void cancellationKillsGrandchildThatIgnoresCooperativeSignal();
     void adapterCrashCannotLeaveGrandchildRunning();
     void hostDestructionCannotLeaveProcessTreeRunning();
@@ -325,6 +326,60 @@ void ProcessTreeTests::pythonAdapterHostInjectsEnvironmentAndForcesCancellation(
     QVERIFY(exits.constFirst().exitCode != 9);
 #else
     QSKIP(" Python Adapter Host cancellation integration currently uses Windows Job Object.");
+#endif
+}
+
+void ProcessTreeTests::pythonAdapterHostDrainsTerminalAfterProcessExit()
+{
+#ifdef Q_OS_WIN
+    aitrain::PythonAdapterLaunch launch;
+    launch.program = QStringLiteral("cmd.exe");
+    launch.arguments = QStringList{QStringLiteral("/c"), QStringLiteral("exit /b 0")};
+    launch.eventDrainTimeoutMs = 1500;
+
+    const aitrain::RequestId requestId = aitrain::RequestId::create();
+    const aitrain::TaskId taskId = aitrain::TaskId::create();
+    aitrain::PythonAdapterHost host;
+    QList<aitrain::PythonAdapterExit> exits;
+    QString error;
+    QVERIFY2(host.start(launch, requestId, taskId, {},
+        [&exits](const aitrain::PythonAdapterExit& outcome) { exits.append(outcome); }, &error), qPrintable(error));
+
+    // QProcess finished is intentionally observed before the adapter event
+    // connection is established. The host must keep its endpoint alive during
+    // the explicit drain window instead of finalizing after a fixed 100 ms.
+    QTRY_VERIFY_WITH_TIMEOUT(!host.isRunning(), 3000);
+    QCOMPARE(exits.size(), 0);
+
+    QTcpSocket socket;
+    socket.connectToHost(host.endpoint().host, host.endpoint().port);
+    QVERIFY(socket.waitForConnected(3000));
+    const QByteArray handshake = QByteArrayLiteral("{\"channel\":\"aitrain.adapter\",\"token\":\"")
+        + host.endpoint().token.toUtf8() + QByteArrayLiteral("\"}\n");
+    QCOMPARE(socket.write(handshake), handshake.size());
+    QVERIFY(socket.waitForBytesWritten(3000));
+    QTRY_VERIFY_WITH_TIMEOUT(socket.bytesAvailable() > 0, 3000);
+    QCOMPARE(QJsonDocument::fromJson(socket.readLine()).object()
+            .value(QStringLiteral("status")).toString(), QStringLiteral("accepted"));
+
+    aitrain::ProtocolEnvelope terminal;
+    terminal.messageId = aitrain::MessageId::create();
+    terminal.requestId = requestId;
+    terminal.taskId = taskId;
+    terminal.sequence = 1;
+    terminal.kind = QStringLiteral("event.succeeded");
+    terminal.timestamp = QDateTime::currentDateTimeUtc();
+    terminal.payload = QJsonObject{{QStringLiteral("message"), QStringLiteral("delayed terminal")}};
+    const QByteArray encoded = aitrain::encodeProtocolMessage(terminal, &error);
+    QVERIFY2(!encoded.isEmpty(), qPrintable(error));
+    QCOMPARE(socket.write(encoded), encoded.size());
+    QVERIFY(socket.waitForBytesWritten(3000));
+
+    QTRY_COMPARE_WITH_TIMEOUT(exits.size(), 1, 3000);
+    QVERIFY(exits.constFirst().terminalEventSeen);
+    QVERIFY(exits.constFirst().normalExit);
+#else
+    QSKIP("Python Adapter Host drain integration currently uses the Windows worker fixture.");
 #endif
 }
 

@@ -20,6 +20,8 @@
 #include <QTableWidgetItem>
 #include <QVBoxLayout>
 
+#include <utility>
+
 namespace {
 
 QString uiText(const char* source)
@@ -242,7 +244,8 @@ void EvaluationReportView::clear()
     const QSignalBlocker perClassBlocker(perClassTable_);
     const QSignalBlocker officialArtifactsBlocker(officialArtifactsTable_);
     const QSignalBlocker samplesBlocker(sampleTable_);
-    currentReportPath_.clear();
+    currentReportRelativePath_.clear();
+    artifactPreviewProvider_ = {};
     artifactPreviewPaths_.clear();
     artifactDetailTexts_.clear();
     samplePreviewPaths_.clear();
@@ -261,7 +264,7 @@ void EvaluationReportView::clear()
 bool EvaluationReportView::loadReportData(const QByteArray& data, const QString& relativePath)
 {
     clear();
-    currentReportPath_.clear();
+    currentReportRelativePath_ = QDir::cleanPath(relativePath.trimmed());
     QJsonParseError error;
     const QJsonDocument document = QJsonDocument::fromJson(data, &error);
     if (error.error != QJsonParseError::NoError || !document.isObject()) {
@@ -318,35 +321,31 @@ bool EvaluationReportView::loadReportObject(const QJsonObject& report)
     return true;
 }
 
-QString EvaluationReportView::resolveArtifactPath(const QString& declaredPath) const
+void EvaluationReportView::setArtifactPreviewProvider(ArtifactPreviewProvider provider)
 {
-    if (declaredPath.trimmed().isEmpty() || currentReportPath_.isEmpty()) {
-        return QString();
-    }
+    artifactPreviewProvider_ = std::move(provider);
+}
 
-    const QString reportRoot = QFileInfo(currentReportPath_).canonicalPath();
-    if (reportRoot.isEmpty()) {
+QString EvaluationReportView::resolveArtifactRelativePath(const QString& declaredPath) const
+{
+    const QString normalized = QDir::cleanPath(declaredPath.trimmed());
+    if (normalized.isEmpty() || normalized == QStringLiteral(".")
+        || currentReportRelativePath_.isEmpty()) {
         return QString();
     }
-
-    const QFileInfo declaredInfo(declaredPath);
-    const QString candidatePath = declaredInfo.isAbsolute()
-        ? declaredInfo.absoluteFilePath()
-        : QDir(reportRoot).absoluteFilePath(QDir::cleanPath(declaredPath));
-    const QFileInfo candidateInfo(candidatePath);
-    if (!candidateInfo.exists() || !candidateInfo.isFile()) {
+    const QFileInfo declaredInfo(normalized);
+    if (declaredInfo.isAbsolute()) {
         return QString();
     }
-
-    const QString canonicalPath = candidateInfo.canonicalFilePath();
-    const QString rootPrefix = reportRoot.endsWith(QDir::separator())
-        ? reportRoot
-        : reportRoot + QDir::separator();
-    if (canonicalPath.compare(reportRoot, Qt::CaseInsensitive) != 0
-        && !canonicalPath.startsWith(rootPrefix, Qt::CaseInsensitive)) {
+    const QString reportDirectory = QFileInfo(currentReportRelativePath_).path();
+    const QString relative = QDir::cleanPath(
+        QDir(reportDirectory).relativeFilePath(normalized));
+    if (relative.isEmpty() || relative == QStringLiteral(".")
+        || relative == QStringLiteral("..")
+        || relative.startsWith(QStringLiteral("../"))) {
         return QString();
     }
-    return canonicalPath;
+    return relative;
 }
 
 void EvaluationReportView::updateArtifactPreview()
@@ -480,11 +479,11 @@ void EvaluationReportView::populateOfficialArtifacts(const QJsonObject& report)
         }
         seenPaths.append(declaredPath);
         const QFileInfo info(declaredPath);
-        const QString safePath = resolveArtifactPath(declaredPath);
+        const QString safePath = resolveArtifactRelativePath(declaredPath);
         const QString artifactName = name.isEmpty() ? info.fileName() : name;
         const QString displayPath = safePath.isEmpty()
             ? uiText("外部路径已隐藏")
-            : QDir::cleanPath(QDir(QFileInfo(currentReportPath_).canonicalPath()).relativeFilePath(safePath));
+            : safePath;
         const int row = officialArtifactsTable_->rowCount();
         officialArtifactsTable_->insertRow(row);
         officialArtifactsTable_->setItem(row, 0, new QTableWidgetItem(artifactKindLabel(kind)));
@@ -550,7 +549,7 @@ void EvaluationReportView::populateSamples(const QJsonObject& report)
         sampleTable_->insertRow(row);
 
         const QString imagePath = item.value(QStringLiteral("imagePath")).toString();
-        const QString safeImagePath = resolveArtifactPath(imagePath);
+        const QString safeImagePath = resolveArtifactRelativePath(imagePath);
         const QString predictionText = item.value(QStringLiteral("prediction")).isObject()
             ? QString::fromUtf8(QJsonDocument(item.value(QStringLiteral("prediction")).toObject()).toJson(QJsonDocument::Compact))
             : item.value(QStringLiteral("prediction")).toString();
@@ -561,13 +560,13 @@ void EvaluationReportView::populateSamples(const QJsonObject& report)
             ? uiText("未记录图片路径")
             : safeImagePath.isEmpty()
                 ? uiText("图片路径不属于当前 committed Artifact，已隐藏。")
-                : uiText("图片（Artifact 内）：%1").arg(QDir::cleanPath(QDir(QFileInfo(currentReportPath_).canonicalPath()).relativeFilePath(safeImagePath)));
+                : uiText("图片（Artifact 内）：%1").arg(safeImagePath);
         const QString labelPath = item.value(QStringLiteral("labelPath")).toString();
         if (!labelPath.isEmpty()) {
-            const QString safeLabelPath = resolveArtifactPath(labelPath);
+            const QString safeLabelPath = resolveArtifactRelativePath(labelPath);
             detail.append(safeLabelPath.isEmpty()
                 ? uiText("\n标签路径不属于当前 committed Artifact，已隐藏。")
-                : uiText("\n标签（Artifact 内）：%1").arg(QDir::cleanPath(QDir(QFileInfo(currentReportPath_).canonicalPath()).relativeFilePath(safeLabelPath))));
+                : uiText("\n标签（Artifact 内）：%1").arg(safeLabelPath));
         }
         for (auto it = item.constBegin(); it != item.constEnd(); ++it) {
             if (it.key() == QStringLiteral("imagePath") || it.key() == QStringLiteral("labelPath")) {
@@ -598,7 +597,7 @@ void EvaluationReportView::populateSamples(const QJsonObject& report)
         sampleTable_->setItem(row, 4, new QTableWidgetItem(extra));
 
         const QString declaredOverlayPath = item.value(QStringLiteral("overlayPath")).toString(overlayByImage.value(imagePath));
-        samplePreviewPaths_.insert(row, resolveArtifactPath(declaredOverlayPath));
+        samplePreviewPaths_.insert(row, resolveArtifactRelativePath(declaredOverlayPath));
         sampleDetailTexts_.insert(row, detail);
     };
 
@@ -648,8 +647,20 @@ void EvaluationReportView::showPreviewImage(const QString& imagePath)
         previewLabel_->setText(uiText("该条目没有可预览图片。"));
         return;
     }
-    const QPixmap image(imagePath);
-    if (image.isNull()) {
+    if (!artifactPreviewProvider_) {
+        previewLabel_->setText(uiText("当前报告没有已提交 Artifact 预览提供者。"));
+        return;
+    }
+    QByteArray content;
+    QString error;
+    if (!artifactPreviewProvider_(imagePath, &content, &error)) {
+        previewLabel_->setText(error.isEmpty()
+            ? uiText("图片无法读取。")
+            : uiText("已提交 Artifact 图片无法读取：%1").arg(error));
+        return;
+    }
+    QPixmap image;
+    if (!image.loadFromData(content)) {
         previewLabel_->setText(uiText("图片无法读取。"));
         return;
     }

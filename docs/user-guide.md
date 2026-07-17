@@ -341,14 +341,14 @@ OCR 路线只依赖 PaddleOCR 官方实现。Det / Rec / System 的推理、评�
 
 ### 11.1 数据集 > 质量与复核
 
-“数据集 > 质量与复核”用于把问题样本重新送回标注和数据集校验闭环。可以加载：
+“数据集 > 质量与复核”用于把问题样本重新送回标注和数据集校验闭环。页面只接受已提交的复核 ArtifactId；输入后由 Query Service 在 Artifact 包内按相对成员名读取，不接受任意本地 JSON 路径。可加载的包内成员包括：
 
 - 数据质量报告中的 `problem_samples.json`
 - 评估报告中的 `error_samples.json`
 - 低置信样本清单
 - `rework_sample_set.json`
 
-加载后可按来源、问题类型、类别、split、评估错误、OCR edit distance / CER、低置信信息筛选。点击“生成复核清单”会写出 X-AnyLabeling 可用的本地图片列表和 `rework_sample_set.json`。v1 不内嵌标注器，也不实现多人协作；标注完成后回到“数据集”页刷新、重新校验并创建快照。
+加载后可按来源、问题类型、类别、split、评估错误、OCR edit distance / CER、低置信信息筛选。样本行只展示 ArtifactId 及包内相对路径；“查看受控信息”不会打开原始文件或把 staging/本地绝对路径交给 GUI。点击“生成复核清单”会写出 X-AnyLabeling 可用的本地图片列表和 `rework_sample_set.json`。v1 不内嵌标注器，也不实现多人协作；标注完成后回到“数据集”页刷新、重新校验并创建快照。
 
 ### 11.2 环境 > 交付证据
 

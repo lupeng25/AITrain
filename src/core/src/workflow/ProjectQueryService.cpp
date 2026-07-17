@@ -163,113 +163,148 @@ QVector<DeliveryEvidenceReadModel> ProjectQueryService::deliveryEvidence(
         return {};
     }
 
-    const QVector<TaskSnapshot> tasks = workspace_->tasks(limit, error);
+    const QVector<DeliveryEvidenceCandidate> candidates =
+        workspace_->deliveryEvidenceCandidates(limit, error);
     if (error && !error->isEmpty()) return {};
+
     QVector<DeliveryEvidenceReadModel> result;
-    for (const TaskSnapshot& task : tasks) {
-        const QVector<ArtifactSnapshot> artifacts = workspace_->artifactsForTask(task.id, error);
-        if (error && !error->isEmpty()) return {};
-        for (const ArtifactSnapshot& artifact : artifacts) {
-            if (artifact.kind == QStringLiteral("external_acceptance_evidence")) {
-                const auto fileIt = std::find_if(artifact.files.cbegin(), artifact.files.cend(),
-                    [](const ArtifactFileSnapshot& file) {
-                        return file.relativePath == QStringLiteral("acceptance.json");
-                    });
-                if (fileIt == artifact.files.cend()) {
-                    if (error) *error = QStringLiteral("外部验收 Artifact 缺少 acceptance.json：%1").arg(artifact.id.toString());
-                    return {};
-                }
-                ArtifactFilePreview preview;
-                if (!workspace_->readCommittedArtifactFile(artifact.id, fileIt->relativePath,
-                        &preview, 1024 * 1024, error)) return {};
-                QJsonParseError parseError;
-                const QJsonDocument document = QJsonDocument::fromJson(preview.content, &parseError);
-                const QJsonObject object = document.object();
-                const QStringList allowed = {QStringLiteral("schemaVersion"), QStringLiteral("kind"),
-                    QStringLiteral("evidenceKind"), QStringLiteral("status"), QStringLiteral("producer"),
-                    QStringLiteral("observedAt"), QStringLiteral("message"), QStringLiteral("limitations")};
-                for (const QString& key : object.keys()) {
-                    if (!allowed.contains(key)) {
-                        if (error) *error = QStringLiteral("外部验收 Artifact 包含未知字段：%1").arg(key);
-                        return {};
-                    }
-                }
-                const QString evidenceKind = object.value(QStringLiteral("evidenceKind")).toString().trimmed();
-                const QString status = object.value(QStringLiteral("status")).toString().trimmed();
-                const QString producer = object.value(QStringLiteral("producer")).toString().trimmed();
-                const QDateTime observedAt = QDateTime::fromString(
-                    object.value(QStringLiteral("observedAt")).toString(), Qt::ISODate);
-                if (parseError.error != QJsonParseError::NoError || !document.isObject()
-                    || object.value(QStringLiteral("schemaVersion")).toInt(-1) != 1
-                    || object.value(QStringLiteral("kind")).toString() != QStringLiteral("aitrain_external_acceptance_evidence")
-                    || evidenceKind.isEmpty() || producer.isEmpty() || observedAt.isValid()
-                        == false) {
-                    if (error) *error = QStringLiteral("外部验收 Artifact schema 校验失败：%1").arg(artifact.id.toString());
-                    return {};
-                }
-                if (!QStringList{QStringLiteral("passed"), QStringLiteral("failed"), QStringLiteral("blocked"),
-                        QStringLiteral("collected"), QStringLiteral("imported")}.contains(status)) {
-                    if (error) *error = QStringLiteral("外部验收 Artifact status 无效：%1").arg(artifact.id.toString());
-                    return {};
-                }
-                DeliveryEvidenceReadModel model;
-                model.taskId = task.id;
-                model.evidenceArtifactId = artifact.id;
-                model.taskState = taskStateToString(task.state);
-                model.evidenceKind = evidenceKind;
-                model.runtimeStatus = status;
-                model.producer = producer;
-                model.observedAt = observedAt.toUTC();
-                model.verified = false;
-                for (const QJsonValue& value : object.value(QStringLiteral("limitations")).toArray()) {
-                    if (!value.isString()) {
-                        if (error) *error = QStringLiteral("外部验收 Artifact limitations 无效：%1").arg(artifact.id.toString());
-                        return {};
-                    }
-                    model.limitations.append(value.toString());
-                }
-                model.limitations.append(QStringLiteral("外部证据未经过 AITrain 内部生产验收证明，verified=false。"));
-                result.append(model);
+    const auto appendInvalid = [&result](const DeliveryEvidenceCandidate& candidate,
+        const QString& message) {
+        DeliveryEvidenceReadModel model;
+        model.taskId = candidate.task.id;
+        model.evidenceArtifactId = candidate.artifact.id;
+        model.taskState = taskStateToString(candidate.task.state);
+        model.evidenceKind = candidate.artifact.kind;
+        model.runtimeStatus = QStringLiteral("invalid");
+        model.observedAt = candidate.artifact.createdAt;
+        model.verified = false;
+        model.valid = false;
+        model.validationFailure = Failure{
+            FailureCode::ArtifactIncomplete,
+            message,
+            QStringLiteral("重新生成或重新导入该证据 Artifact。"),
+            QDateTime::currentDateTimeUtc()};
+        model.limitations.append(message);
+        result.append(model);
+    };
+
+    for (const DeliveryEvidenceCandidate& candidate : candidates) {
+        const ArtifactSnapshot& artifact = candidate.artifact;
+        const QString requiredFile = artifact.kind == QStringLiteral("external_acceptance_evidence")
+            ? QStringLiteral("acceptance.json") : QStringLiteral("evidence.json");
+        const auto fileIt = std::find_if(artifact.files.cbegin(), artifact.files.cend(),
+            [&requiredFile](const ArtifactFileSnapshot& file) {
+                return file.relativePath == requiredFile;
+            });
+        if (fileIt == artifact.files.cend()) {
+            appendInvalid(candidate, QStringLiteral("证据 Artifact 缺少 %1：%2")
+                .arg(requiredFile, artifact.id.toString()));
+            continue;
+        }
+
+        ArtifactFilePreview preview;
+        QString rowError;
+        const qint64 maxBytes = artifact.kind == QStringLiteral("external_acceptance_evidence")
+            ? 1024 * 1024 : 512 * 1024;
+        if (!workspace_->readCommittedArtifactFile(artifact, fileIt->relativePath,
+                &preview, maxBytes, &rowError)) {
+            appendInvalid(candidate, QStringLiteral("证据 Artifact 文件无法读取或校验：%1")
+                .arg(rowError));
+            continue;
+        }
+
+        QJsonParseError parseError;
+        const QJsonDocument document = QJsonDocument::fromJson(preview.content, &parseError);
+        if (artifact.kind == QStringLiteral("external_acceptance_evidence")) {
+            if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+                appendInvalid(candidate, QStringLiteral("外部验收 Artifact JSON 无效：%1")
+                    .arg(artifact.id.toString()));
                 continue;
             }
-            if (artifact.kind != QStringLiteral("evidence_bundle")) continue;
-            const auto fileIt = std::find_if(artifact.files.cbegin(), artifact.files.cend(),
-                [](const ArtifactFileSnapshot& file) {
-                    return file.relativePath == QStringLiteral("evidence.json");
-                });
-            if (fileIt == artifact.files.cend()) {
-                if (error) *error = QStringLiteral("Evidence Artifact 缺少 evidence.json：%1").arg(artifact.id.toString());
-                return {};
+            const QJsonObject object = document.object();
+            const QStringList allowed = {QStringLiteral("schemaVersion"), QStringLiteral("kind"),
+                QStringLiteral("evidenceKind"), QStringLiteral("status"), QStringLiteral("producer"),
+                QStringLiteral("observedAt"), QStringLiteral("message"), QStringLiteral("limitations")};
+            QString schemaError;
+            for (const QString& key : object.keys()) {
+                if (!allowed.contains(key)) {
+                    schemaError = QStringLiteral("外部验收 Artifact 包含未知字段：%1").arg(key);
+                    break;
+                }
             }
-            ArtifactFilePreview preview;
-            if (!workspace_->readCommittedArtifactFile(artifact.id, fileIt->relativePath,
-                    &preview, 512 * 1024, error)) {
-                return {};
+            const QString evidenceKind = object.value(QStringLiteral("evidenceKind")).toString().trimmed();
+            const QString status = object.value(QStringLiteral("status")).toString().trimmed();
+            const QString producer = object.value(QStringLiteral("producer")).toString().trimmed();
+            const QDateTime observedAt = QDateTime::fromString(
+                object.value(QStringLiteral("observedAt")).toString(), Qt::ISODate);
+            const bool limitationsValid = !object.contains(QStringLiteral("limitations"))
+                || object.value(QStringLiteral("limitations")).isArray();
+            if (schemaError.isEmpty() && (object.value(QStringLiteral("schemaVersion")).toInt(-1) != 1
+                || object.value(QStringLiteral("kind")).toString()
+                    != QStringLiteral("aitrain_external_acceptance_evidence")
+                || evidenceKind.isEmpty() || producer.isEmpty() || !observedAt.isValid()
+                || !limitationsValid)) {
+                schemaError = QStringLiteral("外部验收 Artifact schema 校验失败：%1").arg(artifact.id.toString());
             }
-            const QJsonDocument document = QJsonDocument::fromJson(preview.content);
-            EvidenceBundle bundle;
-            QString decodeError;
-            if (!document.isObject() || !decodeEvidenceBundle(document.object(), &bundle, &decodeError)) {
-                if (error) *error = QStringLiteral("Evidence Artifact 无法验证：%1").arg(decodeError);
-                return {};
+            if (schemaError.isEmpty() && !QStringList{QStringLiteral("passed"), QStringLiteral("failed"),
+                    QStringLiteral("blocked"), QStringLiteral("collected"),
+                    QStringLiteral("imported")}.contains(status)) {
+                schemaError = QStringLiteral("外部验收 Artifact status 无效：%1").arg(artifact.id.toString());
+            }
+            if (!schemaError.isEmpty()) {
+                appendInvalid(candidate, schemaError);
+                continue;
             }
             DeliveryEvidenceReadModel model;
-            model.taskId = task.id;
+            model.taskId = candidate.task.id;
             model.evidenceArtifactId = artifact.id;
-            model.taskState = taskStateToString(bundle.task.state);
-            model.evidenceKind = QStringLiteral("aitrain_evidence_bundle");
-            model.runtimeStatus = bundle.runtimeStatus.value(QStringLiteral("status")).toString();
-            if (model.runtimeStatus.isEmpty()) {
-                model.runtimeStatus = bundle.runtimeStatus.value(QStringLiteral("runtimeStatus")).toString();
+            model.taskState = taskStateToString(candidate.task.state);
+            model.evidenceKind = evidenceKind;
+            model.runtimeStatus = status;
+            model.producer = producer;
+            model.observedAt = observedAt.toUTC();
+            model.verified = false;
+            for (const QJsonValue& value : object.value(QStringLiteral("limitations")).toArray()) {
+                if (!value.isString()) {
+                    schemaError = QStringLiteral("外部验收 Artifact limitations 无效：%1")
+                        .arg(artifact.id.toString());
+                    break;
+                }
+                model.limitations.append(value.toString());
             }
-            model.producer = bundle.backendEnvironment.value(QStringLiteral("producer")).toString();
-            if (model.producer.isEmpty()) model.producer = bundle.projectIdentity;
-            model.limitations = bundle.limitations;
-            model.observedAt = bundle.createdAt;
-            model.verified = bundle.task.state == TaskState::Succeeded
-                && bundle.task.failure.code == FailureCode::None;
+            if (!schemaError.isEmpty()) {
+                appendInvalid(candidate, schemaError);
+                continue;
+            }
+            model.limitations.append(QStringLiteral("外部证据未经过 AITrain 内部生产验收证明，verified=false。"));
             result.append(model);
+            continue;
         }
+
+        EvidenceBundle bundle;
+        QString decodeError;
+        if (parseError.error != QJsonParseError::NoError || !document.isObject()
+            || !decodeEvidenceBundle(document.object(), &bundle, &decodeError)) {
+            appendInvalid(candidate, QStringLiteral("Evidence Artifact 无法验证：%1")
+                .arg(decodeError.isEmpty() ? QStringLiteral("JSON 无效") : decodeError));
+            continue;
+        }
+        DeliveryEvidenceReadModel model;
+        model.taskId = candidate.task.id;
+        model.evidenceArtifactId = artifact.id;
+        model.taskState = taskStateToString(bundle.task.state);
+        model.evidenceKind = QStringLiteral("aitrain_evidence_bundle");
+        model.runtimeStatus = bundle.runtimeStatus.value(QStringLiteral("status")).toString();
+        if (model.runtimeStatus.isEmpty()) {
+            model.runtimeStatus = bundle.runtimeStatus.value(QStringLiteral("runtimeStatus")).toString();
+        }
+        model.producer = bundle.backendEnvironment.value(QStringLiteral("producer")).toString();
+        if (model.producer.isEmpty()) model.producer = bundle.projectIdentity;
+        model.limitations = bundle.limitations;
+        model.observedAt = bundle.createdAt;
+        model.verified = bundle.task.state == TaskState::Succeeded
+            && bundle.task.failure.code == FailureCode::None;
+        result.append(model);
     }
     return result;
 }

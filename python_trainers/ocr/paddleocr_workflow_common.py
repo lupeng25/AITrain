@@ -67,7 +67,7 @@ def configure_adapter(component: str, operation: str) -> AdapterSdk:
         _event_channel = event_channel_from_environment()
         _event_channel.connect()
     if _adapter is None or _adapter.backend != expected:
-        sink = _event_channel.emit_legacy_event if _event_channel is not None else None
+        sink = _event_channel.emit_event if _event_channel is not None else None
         _adapter = AdapterSdk(expected, event_sink=sink, cancel_file=os.environ.get("AITRAIN_CANCEL_FILE"))
     return _adapter
 

@@ -168,6 +168,9 @@ enum class TaskEventKind {
 };
 
 struct TaskEvent final {
+    // TaskId 属于已验证的 envelope 身份。details 中仍保留 wire 字段供
+    // 现有事件查看器读取，但业务路由不得再从 details 重新解析身份。
+    TaskId taskId;
     TaskEventKind kind = TaskEventKind::Log;
     QString resultType;
     // 事件内容由 WorkerProtocol 的 codec 按 kind 校验；该对象不是协议中的

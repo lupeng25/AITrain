@@ -70,8 +70,7 @@ bool WorkerClient::startTask(const QString& workerProgram,
     const wp::TaskCommand& command,
     QString* error)
 {
-    return startWorkerCommand(workerProgram, wp::taskCommandType(command),
-        wp::taskCommandPayload(command), error);
+    return startWorkerCommand(workerProgram, command, error);
 }
 void WorkerClient::cancel()
 {
@@ -88,7 +87,9 @@ bool WorkerClient::isRunning() const
     return finishing_ || process_.state() != QProcess::NotRunning;
 }
 
-bool WorkerClient::startWorkerCommand(const QString& workerProgram, const QString& commandType, const QJsonObject& payload, QString* error)
+bool WorkerClient::startWorkerCommand(const QString& workerProgram,
+    const wp::TaskCommand& command,
+    QString* error)
 {
     if (finishing_ || process_.state() != QProcess::NotRunning) {
         if (error) {
@@ -100,6 +101,15 @@ bool WorkerClient::startWorkerCommand(const QString& workerProgram, const QStrin
     if (!QFileInfo::exists(workerProgram)) {
         if (error) {
             *error = QStringLiteral("Worker executable not found: %1").arg(workerProgram);
+        }
+        return false;
+    }
+
+    const aitrain::TaskId requestedTaskId = std::visit(
+        [](const auto& value) { return value.context.taskId; }, command.payload);
+    if (!requestedTaskId.isValid()) {
+        if (error) {
+            *error = QStringLiteral("TaskCommand context.taskId 必须是有效 UUID。");
         }
         return false;
     }
@@ -118,25 +128,11 @@ bool WorkerClient::startWorkerCommand(const QString& workerProgram, const QStrin
         return false;
     }
 
-    QJsonObject normalizedPayload = payload;
-    aitrain::TaskId requestedTaskId;
-    QString taskIdError;
-    if (!aitrain::TaskId::parse(
-            normalizedPayload.value(wp::field::taskId()).toString(),
-            &requestedTaskId, &taskIdError)) {
-        requestedTaskId = aitrain::TaskId::create();
-        normalizedPayload.insert(wp::field::taskId(), requestedTaskId.toString());
-    }
-    aitrain::worker_protocol::TaskCommand decodedCommand;
-    if (!wp::taskCommandFromPayload(commandType, normalizedPayload, &decodedCommand, error)) {
-        return false;
-    }
-
     buffer_.clear();
-    pendingCommand_ = decodedCommand;
+    pendingCommand_ = command;
     activeRequestId_ = aitrain::RequestId::create();
     controlToken_ = QUuid::createUuid().toString(QUuid::Id128);
-    activeTaskId_ = std::visit([](const auto& command) { return command.context.taskId; }, decodedCommand.payload);
+    activeTaskId_ = requestedTaskId;
     incomingSequenceTracker_.clear();
     outgoingSequence_ = 0;
     finishedEmitted_ = false;

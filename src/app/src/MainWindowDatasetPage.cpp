@@ -520,8 +520,8 @@ QWidget* MainWindow::buildSampleReviewPanel()
     setupPanel->setMinimumWidth(280);
     setupPanel->setMaximumWidth(340);
     reviewSamplePathEdit_ = new QLineEdit;
-    reviewSamplePathEdit_->setPlaceholderText(uiText("选择 problem_samples.json / error_samples.json / rework_sample_set.json / evaluation_report.json"));
-    auto* browseButton = new QPushButton(uiText("选择文件"));
+    reviewSamplePathEdit_->setPlaceholderText(uiText("输入已提交的 dataset_quality_analysis / dataset_repair_manifest ArtifactId"));
+    auto* browseButton = new QPushButton(uiText("选择 Artifact"));
     connect(browseButton, &QPushButton::clicked, this, &MainWindow::browseSampleReviewFile);
     auto* pathRow = new QWidget;
     auto* pathLayout = new QHBoxLayout(pathRow);
@@ -545,7 +545,7 @@ QWidget* MainWindow::buildSampleReviewPanel()
     form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     form->setHorizontalSpacing(12);
     form->setVerticalSpacing(10);
-    form->addRow(uiText("样本文件"), pathRow);
+    form->addRow(uiText("复核 Artifact"), pathRow);
     form->addRow(uiText("来源"), reviewSourceFilterCombo_);
     form->addRow(uiText("问题类型"), reviewReasonFilterCombo_);
     form->addRow(uiText("搜索"), reviewSearchEdit_);
@@ -561,7 +561,7 @@ QWidget* MainWindow::buildSampleReviewPanel()
     actionLayout->setContentsMargins(10, 8, 10, 8);
     actionLayout->setSpacing(8);
     auto* loadButton = primaryButton(uiText("加载复核样本"));
-    auto* openButton = new QPushButton(uiText("打开样本"));
+    auto* openButton = new QPushButton(uiText("查看受控信息"));
     connect(loadButton, &QPushButton::clicked, this, &MainWindow::loadSampleReviewFile);
     connect(openButton, &QPushButton::clicked, this, &MainWindow::openSelectedReviewSample);
     actionLayout->addWidget(loadButton, 0, 0);

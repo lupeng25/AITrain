@@ -9,6 +9,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 
 class QProcess;
 class QTemporaryDir;
@@ -27,6 +28,10 @@ struct PythonAdapterLaunch final {
     QProcessEnvironment environment;
     quint64 eventSequenceOffset = 0;
     int cancellationGraceMs = 5000;
+    // 进程已经退出后，事件通道仍可能在 Qt 的下一轮事件循环中交付
+    // 最后的终态帧。Host 在该窗口内等待终态；超时后才将“无终态退出”
+    // 作为失败收口。该值必须显式为正数，便于集成测试覆盖延迟交付。
+    int eventDrainTimeoutMs = 1000;
 };
 
 struct PythonAdapterExit final {
@@ -61,12 +66,21 @@ public:
     AdapterEventEndpoint endpoint() const;
 
 private:
+    enum class DrainState {
+        Idle,
+        Running,
+        WaitingForTerminal,
+        Finalized,
+    };
+
     void onProcessStarted();
     void drainProcessOutput();
     void appendProcessOutput(const QByteArray& bytes, const QString& channel);
     void onAdapterEvent(const ProtocolEnvelope& event);
     void onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus);
     void onProcessError(QProcess::ProcessError error);
+    void beginProcessDrain(PythonAdapterExit outcome);
+    void finalizeAfterDrainDeadline();
     void finalizeProcessExit(PythonAdapterExit outcome);
     void emitExitOnce(const PythonAdapterExit& outcome);
     void stop();
@@ -76,6 +90,7 @@ private:
     std::unique_ptr<QProcess> process_;
     std::unique_ptr<QTemporaryDir> cancellationDirectory_;
     std::unique_ptr<QTimer> cancellationTimer_;
+    std::unique_ptr<QTimer> drainTimer_;
     EventHandler eventHandler_;
     ExitHandler exitHandler_;
     bool running_ = false;
@@ -83,6 +98,10 @@ private:
     bool forceTerminated_ = false;
     bool terminalEventSeen_ = false;
     bool exitEmitted_ = false;
+    DrainState drainState_ = DrainState::Idle;
+    std::optional<PythonAdapterExit> pendingExit_;
+    bool drainFinalizeScheduled_ = false;
+    int eventDrainTimeoutMs_ = 1000;
     quint64 eventSequenceOffset_ = 0;
     QString lifecycleError_;
     QByteArray processOutputTail_;

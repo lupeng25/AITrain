@@ -47,7 +47,7 @@ def configure_adapter() -> None:
         _event_channel = event_channel_from_environment()
         _event_channel.connect()
     if _adapter is None:
-        sink = _event_channel.emit_legacy_event if _event_channel is not None else None
+        sink = _event_channel.emit_event if _event_channel is not None else None
         _adapter = AdapterSdk(BACKEND_ID, event_sink=sink)
 
 

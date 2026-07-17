@@ -527,8 +527,17 @@ public:
     bool cleanupRuntimeStaging(const TaskId& taskId, QString* error = nullptr);
     QVector<TaskSnapshot> tasks(int limit, QString* error = nullptr) const;
     bool task(const TaskId& taskId, TaskSnapshot* result, QString* error = nullptr) const;
+    bool artifact(const ArtifactId& artifactId, ArtifactSnapshot* result, QString* error = nullptr) const;
     QVector<ArtifactSnapshot> artifactsForTask(const TaskId& taskId, QString* error = nullptr) const;
+    QVector<DeliveryEvidenceCandidate> deliveryEvidenceCandidates(
+        int limit, QString* error = nullptr) const;
     bool readCommittedArtifactFile(const ArtifactId& artifactId,
+        const QString& relativePath,
+        ArtifactFilePreview* result,
+        qint64 maxBytes = 512 * 1024,
+        QString* error = nullptr) const;
+    // 已经从同一条候选查询加载过清单时使用此重载，避免再次查询 Artifact 元数据。
+    bool readCommittedArtifactFile(const ArtifactSnapshot& snapshot,
         const QString& relativePath,
         ArtifactFilePreview* result,
         qint64 maxBytes = 512 * 1024,

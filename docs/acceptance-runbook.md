@@ -72,7 +72,7 @@ The GUI delivery-closeout surfaces aggregate evidence; they do not replace the s
 
 Current GUI surfaces:
 
-- `数据集 > 质量与复核`: load `problem_samples.json`, `error_samples.json`, `rework_sample_set.json`, or evaluation reports; filter by source, reason, class, split, OCR edit distance / CER, or search text; export an X-AnyLabeling review list.
+- `数据集 > 质量与复核`: enter a committed review `ArtifactId`; the GUI reads `problem_samples.json`, `error_samples.json`, `rework_sample_set.json`, or evaluation reports by package-relative member name after inventory/hash verification. It never accepts an arbitrary local JSON path or opens staging files; filter by source, reason, class, split, OCR edit distance / CER, or search text; export an X-AnyLabeling review list.
 - `模型库 > 评估报告`: review model evaluation report records and visualized report details.
 - `部署验证 > 部署验证 / 推理验证`：两者都只接受已登记、Manifest 和哈希校验通过的  模型包；分别运行部署验证与单图推理。
 - `系统设置 > 内置能力`: review the built-in capability matrix and backend boundaries.

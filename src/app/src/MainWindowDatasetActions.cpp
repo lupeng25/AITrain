@@ -13,9 +13,7 @@
 #include <QCheckBox>
 #include <QClipboard>
 #include <QDateTime>
-#include <QDesktopServices>
 #include <QDir>
-#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -44,7 +42,6 @@
 #include <QTime>
 #include <QToolButton>
 #include <QVBoxLayout>
-#include <QUrl>
 #include <QUuid>
 
 using namespace aitrain_app;
@@ -144,6 +141,8 @@ QJsonArray extractReviewSamples(const QJsonDocument& document)
         qMakePair(QStringLiteral("errorSamples"), QStringLiteral("error_samples")),
         qMakePair(QStringLiteral("lowConfidenceSamples"), QStringLiteral("low_confidence")),
         qMakePair(QStringLiteral("samples"), QStringLiteral("samples")),
+        qMakePair(QStringLiteral("issues"), QStringLiteral("quality_issues")),
+        qMakePair(QStringLiteral("actions"), QStringLiteral("repair_actions")),
         qMakePair(QStringLiteral("reworkSamples"), QStringLiteral("rework_samples")),
         qMakePair(QStringLiteral("items"), QStringLiteral("items"))
     };
@@ -731,36 +730,61 @@ void MainWindow::syncXAnyLabelingAnnotationSession()
 
 void MainWindow::browseSampleReviewFile()
 {
-    const QString file = QFileDialog::getOpenFileName(
-        this,
-        uiText("选择复核样本文件"),
-        currentProjectPath_,
-        QStringLiteral("Review samples (*.json);;All files (*.*)"));
-    if (!file.isEmpty() && reviewSamplePathEdit_) {
-        reviewSamplePathEdit_->setText(QDir::toNativeSeparators(file));
+    bool accepted = false;
+    const QString artifactText = QInputDialog::getText(
+        this, uiText("选择复核 Artifact"), uiText("输入已提交的质量/复核 ArtifactId："),
+        QLineEdit::Normal, state_.dataset.sampleReviewArtifactId, &accepted).trimmed();
+    if (accepted && reviewSamplePathEdit_) {
+        reviewSamplePathEdit_->setText(artifactText);
         loadSampleReviewFile();
     }
 }
 
 void MainWindow::loadSampleReviewFile()
 {
-    const QString path = QDir::fromNativeSeparators(reviewSamplePathEdit_ ? reviewSamplePathEdit_->text().trimmed() : QString());
-    if (path.isEmpty() || !QFileInfo::exists(path)) {
-        QMessageBox::warning(this, uiText("样本复核"), uiText("请选择存在的复核样本 JSON 文件。"));
+    const QString artifactText = reviewSamplePathEdit_ ? reviewSamplePathEdit_->text().trimmed() : QString();
+    aitrain::ArtifactId artifactId;
+    QString error;
+    if (!aitrain::ArtifactId::parse(artifactText, &artifactId, &error)) {
+        QMessageBox::warning(this, uiText("样本复核"), uiText("请输入有效的已提交复核 ArtifactId。"));
         return;
     }
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
-        QMessageBox::critical(this, uiText("样本复核"), uiText("无法读取复核样本文件：%1").arg(QDir::toNativeSeparators(path)));
+    if (!workspace_.isOpen()) {
+        QMessageBox::warning(this, uiText("样本复核"), uiText("请先打开项目。"));
+        return;
+    }
+    aitrain::ArtifactSnapshot artifact;
+    if (!workspace_.artifact(artifactId, &artifact, &error)) {
+        QMessageBox::warning(this, uiText("样本复核"), uiText("找不到已提交复核 Artifact：%1").arg(error));
+        return;
+    }
+    const QStringList candidates = {
+        QStringLiteral("problem_samples.json"),
+        QStringLiteral("quality_analysis.json"),
+        QStringLiteral("xanylabeling_review_manifest.json"),
+        QStringLiteral("repair_manifest.json"),
+        QStringLiteral("quality_report.json")};
+    aitrain::ArtifactFilePreview preview;
+    QString selectedFile;
+    for (const QString& candidate : candidates) {
+        if (workspace_.readCommittedArtifactFile(artifact, candidate, &preview, 4 * 1024 * 1024, &error)) {
+            selectedFile = candidate;
+            break;
+        }
+    }
+    if (selectedFile.isEmpty()) {
+        QMessageBox::warning(this, uiText("样本复核"),
+            uiText("Artifact 内没有可读取的质量/复核 JSON：%1").arg(error));
         return;
     }
     QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    const QJsonDocument document = QJsonDocument::fromJson(preview.content, &parseError);
     if (parseError.error != QJsonParseError::NoError || (!document.isObject() && !document.isArray())) {
         QMessageBox::critical(this, uiText("样本复核"), uiText("复核样本 JSON 解析失败：%1").arg(parseError.errorString()));
         return;
     }
 
+    state_.dataset.sampleReviewArtifactId = artifactId.toString();
     state_.dataset.sampleReviewSamples = extractReviewSamples(document);
     if (reviewSourceFilterCombo_) {
         reviewSourceFilterCombo_->clear();
@@ -792,7 +816,8 @@ void MainWindow::loadSampleReviewFile()
         reviewReasonFilterCombo_->addItem(reason, reason);
     }
     refreshSampleReviewTable();
-    statusBar()->showMessage(uiText("已加载复核样本：%1 条").arg(state_.dataset.sampleReviewSamples.size()), 4000);
+    statusBar()->showMessage(uiText("已加载 Artifact %1 的复核样本：%2 条")
+        .arg(artifactId.toString(), QString::number(state_.dataset.sampleReviewSamples.size())), 4000);
 }
 
 QJsonArray MainWindow::filteredSampleReviewRows() const
@@ -836,22 +861,22 @@ void MainWindow::refreshSampleReviewTable()
         const QString imagePath = samplePathField(sample, QStringList()
             << QStringLiteral("imagePath")
             << QStringLiteral("path")
-            << QStringLiteral("filePath"));
+            << QStringLiteral("filePath")
+            << QStringLiteral("sampleRelativePath"));
         const QString labelPath = samplePathField(sample, QStringList()
             << QStringLiteral("labelPath")
             << QStringLiteral("annotationPath")
-            << QStringLiteral("gtPath"));
+            << QStringLiteral("gtPath")
+            << QStringLiteral("sourceRelativePath"));
         sampleReviewTable_->setItem(row, 0, new QTableWidgetItem(sample.value(QStringLiteral("source")).toString()));
         sampleReviewTable_->setItem(row, 1, new QTableWidgetItem(sample.value(QStringLiteral("reason")).toString()));
         sampleReviewTable_->setItem(row, 2, new QTableWidgetItem(reviewClassText(sample)));
         sampleReviewTable_->setItem(row, 3, new QTableWidgetItem(reviewMetricText(sample)));
-        auto* imageItem = new QTableWidgetItem(compactPathForStatus(imagePath, 80));
-        imageItem->setData(Qt::UserRole, imagePath);
-        imageItem->setToolTip(QDir::toNativeSeparators(imagePath));
+        auto* imageItem = new QTableWidgetItem(imagePath);
+        imageItem->setToolTip(uiText("Snapshot 内相对路径：%1").arg(imagePath));
         sampleReviewTable_->setItem(row, 4, imageItem);
-        auto* labelItem = new QTableWidgetItem(compactPathForStatus(labelPath, 80));
-        labelItem->setData(Qt::UserRole, labelPath);
-        labelItem->setToolTip(QDir::toNativeSeparators(labelPath));
+        auto* labelItem = new QTableWidgetItem(labelPath);
+        labelItem->setToolTip(uiText("Snapshot 内相对路径：%1").arg(labelPath));
         sampleReviewTable_->setItem(row, 5, labelItem);
         sampleReviewTable_->setItem(row, 6, new QTableWidgetItem(sampleTextField(sample, QStringList()
             << QStringLiteral("message")
@@ -873,13 +898,18 @@ void MainWindow::openSelectedReviewSample()
         QMessageBox::information(this, uiText("样本复核"), uiText("请先选择一条复核样本。"));
         return;
     }
-    QTableWidgetItem* item = sampleReviewTable_->item(sampleReviewTable_->currentRow(), 4);
-    const QString path = item ? item->data(Qt::UserRole).toString() : QString();
-    if (path.isEmpty() || !QFileInfo::exists(path)) {
-        QMessageBox::warning(this, uiText("样本复核"), uiText("样本图片不存在。"));
+    const int row = sampleReviewTable_->currentRow();
+    const QString imagePath = sampleReviewTable_->item(row, 4)
+        ? sampleReviewTable_->item(row, 4)->text() : QString();
+    const QString labelPath = sampleReviewTable_->item(row, 5)
+        ? sampleReviewTable_->item(row, 5)->text() : QString();
+    if (state_.dataset.sampleReviewArtifactId.isEmpty()) {
+        QMessageBox::warning(this, uiText("样本复核"), uiText("当前没有已加载的复核 Artifact。"));
         return;
     }
-    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+    QMessageBox::information(this, uiText("样本复核"),
+        uiText("当前复核记录属于 Artifact %1。\n图片相对路径：%2\n标签相对路径：%3\n\n原始文件不会由 GUI 直接打开；请在任务与产物页按 ArtifactId 进行受控预览。")
+            .arg(state_.dataset.sampleReviewArtifactId, imagePath, labelPath));
 }
 
 void MainWindow::createDatasetSnapshot()

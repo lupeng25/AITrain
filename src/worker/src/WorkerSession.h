@@ -29,6 +29,8 @@ private slots:
 private:
     void handleCommand(const aitrain::worker_protocol::TaskCommand& command);
     void cancelCommand();
+    bool requestCancellationForActiveWorkflow();
+    void requestCancellationForTrackedWorkflows();
     void runEnvironmentCheckWorkflow(const aitrain::worker_protocol::EnvironmentCheckCommand& command);
     void runDatasetSplitWorkflow(const aitrain::worker_protocol::DatasetSplitCommand& command);
     void runDatasetConversionWorkflow(const aitrain::worker_protocol::DatasetConversionCommand& command);

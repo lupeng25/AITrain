@@ -12,6 +12,13 @@ This file is the source of truth for phase status in new AI coding conversations
 
 以下内容以本节为准，覆盖文档中较早的历史段落：SQLite 元数据版本为 schema 11；`ProjectStore`、`JsonProtocol`、`TaskModels`、`WorkerRequests` 以及 V1 `ProductWorkflow` 实现已物理删除，项目/总览、任务与产物、数据集目录、模型库、环境、交付证据和设置查询统一使用 `ProjectStore`、Query Service 和 Presenter，GUI 写入口统一由 `ProjectWorkspace`/Worker 收口。Worker 只保留 Protocol 的 `--self-check`、`--builtin-capabilities` 和 Socket 服务入口，旧裸模型、旧标注、旧数据集转换、TensorRT/NCNN/语义 ONNX smoke CLI 已删除；对应独立 smoke 脚本也已删除，验收必须使用 Workflow 或官方 Python 适配器。Qt 测试运行目录由 CMake 自动复制 Qt DLL、`platforms/qoffscreen` 和 `qt.conf`，CTest/VS Code 固定 `QT_QPA_PLATFORM=offscreen`，因此不再出现“Qt platform plugin could not be initialized”的旧启动环境问题。
 
+## 最终收口补充（2026-07-17）
+
+- Protocol/Adapter：`TaskEvent.taskId` 与 Envelope 统一为事件身份事实；非空 payload taskId 不一致时拒绝，步骤启动前的空 taskId 诊断由 Envelope 补齐；Python Adapter 统一使用 `emit_event`，认证通道注入 taskId 并保留稳定的 adapter/domain failure code。
+- Worker：取消、断开、退出和窗口关闭共用有限异步排空路径；Python Adapter 退出后的终态帧在读回调完成后再 finalize，不使用 GUI/Worker 嵌套事件循环。
+- Storage/Evidence：证据候选使用单条 SQL 查询并按 Artifact 数量限流；invalid evidence 保留在只读结果页并附带 Failure，而不是静默丢页；外部导入证据仍固定 `verified=false`。
+- GUI：评估报告与样本复核均以 committed ArtifactId + 包内相对成员读取；样本复核不再接收任意本地 JSON/图片路径，仅提供受控身份信息。
+
 ##  破坏性重构执行状态（2026-07-16）
 
 任务与产物文件预览现通过 `ProjectQueryService::artifactFilePreview` 按 ArtifactId 和包内相对路径读取，经 committed 清单 SHA-256 复验后以内存内容渲染；旧路径操作入口已删除，不再把 Artifact Store 物理路径交给 GUI。

@@ -456,13 +456,13 @@ bool writeFakeSmpWorkflowAdapters(const QString& root)
         "sidecar=out/'semantic_segmentation_sidecar.json'\n"
         "sidecar.write_text(json.dumps({'backend':'smp_semantic_segmentation','modelFamily':'semantic_segmentation','taskType':'semantic_segmentation','datasetFormat':'semantic_segmentation_mask','classNames':['background','part','scratch'],'inputWidth':32,'inputHeight':32,'normalization':{'mean':[0,0,0],'std':[1,1,1],'scale':0.003921568627},'decoder':'smp_semantic_segmentation'}),encoding='utf-8')\n"
         "report=out/'smp_training_report.json'; report.write_text(json.dumps({'ok':True,'backend':'smp_semantic_segmentation','metrics':{'mIoU':1.0}}),encoding='utf-8')\n"
-        "channel=event_channel_from_environment(); channel.connect(); sdk=AdapterSdk('smp_semantic_segmentation',event_sink=channel.emit_legacy_event)\n"
+        "channel=event_channel_from_environment(); channel.connect(); sdk=AdapterSdk('smp_semantic_segmentation',event_sink=channel.emit_event)\n"
         "sdk.emit_artifact_candidate('checkpoint',str(checkpoint)); sdk.emit_artifact_candidate('onnx_model',str(model_path)); sdk.emit_artifact_candidate('model_sidecar',str(sidecar)); sdk.emit_artifact_candidate('training_report',str(report)); sdk.emit_completed('fake SMP train completed'); channel.close()\n");
     const QString evaluate = common + QStringLiteral(
         "model=Path(request['modelPath']); sidecar=Path(request['sidecarPath']); checkpoint=Path(request.get('checkpointPath',''))\n"
         "assert model.is_file() and sidecar.is_file() and Path(request['datasetSnapshotManifest']).is_file()\n"
         "report=out/'evaluation_report.json'; report.write_text(json.dumps({'ok':True,'taskType':'semantic_segmentation','datasetFormat':'semantic_segmentation_mask','classNames':['background','part','scratch'],'metrics':{'mIoU':1.0,'meanDice':1.0,'pixelAccuracy':1.0}}),encoding='utf-8')\n"
-        "channel=event_channel_from_environment(); channel.connect(); sdk=AdapterSdk('smp_semantic_segmentation_eval',event_sink=channel.emit_legacy_event)\n"
+        "channel=event_channel_from_environment(); channel.connect(); sdk=AdapterSdk('smp_semantic_segmentation_eval',event_sink=channel.emit_event)\n"
         "sdk.emit_artifact_candidate('onnx_model',str(model)); sdk.emit_artifact_candidate('model_sidecar',str(sidecar));\n"
         "if checkpoint.is_file(): sdk.emit_artifact_candidate('checkpoint',str(checkpoint))\n"
         "sdk.emit_artifact_candidate('evaluation_report',str(report)); sdk.emit_completed('fake SMP evaluation completed'); channel.close()\n");
@@ -491,7 +491,7 @@ bool writeFakeAnomalibWorkflowAdapters(const QString& root)
         "request=json.loads(Path(os.sys.argv[os.sys.argv.index('--request')+1]).read_text(encoding='utf-8'))\n"
         "out=Path(request['outputPath']); out.mkdir(parents=True,exist_ok=True)\n"
         "backend=request['backend']; mode=request.get('mode','train')\n"
-        "channel=event_channel_from_environment(); channel.connect(); sdk=AdapterSdk(backend,event_sink=channel.emit_legacy_event)\n"
+        "channel=event_channel_from_environment(); channel.connect(); sdk=AdapterSdk(backend,event_sink=channel.emit_event)\n"
         "if mode=='train':\n"
         " assert Path(request['datasetSnapshotManifest']).is_file()\n"
         " checkpoint=out/'model.ckpt'; checkpoint.write_bytes(b'fake anomalib checkpoint')\n"

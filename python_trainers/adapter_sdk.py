@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-""" Python Adapter SDK.
+""" AITrain official Python Adapter SDK.
 
-The SDK keeps the existing JSONL event shape while giving adapters one small,
-testable boundary for structured events, cooperative cancellation and child
-process execution.  Process-tree ownership remains with the  Worker Host;
-this module only owns the direct child it starts.
+The SDK gives adapters one small, testable boundary for structured events,
+cooperative cancellation and child-process execution.  Process-tree ownership
+remains with the AITrain Worker Host; this module only owns the direct child it
+starts.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 import os
+import math
 from pathlib import Path
 from queue import Empty, Queue
 import subprocess
@@ -48,7 +49,7 @@ class ChildProcessResult:
 
 
 class AdapterSdk:
-    """Emit -compatible adapter events and run a cancellable direct child."""
+    """Emit structured adapter events and run a cancellable direct child."""
 
     def __init__(
         self,
@@ -99,14 +100,17 @@ class AdapterSdk:
         self._emit("log", level=level, message=message, **details)
 
     def emit_progress(self, percent: float, *, message: str, **details: Any) -> None:
-        if percent < 0 or percent > 100:
+        if not math.isfinite(float(percent)) or percent < 0 or percent > 100:
             raise ValueError("progress percent must be within [0, 100]")
         self._emit("progress", percent=float(percent), message=message, **details)
 
     def emit_metric(self, name: str, value: float, **details: Any) -> None:
         if not name.strip():
             raise ValueError("metric name must not be empty")
-        self._emit("metric", name=name, value=float(value), **details)
+        normalized_value = float(value)
+        if not math.isfinite(normalized_value):
+            raise ValueError("metric value must be finite")
+        self._emit("metric", name=name, value=normalized_value, **details)
 
     def emit_artifact_candidate(self, kind: str, path: str | Path, *, message: str = "", **details: Any) -> None:
         if not kind.strip():

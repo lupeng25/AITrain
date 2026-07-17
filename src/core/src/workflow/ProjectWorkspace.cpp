@@ -2096,6 +2096,15 @@ bool ProjectWorkspace::task(const TaskId& taskId, TaskSnapshot* result, QString*
     return storage_.task(taskId, result, error);
 }
 
+bool ProjectWorkspace::artifact(const ArtifactId& artifactId, ArtifactSnapshot* result, QString* error) const
+{
+    if (!isOpen()) {
+        if (error) *error = QStringLiteral(" 项目工作区未打开。已提交 Artifact 查询被拒绝。");
+        return false;
+    }
+    return storage_.artifact(artifactId, result, error);
+}
+
 QVector<ArtifactSnapshot> ProjectWorkspace::artifactsForTask(const TaskId& taskId, QString* error) const
 {
     if (!isOpen()) {
@@ -2103,6 +2112,16 @@ QVector<ArtifactSnapshot> ProjectWorkspace::artifactsForTask(const TaskId& taskI
         return {};
     }
     return storage_.artifactsForTask(taskId, error);
+}
+
+QVector<DeliveryEvidenceCandidate> ProjectWorkspace::deliveryEvidenceCandidates(
+    int limit, QString* error) const
+{
+    if (!isOpen()) {
+        if (error) *error = QStringLiteral(" 项目工作区未打开。");
+        return {};
+    }
+    return storage_.deliveryEvidenceCandidates(limit, error);
 }
 
 bool ProjectWorkspace::readCommittedArtifactFile(const ArtifactId& artifactId,
@@ -2116,6 +2135,22 @@ bool ProjectWorkspace::readCommittedArtifactFile(const ArtifactId& artifactId,
         if (error) *error = QStringLiteral("读取 Artifact 预览需要有效工作区、Artifact ID、输出对象和合法大小限制。");
         return false;
     }
+    ArtifactSnapshot snapshot;
+    if (!storage_.artifact(artifactId, &snapshot, error)) return false;
+    return readCommittedArtifactFile(snapshot, relativePath, result, maxBytes, error);
+}
+
+bool ProjectWorkspace::readCommittedArtifactFile(const ArtifactSnapshot& snapshot,
+    const QString& relativePath,
+    ArtifactFilePreview* result,
+    qint64 maxBytes,
+    QString* error) const
+{
+    if (error) error->clear();
+    if (!isOpen() || !snapshot.id.isValid() || !result || maxBytes <= 0 || maxBytes > 4 * 1024 * 1024) {
+        if (error) *error = QStringLiteral("读取 Artifact 预览需要有效工作区、Artifact ID、输出对象和合法大小限制。");
+        return false;
+    }
 
     const QString normalizedPath = QDir::cleanPath(QDir::fromNativeSeparators(relativePath.trimmed()));
     if (normalizedPath.isEmpty() || normalizedPath == QStringLiteral(".")
@@ -2125,8 +2160,6 @@ bool ProjectWorkspace::readCommittedArtifactFile(const ArtifactId& artifactId,
         return false;
     }
 
-    ArtifactSnapshot snapshot;
-    if (!storage_.artifact(artifactId, &snapshot, error)) return false;
     const auto fileIt = std::find_if(snapshot.files.cbegin(), snapshot.files.cend(),
         [&normalizedPath](const ArtifactFileSnapshot& file) {
             return QDir::cleanPath(QDir::fromNativeSeparators(file.relativePath)) == normalizedPath;
@@ -2137,7 +2170,7 @@ bool ProjectWorkspace::readCommittedArtifactFile(const ArtifactId& artifactId,
     }
 
     VerifiedWorkflowArtifactFile verified;
-    if (!verifyArtifactFile(artifactStore_->artifactPath(artifactId), *fileIt, &verified, error)) {
+    if (!verifyArtifactFile(artifactStore_->artifactPath(snapshot.id), *fileIt, &verified, error)) {
         return false;
     }
     QFile file(verified.absolutePath);

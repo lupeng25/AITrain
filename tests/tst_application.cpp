@@ -93,6 +93,8 @@ private slots:
     void projectWorkspaceOwnsRuntimeTaskLifecycle();
     void projectQueryServiceReadsOnlyPersistedTaskState();
     void externalAcceptanceEvidenceRequiresStrictSchemaAndStaysUnverified();
+    void deliveryEvidenceLimitCountsEvidenceArtifacts();
+    void deliveryEvidenceKeepsInvalidArtifactAsRow();
     void projectWorkspaceCommitsRuntimeArtifactsBeforeSuccess();
     void projectWorkspaceRegistersDatasetSnapshotAndSequencesTrainingWorkflow();
     void datasetSnapshotImportRegistersNewAndExistingDatasetVersions();
@@ -792,6 +794,89 @@ void ApplicationTests::externalAcceptanceEvidenceRequiresStrictSchemaAndStaysUnv
         QDateTime::currentDateTimeUtc()};
     QVERIFY2(workspace.finalizeTask(rejectedTaskId, aitrain::TaskState::Failed,
         rejectedFailure, &error), qPrintable(error));
+}
+
+void ApplicationTests::deliveryEvidenceLimitCountsEvidenceArtifacts()
+{
+    QTemporaryDir project;
+    QTemporaryDir external;
+    QVERIFY(project.isValid());
+    QVERIFY(external.isValid());
+    aitrain::ProjectWorkspace workspace;
+    QString error;
+    QVERIFY2(workspace.open(project.path(), &error), qPrintable(error));
+
+    const QString sourcePath = QDir(external.path()).filePath(QStringLiteral("acceptance.json"));
+    QVERIFY(writeFile(sourcePath, QJsonDocument(QJsonObject{
+        {QStringLiteral("schemaVersion"), 1},
+        {QStringLiteral("kind"), QStringLiteral("aitrain_external_acceptance_evidence")},
+        {QStringLiteral("evidenceKind"), QStringLiteral("clean_windows")},
+        {QStringLiteral("status"), QStringLiteral("passed")},
+        {QStringLiteral("producer"), QStringLiteral("qa-lab")},
+        {QStringLiteral("observedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)}})
+        .toJson(QJsonDocument::Compact)));
+
+    const aitrain::TaskId evidenceTaskId = aitrain::TaskId::create();
+    aitrain::TaskSnapshot task;
+    QVERIFY2(workspace.startTask(evidenceTaskId, QStringLiteral("delivery.external_acceptance"),
+        QStringLiteral("external_acceptance_evidence"), &task, &error), qPrintable(error));
+    aitrain::ExternalAcceptanceEvidenceImportResult imported;
+    QVERIFY2(workspace.importExternalAcceptanceEvidence(evidenceTaskId,
+        aitrain::ExternalAcceptanceEvidenceImportRequest{sourcePath}, &imported, &error),
+        qPrintable(error));
+    QVERIFY2(workspace.finalizeTask(evidenceTaskId, aitrain::TaskState::Succeeded, {}, &error),
+        qPrintable(error));
+
+    // 确保后续无 Artifact 任务在任务时间上更新，旧实现会错误地只扫描这些任务。
+    QTest::qWait(5);
+    for (int index = 0; index < 3; ++index) {
+        const aitrain::TaskId noiseTaskId = aitrain::TaskId::create();
+        QVERIFY2(workspace.startTask(noiseTaskId, QStringLiteral("diagnostic.noise"),
+            QStringLiteral("diagnostics"), &task, &error), qPrintable(error));
+        QVERIFY2(workspace.requestTaskCancellation(noiseTaskId, &error), qPrintable(error));
+        QVERIFY2(workspace.finalizeTask(noiseTaskId, aitrain::TaskState::Canceled,
+            aitrain::Failure{aitrain::FailureCode::Canceled, QStringLiteral("测试取消"),
+                QStringLiteral("无需操作"), QDateTime::currentDateTimeUtc()}, &error),
+            qPrintable(error));
+    }
+
+    aitrain::ProjectQueryService queries(&workspace);
+    const QVector<aitrain::DeliveryEvidenceReadModel> evidence = queries.deliveryEvidence(1, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(evidence.size(), 1);
+    QCOMPARE(evidence.first().evidenceArtifactId, imported.evidenceArtifactId);
+}
+
+void ApplicationTests::deliveryEvidenceKeepsInvalidArtifactAsRow()
+{
+    QTemporaryDir project;
+    QVERIFY(project.isValid());
+    aitrain::ProjectWorkspace workspace;
+    QString error;
+    QVERIFY2(workspace.open(project.path(), &error), qPrintable(error));
+
+    const aitrain::TaskId taskId = aitrain::TaskId::create();
+    aitrain::TaskSnapshot task;
+    QVERIFY2(workspace.startTask(taskId, QStringLiteral("delivery.external_acceptance"),
+        QStringLiteral("external_acceptance_evidence"), &task, &error), qPrintable(error));
+    const QString staging = workspace.runtimeStagingPath(taskId);
+    QVERIFY(QDir().mkpath(staging));
+    const QString sourcePath = QDir(staging).filePath(QStringLiteral("acceptance.json"));
+    QVERIFY(writeFile(sourcePath, QByteArrayLiteral("{}")));
+    aitrain::RuntimeArtifactBundle committed;
+    QVERIFY2(workspace.commitRuntimeArtifacts(taskId,
+        QStringLiteral("external_acceptance_evidence"),
+        {{QStringLiteral("acceptance"), sourcePath}}, &committed, &error), qPrintable(error));
+    QVERIFY2(workspace.finalizeTask(taskId, aitrain::TaskState::Succeeded, {}, &error),
+        qPrintable(error));
+
+    aitrain::ProjectQueryService queries(&workspace);
+    const QVector<aitrain::DeliveryEvidenceReadModel> evidence = queries.deliveryEvidence(10, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(evidence.size(), 1);
+    QVERIFY(!evidence.first().valid);
+    QCOMPARE(evidence.first().validationFailure.code, aitrain::FailureCode::ArtifactIncomplete);
+    QCOMPARE(evidence.first().runtimeStatus, QStringLiteral("invalid"));
 }
 
 void ApplicationTests::projectWorkspaceCommitsRuntimeArtifactsBeforeSuccess()

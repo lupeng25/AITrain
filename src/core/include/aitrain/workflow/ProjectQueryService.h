@@ -60,6 +60,10 @@ struct DeliveryEvidenceReadModel final {
     QStringList limitations;
     QDateTime observedAt;
     bool verified = false;
+    // Artifact 已进入证据索引但内容无法验证时，保留一条可见的无效记录，
+    // 避免单条损坏证据清空整个交付面板。
+    bool valid = true;
+    Failure validationFailure;
 };
 
 // 项目总览只读 DTO。底层 Snapshot 本身不包含裸 Artifact 路径或 legacy 数据。

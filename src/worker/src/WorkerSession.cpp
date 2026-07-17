@@ -10,8 +10,6 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
-#include <QElapsedTimer>
-#include <QEventLoop>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -246,9 +244,20 @@ void WorkerSession::cancelCommand()
     if (finishingSession_) {
         return;
     }
+    if (requestCancellationForActiveWorkflow()) {
+        return;
+    }
+    running_ = false;
+    canceled_ = true;
+    shutdownPythonTrainer(QStringLiteral("Canceled by user"), true);
+    sendCanceledAndFinish(activeTaskId_, QStringLiteral("Canceled by user"));
+}
+
+bool WorkerSession::requestCancellationForActiveWorkflow()
+{
     if (trainingWorkspace_ && trainingWorkflowTaskId_.isValid()) {
         cancelTrainingWorkflow();
-        return;
+        return true;
     }
     if (runtimeDeliveryRunning_ && runtimeDeliveryWorkspace_
         && runtimeDeliveryTaskId_.isValid()) {
@@ -256,62 +265,53 @@ void WorkerSession::cancelCommand()
         // 底层 ONNX Runtime 单次 infer 为同步调用，进入后不能中途抢占；
         // 取消会在该次 infer 返回后收口，不能提前发送第二个终态。
         canceled_ = true;
-        return;
+        return true;
     }
-    if (annotationRunning_ && annotationWorkspace_ && annotationTaskId_.isValid()) {
+
+    const auto request = [this](aitrain::ProjectWorkspace* workspace,
+                                const aitrain::TaskId& taskId) {
+        if (!workspace || !taskId.isValid()) {
+            return false;
+        }
         canceled_ = true;
         QString ignored;
-        annotationWorkspace_->requestTaskCancellation(annotationTaskId_, &ignored);
-        return;
-    }
-    if (ocrAcceptanceRunning_ && ocrAcceptanceWorkspace_
-        && ocrAcceptanceTaskId_.isValid()) {
-        canceled_ = true;
+        workspace->requestTaskCancellation(taskId, &ignored);
+        return true;
+    };
+    if (annotationRunning_ && request(annotationWorkspace_.get(), annotationTaskId_)) return true;
+    if (ocrAcceptanceRunning_ && request(ocrAcceptanceWorkspace_.get(), ocrAcceptanceTaskId_)) return true;
+    if (dataQualityRunning_ && request(dataQualityWorkspace_.get(), dataQualityTaskId_)) return true;
+    if (diagnosticsRunning_ && request(diagnosticsWorkspace_.get(), diagnosticsTaskId_)) return true;
+    if (datasetConversionRunning_ && request(datasetConversionWorkspace_.get(), datasetConversionTaskId_)) return true;
+    if (datasetSnapshotImportRunning_
+        && request(datasetSnapshotImportWorkspace_.get(), datasetSnapshotImportTaskId_)) return true;
+    if (datasetSplitRunning_ && request(datasetSplitWorkspace_.get(), datasetSplitTaskId_)) return true;
+    return false;
+}
+
+void WorkerSession::requestCancellationForTrackedWorkflows()
+{
+    const auto request = [](aitrain::ProjectWorkspace* workspace,
+                            const aitrain::TaskId& taskId) {
+        if (!workspace || !taskId.isValid()) {
+            return;
+        }
         QString ignored;
-        ocrAcceptanceWorkspace_->requestTaskCancellation(ocrAcceptanceTaskId_, &ignored);
-        return;
-    }
-    if (dataQualityRunning_ && dataQualityWorkspace_
-        && dataQualityTaskId_.isValid()) {
-        canceled_ = true;
-        QString ignored;
-        dataQualityWorkspace_->requestTaskCancellation(dataQualityTaskId_, &ignored);
-        return;
-    }
-    if (diagnosticsRunning_ && diagnosticsWorkspace_
-        && diagnosticsTaskId_.isValid()) {
-        // 外部同步 probe 期间不能抢占；Core 会在每个 probe 前后读取 canceled_。
-        canceled_ = true;
-        QString ignored;
-        diagnosticsWorkspace_->requestTaskCancellation(diagnosticsTaskId_, &ignored);
-        return;
-    }
-    if (datasetConversionRunning_ && datasetConversionWorkspace_
-        && datasetConversionTaskId_.isValid()) {
-        canceled_ = true;
-        QString ignored;
-        datasetConversionWorkspace_->requestTaskCancellation(datasetConversionTaskId_, &ignored);
-        return;
-    }
-    if (datasetSnapshotImportRunning_ && datasetSnapshotImportWorkspace_
-        && datasetSnapshotImportTaskId_.isValid()) {
-        canceled_ = true;
-        QString ignored;
-        datasetSnapshotImportWorkspace_->requestTaskCancellation(
-            datasetSnapshotImportTaskId_, &ignored);
-        return;
-    }
-    if (datasetSplitRunning_ && datasetSplitWorkspace_
-        && datasetSplitTaskId_.isValid()) {
-        canceled_ = true;
-        QString ignored;
-        datasetSplitWorkspace_->requestTaskCancellation(datasetSplitTaskId_, &ignored);
-        return;
-    }
-    running_ = false;
-    canceled_ = true;
-    shutdownPythonTrainer(QStringLiteral("Canceled by user"), true);
-    sendCanceledAndFinish(activeTaskId_, QStringLiteral("Canceled by user"));
+        workspace->requestTaskCancellation(taskId, &ignored);
+    };
+
+    // 断线是本地生命周期事件，不再根据各 handler 的 running 标记分叉；
+    // 只要 workspace 已经绑定了任务身份，就统一发出取消请求。这样在
+    // “startTask 成功、running 标记尚未置位”的窄窗口内也不会遗留活动任务。
+    request(trainingWorkspace_.get(), trainingWorkflowTaskId_);
+    request(runtimeDeliveryWorkspace_.get(), runtimeDeliveryTaskId_);
+    request(annotationWorkspace_.get(), annotationTaskId_);
+    request(ocrAcceptanceWorkspace_.get(), ocrAcceptanceTaskId_);
+    request(dataQualityWorkspace_.get(), dataQualityTaskId_);
+    request(diagnosticsWorkspace_.get(), diagnosticsTaskId_);
+    request(datasetConversionWorkspace_.get(), datasetConversionTaskId_);
+    request(datasetSnapshotImportWorkspace_.get(), datasetSnapshotImportTaskId_);
+    request(datasetSplitWorkspace_.get(), datasetSplitTaskId_);
 }
 
 void WorkerSession::handleSocketDisconnected()
@@ -322,39 +322,7 @@ void WorkerSession::handleSocketDisconnected()
 
     running_ = false;
     canceled_ = true;
-    if (trainingWorkspace_ && trainingWorkflowTaskId_.isValid()) {
-        QString ignored;
-        trainingWorkspace_->requestTaskCancellation(trainingWorkflowTaskId_, &ignored);
-    }
-    if (annotationWorkspace_ && annotationTaskId_.isValid()) {
-        QString ignored;
-        annotationWorkspace_->requestTaskCancellation(annotationTaskId_, &ignored);
-    }
-    if (ocrAcceptanceWorkspace_ && ocrAcceptanceTaskId_.isValid()) {
-        QString ignored;
-        ocrAcceptanceWorkspace_->requestTaskCancellation(ocrAcceptanceTaskId_, &ignored);
-    }
-    if (dataQualityWorkspace_ && dataQualityTaskId_.isValid()) {
-        QString ignored;
-        dataQualityWorkspace_->requestTaskCancellation(dataQualityTaskId_, &ignored);
-    }
-    if (diagnosticsWorkspace_ && diagnosticsTaskId_.isValid()) {
-        QString ignored;
-        diagnosticsWorkspace_->requestTaskCancellation(diagnosticsTaskId_, &ignored);
-    }
-    if (datasetConversionWorkspace_ && datasetConversionTaskId_.isValid()) {
-        QString ignored;
-        datasetConversionWorkspace_->requestTaskCancellation(datasetConversionTaskId_, &ignored);
-    }
-    if (datasetSnapshotImportWorkspace_ && datasetSnapshotImportTaskId_.isValid()) {
-        QString ignored;
-        datasetSnapshotImportWorkspace_->requestTaskCancellation(
-            datasetSnapshotImportTaskId_, &ignored);
-    }
-    if (datasetSplitWorkspace_ && datasetSplitTaskId_.isValid()) {
-        QString ignored;
-        datasetSplitWorkspace_->requestTaskCancellation(datasetSplitTaskId_, &ignored);
-    }
+    requestCancellationForTrackedWorkflows();
     shutdownPythonTrainer(QStringLiteral("Worker client disconnected."), false);
     qApp->quit();
 }
@@ -529,19 +497,10 @@ void WorkerSession::finishSession()
     activeTaskId_.clear();
     activeCommand_.clear();
     socket_.flush();
-    QElapsedTimer timer;
-    timer.start();
-    // 终态帧在 send() 中已 flush 到本地 socket；这里仅给内核写缓冲一个短暂收尾
-    // 窗口。不能等待数秒，否则 Controller 已收到 completed/failed 后仍会看到 Worker
-    // 假性运行，既阻塞队列也破坏 Worker 生命周期验收。
-    while (socket_.bytesToWrite() > 0 && timer.elapsed() < 500) {
-        socket_.waitForBytesWritten(25);
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 25);
-    }
-    // Keep the local socket connected while the controller's event loop drains
-    // the terminal frame. Calling disconnectFromServer immediately after a
-    // successful flush can still discard the frame before the peer observes
-    // it, especially when the Worker is under Python-process load.
+    // 终态帧已经交给 QLocalSocket 的异步写缓冲。不要在这里同步等待或
+    // 调用 processEvents：该嵌套事件循环会重入 readLines、断线和析构回调，
+    // 使同一任务出现第二次取消/终态。保留一个有界的异步收尾窗口，让 Qt
+    // 自己处理 bytesWritten；窗口到期后由主事件循环退出 Worker。
     QTimer::singleShot(750, qApp, [] { qApp->quit(); });
 }
 

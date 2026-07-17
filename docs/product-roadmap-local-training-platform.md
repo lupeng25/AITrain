@@ -147,7 +147,7 @@ OCR 评估和验收使用 PaddleOCR 官方报告路径：
 
 已落地能力：
 
-- `数据集 > 质量与复核`：读取 `problem_samples.json`、`error_samples.json`、`rework_sample_set.json`、`evaluation_report.json`，按来源、问题类型、类别、split、OCR edit distance / CER、搜索文本过滤，并导出 X-AnyLabeling 复核清单。
+- `数据集 > 质量与复核`：输入已提交的复核 ArtifactId，由 Query Service 在通过 inventory/hash 复验的 Artifact 包内按相对成员名读取 `problem_samples.json`、`error_samples.json`、`rework_sample_set.json`、`evaluation_report.json`；按来源、问题类型、类别、split、OCR edit distance / CER、搜索文本过滤，并导出 X-AnyLabeling 复核清单。GUI 不接受任意本地 JSON 路径，也不打开 staging 文件。
 - `环境 > 交付证据`：汇总本机 RC、clean Windows、TensorRT、客户域 OCR、包体完整性、诊断包和部署验证状态，显示 `passed` / `blocked` / `failed` / `hardware-blocked`。
 - 客户域 OCR 验收：通过 Worker/core 生成客户 OCR manifest 和 summary；public/generated/smoke 数据只能作为流程 evidence，不能作为生产 OCR 精度证明。
 - 诊断包：收集 Worker self-check、环境 profile、GPU/runtime、最近任务日志、失败 request、artifact index、内置能力状态和授权摘要。

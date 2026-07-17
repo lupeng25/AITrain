@@ -39,6 +39,13 @@ struct ArtifactSnapshot final {
     QVector<ArtifactFileSnapshot> files;
 };
 
+// 交付证据查询的一次性只读候选。任务、Artifact 和文件清单由同一条
+// SQL 查询加载，避免查询服务先取任务再逐任务加载 Artifact。
+struct DeliveryEvidenceCandidate final {
+    TaskSnapshot task;
+    ArtifactSnapshot artifact;
+};
+
 struct MetricSnapshot final {
     QString name;
     double value = 0.0;
@@ -317,6 +324,8 @@ public:
     QVector<TaskSnapshot> tasks(int limit, QString* error = nullptr) const;
     bool artifact(const ArtifactId& artifactId, ArtifactSnapshot* result, QString* error = nullptr) const;
     QVector<ArtifactSnapshot> artifactsForTask(const TaskId& taskId, QString* error = nullptr) const;
+    QVector<DeliveryEvidenceCandidate> deliveryEvidenceCandidates(
+        int limit, QString* error = nullptr) const;
     QVector<MetricSnapshot> metricsForTask(const TaskId& taskId, QString* error = nullptr) const;
     QVector<WorkflowRunSnapshot> workflowRunsForTask(const TaskId& taskId, QString* error = nullptr) const;
     // Adapter 事件可在同一根任务的多个 Workflow 步骤中连续产生；返回最近一条

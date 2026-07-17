@@ -299,6 +299,17 @@ void TaskArtifactPanel::previewSelectedArtifact()
     const QString fileName = QFileInfo(preview.relativePath).fileName();
     if (suffix == QStringLiteral("json") && fileName == QStringLiteral("evaluation_report.json") && evaluationReportView_) {
         evaluationReportView_->loadReportData(preview.content, preview.relativePath);
+        const QString artifactId = selectedArtifactId_;
+        evaluationReportView_->setArtifactPreviewProvider(
+            [this, artifactId](const QString& relativePath, QByteArray* content, QString* error) {
+                aitrain::ArtifactFilePreview related;
+                if (!presenter_ || !presenter_->previewArtifact(
+                        artifactId, relativePath, &related, error)) {
+                    return false;
+                }
+                if (content) *content = related.content;
+                return true;
+            });
         previewStack_->setCurrentIndex(1);
         return;
     }

@@ -1,5 +1,8 @@
 #include "aitrain/core/WorkerProtocol.h"
 
+#include <QtMath>
+
+#include <limits>
 #include <type_traits>
 
 namespace aitrain {
@@ -117,6 +120,143 @@ bool hasOnlyKeys(const QJsonObject& object,
         }
     }
     return true;
+}
+
+bool requiredEventString(const QJsonObject& object,
+    const QString& key,
+    QString* error)
+{
+    const QJsonValue value = object.value(key);
+    if (!value.isString() || value.toString().trimmed().isEmpty()) {
+        if (error) {
+            *error = QStringLiteral("事件字段 %1 必须是非空字符串。").arg(key);
+        }
+        return false;
+    }
+    return true;
+}
+
+bool optionalEventString(const QJsonObject& object,
+    const QString& key,
+    QString* error)
+{
+    if (!object.contains(key)) {
+        return true;
+    }
+    if (!object.value(key).isString()) {
+        if (error) {
+            *error = QStringLiteral("事件字段 %1 必须是字符串。").arg(key);
+        }
+        return false;
+    }
+    return true;
+}
+
+bool optionalEventNumber(const QJsonObject& object,
+    const QString& key,
+    double minimum,
+    double maximum,
+    QString* error)
+{
+    if (!object.contains(key)) {
+        return true;
+    }
+    const QJsonValue value = object.value(key);
+    const double number = value.toDouble(qQNaN());
+    if (!value.isDouble() || !qIsFinite(number) || number < minimum || number > maximum) {
+        if (error) {
+            *error = QStringLiteral("事件字段 %1 必须是范围 [%2, %3] 内的有限数字。")
+                .arg(key).arg(minimum).arg(maximum);
+        }
+        return false;
+    }
+    return true;
+}
+
+bool requiredEventNumber(const QJsonObject& object,
+    const QString& key,
+    double minimum,
+    double maximum,
+    QString* error)
+{
+    if (!object.contains(key)) {
+        if (error) {
+            *error = QStringLiteral("事件缺少字段 %1。").arg(key);
+        }
+        return false;
+    }
+    return optionalEventNumber(object, key, minimum, maximum, error);
+}
+
+bool validateTaskEventDetails(TaskEventKind kind,
+    const QString& resultType,
+    const QJsonObject& details,
+    QString* error)
+{
+    // TaskId 是所有事件的身份字段；具体值和 envelope 的一致性在调用方校验。
+    QString taskIdText;
+    if (!requiredString(details, QStringLiteral("taskId"), &taskIdText, error)) {
+        return false;
+    }
+    TaskId taskId;
+    if (!TaskId::parse(taskIdText, &taskId, error)) {
+        return false;
+    }
+
+    switch (kind) {
+    case TaskEventKind::Ready:
+        return requiredEventString(details, QStringLiteral("message"), error);
+    case TaskEventKind::Log:
+        return requiredEventString(details, QStringLiteral("message"), error)
+            && optionalEventString(details, QStringLiteral("level"), error);
+    case TaskEventKind::Progress: {
+        const bool hasPercent = details.contains(QStringLiteral("percent"));
+        const bool hasValue = details.contains(QStringLiteral("value"));
+        if (!hasPercent && !hasValue) {
+            if (error) *error = QStringLiteral("progress 事件必须包含 percent 或 value。");
+            return false;
+        }
+        if (!optionalEventNumber(details, QStringLiteral("percent"), 0.0, 100.0, error)
+            || !optionalEventNumber(details, QStringLiteral("value"), 0.0, 1.0, error)) {
+            return false;
+        }
+        return optionalEventString(details, QStringLiteral("message"), error);
+    }
+    case TaskEventKind::Metric:
+        return requiredEventString(details, QStringLiteral("name"), error)
+            && requiredEventNumber(details, QStringLiteral("value"), -std::numeric_limits<double>::max(),
+                std::numeric_limits<double>::max(), error);
+    case TaskEventKind::Artifact:
+        return requiredEventString(details, QStringLiteral("artifactId"), error)
+            && requiredEventString(details, QStringLiteral("kind"), error)
+            && requiredEventString(details, QStringLiteral("relativePath"), error)
+            && optionalEventString(details, QStringLiteral("message"), error);
+    case TaskEventKind::Succeeded:
+    case TaskEventKind::Failed:
+    case TaskEventKind::Canceled:
+        if (!requiredEventString(details, QStringLiteral("message"), error)) {
+            return false;
+        }
+        if (!optionalEventString(details, QStringLiteral("status"), error)
+            || !optionalEventString(details, QStringLiteral("errorCode"), error)) {
+            return false;
+        }
+        if (kind == TaskEventKind::Failed
+            && !details.contains(QStringLiteral("errorCode"))
+            && !details.contains(QStringLiteral("failureCode"))) {
+            if (error) *error = QStringLiteral("failed 事件必须包含 errorCode 或 failureCode。");
+            return false;
+        }
+        return optionalEventString(details, QStringLiteral("failureCode"), error);
+    case TaskEventKind::Result:
+        if (resultType.trimmed().isEmpty()) {
+            if (error) *error = QStringLiteral("result 事件必须包含 resultType。");
+            return false;
+        }
+        return true;
+    }
+    if (error) *error = QStringLiteral("未知 TaskEvent kind。");
+    return false;
 }
 
 QString commandTypeForKind(TaskEventKind kind)
@@ -806,6 +946,10 @@ TaskEvent taskEventFromType(const QString& type, const QJsonObject& details)
     TaskEvent result;
     result.kind = ok ? kind : TaskEventKind::Failed;
     result.details = details;
+    QString taskIdText;
+    if (requiredString(details, QStringLiteral("taskId"), &taskIdText, nullptr)) {
+        TaskId::parse(taskIdText, &result.taskId, nullptr);
+    }
     if (kind == TaskEventKind::Result) {
         result.resultType = type;
     }
@@ -850,7 +994,26 @@ aitrain::ProtocolEnvelope eventEnvelope(
     const TaskEvent& eventValue,
     const QString& controlToken)
 {
+    if (!requestId.isValid() || !taskId.isValid()) {
+        return aitrain::ProtocolEnvelope();
+    }
+    if (eventValue.taskId.isValid() && eventValue.taskId != taskId) {
+        return aitrain::ProtocolEnvelope();
+    }
     QJsonObject payload = eventValue.details;
+    const QJsonValue existingTaskId = payload.value(QStringLiteral("taskId"));
+    // Protocol-level rejection may be emitted before Worker has assigned its
+    // active task, so that diagnostic payload legitimately carries an empty
+    // taskId. An explicit non-empty value must still match the envelope.
+    if (!existingTaskId.isUndefined()
+        && (!existingTaskId.isString()
+            || (!existingTaskId.toString().trimmed().isEmpty()
+                && existingTaskId.toString().trimmed() != taskId.toString()))) {
+        return aitrain::ProtocolEnvelope();
+    }
+    // Ready 事件在 Worker 尚未接收 start_task 时没有 activeTaskId；身份仍由
+    // control envelope 提供，不能让 payload 缺少 TaskId。
+    payload.insert(QStringLiteral("taskId"), taskId.toString());
     payload.insert(QStringLiteral("schema"), taskEventSchema());
     const QString eventType = eventValue.kind == TaskEventKind::Result
         ? QStringLiteral("result")
@@ -858,6 +1021,10 @@ aitrain::ProtocolEnvelope eventEnvelope(
     payload.insert(QStringLiteral("type"), eventType);
     if (eventValue.kind == TaskEventKind::Result && !eventValue.resultType.isEmpty()) {
         payload.insert(QStringLiteral("resultType"), eventValue.resultType);
+    }
+    QString validationError;
+    if (!validateTaskEventDetails(eventValue.kind, eventValue.resultType, payload, &validationError)) {
+        return aitrain::ProtocolEnvelope();
     }
     return makeControlEnvelope(requestId, taskId, sequence,
         eventType == QStringLiteral("result") ? QStringLiteral("event.result") : controlEventKind(eventType),
@@ -868,6 +1035,10 @@ bool unpackStartTask(const aitrain::ProtocolEnvelope& envelope,
     TaskCommand* command,
     QString* error)
 {
+    if (!envelope.taskId.isValid()) {
+        if (error) *error = QStringLiteral("command.start_task 缺少有效 envelope taskId。");
+        return false;
+    }
     if (envelope.kind != QStringLiteral("command.start_task")) {
         if (error) *error = QStringLiteral("不是 command.start_task envelope。");
         return false;
@@ -900,6 +1071,10 @@ bool unpackTaskEvent(const aitrain::ProtocolEnvelope& envelope,
     TaskEvent* eventValue,
     QString* error)
 {
+    if (!envelope.taskId.isValid()) {
+        if (error) *error = QStringLiteral("事件缺少有效 envelope taskId。");
+        return false;
+    }
     if (!envelope.kind.startsWith(QStringLiteral("event."))) {
         if (error) *error = QStringLiteral("不是 event envelope。");
         return false;
@@ -935,8 +1110,24 @@ bool unpackTaskEvent(const aitrain::ProtocolEnvelope& envelope,
     details.remove(QStringLiteral("schema"));
     details.remove(QStringLiteral("type"));
     details.remove(QStringLiteral("resultType"));
+    QString eventTaskIdText;
+    if (!requiredString(details, QStringLiteral("taskId"), &eventTaskIdText, error)) {
+        return false;
+    }
+    TaskId eventTaskId;
+    if (!TaskId::parse(eventTaskIdText, &eventTaskId, error)
+        || eventTaskId != envelope.taskId) {
+        if (error) *error = QStringLiteral("事件 taskId 与 envelope 不一致。");
+        return false;
+    }
+    if (!validateTaskEventDetails(
+            type == QStringLiteral("result") ? TaskEventKind::Result : kind,
+            resultType, details, error)) {
+        return false;
+    }
     TaskEvent decoded;
     decoded.kind = type == QStringLiteral("result") ? TaskEventKind::Result : kind;
+    decoded.taskId = envelope.taskId;
     decoded.resultType = resultType;
     decoded.details = details;
     if (eventValue) *eventValue = decoded;

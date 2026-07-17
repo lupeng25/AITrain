@@ -30,7 +30,7 @@ void ApplicationEventRouter::clear(const QString& taskId)
 
 QString ApplicationEventRouter::taskIdForEvent(const wp::TaskEvent& event)
 {
-    return event.details.value(QStringLiteral("taskId")).toString().trimmed();
+    return event.taskId.toString();
 }
 
 TaskViewState& ApplicationEventRouter::stateFor(const QString& taskId)

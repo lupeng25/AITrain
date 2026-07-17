@@ -14,6 +14,7 @@ struct DatasetWorkbenchState {
     QString latestAnnotationSessionArtifactId;
     QString latestAnnotationEvidenceArtifactId;
     QString latestAnnotationSyncReportArtifactId;
+    QString sampleReviewArtifactId;
     QString annotationWorkingDirectory;
     bool currentValid = false;
     QJsonArray sampleReviewSamples;

@@ -15,7 +15,11 @@ TRAINERS = ROOT / "python_trainers"
 if str(TRAINERS) not in sys.path:
     sys.path.insert(0, str(TRAINERS))
 
-from adapter_event_channel import AdapterEventChannelError, AdapterEventChannel  # noqa: E402
+from adapter_event_channel import (  # noqa: E402
+    AdapterEventChannelError,
+    AdapterEventChannel,
+    domain_failure_code,
+)
 from adapter_sdk import (  # noqa: E402
     MAX_BUFFERED_OUTPUT_LINES,
     MAX_STRUCTURED_LOG_MESSAGE_BYTES,
@@ -152,7 +156,7 @@ def test_event_channel_authenticates_and_emits_protocol_envelopes() -> None:
         task_id=str(uuid.uuid4()),
     )
     with channel:
-        envelope = channel.emit_legacy_event({"type": "progress", "backend": "official_test", "percent": 12.5})
+        envelope = channel.emit_event({"type": "progress", "backend": "official_test", "percent": 12.5})
     thread.join(timeout=2)
 
     assert received[0] == {"channel": "aitrain.adapter", "token": "0123456789abcdef"}
@@ -161,6 +165,7 @@ def test_event_channel_authenticates_and_emits_protocol_envelopes() -> None:
     assert envelope["kind"] == "event.progress"
     assert envelope["sequence"] == "1"
     assert envelope["payload"]["percent"] == 12.5
+    assert envelope["payload"]["taskId"] == channel._task_id
 
 
 def test_event_channel_marks_sdk_artifacts_as_uncommitted_candidates() -> None:
@@ -173,24 +178,48 @@ def test_event_channel_marks_sdk_artifacts_as_uncommitted_candidates() -> None:
     )
     captured: list[tuple[str, dict]] = []
     channel.send_event = lambda kind, payload: captured.append((kind, dict(payload))) or {"kind": kind}  # type: ignore[method-assign]
-    result = channel.emit_legacy_event({"type": "artifact", "kind": "report", "path": "out/report.json"})
+    result = channel.emit_event({"type": "artifact", "kind": "report", "path": "out/report.json"})
 
     assert result["kind"] == "event.artifact_candidate"
     assert captured == [("event.artifact_candidate", {"kind": "report", "path": "out/report.json"})]
 
 
-def test_event_channel_preserves_adapter_failure_code_without_overloading_domain_code() -> None:
+def test_event_channel_preserves_adapter_failure_code_and_maps_domain_code() -> None:
     channel = AdapterEventChannel(
         host="127.0.0.1", port=1, token="0123456789abcdef",
         request_id=str(uuid.uuid4()), task_id=str(uuid.uuid4()),
     )
     captured: list[tuple[str, dict]] = []
     channel.send_event = lambda kind, payload: captured.append((kind, dict(payload))) or {"kind": kind}  # type: ignore[method-assign]
-    channel.emit_legacy_event({"type": "failed", "code": "ultralytics_missing", "message": "missing"})
+    channel.emit_event({"type": "failed", "code": "ultralytics_missing", "message": "missing"})
 
     assert captured == [("event.failed", {
-        "message": "missing", "adapterCode": "ultralytics_missing", "failureCode": "internal_error",
+        "message": "missing", "adapterCode": "ultralytics_missing",
+        "originCode": "ultralytics_missing", "failureCode": "dependency_missing",
     })]
+
+
+def test_adapter_failure_code_mapping_keeps_known_domain_categories() -> None:
+    assert domain_failure_code("bad_request") == "invalid_request"
+    assert domain_failure_code("dataset_snapshot_invalid") == "invalid_dataset"
+    assert domain_failure_code("ultralytics_missing") == "dependency_missing"
+    assert domain_failure_code("anomalib_evaluation_blocked") == "internal_error"
+
+
+def test_sdk_rejects_non_finite_metrics_and_progress() -> None:
+    sdk = AdapterSdk("official_test", event_sink=lambda _: None)
+    try:
+        sdk.emit_metric("loss", float("nan"))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("NaN metric was accepted")
+    try:
+        sdk.emit_progress(float("inf"), message="invalid")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("infinite progress was accepted")
 
 
 def test_event_channel_rejects_non_loopback_and_bad_handshake() -> None:

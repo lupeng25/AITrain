@@ -45,7 +45,9 @@ private slots:
     void workerProcessError(QProcess::ProcessError error);
 
 private:
-    bool startWorkerCommand(const QString& workerProgram, const QString& commandType, const QJsonObject& payload, QString* error);
+    bool startWorkerCommand(const QString& workerProgram,
+        const aitrain::worker_protocol::TaskCommand& command,
+        QString* error);
     void finalizeWorkerExit();
     void sendStartTask();
     void sendCancelTask();

@@ -149,6 +149,17 @@ git diff --check
 | V2-700～702 | 已完成 | License Generator 私钥改为 Windows DPAPI 当前用户保护并收紧 DACL，不再保存、展示或导出明文；主程序使用 DPAPI 可信 UTC 检测超过 5 分钟的明显回拨。自动化覆盖正常/永久/过期、篡改、错误公钥、机器码、无效日期、回拨与受保护数据损坏。文档明确纯离线授权不能抵御管理员级完整篡改。 | `aitrain_license_security_tests`。 |
 | V2-703 | 已完成（旧训练/裸路径链路物理删除） | GUI 训练强制解析 `TrainingWorkflowProfileV2`；Worker 已物理删除 `startTrain`、随机训练、伪 checkpoint、旧 Python Trainer、`runLocalPipeline` 及裸模型命令。`ProjectRepository`、`JsonProtocol`、`TaskModels`、`WorkerRequests`、V1 ProductWorkflow 实现和旧独立 smoke CLI 均已删除，主控制面统一为 Protocol V2。 | `aitrain_ocr_segmentation_worker_tests`、`aitrain_delivery_acceptance_ui_tests`、全量 CTest。 |
 
+### 4.2 最终收口补充（2026-07-17）
+
+本轮按“协议身份 → Worker 生命周期 → Storage/Evidence → GUI Artifact 边界 → 门禁”顺序完成最后收口，以下内容覆盖此前阶段记录中可能残留的实现细节：
+
+1. **Protocol/Adapter 身份唯一化**：`TaskEvent.taskId` 与受控 Envelope 成为事件身份事实；非空 payload taskId 与 Envelope 不一致时拒绝，步骤启动前的协议失败允许由 Envelope 补齐空 taskId，避免失败事件丢失。Python Adapter 统一使用 `emit_event`，认证事件通道负责注入 taskId，adapter failure code 与产品 failure code 分层保存。
+2. **Worker/进程生命周期**：取消、Socket 断开、窗口关闭和进程退出共用同一排空路径；Python Adapter 退出后使用有限异步 drain，终态帧在读回调完成后再 finalize，禁止 GUI/Worker 通过嵌套事件循环等待。
+3. **Storage/Evidence 查询闭环**：交付证据候选由单条 SQL 查询按 Artifact 数量限流；invalid evidence 不再使整页消失，而是保留行并附带稳定 Failure。外部导入证据继续固定 `verified=false`。
+4. **GUI 输入边界**：评估报告和样本复核均以 committed ArtifactId + 包内相对成员名读取；样本复核删除任意本地 JSON/图片打开入口，只显示受控身份信息。显式外部导入、X-AnyLabeling 工作目录和官方验收报告仍是产品边界，不是 Artifact Store 泄漏。
+
+本轮最终验收命令：`.\tools\harness-check.ps1`、`python -m pytest tests -q`、`git diff --check`。门禁必须在最终代码上重新执行；未返回证据的外部 clean Windows、客户域 OCR、真实 TensorRT decoder/infer 仍不得标记为通过。
+
 当前边界：模型导入和 ONNX Runtime 推理已具有 GUI → Worker → Workspace/Manifest 的受控链路；训练已建立八步编排，并完成官方 YOLO Detection/Segmentation/OBB、SMP、Anomalib PatchCore/EfficientAD 及 PaddleOCR Det/Rec 的真实产品边界与 Worker 端到端自动化验收。PaddleOCR System 保持独立 Det+Rec 官方组合 wiring，不被误计为任一单组件训练交付或客户域验收。主控制外层已经是 Protocol V2，所有 TaskCommand/TaskEvent 使用强类型 codec；Annotation、Runtime Delivery、Data Quality、Dataset Conversion/Snapshot/Split、OCR Acceptance、Diagnostics Bundle、Environment Check、外部验收证据导入与 Training 结果均以 ArtifactId/登记 ID 为边界。Training 通过持久化外部输入绑定跨任务消费 committed Snapshot，部署样本只用包内相对路径，运行环境由 Worker 控制。Training GUI 的 legacy Task/Metric/Artifact/Experiment 双写已切断，Model Registry 运行时只读 Presenter。推理与有限外部诊断/环境 probe 仍为 Worker 进程内同步调用，只能在单次调用前后观察取消；外部证据只能作为 `verified=false` 的结构化记录，不能替代客户域或真实硬件验收。
 
 ## 5. 阶段 0：恢复可靠基线
