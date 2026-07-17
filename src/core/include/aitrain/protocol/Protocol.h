@@ -9,7 +9,7 @@
 
 namespace aitrain {
 
-inline constexpr int kProtocolVersion = 1;
+inline constexpr int kProtocolVersion = 2;
 inline constexpr qsizetype kProtocolMaxControlMessageBytes = 1024 * 1024;
 inline constexpr qsizetype kProtocolMaxLogMessageBytes = 64 * 1024;
 

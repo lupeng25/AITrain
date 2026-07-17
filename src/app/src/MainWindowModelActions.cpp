@@ -534,7 +534,7 @@ void MainWindow::startTraining()
     parameters.insert(QStringLiteral("horizontalFlip"), horizontalFlipCheck_ && horizontalFlipCheck_->isChecked());
     parameters.insert(QStringLiteral("colorJitter"), colorJitterCheck_ && colorJitterCheck_->isChecked());
     parameters.insert(QStringLiteral("trainingBackend"), backendForRequest);
-    if (backendForRequest.startsWith(QStringLiteral("ultralytics_yolo"))) {
+    if (backendForRequest.startsWith(QStringLiteral("ultralytics_yolo_"))) {
         QJsonObject yoloArgs = yoloTrainArgsFromUi(this);
         if ((horizontalFlipCheck_ && horizontalFlipCheck_->isChecked()) && !yoloArgs.contains(QStringLiteral("fliplr"))) {
             yoloArgs.insert(QStringLiteral("fliplr"), 0.5);
@@ -567,8 +567,7 @@ void MainWindow::startTraining()
         parameters.insert(QStringLiteral("exportFormats"), QJsonArray{});
     }
     if (backendForRequest == QStringLiteral("paddleocr_det_official")
-        || backendForRequest == QStringLiteral("paddleocr_rec_official")
-        || backendForRequest == QStringLiteral("paddleocr_ppocrv4_rec")) {
+        || backendForRequest == QStringLiteral("paddleocr_rec_official")) {
         parameters.insert(QStringLiteral("runOfficial"), true);
         parameters.insert(QStringLiteral("prepareOnly"), false);
     }
@@ -585,7 +584,7 @@ void MainWindow::startTraining()
     parameters.insert(QStringLiteral("trainingTemplate"), workflowProfile.templateId);
     if (!modelPreset.isEmpty()) {
         parameters.insert(QStringLiteral("modelPreset"), modelPreset);
-        if (backendForRequest.startsWith(QStringLiteral("ultralytics_yolo"))) {
+        if (backendForRequest.startsWith(QStringLiteral("ultralytics_yolo_"))) {
             parameters.insert(QStringLiteral("model"), modelPreset);
         }
     }

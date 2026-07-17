@@ -1,6 +1,6 @@
 # AITrain Studio 开发架构说明
 
-最后更新：2026-06-21
+最后更新：2026-07-17
 
 本文面向后续维护和扩展开发，说明当前架构边界、主要模块、扩展入口和验证要求。所有阶段事实以 `docs/harness/current-status.md` 为准。
 
@@ -11,7 +11,7 @@ AITrain Studio 当前是 Windows + NVIDIA GPU 本地视觉训练工作台，核�
 - GUI 只做编排、状态展示和用户输入，不执行长任务。
 - 长任务进入 `aitrain_worker`。
 - 训练优先通过 Worker 启动独立 Python 子进程。
-- 元数据进入 `ProjectRepository` / SQLite。
+- 元数据进入 `ProjectStore` / SQLite；GUI 读取经 Query Service/Presenter，业务写入经 `ProjectWorkspace`/Worker 收口。
 - 模型、数据集、训练、验证、导出、推理扩展走内置能力注册表。
 - scaffold、smoke、diagnostic 能力必须明确标注，不能写成真实生产训练能力。
 
@@ -21,7 +21,7 @@ AITrain Studio 当前是 Windows + NVIDIA GPU 本地视觉训练工作台，核�
 AITrainStudio.exe
   -> Qt Widgets workbench
   -> WorkerClient
-  -> ProjectRepository / SQLite
+  -> ProjectStore / Query Service / Presenter
   -> BuiltinCapabilityRegistry / capability matrix UI
   -> aitrain_worker.exe
        -> core workflow functions
@@ -30,14 +30,14 @@ AITrainStudio.exe
        -> filesystem artifacts
 ```
 
-进程通信使用 JSON Lines over `QLocalSocket`。任何协议字段变更都需要同步 Worker、GUI 和测试。
+控制面使用统一 JSONL 协议 over `QLocalSocket`；Python Adapter 使用认证 loopback 事件通道，stdout/stderr 只保留为原始诊断日志。任何协议字段变更都需要同步 Worker、GUI、Adapter 和测试。
 
 ## 源码地图
 
 | 路径 | 职责 |
 |---|---|
-| `src/core` | 协议、能力注册表、数据集校验/转换、训练/评估/交付 workflow、SQLite repository、ONNX/TensorRT 支持。 |
-| `src/app` | Qt Widgets GUI、页面、动作、Worker 消息处理、预览、翻译和能力矩阵。 |
+| `src/core` | 统一 Protocol、能力注册表、数据集校验/转换、训练/评估/交付 Workflow、`ProjectStore`/Artifact Store、ONNX/TensorRT 支持。 |
+| `src/app` | Qt Widgets GUI、页面、Presenter、ApplicationEventRouter、Worker Client、预览、翻译和能力矩阵。 |
 | `src/worker` | 独立任务进程、WorkerSession、数据集/训练/模型/交付命令入口。 |
 | `src/core/CapabilityRegistry.cpp` | 内置 YOLO、semantic segmentation、anomaly detection、PaddleOCR、dataset interop 能力注册表。 |
 | `src/license_generator` | 内部离线注册码生成器。 |
@@ -73,23 +73,23 @@ AITrainStudio.exe
 2. 在 WorkerSession 中添加命令入口。
 3. 通过 Worker message 返回进度、日志、结果、失败或取消状态。
 4. 在 GUI 中只添加表单、按钮、状态、预览和任务记录。
-5. 需要持久化时通过 `ProjectRepository` 写入项目数据库。
+5. 需要持久化时通过 `ProjectWorkspace`/Worker 调用 `ProjectStore` 写入项目数据库。
 6. 添加 focused test，再按风险运行 harness。
 
 任务必须支持：
 
 - 明确的请求 JSON。
 - 可诊断的错误码和错误消息。
-- artifact 路径记录。
+- ArtifactId、包内相对成员和清单哈希记录；不把物理 Artifact Store 路径交给 GUI 或控制面。
 - 取消或失败后的状态恢复。
 - 不阻塞 GUI。
 
 ## 数据与产物边界
 
-- 数据集索引、任务、指标、artifact、模型版本进入 SQLite。
-- 大文件、报告、图片、ONNX、engine、ZIP 等保留为文件路径，不塞入 SQLite。
+- 数据集索引、任务、指标、Artifact、模型包和 Workflow/Evidence 关系进入 SQLite。
+- 大文件、报告、图片、ONNX、engine、ZIP 等写入 Artifact Store；SQLite 只保存 ArtifactId、相对成员、字节数和 SHA-256，不保存供 GUI 使用的物理路径。
 - `.deps`、build 输出、模型权重、数据集和生成二进制不提交源码控制。
-- 转换后的数据集不会自动注册，必须由用户选择并重新校验。
+- 数据集转换、快照导入和划分均由 EvidenceRequired Workflow 原子登记目标 Snapshot；显式外部导入边界之外不接受裸路径结果。
 - 交付报告和诊断包是证据产物，不应修改用户全局 Python、CUDA、驱动或数据。
 
 ## 能力注册边界

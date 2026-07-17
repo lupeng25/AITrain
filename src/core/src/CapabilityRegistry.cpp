@@ -7,26 +7,17 @@ namespace {
 
 QString canonicalTaskType(const QString& value)
 {
-    const QString normalized = value.trimmed().toLower();
-    return normalized == QStringLiteral("obb") ? QStringLiteral("obb_detection") : normalized;
+    return value.trimmed().toLower();
 }
 
 QString canonicalDatasetFormat(const QString& value)
 {
-    const QString normalized = value.trimmed().toLower();
-    return normalized == QStringLiteral("yolo_txt") ? QStringLiteral("yolo_detection") : normalized;
+    return value.trimmed().toLower();
 }
 
 QString canonicalBackendId(const QString& value)
 {
-    const QString normalized = value.trimmed().toLower();
-    if (normalized == QStringLiteral("ultralytics_yolo")) {
-        return QStringLiteral("ultralytics_yolo_detect");
-    }
-    if (normalized == QStringLiteral("paddleocr_ppocrv4_rec")) {
-        return QStringLiteral("paddleocr_rec_official");
-    }
-    return normalized;
+    return value.trimmed().toLower();
 }
 
 QStringList yoloModelPresets(bool segmentation)
@@ -350,12 +341,6 @@ QJsonObject BuiltinCapabilityRegistry::toJson() const
     }
     return QJsonObject{
         {QStringLiteral("schemaVersion"), 1},
-        {QStringLiteral("aliases"), QJsonObject{
-             {QStringLiteral("taskTypes"), QJsonObject{{QStringLiteral("obb"), QStringLiteral("obb_detection")}}},
-             {QStringLiteral("datasetFormats"), QJsonObject{{QStringLiteral("yolo_txt"), QStringLiteral("yolo_detection")}}},
-             {QStringLiteral("backends"), QJsonObject{
-                  {QStringLiteral("ultralytics_yolo"), QStringLiteral("ultralytics_yolo_detect")},
-                  {QStringLiteral("paddleocr_ppocrv4_rec"), QStringLiteral("paddleocr_rec_official")}}}}},
         {QStringLiteral("capabilities"), capabilityArray},
         {QStringLiteral("backends"), backendArray}};
 }

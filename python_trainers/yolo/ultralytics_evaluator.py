@@ -22,7 +22,7 @@ if str(DETECTION_ADAPTER_DIR) not in sys.path:
     sys.path.insert(0, str(DETECTION_ADAPTER_DIR))
 
 import ultralytics_trainer as shared  # type: ignore  # noqa: E402
-from adapter_event_channel import AdapterEventChannel, event_channel_from_environment  # noqa: E402
+from adapter_event_channel import AdapterEventChannel, event_channel_from_environment, standalone_protocol_enabled  # noqa: E402
 from adapter_sdk import AdapterSdk  # noqa: E402
 from dataset_snapshot import materialize_dataset_snapshot  # noqa: E402
 from trainer_protocol import configure_stdio, exception_details  # noqa: E402
@@ -39,10 +39,10 @@ _event_channel: AdapterEventChannel | None = None
 
 
 def configure_adapter(backend: str | None = None) -> None:
-    """Select JSONL fallback or the  authenticated event channel once."""
+    """Select the authenticated event channel once."""
     global _adapter, _adapter_backend, _event_channel
     selected_backend = backend or BACKEND_ID
-    if _event_channel is None and os.environ.get("AITRAIN_EVENT_PORT"):
+    if _event_channel is None and not standalone_protocol_enabled() and _adapter is None:
         _event_channel = event_channel_from_environment()
         _event_channel.connect()
     if _adapter is None or _adapter_backend != selected_backend:
@@ -370,17 +370,13 @@ def official_artifacts(save_dir: Path) -> list[dict[str, str]]:
 
 
 def emit_official_artifacts(artifacts: list[dict[str, str]], save_dir: Path) -> None:
-    """Emit only regular candidate files on ; retain the V1 run-directory frame.
+    """Emit only immutable regular files from the official run directory.
 
     `TaskExecutionHost` deliberately refuses directory candidates because it
     cannot make an immutable promise about a directory whose contents may still
-    change. The V1 Worker historically indexes the official run directory as a
-    single artifact, so that JSONL-only behavior remains available during the
-    destructive migration.
+    change. The report records the directory for human navigation; the event
+    channel only carries immutable files.
     """
-    if _event_channel is None:
-        emit("artifact", name="ultralytics_official_val", kind="official_run_dir", path=str(save_dir))
-        return
     for index, artifact in enumerate(artifacts, start=1):
         path = Path(str(artifact.get("path") or ""))
         if not path.is_file():

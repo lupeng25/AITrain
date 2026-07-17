@@ -4,7 +4,7 @@ AITrain Studio is a C++/Qt desktop foundation for managing local computer-vision
 
 This repository implements the first usable platform layer from the requested plan:
 
-- Qt Widgets GUI organized as a local training workbench with project dashboard, dataset library, training experiments, task/artifact history, V2 model-package deployment/inference validation, built-in capability, and environment views.
+- Qt Widgets GUI organized as a local training workbench with project dashboard, dataset library, training experiments, task/artifact history, manifest-backed model-package deployment/inference validation, built-in capability, and environment views.
 - Chinese/English GUI language switching through Qt translation resources, with language settings persisted in `QSettings` and applied after restart.
 - Offline machine-bound license verification before the main window opens, plus a separate Qt license generator tool for issuing signed license codes.
 - Isolated `aitrain_worker` process using JSON Lines over `QLocalSocket`.
@@ -50,7 +50,7 @@ The Worker reports the authoritative built-in capability matrix with `aitrain_wo
 
 ## User Guide
 
-End-user operation is documented in `docs/user-guide.md`. It covers registration, projects, dataset preparation, dataset conversion, validation and split, sample review, training, artifacts, V2 model-package import, deployment validation, inference validation, built-in capability selection, delivery acceptance, and diagnostic bundles through the GUI.
+End-user operation is documented in `docs/user-guide.md`. It covers registration, projects, dataset preparation, dataset conversion, validation and split, sample review, training, artifacts, model-package import, deployment validation, inference validation, built-in capability selection, delivery acceptance, and diagnostic bundles through the GUI.
 
 Additional operational and delivery references:
 
@@ -137,14 +137,14 @@ To require real Ultralytics COCO8 / COCO8-seg materialization instead of generat
 TensorRT acceptance must be run on an RTX / SM 75+ machine. The RTX 4090 D validation lane already has passing evidence; rerun this only when validating a new package root, machine, driver/runtime set, or reopened external acceptance lane:
 
 ```powershell
-.\tools\acceptance-smoke.ps1 -TensorRT
+.\tools\acceptance-smoke.ps1 -Package -SkipBuild
 ```
 
 ## Python Training Backends
 
 Environment and backend notes are documented in `docs/training-backends.md`.
 
-Production training entry points expose Worker-managed official/upstream adapters: Ultralytics for YOLO detection/segmentation/OBB, SMP for dedicated semantic segmentation, Anomalib for PatchCore/EfficientAD anomaly workflows, and PaddleOCR official adapters for Det/Rec. Legacy diagnostic training implementations have been removed instead of hidden behind user-facing switches. `paddleocr_rec` remains only a dataset format; production OCR Rec training uses `paddleocr_rec_official` or `paddleocr_ppocrv4_rec`.
+Production training entry points expose Worker-managed official/upstream adapters: Ultralytics for YOLO detection/segmentation/OBB, SMP for dedicated semantic segmentation, Anomalib for PatchCore/EfficientAD anomaly workflows, and PaddleOCR official adapters for Det/Rec. Legacy diagnostic training implementations have been removed instead of hidden behind user-facing switches. `paddleocr_rec` remains only a dataset format; production OCR Rec training uses `paddleocr_rec_official`.
 
 Minimal sample datasets can be generated with:
 

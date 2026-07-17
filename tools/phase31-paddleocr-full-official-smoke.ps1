@@ -16,6 +16,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# This phase is a standalone diagnostic runner, not a Worker launch.
+$env:AITRAIN_STANDALONE_ADAPTER_PROTOCOL = "1"
 $script:Root = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $PSScriptRoot) "."))
 . (Join-Path $PSScriptRoot "deps-layout.ps1")
 

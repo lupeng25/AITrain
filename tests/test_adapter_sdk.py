@@ -24,6 +24,7 @@ from adapter_sdk import (  # noqa: E402
     MAX_BUFFERED_OUTPUT_LINES,
     MAX_STRUCTURED_LOG_MESSAGE_BYTES,
     AdapterSdk,
+    AdapterEventTransportUnavailable,
     sdk_from_environment,
 )
 
@@ -161,7 +162,7 @@ def test_event_channel_authenticates_and_emits_protocol_envelopes() -> None:
 
     assert received[0] == {"channel": "aitrain.adapter", "token": "0123456789abcdef"}
     assert received[1] == envelope
-    assert envelope["protocol"] == 1
+    assert envelope["protocol"] == 2
     assert envelope["kind"] == "event.progress"
     assert envelope["sequence"] == "1"
     assert envelope["payload"]["percent"] == 12.5
@@ -219,7 +220,22 @@ def test_sdk_rejects_non_finite_metrics_and_progress() -> None:
     except ValueError:
         pass
     else:
-        raise AssertionError("infinite progress was accepted")
+            raise AssertionError("infinite progress was accepted")
+
+
+def test_sdk_requires_authenticated_transport_without_standalone_opt_in(monkeypatch=None) -> None:
+    previous = os.environ.pop("AITRAIN_STANDALONE_ADAPTER_PROTOCOL", None)
+    try:
+        sdk = AdapterSdk("official_test")
+        try:
+            sdk.emit_log("transport must be explicit")
+        except AdapterEventTransportUnavailable as exc:
+            assert "authenticated Worker event channel" in str(exc)
+        else:
+            raise AssertionError("SDK silently emitted an unauthenticated stdout event")
+    finally:
+        if previous is not None:
+            os.environ["AITRAIN_STANDALONE_ADAPTER_PROTOCOL"] = previous
 
 
 def test_event_channel_rejects_non_loopback_and_bad_handshake() -> None:
@@ -260,6 +276,7 @@ def test_event_channel_rejects_non_loopback_and_bad_handshake() -> None:
 
 
 if __name__ == "__main__":
+    os.environ.setdefault("AITRAIN_STANDALONE_ADAPTER_PROTOCOL", "1")
     for name, function in sorted(globals().items()):
         if name.startswith("test_") and callable(function):
             function()

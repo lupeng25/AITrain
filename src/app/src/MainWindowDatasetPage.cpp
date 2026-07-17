@@ -9,7 +9,6 @@
 #include <QAbstractItemView>
 #include <QCheckBox>
 #include <QComboBox>
-#include <QDesktopServices>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -34,7 +33,6 @@
 #include <QTableWidget>
 #include <QTextEdit>
 #include <QToolButton>
-#include <QUrl>
 #include <QVBoxLayout>
 
 using namespace aitrain_app;
@@ -415,18 +413,12 @@ QWidget* MainWindow::buildDatasetPage()
     createAnnotationSessionButton->setObjectName(QStringLiteral("CreateAnnotationSessionButton"));
     syncAnnotationSessionButton->setObjectName(QStringLiteral("SyncAnnotationSessionButton"));
     auto* refreshAnnotationStatusButton = new QPushButton(QStringLiteral("检测状态"));
-    auto* openDatasetDirButton = new QPushButton(QStringLiteral("打开数据目录"));
     connect(refreshAnnotationStatusButton, &QPushButton::clicked, this, &MainWindow::updateAnnotationToolStatus);
     connect(createAnnotationSessionButton, &QPushButton::clicked, this, &MainWindow::createXAnyLabelingAnnotationSession);
     connect(syncAnnotationSessionButton, &QPushButton::clicked, this, &MainWindow::syncXAnyLabelingAnnotationSession);
-    connect(openDatasetDirButton, &QPushButton::clicked, this, [this]() {
-        const QString datasetPath = QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
-        if (datasetPath.isEmpty()) {
-            QMessageBox::information(this, uiText("标注工具"), uiText("请先选择数据集目录。"));
-            return;
-        }
-        QDesktopServices::openUrl(QUrl::fromLocalFile(datasetPath));
-    });
+    auto* annotationBoundaryHint = mutedLabel(uiText(
+        "原始数据目录不会由 GUI 直接打开。修复必须先创建 Annotation Session，完成后由 Worker 按 Session ArtifactId 和受控工作目录同步。"));
+    allowLabelToShrink(annotationBoundaryHint);
     auto* annotationActionRow = new QWidget;
     auto* annotationActionGrid = new QGridLayout(annotationActionRow);
     annotationActionGrid->setContentsMargins(0, 0, 0, 0);
@@ -435,12 +427,12 @@ QWidget* MainWindow::buildDatasetPage()
     annotationActionGrid->addWidget(createAnnotationSessionButton, 0, 0);
     annotationActionGrid->addWidget(syncAnnotationSessionButton, 0, 1);
     annotationActionGrid->addWidget(refreshAnnotationStatusButton, 0, 2);
-    annotationActionGrid->addWidget(openDatasetDirButton, 1, 0, 1, 3);
     for (int column = 0; column < 3; ++column) {
         annotationActionGrid->setColumnStretch(column, 1);
     }
     annotationLayout->addWidget(annotationSummary);
     annotationLayout->addWidget(annotationToolStatusLabel_);
+    annotationLayout->addWidget(annotationBoundaryHint);
     annotationLayout->addWidget(annotationActionRow);
     auto* datasetLibraryTab = new QWidget;
     auto* datasetLibraryLayout = new QVBoxLayout(datasetLibraryTab);

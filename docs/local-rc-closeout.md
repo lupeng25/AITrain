@@ -64,7 +64,7 @@ The default RC command runs the fixed 1280x820 walkthrough wrapper:
 
 该检查覆盖 `总览`、`项目`、`数据集`、`训练实验`、`任务与产物`、`模型库`、`部署验证`、`环境` 与 `系统设置`，并写入 `.deps\UI-Walkthrough\rc\ui_walkthrough_rc_summary.json`。`数据集 > 质量与复核`、`模型库 > 评估报告`、`部署验证 > 部署验证 / 推理验证`、`系统设置 > 内置能力 / 应用设置` 与 `环境 > 交付证据` 等页签由 QtTest 覆盖。
 
-If the app opens the offline registration dialog before the workbench, the wrapper writes a blocked summary with `errorCode=license_required`. Treat that as environment/configuration blocked evidence: configure a valid offline license token and build-time `AITRAIN_LICENSE_PUBLIC_KEY`, then rerun the walkthrough instead of marking the GUI gate passed.
+If the app opens the offline registration dialog before the workbench, the wrapper writes a blocked summary with `errorCode=license_required`. If the optional `qt-gui-walkthrough` dependency is not installed, it writes `errorCode=walkthrough_script_missing`. Treat either result as environment/setup blocked evidence: install the walkthrough dependency and configure a valid offline license token plus build-time `AITRAIN_LICENSE_PUBLIC_KEY`, then rerun the walkthrough instead of marking the GUI gate passed.
 
 For manual exploration beyond the automated gate, walk through these screens:
 

@@ -373,6 +373,10 @@ function Invoke-CtestForAcceptanceWorkDir {
     $ctestFile = Join-Path $script:Root "$BuildDir\CTestTestfile.cmake"
     if (Test-Path $ctestFile) {
         $previousAcceptanceSmokeRoot = $env:AITRAIN_ACCEPTANCE_SMOKE_ROOT
+        $previousStandaloneProtocol = $env:AITRAIN_STANDALONE_ADAPTER_PROTOCOL
+        # CTest starts the real Worker; never let the standalone stdout opt-in
+        # leak into that production-like process tree.
+        Remove-Item Env:\AITRAIN_STANDALONE_ADAPTER_PROTOCOL -ErrorAction SilentlyContinue
         $env:AITRAIN_ACCEPTANCE_SMOKE_ROOT = $WorkRoot
         try {
             try {
@@ -387,6 +391,11 @@ function Invoke-CtestForAcceptanceWorkDir {
                 Remove-Item Env:\AITRAIN_ACCEPTANCE_SMOKE_ROOT -ErrorAction SilentlyContinue
             } else {
                 $env:AITRAIN_ACCEPTANCE_SMOKE_ROOT = $previousAcceptanceSmokeRoot
+            }
+            if ($null -eq $previousStandaloneProtocol) {
+                Remove-Item Env:\AITRAIN_STANDALONE_ADAPTER_PROTOCOL -ErrorAction SilentlyContinue
+            } else {
+                $env:AITRAIN_STANDALONE_ADAPTER_PROTOCOL = $previousStandaloneProtocol
             }
         }
     } else {
@@ -568,11 +577,31 @@ try {
     }
     if ($PublicDatasets) {
         $script:AcceptanceModes += "PublicDatasets"
-        Invoke-PublicDatasetSmoke
+        $previousStandaloneProtocol = $env:AITRAIN_STANDALONE_ADAPTER_PROTOCOL
+        $env:AITRAIN_STANDALONE_ADAPTER_PROTOCOL = "1"
+        try {
+            Invoke-PublicDatasetSmoke
+        } finally {
+            if ($null -eq $previousStandaloneProtocol) {
+                Remove-Item Env:\AITRAIN_STANDALONE_ADAPTER_PROTOCOL -ErrorAction SilentlyContinue
+            } else {
+                $env:AITRAIN_STANDALONE_ADAPTER_PROTOCOL = $previousStandaloneProtocol
+            }
+        }
     }
     if ($CpuTrainingSmoke) {
         $script:AcceptanceModes += "CpuTrainingSmoke"
-        Invoke-CpuTrainingSmoke
+        $previousStandaloneProtocol = $env:AITRAIN_STANDALONE_ADAPTER_PROTOCOL
+        $env:AITRAIN_STANDALONE_ADAPTER_PROTOCOL = "1"
+        try {
+            Invoke-CpuTrainingSmoke
+        } finally {
+            if ($null -eq $previousStandaloneProtocol) {
+                Remove-Item Env:\AITRAIN_STANDALONE_ADAPTER_PROTOCOL -ErrorAction SilentlyContinue
+            } else {
+                $env:AITRAIN_STANDALONE_ADAPTER_PROTOCOL = $previousStandaloneProtocol
+            }
+        }
     }
     Write-AcceptanceSummary -Status "passed"
     Write-Host "Acceptance smoke completed." -ForegroundColor Green

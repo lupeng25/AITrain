@@ -42,8 +42,7 @@ struct TrainingWorkflowProfile final {
 // 返回编译期注册的规范 Profile。调用方不得修改返回内容。
 const QVector<TrainingWorkflowProfile>& trainingWorkflowProfiles();
 
-// backend 匹配不区分大小写并忽略首尾空白；历史的 ultralytics_yolo
-// 别名解析到规范 ultralytics_yolo_detect Profile。
+// backend 匹配不区分大小写并忽略首尾空白；调用方必须使用注册表中的规范 ID。
 bool resolveTrainingWorkflowProfile(const QString& trainingBackend,
     TrainingWorkflowProfile* result,
     QString* error = nullptr);

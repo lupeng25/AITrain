@@ -21,7 +21,7 @@ from typing import Any, Mapping
 from uuid import UUID, uuid4
 
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 CHANNEL_NAME = "aitrain.adapter"
 MAX_CONTROL_MESSAGE_BYTES = 1024 * 1024
 MAX_LOG_MESSAGE_BYTES = 64 * 1024
@@ -63,6 +63,39 @@ _DOMAIN_FAILURE_CODES = frozenset({
     "timeout",
     "internal_error",
 })
+
+
+def standalone_protocol_enabled() -> bool:
+    """Return whether an explicitly launched diagnostic runner may use stdout.
+
+    Production Worker launches never set this flag.  It exists only for the
+    repository's phase/acceptance smoke scripts, which do not have a Worker
+    Host available to terminate an authenticated loopback channel.
+    """
+    if os.environ.get("AITRAIN_STANDALONE_ADAPTER_PROTOCOL") != "1":
+        return False
+    # A Worker-provided channel always wins, even if a parent shell happened
+    # to leak the diagnostic flag into the child environment.
+    return not any(
+        os.environ.get(name)
+        for name in (
+            "AITRAIN_EVENT_HOST",
+            "AITRAIN_EVENT_PORT",
+            "AITRAIN_EVENT_TOKEN",
+            "AITRAIN_REQUEST_ID",
+            "AITRAIN_TASK_ID",
+        )
+    )
+
+
+def emit_standalone_event(event: Mapping[str, Any]) -> None:
+    """Emit a diagnostic JSONL event after an explicit standalone opt-in."""
+    if not standalone_protocol_enabled():
+        raise AdapterEventChannelError(
+            "authenticated Worker event channel is required; set "
+            "AITRAIN_STANDALONE_ADAPTER_PROTOCOL=1 only for standalone smoke runners"
+        )
+    print(json.dumps(dict(event), ensure_ascii=False, separators=(",", ":")), flush=True)
 
 
 def domain_failure_code(adapter_code: str) -> str:

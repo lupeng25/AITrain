@@ -252,6 +252,10 @@ void EnvironmentDeliveryEvidenceUiTests::annotationSessionUiUsesArtifactBoundary
         Q_ARG(int, MainWindow::DatasetPage), Q_ARG(QString, QStringLiteral("数据集"))));
     QVERIFY(window.findChild<QPushButton*>(QStringLiteral("CreateAnnotationSessionButton")) != nullptr);
     QVERIFY(window.findChild<QPushButton*>(QStringLiteral("SyncAnnotationSessionButton")) != nullptr);
+    for (QPushButton* button : window.findChildren<QPushButton*>()) {
+        QVERIFY2(button->text() != QStringLiteral("打开数据目录"),
+            "标注页不得通过任意数据集目录绕过 Annotation Session/Artifact 边界");
+    }
 
     namespace wp = aitrain::worker_protocol;
     const QString taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);

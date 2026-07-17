@@ -19,9 +19,9 @@ TRAINER_ROOT = Path(__file__).resolve().parents[1]
 if str(TRAINER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRAINER_ROOT))
 
-from adapter_event_channel import AdapterEventChannel, event_channel_from_environment  # noqa: E402
+from adapter_event_channel import AdapterEventChannel, event_channel_from_environment, standalone_protocol_enabled  # noqa: E402
 from adapter_sdk import AdapterSdk  # noqa: E402
-from trainer_protocol import configure_stdio, emit_event, exception_details  # noqa: E402
+from trainer_protocol import configure_stdio, exception_details  # noqa: E402
 
 
 BACKEND_ID = "ultralytics_yolo_export"
@@ -35,10 +35,10 @@ _event_channel: AdapterEventChannel | None = None
 
 
 def configure_adapter(backend: str | None = None) -> None:
-    """Select JSONL fallback or the  authenticated event channel once."""
+    """Select the authenticated event channel once."""
     global _adapter, _adapter_backend, _event_channel
     selected_backend = backend or BACKEND_ID
-    if _event_channel is None and os.environ.get("AITRAIN_EVENT_PORT"):
+    if _event_channel is None and not standalone_protocol_enabled() and _adapter is None:
         _event_channel = event_channel_from_environment()
         _event_channel.connect()
     if _adapter is None or _adapter_backend != selected_backend:
@@ -62,20 +62,6 @@ def active_adapter() -> AdapterSdk:
 
 def emit(event_type: str, **payload: Any) -> None:
     payload.pop("backend", None)
-    if event_type == "modelExport":
-        # V1 has a dedicated modelExport message.  stores the same metadata in
-        # the immutable export sidecar, so retain the legacy frame only on JSONL.
-        if _event_channel is None:
-            emit_event(BACKEND_ID, event_type, **payload)
-        else:
-            active_adapter().emit_log(
-                "Official YOLO export metadata is available in the export sidecar.",
-                level="info",
-                exportPath=str(payload.get("exportPath") or ""),
-                reportPath=str(payload.get("reportPath") or ""),
-            )
-        return
-
     adapter = active_adapter()
     if event_type == "log":
         adapter.emit_log(str(payload.pop("message", "")), level=str(payload.pop("level", "info")), **payload)
@@ -194,7 +180,7 @@ def model_family_from_text(value: Any) -> str:
         return "yolo_segmentation"
     if text in {"obb", "obb_detection", "yolo_obb", "ultralytics_yolo_obb"}:
         return "yolo_obb"
-    if text in {"detection", "detect", "yolo_detection", "ultralytics_yolo_detect", "ultralytics_yolo"}:
+    if text in {"detection", "detect", "yolo_detection", "ultralytics_yolo_detect"}:
         return "yolo_detection"
     return ""
 
@@ -387,7 +373,7 @@ def task_from_model_family(model_family: str) -> str:
     if model_family == "yolo_segmentation":
         return "segmentation"
     if model_family == "yolo_obb":
-        return "obb"
+        return "obb_detection"
     if model_family == "yolo_detection":
         return "detection"
     return ""
@@ -718,17 +704,6 @@ def run_official_export(request: dict[str, Any]) -> int:
     emit("artifact", taskId=task_id, backend=BACKEND_ID, kind="export", path=str(final_path), message="Official Ultralytics export")
     emit("artifact", taskId=task_id, backend=BACKEND_ID, kind="export_sidecar", path=str(report_path), message="AITrain export sidecar")
     emit("progress", taskId=task_id, backend=BACKEND_ID, phase="completed", percent=100, message="official YOLO export completed")
-    emit(
-        "modelExport",
-        taskId=task_id,
-        backend=BACKEND_ID,
-        ok=True,
-        format=plan["productFormat"],
-        checkpointPath=str(model_path),
-        exportPath=str(final_path),
-        reportPath=str(report_path),
-        config=report,
-    )
     emit("completed", taskId=task_id, backend=BACKEND_ID, checkpointPath=str(model_path), exportPath=str(final_path), reportPath=str(report_path))
     return 0
 

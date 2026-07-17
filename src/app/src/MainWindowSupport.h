@@ -27,7 +27,6 @@ QString uiText(const char* source);
 QString taskTypeLabel(const QString& taskType);
 void addComboItem(QComboBox* combo, const QString& displayText, const QString& value);
 QString backendLabel(const QString& backend);
-QJsonObject readJsonObjectFile(const QString& path);
 QString metricValueText(const QJsonObject& metrics, const QStringList& keys);
 QString modelSummaryText(const QJsonObject& summary);
 InfoPanel* createCompactSummaryCard(const QString& label, const QString& value, const QString& caption);

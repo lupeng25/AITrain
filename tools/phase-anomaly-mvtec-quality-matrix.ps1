@@ -24,6 +24,8 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+# This phase is a standalone diagnostic runner, not a Worker launch.
+$env:AITRAIN_STANDALONE_ADAPTER_PROTOCOL = "1"
 
 $script:Root = Split-Path -Parent $PSScriptRoot
 Set-Location $script:Root

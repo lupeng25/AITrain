@@ -1,5 +1,7 @@
 import importlib.util
 import json
+import os
+import pytest
 import py_compile
 import sys
 import tempfile
@@ -8,6 +10,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ADAPTER_PATH = ROOT / "python_trainers" / "anomaly" / "anomalib_adapter.py"
+
+
+@pytest.fixture(autouse=True)
+def standalone_protocol(monkeypatch):
+    monkeypatch.setenv("AITRAIN_STANDALONE_ADAPTER_PROTOCOL", "1")
 
 
 def load_adapter():
@@ -397,6 +404,7 @@ def test_bundle_sidecar_relative_checkpoint_is_resolved_from_package():
 
 
 if __name__ == "__main__":
+    os.environ.setdefault("AITRAIN_STANDALONE_ADAPTER_PROTOCOL", "1")
     test_adapter_py_compile()
     test_preset_registry_and_defaults()
     test_dataset_inventory_good_only_limited()

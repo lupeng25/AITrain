@@ -19,7 +19,7 @@
   -> 在“任务与产物”查看 checkpoint、ONNX、报告和预览图
   -> 评估模型并在“模型库 > 评估报告”查看结果
   -> 注册到“模型库”
-  -> 将训练产物登记为 V2 模型包，再在“部署验证”完成部署验证和推理验证
+  -> 将训练产物登记为带 Manifest 的模型包，再在“部署验证”完成部署验证和推理验证
   -> 环境 > 交付证据和诊断包
 ```
 
@@ -78,7 +78,7 @@
 - `.deps/annotation-tools/X-AnyLabeling`
 - `PATH`
 
-在“数据集”页仍可点击“启动 X-AnyLabeling”直接打开普通外部标注工具。受控修复闭环使用 V2 Artifact：先从 Data Quality 任务取得 Repair ArtifactId，再点击“准备修复会话”，输入该 ArtifactId 和一个新的空工作目录。Worker 校验已提交 Repair Artifact、复制不可变 Snapshot，并提交 Session Artifact；GUI 只显示 Session ArtifactId 和 Evidence ArtifactId，不读取 Artifact 裸路径。会话准备成功后，GUI 以独立工作目录启动本地 X-AnyLabeling。标注完成后点击“同步标注会话”，确认 Session ArtifactId 和同一工作目录；Worker 会重新校验基线、文件集合、编辑白名单与哈希。只有合法变更才登记新的 Dataset Version/Snapshot；无变化、冲突、越界或取消都不会生成正式新版本。任务、Artifact 和新版本状态在 V2“任务与产物”及项目汇总中刷新。
+在“数据集”页仍可点击“启动 X-AnyLabeling”直接打开普通外部标注工具。GUI 不提供“打开数据目录”或按任意本地数据路径浏览的入口；原始数据目录只在明确的导入/转换边界由 Worker 消费。受控修复闭环使用 V2 Artifact：先从 Data Quality 任务取得 Repair ArtifactId，再点击“准备修复会话”，输入该 ArtifactId 和一个新的空工作目录。Worker 校验已提交 Repair Artifact、复制不可变 Snapshot，并提交 Session Artifact；GUI 只显示 Session ArtifactId 和 Evidence ArtifactId，不读取 Artifact 裸路径。会话准备成功后，GUI 以独立工作目录启动本地 X-AnyLabeling。标注完成后点击“同步标注会话”，确认 Session ArtifactId 和同一工作目录；Worker 会重新校验基线、文件集合、编辑白名单与哈希。只有合法变更才登记新的 Dataset Version/Snapshot；无变化、冲突、越界或取消都不会生成正式新版本。任务、Artifact 和新版本状态在 V2“任务与产物”及项目汇总中刷新。
 
 AITrain Studio 不内嵌 X-AnyLabeling GUI / PyQt 进程，也不打包 X-AnyLabeling Server。X-AnyLabeling 保持本地外部依赖；如需随产品分发，需要单独完成第三方许可证和包体评审。
 
@@ -272,7 +272,7 @@ YOLO 模型预设下拉是完整产品化入口，但仍允许手动输入官方
 
 - 选择历史任务查看 artifacts、metrics、exports。
 - 预览 JSON、YAML、TXT、CSV、LOG、图片 overlay。
-- 任务产物页不再把 checkpoint、ONNX 或 engine 裸路径直接送入导出、评估、benchmark 或推理；模型必须先登记为带 Manifest 和哈希的 V2 模型包。
+- 任务产物页不再把 checkpoint、ONNX 或 engine 裸路径直接送入导出、评估、benchmark 或推理；模型必须先登记为带 Manifest 和哈希的已验证模型包。
 - 选中 ONNX、NCNN `.param` 或 AITrain export sidecar 后点击“用作推理模型”，会跳到“部署验证 > 推理验证”。TensorRT engine 当前用于部署验证状态记录，不作为单图推理输入。
 - 选中训练产物后注册为模型版本。
 - 历史训练任务只读展示原始请求、数据快照、seed、后端和模型预设；如需再次训练，请新建训练任务并显式选择输入。
@@ -302,11 +302,11 @@ YOLO 模型预设下拉是完整产品化入口，但仍允许手动输入官方
 - 评估报告
 - benchmark 或交付报告
 
-模型库中的已验证 V2 模型包可以继续进入“部署验证”或“推理验证”；旧模型版本记录只用于迁移期审计。
+模型库中的已验证模型包可以继续进入“部署验证”或“推理验证”；旧模型版本记录只用于迁移期审计。
 
 ## 9. 部署验证
 
-“部署验证”只接受已经登记且校验通过的 V2 模型包，不接受 checkpoint、ONNX、NCNN param 或 TensorRT engine 裸路径。
+“部署验证”只接受已经登记且校验通过的模型包，不接受 checkpoint、ONNX、NCNN param 或 TensorRT engine 裸路径。
 
 1. 在“模型库”导入模型文件和用户确认的 Manifest 草稿，等待系统计算 SHA-256 并登记 `ModelPackageId`。
 2. 在“部署验证”选择已验证模型包。
@@ -325,7 +325,7 @@ YOLO 模型预设下拉是完整产品化入口，但仍允许手动输入官方
 
 ## 10. 部署验证 > 推理验证
 
-单图推理同样只接受 V2 模型包：
+单图推理同样只接受已登记模型包：
 
 1. 选择已验证的 `ModelPackageId`。
 2. 选择验证图片。
@@ -419,7 +419,7 @@ smoke 只证明流程、依赖和产物可用。OCR 业务可用性必须使用�
 
 确认已安装 NCNN 工具，并配置 `AITRAIN_NCNN_ONNX2NCNN` 或 `AITRAIN_NCNN_ROOT`。若要执行部署验证，还需要用 `AITRAIN_NCNN_ROOT` 配置 NCNN SDK/runtime 并提供样本图；外部 `.param/.bin` 模型必须提供 AITrain sidecar，或显式传入 `modelFamily`、`classNames`、`inputBlob`、`outputBlobs` 和 `decoder`。
 
-如果 YOLOv8-seg ONNX 转出的 NCNN `.param` 包含 `Shape` 等 unsupported layer，当前属于转换兼容性问题。处理方式是使用静态/兼容导出的 ONNX、pnnx/nihui 风格的预转换 NCNN artifact，或提供已验证的 sidecar/config 后走 `--ncnn-param-smoke` 验证现有 `.param/.bin`；不要把该失败当作 runtime 通过。
+如果 YOLOv8-seg ONNX 转出的 NCNN `.param` 包含 `Shape` 等 unsupported layer，当前属于转换兼容性问题。处理方式是使用静态/兼容导出的 ONNX、pnnx/nihui 风格的预转换 NCNN Artifact，或提供已验证的 sidecar/config 后通过 Runtime Delivery 重新验证已登记模型包；不要把该失败当作 runtime 通过。
 
 部署验证失败报告会给出 `failureCategory` 和下一步建议：`sdk_missing` 表示未启用 NCNN SDK/runtime，`sample_missing` 表示缺少样本图，`sidecar_missing` 表示外部模型缺 AITrain sidecar 或显式 blob/decoder 配置，`unsupported_layer` 表示 `.param` 中存在当前 NCNN runtime 无法加载的层，`runtime_failed` 表示加载、输出提取或后处理失败。
 

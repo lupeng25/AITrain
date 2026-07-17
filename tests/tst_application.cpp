@@ -1511,7 +1511,7 @@ void ApplicationTests::trainingWorkflowEvidenceGatePersistsEvidenceBeforeTermina
 
     aitrain::TrainingWorkflowRequest request;
     request.templateId = QStringLiteral("official_yolo_training_delivery");
-    request.trainingBackend = QStringLiteral("ultralytics_yolo");
+    request.trainingBackend = QStringLiteral("ultralytics_yolo_detect");
     request.evaluationBackend = QStringLiteral("ultralytics_yolo_eval");
     request.exportBackend = QStringLiteral("ultralytics_yolo_export");
     request.deploymentBackend = QStringLiteral("aitrain_onnxruntime");
@@ -1575,7 +1575,7 @@ void ApplicationTests::trainingWorkflowEvidenceGateRecoversAcrossReopen()
             &started, &error), qPrintable(error));
         aitrain::TrainingWorkflowRequest request;
         request.templateId = QStringLiteral("official_yolo_training_delivery");
-        request.trainingBackend = QStringLiteral("ultralytics_yolo");
+        request.trainingBackend = QStringLiteral("ultralytics_yolo_detect");
         request.evaluationBackend = QStringLiteral("ultralytics_yolo_eval");
         request.exportBackend = QStringLiteral("ultralytics_yolo_export");
         request.deploymentBackend = QStringLiteral("aitrain_onnxruntime");
@@ -1633,7 +1633,7 @@ void ApplicationTests::officialYoloWorkflowPreservesVariantTaskType_data()
         << QStringLiteral("ultralytics_yolo_obb")
         << QStringLiteral("yolo_obb")
         << QStringLiteral("obb_detection")
-        << QStringLiteral("obb")
+        << QStringLiteral("obb_detection")
         << QStringLiteral("obb/ultralytics_trainer.py");
 }
 

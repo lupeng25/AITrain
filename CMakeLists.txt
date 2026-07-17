@@ -735,14 +735,10 @@ install(FILES
     tools/build-inno-installer.ps1
     tools/ui-workbench-walkthrough.ps1
     tools/phase45-yolo-model-matrix-smoke.ps1
-    tools/phase-yolo26-model-matrix-smoke.ps1
     tools/phase-smp-semantic-segmentation-smoke.ps1
     tools/phase-anomaly-anomalib-smoke.ps1
     tools/phase-anomaly-mvtec-quality-matrix.ps1
-    tools/phase-smp-4090d-gpu-realtest.ps1
-    tools/phase-smp-oxford-pets-quality-matrix.ps1
     tools/full-model-lifecycle-progress-server.py
-    tools/phase-ncnn-runtime-smoke.ps1
     tools/local-rc-closeout.ps1
     tools/release-freeze-handoff.ps1
     tools/materialize-ultralytics-dataset.py

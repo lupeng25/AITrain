@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import hashlib
 import json
+import pytest
 import py_compile
 import tempfile
 from pathlib import Path
@@ -15,6 +16,11 @@ ROOT = Path(__file__).resolve().parents[1]
 TRAINER = ROOT / "python_trainers" / "semantic_segmentation" / "smp_trainer.py"
 EVALUATOR = ROOT / "python_trainers" / "semantic_segmentation" / "smp_evaluator.py"
 EXPORTER = ROOT / "python_trainers" / "semantic_segmentation" / "smp_exporter.py"
+
+
+@pytest.fixture(autouse=True)
+def standalone_protocol(monkeypatch):
+    monkeypatch.setenv("AITRAIN_STANDALONE_ADAPTER_PROTOCOL", "1")
 
 
 def load_module(name: str, path: Path):

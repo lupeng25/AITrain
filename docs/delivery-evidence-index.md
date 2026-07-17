@@ -1,10 +1,10 @@
 # 交付证据索引
 
-最后更新：2026-06-21
+最后更新：2026-07-17
 
 本文把当前 RC、RTX 验证、打包、OCR、诊断和外部验收相关证据集中列出，避免把本地证据、RTX 4090 D 证据、clean Windows 证据和客户域证据混在一起。阶段状态仍以 `docs/harness/current-status.md` 为准。
 
-> 2026-07-16 破坏性重构说明：旧 `acceptance-smoke.ps1 -TensorRT`、独立 OBB/NCNN/SMP smoke 及 Worker 裸路径命令均已删除；历史证据不可作为当前 V2 通过结论。当前证据必须来自 V2 Workflow、Artifact/Evidence 查询或官方 Python 适配器报告。
+> 2026-07-16 破坏性重构说明：旧 `acceptance-smoke.ps1 -TensorRT`、独立 OBB/NCNN/SMP smoke 及 Worker 裸路径命令均已删除；历史证据不可作为当前通过结论。当前证据必须来自统一 Workflow、Artifact/Evidence 查询或官方 Python 适配器报告。
 
 ## 证据总表
 
@@ -13,7 +13,7 @@
 | 阶段状态源 | 已维护 | `docs/harness/current-status.md` | 项目状态唯一来源。 |
 | 本地/RTX follow-up summary | 已通过并保留边界 | `docs\validation\rtx4090-validation-evidence-20260615.json` | 记录 2026-06-05 LocalBaseline+Package、GUI walkthrough、Phase47+CTest 刷新结果，并引用 CPU smoke、Phase45、TensorRT、public OCR 通过证据。 |
 | 本地 RC closeout | 历史通过本地/RTX 验证 lane | `docs\validation\rtx4090-validation-evidence-20260615.json` | 记录本地 closeout、CPU smoke、package smoke 等汇总。 |
-| RTX 4090 D TensorRT | 已通过当前 validation lane | `docs\validation\rtx4090-validation-evidence-20260615.json`；复跑命令仍可使用 `.\tools\acceptance-smoke.ps1 -TensorRT -WorkDir .deps\rtx4090-validation\acceptance-tensorrt` | 不等于后续任意 package-root rerun 已通过。 |
+| RTX 4090 D TensorRT | 已通过历史 validation lane | `docs\validation\rtx4090-validation-evidence-20260615.json` | 不等于后续任意 package-root rerun 已通过；当前没有裸路径 TensorRT smoke 命令。 |
 | Release handoff | 已刷新 / 以 manifest 为准 | `build-vscode\release-freeze-handoff\release_handoff_manifest.json`；`build-vscode\release-freeze-handoff\release_handoff_summary.md` | 具体 source commit、dirty 状态、ZIP 路径和 SHA256 以最新 manifest 为准。不要在长期索引里把某一次 hash 当作当前包身份。 |
 | Clean Windows package acceptance | 延后 / 未返回 | `docs\external-acceptance-handoff.md`；`docs\acceptance-templates\clean-windows-acceptance-result.md` | 没有 clean-machine 返回证据时不得标记 passed。 |
 | Package-root TensorRT rerun | 延后 / 未返回 | `docs\acceptance-templates\tensorrt-acceptance-result.md` | RTX 4090 D 源侧通过证据与 package-root rerun 分开记录。 |
@@ -22,17 +22,17 @@
 | Production OCR public workflow | 已通过 public workflow lane | `docs\validation\rtx4090-validation-evidence-20260615.json`；复跑环境通过 `.deps\envs\ocr-gpu` 暴露，旧 `.deps\rtx4090-validation\python-ocr-gpu` 为兼容 target | Public Total-Text 证据不能证明客户域生产精度。 |
 | Customer-domain OCR | 需要客户/目标域证据 | `.\tools\customer-ocr-validation.ps1`；`环境 > 交付证据` 导入结果 | 只有真实客户/目标域数据和报告才能支撑生产声明。 |
 | 数据集转换 GUI closeout | 已完成本地验证 | `.deps\UI-Walkthrough\dataset-conversion\walkthrough-summary.json` | 转换产物不自动注册为数据集。 |
-| GUI walkthrough | 已固化为本地 RC gate | `.\tools\ui-workbench-walkthrough.ps1`；`docs\validation\rtx4090-validation-evidence-20260615.json` | 当前固定 1280x820，覆盖 9 个对象型工作区；tab-level 区域由 QtTest 和 focused notes 覆盖。历史 2026-06-05 follow-up 证据保留在归档中。 |
-| SMP semantic segmentation | 已通过本地 RTX 4090D realtest | `.deps\smp-realtest\gpu-4090d`；`.\tools\phase-smp-4090d-gpu-realtest.ps1` | Public/synthetic workflow evidence only; SMP 范围为 ONNX Runtime，不要求 NCNN/TensorRT。 |
+| GUI walkthrough | QtTest 通过；wrapper 等待外部依赖 | `.\tools\ui-workbench-walkthrough.ps1`；`.deps\UI-Walkthrough\rc\ui_walkthrough_rc_summary.json` | 固定 1280x820 wrapper 因本机缺少 `qt-gui-walkthrough` 记录为 `blocked/walkthrough_script_missing`；tab-level 区域由 QtTest 覆盖，历史 2026-06-05 wrapper 证据保留在归档中。 |
+| SMP semantic segmentation | 历史本地 RTX 4090D realtest 证据 | `.deps\smp-realtest\gpu-4090d`（原脚本已删除，不可重跑） | Public/synthetic workflow evidence only; SMP 范围为 ONNX Runtime，不要求 NCNN/TensorRT。 |
 | OBB v1 | 已通过本地 public DOTA smoke/matrix | `.deps\phase-obb-ultralytics-smoke`；`.deps\obb-quality\dota`; `.\tools\phase-obb-dota-quality-matrix.ps1` | Public DOTA/workflow evidence only；OBB v1 产品部署范围为 ONNX Runtime，NCNN 不支持。 |
 | Anomaly v1 | 已通过本地 public MVTec 默认三类矩阵 | `.deps\anomaly-mvtec-quality-matrix\anomaly_mvtec_quality_matrix_summary.json`; `.\tools\phase-anomaly-mvtec-quality-matrix.ps1` | Public MVTec workflow/quality evidence only；运行时为 Worker-managed Python/Anomalib，不声明 AITrain C++ ONNX/TensorRT/NCNN anomaly runtime。 |
-| Diagnostics Bundle V2 | 两步 EvidenceRequired 工作流已落地并通过统一构建/回归 | `环境 > 交付证据` 的“一键诊断包”；Worker `runDiagnosticsWorkflowV2` | 只读 Presenter 按 TaskId 从 V2 Query 读取 Diagnostics/Evidence ArtifactId，不消费 Worker 路径。同步外部探测不可在调用中抢占，取消在探测前后收口；输出有固定上限。2026-07-16 定向 CTest 4/4 通过。 |
-| Training / Runtime Delivery | V2 Workflow 统一生成交付摘要并通过删除回归 | Training Workflow 提交 `training_delivery_report_v2`，Runtime Delivery 提交 `runtime_delivery_report_v2`，两者终态提交 `evidence_bundle_v2`；任务页按 TaskId 通过 Presenter 查看 ArtifactId 和包内清单 | standalone `generateDeliveryReport` 已删除，不再接收模型、数据集、上下文或输出路径。Runtime 仍只接受已登记 `ModelPackageId`；同步 infer 与 TensorRT 限制保持不变。2026-07-16 定向 CTest 4/4 通过。 |
+| Diagnostics Bundle | 两步 EvidenceRequired 工作流已落地并通过统一构建/回归 | `环境 > 交付证据` 的“一键诊断包”；Worker `runDiagnosticsWorkflow` | 只读 Presenter 按 TaskId 从 Query 读取 Diagnostics/Evidence ArtifactId，不消费 Worker 路径。同步外部探测不可在调用中抢占，取消在探测前后收口；输出有固定上限。 |
+| Training / Runtime Delivery | Workflow 统一生成交付摘要并通过删除回归 | Training Workflow 提交交付报告，Runtime Delivery 提交运行时报告，两者终态提交 evidence bundle；任务页按 TaskId 通过 Presenter 查看 ArtifactId 和包内清单 | standalone `generateDeliveryReport` 已删除，不再接收模型、数据集、上下文或输出路径。Runtime 仍只接受已登记 `ModelPackageId`；同步 infer 与 TensorRT 限制保持不变。 |
 | NCNN runtime smoke | 本机检测/分割 runtime 已有证据 | `.deps\github-ncnn-smoke\hyuto-yolov8\runtime-output`；`.deps\github-ncnn-smoke\nihui-yolov8n-seg-ncnn\runtime-output\deployment-validation` | Hyuto YOLOv8 detection ONNX -> NCNN passed，nihui 预转换 YOLOv8n-seg pnnx/DFL NCNN passed；YOLOv8-seg ONNX 若残留 unsupported `Shape` layer，则记录为 failed report。 |
 
 ## 证据分层
 
-- 本地源码证据：`git diff --check`、`.\tools\harness-context.ps1`、`.\tools\harness-check.ps1`、本地 GUI walkthrough。
+- 本地源码证据：`git diff --check`、`.\tools\harness-context.ps1`、连续三次 `.\tools\harness-check.ps1`、QtTest UI 合同和 wrapper 状态摘要。
 - GUI walkthrough 若记录 `errorCode=license_required`，只能作为授权配置 blocked 证据，不能当作布局通过证据。
 - 本地 package 证据：`.\tools\package-smoke.ps1 -SkipBuild`、`.\tools\acceptance-smoke.ps1 -Package -SkipBuild`。
 - RTX validation lane：历史 TensorRT、YOLO matrix、PaddleOCR Det ONNX、Production OCR evidence 已归档到 `docs\validation\rtx4090-validation-evidence-20260615.json`；OCR GPU 复跑环境通过 `.deps\envs\ocr-gpu` 暴露，旧 `.deps\rtx4090-validation\python-ocr-gpu` 仅作为兼容 target 保留。

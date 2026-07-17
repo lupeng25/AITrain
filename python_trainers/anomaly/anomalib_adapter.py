@@ -22,7 +22,7 @@ if str(TRAINER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRAINER_ROOT))
 REPO_ROOT = TRAINER_ROOT.parent
 
-from adapter_event_channel import AdapterEventChannel, event_channel_from_environment
+from adapter_event_channel import AdapterEventChannel, event_channel_from_environment, standalone_protocol_enabled
 from adapter_sdk import AdapterCanceled, AdapterSdk
 from dataset_snapshot import materialize_dataset_snapshot
 from trainer_protocol import configure_stdio, exception_details
@@ -35,9 +35,9 @@ _event_channel: Optional[AdapterEventChannel] = None
 
 
 def configure_adapter(backend: str) -> AdapterSdk:
-    """Create the SDK and prefer the authenticated Worker  event channel."""
+    """Create the SDK on the authenticated Worker event channel."""
     global _adapter, _event_channel
-    if _event_channel is None and os.environ.get("AITRAIN_EVENT_PORT"):
+    if _event_channel is None and not standalone_protocol_enabled() and _adapter is None:
         _event_channel = event_channel_from_environment()
         _event_channel.connect()
     if _adapter is None or _adapter.backend != backend:

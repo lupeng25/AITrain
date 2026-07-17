@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import pytest
 import sys
 import tempfile
 from pathlib import Path
@@ -21,6 +22,12 @@ import ultralytics_evaluator as evaluator  # noqa: E402
 from yolo import ultralytics_exporter as exporter  # noqa: E402
 from adapter_sdk import AdapterSdk  # noqa: E402
 from dataset_snapshot import materialize_dataset_snapshot  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def standalone_protocol(monkeypatch):
+    """Unit tests invoke adapters without a Worker Host."""
+    monkeypatch.setenv("AITRAIN_STANDALONE_ADAPTER_PROTOCOL", "1")
 
 
 class FakeModel:
@@ -213,7 +220,7 @@ def test_official_evaluator_expands_directory_outputs_for_candidates() -> None:
     })]
 
 
-def test_official_evaluator_keeps_directory_output_on_v1_jsonl() -> None:
+def test_official_evaluator_never_emits_directory_candidates() -> None:
     events: list[tuple[str, dict]] = []
     original_emit = evaluator.emit
     original_channel = evaluator._event_channel
@@ -225,11 +232,7 @@ def test_official_evaluator_keeps_directory_output_on_v1_jsonl() -> None:
         evaluator.emit = original_emit
         evaluator._event_channel = original_channel
 
-    assert events == [("artifact", {
-        "name": "ultralytics_official_val",
-        "kind": "official_run_dir",
-        "path": "out\\official_val" if sys.platform.startswith("win") else "out/official_val",
-    })]
+    assert events == []
 
 
 def test_dataset_snapshot_materialization_copies_only_verified_files() -> None:
@@ -281,24 +284,8 @@ def test_official_exporter_event_adapter_uses_sdk_and_preserves_backend() -> Non
     assert all(event["backend"] == "ultralytics_yolo_export" for event in events)
 
 
-def test_official_exporter_keeps_model_export_frame_on_v1_jsonl() -> None:
-    events: list[dict] = []
-    original_emit_event = exporter.emit_event
-    original_channel = exporter._event_channel
-    exporter.emit_event = lambda backend, event_type, **payload: events.append({"backend": backend, "type": event_type, **payload})
-    exporter._event_channel = None
-    try:
-        exporter.emit("modelExport", exportPath="out/model.onnx", reportPath="out/model.aitrain.json")
-    finally:
-        exporter.emit_event = original_emit_event
-        exporter._event_channel = original_channel
-
-    assert events == [{
-        "backend": "ultralytics_yolo_export",
-        "type": "modelExport",
-        "exportPath": "out/model.onnx",
-        "reportPath": "out/model.aitrain.json",
-    }]
+def test_official_exporter_does_not_emit_legacy_model_export_frame() -> None:
+    assert "modelExport" not in exporter.emit.__code__.co_consts
 
 
 def test_ultralytics_train_args_are_sanitized_and_merged() -> None:
@@ -567,7 +554,7 @@ def test_yolo_obb_export_defaults_to_obb_task_and_onnx() -> None:
     assert plan["productFormat"] == "onnx"
     assert plan["officialFormat"] == "onnx"
     assert plan["modelFamily"] == "yolo_obb"
-    assert plan["task"] == "obb"
+    assert plan["task"] == "obb_detection"
     assert plan["kwargs"]["imgsz"] == 640
     assert plan["kwargs"]["batch"] == 1
 
@@ -712,13 +699,14 @@ def test_exporter_builds_variant_specific_contracts() -> None:
         "inputs": [{"name": "images", "shape": [1, 3, 640, 640]}],
         "outputs": [{"name": "output0", "shape": [1, 6, "anchors"]}],
     }, None)
-    assert obb["taskType"] == "obb"
+    assert obb["taskType"] == "obb_detection"
     assert obb["decoder"] == "yolo_obb_v8"
     assert obb["postprocessing"] == {"id": "yolo_obb_nms"}
     assert obb["runtimeRoutes"] == ["aitrain_onnxruntime"]
 
 
 if __name__ == "__main__":
+    os.environ.setdefault("AITRAIN_STANDALONE_ADAPTER_PROTOCOL", "1")
     test_sanitize_log_line_removes_ansi_tqdm_noise()
     test_yolo_callbacks_emit_structured_progress_and_epoch_metrics()
     test_ultralytics_train_args_are_sanitized_and_merged()

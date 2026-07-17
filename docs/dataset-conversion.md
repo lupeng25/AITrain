@@ -63,7 +63,7 @@ GUI 只暴露已经接入 Worker 和核心转换实现的组合：
 
 ## X-AnyLabeling 转换验收
 
-独立 X-AnyLabeling smoke 脚本已在 V2 破坏性重构中删除。转换只通过 `runDatasetConversionWorkflowV2` 执行：请求在导入边界携带外部源路径，Core 冻结 inventory/hash，Worker 重新校验并提交自包含 Artifact；标注复核只通过 GUI↔Worker Annotation Session V2 的 ArtifactId 合同执行。不得直接调用外部目录或旧 CLI。
+独立 X-AnyLabeling smoke 脚本已删除。转换只通过 `runDatasetConversionWorkflow` 执行：请求在导入边界携带外部源路径，Core 冻结 inventory/hash，Worker 重新校验并提交自包含 Artifact；标注复核只通过 GUI↔Worker Annotation Session 的 ArtifactId 合同执行。不得直接调用外部目录或旧 CLI。
 
 ## 输出产物
 

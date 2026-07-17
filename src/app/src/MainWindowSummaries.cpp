@@ -656,7 +656,7 @@ void MainWindow::updateTrainingSelectionSummary()
         : QString();
     if (auto* yoloPanel = findChild<QWidget*>(QStringLiteral("YoloOfficialArgsGroup"))) {
         yoloPanel->setVisible(yoloPanel->property("advancedExpanded").toBool()
-            && visibleBackend.startsWith(QStringLiteral("ultralytics_yolo")));
+            && visibleBackend.startsWith(QStringLiteral("ultralytics_yolo_")));
     }
     if (auto* smpPanel = findChild<QWidget*>(QStringLiteral("SmpSemanticArgsGroup"))) {
         smpPanel->setVisible(smpPanel->property("advancedExpanded").toBool()
@@ -706,7 +706,7 @@ void MainWindow::refreshTrainingDefaults()
     QString preferredTask;
     QString preferredBackend;
 
-    if (datasetFormat == QStringLiteral("yolo_detection") || datasetFormat == QStringLiteral("yolo_txt")) {
+    if (datasetFormat == QStringLiteral("yolo_detection")) {
         preferredCapability = QStringLiteral("yolo");
         preferredTask = QStringLiteral("detection");
         preferredBackend = QStringLiteral("ultralytics_yolo_detect");

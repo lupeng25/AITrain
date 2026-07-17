@@ -224,8 +224,7 @@ QString inferOnnxModelFamily(const QString& onnxPath, QString* warning)
         return QStringLiteral("yolo_segmentation");
     }
     if (configuredFamily == QStringLiteral("ocr_recognition")
-        || configuredBackend == QStringLiteral("paddleocr_rec_official")
-        || configuredBackend == QStringLiteral("paddleocr_ppocrv4_rec")) {
+        || configuredBackend == QStringLiteral("paddleocr_rec_official")) {
         return QStringLiteral("ocr_recognition");
     }
     if (configuredFamily == QStringLiteral("ocr_detection")

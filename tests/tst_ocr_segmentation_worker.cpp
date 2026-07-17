@@ -2681,7 +2681,7 @@ private slots:
             QVERIFY(deployment.value(QStringLiteral("inventoryVerified")).toBool());
         }
         if (taskType == QStringLiteral("obb_detection")) {
-            QCOMPARE(manifest.value(QStringLiteral("taskType")).toString(), QStringLiteral("obb"));
+            QCOMPARE(manifest.value(QStringLiteral("taskType")).toString(), QStringLiteral("obb_detection"));
             QCOMPARE(manifest.value(QStringLiteral("classNames")).toArray(),
                 QJsonArray({QStringLiteral("ship"), QStringLiteral("plane")}));
             QCOMPARE(manifest.value(QStringLiteral("postprocessing")).toObject()
@@ -2782,6 +2782,9 @@ private slots:
         writeTextFile(requestPath, QString::fromUtf8(QJsonDocument(request).toJson(QJsonDocument::Indented)));
 
         QProcess process;
+        QProcessEnvironment standaloneEnvironment = QProcessEnvironment::systemEnvironment();
+        standaloneEnvironment.insert(QStringLiteral("AITRAIN_STANDALONE_ADAPTER_PROTOCOL"), QStringLiteral("1"));
+        process.setProcessEnvironment(standaloneEnvironment);
         const QString adapterPath = repoRelativeFilePath(QStringLiteral("python_trainers/ocr_system/paddleocr_system_official_adapter.py"));
         process.setWorkingDirectory(QFileInfo(adapterPath).absolutePath() + QStringLiteral("/../.."));
         process.start(python, QStringList()
@@ -2838,6 +2841,9 @@ private slots:
         writeTextFile(requestPath, QString::fromUtf8(QJsonDocument(request).toJson(QJsonDocument::Indented)));
 
         QProcess process;
+        QProcessEnvironment standaloneEnvironment = QProcessEnvironment::systemEnvironment();
+        standaloneEnvironment.insert(QStringLiteral("AITRAIN_STANDALONE_ADAPTER_PROTOCOL"), QStringLiteral("1"));
+        process.setProcessEnvironment(standaloneEnvironment);
         const QString adapterPath = repoRelativeFilePath(QStringLiteral("python_trainers/ocr_system/paddleocr_system_official_adapter.py"));
         process.setWorkingDirectory(QFileInfo(adapterPath).absolutePath() + QStringLiteral("/../.."));
         process.start(python, QStringList()
@@ -2887,6 +2893,9 @@ private slots:
         writeTextFile(requestPath, QString::fromUtf8(QJsonDocument(request).toJson(QJsonDocument::Indented)));
 
         QProcess process;
+        QProcessEnvironment standaloneEnvironment = QProcessEnvironment::systemEnvironment();
+        standaloneEnvironment.insert(QStringLiteral("AITRAIN_STANDALONE_ADAPTER_PROTOCOL"), QStringLiteral("1"));
+        process.setProcessEnvironment(standaloneEnvironment);
         const QString adapterPath = repoRelativeFilePath(QStringLiteral("python_trainers/ocr_system/paddleocr_system_official_adapter.py"));
         process.setWorkingDirectory(QFileInfo(adapterPath).absolutePath() + QStringLiteral("/../.."));
         process.start(python, QStringList()

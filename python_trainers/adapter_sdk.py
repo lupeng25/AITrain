@@ -20,8 +20,7 @@ import threading
 import time
 from typing import Any, Callable, Mapping, Sequence
 
-from trainer_protocol import emit_event
-
+from adapter_event_channel import emit_standalone_event, standalone_protocol_enabled
 
 EventSink = Callable[[dict[str, Any]], None]
 CancellationCheck = Callable[[], bool]
@@ -35,6 +34,10 @@ MAX_BUFFERED_OUTPUT_LINES = 256
 
 class AdapterCanceled(RuntimeError):
     """Raised when an adapter observes a cooperative cancellation request."""
+
+
+class AdapterEventTransportUnavailable(RuntimeError):
+    """Raised when an adapter has no authenticated event sink."""
 
 
 @dataclass(frozen=True)
@@ -77,10 +80,14 @@ class AdapterSdk:
 
     def _emit(self, event_type: str, **payload: Any) -> None:
         event = {"type": event_type, **payload, "backend": self._backend}
-        if self._event_sink is not None:
-            self._event_sink(event)
-            return
-        emit_event(self._backend, event_type, **payload)
+        if self._event_sink is None:
+            if standalone_protocol_enabled():
+                emit_standalone_event(event)
+                return
+            raise AdapterEventTransportUnavailable(
+                "authenticated Worker event channel is required; stdout JSONL is only available to an explicit standalone smoke runner"
+            )
+        self._event_sink(event)
 
     def emit_log(self, message: str, *, level: str = "info", **details: Any) -> None:
         encoded = message.encode("utf-8")

@@ -336,7 +336,7 @@ void ModelManifestTests::onnxAdapterUsesManifestClassesForMultiClassObb()
     aitrain::RuntimeModelLocation location;
     location.manifest = validManifest();
     location.manifest.modelFamily = QStringLiteral("yolo_obb");
-    location.manifest.taskType = QStringLiteral("obb");
+    location.manifest.taskType = QStringLiteral("obb_detection");
     location.manifest.sourceBackend = QStringLiteral("ultralytics_yolo_export");
     location.manifest.sourceArtifactSha256 = QString::fromLatin1(
         QCryptographicHash::hash(modelBytes, QCryptographicHash::Sha256).toHex());

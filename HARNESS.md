@@ -88,7 +88,7 @@ Harness 的目标是让 AITrain Studio 更适合 vibe coding：每次改动都�
 - GUI 只做交互、状态展示和任务编排。
 - 长任务必须进入 `aitrain_worker`，不能直接堵塞 GUI 线程。
 - 能力通过 `BuiltinCapabilityRegistry` 与 Worker/core 边界扩展，不把模型逻辑塞进 `MainWindow`。
-- SQLite 元数据通过 `ProjectRepository` 管理，不在 UI 里手写散落 SQL。
+- SQLite 元数据通过 `ProjectStore` 管理；GUI 读取经 Query Service/Presenter，写入经 `ProjectWorkspace`/Worker，不在 UI 里手写散落 SQL。
 - 当前生产训练入口只允许官方/上游后端：Ultralytics YOLO detection/segmentation/OBB、SMP semantic segmentation、Anomalib PatchCore/EfficientAD，以及 PaddleOCR Det/Rec 官方适配器。旧的 C++ tiny detector、segmentation/OCR scaffold 训练、小型 PaddleOCR Rec CTC 和 shipped `python_mock` 已从产品训练路径移除，不得重新作为产品后端描述。
 - YOLO 产品边界是“官方 Ultralytics 训练/首次 ONNX 导出/`val()` 评估 + AITrain C++ runtime 推理、benchmark、受支持的部署验证、overlay 和交付报告”；OBB v1 仅承诺 ONNX Runtime 产品部署，NCNN 不属于 OBB v1。SMP 语义分割只承诺 ONNX Runtime 推理、overlay、benchmark 和部署验证，NCNN/TensorRT 导出不属于 SMP 范围。Anomaly v1 使用 Worker-managed Python/Anomalib artifacts，不声明 AITrain C++ ONNX/TensorRT/NCNN anomaly runtime。OCR 产品验收是 PaddleOCR Det/Rec/System 官方报告路径，不使用历史 C++ OCR ONNX wiring 作为当前验收。
 - generated/public smoke 只证明接线和 artifact 生成，不证明客户域精度。clean Windows、package-root TensorRT、客户域 OCR 和 unsupported-hardware TensorRT 结论必须有对应外部或客户域证据。

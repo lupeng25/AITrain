@@ -1,6 +1,6 @@
 # Python Trainer Protocol
 
-Phase 8 uses a subprocess boundary for real training. `aitrain_worker` launches a Python trainer, passes one request JSON file, then reads newline-delimited JSON from stdout.
+当前训练使用受控子进程边界。`aitrain_worker` 启动 Python Adapter，传入一个请求 JSON 文件，并为本次 request/task 建立一次性认证 loopback 事件通道。stdout/stderr 只保存为原始诊断日志，不再作为业务事件协议。
 
 ## Request
 
@@ -10,7 +10,7 @@ The Worker writes `python_trainer_request.json` in the task output directory and
 python <selected-official-trainer> --request <request-json>
 ```
 
-For Phase 9 official YOLO detection training, Worker routes `trainingBackend=ultralytics_yolo_detect` or `trainingBackend=ultralytics_yolo` to:
+For official YOLO detection training, Worker routes `trainingBackend=ultralytics_yolo_detect` to:
 
 ```powershell
 python python_trainers/detection/ultralytics_trainer.py --request <request-json>
@@ -60,7 +60,7 @@ python python_trainers/anomaly/anomalib_adapter.py --request <request-json>
 
 Anomaly v1 uses `taskType=anomaly_detection`, `datasetFormat=anomaly_folder`, `modelFamily=anomaly_detection`, and `runtime=anomalib_python`. It writes Worker-managed Python/Anomalib artifacts such as `anomalib_training_report.json`, `anomaly_sidecar.json`, `evaluation_report.json`, `inference_predictions.json`, heatmaps, overlays, masks, and benchmark/deployment reports. It does not add AITrain C++ ONNX/TensorRT/NCNN anomaly runtime.
 
-For the official PaddleOCR PP-OCRv4 / PP-OCRv5 / PP-OCRv6 Rec adapter, Worker routes `trainingBackend=paddleocr_rec_official` or the compatibility alias `trainingBackend=paddleocr_ppocrv4_rec` to:
+For the official PaddleOCR PP-OCRv4 / PP-OCRv5 / PP-OCRv6 Rec adapter, Worker routes `trainingBackend=paddleocr_rec_official` to:
 
 ```powershell
 python python_trainers/ocr_rec/paddleocr_official_adapter.py --request <request-json>
@@ -68,7 +68,7 @@ python python_trainers/ocr_rec/paddleocr_official_adapter.py --request <request-
 
 Use `modelPreset` to select the official family. The default is `PP-OCRv5_mobile_rec`; `PP-OCRv4_mobile_rec`, `PP-OCRv5_server_rec`, `en_PP-OCRv5_mobile_rec`, and PP-OCRv6 `tiny/small/medium` Rec presets remain selectable. Use `prepareOnly=true` to generate and validate the selected official config, label lists, dictionary selection, report, and reproducible command files without running official training. PP-OCRv5/v6 built-in presets are resolved from a PaddleOCR source checkout and fail with `paddleocr_repo_missing` when no repo is available. PP-OCRv6 reads dictionary and algorithm metadata from the official config. Use `runOfficial=true` or `prepareOnly=false` with `paddleOcrRepoPath` or `AITRAIN_PADDLEOCR_REPO` pointing at a PaddleOCR source checkout to execute official `tools/train.py` and `tools/export_model.py`. Set `runInferenceAfterExport=true` with `inferenceImage` to run official `tools/infer/predict_rec.py` after export and write `official_prediction.json`.
 
-The former small CTC route for `trainingBackend=paddleocr_rec` has been removed. `paddleocr_rec` remains a dataset format only; use `paddleocr_rec_official` or `paddleocr_ppocrv4_rec` for production OCR Rec training.
+The former small CTC route for `trainingBackend=paddleocr_rec` has been removed. `paddleocr_rec` remains a dataset format only; use `paddleocr_rec_official` for production OCR Rec training.
 
 For the official PaddleOCR PP-OCRv4 / PP-OCRv5 / PP-OCRv6 Det adapter, Worker routes `trainingBackend=paddleocr_det_official` to:
 
@@ -100,7 +100,7 @@ The full official PaddleOCR Det + Rec + System smoke is:
 .\tools\phase50-paddleocr-v5-gpu-official-chain.ps1 -UseGpu
 ```
 
-Request shape:
+Request shape (this adapter request schema is independent from the outer control-envelope version):
 
 ```json
 {
@@ -115,24 +115,19 @@ Request shape:
 }
 ```
 
-## Stdout Messages
+## Authenticated Adapter Events
 
-Each stdout line must be a compact JSON object:
+The Worker sets `AITRAIN_EVENT_HOST`, `AITRAIN_EVENT_PORT`, `AITRAIN_EVENT_TOKEN`, `AITRAIN_REQUEST_ID`, and `AITRAIN_TASK_ID`. The Adapter must connect to the literal loopback endpoint, complete the token handshake, and emit compact JSONL envelopes with `protocol: 2`, request/task identity, a strictly increasing sequence, and a typed `event.*` kind. Missing or invalid channel variables are a hard adapter failure.
+
+An explicit standalone diagnostic runner may set `AITRAIN_STANDALONE_ADAPTER_PROTOCOL=1`; this opt-in is used only by repository smoke scripts and is never injected by the Worker. In that mode stdout JSONL is diagnostic output and must not be treated as a product transport.
+
+Structured events are never inferred from arbitrary stdout lines. Raw stdout/stderr is bounded and retained as a log Artifact candidate.
+
+Example envelope:
 
 ```json
-{"type":"metric","payload":{"name":"loss","value":0.5,"step":1,"epoch":1}}
+{"protocol":2,"messageId":"...","requestId":"...","taskId":"...","sequence":"1","kind":"event.metric","timestamp":"...","payload":{"name":"loss","value":0.5,"taskId":"..."}}
 ```
-
-Supported message types:
-
-- `log`
-- `progress`
-- `metric`
-- `artifact`
-- `completed`
-- `failed`
-
-The Worker adds `taskId` when a payload omits it, then forwards the business event to the GUI inside the Protocol  control envelope described below.
 
 ## GUI ↔ Worker Protocol  外层控制面
 
@@ -153,7 +148,7 @@ Official Python packages are adapted behind this protocol:
 - `ultralytics_yolo_obb`: Ultralytics YOLO OBB training. It uses official OBB training, ONNX export, and `val()` evaluation over YOLO OBB 9-column labels. Product deployment validation is ONNX Runtime-only for OBB v1.
 - `smp_semantic_segmentation`: SMP dedicated semantic segmentation training and evaluation. It is separate from YOLO instance segmentation and uses Mask PNG datasets plus ONNX Runtime product inference/deployment validation.
 - `anomalib_patchcore` / `anomalib_efficientad`: Anomalib anomaly detection/localization. It uses Worker-managed Python/Anomalib artifacts and `runtime=anomalib_python`; missing Anomalib or EfficientAD external data is blocked, not downgraded to a pass.
-- `paddleocr_rec_official` / `paddleocr_ppocrv4_rec`: PaddleOCR official-recognition adapter. It prepares a PP-OCRv4, PP-OCRv5, or PP-OCRv6 config selected by `modelPreset` and can run official PaddleOCR training/export/inference from a source checkout. `prepareOnly` artifacts are configuration validation, not trained model artifacts.
+- `paddleocr_rec_official`: PaddleOCR official-recognition adapter. It prepares a PP-OCRv4, PP-OCRv5, or PP-OCRv6 config selected by `modelPreset` and can run official PaddleOCR training/export/inference from a source checkout. `prepareOnly` artifacts are configuration validation, not trained model artifacts.
   When official training runs, the adapter parses stdout metrics such as `loss`, `ctcLoss`, `nrtrLoss`, `accuracy`, and `normalizedEditDistance` into Worker `metric` events and the final report.
 - `paddleocr_det_official`: PaddleOCR official-detection adapter. It prepares a PP-OCRv4, PP-OCRv5, or PP-OCRv6 Det config selected by `modelPreset` and can run official PaddleOCR training/export from a source checkout. `prepareOnly` artifacts are configuration validation, not trained model artifacts.
   When official training runs, the adapter parses stdout metrics such as `loss`, `hmean`, `precision`, and `recall` into Worker `metric` events and the final report.

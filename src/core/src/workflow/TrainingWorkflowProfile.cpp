@@ -203,14 +203,7 @@ TrainingWorkflowProfile paddleOcrProfile(bool recognition)
 
 QString normalizedBackend(const QString& value)
 {
-    const QString normalized = value.trimmed().toLower();
-    if (normalized == QStringLiteral("ultralytics_yolo")) {
-        return QStringLiteral("ultralytics_yolo_detect");
-    }
-    if (normalized == QStringLiteral("paddleocr_ppocrv4_rec")) {
-        return QStringLiteral("paddleocr_rec_official");
-    }
-    return normalized;
+    return value.trimmed().toLower();
 }
 
 } // namespace
@@ -238,7 +231,7 @@ const QVector<TrainingWorkflowProfile>& trainingWorkflowProfiles()
                 QStringLiteral("实例分割官方评估由 Ultralytics val() 提供；公开或生成数据集证据不代表客户域精度。")}),
         yoloProfile(QStringLiteral("ultralytics_yolo_obb"),
             QStringLiteral("obb_detection"),
-            QStringLiteral("obb"),
+            QStringLiteral("obb_detection"),
             QStringLiteral("yolo_obb"),
             QStringLiteral("yolo_obb"),
             QStringLiteral("yolo_obb_v8"),

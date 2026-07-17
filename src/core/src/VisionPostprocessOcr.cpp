@@ -72,7 +72,6 @@ QJsonObject loadOcrRecReport(const QString& onnxPath)
         if (document.isObject()) {
             const QJsonObject object = document.object();
             if (object.value(QStringLiteral("backend")).toString() == QStringLiteral("paddleocr_rec_official")
-                || object.value(QStringLiteral("backend")).toString() == QStringLiteral("paddleocr_ppocrv4_rec")
                 || object.value(QStringLiteral("modelFamily")).toString() == QStringLiteral("ocr_recognition")) {
                 return object;
             }

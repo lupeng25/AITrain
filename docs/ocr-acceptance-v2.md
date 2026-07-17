@@ -56,7 +56,7 @@ System 原始报告必须原生声明 `ok=true`、`paddleocr_system_official`、
 
 三份输入全部预校验通过后，导入器才生成三种 committed Artifact。每种 Artifact 同时保存原始报告、规范化报告和 `official_report_lineage.json`；System lineage 绑定本次规范化 Det/Rec 报告 SHA-256。提交中途失败或取消会反向删除已经提交且尚未被引用的 Artifact，并清理暂存；补偿不完整会返回独立失败码，不能把部分结果作为可用报告。
 
-受控 Packager/Importer、Acceptance、Annotation Worker/UI 与 legacy integration 的统一定向 CTest 已 5/5 通过（35.06 秒），其中 `aitrain_v2_ocr_report_packager_tests` 1/1 通过。该验证只证明 Core 合同、补偿和接线回归；OCR 报告导入与 Acceptance 仍未接入 GUI/Worker，也没有产生任何真实客户域 accuracy 证据。
+受控 Packager/Importer、Acceptance、Annotation Worker/UI 与 legacy integration 的统一定向 CTest 已 5/5 通过（35.06 秒），其中 OCR 报告 Packager 合同测试 1/1 通过。该验证只证明 Core 合同、补偿和接线回归；OCR 报告导入与 Acceptance 仍未接入 GUI/Worker，也没有产生任何真实客户域 accuracy 证据。
 
 ## 精确失败
 

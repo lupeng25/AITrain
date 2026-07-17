@@ -1,6 +1,6 @@
 # YOLO Model Support Matrix
 
-> 2026-07-16 破坏性重构说明：本文下方的旧 YOLO26/OBB 独立 smoke 命令仅保留为历史证据，脚本已删除。当前 YOLO 训练、评估、导出和交付分别由 `TrainingWorkflowProfileV2`、官方 Python 适配器和 `runRuntimeDeliveryWorkflowV2` 负责。
+> 2026-07-16 破坏性重构说明：本文下方的旧 YOLO26/OBB 独立 smoke 命令仅保留为历史证据，脚本已删除。当前 YOLO 训练、评估、导出和交付分别由训练工作流 Profile、官方 Python 适配器和 `runRuntimeDeliveryWorkflow` 负责。
 
 本文是 AITrain Studio Ultralytics YOLO 检测与实例分割模型族的历史支持矩阵。OBB 当前只通过 V2 Profile 与官方适配器描述，不再提供独立 smoke/matrix 脚本。
 
@@ -36,7 +36,7 @@ OBB v1 uses `taskType=obb_detection`, `datasetFormat=yolo_obb`, `trainingBackend
 
 2026-06-15 full lifecycle finding: all 20 YOLO26 rows failed in the shared validation environment with Ultralytics 8.3.171. `GITHUB_ASSETS_STEMS` contains no `yolo26n/s/m/l/x` or `yolo26*-seg` stems. The `.yaml` rows fail because files such as `yolo26n.yaml` and `yolo26x-seg.yaml` do not exist; most `.pt` rows fail because weights such as `yolo26x.pt` or `yolo26x-seg.pt` cannot be resolved; nano `.pt` rows expose package/code incompatibility (`SPPF.__init__()` argument mismatch and missing `Segment26`).
 
-The isolated YOLO26 targeted environment then passed `tools\phase-yolo26-model-matrix-smoke.ps1 -Full -Epochs 100 -Device 0` on 2026-06-15 with 20/20 required rows passing training, official ONNX export, AITrain C++ ONNX inference, and TensorRT deployment validation. The historical YOLO26 NCNN attempt failed 20/20, so AITrain no longer offers or runs YOLO26 NCNN export/conversion; use ONNX or TensorRT for YOLO26 deployment.
+The isolated YOLO26 targeted environment produced historical evidence on 2026-06-15. The former matrix script was deleted, so that evidence is archival and cannot be rerun as a current gate. AITrain no longer offers or runs YOLO26 NCNN export/conversion; use ONNX or TensorRT only when a fresh official-artifact workflow provides evidence.
 
 ## Export Parameters
 
@@ -94,7 +94,7 @@ Run the separate YOLO26 compatibility matrix:
 ```powershell
 ```
 
-The YOLO26 script writes `yolo26_model_matrix_summary.json` and `yolo26_environment_self_check.json` under `.deps\phase-yolo26-model-matrix` by default. Probe mode validates the isolated Python environment, CUDA Torch when `-Device 0` is requested, `cfg/models/26`, and nano `.yaml` / `.pt` model loading before any training. Full mode has 20 rows covering detection and instance segmentation `n/s/m/l/x` `.yaml` and `.pt` presets. Focused mode covers the four nano lifecycle rows: `yolo26n.yaml`, `yolo26n.pt`, `yolo26n-seg.yaml`, and `yolo26n-seg.pt`. In an environment where official YOLO26 assets resolve, each passed row must produce `best.pt`, ONNX, `ultralytics_training_report.json`, AITrain inference JSON, overlay output, and deployment statuses for ONNX and TensorRT. `ncnn` is not an accepted YOLO26 deployment target.
+The former YOLO26 matrix wrote summary files under `.deps\phase-yolo26-model-matrix`; that script and its probe/full modes are deleted. `ncnn` is not an accepted YOLO26 deployment target.
 
 Run the separate OBB v1 smoke/matrix:
 

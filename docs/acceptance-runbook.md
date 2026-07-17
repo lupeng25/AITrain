@@ -36,7 +36,7 @@ For external handoff, use `docs\external-acceptance-handoff.md` and the result t
 
 For release-freeze package identity, use `docs\release-freeze-handoff.md` and `tools\release-freeze-handoff.ps1`. This generates the CPack ZIP, SHA256 hashes, and a handoff manifest without marking external acceptance as passed.
 
-For YOLO model-family productization, use `docs\yolo-model-support-matrix.md`. Phase 45 validates newer Ultralytics detection/segmentation nano model names only. P1 validates YOLOv5u standard P5 detection, YOLOv8 / YOLO11 / YOLO12 detection, YOLOv8 / YOLO11 instance segmentation, YOLO12 instance-segmentation `.yaml`, `.yaml` and `.pt` source types where the official asset resolves, YOLOv8 P2/P6 detection YAML architectures, and the official export-argument protocol. YOLO12 segmentation `.pt` rows are blocked in the recorded Ultralytics 8.3.171 environment because `yolo12n-seg.pt` cannot be resolved, so they must not be counted as passed until upstream official `yolo12*-seg.pt` weights resolve. YOLO26 is validated by `tools\phase-yolo26-model-matrix-smoke.ps1` as a separate compatibility phase for detection and instance segmentation only. The shared Ultralytics 8.3.171 lifecycle lane blocked/failed all 20 YOLO26 rows, but the isolated 2026-06-15 targeted full lane passed 20/20 rows for training, official ONNX, AITrain C++ ONNX inference, and TensorRT. YOLO26 NCNN is not a supported export/deployment target. These YOLO paths do not expand scope to YOLOv5 segmentation, YOLOv5 P6, classification, pose, OBB, anomaly, YOLO-World, YOLOE-26, tracking, or other tasks. Dedicated semantic segmentation is validated separately through SMP and is not a YOLO instance-segmentation capability.
+For YOLO model-family productization, use `docs\yolo-model-support-matrix.md`. Phase 45 validates newer Ultralytics detection/segmentation nano model names only. P1 validates YOLOv5u standard P5 detection, YOLOv8 / YOLO11 / YOLO12 detection, YOLOv8 / YOLO11 instance segmentation, YOLO12 instance-segmentation `.yaml`, `.yaml` and `.pt` source types where the official asset resolves, YOLOv8 P2/P6 detection YAML architectures, and the official export-argument protocol. YOLO12 segmentation `.pt` rows are blocked in the recorded Ultralytics 8.3.171 environment because `yolo12n-seg.pt` cannot be resolved, so they must not be counted as passed until upstream official `yolo12*-seg.pt` weights resolve. YOLO26 records are historical evidence only; the former matrix script was deleted and cannot be rerun. YOLO26 NCNN is not a supported export/deployment target. These YOLO paths do not expand scope to YOLOv5 segmentation, YOLOv5 P6, classification, pose, OBB, anomaly, YOLO-World, YOLOE-26, tracking, or other tasks. Dedicated semantic segmentation is validated separately through SMP and is not a YOLO instance-segmentation capability.
 
 For SMP semantic segmentation, use:
 
@@ -72,7 +72,7 @@ The GUI delivery-closeout surfaces aggregate evidence; they do not replace the s
 
 Current GUI surfaces:
 
-- `数据集 > 质量与复核`: enter a committed review `ArtifactId`; the GUI reads `problem_samples.json`, `error_samples.json`, `rework_sample_set.json`, or evaluation reports by package-relative member name after inventory/hash verification. It never accepts an arbitrary local JSON path or opens staging files; filter by source, reason, class, split, OCR edit distance / CER, or search text; export an X-AnyLabeling review list.
+- `数据集 > 质量与复核`: enter a committed review `ArtifactId`; the GUI reads quality/review JSON by package-relative member name after inventory/hash verification. It never accepts an arbitrary local JSON path or opens staging files; filter and export an X-AnyLabeling review list.
 - `模型库 > 评估报告`: review model evaluation report records and visualized report details.
 - `部署验证 > 部署验证 / 推理验证`：两者都只接受已登记、Manifest 和哈希校验通过的  模型包；分别运行部署验证与单图推理。
 - `系统设置 > 内置能力`: review the built-in capability matrix and backend boundaries.
@@ -87,11 +87,10 @@ The real execution entries remain:
 .\tools\local-rc-closeout.ps1
 .\tools\release-freeze-handoff.ps1
 .\tools\customer-ocr-validation.ps1
-.\build-vscode\bin\aitrain_worker.exe --ncnn-param-smoke <model.param> --image <sample.png> --output <smoke-output> --task-type segmentation
 .\tools\ui-workbench-walkthrough.ps1
 ```
 
-当前 Worker 产品协议保留 `runCustomerOcrAcceptance` 与 `collectDiagnostics` 报告命令；-503 已完成，推理与部署验证统一使用 `runRuntimeDeliveryWorkflow` 六步工作流，并且只能通过 `ModelPackageId`、Manifest 与 Artifact Store 解析模型。已删除的单步命令和裸路径部署命令不得再作为验收入口。长任务实现仍必须位于 Worker/core 边界，不能进入 `MainWindow`。底层 ONNX Runtime 单次同步 `infer` 进入后不可中途抢占，取消会在该次调用返回后收口。NCNN  验收只覆盖产品矩阵允许且 Manifest 合同完整的 Detection/Segmentation，不得扩展到 OBB、SMP、异常检测、OCR 或未知 decoder；TensorRT  的官方 YOLO decoder 与真实 `infer` 尚未实现，probe/engine 或历史外部证据不能作为本六步工作流的 TensorRT 推理通过结论。
+当前 Worker 产品协议只保留统一 Workflow 命令；诊断、OCR 验收、环境检查、Runtime Delivery 和外部证据导入均通过对应 Workflow，并以 TaskId/ArtifactId/EvidenceId 返回结果。旧 `runCustomerOcrAcceptance`、`collectDiagnostics`、裸路径部署和 `--*-smoke` 业务入口均已删除，不得作为验收入口。长任务实现仍必须位于 Worker/core 边界，不能进入 `MainWindow`。底层 ONNX Runtime 单次同步 `infer` 进入后不可中途抢占，取消会在该次调用返回后收口。NCNN 验收只覆盖产品矩阵允许且 Manifest 合同完整的 Detection/Segmentation，不得扩展到 OBB、SMP、异常检测、OCR 或未知 decoder；TensorRT 的官方 YOLO decoder 与真实 `infer` 尚未实现，probe/engine 或历史外部证据不能作为 TensorRT 推理通过结论。
 
 NCNN evidence refresh on 2026-05-16:
 
@@ -166,18 +165,12 @@ Expected result:
 
 RTX 4090 D TensorRT acceptance has passed for the current validation lane, with evidence archived in `docs\validation\rtx4090-validation-evidence-20260615.json`. Older GTX 1060 / SM 61 hardware remains `hardware-blocked` for TensorRT 10 and must not be treated as passing.
 
-To reproduce or refresh the evidence on an RTX / SM 75+ Windows machine or matching cloud GPU:
-
-```powershell
-.\tools\acceptance-smoke.ps1 -TensorRT -WorkDir .deps\acceptance-tensorrt
-```
-
 Acceptance requires:
 
 - Worker self-check resolves CUDA, cuDNN, TensorRT, TensorRT Plugin, TensorRT ONNX Parser, and ONNX Runtime components needed for ONNX-to-engine export.
-- `acceptance-smoke.ps1 -TensorRT` generates a small official Ultralytics YOLO ONNX artifact, or uses `-TensorRtOnnxPath <official.onnx>` when supplied.
-- 历史 TensorRT smoke CLI 已删除；当前 TensorRT 仅报告  Adapter 的 SDK/依赖/硬件/decoder 状态，不宣称真实推理通过。
-- The result is recorded back in `docs\harness\current-status.md`; the current RTX 4090 D pass is already recorded.
+- 当前本地门禁只检查包内运行时依赖和 Runtime Delivery 的能力分类；不存在独立的 TensorRT smoke CLI。
+- 真实 TensorRT decoder/infer 尚未实现，不能把 SDK、engine 或历史外部结果写成产品推理通过。
+- 若重新开放 RTX/SM 75+ 外部验收，必须从已登记 ModelPackage 运行 Runtime Delivery，提交完整 SDK、硬件、Manifest、Artifact 和报告证据；当前本地代码不提供裸 ONNX 路径入口。
 
 ## Phase 43 Lite: External Acceptance Handoff
 
@@ -195,13 +188,7 @@ Clean Windows package acceptance from the unpacked package root:
 .\tools\acceptance-smoke.ps1 -Package
 ```
 
-RTX 4090 D TensorRT smoke evidence is recorded under `.deps\\rtx4090-validation\\acceptance-tensorrt`.
-
-```powershell
-.\tools\acceptance-smoke.ps1 -TensorRT -WorkDir .deps\acceptance-tensorrt
-```
-
-Return the filled template, `acceptance_summary.json`, full console output, Worker self-check JSON, package layout summary, GPU/driver evidence for TensorRT, and the exact TensorRT smoke pass/fail/hardware-blocked output. Keep historical unsupported-GPU runs separate from the recorded RTX 4090 D pass.
+TensorRT 外部验收只接受已登记 ModelPackage 的 Runtime Delivery 证据，不再接受裸 ONNX 或旧 smoke CLI。返回填好的模板、`acceptance_summary.json`、完整控制台输出、Worker self-check JSON、包体布局摘要、GPU/驱动证据、Manifest/Artifact 清单及 Runtime Delivery 报告；将不支持硬件的结果与历史 RTX 4090 D 证据分开保存。
 
 ## Phase 44 Lite: Release Freeze Handoff
 
@@ -226,7 +213,7 @@ Run the required YOLO11 and YOLO12 detection/segmentation model matrix:
 .\tools\phase45-yolo-model-matrix-smoke.ps1
 ```
 
-The legacy YOLO12 command remains accepted, but it is no longer needed because YOLO12 is part of the default matrix:
+如需单独确认 YOLO12 行，可显式启用该矩阵选项（不代表任何旧产品命令兼容）：
 
 ```powershell
 .\tools\phase45-yolo-model-matrix-smoke.ps1 -IncludeYolo12
@@ -270,21 +257,7 @@ The full P1 matrix is intentionally separate from `harness-check.ps1` because it
 
 ## YOLO26 Compatibility Matrix
 
-Run the separate YOLO26 detection/instance-segmentation matrix:
-
-```powershell
-```
-
-Full mode writes `yolo26_model_matrix_summary.json` under `.deps\phase-yolo26-model-matrix` by default and has 20 required rows:
-
-- YOLO26 detection: `yolo26n/s/m/l/x.yaml` and `yolo26n/s/m/l/x.pt`.
-- YOLO26 instance segmentation: `yolo26n/s/m/l/x-seg.yaml` and `yolo26n/s/m/l/x-seg.pt`.
-
-Probe mode writes `yolo26_environment_self_check.json` and validates the isolated Python environment, CUDA Torch when GPU is requested, `cfg/models/26`, and nano `.yaml` / `.pt` model loading before training. Focused mode is the quick lifecycle gate for nano models and covers `yolo26n.yaml`, `yolo26n.pt`, `yolo26n-seg.yaml`, and `yolo26n-seg.pt`.
-
-`end2end=auto` uses the loaded Ultralytics model config when it exposes an `end2end` default; otherwise it falls back to YOLO26 detection=true and other models=false. Reports must record the normalized boolean under `ultralyticsExportArgs.end2end`. Each passed YOLO26 row must produce a completed Worker training task, `best.pt`, ONNX, `ultralytics_training_report.json`, AITrain inference JSON, overlay output, and explicit ONNX/TensorRT deployment statuses. YOLO26 NCNN is not an accepted target.
-
-Current status: in the recorded shared Ultralytics 8.3.171 full lifecycle environment, all 20 YOLO26 rows failed before useful training. `.yaml` rows report missing model config files, most `.pt` rows report missing official weights, and nano `.pt` rows expose package/code incompatibility (`SPPF.__init__()` argument mismatch and missing `Segment26`). The isolated YOLO26 matrix full summary passed on 2026-06-15 for 20/20 training, official ONNX export, AITrain C++ ONNX inference, and TensorRT deployment validation. YOLO26 NCNN is removed from the accepted deployment target list.
+YOLO26 detection/instance-segmentation matrix results are historical only. The former matrix script and its probe/focused/full modes were deleted; `.deps\phase-yolo26-model-matrix` is retained only as archived evidence and cannot be used as a current gate. YOLO26 NCNN is not an accepted target.
 
 YOLO26 semantic segmentation, classification, pose, OBB, tracking, YOLOE-26, and other task variants are not supported.
 
@@ -426,9 +399,9 @@ If offline licensing stops startup at the registration dialog, the wrapper recor
 
 `tools\local-rc-closeout.ps1` runs this walkthrough by default after harness/package smoke. Use `-SkipGuiWalkthrough` only for intentionally headless environments, and record that omission in the handoff notes.
 
-For manual exploration beyond the automated pass, create or open a project, import generated detection, segmentation, OCR Rec, and OCR Det datasets, launch X-AnyLabeling from the dataset page, use post-labeling refresh/revalidation, validate and split each dataset, run one training/export/inference path, then confirm the task queue detail view lists report, checkpoint/model, ONNX, overlay, visualized OCR image, and prediction JSON/TXT artifacts. Also open `数据集 > 质量与复核`, `部署验证`, `系统设置 > 内置能力`, and `环境 > 交付证据` to confirm review-list export, export/inference validation, built-in capability state, diagnostics, customer OCR gate, and deployment validation entries are visible.
+For manual exploration beyond the automated pass, create or open a project, import generated detection, segmentation, OCR Rec, and OCR Det datasets, launch X-AnyLabeling from the dataset page, use post-labeling refresh/revalidation, validate and split each dataset, run one training/export/inference path, then confirm the task queue detail view lists report, checkpoint/model, ONNX, overlay, visualized OCR image, and prediction JSON/TXT artifacts. 数据集页不得暴露任意“打开数据目录”操作；裸路径仅允许出现在明确的导入/转换边界，修复流程必须使用 Session/Artifact 身份；同时打开 `数据集 > 质量与复核`、`部署验证`、`系统设置 > 内置能力` 和 `环境 > 交付证据`，确认复核清单导出、导出/推理校验、内置能力状态、诊断包、客户 OCR 门禁和部署验证条目可见。
 
-X-AnyLabeling is detected from `AITRAIN_XANYLABELING_EXE`, the app directory, `tools\x-anylabeling`, `.deps\tools\annotation-tools\X-AnyLabeling`, legacy `.deps\annotation-tools\X-AnyLabeling`, or `PATH`. Keep downloaded binaries in `.deps\` unless a separate redistribution review is completed.
+X-AnyLabeling is detected from `AITRAIN_XANYLABELING_EXE`, the app directory, `tools\x-anylabeling`, `.deps\tools\annotation-tools\X-AnyLabeling`, or `PATH`. Keep downloaded binaries in `.deps\` unless a separate redistribution review is completed.
 
 ## Phase 21: Release Closeout
 

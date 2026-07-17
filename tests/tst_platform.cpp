@@ -19,20 +19,19 @@ private slots:
             QStringLiteral("detection"),
             QStringLiteral("yolo_detection"),
             QStringLiteral("ultralytics_yolo_detect")));
-        QVERIFY(registry.supports(
+        QVERIFY(!registry.supports(
             QStringLiteral("yolo"),
             QStringLiteral("detection"),
             QStringLiteral("yolo_txt"),
             QStringLiteral("ultralytics_yolo")));
-        QVERIFY(registry.supports(
+        QVERIFY(!registry.supports(
             QStringLiteral("paddleocr"),
             QStringLiteral("ocr_recognition"),
             QStringLiteral("paddleocr_rec"),
             QStringLiteral("paddleocr_ppocrv4_rec")));
-        QCOMPARE(registry.backendsForTask(QStringLiteral("obb"), QStringLiteral("yolo_obb")),
-            QStringList() << QStringLiteral("ultralytics_yolo_obb"));
-        QCOMPARE(registry.backend(QStringLiteral("ultralytics_yolo")).id,
-            QStringLiteral("ultralytics_yolo_detect"));
+        QVERIFY(registry.backendsForTask(QStringLiteral("obb_detection"), QStringLiteral("yolo_obb"))
+            .contains(QStringLiteral("ultralytics_yolo_obb")));
+        QVERIFY(registry.backend(QStringLiteral("ultralytics_yolo")).id.isEmpty());
         QVERIFY(!registry.supports(
             QStringLiteral("yolo"),
             QStringLiteral("detection"),
@@ -54,10 +53,7 @@ private slots:
 
         const QJsonObject json = registry.toJson();
         QCOMPARE(json.value(QStringLiteral("schemaVersion")).toInt(), 1);
-        QCOMPARE(json.value(QStringLiteral("aliases")).toObject()
-                     .value(QStringLiteral("datasetFormats")).toObject()
-                     .value(QStringLiteral("yolo_txt")).toString(),
-            QStringLiteral("yolo_detection"));
+        QVERIFY(!json.contains(QStringLiteral("aliases")));
         QVERIFY(json.value(QStringLiteral("capabilities")).toArray().size() >= 4);
         QVERIFY(json.value(QStringLiteral("backends")).toArray().size() >= 8);
     }

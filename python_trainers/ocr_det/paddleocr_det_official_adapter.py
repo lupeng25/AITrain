@@ -18,7 +18,13 @@ TRAINER_ROOT = Path(__file__).resolve().parents[1]
 if str(TRAINER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRAINER_ROOT))
 
-from trainer_protocol import configure_stdio, emit_failed, exception_details, unhandled_failure  # noqa: E402
+from adapter_event_channel import (
+    AdapterEventChannel,
+    emit_standalone_event,
+    event_channel_from_environment,
+    standalone_protocol_enabled,
+)  # noqa: E402
+from trainer_protocol import configure_stdio, exception_details  # noqa: E402
 
 
 BACKEND_ID = "paddleocr_det_official"
@@ -70,15 +76,37 @@ DET_PRESETS: dict[str, dict[str, Any]] = {
 
 configure_stdio()
 
+_event_channel: AdapterEventChannel | None = None
+
+
+def configure_event_channel() -> None:
+    global _event_channel
+    if _event_channel is not None or standalone_protocol_enabled():
+        return
+    _event_channel = event_channel_from_environment()
+    _event_channel.connect()
+
+
+def close_event_channel() -> None:
+    global _event_channel
+    if _event_channel is not None:
+        _event_channel.close()
+        _event_channel = None
+
 
 def emit(event_type: str, **payload: Any) -> None:
     message = {"type": event_type, "timestamp": time.time(), "backend": BACKEND_ID}
     message.update(payload)
-    print(json.dumps(message, ensure_ascii=False), flush=True)
+    configure_event_channel()
+    if _event_channel is not None:
+        _event_channel.emit_event(message)
+    else:
+        emit_standalone_event(message)
 
 
 def fail(message: str, code: str, details: dict[str, Any] | None = None) -> int:
-    return emit_failed(BACKEND_ID, message, code, details)
+    emit(message=message, code=code, details=details or {}, event_type="failed")
+    return 1
 
 
 def read_request(path: Path) -> dict[str, Any]:
@@ -653,13 +681,20 @@ def main() -> int:
     parser.add_argument("--request", required=True, type=Path)
     args = parser.parse_args()
     try:
-        request = read_request(args.request)
+        configure_event_channel()
+        try:
+            request = read_request(args.request)
+        except Exception as exc:
+            return fail(f"failed to read trainer request: {exc}", "bad_request", exception_details(exc))
+        try:
+            return run(request)
+        except Exception as exc:
+            return fail(f"Unhandled PaddleOCR detection adapter error: {exc}", "unhandled_exception", exception_details(exc))
     except Exception as exc:
-        return fail(f"failed to read trainer request: {exc}", "bad_request", exception_details(exc))
-    try:
-        return run(request)
-    except Exception as exc:
-        return unhandled_failure(BACKEND_ID, exc)
+        print(f"PaddleOCR detection adapter bootstrap failed: {exc}", file=sys.stderr, flush=True)
+        return 1
+    finally:
+        close_event_channel()
 
 
 if __name__ == "__main__":

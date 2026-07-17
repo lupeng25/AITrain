@@ -15,7 +15,7 @@ private slots:
     void resolvesAnomalibProfiles();
     void resolvesPaddleOcrProfiles_data();
     void resolvesPaddleOcrProfiles();
-    void normalizesDetectionAliasAndBackendText();
+    void normalizesBackendTextAndRejectsAliases();
     void rejectsUnknownOrMissingBackend();
     void registeredProfilesAreCompleteAndUnique();
 };
@@ -49,7 +49,7 @@ void TrainingWorkflowProfileTests::resolvesRegisteredYoloProfiles_data()
     QTest::newRow("obb")
         << QStringLiteral("ultralytics_yolo_obb")
         << QStringLiteral("obb_detection")
-        << QStringLiteral("obb")
+        << QStringLiteral("obb_detection")
         << QStringLiteral("yolo_obb")
         << QStringLiteral("yolo_obb")
         << QStringLiteral("yolo_obb_v8")
@@ -243,18 +243,20 @@ void TrainingWorkflowProfileTests::resolvesPaddleOcrProfiles()
     QVERIFY(profile.limitations.join(QLatin1Char(' ')).contains(QStringLiteral("官方工具链")));
 }
 
-void TrainingWorkflowProfileTests::normalizesDetectionAliasAndBackendText()
+void TrainingWorkflowProfileTests::normalizesBackendTextAndRejectsAliases()
 {
     aitrain::TrainingWorkflowProfile profile;
     QString error = QStringLiteral("stale");
     QVERIFY2(aitrain::resolveTrainingWorkflowProfile(
-        QStringLiteral("  ULTRALYTICS_YOLO  "), &profile, &error), qPrintable(error));
+        QStringLiteral("  ULTRALYTICS_YOLO_DETECT  "), &profile, &error), qPrintable(error));
     QCOMPARE(profile.trainingBackend, QStringLiteral("ultralytics_yolo_detect"));
     QVERIFY(error.isEmpty());
     QVERIFY(aitrain::hasTrainingWorkflowProfile(QStringLiteral("ULTRALYTICS_YOLO_OBB")));
-    QVERIFY(aitrain::resolveTrainingWorkflowProfile(
+    QVERIFY(!aitrain::resolveTrainingWorkflowProfile(
         QStringLiteral(" PADDLEOCR_PPOCRV4_REC "), &profile, &error));
-    QCOMPARE(profile.trainingBackend, QStringLiteral("paddleocr_rec_official"));
+    QVERIFY(error.contains(QStringLiteral("未注册")));
+    QVERIFY(!aitrain::resolveTrainingWorkflowProfile(
+        QStringLiteral(" ULTRALYTICS_YOLO "), &profile, &error));
 }
 
 void TrainingWorkflowProfileTests::rejectsUnknownOrMissingBackend()

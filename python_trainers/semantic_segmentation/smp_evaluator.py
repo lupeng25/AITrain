@@ -16,7 +16,7 @@ TRAINER_ROOT = Path(__file__).resolve().parents[1]
 if str(TRAINER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRAINER_ROOT))
 
-from adapter_event_channel import AdapterEventChannel, event_channel_from_environment  # noqa: E402
+from adapter_event_channel import AdapterEventChannel, event_channel_from_environment, standalone_protocol_enabled  # noqa: E402
 from adapter_sdk import AdapterSdk  # noqa: E402
 from dataset_snapshot import materialize_dataset_snapshot  # noqa: E402
 from trainer_protocol import configure_stdio, exception_details  # noqa: E402
@@ -34,7 +34,7 @@ _event_channel: AdapterEventChannel | None = None
 
 def configure_adapter() -> None:
     global _adapter, _event_channel
-    if _event_channel is None and os.environ.get("AITRAIN_EVENT_PORT"):
+    if _event_channel is None and not standalone_protocol_enabled() and _adapter is None:
         _event_channel = event_channel_from_environment()
         _event_channel.connect()
     if _adapter is None:

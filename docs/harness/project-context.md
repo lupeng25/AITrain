@@ -39,7 +39,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 
 阶段状态以 `docs/harness/current-status.md` 为准。不要只根据长期路线图末尾的历史“下一步建议”判断当前阶段。
 
-当前样本复核和评估报告统一以已提交 ArtifactId 为入口，GUI 只读取通过 inventory/hash 复验的 Artifact 包内相对成员，不暴露任意本地路径或 staging 文件。
+当前样本复核和评估报告统一以已提交 ArtifactId 为入口，GUI 只读取通过 inventory/hash 复验的 Artifact 包内相对成员，不暴露任意本地路径或 staging 文件。数据集页不提供任意“打开数据目录”按钮；外部目录只作为显式导入/转换边界输入，标注修复通过 Session/Artifact 身份闭环。
 
 截至 2026-06-18，官方 YOLO 检测/分割/OBB 训练与 ONNX 导出、Anomalib PatchCore/EfficientAD 异常检测 Python 路由、PaddleOCR Det/Rec/System 官方工具链、PP-OCRv4/v5/v6 official adapter preset、YOLO C++ ONNX Runtime 推理、RTX 4090D TensorRT 验收证据、本地插件 marketplace、环境 profile、数据集质量/快照、数据集格式转换 GUI、评估、benchmark、模型库、交付报告、样本复核、部署验证、诊断包和环境页交付证据 GUI 闭环都已落地到当前本地代码。当前主导航收敛为 9 个对象型工作区：`总览`、`项目`、`数据集`、`训练实验`、`任务与产物`、`模型库`、`部署验证`、`环境`、`系统设置`；样本复核、评估报告、模型导出、推理验证、插件和应用设置作为对应工作区 tab 呈现。2026-06-05 RTX 4090D follow-up 刷新记录 local baseline/package acceptance、GUI walkthrough、历史 Phase 47 Det ONNX+CTest、CPU training smoke、Phase 45 YOLO matrix、TensorRT 和 public OCR GPU workflow 均有通过证据。2026-06-17 OBB v1 通过 `tools\phase-obb-ultralytics-smoke.ps1` 和 `tools\phase-obb-dota-quality-matrix.ps1` 本地验证，覆盖官方 Ultralytics OBB 训练/ONNX/`val()`、AITrain ONNX Runtime 旋转框推理、benchmark 和部署验证；该证据是 public DOTA/workflow evidence，不是客户域工业精度证明。2026-06-18 异常检测 v1 默认 public MVTec 三类矩阵通过 6/6，覆盖 `bottle/hazelnut/leather` x `anomalib_patchcore/anomalib_efficientad`，summary 为 `.deps\anomaly-mvtec-quality-matrix\anomaly_mvtec_quality_matrix_summary.json`；该证据是 public MVTec workflow/quality evidence，不是客户域工业精度证明。准确阶段边界仍以 `docs/harness/current-status.md` 为准。
 
@@ -51,7 +51,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 
 - `AITrainStudio.exe` Qt GUI。
 - `aitrain_worker.exe` 独立任务进程。
-- JSON Lines over `QLocalSocket` 通信。
+- 控制面使用当前版本 JSONL over `QLocalSocket`；Python Adapter 使用认证 loopback 事件通道，stdout/stderr 只作为原始诊断日志。
 - SQLite 项目、任务、指标存储。
 - 内置能力注册表和官方后端描述。
 - 数据集校验初版。

@@ -1,6 +1,6 @@
 # AITrain Studio 运维交付 Runbook
 
-最后更新：2026-06-21
+最后更新：2026-07-17
 
 本文面向打包、安装、现场运维和交付验收人员，说明 AITrain Studio 的包体边界、依赖准备、证据采集和常见处置。开发架构见 `docs/developer-architecture.md`，用户操作见 `docs/user-guide.md`。
 
@@ -129,7 +129,7 @@ If the result summary reports `errorCode=license_required`, the app is blocked a
 RTX / SM 75+ TensorRT 验收：
 
 ```powershell
-.\tools\acceptance-smoke.ps1 -TensorRT
+.\tools\acceptance-smoke.ps1 -Package -SkipBuild
 ```
 
 客户域 OCR 验收：
@@ -144,7 +144,7 @@ RTX / SM 75+ TensorRT 验收：
 .\tools\release-freeze-handoff.ps1
 ```
 
-NCNN 运行时只通过 `runRuntimeDeliveryWorkflowV2`，由 ModelPackageId、Manifest、tensor/blob/decoder 合同和 Artifact Store 解析模型。旧 NCNN smoke 脚本及 Worker 参数已删除；不完整合同统一返回结构化 `Unsupported`/`Blocked`，不得把裸 `.onnx`、`.param` 或样本路径传给 Worker。
+NCNN 运行时只通过 `runRuntimeDeliveryWorkflow`，由 ModelPackageId、Manifest、tensor/blob/decoder 合同和 Artifact Store 解析模型。旧 NCNN smoke CLI 已删除；不完整合同统一返回结构化 `Unsupported`/`Blocked`，不得把裸 `.onnx`、`.param` 或样本路径传给 Worker。
 
 ## 外部验收收集
 
@@ -186,7 +186,7 @@ package-root TensorRT rerun：
 | NCNN 部署验证返回 `sdk_missing` | 重新配置 `AITRAIN_NCNN_ROOT`，确认 `ncnn.dll` 位于 Worker 同目录或 `runtimes\ncnn`。 |
 | NCNN 部署验证返回 `sample_missing` | 提供可读取的 `sampleImagePath`，否则只记录 blocked，不声明 runtime passed。 |
 | NCNN 部署验证返回 `sidecar_missing` | 为外部 `.param/.bin` 提供 AITrain sidecar，或显式传入 `modelFamily`、`classNames`、`inputBlob`、`outputBlobs`、`decoder` 等配置。 |
-| NCNN 部署验证失败并提示 unsupported `Shape` layer | 当前 `.param` 来自不兼容的 ONNX 转换；使用静态/兼容导出的 ONNX，或改用带 sidecar/config 的预转换 NCNN artifact 后运行 `--ncnn-param-smoke`。 |
+| NCNN 部署验证失败并提示 unsupported `Shape` layer | 当前 `.param` 来自不兼容的 ONNX 转换；使用静态/兼容导出的 ONNX，或改用带 sidecar/config 的预转换 NCNN Artifact 后重新执行 Runtime Delivery。 |
 | 能力注册表为空 | 检查 Worker `--builtin-capabilities` 输出和构建版本是否一致。 |
 | 数据集转换后无法训练 | 是否手动选择转换输出目录并重新运行数据集校验。 |
 

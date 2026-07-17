@@ -10,6 +10,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# This phase is a standalone diagnostic runner, not a Worker launch.  The
+# adapter's stdout JSONL transport is enabled only by this explicit opt-in.
+$env:AITRAIN_STANDALONE_ADAPTER_PROTOCOL = "1"
 $script:Root = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $PSScriptRoot) "."))
 . (Join-Path $PSScriptRoot "deps-layout.ps1")
 

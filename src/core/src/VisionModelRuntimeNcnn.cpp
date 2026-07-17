@@ -123,8 +123,7 @@ QString normalizedNcnnDecoder(QString decoder)
     if (decoder == QStringLiteral("yolo_v8_detection")
         || decoder == QStringLiteral("yolo_v8_segmentation")
         || decoder == QStringLiteral("yolov8")
-        || decoder == QStringLiteral("ultralytics")
-        || decoder == QStringLiteral("ultralytics_yolo")) {
+        || decoder == QStringLiteral("ultralytics")) {
         return QStringLiteral("ultralytics_output");
     }
     if (decoder == QStringLiteral("pnnx")

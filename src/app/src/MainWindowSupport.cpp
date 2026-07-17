@@ -107,7 +107,7 @@ QString taskTypeLabel(const QString& taskType)
     if (taskType == QStringLiteral("segmentation")) {
         return uiText("分割");
     }
-    if (taskType == QStringLiteral("obb_detection") || taskType == QStringLiteral("obb")) {
+    if (taskType == QStringLiteral("obb_detection")) {
         return uiText("OBB 旋转框检测");
     }
     if (taskType == QStringLiteral("semantic_segmentation")) {
@@ -166,23 +166,6 @@ QString backendLabel(const QString& backend)
         return uiText("PaddleOCR System 推理（官方）");
     }
     return backend;
-}
-
-QJsonObject readJsonObjectFile(const QString& path)
-{
-    if (path.isEmpty()) {
-        return {};
-    }
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
-        return {};
-    }
-    QJsonParseError error;
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &error);
-    if (error.error != QJsonParseError::NoError || !document.isObject()) {
-        return {};
-    }
-    return document.object();
 }
 
 QString metricValueText(const QJsonObject& metrics, const QStringList& keys)
@@ -412,7 +395,7 @@ QString inferenceTaskTypeLabel(const QString& taskType)
     if (taskType == QStringLiteral("segmentation")) {
         return uiText("分割");
     }
-    if (taskType == QStringLiteral("obb_detection") || taskType == QStringLiteral("obb")) {
+    if (taskType == QStringLiteral("obb_detection")) {
         return uiText("OBB 旋转框检测");
     }
     if (taskType == QStringLiteral("semantic_segmentation")) {
@@ -435,7 +418,7 @@ QString inferenceTaskTypeLabel(const QString& taskType)
 
 QString datasetFormatLabel(const QString& format)
 {
-    if (format == QStringLiteral("yolo_detection") || format == QStringLiteral("yolo_txt")) {
+    if (format == QStringLiteral("yolo_detection")) {
         return uiText("YOLO 检测");
     }
     if (format == QStringLiteral("yolo_segmentation")) {
@@ -476,7 +459,7 @@ QString defaultBackendForTask(const QString& taskType)
     if (taskType == QStringLiteral("segmentation")) {
         return QStringLiteral("ultralytics_yolo_segment");
     }
-    if (taskType == QStringLiteral("obb_detection") || taskType == QStringLiteral("obb")) {
+    if (taskType == QStringLiteral("obb_detection")) {
         return QStringLiteral("ultralytics_yolo_obb");
     }
     if (taskType == QStringLiteral("semantic_segmentation")) {
@@ -528,10 +511,10 @@ QString defaultModelForBackend(const QString& backend)
     if (backend == QStringLiteral("ultralytics_yolo_obb")) {
         return QStringLiteral("yolo11n-obb.pt");
     }
-    if (backend == QStringLiteral("ultralytics_yolo_detect") || backend == QStringLiteral("ultralytics_yolo")) {
+    if (backend == QStringLiteral("ultralytics_yolo_detect")) {
         return QStringLiteral("yolov8n.yaml");
     }
-    if (backend == QStringLiteral("paddleocr_rec_official") || backend == QStringLiteral("paddleocr_ppocrv4_rec")) {
+    if (backend == QStringLiteral("paddleocr_rec_official")) {
         return QStringLiteral("PP-OCRv5_mobile_rec");
     }
     if (backend == QStringLiteral("paddleocr_det_official")) {
@@ -560,7 +543,7 @@ QString trainingBackendDescription(const QString& backend)
     if (backend == QStringLiteral("anomalib_efficientad")) {
         return uiText("当前模型能力：Anomalib EfficientAD 异常检测。需要 imagenetDir、AITRAIN_ANOMALIB_IMAGENET_DIR 或 .deps/anomalib/imagenette；Anomalib 2.5 下训练 batchSize 固定为 1，缺失外部数据时 blocked，不自动下载。");
     }
-    if (backend == QStringLiteral("paddleocr_rec_official") || backend == QStringLiteral("paddleocr_ppocrv4_rec")) {
+    if (backend == QStringLiteral("paddleocr_rec_official")) {
         return uiText("当前模型能力：官方 PaddleOCR PP-OCRv4/v5/v6 Rec 适配器。通过模型预设选择版本，适合隔离 OCR Python 环境，记录 train/export/predict 命令、checkpoint、inference model 和官方预测报告。");
     }
     if (backend == QStringLiteral("paddleocr_det_official")) {

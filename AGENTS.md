@@ -30,7 +30,7 @@ Archived roadmap notes are not current implementation plans. Use `docs/harness/c
 - Do not put long-running work in the GUI thread.
 - Do not put model training logic in `MainWindow`.
 - Use Worker messages for long tasks.
-- Use `ProjectRepository` for SQLite metadata.
+- Use `ProjectStore` for SQLite metadata; GUI reads go through Query Service/Presenter and writes go through `ProjectWorkspace`/Worker.
 - Use plugin interfaces for model, dataset, export, inference, and validation extensions.
 - Keep Qt 5.12+ compatibility unless explicitly asked to upgrade.
 - Use `QStringLiteral` for UI text.

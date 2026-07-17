@@ -355,11 +355,6 @@ QVector<RuntimeDependencyCheck> defaultRuntimeDependencyChecks(const QString& ap
             QStringLiteral("ONNX Runtime"),
             QStringList() << QStringLiteral("onnxruntime"),
             QStringLiteral("ONNX 推理需要 onnxruntime.dll；打包时应放入应用目录和 runtimes/onnxruntime。"),
-            applicationDir),
-        checkRuntimeDependency(
-            QStringLiteral("LibTorch"),
-            QStringList() << QStringLiteral("torch") << QStringLiteral("torch_cpu"),
-            QStringLiteral("真实 LibTorch/CUDA 训练暂未接入；后续需要配置 LibTorch DLL。"),
             applicationDir)
     };
 }

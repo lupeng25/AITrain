@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
+import uuid
 import zipfile
 
 
@@ -49,7 +52,7 @@ def make_request(root: Path, repo: Path, *, prepare_only: bool = False) -> tuple
     image = root / "sample.png"
     image.write_bytes(b"image")
     request = {
-        "protocolVersion": 2,
+        "protocolVersion": 1,
         "taskId": "ocr-system-test",
         "taskType": "ocr",
         "datasetPath": str(image),
@@ -71,19 +74,86 @@ def make_request(root: Path, repo: Path, *, prepare_only: bool = False) -> tuple
     return request_path, output
 
 
-def run_adapter(request_path: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [sys.executable, str(ADAPTER), "--request", str(request_path)],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
+def run_adapter(request_path: Path) -> tuple[subprocess.CompletedProcess[str], list[dict[str, object]]]:
+    events: list[dict[str, object]] = []
+    server_error: list[BaseException] = []
+    request_id = str(uuid.uuid4())
+    task_id = str(uuid.uuid4())
+    token = "paddleocr-system-test-token"
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        listener.settimeout(10)
+        port = listener.getsockname()[1]
+        ready = threading.Event()
 
+        def serve() -> None:
+            try:
+                ready.set()
+                connection, _ = listener.accept()
+                with connection:
+                    def read_line() -> bytes:
+                        buffer = bytearray()
+                        while True:
+                            chunk = connection.recv(1)
+                            if not chunk:
+                                return bytes(buffer)
+                            if chunk == b"\n":
+                                return bytes(buffer)
+                            buffer.extend(chunk)
 
-def events_from(result: subprocess.CompletedProcess[str]) -> list[dict[str, object]]:
-    return [json.loads(line) for line in result.stdout.splitlines() if line.strip().startswith("{")]
+                    handshake = json.loads(read_line().decode("utf-8"))
+                    assert handshake == {"channel": "aitrain.adapter", "token": token}
+                    connection.sendall(b'{"status":"accepted"}\n')
+                    buffer = bytearray()
+                    while True:
+                        chunk = connection.recv(65536)
+                        if not chunk:
+                            break
+                        buffer.extend(chunk)
+                        while b"\n" in buffer:
+                            line, _, remainder = buffer.partition(b"\n")
+                            buffer = bytearray(remainder)
+                            if line.strip():
+                                events.append(json.loads(line.decode("utf-8")))
+                    if buffer.strip():
+                        events.append(json.loads(bytes(buffer).decode("utf-8")))
+            except OSError as exc:
+                # Closing the adapter's socket can race the Windows file
+                # wrapper teardown and report WSAENOTSOCK after all frames
+                # have already been received.
+                if getattr(exc, "winerror", None) != 10038:
+                    server_error.append(exc)
+            except BaseException as exc:  # surface protocol failures in the test
+                server_error.append(exc)
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        assert ready.wait(timeout=2)
+        env = {
+            **__import__("os").environ,
+            "AITRAIN_EVENT_HOST": "127.0.0.1",
+            "AITRAIN_EVENT_PORT": str(port),
+            "AITRAIN_EVENT_TOKEN": token,
+            "AITRAIN_REQUEST_ID": request_id,
+            "AITRAIN_TASK_ID": task_id,
+        }
+        # Other unit-test modules opt into local stdout diagnostics; this
+        # subprocess test deliberately verifies the authenticated channel.
+        env.pop("AITRAIN_STANDALONE_ADAPTER_PROTOCOL", None)
+        result = subprocess.run(
+            [sys.executable, str(ADAPTER), "--request", str(request_path)],
+            cwd=REPO_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        thread.join(timeout=5)
+    assert not server_error, server_error
+    return result, events
 
 
 def test_official_system_success_requires_structured_results_and_emits_file_artifacts() -> None:
@@ -92,7 +162,7 @@ def test_official_system_success_requires_structured_results_and_emits_file_arti
         repo = write_fake_repo(root)
         request_path, output = make_request(root, repo)
 
-        result = run_adapter(request_path)
+        result, events = run_adapter(request_path)
 
         assert result.returncode == 0, result.stdout + result.stderr
         prediction = json.loads((output / "official_system_prediction.json").read_text(encoding="utf-8"))
@@ -102,9 +172,8 @@ def test_official_system_success_requires_structured_results_and_emits_file_arti
         assert archive_path.is_file()
         with zipfile.ZipFile(archive_path) as archive:
             assert set(archive.namelist()) == {"sample_preview.png", "system_results.txt"}
-        events = events_from(result)
-        artifact_events = [event for event in events if event.get("type") == "artifact"]
-        assert any(event.get("name") == archive_path.name and event.get("kind") == "preview" for event in artifact_events)
+        artifact_events = [event["payload"] for event in events if event.get("kind") == "event.artifact_candidate"]
+        assert any(event.get("name") == archive_path.name and event.get("kind") == "preview" for event in artifact_events), events
         assert not any(event.get("kind") == "preview_dir" for event in artifact_events)
         report = json.loads((output / "paddleocr_official_system_report.json").read_text(encoding="utf-8"))
         assert report["predictionCount"] == 1
@@ -117,10 +186,14 @@ def test_official_system_rejects_missing_system_results_after_zero_exit() -> Non
         repo = write_fake_repo(root, write_results=False)
         request_path, output = make_request(root, repo)
 
-        result = run_adapter(request_path)
+        result, events = run_adapter(request_path)
 
         assert result.returncode != 0
-        assert "official_results_invalid" in result.stdout
+        assert any(
+            event.get("kind") == "event.failed"
+            and event.get("payload", {}).get("adapterCode") == "official_results_invalid"
+            for event in events
+        ), events
         report = json.loads((output / "paddleocr_official_system_report.json").read_text(encoding="utf-8"))
         assert report["ok"] is False
         assert "was not produced" in report["resultValidationError"]
@@ -133,10 +206,14 @@ def test_official_system_rejects_unparseable_system_results() -> None:
         repo = write_fake_repo(root, invalid_results=True)
         request_path, output = make_request(root, repo)
 
-        result = run_adapter(request_path)
+        result, events = run_adapter(request_path)
 
         assert result.returncode != 0
-        assert "official_results_invalid" in result.stdout
+        assert any(
+            event.get("kind") == "event.failed"
+            and event.get("payload", {}).get("adapterCode") == "official_results_invalid"
+            for event in events
+        ), events
         report = json.loads((output / "paddleocr_official_system_report.json").read_text(encoding="utf-8"))
         assert "invalid system_results.txt payload" in report["resultValidationError"]
 
@@ -147,7 +224,7 @@ def test_prepare_only_keeps_algorithm_derivation_and_does_not_require_repo_execu
         repo = write_fake_repo(root, write_results=False)
         request_path, output = make_request(root, repo, prepare_only=True)
 
-        result = run_adapter(request_path)
+        result, _ = run_adapter(request_path)
 
         assert result.returncode == 0, result.stdout + result.stderr
         report = json.loads((output / "paddleocr_official_system_report.json").read_text(encoding="utf-8"))

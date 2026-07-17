@@ -201,8 +201,7 @@ QStringList classNamesForDataset(const QString& datasetPath, const QString& form
 {
     if (format == QStringLiteral("yolo_detection")
         || format == QStringLiteral("yolo_segmentation")
-        || format == QStringLiteral("yolo_obb")
-        || format == QStringLiteral("yolo_txt")) {
+        || format == QStringLiteral("yolo_obb")) {
         QString error;
         const YoloDataYaml layout = parseYoloDataYaml(datasetPath, &error);
         if (!layout.classNames.isEmpty()) {
@@ -298,7 +297,7 @@ QString firstXLabelImagePath(const QString& labelsPath)
 
 QString yoloModeForFormat(const QString& format)
 {
-    if (format == QStringLiteral("yolo_detection") || format == QStringLiteral("yolo_txt")) {
+    if (format == QStringLiteral("yolo_detection")) {
         return QStringLiteral("detect");
     }
     if (format == QStringLiteral("yolo_segmentation")) {
@@ -314,8 +313,7 @@ bool isYoloFormat(const QString& format)
 {
     return format == QStringLiteral("yolo_detection")
         || format == QStringLiteral("yolo_segmentation")
-        || format == QStringLiteral("yolo_obb")
-        || format == QStringLiteral("yolo_txt");
+        || format == QStringLiteral("yolo_obb");
 }
 
 QString comparablePath(QString path)

@@ -7,6 +7,7 @@ import hashlib
 import importlib.util
 import json
 import py_compile
+import pytest
 import sys
 import tempfile
 import zipfile
@@ -19,6 +20,11 @@ if str(TRAINER_ROOT) not in sys.path:
 
 from adapter_sdk import AdapterSdk
 from ocr import paddleocr_workflow_common as common
+
+
+@pytest.fixture(autouse=True)
+def standalone_protocol(monkeypatch):
+    monkeypatch.setenv("AITRAIN_STANDALONE_ADAPTER_PROTOCOL", "1")
 
 
 SCRIPTS = [

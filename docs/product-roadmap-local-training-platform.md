@@ -39,13 +39,13 @@ Phase 40 backlog 的优先级已重新确认：异常检测/定位、OBB、专�
 - OBB：基于官方 Ultralytics OBB 能力，旋转框数据集校验、训练、ONNX 导出、官方 `val()` 评估、AITrain C++ ONNX Runtime 旋转框推理/overlay/benchmark/部署验证、GUI 入口和脚本闭环已形成本地证据；NCNN 不纳入 OBB v1，TensorRT engine export 只记录可选状态，不作为必过项，TensorRT runtime OBB inference 不宣称为通过能力。不要把普通 YOLO bbox 结果伪装成 OBB，也不要把 public DOTA/workflow evidence 说成客户域工业精度证明。
 - 专用语义分割：面向像素级工业缺陷/区域分割，首版使用 `segmentation_models.pytorch`，与现有 YOLO 实例分割区分，输出 per-pixel mask、面积/类别像素统计、overlay、评估和部署限制；当前已有 RTX 4090D GPU realtest 证据，Mask2Former 等路线仍可作为后续扩展候选。
 
-2026-06-14/15 全量模型生命周期运行中的新增边界：共享 Ultralytics 8.3.171 环境下 YOLO26 检测/实例分割 20 行全部失败，原因是官方模型配置/权重不可用或包代码不兼容。YOLO26 随后在隔离 targeted matrix 中完成 `phase-yolo26-model-matrix-smoke.ps1 -Full -Epochs 100 -Device 0`，20/20 行通过训练、官方 ONNX、AITrain C++ ONNX 推理和 TensorRT 验证；YOLO26 NCNN 历史尝试 20/20 failed，当前产品不提供 YOLO26 NCNN 导出/转换，客户预检只放行 YOLO26 训练/ONNX/TensorRT 证据。
+2026-06-14/15 全量模型生命周期运行中的新增边界：共享 Ultralytics 8.3.171 环境下 YOLO26 检测/实例分割 20 行全部失败，原因是官方模型配置/权重不可用或包代码不兼容。随后形成的隔离 YOLO26 matrix 结果仅作为历史证据保留；原脚本已删除且不可重跑。YOLO26 NCNN 历史尝试 20/20 failed，当前产品不提供 YOLO26 NCNN 导出/转换。
 
 ## 2. 架构约束
 
 - GUI 只做交互、调度和展示。
 - 长任务继续进入 `aitrain_worker`。
-- 元数据通过 `ProjectRepository` 写入 SQLite。
+- 元数据通过 `ProjectStore` 写入 SQLite；GUI 只经 Query Service/Presenter 读取，业务写入经 `ProjectWorkspace`/Worker 收口。
 - 训练、推理、评估、导出逻辑不进入 `MainWindow`。
 - 官方训练优先通过 Worker 管理的 Python trainer subprocess。
 - 旧的 C++ tiny detector、segmentation baseline、OCR baseline、small OCR CTC 和 shipped Python mock 已物理删除，不能作为产品训练 backend。
@@ -87,7 +87,7 @@ OCR 评估和验收使用 PaddleOCR 官方报告路径：
 
 当前方向统一为：
 
-1. 生产训练通过 `TrainingWorkflowProfileV2` 执行八步工作流。
+1. 生产训练通过训练工作流 Profile 执行八步工作流。
 2. 运行时交付迁移到 `ImportOrResolveModel → ValidateManifest → RunInferenceSmoke → Benchmark → DeploymentValidate → RenderDeliveryReport`。
 3. 每个步骤只消费已提交 Artifact，并持久化状态、指标、失败和 Evidence。
 4. 缺少 SDK、依赖、硬件或 decoder 时使用 Runtime V2 精确状态，不再使用笼统 `hardware-blocked` 字符串。
