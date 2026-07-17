@@ -25,11 +25,9 @@
 - ONNX Runtime version:
 - PowerShell version:
 
-## Command
+## Runtime Delivery workflow
 
-```powershell
-.\tools\acceptance-smoke.ps1 -TensorRT -WorkDir .deps\acceptance-tensorrt
-```
+填写本次 Runtime Delivery workflow 的 ModelPackageId、TaskId、EvidenceId，以及返回的能力分类报告。当前没有独立 TensorRT smoke CLI；裸 ONNX 路径不能作为产品推理通过证据。
 
 ## Result
 

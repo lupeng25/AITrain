@@ -7,7 +7,6 @@
 #include <QAbstractItemView>
 #include <QCheckBox>
 #include <QComboBox>
-#include <QDesktopServices>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -31,7 +30,6 @@
 #include <QTableWidget>
 #include <QTextEdit>
 #include <QToolButton>
-#include <QUrl>
 #include <QVBoxLayout>
 
 using namespace aitrain_app;
@@ -46,12 +44,11 @@ QWidget* MainWindow::buildSystemSettingsPage()
     layout->addWidget(createWorkbenchHeader(
         QStringLiteral("SYSTEM SETTINGS"),
         uiText("系统设置"),
-        uiText("管理内置能力、界面语言、默认目录、授权状态和本地路径。"),
+        uiText("管理内置能力、界面语言、默认目录和授权状态。"),
         nullptr,
         QStringList()
             << uiText("内置能力")
-            << uiText("偏好设置")
-            << uiText("本地路径")));
+            << uiText("偏好设置")));
 
     systemSettingsTabs_ = new QTabWidget;
     systemSettingsTabs_->setObjectName(QStringLiteral("SystemSettingsTabs"));
@@ -352,42 +349,17 @@ QWidget* MainWindow::buildApplicationSettingsPanel()
     allowLabelToShrink(entryHint);
     entryPanel->bodyLayout()->addWidget(entryHint);
 
-    auto* pathsPanel = new InfoPanel(uiText("本地路径"));
-    auto* pathsGrid = new QGridLayout;
-    pathsGrid->setHorizontalSpacing(10);
-    pathsGrid->setVerticalSpacing(8);
-    const auto addStaticPathRow = [this, pathsGrid](int row, const QString& labelText, const QString& path) {
-        auto* label = new QLabel(labelText);
-        auto* edit = new QLineEdit(QDir::toNativeSeparators(path));
-        edit->setReadOnly(true);
-        auto* openButton = new QPushButton(uiText("打开目录"));
-        auto* copyButton = new QPushButton(uiText("复制路径"));
-        connect(openButton, &QPushButton::clicked, this, [this, path]() { openLocalDirectory(path); });
-        connect(copyButton, &QPushButton::clicked, this, [this, path, labelText]() { copyLocalPath(path, labelText); });
-        pathsGrid->addWidget(label, row, 0);
-        pathsGrid->addWidget(edit, row, 1);
-        pathsGrid->addWidget(openButton, row, 2);
-        pathsGrid->addWidget(copyButton, row, 3);
-    };
-    auto* currentProjectLabel = new QLabel(uiText("当前项目目录"));
-    settingsCurrentProjectPathLabel_ = inlineStatusLabel(uiText("未打开项目"));
-    allowLabelToShrink(settingsCurrentProjectPathLabel_);
-    auto* openCurrentProjectButton = new QPushButton(uiText("打开目录"));
-    auto* copyCurrentProjectButton = new QPushButton(uiText("复制路径"));
-    connect(openCurrentProjectButton, &QPushButton::clicked, this, [this]() { openLocalDirectory(currentProjectPath_); });
-    connect(copyCurrentProjectButton, &QPushButton::clicked, this, [this]() { copyLocalPath(currentProjectPath_, uiText("当前项目目录")); });
-    pathsGrid->addWidget(currentProjectLabel, 0, 0);
-    pathsGrid->addWidget(settingsCurrentProjectPathLabel_, 0, 1);
-    pathsGrid->addWidget(openCurrentProjectButton, 0, 2);
-    pathsGrid->addWidget(copyCurrentProjectButton, 0, 3);
-    pathsGrid->setColumnStretch(1, 1);
-    pathsPanel->bodyLayout()->addLayout(pathsGrid);
+    auto* boundaryPanel = new InfoPanel(uiText("文件路径边界"));
+    auto* boundaryHint = mutedLabel(uiText(
+        "系统设置不展示、打开或复制项目文件的物理路径。数据集、模型和报告必须通过导入边界或任务与产物页按登记身份访问。"));
+    allowLabelToShrink(boundaryHint);
+    boundaryPanel->bodyLayout()->addWidget(boundaryHint);
 
     layout->addWidget(languagePanel);
     layout->addWidget(projectPathPanel);
     layout->addWidget(licensePanel);
     layout->addWidget(entryPanel);
-    layout->addWidget(pathsPanel);
+    layout->addWidget(boundaryPanel);
     layout->addStretch();
 
     page->setWidget(content);

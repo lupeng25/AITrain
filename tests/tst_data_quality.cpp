@@ -51,7 +51,7 @@ QString artifactFile(const aitrain::ProjectWorkspace& workspace,
     const aitrain::ArtifactId& artifactId, const QString& relative)
 {
     return QDir(workspace.workspacePath()).filePath(
-        QStringLiteral("artifacts/artifacts/%1/%2").arg(artifactId.toString(), relative));
+        QStringLiteral("artifacts/committed/%1/%2").arg(artifactId.toString(), relative));
 }
 
 aitrain::DatasetSnapshotArtifactBundle commitSnapshot(

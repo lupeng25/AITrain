@@ -33,6 +33,7 @@ from adapter_event_channel import (
     standalone_protocol_enabled,
 )  # noqa: E402
 from trainer_protocol import configure_stdio, exception_details  # noqa: E402
+from adapter_sdk import AdapterSdk  # noqa: E402
 
 
 DEFAULT_BACKEND_ID = "paddleocr_rec_official"
@@ -559,57 +560,24 @@ def run_process(
     metrics: dict[str, float] | None = None,
     log_path: Path | None = None,
 ) -> tuple[int, list[str]]:
-    emit(backend, "log", level="info", message=f"Running official PaddleOCR command: {' '.join(command)}")
-    verbosity, interval_seconds, tail_lines = official_log_options(parameters)
-    process = subprocess.Popen(
-        command,
-        cwd=str(cwd),
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
+    sdk = AdapterSdk(
+        backend,
+        event_sink=lambda event: emit(backend, event.pop("type"), **{k: v for k, v in event.items() if k != "backend"}),
+        cancel_file=os.environ.get("AITRAIN_CANCEL_FILE"),
     )
-    assert process.stdout is not None
-    tail: deque[str] = deque(maxlen=tail_lines)
-    line_count = 0
-    last_event_at = time.monotonic()
-    handle = None
-    if log_path is not None:
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        handle = log_path.open("w", encoding="utf-8")
-    try:
-        for line in process.stdout:
-            if not line.strip():
-                continue
-            stripped = line.rstrip()
-            line_count += 1
-            if handle is not None:
-                handle.write(stripped + "\n")
-                handle.flush()
-            tail.append(stripped)
-            if metrics is not None:
-                parse_official_metrics(backend, stripped, metrics)
-            now = time.monotonic()
-            if verbosity == "full" or is_important_official_line(stripped):
-                emit(backend, "log", level="info", message=stripped[:2000])
-                last_event_at = now
-            elif verbosity == "summary" and now - last_event_at >= interval_seconds:
-                emit(backend, "log", level="info", message=f"Official PaddleOCR command still running; lines={line_count}; latest={stripped[:500]}")
-                last_event_at = now
-    finally:
-        if handle is not None:
-            handle.close()
-    exit_code = process.wait()
-    if verbosity != "full":
-        emit(
-            backend,
-            "log",
-            level="info" if exit_code == 0 else "error",
-            message=f"Official PaddleOCR command finished with exitCode={exit_code}; logPath={log_path or ''}; tailLines={len(tail)}",
-        )
-    return exit_code, list(tail)
+    result = sdk.run_child_process(
+        command,
+        cwd=cwd,
+        env=env,
+        log_path=log_path,
+        on_line=lambda line: parse_official_metrics(backend, line, metrics) if metrics is not None else None,
+    )
+    if result.canceled:
+        emit(backend, "canceled", message="Official PaddleOCR child process canceled.", force=False)
+        return -2, list(result.tail_lines)
+    emit(backend, "log", level="info" if result.exit_code == 0 else "error",
+         message=f"Official PaddleOCR child process finished (exitCode={result.exit_code}, tailLines={len(result.tail_lines)}).")
+    return result.exit_code, list(result.tail_lines)
 
 
 def prune_intermediate_checkpoints(output_path: Path, parameters: dict[str, Any]) -> int:
@@ -834,14 +802,18 @@ def run(request: dict[str, Any]) -> int:
                 report["ok"] = False
                 report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
                 emit(backend, "artifact", name="paddleocr_official_rec_report.json", path=str(report_path), kind="report")
-                return fail(backend, "Official PaddleOCR training failed.", "official_train_failed", {"exitCode": train_exit, "logPath": str(train_log_path)})
+                if train_exit == -2:
+                    return fail(backend, "Official PaddleOCR training canceled.", "canceled", {"exitCode": train_exit})
+                return fail(backend, "Official PaddleOCR training failed.", "official_train_failed", {"exitCode": train_exit})
         export_exit, _ = run_process(backend, export_command, repo, env, parameters, log_path=export_log_path)
         report["exportExitCode"] = export_exit
         if export_exit != 0:
             report["ok"] = False
             report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             emit(backend, "artifact", name="paddleocr_official_rec_report.json", path=str(report_path), kind="report")
-            return fail(backend, "Official PaddleOCR export failed.", "official_export_failed", {"exitCode": export_exit, "logPath": str(export_log_path)})
+            if export_exit == -2:
+                return fail(backend, "Official PaddleOCR export canceled.", "canceled", {"exitCode": export_exit})
+            return fail(backend, "Official PaddleOCR export failed.", "official_export_failed", {"exitCode": export_exit})
         report["checkpointPath"] = str(checkpoint_file_from_base(export_checkpoint_base))
         report["inferenceModelDir"] = str(output_path / "official_inference")
         pruned_count = prune_intermediate_checkpoints(output_path, parameters)
@@ -871,7 +843,9 @@ def run(request: dict[str, Any]) -> int:
                 report["ok"] = False
                 report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
                 emit(backend, "artifact", name="paddleocr_official_rec_report.json", path=str(report_path), kind="report")
-                return fail(backend, "Official PaddleOCR prediction failed.", "official_predict_failed", {"exitCode": predict_exit, "logPath": str(predict_log_path)})
+                if predict_exit == -2:
+                    return fail(backend, "Official PaddleOCR prediction canceled.", "canceled", {"exitCode": predict_exit})
+                return fail(backend, "Official PaddleOCR prediction failed.", "official_predict_failed", {"exitCode": predict_exit})
 
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     emit(backend, "artifact", name="paddleocr_official_rec_report.json", path=str(report_path), kind="report")

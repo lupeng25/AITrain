@@ -44,7 +44,7 @@ aitrain::DatasetSnapshotRecord registerSnapshot(
     snapshot.taskId = task.id;
     snapshot.artifactId = artifactId;
     snapshot.rootPath = QDir(projectRoot).filePath(
-        QStringLiteral(".aitrain/artifacts/artifacts/%1").arg(artifactId.toString()));
+        QStringLiteral(".aitrain/artifacts/committed/%1").arg(artifactId.toString()));
     snapshot.datasetFormat = QStringLiteral("yolo_detection");
     snapshot.driverId = QStringLiteral("yolo_detection");
     snapshot.driverVersion = QStringLiteral("2.0");

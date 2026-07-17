@@ -380,8 +380,7 @@ bool ProjectWorkspace::runDatasetSplitWorkflow(const TaskId& taskId,
                 return WorkflowStepExecutionResult{WorkflowStepState::Failed, {}, splitFailure(
                     QStringLiteral("dataset_split_plan_artifact_invalid"))};
             }
-            const QString planRoot = QDir(artifactStore_->rootPath()).filePath(
-                QStringLiteral("artifacts/%1").arg(planArtifactId.toString()));
+            const QString planRoot = artifactStore_->artifactPath(planArtifactId);
             const QString planPath = QDir(planRoot).filePath(QStringLiteral("dataset_split_plan.json"));
             QString planFileHash;
             QFile planFile(planPath);
@@ -446,8 +445,7 @@ bool ProjectWorkspace::runDatasetSplitWorkflow(const TaskId& taskId,
             }
             if (!splitArtifactId.isValid()) splitArtifactId = step.inputArtifactId;
             ArtifactSnapshot splitStored;
-            const QString splitRoot = QDir(artifactStore_->rootPath()).filePath(
-                QStringLiteral("artifacts/%1").arg(splitArtifactId.toString()));
+            const QString splitRoot = artifactStore_->artifactPath(splitArtifactId);
             ArtifactId snapshotArtifactId;
             QString staging;
             if (!storage_.artifact(splitArtifactId, &splitStored, &executionError)

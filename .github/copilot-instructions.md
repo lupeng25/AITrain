@@ -18,8 +18,8 @@ For UI work, follow:
 - Keep Qt 5.12+ compatibility; the current verified environment is Qt 5.12.9.
 - Long-running tasks belong in `aitrain_worker`, not the GUI thread.
 - GUI should orchestrate and display state only.
-- SQLite access should go through `ProjectRepository`.
-- Model, dataset, validation, export, and inference behavior should be plugin-based.
+- SQLite access should go through `ProjectStore`; GUI reads through Query Service/Presenter and writes through `ProjectWorkspace`/Worker.
+- Model, dataset, validation, export, and inference behavior should use the compile-time `CapabilityRegistry` and explicit Worker/core adapters, not dynamic plugins.
 - Preserve the left-sidebar workbench UI.
 - Use UTF-8 and `QStringLiteral` for Chinese UI text.
 - When reading project text in Windows PowerShell, specify UTF-8 explicitly, for example `Get-Content -Encoding UTF8`; mojibake in terminal output is not proof that the file is corrupt.

@@ -4,6 +4,9 @@
 #include "aitrain/core/Deployment.h"
 #include "aitrain/core/WorkerProtocol.h"
 #include "aitrain/protocol/Protocol.h"
+#include "aitrain/protocol/ProtocolSanitizer.h"
+
+#include <QJsonArray>
 
 class PlatformTests final : public QObject {
     Q_OBJECT
@@ -72,6 +75,34 @@ private slots:
         QVERIFY(!request.contains(QStringLiteral("datasetPath")));
         QVERIFY(!request.contains(QStringLiteral("outputPath")));
         QVERIFY(wp::isTerminalEvent(wp::event::completed()));
+    }
+
+    void protocolSanitizerRecursivelyDropsPhysicalPaths()
+    {
+        const QJsonObject payload{
+            {QStringLiteral("reportPath"), QStringLiteral("C:/private/report.json")},
+            {QStringLiteral("outputDir"), QStringLiteral("C:/private/output")},
+            {QStringLiteral("projectRoot"), QStringLiteral("C:/private/project")},
+            {QStringLiteral("relativePath"), QStringLiteral("reports/metrics.json")},
+            {QStringLiteral("details"), QJsonObject{
+                {QStringLiteral("log_path"), QStringLiteral("D:/private/train.log")},
+                {QStringLiteral("artifactId"), QStringLiteral("artifact-1")}}},
+            {QStringLiteral("items"), QJsonArray{
+                QJsonObject{{QStringLiteral("workDir"), QStringLiteral("E:/private/work")},
+                    {QStringLiteral("sampleRelativePath"), QStringLiteral("images/a.png")}}}}};
+
+        const QJsonObject redacted = aitrain::protocol::redactPhysicalPathFields(payload);
+        QVERIFY(!redacted.contains(QStringLiteral("reportPath")));
+        QVERIFY(!redacted.contains(QStringLiteral("outputDir")));
+        QVERIFY(!redacted.contains(QStringLiteral("projectRoot")));
+        QCOMPARE(redacted.value(QStringLiteral("relativePath")).toString(),
+            QStringLiteral("reports/metrics.json"));
+        const QJsonObject details = redacted.value(QStringLiteral("details")).toObject();
+        QVERIFY(!details.contains(QStringLiteral("log_path")));
+        QCOMPARE(details.value(QStringLiteral("artifactId")).toString(), QStringLiteral("artifact-1"));
+        const QJsonObject item = redacted.value(QStringLiteral("items")).toArray().at(0).toObject();
+        QVERIFY(!item.contains(QStringLiteral("workDir")));
+        QCOMPARE(item.value(QStringLiteral("sampleRelativePath")).toString(), QStringLiteral("images/a.png"));
     }
 
     void workerControlBridgeUsesProtocolEnvelope()

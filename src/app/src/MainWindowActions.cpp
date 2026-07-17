@@ -12,9 +12,7 @@
 
 #include <QApplication>
 #include <QCheckBox>
-#include <QClipboard>
 #include <QDateTime>
-#include <QDesktopServices>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
@@ -47,7 +45,6 @@
 #include <QTime>
 #include <QToolButton>
 #include <QVBoxLayout>
-#include <QUrl>
 #include <QUuid>
 
 using namespace aitrain_app;
@@ -61,7 +58,6 @@ void MainWindow::createProject()
         return;
     }
 
-    ensureProjectSubdirs(currentProjectPath_);
     QString error;
     if (!workspace_.open(currentProjectPath_, &error)) {
         QMessageBox::critical(this, uiText("项目"), uiText("无法打开项目工作区：%1").arg(error));
@@ -75,7 +71,7 @@ void MainWindow::createProject()
         if (field) field->clear();
     }
 
-    projectLabel_->setText(uiText("当前项目：%1").arg(currentProjectPath_));
+    projectLabel_->setText(uiText("当前项目：%1（工作区已就绪）").arg(currentProjectName_));
     if (dashboardProjectValue_) {
         dashboardProjectValue_->setText(currentProjectName_);
     }

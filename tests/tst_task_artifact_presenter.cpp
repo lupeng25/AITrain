@@ -137,7 +137,7 @@ void TaskArtifactPresenterTests::readsCommittedArtifactPreviewByIdentity()
     const QByteArray content = QByteArrayLiteral("{\"status\":\"ok\"}\n");
     const QString sha256 = QString::fromLatin1(QCryptographicHash::hash(content, QCryptographicHash::Sha256).toHex());
     const QString artifactRoot = QDir(workspace.workspacePath()).filePath(
-        QStringLiteral("artifacts/artifacts/%1").arg(artifactId.toString()));
+        QStringLiteral("artifacts/committed/%1").arg(artifactId.toString()));
     QVERIFY(QDir().mkpath(artifactRoot));
     QFile file(QDir(artifactRoot).filePath(QStringLiteral("evaluation_report.json")));
     QVERIFY(file.open(QIODevice::WriteOnly));

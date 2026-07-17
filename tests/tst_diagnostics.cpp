@@ -98,7 +98,7 @@ void DiagnosticsTests::coreFailureStillCommitsEvidence()
     bool tampered = false;
     const auto tamperAfterCollect = [&]() {
         if (tampered) return false;
-        QDirIterator iterator(QDir(directory.path()).filePath(QStringLiteral(".aitrain/artifacts/artifacts")),
+        QDirIterator iterator(QDir(directory.path()).filePath(QStringLiteral(".aitrain/artifacts/committed")),
             QStringList{QStringLiteral("diagnostic_facts.json")}, QDir::Files, QDirIterator::Subdirectories);
         if (!iterator.hasNext()) return false;
         const QString factsPath = iterator.next();

@@ -363,7 +363,15 @@ def official_artifacts(save_dir: Path) -> list[dict[str, str]]:
         kind = "official_plot" if path.suffix.lower() in {".png", ".jpg", ".jpeg"} else "official_artifact"
         if path.name == "predictions.json":
             kind = "official_predictions"
-        artifacts.append({"name": path.name, "kind": kind, "path": str(path)})
+        try:
+            relative_path = path.resolve().relative_to(save_dir.resolve()).as_posix()
+        except ValueError:
+            continue
+        artifacts.append({
+            "name": path.name,
+            "kind": kind,
+            "relativePath": f"official_artifacts/{relative_path}",
+        })
         if len(artifacts) >= 120:
             break
     return artifacts
@@ -374,11 +382,22 @@ def emit_official_artifacts(artifacts: list[dict[str, str]], save_dir: Path) -> 
 
     `TaskExecutionHost` deliberately refuses directory candidates because it
     cannot make an immutable promise about a directory whose contents may still
-    change. The report records the directory for human navigation; the event
-    channel only carries immutable files.
+    change. The report carries only package-relative members; the event channel
+    resolves those members inside the official run directory and carries the
+    immutable files to Artifact staging.
     """
     for index, artifact in enumerate(artifacts, start=1):
-        path = Path(str(artifact.get("path") or ""))
+        relative_path = str(artifact.get("relativePath") or "").strip().replace("\\", "/")
+        if relative_path.startswith("official_artifacts/"):
+            relative_path = relative_path[len("official_artifacts/"):]
+        if not relative_path or relative_path.startswith("/") or ".." in Path(relative_path).parts:
+            continue
+        candidate_path = save_dir / Path(relative_path)
+        path = candidate_path.resolve()
+        try:
+            path.relative_to(save_dir.resolve())
+        except ValueError:
+            continue
         if not path.is_file():
             continue
         original_kind = str(artifact.get("kind") or "official_artifact")
@@ -386,7 +405,11 @@ def emit_official_artifacts(artifacts: list[dict[str, str]], save_dir: Path) -> 
             "artifact",
             name=str(artifact.get("name") or path.name),
             kind=f"official_val_{index:03d}_{original_kind}",
-            path=str(path),
+            # Preserve the caller's spelling (including Windows 8.3 aliases)
+            # in the transient event; containment and immutability checks use
+            # the canonical path above.
+            path=str(candidate_path),
+            relativePath=f"official_artifacts/{relative_path}",
             message="Official Ultralytics validation output",
         )
 
@@ -428,13 +451,13 @@ def write_summary(path: Path, report: dict[str, Any]) -> None:
         f"- Task type: {report.get('taskType', '')}",
         f"- Status: {report.get('status', '')}",
         f"- Split: {report.get('split', '')}",
-        f"- Official run dir: {report.get('officialRunDir', '')}",
         "",
         "## Metrics",
         "",
     ]
     for key in sorted(metrics.keys()):
         lines.append(f"- {key}: {metrics[key]}")
+    lines.append(f"- Official artifact count: {len(report.get('officialArtifacts') or [])}")
     lines.append("")
     lines.append("Metrics are produced by Ultralytics official val(). AITrain does not compute local AP/mAP or mask IoU for this report.")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -453,8 +476,8 @@ def write_failure_report(output_path: Path, request: dict[str, Any], message: st
         "details": details,
         "kind": "evaluation_report",
         "createdAt": now_iso(),
-        "modelPath": str(request.get("modelPath") or ""),
-        "datasetPath": str(request.get("datasetPath") or ""),
+        "modelInputProvided": bool(str(request.get("modelPath") or "").strip()),
+        "datasetInputProvided": bool(str(request.get("datasetPath") or "").strip()),
         "taskType": task_type,
         "runtime": EVALUATION_SOURCE,
         "evaluationSource": EVALUATION_SOURCE,
@@ -479,7 +502,7 @@ def run(request: dict[str, Any]) -> int:
     if task_type in {"yolo_segmentation", "segment"}:
         task_type = "segmentation"
     if task_type in {"obb_detection", "yolo_obb", "obb"}:
-        task_type = "obb"
+        task_type = "obb_detection"
     options = request.get("options")
     if not isinstance(options, dict):
         options = {}
@@ -533,7 +556,7 @@ def run(request: dict[str, Any]) -> int:
         return 3
 
     emit("log", level="info", message=f"Using Ultralytics module: {getattr(ultralytics, '__file__', 'built-in')}")
-    emit("log", level="info", message=f"Starting official Ultralytics val: model={model_path}, split={val_kwargs.get('split')}")
+    emit("log", level="info", message=f"Starting official Ultralytics val (split={val_kwargs.get('split')}).")
 
     try:
         model = YOLO(str(model_path))
@@ -562,7 +585,7 @@ def run(request: dict[str, Any]) -> int:
         "resultsDict": results if isinstance(results, dict) else {},
         "metrics": metrics,
         "valArgs": {key: to_jsonable(value) for key, value in val_kwargs.items()},
-        "saveDir": str(save_dir),
+        "officialRunMember": ".",
     })
 
     split = str(val_kwargs.get("split") or "val")
@@ -572,8 +595,8 @@ def run(request: dict[str, Any]) -> int:
         "status": "ok",
         "kind": "evaluation_report",
         "createdAt": now_iso(),
-        "modelPath": str(model_path),
-        "datasetPath": str(dataset_path),
+        "modelInputProvided": True,
+        "datasetInputProvided": True,
         "taskType": task_type,
         "split": split,
         "runtime": EVALUATION_SOURCE,
@@ -582,7 +605,7 @@ def run(request: dict[str, Any]) -> int:
         # official evaluator instead of applying the legacy integer conversion.
         "datasetSnapshotId": str(options.get("datasetSnapshotId") or ""),
         "datasetSnapshotHash": str(options.get("datasetSnapshotHash") or ""),
-        "datasetSnapshotManifest": str(options.get("datasetSnapshotManifest") or ""),
+        "datasetSnapshotManifestProvided": bool(str(options.get("datasetSnapshotManifest") or "").strip()),
         "scaffold": False,
         "metrics": metrics,
         "perClass": per_class,
@@ -590,8 +613,8 @@ def run(request: dict[str, Any]) -> int:
         "errorSamples": [],
         "lowConfidenceSamples": [],
         "sampleCount": sample_count,
-        "officialRunDir": str(save_dir),
-        "officialMetricsPath": str(metrics_path),
+        "officialMetricsMember": "official_metrics/ultralytics_official_metrics.json",
+        "evaluationSummaryMember": "evaluation_summary/evaluation_summary.md",
         "officialResultsDict": results if isinstance(results, dict) else {},
         "officialArtifacts": artifacts,
         "parameters": {key: to_jsonable(value) for key, value in val_kwargs.items() if key not in {"data", "project", "name"}},
@@ -604,11 +627,17 @@ def run(request: dict[str, Any]) -> int:
     summary_path = output_path / "evaluation_summary.md"
     write_json(report_path, report)
     write_summary(summary_path, report)
-    emit("artifact", name="evaluation_report.json", kind="evaluation_report", path=str(report_path))
-    emit("artifact", name="ultralytics_official_metrics.json", kind="official_metrics", path=str(metrics_path))
-    emit("artifact", name=model_path.name, kind="checkpoint", path=str(model_path), message="Verified source checkpoint for downstream export")
+    emit("artifact", name="evaluation_report.json", kind="evaluation_report", path=str(report_path),
+         relativePath="evaluation_report/evaluation_report.json")
+    emit("artifact", name="ultralytics_official_metrics.json", kind="official_metrics", path=str(metrics_path),
+         relativePath="official_metrics/ultralytics_official_metrics.json")
+    emit("artifact", name="evaluation_summary.md", kind="evaluation_summary", path=str(summary_path),
+         relativePath="evaluation_summary/evaluation_summary.md")
+    emit("artifact", name=model_path.name, kind="checkpoint", path=str(model_path),
+         relativePath=f"checkpoint/{model_path.name}", message="Verified source checkpoint for downstream export")
     emit_official_artifacts(artifacts, save_dir)
-    emit("completed", reportPath=str(report_path), metrics=metrics, officialRunDir=str(save_dir))
+    emit("completed", reportPath=str(report_path), metrics=metrics,
+        officialArtifactCount=len(artifacts), officialMetricsMember="ultralytics_official_metrics.json")
     return 0
 
 

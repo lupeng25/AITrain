@@ -44,6 +44,7 @@ QWidget* MainWindow::buildDashboardPage()
     layout->setSpacing(16);
 
     projectLabel_ = inlineStatusLabel(QStringLiteral("未打开项目。先创建或打开本地项目，后续数据集、任务和模型产物都会写入项目目录。"));
+    projectLabel_->setObjectName(QStringLiteral("ProjectWorkspaceStatus"));
     gpuLabel_ = inlineStatusLabel(QStringLiteral("GPU / 运行时：未执行环境自检"));
     allowLabelToShrink(projectLabel_);
     allowLabelToShrink(gpuLabel_);
@@ -146,7 +147,7 @@ QWidget* MainWindow::buildProjectPage()
     contextLabel->setObjectName(QStringLiteral("WorkspaceToolbarTitle"));
     projectConsoleStatusLabel_ = inlineStatusLabel(QStringLiteral("未打开项目。"));
     projectConsoleStatusLabel_->setObjectName(QStringLiteral("WorkspaceToolbarStatus"));
-    auto* policyStatus = inlineStatusLabel(QStringLiteral("工作区会生成 artifacts、logs 和 project.sqlite。"));
+    auto* policyStatus = inlineStatusLabel(QStringLiteral("工作区由 .aitrain 管理，产物和元数据通过登记身份访问。"));
     policyStatus->setObjectName(QStringLiteral("WorkspaceToolbarMeta"));
     allowLabelToShrink(projectConsoleStatusLabel_);
     allowLabelToShrink(policyStatus);
@@ -163,7 +164,9 @@ QWidget* MainWindow::buildProjectPage()
     form->setHorizontalSpacing(14);
     form->setVerticalSpacing(10);
     projectNameEdit_ = new QLineEdit(uiText("本地训练项目"));
+    projectNameEdit_->setObjectName(QStringLiteral("ProjectNameEdit"));
     projectRootEdit_ = new QLineEdit(QDir::toNativeSeparators(configuredDefaultProjectPath()));
+    projectRootEdit_->setObjectName(QStringLiteral("ProjectRootEdit"));
     auto* browseButton = new QPushButton(QStringLiteral("选择目录"));
 
     connect(browseButton, &QPushButton::clicked, this, [this]() {
@@ -188,7 +191,7 @@ QWidget* MainWindow::buildProjectPage()
     actionLayout->setContentsMargins(10, 8, 10, 8);
     actionLayout->setHorizontalSpacing(10);
     actionLayout->setVerticalSpacing(8);
-    auto* projectActionHint = mutedLabel(QStringLiteral("打开项目后，项目摘要只读取 project.sqlite 中已持久化的事实。"));
+    auto* projectActionHint = mutedLabel(QStringLiteral("打开项目后，项目摘要只读取 .aitrain/project.sqlite 中已持久化的事实。"));
     allowLabelToShrink(projectActionHint);
     actionLayout->addWidget(projectActionHint, 0, 0);
     actionLayout->setColumnStretch(0, 1);
@@ -199,7 +202,7 @@ QWidget* MainWindow::buildProjectPage()
     auto* summaryGrid = new QGridLayout;
     summaryGrid->setHorizontalSpacing(10);
     summaryGrid->setVerticalSpacing(10);
-    auto* pathCard = createCompactSummaryCard(QStringLiteral("项目路径"), QStringLiteral("未打开"), QStringLiteral("当前项目根目录"));
+    auto* pathCard = createCompactSummaryCard(QStringLiteral("当前项目"), QStringLiteral("未打开"), QStringLiteral("项目登记身份"));
     projectPathSummaryLabel_ = pathCard->findChild<QLabel*>(QStringLiteral("CompactMetricValue"));
     auto* sqliteCard = createCompactSummaryCard(QStringLiteral("SQLite"), QStringLiteral("未连接"), QStringLiteral("项目元数据状态"));
     projectSqliteSummaryLabel_ = sqliteCard->findChild<QLabel*>(QStringLiteral("CompactMetricValue"));
@@ -226,9 +229,9 @@ QWidget* MainWindow::buildProjectPage()
     auto* structure = new QPlainTextEdit;
     structure->setReadOnly(true);
     structure->setMaximumHeight(170);
-    structure->setPlainText(QStringLiteral("artifacts/\n  committed/\n  .staging/\nlogs/\nproject.sqlite"));
+    structure->setPlainText(QStringLiteral(".aitrain/\n  artifacts/\n    committed/\n    .staging/\n  project.sqlite"));
     structurePanel->bodyLayout()->addWidget(structure);
-    structurePanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("项目页只负责创建和打开工作区；训练、导出和推理仍通过 Worker 执行。")));
+    structurePanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("项目页只负责创建和打开工作区；训练、导出和推理仍通过 Worker 执行，GUI 不打开或复制物理产物路径。")));
     summaryPanel->bodyLayout()->addWidget(structurePanel);
 
     layout->addWidget(headerPanel);

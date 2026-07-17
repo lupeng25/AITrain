@@ -334,18 +334,18 @@ QString EvaluationReportView::resolveArtifactRelativePath(const QString& declare
         return QString();
     }
     const QFileInfo declaredInfo(normalized);
-    if (declaredInfo.isAbsolute()) {
+    if (declaredInfo.isAbsolute() || normalized == QStringLiteral("..")
+        || normalized.startsWith(QStringLiteral("../"))) {
         return QString();
     }
-    const QString reportDirectory = QFileInfo(currentReportRelativePath_).path();
-    const QString relative = QDir::cleanPath(
-        QDir(reportDirectory).relativeFilePath(normalized));
-    if (relative.isEmpty() || relative == QStringLiteral(".")
-        || relative == QStringLiteral("..")
-        || relative.startsWith(QStringLiteral("../"))) {
+    if (normalized.isEmpty() || normalized == QStringLiteral(".")) {
         return QString();
     }
-    return relative;
+    // Artifact candidates are committed under their declared package member
+    // (for example official_metrics/...); resolve against the Artifact root,
+    // never against the report file's directory and never against a physical
+    // filesystem path.
+    return normalized;
 }
 
 void EvaluationReportView::updateArtifactPreview()
@@ -472,18 +472,19 @@ void EvaluationReportView::populateOfficialArtifacts(const QJsonObject& report)
     artifactDetailTexts_.clear();
     QStringList seenPaths;
 
-    auto appendArtifact = [this, &seenPaths](const QString& kind, const QString& name, const QString& path) {
-        const QString declaredPath = path.trimmed();
+    auto appendArtifact = [this, &seenPaths](const QString& kind, const QString& name, const QString& relativePath) {
+        const QString declaredPath = relativePath.trimmed();
         if (declaredPath.isEmpty() || seenPaths.contains(declaredPath)) {
             return;
         }
         seenPaths.append(declaredPath);
         const QFileInfo info(declaredPath);
         const QString safePath = resolveArtifactRelativePath(declaredPath);
+        if (safePath.isEmpty()) {
+            return;
+        }
         const QString artifactName = name.isEmpty() ? info.fileName() : name;
-        const QString displayPath = safePath.isEmpty()
-            ? uiText("外部路径已隐藏")
-            : safePath;
+        const QString displayPath = safePath;
         const int row = officialArtifactsTable_->rowCount();
         officialArtifactsTable_->insertRow(row);
         officialArtifactsTable_->setItem(row, 0, new QTableWidgetItem(artifactKindLabel(kind)));
@@ -493,16 +494,14 @@ void EvaluationReportView::populateOfficialArtifacts(const QJsonObject& report)
             artifactPreviewPaths_.insert(row, safePath);
         }
         artifactDetailTexts_.insert(row,
-            safePath.isEmpty()
-                ? uiText("类型：%1\n名称：%2\n该记录不属于当前 committed Artifact，已禁止外部路径预览。请从任务产物列表查看已提交文件。")
-                    .arg(artifactKindLabel(kind), artifactName)
-                : uiText("类型：%1\n名称：%2\nArtifact 相对项：%3")
-                    .arg(artifactKindLabel(kind), artifactName, displayPath));
+            uiText("类型：%1\n名称：%2\nArtifact 相对项：%3")
+                .arg(artifactKindLabel(kind), artifactName, displayPath));
     };
 
-    appendArtifact(QStringLiteral("official_metrics"), QStringLiteral("ultralytics_official_metrics.json"), report.value(QStringLiteral("officialMetricsPath")).toString());
-    appendArtifact(QStringLiteral("official_log"), QStringLiteral("ultralytics_official_val.log"), report.value(QStringLiteral("officialLogPath")).toString());
-    appendArtifact(QStringLiteral("evaluation_summary"), QStringLiteral("evaluation_summary.md"), report.value(QStringLiteral("evaluationSummaryPath")).toString());
+    appendArtifact(QStringLiteral("official_metrics"), QStringLiteral("ultralytics_official_metrics.json"),
+        report.value(QStringLiteral("officialMetricsMember")).toString());
+    appendArtifact(QStringLiteral("evaluation_summary"), QStringLiteral("evaluation_summary.md"),
+        report.value(QStringLiteral("evaluationSummaryMember")).toString());
 
     const QJsonArray officialArtifacts = report.value(QStringLiteral("officialArtifacts")).toArray();
     for (const QJsonValue& value : officialArtifacts) {
@@ -510,14 +509,14 @@ void EvaluationReportView::populateOfficialArtifacts(const QJsonObject& report)
         appendArtifact(
             artifact.value(QStringLiteral("kind")).toString(QStringLiteral("official_artifact")),
             artifact.value(QStringLiteral("name")).toString(),
-            artifact.value(QStringLiteral("path")).toString());
+            artifact.value(QStringLiteral("relativePath")).toString());
     }
 
     if (officialArtifactsTable_->rowCount() == 0) {
         officialArtifactsTable_->insertRow(0);
         officialArtifactsTable_->setItem(0, 0, new QTableWidgetItem(uiText("暂无官方产物")));
         officialArtifactsTable_->setItem(0, 1, new QTableWidgetItem(QString()));
-        officialArtifactsTable_->setItem(0, 2, new QTableWidgetItem(uiText("该报告没有记录 officialArtifacts 或官方路径字段。")));
+        officialArtifactsTable_->setItem(0, 2, new QTableWidgetItem(uiText("该报告没有记录官方 Artifact 相对成员。")));
         detailText_->setPlainText(uiText("该报告没有记录官方产物。旧历史报告仍可通过任务产物列表查看原始文件。"));
         return;
     }

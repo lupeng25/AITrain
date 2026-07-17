@@ -554,12 +554,14 @@ def build_datamodule(folder_cls, dataset_path: Path, params: Dict[str, Any]):
 
 
 def normalize_efficientad_model_size(value: Any) -> str:
-    normalized = str(value or "small").strip().lower()
-    if normalized in {"s", "small"}:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
         return "small"
-    if normalized in {"m", "medium"}:
+    if normalized == "small":
+        return "small"
+    if normalized == "medium":
         return "medium"
-    return "small"
+    raise ValueError("efficientad_model_size_invalid: expected small or medium")
 
 
 def build_model(backend: str, params: Dict[str, Any], patchcore_cls, efficientad_cls):

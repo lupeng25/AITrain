@@ -170,10 +170,9 @@ QWidget* MainWindow::buildInferenceValidationPanel()
     inferenceSampleSnapshotIdEdit_ = new QLineEdit;
     inferenceSampleSnapshotArtifactIdEdit_ = new QLineEdit;
     inferenceSampleRelativePathEdit_ = new QLineEdit;
-    inferenceOutputEdit_ = new QLineEdit;
     for (QLineEdit* edit : {inferenceSampleDatasetIdEdit_, inferenceSampleDatasetVersionIdEdit_,
              inferenceSampleSnapshotIdEdit_, inferenceSampleSnapshotArtifactIdEdit_,
-             inferenceSampleRelativePathEdit_, inferenceOutputEdit_}) {
+             inferenceSampleRelativePathEdit_}) {
         edit->setMinimumWidth(0);
         edit->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     }
@@ -185,23 +184,7 @@ QWidget* MainWindow::buildInferenceValidationPanel()
     inferenceSampleSnapshotIdEdit_->setPlaceholderText(QStringLiteral("SnapshotId"));
     inferenceSampleSnapshotArtifactIdEdit_->setPlaceholderText(QStringLiteral("Snapshot ArtifactId"));
     inferenceSampleRelativePathEdit_->setPlaceholderText(QStringLiteral("样本在 Snapshot Artifact 内的相对路径，例如 images/0001.png"));
-    inferenceOutputEdit_->setPlaceholderText(QStringLiteral("输出由 Artifact Store 托管"));
-    inferenceOutputEdit_->setReadOnly(true);
-    auto* chooseOutputButton = new QPushButton(QStringLiteral("选择输出目录"));
-    chooseOutputButton->setEnabled(false);
     auto* inferButton = primaryButton(QStringLiteral("运行完整 Runtime Delivery"));
-    connect(chooseOutputButton, &QPushButton::clicked, this, [this]() {
-        const QString currentOutput = QDir::fromNativeSeparators(inferenceOutputEdit_ ? inferenceOutputEdit_->text().trimmed() : QString());
-        const QString defaultDir = !currentOutput.isEmpty()
-            ? currentOutput
-            : (!currentProjectPath_.isEmpty()
-                ? QDir(currentProjectPath_).filePath(QStringLiteral("inference"))
-                : QDir::homePath());
-        const QString dir = QFileDialog::getExistingDirectory(this, uiText("选择推理输出目录"), defaultDir);
-        if (!dir.isEmpty() && inferenceOutputEdit_) {
-            inferenceOutputEdit_->setText(QDir::toNativeSeparators(dir));
-        }
-    });
     connect(inferButton, &QPushButton::clicked, this, &MainWindow::startInference);
     auto* modelRow = new QWidget;
     auto* modelLayout = new QHBoxLayout(modelRow);
@@ -213,12 +196,8 @@ QWidget* MainWindow::buildInferenceValidationPanel()
     imageLayout->setSpacing(8);
     imageLayout->addWidget(inferenceSampleRelativePathEdit_);
     modelLayout->setSpacing(8);
-    auto* outputRow = new QWidget;
-    auto* outputLayout = new QHBoxLayout(outputRow);
-    outputLayout->setContentsMargins(0, 0, 0, 0);
-    outputLayout->setSpacing(8);
-    outputLayout->addWidget(inferenceOutputEdit_);
-    outputLayout->addWidget(chooseOutputButton);
+    auto* outputHint = mutedLabel(QStringLiteral("输出由 Artifact Store 托管，完成后在任务与产物中按 ArtifactId 预览。"));
+    allowLabelToShrink(outputHint);
     inferForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     inferForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     inferForm->setHorizontalSpacing(14);
@@ -229,7 +208,7 @@ QWidget* MainWindow::buildInferenceValidationPanel()
     inferForm->addRow(QStringLiteral("样本 SnapshotId"), inferenceSampleSnapshotIdEdit_);
     inferForm->addRow(QStringLiteral("样本 ArtifactId"), inferenceSampleSnapshotArtifactIdEdit_);
     inferForm->addRow(QStringLiteral("样本相对路径"), imageRow);
-    inferForm->addRow(QStringLiteral("推理输出"), outputRow);
+    inferForm->addRow(QStringLiteral("推理输出"), outputHint);
     toolbar->bodyLayout()->addLayout(inferForm);
     auto* sourceHelp = emptyStateLabel(QStringLiteral("推理只能使用模型库中已登记、已校验哈希且声明 ONNX Runtime 路由的模型包，以及已提交 Snapshot Artifact 内的样本。模型文件、样本图片、NCNN 和 TensorRT engine 裸路径不会进入此推理链路。"));
     allowLabelToShrink(sourceHelp);

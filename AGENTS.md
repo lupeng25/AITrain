@@ -31,7 +31,7 @@ Archived roadmap notes are not current implementation plans. Use `docs/harness/c
 - Do not put model training logic in `MainWindow`.
 - Use Worker messages for long tasks.
 - Use `ProjectStore` for SQLite metadata; GUI reads go through Query Service/Presenter and writes go through `ProjectWorkspace`/Worker.
-- Use plugin interfaces for model, dataset, export, inference, and validation extensions.
+- Use the compile-time `CapabilityRegistry` and explicit Worker/core adapters for model, dataset, export, inference, and validation extensions; do not reintroduce dynamic plugin interfaces.
 - Keep Qt 5.12+ compatibility unless explicitly asked to upgrade.
 - Use `QStringLiteral` for UI text.
 - Avoid Chinese mojibake. Source files must compile with UTF-8.

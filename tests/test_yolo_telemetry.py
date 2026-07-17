@@ -207,16 +207,17 @@ def test_official_evaluator_expands_directory_outputs_for_candidates() -> None:
         evaluator._event_channel = object()  # type: ignore[assignment]
         try:
             evaluator.emit_official_artifacts(
-                [{"name": "results.png", "kind": "official_plot", "path": str(plot)}], root)
+                [{"name": "results.png", "kind": "official_plot", "relativePath": "results.png"}], root)
         finally:
             evaluator.emit = original_emit
             evaluator._event_channel = original_channel
 
     assert events == [("artifact", {
         "name": "results.png",
-        "kind": "official_val_001_official_plot",
-        "path": str(plot),
-        "message": "Official Ultralytics validation output",
+            "kind": "official_val_001_official_plot",
+            "path": str(plot),
+            "relativePath": "official_artifacts/results.png",
+            "message": "Official Ultralytics validation output",
     })]
 
 

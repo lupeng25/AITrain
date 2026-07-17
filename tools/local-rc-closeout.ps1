@@ -38,6 +38,38 @@ function Invoke-PowerShellScript {
     }
 }
 
+function Assert-CloseoutResidueClean {
+    $ownedProcessNames = @(
+        "AITrainStudio",
+        "aitrain_worker",
+        "aitrain_platform_tests",
+        "aitrain_application_tests",
+        "aitrain_delivery_acceptance_ui_tests"
+    )
+    $running = @(Get-Process -ErrorAction SilentlyContinue |
+        Where-Object { $ownedProcessNames -contains $_.ProcessName })
+    if ($running.Count -gt 0) {
+        throw ("Closeout left owned processes running: {0}" -f (($running | ForEach-Object { "$($_.ProcessName)#$($_.Id)" }) -join ", "))
+    }
+
+    $stagingRoots = @(
+        (Join-Path $root $BuildDir),
+        (Join-Path $root (Join-Path $BuildDir "package-smoke"))
+    ) | Where-Object { Test-Path -LiteralPath $_ }
+    $dirty = @()
+    foreach ($scanRoot in $stagingRoots) {
+        $dirty += Get-ChildItem -LiteralPath $scanRoot -Recurse -Directory -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -in @(".staging", ".staging-meta", ".runtime-staging") } |
+            Where-Object {
+                @(Get-ChildItem -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue).Count -gt 0
+            }
+    }
+    if ($dirty.Count -gt 0) {
+        throw ("Closeout left non-empty staging directories: {0}" -f (($dirty | ForEach-Object FullName) -join "; "))
+    }
+    Write-Host "  [ok] no owned processes or non-empty staging directories"
+}
+
 Invoke-Step "git diff whitespace check" {
     $previousErrorActionPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
@@ -84,6 +116,10 @@ if ($RunCpuTrainingSmoke) {
     Invoke-Step "CPU training smoke" {
         Invoke-PowerShellScript -ScriptPath (Join-Path $root "tools\acceptance-smoke.ps1") -Arguments @("-CpuTrainingSmoke", "-BuildDir", $BuildDir)
     }
+}
+
+Invoke-Step "residual process and staging scan" {
+    Assert-CloseoutResidueClean
 }
 
 Write-Host "Local RC closeout passed." -ForegroundColor Green

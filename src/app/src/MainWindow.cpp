@@ -22,9 +22,7 @@
 #include <QApplication>
 #include <QCloseEvent>
 #include <QCheckBox>
-#include <QClipboard>
 #include <QDateTime>
-#include <QDesktopServices>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
@@ -58,7 +56,6 @@
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
-#include <QUrl>
 #include <QUuid>
 
 using namespace aitrain_app;
@@ -279,15 +276,6 @@ QString MainWindow::configuredDefaultProjectPath() const
     return QDir::cleanPath(QDir::fromNativeSeparators(configured));
 }
 
-void MainWindow::ensureProjectSubdirs(const QString& rootPath)
-{
-    QDir root(rootPath);
-    root.mkpath(QStringLiteral("."));
-    root.mkpath(QStringLiteral("datasets"));
-    root.mkpath(QStringLiteral("runs"));
-    root.mkpath(QStringLiteral("models"));
-}
-
 void MainWindow::appendLog(const QString& text)
 {
     if (logEdit_) {
@@ -430,33 +418,4 @@ void MainWindow::storeDefaultProjectPathPreference(const QString& path)
         settingsDefaultProjectPathStatusLabel_->setText(uiText("默认项目目录已保存。"));
     }
     statusBar()->showMessage(uiText("默认项目目录已保存。"), 3000);
-}
-
-void MainWindow::openLocalDirectory(const QString& path)
-{
-    const QString normalized = QDir::cleanPath(QDir::fromNativeSeparators(path.trimmed()));
-    if (normalized.isEmpty() || normalized == QStringLiteral(".")) {
-        statusBar()->showMessage(uiText("当前未打开项目。"), 3000);
-        return;
-    }
-
-    const QFileInfo info(normalized);
-    const QString directory = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
-    if (!QDir(directory).exists()) {
-        statusBar()->showMessage(uiText("目录不存在：%1").arg(QDir::toNativeSeparators(directory)), 5000);
-        return;
-    }
-    QDesktopServices::openUrl(QUrl::fromLocalFile(directory));
-}
-
-void MainWindow::copyLocalPath(const QString& path, const QString& label)
-{
-    const QString normalized = QDir::cleanPath(QDir::fromNativeSeparators(path.trimmed()));
-    if (normalized.isEmpty() || normalized == QStringLiteral(".")) {
-        statusBar()->showMessage(uiText("当前未打开项目。"), 3000);
-        return;
-    }
-
-    QApplication::clipboard()->setText(QDir::toNativeSeparators(normalized));
-    statusBar()->showMessage(uiText("路径已复制：%1").arg(label), 3000);
 }

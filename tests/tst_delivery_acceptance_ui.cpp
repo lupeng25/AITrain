@@ -8,6 +8,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
 #include <QFrame>
@@ -50,6 +51,8 @@ private slots:
     void ocrAcceptanceUiUsesControlledImportAndArtifactOnlyAcceptance();
     void taskPageExposesReadOnlyObjects();
     void projectAndDashboardExposeSummaryPresenter();
+    void uiPathBoundariesStayAtExplicitImportAndIdentityEdges();
+    void repeatedNavigationDoesNotAccumulatePages();
 
 private:
     QString previousLanguage_;
@@ -629,6 +632,7 @@ void EnvironmentDeliveryEvidenceUiTests::runtimeDeliveryPagesExposeOneSixStepPro
         if (button->text() == QStringLiteral("运行完整 Runtime Delivery")) ++unifiedEntryCount;
         QVERIFY(button->text() != QStringLiteral("开始推理"));
         QVERIFY(button->text() != QStringLiteral("开始部署验证"));
+        QVERIFY(button->text() != QStringLiteral("选择输出目录"));
     }
     QCOMPARE(unifiedEntryCount, 2);
     bool sixStepTextVisible = false;
@@ -639,6 +643,59 @@ void EnvironmentDeliveryEvidenceUiTests::runtimeDeliveryPagesExposeOneSixStepPro
         }
     }
     QVERIFY(sixStepTextVisible);
+}
+
+void EnvironmentDeliveryEvidenceUiTests::uiPathBoundariesStayAtExplicitImportAndIdentityEdges()
+{
+    MainWindow& window = *window_;
+    QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
+        Q_ARG(int, MainWindow::DatasetPage), Q_ARG(QString, QStringLiteral("数据集"))));
+    auto* datasetPath = window.findChild<QLineEdit*>(QStringLiteral("DatasetPathEdit"));
+    QVERIFY(datasetPath != nullptr);
+    const QString externalPath = QStringLiteral("C:/external/secret-dataset");
+    datasetPath->setText(externalPath);
+
+    QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
+        Q_ARG(int, MainWindow::TrainingPage), Q_ARG(QString, QStringLiteral("训练实验"))));
+    auto* trainingNote = window.findChild<QLabel*>(QStringLiteral("TrainingDatasetNote"));
+    auto* datasetDetail = window.findChild<QLabel*>(QStringLiteral("DatasetDetailLabel"));
+    QVERIFY(trainingNote != nullptr);
+    QVERIFY(datasetDetail != nullptr);
+    QVERIFY(!trainingNote->text().contains(externalPath));
+    QVERIFY(!trainingNote->toolTip().contains(externalPath));
+    QVERIFY(!datasetDetail->text().contains(externalPath));
+    QVERIFY(!datasetDetail->text().contains(QStringLiteral("路径：")));
+
+    QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
+        Q_ARG(int, MainWindow::DashboardPage), Q_ARG(QString, QStringLiteral("总览"))));
+    auto* projectStatus = window.findChild<QLabel*>(QStringLiteral("ProjectWorkspaceStatus"));
+    QVERIFY(projectStatus != nullptr);
+    QVERIFY(!projectStatus->text().contains(QStringLiteral("C:/")));
+    QVERIFY(!projectStatus->toolTip().contains(QStringLiteral("C:/")));
+}
+
+void EnvironmentDeliveryEvidenceUiTests::repeatedNavigationDoesNotAccumulatePages()
+{
+    MainWindow& window = *window_;
+    const QList<int> pages = {
+        MainWindow::DashboardPage, MainWindow::ProjectPage, MainWindow::DatasetPage,
+        MainWindow::TrainingPage, MainWindow::TaskQueuePage, MainWindow::ModelRegistryPage,
+        MainWindow::DeploymentPage, MainWindow::EnvironmentPage, MainWindow::SystemSettingsPage
+    };
+    QStackedWidget* stack = window.findChild<QStackedWidget*>();
+    QVERIFY(stack != nullptr);
+    const int initialCount = stack->count();
+    for (int cycle = 0; cycle < 1000; ++cycle) {
+        for (const int page : pages) {
+            QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
+                Q_ARG(int, page), Q_ARG(QString, QStringLiteral("stress"))));
+        }
+        if ((cycle % 25) == 0) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 1);
+        }
+    }
+    QCOMPARE(stack->count(), initialCount);
+    QCOMPARE(stack->currentIndex(), pages.last());
 }
 
 QTEST_MAIN(EnvironmentDeliveryEvidenceUiTests)

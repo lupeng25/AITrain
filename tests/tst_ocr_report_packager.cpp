@@ -120,7 +120,7 @@ QString artifactRoot(const aitrain::ProjectWorkspace& workspace,
     const aitrain::ArtifactId& id)
 {
     return QDir(workspace.workspacePath()).filePath(
-        QStringLiteral("artifacts/artifacts/%1").arg(id.toString()));
+        QStringLiteral("artifacts/committed/%1").arg(id.toString()));
 }
 
 } // namespace

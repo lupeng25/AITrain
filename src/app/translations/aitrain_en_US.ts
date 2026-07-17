@@ -436,14 +436,6 @@
         <translation>Select a historical task to view artifacts, metrics, and export records.</translation>
     </message>
     <message>
-        <source>打开目录</source>
-        <translation>Open Folder</translation>
-    </message>
-    <message>
-        <source>复制路径</source>
-        <translation>Copy Path</translation>
-    </message>
-    <message>
         <source>用于推理</source>
         <translation>Use for Inference</translation>
     </message>

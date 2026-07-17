@@ -121,7 +121,7 @@ $manifest = [ordered]@{
     handoffDocs = $handoffDocs
     externalCommands = [ordered]@{
         cleanWindowsPackage = ".\tools\acceptance-smoke.ps1 -Package"
-        tensorrt = ".\tools\acceptance-smoke.ps1 -TensorRT -WorkDir .deps\acceptance-tensorrt"
+        tensorrt = "Runtime Delivery workflow with a registered ModelPackage; no standalone TensorRT smoke CLI"
     }
     requiredReturnArtifacts = @(
         "filled clean Windows result template",
@@ -166,7 +166,7 @@ $summaryLines += @(
     '',
     '```powershell',
     '.\tools\acceptance-smoke.ps1 -Package',
-    '.\tools\acceptance-smoke.ps1 -TensorRT -WorkDir .deps\acceptance-tensorrt',
+    'TensorRT: run Runtime Delivery with a registered ModelPackage and return the capability report.',
     '```',
     '',
     'Do not update TensorRT status as passed until RTX / SM 75+ evidence is returned.'

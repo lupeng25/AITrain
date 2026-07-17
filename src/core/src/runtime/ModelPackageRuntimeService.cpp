@@ -31,7 +31,7 @@ bool ModelPackageRuntimeService::resolve(const ModelPackageId& modelPackageId,
     RuntimeModelLocation resolved;
     resolved.manifest = modelPackage.manifest;
     resolved.artifactDirectory = QDir(artifactStoreRoot_).filePath(
-        QStringLiteral("artifacts/%1").arg(modelPackage.sourceArtifactId.toString()));
+        QStringLiteral("committed/%1").arg(modelPackage.sourceArtifactId.toString()));
     const RuntimeOperationResult admission = validateRuntimeModel(resolved, runtimeRoute);
     if (admission.status != RuntimeStatus::Available) {
         if (error) *error = admission.message;

@@ -263,8 +263,8 @@ bool ProjectWorkspace::runDatasetSnapshotImportWorkflow(const TaskId& taskId,
                 [](const ArtifactFileSnapshot& file) {
                     return file.relativePath == QStringLiteral("snapshot_import_plan.json");
                 });
-            const QString committedPlanPath = QDir(artifactStore_->rootPath()).filePath(
-                QStringLiteral("artifacts/%1/snapshot_import_plan.json").arg(planArtifactId.toString()));
+            const QString committedPlanPath = QDir(artifactStore_->artifactPath(planArtifactId)).filePath(
+                QStringLiteral("snapshot_import_plan.json"));
             QString actualPlanHash;
             QFile committedPlanFile(committedPlanPath);
             if (planFile == storedPlan.files.cend() || !hashFile(committedPlanPath, &actualPlanHash, &executionError)

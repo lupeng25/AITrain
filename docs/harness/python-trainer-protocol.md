@@ -187,7 +187,7 @@ Common Anomalib parameters:
 
 - `modelPreset`: `anomalib_patchcore_wide_resnet50_2`, `anomalib_efficientad_s`, or compatible explicit settings
 - `backbone`, `layers`, `coresetSamplingRatio`, and `numNeighbors` for PatchCore
-- `modelSize=small|medium` for EfficientAD; legacy `s/m` may be normalized for compatibility
+- `modelSize=small|medium` for EfficientAD; any other value is rejected as an invalid request
 - `imagenetDir` or `AITRAIN_ANOMALIB_IMAGENET_DIR` for EfficientAD auxiliary data
 - `threshold`, `imageSize`, `batchSize`, `device`, and `pythonExecutable`
 

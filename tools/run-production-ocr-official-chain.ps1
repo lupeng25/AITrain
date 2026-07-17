@@ -34,6 +34,9 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+# This script is an explicit diagnostic runner, not a Worker child.  Opt in
+# to stdout JSONL only for its direct adapter invocations.
+$env:AITRAIN_STANDALONE_ADAPTER_PROTOCOL = "1"
 
 $script:Root = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $PSScriptRoot) "."))
 $script:StartedAt = [DateTime]::UtcNow

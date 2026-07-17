@@ -1,5 +1,7 @@
 #include "aitrain/workflow/TaskCoordinator.h"
 
+#include "aitrain/protocol/ProtocolSanitizer.h"
+
 #include <QDateTime>
 
 namespace aitrain {
@@ -223,7 +225,8 @@ bool TaskCoordinator::recordWorkflowTerminalEvent(const ProtocolEnvelope& envelo
         return false;
     }
     if (!storage_->recordProtocolEvent(envelope.taskId, envelope.requestId, envelope.messageId,
-        envelope.sequence, envelope.kind, envelope.payload, envelope.timestamp, error)) {
+        envelope.sequence, envelope.kind, protocol::redactPhysicalPathFields(envelope.payload),
+        envelope.timestamp, error)) {
         return false;
     }
     // 仅在存储提交后更新 tracker，避免记录失败造成内存序号漂移。

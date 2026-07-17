@@ -436,14 +436,6 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>打开目录</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>复制路径</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>用于推理</source>
         <translation type="unfinished"></translation>
     </message>

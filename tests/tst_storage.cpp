@@ -103,6 +103,7 @@ private slots:
     void persistsCrossTaskWorkflowInputAndEnforcesOwnership();
     void listsDatasetCatalogThroughVersionJoin();
     void rejectsSchema7AndPersistsTerminalPolicy();
+    void createsCanonicalSchemaWithoutLegacyProjectTable();
     void enforcesTerminalizationSchemaConstraints();
     void evidenceGatedSuccessSurvivesReopen();
     void persistsFailedAndCanceledTerminalFacts();
@@ -488,7 +489,7 @@ void StorageTests::persistsCrossTaskWorkflowInputAndEnforcesOwnership()
     QVERIFY(!storage.registerDatasetSnapshot(&snapshot, &error));
     QVERIFY(error.contains(QStringLiteral("committed Snapshot Artifact")));
     snapshot.rootPath = QDir(directory.path()).filePath(
-        QStringLiteral("artifact-store/artifacts/%1").arg(snapshotArtifactId.toString()));
+        QStringLiteral("artifact-store/committed/%1").arg(snapshotArtifactId.toString()));
     QVERIFY2(storage.registerDatasetSnapshot(&snapshot, &error), qPrintable(error));
 
     aitrain::WorkflowRunSnapshot workflow;
@@ -602,7 +603,7 @@ void StorageTests::listsDatasetCatalogThroughVersionJoin()
         snapshot.taskId = producer.id;
         snapshot.artifactId = artifactId;
         snapshot.rootPath = QDir(directory.path()).filePath(
-            QStringLiteral("artifact-store/artifacts/%1").arg(artifactId.toString()));
+            QStringLiteral("artifact-store/committed/%1").arg(artifactId.toString()));
         snapshot.datasetFormat = QStringLiteral("yolo_detection");
         snapshot.driverId = QStringLiteral("yolo_detection");
         snapshot.driverVersion = QStringLiteral("2.0");
@@ -665,6 +666,33 @@ void StorageTests::rejectsSchema7AndPersistsTerminalPolicy()
     aitrain::WorkflowRunSnapshot loaded;
     QVERIFY2(storage.workflowRun(workflow.id, &loaded, &error), qPrintable(error));
     QCOMPARE(loaded.terminalPolicy, aitrain::WorkflowTerminalPolicy::EvidenceRequired);
+}
+
+void StorageTests::createsCanonicalSchemaWithoutLegacyProjectTable()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString databasePath = directory.filePath(QStringLiteral("project.sqlite"));
+    aitrain::ProjectStore storage;
+    QString error;
+    QVERIFY2(storage.open(databasePath, &error), qPrintable(error));
+    QCOMPARE(aitrain::ProjectStore::schemaVersion(), 11);
+    storage.close();
+
+    const QString connectionName = QStringLiteral("canonical_schema_check");
+    QSqlDatabase database = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+    database.setDatabaseName(databasePath);
+    QVERIFY(database.open());
+    QSqlQuery query(database);
+    QVERIFY(query.exec(QStringLiteral("select version from schema_info limit 1")));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toInt(), 11);
+    QVERIFY(query.exec(QStringLiteral(
+        "select 1 from sqlite_master where type = 'table' and name = 'projects'")));
+    QVERIFY(!query.next());
+    database.close();
+    database = QSqlDatabase();
+    QSqlDatabase::removeDatabase(connectionName);
 }
 
 void StorageTests::enforcesTerminalizationSchemaConstraints()

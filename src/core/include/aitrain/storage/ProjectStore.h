@@ -217,6 +217,9 @@ public:
     ProjectStore();
     ~ProjectStore();
 
+    // 当前项目尚未上线，不提供旧数据库迁移；新工作区必须使用这一版完整 schema。
+    static int schemaVersion();
+
     ProjectStore(const ProjectStore&) = delete;
     ProjectStore& operator=(const ProjectStore&) = delete;
 

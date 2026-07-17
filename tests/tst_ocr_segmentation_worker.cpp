@@ -161,7 +161,7 @@ QString committedArtifactEventPath(const QString& projectRoot, const QJsonObject
     const QString artifactId = payload.value(QStringLiteral("artifactId")).toString();
     const QString relativePath = payload.value(QStringLiteral("relativePath")).toString();
     if (artifactId.isEmpty() || relativePath.isEmpty()) return {};
-    return QDir(projectRoot).filePath(QStringLiteral(".aitrain/artifacts/artifacts/%1/%2")
+    return QDir(projectRoot).filePath(QStringLiteral(".aitrain/artifacts/committed/%1/%2")
         .arg(artifactId, relativePath));
 }
 

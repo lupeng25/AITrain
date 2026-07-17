@@ -204,7 +204,7 @@ void ArtifactStoreTests::recoveryCompletesEvidenceCommitAfterDirectoryRename()
     bool exists = true;
     QVERIFY2(storage.artifactExists(artifactId, &exists, &error), qPrintable(error));
     QVERIFY(!exists);
-    QVERIFY(QFileInfo::exists(QDir(storeRoot).filePath(QStringLiteral("artifacts/%1").arg(artifactId.toString()))));
+    QVERIFY(QFileInfo::exists(QDir(storeRoot).filePath(QStringLiteral("committed/%1").arg(artifactId.toString()))));
 
     aitrain::ArtifactStore recovered(storeRoot);
     QStringList diagnostics;

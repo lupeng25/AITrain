@@ -128,7 +128,7 @@ git diff --check
 | V2-407 | 已完成（Probe → Core 报告 → Presenter/UI） | Runtime Capability Matrix 统一输出 Supported、UnsupportedByProduct、RuntimeNotImplemented、RequiresSdk、RequiresDependency、RequiresHardware、RequiresExternalEvidence；Worker 环境自检将事实提交为 Artifact，`ProjectQueryService`/`EnvironmentCheckPresenter` 读取已校验报告，环境表按报告的 checks/profiles 动态渲染并同步摘要，移除 LibTorch 与静态 hardware-blocked 文案。交付证据页消费同一套结构化状态。 | `aitrain_v2_runtime_adapter_tests`、`aitrain_ocr_segmentation_worker_tests`、`aitrain_delivery_acceptance_ui_tests`。 |
 | V2-408 | 已完成（Runtime 合同测试） | 自动化覆盖 Manifest/格式不匹配、blob/tensor 合同、decoder 路由、NCNN `.bin` 哈希、禁用产品族，以及 TensorRT SDK/依赖/硬件/未实现 decoder 的精确分类。 | `aitrain_v2_runtime_adapter_tests`、`aitrain_v2_model_manifest_tests`。 |
 | V2-303 | 已完成（SDK 与官方 Adapter 接入） | `python_trainers/adapter_sdk.py` 统一结构化日志、进度、指标、产物候选、完成、失败、取消检查与直接子进程日志落盘/退出码记录；候选通过 `event.artifact_candidate` 与已提交的 `event.artifact` 明确区分，命令和环境内容不写入事件，官方 Adapter 由 PythonAdapterHost/Job Object 托管。 | `aitrain_adapter_sdk_python_tests`、`aitrain_v2_protocol_tests`、`aitrain_v2_process_tests`。 |
-| V2-304 | 已完成（Ultralytics 训练、评估、导出 Adapter 迁移） | Detection 共享训练 Adapter 及 Segmentation/OBB 包装器，以及官方 `val()` evaluator、官方 exporter，均改由 SDK 发出日志、进度、指标、产物和终态；当 V2 Host 注入事件环境时使用受认证 loopback 通道，否则保留 JSONL stdout 作为 V1 过渡路径。V1 专用 `modelExport` 帧仅在 JSONL 路径保留；V2 以已提交导出 sidecar 为该元数据的事实来源。官方训练、评估、ONNX 导出的算法调用未替换。 | `aitrain_yolo_telemetry_python_tests`。 |
+| V2-304 | 已完成（Ultralytics 训练、评估、导出 Adapter 迁移） | Detection 共享训练 Adapter 及 Segmentation/OBB 包装器，以及官方 `val()` evaluator、官方 exporter，均由 SDK 发出日志、进度、指标、产物和终态；Worker Host 注入认证 loopback 事件通道时，所有产品路径必须使用该通道。stdout JSONL 只允许显式 standalone 诊断脚本开启，不属于 Worker 产品传输；V1 专用 `modelExport` 帧已删除，导出 sidecar 是元数据事实来源。官方训练、评估、ONNX 导出的算法调用未替换。 | `aitrain_yolo_telemetry_python_tests`。 |
 | V2-500 | 已完成（Workflow 持久化模型） | 将 V2 schema 升至 5（不兼容旧 V2 开发数据库）：新增有模板、根任务、顺序步骤、输入/输出 Artifact、后端、参数摘要、开始/结束时间、Failure 与重试次数的 Workflow Run/Step 持久化 API；同时落地数据集、版本、快照到 Artifact 的外键关系。步骤状态独立于任务状态，仅允许 `pending → running → succeeded/failed/canceled` 或显式 `skipped`；成功必须引用已提交 Artifact，失败后只能经显式 retry 回到 pending，拒绝不存在的 Artifact、跳序与并发覆盖。 | `aitrain_v2_storage_tests`、`aitrain_v2_application_tests`。 |
 | V2-501 | 已完成（顺序 Workflow Runner） | 新增 `WorkflowRunnerV2`：按 ordinal 顺序执行 pending 步骤，自动把上一步已提交输出绑定为下游输入；已成功步骤可作为重开后的续跑检查点。执行器成功却未返回 Artifact 会被收口为失败；失败/取消时，当前步骤记录明确 Failure，后续 pending 步骤标记为 skipped，不尝试备用后端。同步 `run()` 供本地执行器使用，异步宿主则通过 `beginNextStep()` / `completeStep()` 只派发和收口已提交 Artifact；训练八步和 Runtime 六步均已使用该持久化模型。 | `aitrain_v2_application_tests`、`aitrain_v2_storage_tests`、`aitrain_v2_runtime_delivery_workflow_tests`。 |
 | V2-502 | 已完成（全部生产训练后端垂直切片与 GUI 收口） | 训练 Workflow 已统一为由 `TrainingWorkflowProfileV2` 驱动的八步；Worker、Workspace、GUI 均消费同一 Profile，不再各自维护后端列表。校验报告与快照先提交不可变 Artifact，再作为步骤输出和下游输入持久化。YOLO 三变体使用官方 Ultralytics，SMP 使用 SMP Adapter + AITrain ONNX Runtime，Anomalib 使用 Worker-managed Python，PaddleOCR Det/Rec 使用官方 bundle；System adapter 是独立 Det+Rec 组合 wiring。八种 Profile 行均通过 Worker E2E，终态采用 SQLite 封存、Artifact commit journal 与 Evidence 关联，GUI 训练/模型/任务 Presenter 和 legacy 路径已收口。 | `aitrain_v2_training_workflow_profile_tests`、`aitrain_v2_storage_tests`、`aitrain_v2_artifact_tests`、`aitrain_v2_application_tests`、`aitrain_v2_model_manifest_tests`、`aitrain_ocr_segmentation_worker_tests`、Python adapter tests。 |
@@ -420,7 +420,6 @@ Starting -> Failed/Canceled
 
 核心表：
 
-- `projects`
 - `datasets`
 - `dataset_versions`
 - `dataset_snapshots`
@@ -543,10 +542,10 @@ Fake Worker 只存在测试目标，不随产品包发布。
 目录约定：
 
 ```text
-project/artifacts/<task-id>/
-  staging/
-  committed/
-  artifact-manifest.json
+project/.aitrain/artifacts/
+  .staging/<artifact-id>/
+  .staging-meta/<artifact-id>.json
+  committed/<artifact-id>/
 ```
 
 具体任务：

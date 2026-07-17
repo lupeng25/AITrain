@@ -90,17 +90,13 @@ Use `docs\acceptance-templates\clean-windows-acceptance-result.md` to record the
 
 ## TensorRT Acceptance
 
-From the recorded RTX 4090 D validation lane, or another supported RTX / SM 75+ package root or source tree:
-
-```powershell
-.\tools\acceptance-smoke.ps1 -TensorRT -WorkDir .deps\acceptance-tensorrt
-```
+TensorRT 外部验收不再运行独立 smoke CLI。请在支持 RTX / SM 75+ 的机器上导入已登记 ModelPackage，运行 Runtime Delivery workflow，并返回包含 SDK、硬件、Manifest、Artifact 和 decoder 能力分类的报告。
 
 Acceptance requires:
 
 - Worker self-check resolves the CUDA/TensorRT runtime components needed for TensorRT ONNX-to-engine export.
 - GPU compute capability is accepted by the TensorRT release.
-- `acceptance-smoke.ps1 -TensorRT` generates a small official Ultralytics YOLO ONNX artifact, or uses `-TensorRtOnnxPath <official.onnx>` when supplied.
+- Runtime Delivery consumes the committed ModelPackage and records the official export/deployment evidence; it does not accept a bare ONNX path as a product inference result.
 - 旧 `aitrain_worker.exe --tensorrt-smoke` CLI 已删除。TensorRT 外部验收必须提交 V2 ModelPackage/Manifest 与 Adapter 状态报告；当前只接受 SDK、依赖、硬件和 decoder 能力分类，不将裸 ONNX 路径 smoke 计为 V2 推理通过。
 - The command finishes with `passed`, not `hardware-blocked`.
 

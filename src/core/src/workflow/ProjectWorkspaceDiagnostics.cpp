@@ -382,8 +382,7 @@ bool ProjectWorkspace::runDiagnosticsWorkflow(const TaskId& taskId,
                 return {WorkflowStepState::Failed, {}, diagnosticsFailure(FailureCode::ArtifactIncompatible,
                     executionError.isEmpty() ? QStringLiteral("diagnostics_facts_identity_mismatch") : executionError)};
             }
-            const QString factsRoot = QDir(artifactStore_->rootPath()).filePath(
-                QStringLiteral("artifacts/%1").arg(storedFacts.id.toString()));
+            const QString factsRoot = artifactStore_->artifactPath(storedFacts.id);
             if (!verifyArtifact(storedFacts, factsRoot, &executionError)) {
                 return {WorkflowStepState::Failed, {}, diagnosticsFailure(FailureCode::ArtifactIncompatible, executionError)};
             }
@@ -552,8 +551,7 @@ bool ProjectWorkspace::runEnvironmentCheckWorkflow(const TaskId& taskId,
                 return {WorkflowStepState::Failed, {}, diagnosticsFailure(FailureCode::ArtifactIncompatible,
                     QStringLiteral("environment_check_facts_identity_mismatch"))};
             }
-            const QString root = QDir(artifactStore_->rootPath()).filePath(
-                QStringLiteral("artifacts/%1").arg(factsArtifact.id.toString()));
+            const QString root = artifactStore_->artifactPath(factsArtifact.id);
             if (!verifyArtifact(factsArtifact, root, &executionError)) {
                 return {WorkflowStepState::Failed, {}, diagnosticsFailure(FailureCode::ArtifactIncompatible,
                     executionError)};
@@ -662,8 +660,7 @@ bool ProjectWorkspace::environmentCheckReportForTask(
     if (error && !error->isEmpty()) return false;
     for (auto it = artifacts.crbegin(); it != artifacts.crend(); ++it) {
         if (it->kind != QStringLiteral("environment_profiles_report")) continue;
-        const QString root = QDir(artifactStore_->rootPath()).filePath(
-            QStringLiteral("artifacts/%1").arg(it->id.toString()));
+        const QString root = artifactStore_->artifactPath(it->id);
         if (!verifyArtifact(*it, root, error)) return false;
         QFile file(QDir(root).filePath(QStringLiteral("environment_profiles_report.json")));
         QJsonParseError parseError;

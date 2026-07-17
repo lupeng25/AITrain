@@ -145,7 +145,7 @@ dataset/
 
 `train/good` 必须存在。`val/good`、`val/anomaly`、`test/good`、`test/anomaly` 可按数据情况提供。像素级 mask 可放在 `masks/val/anomaly/<stem>.png` 或 `masks/test/anomaly/<stem>.png`。MVTec 风格 `test/<defect_type>` 和 `ground_truth/<defect_type>/<stem>_mask.png` 也可以识别。
 
-只有 good 样本时可以训练 PatchCore / EfficientAD，但评估会显示为 `limited`。EfficientAD 在 Anomalib 2.5 下使用 `modelSize=small|medium`，训练 batchSize 固定为 1；旧的 `s/m` 输入只作为兼容值归一化。MVTec 官方 `tar.xz` 不需要手工提前解压给质量矩阵脚本，脚本可从 `.deps/datasets/downloads/mvtec_ad/mvtec_anomaly_detection.tar.xz` 物化分类目录，也可以直接使用已预物化的 `.deps/datasets/materialized/mvtec-ad/<category>`。Anomalib v1 的推理/benchmark/部署验证运行时是 `anomalib_python`，不会生成 AITrain C++ ONNX/TensorRT/NCNN anomaly runtime。
+只有 good 样本时可以训练 PatchCore / EfficientAD，但评估会显示为 `limited`。EfficientAD 在 Anomalib 2.5 下使用 `modelSize=small|medium`，训练 batchSize 固定为 1；其他值直接拒绝。MVTec 官方 `tar.xz` 不需要手工提前解压给质量矩阵脚本，脚本可从 `.deps/datasets/downloads/mvtec_ad/mvtec_anomaly_detection.tar.xz` 物化分类目录，也可以直接使用已预物化的 `.deps/datasets/materialized/mvtec-ad/<category>`。Anomalib v1 的推理/benchmark/部署验证运行时是 `anomalib_python`，不会生成 AITrain C++ ONNX/TensorRT/NCNN anomaly runtime。
 
 ### 4.6 PaddleOCR Rec 数据集
 

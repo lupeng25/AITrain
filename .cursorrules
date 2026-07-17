@@ -25,8 +25,8 @@ Rules:
 - Do not put long-running work in the GUI thread.
 - Do not put training logic in MainWindow.
 - Route long tasks through aitrain_worker.
-- Use ProjectRepository for SQLite.
-- Use plugin interfaces for model/dataset/export/inference behavior.
+- Use ProjectStore for SQLite; GUI reads through Query Service/Presenter and writes through ProjectWorkspace/Worker.
+- Use the compile-time CapabilityRegistry and explicit Worker/core adapters for model/dataset/export/inference behavior; do not reintroduce dynamic plugin interfaces.
 - Keep Qt 5.12+ compatibility unless explicitly changed.
 - Use QStringLiteral for UI text.
 - Avoid Chinese mojibake.

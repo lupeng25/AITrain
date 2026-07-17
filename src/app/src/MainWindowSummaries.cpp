@@ -20,7 +20,6 @@
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
-#include <QFileInfo>
 #include <QFormLayout>
 #include <QFrame>
 #include <QGridLayout>
@@ -64,7 +63,7 @@ QString MainWindow::pageCaption(int pageIndex) const
     case ModelRegistryPage: return uiText("管理模型版本、评估报告、对比和流水线记录");
     case DeploymentPage: return uiText("导出模型，运行推理验证，并查看部署验证状态");
     case EnvironmentPage: return uiText("检查运行环境，并集中查看交付证据、诊断包和客户域 OCR 验收");
-    case SystemSettingsPage: return uiText("管理内置能力、界面语言、默认目录、授权状态和本地路径");
+    case SystemSettingsPage: return uiText("管理内置能力、界面语言、默认目录和授权状态");
     default: return {};
     }
 }
@@ -219,11 +218,9 @@ void MainWindow::updateProjectSummary()
     }
     if (projectPathSummaryLabel_) {
         projectPathSummaryLabel_->setText(hasProject
-            ? compactPathForStatus(currentProjectPath_, 74)
+            ? (currentProjectName_.isEmpty() ? uiText("已打开") : currentProjectName_)
             : uiText("未打开"));
-        projectPathSummaryLabel_->setToolTip(hasProject
-            ? QDir::toNativeSeparators(currentProjectPath_)
-            : QString());
+        projectPathSummaryLabel_->setToolTip(QString());
     }
     if (projectSqliteSummaryLabel_) {
         projectSqliteSummaryLabel_->setText(hasProject ? uiText(" 已连接") : uiText("未连接"));
@@ -418,14 +415,6 @@ void MainWindow::updateSettingsSummary()
     if (settingsDefaultProjectPathEdit_) {
         settingsDefaultProjectPathEdit_->setText(QDir::toNativeSeparators(configuredDefaultProjectPath()));
     }
-    if (settingsCurrentProjectPathLabel_) {
-        settingsCurrentProjectPathLabel_->setText(currentProjectPath_.isEmpty()
-            ? uiText("未打开项目")
-            : compactPathForStatus(currentProjectPath_, 92));
-        settingsCurrentProjectPathLabel_->setToolTip(currentProjectPath_.isEmpty()
-            ? QString()
-            : QDir::toNativeSeparators(currentProjectPath_));
-    }
     updateLanguageButtonState();
 }
 
@@ -526,7 +515,8 @@ void MainWindow::updateDashboardSummary()
     }
     if (projectLabel_) {
         projectLabel_->setText(hasProject
-            ? uiText("当前项目：%1").arg(QDir::toNativeSeparators(currentProjectPath_))
+            ? uiText("当前项目：%1（工作区已就绪）").arg(currentProjectName_.isEmpty()
+                ? uiText("已打开") : currentProjectName_)
             : uiText("未打开项目。先创建或打开本地项目，后续数据集、任务和模型产物都会写入项目目录。"));
     }
 
@@ -608,12 +598,6 @@ void MainWindow::updateTrainingSelectionSummary()
         && !state_.dataset.currentSnapshotArtifactId.isEmpty();
     const QString state = hasCommittedIdentity ? uiText("已提交快照")
         : (state_.dataset.currentValid ? uiText("已校验") : uiText("待校验"));
-    const QString fullPathText = datasetPath.isEmpty() ? QString() : QDir::toNativeSeparators(datasetPath);
-    const QString datasetName = datasetPath.isEmpty() ? QString() : QFileInfo(datasetPath).fileName();
-    const QString headerPathText = datasetPath.isEmpty()
-        ? uiText("未选择")
-        : (datasetName.isEmpty() ? compactPathForStatus(datasetPath, 36) : datasetName);
-    const QString detailPathText = datasetPath.isEmpty() ? uiText("未选择") : compactPathForStatus(datasetPath, 92);
     const QString snapshotId = dataQualitySnapshotIdEdit_ ? dataQualitySnapshotIdEdit_->text().trimmed() : QString();
     const QString snapshotArtifactId = dataQualitySnapshotArtifactIdEdit_ ? dataQualitySnapshotArtifactIdEdit_->text().trimmed() : QString();
     QString snapshotText = snapshotId.isEmpty()
@@ -632,11 +616,11 @@ void MainWindow::updateTrainingSelectionSummary()
                     state_.dataset.currentDatasetVersionId.left(12), snapshotText)
             : (datasetPath.isEmpty()
                 ? uiText("当前数据集：未选择。请先选择已登记快照或导入外部数据集。")
-                : uiText("当前数据集：%1 | %2 | %3\n%4")
-                    .arg(datasetFormatLabel(datasetFormat), state, headerPathText, snapshotText)));
+                : uiText("当前数据集：%1 | %2\n外部数据待创建并提交 Snapshot Artifact。\n%3")
+                    .arg(datasetFormatLabel(datasetFormat), state, snapshotText)));
         trainingDatasetSummaryLabel_->setToolTip(hasCommittedIdentity
             ? snapshotText
-            : (datasetPath.isEmpty() ? QString() : uiText("数据集：%1\n%2").arg(fullPathText, snapshotText)));
+            : (datasetPath.isEmpty() ? QString() : uiText("外部数据仅停留在导入边界，需先提交 Snapshot Artifact。\n%1").arg(snapshotText)));
     }
     if (datasetDetailLabel_) {
         datasetDetailLabel_->setText(hasCommittedIdentity
@@ -645,8 +629,8 @@ void MainWindow::updateTrainingSelectionSummary()
                     state_.dataset.currentDatasetId.left(12), snapshotText)
             : (datasetPath.isEmpty()
                 ? uiText("选择已登记快照或导入数据集后显示格式、校验状态和最近报告。")
-                : uiText("格式：%1 | 状态：%2 | 路径：%3\n%4")
-                    .arg(datasetFormatLabel(datasetFormat), state, detailPathText, snapshotText)));
+                : uiText("格式：%1 | 状态：%2\n外部数据仅停留在导入边界，请先创建并提交 Snapshot Artifact。\n%3")
+                    .arg(datasetFormatLabel(datasetFormat), state, snapshotText)));
     }
     if (trainingBackendHintLabel_ && trainingBackendCombo_) {
         trainingBackendHintLabel_->setText(trainingBackendDescription(trainingBackendCombo_->currentData().toString()));

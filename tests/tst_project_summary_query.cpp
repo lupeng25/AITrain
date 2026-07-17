@@ -85,7 +85,7 @@ bool registerSnapshot(aitrain::ProjectStore& storage,
     snapshot.datasetId = datasetId;
     snapshot.taskId = taskId;
     snapshot.artifactId = artifactId;
-    snapshot.rootPath = QDir(root).filePath(QStringLiteral("artifacts/%1").arg(artifactId.toString()));
+    snapshot.rootPath = QDir(root).filePath(QStringLiteral("committed/%1").arg(artifactId.toString()));
     snapshot.datasetFormat = QStringLiteral("yolo_detection");
     snapshot.driverId = QStringLiteral("yolo_detection");
     snapshot.driverVersion = QStringLiteral("2.0");

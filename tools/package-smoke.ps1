@@ -238,4 +238,25 @@ if ($capabilityCheck.capabilityCount -lt 1) {
 }
 Write-Host ("  [ok] built-in capabilities={0}" -f $capabilityCheck.capabilityCount)
 
+Write-Host "Package smoke: workspace first-start and reopen" -ForegroundColor Cyan
+$workspaceSelfCheckRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("aitrain-package-workspace-" + [guid]::NewGuid().ToString("N"))
+try {
+    New-Item -ItemType Directory -Path $workspaceSelfCheckRoot -Force | Out-Null
+    $workspaceSelfCheckOutput = & $workerExe --workspace-self-check --workspace $workspaceSelfCheckRoot
+    if ($LASTEXITCODE -ne 0) {
+        throw "Packaged worker workspace self-check failed with exit code $LASTEXITCODE"
+    }
+    $workspaceSelfCheck = $workspaceSelfCheckOutput | Select-Object -Last 1 | ConvertFrom-Json
+    if ((-not $workspaceSelfCheck.ok) -or (-not $workspaceSelfCheck.firstOpen) -or (-not $workspaceSelfCheck.secondOpen) -or (-not $workspaceSelfCheck.layoutValid) -or (-not $workspaceSelfCheck.stagingClean) -or $workspaceSelfCheck.projectsTablePresent -or ($workspaceSelfCheck.storedSchemaVersion -ne 11)) {
+        throw "Workspace first-start self-check reported an invalid result"
+    }
+    Write-Host ("  [ok] firstOpen={0}, secondOpen={1}, schema={2}" -f `
+        $workspaceSelfCheck.firstOpen, $workspaceSelfCheck.secondOpen, $workspaceSelfCheck.storedSchemaVersion)
+}
+finally {
+    if (Test-Path -LiteralPath $workspaceSelfCheckRoot) {
+        Remove-Item -LiteralPath $workspaceSelfCheckRoot -Recurse -Force
+    }
+}
+
 Write-Host "Package smoke passed: $prefixFull" -ForegroundColor Green

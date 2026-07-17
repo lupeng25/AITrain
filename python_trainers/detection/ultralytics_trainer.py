@@ -2,8 +2,8 @@
 """Ultralytics YOLO detection trainer adapter for AITrain Studio.
 
 This adapter intentionally keeps the official training implementation in
-Python while AITrain Worker owns process lifetime, request routing, and JSONL
-event forwarding.
+Python while AITrain Worker owns process lifetime, request routing, and the
+authenticated loopback event channel.
 """
 
 from __future__ import annotations

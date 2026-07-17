@@ -27,9 +27,10 @@ foundation → domain → protocol/storage/artifact/process
 ```text
 <project>/.aitrain/project.sqlite
 <project>/.aitrain/artifacts
-<project>/.aitrain/artifact-transactions
-<project>/.aitrain/scratch
-<project>/.aitrain/quarantine
+<project>/.aitrain/artifacts/committed/<artifact-id>/
+<project>/.aitrain/artifacts/.staging/<artifact-id>/
+<project>/.aitrain/artifacts/.staging-meta/<artifact-id>.json
+<project>/.aitrain/.runtime-staging
 ```
 
 ## 执行阶段
@@ -45,8 +46,8 @@ foundation → domain → protocol/storage/artifact/process
 
 ### 阶段 2：数据库、任务状态和事件事务
 
-- 新建最终 schema 1，不迁移旧数据库。
-- 项目名称、根目录和 ID 写入 SQLite，删除 GUI 内存事实源。
+- 新建最终 schema 11，不迁移旧数据库。
+- 项目根由 `ProjectWorkspace` 绑定到 `<project>/.aitrain`；不建立未使用的 `projects` 表，也不保留 GUI 第二套项目元数据事实源。
 - 引入 `TaskTerminalResolver`，规定取消优先规则。
 - 引入单一 `applyAdapterEvent` 事务入口，事件、Metric、Artifact link、Workflow Step 和终态必须同事务提交。
 - sequence 使用十进制字符串传输，数据库使用有界整数。
@@ -62,7 +63,7 @@ foundation → domain → protocol/storage/artifact/process
 - Dataset manifest 统一校验 `rootHash`、`fileCount`、`totalBytes`、driver、format 和逐文件 hash。
 - Dataset Conversion 保留源相对目录，大小写折叠冲突在 Plan 阶段失败。
 - Runtime Delivery 只消费已提交 sample Artifact，不接受外部裸样本路径。
-- `.aitrain/scratch` 以 task owner 清单管理并在恢复时清理。
+- `.aitrain/.runtime-staging` 只用于 Worker 运行期临时内容，启动恢复后必须为空。
 
 验收：符号链接越界、manifest 篡改、转换 basename 冲突、样本 TOCTOU、Artifact 各 journal 故障点和崩溃恢复测试通过。
 
@@ -80,7 +81,7 @@ foundation → domain → protocol/storage/artifact/process
 ### 阶段 5：异步项目恢复和 GUI Presenter
 
 - Project Open 使用 `Closed → Probing → Recovering → Ready/Failed` 状态机。
-- Artifact journal、Evidence、Interrupted Task 和 scratch 恢复由 Worker 执行。
+- Artifact journal、Evidence、Interrupted Task 和 runtime staging 恢复由 Worker 执行。
 - GUI 在恢复期间禁用写操作，不在 GUI 线程 hash 或遍历大目录。
 - 所有任务终态由 `WorkerResult` 三态驱动。
 - 推理展示只消费 Presenter DTO，不读取 Worker payload 或裸路径。
@@ -89,7 +90,7 @@ foundation → domain → protocol/storage/artifact/process
 
 ### 阶段 6：验收、打包和文档
 
-- 删除旧 `startTrain`、`runCustomerOcrAcceptance`、`semantic-onnx-smoke` 和旧 Phase smoke 引用。
+- 已删除旧 `startTrain`、`runCustomerOcrAcceptance`、`semantic-onnx-smoke` 和旧 Phase smoke 引用；当前实现只保留统一 Workflow 与 Runtime Delivery 入口。
 - package smoke 按 `base/onnx/yolo/smp/anomaly/ocr/ncnn/tensorrt` profile 检查，缺少必需依赖必须失败。
 - 修复 VS Code Worker 调试配置和 Harness stale path。
 - 重写活动架构、状态、验收和训练后端文档。

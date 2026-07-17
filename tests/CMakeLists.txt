@@ -653,31 +653,31 @@ aitrain_copy_qt_platform_runtime(aitrain_delivery_acceptance_ui_tests)
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
     add_test(NAME aitrain_yolo_telemetry_python_tests
-        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_yolo_telemetry.py"
+        COMMAND "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/test_yolo_telemetry.py" -q
     )
     set_tests_properties(aitrain_yolo_telemetry_python_tests PROPERTIES
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     )
     add_test(NAME aitrain_smp_semantic_python_tests
-        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_smp_semantic_segmentation.py"
+        COMMAND "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/test_smp_semantic_segmentation.py" -q
     )
     set_tests_properties(aitrain_smp_semantic_python_tests PROPERTIES
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     )
     add_test(NAME aitrain_anomalib_adapter_python_tests
-        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_anomalib_adapter.py"
+        COMMAND "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/test_anomalib_adapter.py" -q
     )
     set_tests_properties(aitrain_anomalib_adapter_python_tests PROPERTIES
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     )
     add_test(NAME aitrain_adapter_sdk_python_tests
-        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_adapter_sdk.py"
+        COMMAND "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/test_adapter_sdk.py" -q
     )
     set_tests_properties(aitrain_adapter_sdk_python_tests PROPERTIES
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     )
     add_test(NAME aitrain_paddleocr_python_tests
-        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_paddleocr.py"
+        COMMAND "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/test_paddleocr.py" -q
     )
     set_tests_properties(aitrain_paddleocr_python_tests PROPERTIES
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"

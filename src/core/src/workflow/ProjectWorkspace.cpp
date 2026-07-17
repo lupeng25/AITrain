@@ -681,6 +681,20 @@ bool ProjectWorkspace::open(const QString& projectRoot, QString* error)
         if (error) *error = QStringLiteral("无法创建  项目工作区：%1").arg(candidate);
         return false;
     }
+    const QString artifactRoot = QDir(candidate).filePath(QStringLiteral("artifacts"));
+    const QStringList workspaceDirectories = {
+        artifactRoot,
+        QDir(artifactRoot).filePath(QStringLiteral(".staging")),
+        QDir(artifactRoot).filePath(QStringLiteral(".staging-meta")),
+        QDir(artifactRoot).filePath(QStringLiteral("committed")),
+        QDir(candidate).filePath(QStringLiteral(".runtime-staging"))
+    };
+    for (const QString& directory : workspaceDirectories) {
+        if (!QDir().mkpath(directory)) {
+            if (error) *error = QStringLiteral("无法创建项目工作区目录：%1").arg(directory);
+            return false;
+        }
+    }
     if (!storage_.open(QDir(candidate).filePath(QStringLiteral("project.sqlite")), error)) {
         close();
         return false;

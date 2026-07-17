@@ -753,11 +753,6 @@ void MainWindow::loadSampleReviewFile()
         QMessageBox::warning(this, uiText("样本复核"), uiText("请先打开项目。"));
         return;
     }
-    aitrain::ArtifactSnapshot artifact;
-    if (!workspace_.artifact(artifactId, &artifact, &error)) {
-        QMessageBox::warning(this, uiText("样本复核"), uiText("找不到已提交复核 Artifact：%1").arg(error));
-        return;
-    }
     const QStringList candidates = {
         QStringLiteral("problem_samples.json"),
         QStringLiteral("quality_analysis.json"),
@@ -767,7 +762,7 @@ void MainWindow::loadSampleReviewFile()
     aitrain::ArtifactFilePreview preview;
     QString selectedFile;
     for (const QString& candidate : candidates) {
-        if (workspace_.readCommittedArtifactFile(artifact, candidate, &preview, 4 * 1024 * 1024, &error)) {
+        if (queryService_.artifactFilePreview(artifactId, candidate, &preview, 4 * 1024 * 1024, &error)) {
             selectedFile = candidate;
             break;
         }

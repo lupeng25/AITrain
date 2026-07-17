@@ -200,12 +200,15 @@ def test_request_file_parsing_accepts_utf8_bom():
 
 def test_efficientad_model_size_normalization():
     adapter = load_adapter()
-    assert adapter.normalize_efficientad_model_size("s") == "small"
     assert adapter.normalize_efficientad_model_size("small") == "small"
-    assert adapter.normalize_efficientad_model_size("m") == "medium"
     assert adapter.normalize_efficientad_model_size("medium") == "medium"
     assert adapter.normalize_efficientad_model_size("") == "small"
-    assert adapter.normalize_efficientad_model_size("unexpected") == "small"
+    try:
+        adapter.normalize_efficientad_model_size("unexpected")
+    except ValueError as error:
+        assert "efficientad_model_size_invalid" in str(error)
+    else:
+        raise AssertionError("unexpected EfficientAD model size must be rejected")
 
 
 def test_train_forces_efficientad_batch_size_one():

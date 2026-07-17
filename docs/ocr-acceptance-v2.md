@@ -4,7 +4,7 @@
 
 OCR Acceptance V2 只汇总已经进入 V2 Artifact Store 的 PaddleOCR Det、Rec、System 官方报告事实。它不接收裸报告路径，不运行 PaddleOCR，不读取 GUI 全局状态，也不把公开数据、生成数据或 smoke 结果转换成客户域生产结论。
 
-当前范围包含 Acceptance Core 与受控报告 Packager/Importer Core。GUI、Worker、客户数据采集以及旧 `runCustomerOcrAcceptance` 的删除仍属于后续任务。
+当前范围包含 Acceptance Core、受控报告 Packager/Importer Core，以及已经接通的 GUI/Worker 两步 Workflow。旧 `runCustomerOcrAcceptance` Socket 链路已删除；客户数据仍必须由显式 Snapshot 导入边界提供，不能把公开数据或 smoke 结果当作客户域结论。
 
 ## 固定步骤
 

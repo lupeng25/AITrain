@@ -20,7 +20,9 @@ target_compile_definitions(aitrain_domain
 
 add_library(aitrain_protocol STATIC
     include/aitrain/protocol/Protocol.h
+    include/aitrain/protocol/ProtocolSanitizer.h
     src/protocol/Protocol.cpp
+    src/protocol/ProtocolSanitizer.cpp
 )
 
 target_include_directories(aitrain_protocol

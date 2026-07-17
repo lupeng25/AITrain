@@ -21,6 +21,7 @@ namespace {
 
 constexpr auto kStagingDirectoryName = ".staging";
 constexpr auto kStagingMetadataDirectoryName = ".staging-meta";
+constexpr auto kCommittedDirectoryName = "committed";
 constexpr auto kJournalSchemaVersion = 1;
 constexpr auto kPhaseBegun = "begun";
 constexpr auto kPhasePrepared = "prepared";
@@ -447,7 +448,8 @@ bool ArtifactStore::commit(const ArtifactId& artifactId,
         if (error) *error = QStringLiteral("Artifact 提交已取消。");
         return false;
     }
-    const QString finalPath = QDir(rootPath_).filePath(QStringLiteral("artifacts/%1").arg(artifactId.toString()));
+    const QString finalPath = QDir(rootPath_).filePath(QStringLiteral("%1/%2")
+        .arg(QString::fromLatin1(kCommittedDirectoryName), artifactId.toString()));
     if (QFileInfo::exists(finalPath) || !QDir().mkpath(QFileInfo(finalPath).absolutePath())) {
         if (error) {
             *error = QStringLiteral("Artifact 目标路径不可用：%1").arg(finalPath);
@@ -515,7 +517,8 @@ bool ArtifactStore::discardCommitted(const ArtifactId& artifactId, ProjectStore*
         return false;
     }
     if (!storage->removeUnreferencedArtifact(artifactId, error)) return false;
-    const QString finalPath = QDir(rootPath_).filePath(QStringLiteral("artifacts/%1").arg(artifactId.toString()));
+    const QString finalPath = QDir(rootPath_).filePath(QStringLiteral("%1/%2")
+        .arg(QString::fromLatin1(kCommittedDirectoryName), artifactId.toString()));
     if (QFileInfo::exists(finalPath) && !QDir(finalPath).removeRecursively()) {
         if (error) *error = QStringLiteral("Artifact 元数据已删除，但无法清理磁盘目录：%1").arg(finalPath);
         return false;
@@ -532,7 +535,7 @@ bool ArtifactStore::recoverStaging(ProjectStore* storage, QStringList* diagnosti
         return false;
     }
     const QDir stagingRoot(QDir(rootPath_).filePath(QString::fromLatin1(kStagingDirectoryName)));
-    const QDir finalRoot(QDir(rootPath_).filePath(QStringLiteral("artifacts")));
+    const QDir finalRoot(QDir(rootPath_).filePath(QString::fromLatin1(kCommittedDirectoryName)));
     const QDir metadataRoot(QDir(rootPath_).filePath(QString::fromLatin1(kStagingMetadataDirectoryName)));
     if (metadataRoot.exists()) {
         const QFileInfoList metadataFiles = metadataRoot.entryInfoList(QStringList() << QStringLiteral("*.json"), QDir::Files, QDir::Name);
@@ -644,7 +647,8 @@ QString ArtifactStore::rootPath() const
 QString ArtifactStore::artifactPath(const ArtifactId& artifactId) const
 {
     if (!artifactId.isValid()) return {};
-    return QDir(rootPath_).filePath(QStringLiteral("artifacts/%1").arg(artifactId.toString()));
+    return QDir(rootPath_).filePath(QStringLiteral("%1/%2")
+        .arg(QString::fromLatin1(kCommittedDirectoryName), artifactId.toString()));
 }
 
 } // namespace aitrain

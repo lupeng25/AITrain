@@ -55,6 +55,7 @@ QWidget* MainWindow::buildDatasetPage()
     auto* inputPanel = new InfoPanel(QStringLiteral("数据集操作"));
     auto* form = new QFormLayout;
     datasetPathEdit_ = new QLineEdit;
+    datasetPathEdit_->setObjectName(QStringLiteral("DatasetPathEdit"));
     auto* browseButton = new QPushButton(QStringLiteral("选择数据集"));
     connect(browseButton, &QPushButton::clicked, this, &MainWindow::browseDataset);
 
@@ -288,6 +289,7 @@ QWidget* MainWindow::buildDatasetPage()
     auto* splitter = new QSplitter(Qt::Horizontal);
     auto* resultPanel = new InfoPanel(QStringLiteral("所选数据集详情"));
     datasetDetailLabel_ = inlineStatusLabel(QStringLiteral("选择或导入数据集后显示格式、样本数、校验状态和最近报告。"));
+    datasetDetailLabel_->setObjectName(QStringLiteral("DatasetDetailLabel"));
     validationSummaryLabel_ = mutedLabel(QStringLiteral("请选择数据集目录和格式，然后执行校验。"));
     allowLabelToShrink(datasetDetailLabel_);
     allowLabelToShrink(validationSummaryLabel_);

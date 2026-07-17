@@ -3,6 +3,7 @@
 
 #include "aitrain/core/CapabilityRegistry.h"
 #include "aitrain/core/WorkerProtocol.h"
+#include "aitrain/protocol/ProtocolSanitizer.h"
 #include "aitrain/runtime/OnnxRuntimeAdapter.h"
 #include "aitrain/runtime/RuntimeInvocation.h"
 #include "aitrain/workflow/TrainingWorkflowProfile.h"
@@ -422,7 +423,7 @@ void WorkerSession::runTrainingWorkflowLocalStep(const aitrain::TrainingWorkflow
                             send(wp::event::artifact(), QJsonObject{{wp::field::taskId(), activeTaskId_}, {QStringLiteral("kind"), it.key()},
                                 {QStringLiteral("artifactId"), bundle.artifactId.toString()},
                                 {QStringLiteral("relativePath"), QDir(QDir(trainingWorkspace_->workspacePath())
-                                    .filePath(QStringLiteral("artifacts/artifacts/%1").arg(bundle.artifactId.toString())))
+                                    .filePath(QStringLiteral("artifacts/committed/%1").arg(bundle.artifactId.toString())))
                                     .relativeFilePath(it.value())},
                                 {wp::field::message(), QStringLiteral(" 部署验证 Artifact。")}});
                         }
@@ -455,7 +456,7 @@ void WorkerSession::runTrainingWorkflowLocalStep(const aitrain::TrainingWorkflow
                 send(wp::event::artifact(), QJsonObject{{wp::field::taskId(), activeTaskId_}, {QStringLiteral("kind"), it.key()},
                     {QStringLiteral("artifactId"), report.artifactId.toString()},
                     {QStringLiteral("relativePath"), QDir(QDir(trainingWorkspace_->workspacePath())
-                        .filePath(QStringLiteral("artifacts/artifacts/%1").arg(report.artifactId.toString())))
+                        .filePath(QStringLiteral("artifacts/committed/%1").arg(report.artifactId.toString())))
                         .relativeFilePath(it.value())},
                     {wp::field::message(), QStringLiteral(" 训练交付报告 Artifact。")}});
             }
@@ -480,7 +481,7 @@ void WorkerSession::runTrainingWorkflowLocalStep(const aitrain::TrainingWorkflow
 
 void WorkerSession::forwardTrainingWorkflowAdapterEvent(const aitrain::ProtocolEnvelope& event)
 {
-    QJsonObject payload = event.payload;
+    QJsonObject payload = aitrain::protocol::redactPhysicalPathFields(event.payload);
     payload.insert(wp::field::taskId(), activeTaskId_);
     payload.insert(QStringLiteral("workflowEventKind"), event.kind);
     if (event.kind == QStringLiteral("event.log")) {

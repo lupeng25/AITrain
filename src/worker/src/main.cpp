@@ -4,12 +4,19 @@
 #include "aitrain/core/Deployment.h"
 #include "aitrain/core/VisionModelRuntime.h"
 #include "aitrain/runtime/RuntimeCapabilityMatrix.h"
+#include "aitrain/storage/ProjectStore.h"
+#include "aitrain/workflow/ProjectWorkspace.h"
 
+#include <QDir>
 #include <QCommandLineParser>
 #include <QCoreApplication>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSqlDatabase>
+#include <QSqlError>
+#include <QSqlQuery>
 #include <QTextStream>
 
 namespace {
@@ -65,6 +72,122 @@ int runBuiltinCapabilityCheck()
     return result.value(QStringLiteral("ok")).toBool() ? 0 : 4;
 }
 
+int runWorkspaceSelfCheck(const QString& requestedRoot)
+{
+    const QString root = QDir::cleanPath(QDir::fromNativeSeparators(requestedRoot.trimmed()));
+    QJsonObject result;
+    result.insert(QStringLiteral("schemaVersion"), aitrain::ProjectStore::schemaVersion());
+    if (root.isEmpty()) {
+        result.insert(QStringLiteral("ok"), false);
+        result.insert(QStringLiteral("error"), QStringLiteral("缺少 --workspace 参数。"));
+        writeJsonLine(result);
+        return 2;
+    }
+    const QFileInfo rootInfo(root);
+    if (rootInfo.exists() && !rootInfo.isDir()) {
+        result.insert(QStringLiteral("ok"), false);
+        result.insert(QStringLiteral("error"), QStringLiteral("workspace 必须是目录。"));
+        writeJsonLine(result);
+        return 2;
+    }
+    if (rootInfo.exists()
+        && !QDir(root).entryInfoList(QDir::NoDotAndDotDot | QDir::AllEntries,
+            QDir::Name).isEmpty()) {
+        result.insert(QStringLiteral("ok"), false);
+        result.insert(QStringLiteral("error"), QStringLiteral("workspace-self-check 只允许在空目录执行。"));
+        writeJsonLine(result);
+        return 2;
+    }
+
+    const auto fail = [&result](const QString& message) {
+        result.insert(QStringLiteral("ok"), false);
+        result.insert(QStringLiteral("error"), message);
+        writeJsonLine(result);
+        return 4;
+    };
+
+    aitrain::ProjectWorkspace firstWorkspace;
+    QString error;
+    if (!firstWorkspace.open(root, &error)) {
+        return fail(QStringLiteral("首次打开工作区失败：%1").arg(error));
+    }
+    const QString metadataRoot = firstWorkspace.workspacePath();
+    firstWorkspace.close();
+    result.insert(QStringLiteral("firstOpen"), true);
+
+    const QString databasePath = QDir(metadataRoot).filePath(QStringLiteral("project.sqlite"));
+    const QString artifactRoot = QDir(metadataRoot).filePath(QStringLiteral("artifacts"));
+    const QString stagingRoot = QDir(artifactRoot).filePath(QStringLiteral(".staging"));
+    const QString stagingMetadataRoot = QDir(artifactRoot).filePath(QStringLiteral(".staging-meta"));
+    const QString committedRoot = QDir(artifactRoot).filePath(QStringLiteral("committed"));
+    const QString runtimeStagingRoot = QDir(metadataRoot).filePath(QStringLiteral(".runtime-staging"));
+    const bool layoutValid = QFileInfo::exists(databasePath)
+        && QFileInfo(databasePath).isFile()
+        && QDir(artifactRoot).exists()
+        && QDir(stagingRoot).exists()
+        && QDir(stagingMetadataRoot).exists()
+        && QDir(committedRoot).exists()
+        && QDir(runtimeStagingRoot).exists();
+    result.insert(QStringLiteral("layoutValid"), layoutValid);
+    if (!layoutValid) {
+        return fail(QStringLiteral("首次打开后工作区目录结构不完整。"));
+    }
+
+    const QString connectionName = QStringLiteral("aitrain_workspace_self_check_%1")
+        .arg(QUuid::createUuid().toString(QUuid::Id128));
+    int storedSchemaVersion = 0;
+    bool hasProjectsTable = false;
+    {
+        QSqlDatabase database = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+        database.setDatabaseName(databasePath);
+        if (!database.open()) {
+            return fail(QStringLiteral("无法读取首启数据库：%1").arg(database.lastError().text()));
+        }
+        QSqlQuery schemaQuery(database);
+        if (!schemaQuery.exec(QStringLiteral("select version from schema_info limit 1"))
+            || !schemaQuery.next()) {
+            return fail(QStringLiteral("首启数据库缺少 schema 版本记录。"));
+        }
+        storedSchemaVersion = schemaQuery.value(0).toInt();
+        QSqlQuery projectsQuery(database);
+        if (!projectsQuery.exec(QStringLiteral(
+                "select 1 from sqlite_master where type = 'table' and name = 'projects'"))) {
+            return fail(QStringLiteral("无法检查 projects 死表：%1").arg(projectsQuery.lastError().text()));
+        }
+        hasProjectsTable = projectsQuery.next();
+        database.close();
+    }
+    QSqlDatabase::removeDatabase(connectionName);
+    result.insert(QStringLiteral("storedSchemaVersion"), storedSchemaVersion);
+    result.insert(QStringLiteral("projectsTablePresent"), hasProjectsTable);
+    if (storedSchemaVersion != aitrain::ProjectStore::schemaVersion() || hasProjectsTable) {
+        return fail(QStringLiteral("首启数据库 schema 或死表检查失败。"));
+    }
+
+    aitrain::ProjectWorkspace secondWorkspace;
+    if (!secondWorkspace.open(root, &error)) {
+        return fail(QStringLiteral("关闭后再次打开工作区失败：%1").arg(error));
+    }
+    secondWorkspace.close();
+    result.insert(QStringLiteral("secondOpen"), true);
+
+    const bool stagingClean = QDir(stagingRoot).entryInfoList(
+        QDir::NoDotAndDotDot | QDir::AllEntries, QDir::Name).isEmpty()
+        && QDir(stagingMetadataRoot).entryInfoList(
+            QDir::NoDotAndDotDot | QDir::AllEntries, QDir::Name).isEmpty()
+        && QDir(runtimeStagingRoot).entryInfoList(
+            QDir::NoDotAndDotDot | QDir::AllEntries, QDir::Name).isEmpty();
+    result.insert(QStringLiteral("stagingClean"), stagingClean);
+    result.insert(QStringLiteral("ok"), stagingClean);
+    if (!stagingClean) {
+        result.insert(QStringLiteral("error"), QStringLiteral("首启/二次打开后发现未清理的 staging。"));
+        writeJsonLine(result);
+        return 4;
+    }
+    writeJsonLine(result);
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -86,12 +209,18 @@ int main(int argc, char* argv[])
         QStringLiteral("self-check"), QStringLiteral("执行运行时依赖自检并输出 JSON。"));
     QCommandLineOption capabilityCheckOption(
         QStringLiteral("builtin-capabilities"), QStringLiteral("输出内置能力注册表。"));
+    QCommandLineOption workspaceSelfCheckOption(
+        QStringLiteral("workspace-self-check"), QStringLiteral("验证空项目首次打开、二次打开及工作区目录。"));
+    QCommandLineOption workspaceOption(
+        QStringLiteral("workspace"), QStringLiteral("workspace-self-check 使用的空项目目录。"), QStringLiteral("path"));
     parser.addOption(serverOption);
     parser.addOption(requestIdOption);
     parser.addOption(taskIdOption);
     parser.addOption(controlTokenOption);
     parser.addOption(selfCheckOption);
     parser.addOption(capabilityCheckOption);
+    parser.addOption(workspaceSelfCheckOption);
+    parser.addOption(workspaceOption);
     parser.process(app);
 
     if (parser.isSet(selfCheckOption)) {
@@ -99,6 +228,9 @@ int main(int argc, char* argv[])
     }
     if (parser.isSet(capabilityCheckOption)) {
         return runBuiltinCapabilityCheck();
+    }
+    if (parser.isSet(workspaceSelfCheckOption)) {
+        return runWorkspaceSelfCheck(parser.value(workspaceOption));
     }
 
     const QString serverName = parser.value(serverOption);

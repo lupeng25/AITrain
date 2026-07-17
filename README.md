@@ -16,7 +16,7 @@ This repository implements the first usable platform layer from the requested pl
 - Segmentation dataset admission with dataset loading, polygon-to-mask conversion, overlay preview, and Worker metrics; model training is routed through the official Ultralytics segmentation backend.
 - Worker-managed Python trainer adapters for official Ultralytics YOLO detection/segmentation/OBB, SMP semantic segmentation, Anomalib PatchCore/EfficientAD, and official PaddleOCR Det/Rec train/export/inference orchestration.
 - Delivery-closeout workbench surfaces for sample review, delivery acceptance, customer OCR validation, diagnostics, deployment validation, and model-card/report generation.
-- QtTest coverage for JSONL protocol, project repository behavior, detection workflow, and segmentation admission behavior.
+- QtTest coverage for Protocol V2, ProjectStore/Query Service behavior, detection workflow, and segmentation admission behavior.
 
 Production training is routed through Worker-managed Python trainer subprocesses: Ultralytics for YOLO detection/segmentation/OBB, SMP for dedicated semantic segmentation, Anomalib for PatchCore/EfficientAD anomaly workflows, and PaddleOCR official adapters for Det/Rec. The legacy tiny detector, small PaddleOCR CTC trainer, C++ segmentation/OCR training scaffolds, and shipped `python_mock` trainer have been physically removed from the product path. RTX 4090 D TensorRT acceptance has passing evidence for the current validation lane; clean Windows package acceptance and any package-root TensorRT rerun still require returned external evidence before they can be marked passed.
 
@@ -75,7 +75,7 @@ Build-time licensing knobs:
 
 ## Project Layout
 
-- `src/core`: capability registry, protocol, data workflows, and SQLite repository.
+- `src/core`: capability registry, Protocol V2, data workflows, ProjectStore, Query Service, and Artifact Store.
 - `src/app`: Qt Widgets desktop app.
 - `src/license_generator`: internal Qt license generator tool.
 - `src/worker`: isolated task runner.

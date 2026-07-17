@@ -1,5 +1,6 @@
 #include "aitrain/storage/ProjectStore.h"
 #include "aitrain/protocol/Protocol.h"
+#include "aitrain/protocol/ProtocolSanitizer.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -18,7 +19,7 @@ namespace aitrain {
 namespace {
 
 constexpr qint64 kFirstHostStateEventSequence = 4000000000000000000LL;
-constexpr int kStorageSchemaVersion = 1;
+constexpr int kStorageSchemaVersion = 11;
 
 QString terminalPolicyText(WorkflowTerminalPolicy policy)
 {
@@ -361,6 +362,11 @@ ProjectStore::ProjectStore()
 {
 }
 
+int ProjectStore::schemaVersion()
+{
+    return kStorageSchemaVersion;
+}
+
 ProjectStore::~ProjectStore()
 {
     close();
@@ -442,7 +448,6 @@ bool ProjectStore::initialize(QString* error)
             .arg(kStorageSchemaVersion),
         QStringLiteral("insert into schema_info(version) select %1 where not exists(select 1 from schema_info)")
             .arg(kStorageSchemaVersion),
-        QStringLiteral("create table if not exists projects (id text primary key, name text not null, root_path text not null unique, created_at text not null)"),
         QStringLiteral("create table if not exists datasets (id text primary key, dataset_format text not null, created_at text not null)"),
         QStringLiteral("create table if not exists dataset_versions (id text primary key, dataset_id text not null references datasets(id) on delete restrict, root_hash text not null check(length(root_hash) = 64), created_at text not null, unique(dataset_id, root_hash))"),
         QStringLiteral("create table if not exists dataset_snapshots (id text primary key, dataset_version_id text not null references dataset_versions(id) on delete restrict, task_id text not null references tasks(id) on delete restrict, artifact_id text not null unique references artifacts(id) on delete restrict, root_path text not null, driver_id text not null, driver_version text not null, manifest_sha256 text not null check(length(manifest_sha256) = 64), file_count integer not null check(file_count >= 0), total_bytes integer not null check(total_bytes >= 0), created_at text not null)"),
@@ -521,7 +526,8 @@ bool ProjectStore::appendStateEvent(const TaskId& taskId,
     query.bindValue(QStringLiteral(":sequence"), sequenceQuery.value(0).toLongLong());
     query.bindValue(QStringLiteral(":kind"), QStringLiteral("task.state_changed"));
     query.bindValue(QStringLiteral(":occurred_at"), utcText(occurredAt));
-    query.bindValue(QStringLiteral(":payload_json"), QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
+    query.bindValue(QStringLiteral(":payload_json"), QString::fromUtf8(
+        QJsonDocument(protocol::redactPhysicalPathFields(payload)).toJson(QJsonDocument::Compact)));
     if (query.exec()) {
         return true;
     }
@@ -726,7 +732,8 @@ bool ProjectStore::recordProtocolEvent(const TaskId& taskId,
     query.bindValue(QStringLiteral(":sequence"), static_cast<qint64>(sequence));
     query.bindValue(QStringLiteral(":kind"), kind.trimmed());
     query.bindValue(QStringLiteral(":occurred_at"), utcText(occurredAt));
-    query.bindValue(QStringLiteral(":payload_json"), QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
+    query.bindValue(QStringLiteral(":payload_json"), QString::fromUtf8(
+        QJsonDocument(protocol::redactPhysicalPathFields(payload)).toJson(QJsonDocument::Compact)));
     if (query.exec()) {
         if (db_.commit()) return true;
         if (error) *error = db_.lastError().text();
@@ -767,8 +774,8 @@ bool ProjectStore::applyProtocolEvent(const ProtocolEnvelope& envelope,
         return false;
     }
 
-    const QString payloadJson = QString::fromUtf8(
-        QJsonDocument(envelope.payload).toJson(QJsonDocument::Compact));
+    const QString payloadJson = QString::fromUtf8(QJsonDocument(
+        protocol::redactPhysicalPathFields(envelope.payload)).toJson(QJsonDocument::Compact));
     if (!db_.transaction()) {
         if (error) *error = db_.lastError().text();
         return false;
@@ -1272,7 +1279,7 @@ bool ProjectStore::registerDatasetSnapshot(DatasetSnapshotRecord* snapshot, QStr
     const QString rootPath = QDir::cleanPath(QDir(snapshot->rootPath).absolutePath());
     const QString datasetFormat = snapshot->datasetFormat.trimmed();
     const QString expectedRootPath = QDir::cleanPath(QDir(artifactStoreRoot_).filePath(
-        QStringLiteral("artifacts/%1").arg(snapshot->artifactId.toString())));
+        QStringLiteral("committed/%1").arg(snapshot->artifactId.toString())));
     if (rootPath.compare(expectedRootPath, Qt::CaseInsensitive) != 0) {
         if (error) *error = QStringLiteral("数据快照可执行根必须属于其 committed Snapshot Artifact。");
         db_.rollback();

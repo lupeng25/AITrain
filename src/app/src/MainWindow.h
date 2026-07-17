@@ -132,7 +132,6 @@ private:
     QString workerExecutablePath() const;
     QString defaultProjectPath() const;
     QString configuredDefaultProjectPath() const;
-    void ensureProjectSubdirs(const QString& rootPath);
     void appendLog(const QString& text);
     void loadCapabilityCombos();
     QString currentDatasetFormat() const;
@@ -166,8 +165,6 @@ private:
     void storeLanguagePreference(const QString& languageCode);
     void updateLanguageButtonState();
     void storeDefaultProjectPathPreference(const QString& path);
-    void openLocalDirectory(const QString& path);
-    void copyLocalPath(const QString& path, const QString& label);
     void updateAnnotationToolStatus();
     void applyTaskFilters();
     void ensureVisibleTaskSelection();
@@ -253,7 +250,6 @@ private:
     QLabel* environmentMissingSummaryLabel_ = nullptr;
     QLabel* environmentUncheckedSummaryLabel_ = nullptr;
     QLabel* settingsDefaultProjectPathStatusLabel_ = nullptr;
-    QLabel* settingsCurrentProjectPathLabel_ = nullptr;
     QLineEdit* settingsDefaultProjectPathEdit_ = nullptr;
     QTableWidget* recentTasksTable_ = nullptr;
     QTableWidget* taskQueueTable_ = nullptr;
@@ -339,7 +335,6 @@ private:
     QLineEdit* inferenceSampleSnapshotIdEdit_ = nullptr;
     QLineEdit* inferenceSampleSnapshotArtifactIdEdit_ = nullptr;
     QLineEdit* inferenceSampleRelativePathEdit_ = nullptr;
-    QLineEdit* inferenceOutputEdit_ = nullptr;
     QLabel* inferenceResultLabel_ = nullptr;
     QLabel* inferenceOverlayLabel_ = nullptr;
     QCheckBox* horizontalFlipCheck_ = nullptr;

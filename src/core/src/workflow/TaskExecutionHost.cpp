@@ -1,5 +1,7 @@
 #include "aitrain/workflow/TaskExecutionHost.h"
 
+#include "aitrain/protocol/ProtocolSanitizer.h"
+
 #include <QDateTime>
 #include <QDebug>
 #include <QDir>
@@ -157,6 +159,10 @@ QString TaskExecutionHost::lastError() const
 void TaskExecutionHost::consumeAdapterEvent(const ProtocolEnvelope& event)
 {
     QString error;
+    // 产物候选的原始 path 仅在本函数内部用于受控 staging 校验；进入
+    // Core 回调、终态记录和 Worker 转发前统一移除所有物理路径字段。
+    ProtocolEnvelope safeEvent = event;
+    safeEvent.payload = protocol::redactPhysicalPathFields(event.payload);
     const bool terminal = event.kind == QStringLiteral("event.succeeded")
         || event.kind == QStringLiteral("event.failed") || event.kind == QStringLiteral("event.canceled");
     ArtifactId outputArtifactId;
@@ -209,14 +215,14 @@ void TaskExecutionHost::consumeAdapterEvent(const ProtocolEnvelope& event)
     if ((event.kind == QStringLiteral("event.failed") || event.kind == QStringLiteral("event.canceled"))) {
         abortArtifactBundle();
     }
-    // 终态回调可能立即派发下一步或释放宿主；先转发适配器原始失败详情，
-    // 确保 GUI/Worker 能保留官方后端给出的可诊断信息。
+    // 终态回调可能立即派发下一步或释放宿主；先转发已脱敏的失败详情，
+    // 确保 GUI/Worker 能保留官方后端给出的可诊断信息而不泄露物理路径。
     if (terminal && adapterEventHandler_) {
-        adapterEventHandler_(event);
+        adapterEventHandler_(safeEvent);
     }
     const bool consumed = terminal
-        ? consumeTerminalEvent(event, outputArtifactId, &error)
-        : coordinator_->consumeWorkerEvent(event, &error);
+        ? consumeTerminalEvent(safeEvent, outputArtifactId, &error)
+        : coordinator_->consumeWorkerEvent(safeEvent, &error);
     if (!consumed) {
         lastError_ = error;
         if (adapterEventHandler_) {
@@ -250,7 +256,7 @@ void TaskExecutionHost::consumeAdapterEvent(const ProtocolEnvelope& event)
         return;
     }
     if (!terminal && adapterEventHandler_) {
-        adapterEventHandler_(event);
+        adapterEventHandler_(safeEvent);
     }
     terminalEventSeen_ = terminalEventSeen_ || terminal;
 }
@@ -335,6 +341,7 @@ bool TaskExecutionHost::stageArtifactCandidate(const ProtocolEnvelope& event, QS
     }
     const QString kind = event.payload.value(QStringLiteral("kind")).toString().trimmed();
     const QString declaredPath = event.payload.value(QStringLiteral("path")).toString().trimmed();
+    const QString declaredRelativePath = event.payload.value(QStringLiteral("relativePath")).toString().trimmed();
     if (kind.isEmpty() || declaredPath.isEmpty()) {
         if (error) {
             *error = QStringLiteral("Python Adapter 产物候选必须包含 kind 和 path。" );
@@ -373,7 +380,18 @@ bool TaskExecutionHost::stageArtifactCandidate(const ProtocolEnvelope& event, QS
         return false;
     }
     const QString safeKind = QString(kind).replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9._-]")), QStringLiteral("_"));
-    const QString relativePath = QStringLiteral("%1/%2").arg(safeKind, QFileInfo(sourceCanonical).fileName());
+    QString relativePath = declaredRelativePath;
+    if (relativePath.isEmpty()) {
+        relativePath = QStringLiteral("%1/%2").arg(safeKind, QFileInfo(sourceCanonical).fileName());
+    }
+    relativePath = QDir::fromNativeSeparators(QDir::cleanPath(relativePath));
+    const QFileInfo relativeInfo(relativePath);
+    if (relativeInfo.isAbsolute() || relativePath == QStringLiteral(".")
+        || relativePath == QStringLiteral("..") || relativePath.startsWith(QStringLiteral("../"))
+        || relativePath.contains(QStringLiteral("/../"))) {
+        if (error) *error = QStringLiteral("Python Adapter 产物 relativePath 无效。");
+        return false;
+    }
     const QString destination = QDir(artifactBundleStagingPath_).filePath(relativePath);
     if (QFileInfo::exists(destination) || !QDir().mkpath(QFileInfo(destination).absolutePath()) || !QFile::copy(sourceCanonical, destination)) {
         if (error) {

@@ -15,9 +15,13 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QImage>
+#include <QSqlDatabase>
+#include <QSqlError>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QTcpSocket>
 #include <QTest>
+#include <QUuid>
 
 #include <algorithm>
 
@@ -90,6 +94,7 @@ private slots:
     void importCreatesVerifiedModelPackageWithoutGuessingType();
     void importCancellationLeavesNoRegisteredPackageOrArtifact();
     void runtimeResolutionAcceptsOnlyRegisteredUntamperedModelPackages();
+    void projectWorkspaceFirstStartCreatesStableLayout();
     void projectWorkspaceOwnsRuntimeTaskLifecycle();
     void projectQueryServiceReadsOnlyPersistedTaskState();
     void externalAcceptanceEvidenceRequiresStrictSchemaAndStaysUnverified();
@@ -253,7 +258,7 @@ void ApplicationTests::adapterHostSynthesizesCanceledTerminalAfterForcedCancella
     // and one terminal state transition. A second synthesized terminal would
     // make this count larger and violate -307's single-terminal invariant.
     QCOMPARE(storage.eventCount(task.id, &error), 7);
-    const QDir stagingRoot(directory.filePath(QStringLiteral("store/staging")));
+    const QDir stagingRoot(directory.filePath(QStringLiteral("store/.staging")));
     QCOMPARE(stagingRoot.entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(), 0);
 #else
     QSKIP(" Adapter Host integration uses Windows Job Object.");
@@ -319,7 +324,7 @@ void ApplicationTests::adapterArtifactCandidatesCommitAsOneBundleBeforeSuccess()
     aitrain::TaskSnapshot stored;
     QVERIFY2(storage.task(task.id, &stored, &error), qPrintable(error));
     QCOMPARE(stored.state, aitrain::TaskState::Succeeded);
-    const QDir bundleRoot(directory.filePath(QStringLiteral("store/artifacts")));
+    const QDir bundleRoot(directory.filePath(QStringLiteral("store/committed")));
     const QStringList bundles = bundleRoot.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
     QCOMPARE(bundles.size(), 1);
     const QDir bundle(bundleRoot.filePath(bundles.constFirst()));
@@ -617,7 +622,7 @@ void ApplicationTests::importCancellationLeavesNoRegisteredPackageOrArtifact()
     QCOMPARE(stored.failure.code, aitrain::FailureCode::Canceled);
     QCOMPARE(storage.artifactCount(imported.task.id, &error), 0);
     QCOMPARE(storage.modelPackages(10, &error).size(), 0);
-    const QDir stagingRoot(directory.filePath(QStringLiteral("store/staging")));
+    const QDir stagingRoot(directory.filePath(QStringLiteral("store/.staging")));
     QCOMPARE(stagingRoot.entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(), 0);
 }
 
@@ -698,6 +703,59 @@ void ApplicationTests::projectWorkspaceOwnsRuntimeTaskLifecycle()
     QVERIFY2(storage.task(taskId, &persisted, &error), qPrintable(error));
     QCOMPARE(persisted.state, aitrain::TaskState::Canceled);
     QCOMPARE(persisted.failure.code, aitrain::FailureCode::Canceled);
+}
+
+void ApplicationTests::projectWorkspaceFirstStartCreatesStableLayout()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString projectRoot = QDir(directory.path()).filePath(QStringLiteral("first-start"));
+    QVERIFY(!QFileInfo::exists(projectRoot));
+
+    QString error;
+    aitrain::ProjectWorkspace firstWorkspace;
+    QVERIFY2(firstWorkspace.open(projectRoot, &error), qPrintable(error));
+    QCOMPARE(firstWorkspace.workspacePath(), QDir(projectRoot).filePath(QStringLiteral(".aitrain")));
+    firstWorkspace.close();
+
+    const QString metadataRoot = QDir(projectRoot).filePath(QStringLiteral(".aitrain"));
+    const QString artifactRoot = QDir(metadataRoot).filePath(QStringLiteral("artifacts"));
+    QVERIFY(QFileInfo::exists(QDir(metadataRoot).filePath(QStringLiteral("project.sqlite"))));
+    QVERIFY(QDir(artifactRoot).exists());
+    QVERIFY(QDir(QDir(artifactRoot).filePath(QStringLiteral(".staging"))).exists());
+    QVERIFY(QDir(QDir(artifactRoot).filePath(QStringLiteral(".staging-meta"))).exists());
+    QVERIFY(QDir(QDir(artifactRoot).filePath(QStringLiteral("committed"))).exists());
+    QVERIFY(QDir(QDir(metadataRoot).filePath(QStringLiteral(".runtime-staging"))).exists());
+
+    const QString connectionName = QStringLiteral("application_first_start_%1")
+        .arg(QUuid::createUuid().toString(QUuid::Id128));
+    {
+        QSqlDatabase database = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+        database.setDatabaseName(QDir(metadataRoot).filePath(QStringLiteral("project.sqlite")));
+        QVERIFY2(database.open(), qPrintable(database.lastError().text()));
+        QSqlQuery schema(database);
+        QVERIFY2(schema.exec(QStringLiteral("select version from schema_info limit 1")),
+            qPrintable(schema.lastError().text()));
+        QVERIFY(schema.next());
+        QCOMPARE(schema.value(0).toInt(), aitrain::ProjectStore::schemaVersion());
+        QSqlQuery projects(database);
+        QVERIFY2(projects.exec(QStringLiteral(
+            "select 1 from sqlite_master where type = 'table' and name = 'projects'")),
+            qPrintable(projects.lastError().text()));
+        QVERIFY(!projects.next());
+        database.close();
+    }
+    QSqlDatabase::removeDatabase(connectionName);
+
+    aitrain::ProjectWorkspace secondWorkspace;
+    QVERIFY2(secondWorkspace.open(projectRoot, &error), qPrintable(error));
+    secondWorkspace.close();
+    QVERIFY(QDir(QDir(artifactRoot).filePath(QStringLiteral(".staging")))
+        .entryInfoList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty());
+    QVERIFY(QDir(QDir(artifactRoot).filePath(QStringLiteral(".staging-meta")))
+        .entryInfoList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty());
+    QVERIFY(QDir(QDir(metadataRoot).filePath(QStringLiteral(".runtime-staging")))
+        .entryInfoList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty());
 }
 
 void ApplicationTests::projectQueryServiceReadsOnlyPersistedTaskState()
@@ -997,7 +1055,7 @@ void ApplicationTests::datasetSnapshotImportRejectsSourceChangedAfterPlanWithEvi
     const auto cancellation = [&]() {
         if (!mutated) {
             QDirIterator iterator(QDir(projectRoot).filePath(
-                QStringLiteral(".aitrain/artifacts/artifacts")),
+                QStringLiteral(".aitrain/artifacts/committed")),
                 QStringList{QStringLiteral("snapshot_import_plan.json")}, QDir::Files,
                 QDirIterator::Subdirectories);
             if (iterator.hasNext()) {
@@ -1075,7 +1133,7 @@ void ApplicationTests::datasetSplitWorkflowRegistersSelfContainedSnapshotAndReje
         QStringLiteral("split_plan.json"))).exists());
 
     QDirIterator planIterator(QDir(projectRoot).filePath(
-        QStringLiteral(".aitrain/artifacts/artifacts/%1")
+        QStringLiteral(".aitrain/artifacts/committed/%1")
             .arg(split.splitPlanArtifactId.toString())),
         QStringList{QStringLiteral("dataset_split_plan.json")}, QDir::Files);
     QVERIFY(planIterator.hasNext());
@@ -1150,7 +1208,7 @@ void ApplicationTests::datasetSplitWorkflowCancellationAfterMaterializeDoesNotRe
     bool materialized = false;
     const auto cancellation = [&]() {
         QDirIterator iterator(QDir(projectRoot).filePath(
-            QStringLiteral(".aitrain/artifacts/artifacts")),
+            QStringLiteral(".aitrain/artifacts/committed")),
             QStringList{QStringLiteral("split_plan.json")}, QDir::Files,
             QDirIterator::Subdirectories);
         materialized = iterator.hasNext();
