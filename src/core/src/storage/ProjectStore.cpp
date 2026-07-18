@@ -668,6 +668,47 @@ bool ProjectStore::transitionTask(const TaskId& taskId,
     return db_.commit();
 }
 
+bool ProjectStore::markTaskInterruptedFailed(const TaskId& taskId, QString* error)
+{
+    if (!taskId.isValid()) {
+        if (error) *error = QStringLiteral("Worker 丢失恢复需要有效任务 ID。");
+        return false;
+    }
+    QSqlQuery query(db_);
+    query.prepare(QStringLiteral("select state from tasks where id = :id"));
+    query.bindValue(QStringLiteral(":id"), taskId.toString());
+    if (!query.exec()) {
+        if (error) *error = sqlError(query);
+        return false;
+    }
+    if (!query.next()) {
+        // Worker 可能在创建任务前就启动失败；此时没有需要收口的持久化事实。
+        if (error) error->clear();
+        return true;
+    }
+    TaskState currentState;
+    if (!taskStateFromString(query.value(0).toString(), &currentState)) {
+        if (error) *error = QStringLiteral("任务状态无法解析，拒绝 Worker 丢失恢复。");
+        return false;
+    }
+    if (isTerminalTaskState(currentState)) {
+        if (error) error->clear();
+        return true;
+    }
+    const bool cancellationWasPending = currentState == TaskState::CancelRequested;
+    const Failure failure{
+        cancellationWasPending ? FailureCode::Canceled : FailureCode::ProcessCrashed,
+        cancellationWasPending
+            ? QStringLiteral("Worker 在取消请求后丢失，任务按取消完成收口。")
+            : QStringLiteral("Worker 异常退出且未报告任务终态。"),
+        cancellationWasPending
+            ? QStringLiteral("如需继续，请重新发起该任务。")
+            : defaultFailureSuggestedAction(FailureCode::ProcessCrashed),
+        QDateTime::currentDateTimeUtc()};
+    return transitionTask(taskId, currentState,
+        cancellationWasPending ? TaskState::Canceled : TaskState::Failed, failure, error);
+}
+
 bool ProjectStore::markInterruptedTasksFailed(QString* error)
 {
     QSqlQuery query(db_);

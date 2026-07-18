@@ -36,6 +36,9 @@ signals:
     void taskEventReceived(const aitrain::worker_protocol::TaskEvent& event);
     void logLine(const QString& line);
     void finished(WorkerTerminalStatus status, const QString& message);
+    // Worker 未发送正式终态就退出时，调用方必须按任务 ID 执行持久化恢复，
+    // 不能只依赖瞬态 finished 信号刷新 UI。
+    void workerLost(const aitrain::TaskId& taskId);
     void idle();
 
 private slots:

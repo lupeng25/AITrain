@@ -330,25 +330,29 @@ void WorkerClient::finalizeWorkerExit()
     }
     if (!finishedEmitted_) {
         finishedEmitted_ = true;
-        if (cancelRequested_) {
-            // 没有收到 Worker 的正式 canceled 终态时，不能伪造业务取消；
-            // 任务可能仍停留在 CancelRequested，必须显式报告 Worker 丢失。
-            const QString message = QStringLiteral("Worker 在取消请求后退出，未收到正式终态。" );
-            QJsonObject payload;
-            payload.insert(wp::field::taskId(), activeTaskId_.toString());
-            payload.insert(wp::field::command(), pendingCommand_.has_value()
-                ? wp::taskCommandType(*pendingCommand_) : QString());
-            payload.insert(wp::field::status(), QStringLiteral("worker_lost"));
-            payload.insert(wp::field::errorCode(), QStringLiteral("worker_lost"));
-            payload.insert(wp::field::message(), message);
-            publishEvent(wp::taskEventFromType(wp::event::failed(), payload));
-            emit finished(WorkerTerminalStatus::Failed, message);
-        } else {
-            const QString message = pendingExitCode_ < 0
+        const aitrain::TaskId lostTaskId = activeTaskId_;
+        const QString message = cancelRequested_
+            ? QStringLiteral("Worker 在取消请求后退出，未收到正式终态。")
+            : (pendingExitCode_ < 0
                 ? QStringLiteral("Worker failed to start: %1").arg(process_.errorString())
                 : (pendingExitStatus_ != QProcess::NormalExit || pendingExitCode_ != 0)
                 ? QStringLiteral("Worker exited with code %1").arg(pendingExitCode_)
-                : QStringLiteral("Worker exited without a terminal status message");
+                : QStringLiteral("Worker exited without a terminal status message"));
+        QJsonObject payload;
+        payload.insert(wp::field::taskId(), lostTaskId.toString());
+        payload.insert(wp::field::command(), pendingCommand_.has_value()
+            ? wp::taskCommandType(*pendingCommand_) : QString());
+        payload.insert(wp::field::status(), QStringLiteral("worker_lost"));
+        payload.insert(wp::field::errorCode(), cancelRequested_ ? QStringLiteral("worker_lost")
+            : QStringLiteral("process_crashed"));
+        payload.insert(wp::field::message(), message);
+        publishEvent(wp::taskEventFromType(wp::event::failed(), payload));
+        emit workerLost(lostTaskId);
+        if (cancelRequested_) {
+            // 没有收到 Worker 的正式 canceled 终态时，不能伪造业务取消；
+            // 任务可能仍停留在 CancelRequested，必须显式报告 Worker 丢失。
+            emit finished(WorkerTerminalStatus::Failed, message);
+        } else {
             emit finished(WorkerTerminalStatus::Failed, message);
         }
     }
@@ -427,14 +431,16 @@ void WorkerClient::rejectProtocol(const QString& message)
     emit logLine(message);
     if (!finishedEmitted_) {
         finishedEmitted_ = true;
+        const aitrain::TaskId lostTaskId = activeTaskId_;
         QJsonObject payload;
-        payload.insert(wp::field::taskId(), activeTaskId_.toString());
+        payload.insert(wp::field::taskId(), lostTaskId.toString());
         payload.insert(wp::field::command(), pendingCommand_.has_value()
             ? wp::taskCommandType(*pendingCommand_) : QString());
         payload.insert(wp::field::status(), QStringLiteral("failed"));
         payload.insert(wp::field::errorCode(), QStringLiteral("protocol_rejected"));
         payload.insert(wp::field::message(), message);
         publishEvent(wp::taskEventFromType(wp::event::failed(), payload));
+        emit workerLost(lostTaskId);
         emit finished(WorkerTerminalStatus::Failed, message);
     }
     if (socket_) {

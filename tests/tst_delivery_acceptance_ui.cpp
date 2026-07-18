@@ -204,15 +204,28 @@ void EnvironmentDeliveryEvidenceUiTests::projectOpenPreparedTokenRejectsMutation
     QString error;
     QVERIFY2(current.open(first.path(), &error), qPrintable(error));
 
+    // 修改已有 staging 文件且保持大小不变，不能依赖父目录 mtime/文件大小
+    // 指纹放行；prepared token 必须覆盖文件内容。
+    aitrain::ProjectWorkspace secondInitializer;
+    QVERIFY2(secondInitializer.open(second.path(), &error), qPrintable(error));
+    const QString fingerprintedStaging = QDir(secondInitializer.workspacePath()).filePath(
+        QStringLiteral("artifacts/.staging/%1/input.bin")
+            .arg(QUuid::createUuid().toString(QUuid::Id128)));
+    QVERIFY(QDir().mkpath(QFileInfo(fingerprintedStaging).absolutePath()));
+    QFile stagingFile(fingerprintedStaging);
+    QVERIFY(stagingFile.open(QIODevice::WriteOnly));
+    QVERIFY(stagingFile.write("aaaa") == 4);
+    stagingFile.close();
+    secondInitializer.close();
+
     aitrain::ProjectWorkspacePreparedOpen prepared;
     QVERIFY2(aitrain::ProjectWorkspace::prepareOpen(second.path(), &prepared, &error),
         qPrintable(error));
     QVERIFY(prepared.isValid());
 
-    QFile database(QDir(second.path()).filePath(QStringLiteral(".aitrain/project.sqlite")));
-    QVERIFY(database.open(QIODevice::Append));
-    QVERIFY(database.write("mutation") > 0);
-    database.close();
+    QVERIFY(stagingFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    QVERIFY(stagingFile.write("bbbb") == 4);
+    stagingFile.close();
 
     QVERIFY(!current.openPrepared(prepared, &error));
     QCOMPARE(current.workspacePath(),
@@ -806,12 +819,20 @@ void EnvironmentDeliveryEvidenceUiTests::workerStartFailureIsReportedAsynchronou
 
     WorkerClient client;
     QSignalSpy finishedSpy(&client, &WorkerClient::finished);
+    bool workerLostReceived = false;
+    aitrain::TaskId lostTaskId;
+    connect(&client, &WorkerClient::workerLost, this,
+        [&](const aitrain::TaskId& taskId) {
+        workerLostReceived = true;
+        lostTaskId = taskId;
+    });
     QString error;
     QElapsedTimer elapsed;
     elapsed.start();
+    const aitrain::TaskId requestedTaskId = aitrain::TaskId::create();
     const aitrain::worker_protocol::TaskCommand command{
         aitrain::worker_protocol::EnvironmentCheckCommand{
-            {aitrain::TaskId::create(), directory.path()}}};
+            {requestedTaskId, directory.path()}}};
     QVERIFY2(client.startTask(invalidWorker, command, &error), qPrintable(error));
     QVERIFY2(elapsed.elapsed() < 500, "Worker 启动请求不应同步等待进程创建结果。");
     QVERIFY2(finishedSpy.wait(5000), "异步启动失败必须通过 finished 信号收口。");
@@ -819,6 +840,8 @@ void EnvironmentDeliveryEvidenceUiTests::workerStartFailureIsReportedAsynchronou
     QCOMPARE(qvariant_cast<WorkerClient::WorkerTerminalStatus>(finishedSpy.first().at(0)),
         WorkerClient::WorkerTerminalStatus::Failed);
     QVERIFY(finishedSpy.first().at(1).toString().contains(QStringLiteral("failed to start"), Qt::CaseInsensitive));
+    QVERIFY(workerLostReceived);
+    QCOMPARE(lostTaskId, requestedTaskId);
 }
 
 void EnvironmentDeliveryEvidenceUiTests::runtimeDeliveryPagesExposeOneSixStepProductEntry()

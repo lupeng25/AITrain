@@ -91,10 +91,20 @@ bool CapabilityPlanner::plan(const ExecutionRequest& request, ExecutionPlan* res
             return false;
         }
     }
-    const bool profileExportMatches = hasWorkflowProfile
-        && plan.exportFormat == normalized(workflowProfile.artifactFormat);
-    if (!plan.exportFormat.isEmpty() && !training.exportFormats.contains(plan.exportFormat)
-        && !profileExportMatches) {
+    if (hasWorkflowProfile) {
+        // Profile 的 artifactFormat 是正式 Workflow 合同；Registry 中训练
+        // 后端可能额外列出 ncnn/tensorrt 等独立导出能力，不能借此绕过
+        // 当前 Workflow 只承诺的 onnx 交付边界。
+        if (!plan.exportFormat.isEmpty()
+            && plan.exportFormat != normalized(workflowProfile.artifactFormat)) {
+            if (error) {
+                *error = QStringLiteral("训练 Workflow Profile 不支持请求的导出格式：%1")
+                    .arg(plan.exportFormat);
+            }
+            return false;
+        }
+    } else if (!plan.exportFormat.isEmpty()
+        && !training.exportFormats.contains(plan.exportFormat)) {
         if (error) {
             *error = QStringLiteral("训练后端不支持请求的导出格式：%1").arg(plan.exportFormat);
         }

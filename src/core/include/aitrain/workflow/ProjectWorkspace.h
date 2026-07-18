@@ -388,19 +388,13 @@ struct TrainingDeploymentInvocation final {
 // 只携带文件元数据，不携带 QSqlDatabase、ProjectStore 或 ArtifactStore。
 struct ProjectWorkspacePreparedOpen final {
     QString normalizedRoot;
-    qint64 databaseSize = -1;
-    qint64 databaseLastModifiedMs = -1;
-    qint64 databaseWalSize = -1;
-    qint64 databaseWalLastModifiedMs = -1;
-    qint64 stagingLastModifiedMs = -1;
-    qint64 stagingMetadataLastModifiedMs = -1;
+    // 覆盖恢复会读取的所有持久化文件与暂存树，避免仅依赖父目录
+    // mtime/文件大小导致同大小快速修改绕过激活校验。
+    QString fingerprintSha256;
 
     bool isValid() const
     {
-        return !normalizedRoot.isEmpty() && databaseSize >= 0
-            && databaseLastModifiedMs >= 0 && databaseWalSize >= 0
-            && databaseWalLastModifiedMs >= 0 && stagingLastModifiedMs >= 0
-            && stagingMetadataLastModifiedMs >= 0;
+        return !normalizedRoot.isEmpty() && fingerprintSha256.size() == 64;
     }
 };
 
@@ -424,6 +418,9 @@ public:
     // 仅在凭证指纹仍匹配时激活。恢复已由 prepareOpen 完成，GUI 不重复扫描/恢复。
     bool openPrepared(const ProjectWorkspacePreparedOpen& prepared,
         QString* error = nullptr);
+    // Worker 异常退出后立即收口当前任务；应用重启恢复仍会再次执行同一套
+    // 幂等检查，因此该入口不会依赖 GUI 的瞬态事件是否成功送达。
+    bool recoverAfterWorkerLoss(const TaskId& taskId, QString* error = nullptr);
     void close();
     bool isOpen() const;
 
@@ -613,6 +610,7 @@ private:
         QString* error);
     bool recoverPendingWorkflowTerminalEvents(QString* error);
     bool recoverEvidenceGatedWorkflows(QString* error);
+    bool recoverRuntimeStaging(QString* error);
 
     ProjectStore storage_;
     std::unique_ptr<ArtifactStore> artifactStore_;

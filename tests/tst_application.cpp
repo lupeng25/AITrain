@@ -97,6 +97,7 @@ private slots:
     void importCancellationLeavesNoRegisteredPackageOrArtifact();
     void runtimeResolutionAcceptsOnlyRegisteredUntamperedModelPackages();
     void projectWorkspaceFirstStartCreatesStableLayout();
+    void projectWorkspaceRecoveryClosesInterruptedStaging();
     void projectWorkspaceOwnsRuntimeTaskLifecycle();
     void projectQueryServiceReadsOnlyPersistedTaskState();
     void externalAcceptanceEvidenceRequiresStrictSchemaAndStaysUnverified();
@@ -220,6 +221,12 @@ void ApplicationTests::capabilityPlannerAcceptsOfficialWorkflowAdapterProfiles()
         QCOMPARE(plan.evaluationBackend, request.evaluationBackend);
         QVERIFY2(planner.verify(request, plan.summaryHash, nullptr, &error), qPrintable(error));
     }
+    aitrain::ExecutionRequest unsupported = requests.first();
+    unsupported.exportFormat = QStringLiteral("tensorrt");
+    aitrain::ExecutionPlan rejected;
+    QString error;
+    QVERIFY(!planner.plan(unsupported, &rejected, &error));
+    QVERIFY(error.contains(QStringLiteral("导出格式")));
 }
 
 void ApplicationTests::cancellationTransitionsThroughCancelRequestedAndTerminalCanceled()
@@ -779,6 +786,38 @@ void ApplicationTests::projectWorkspaceFirstStartCreatesStableLayout()
         .entryInfoList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty());
     QVERIFY(QDir(QDir(metadataRoot).filePath(QStringLiteral(".runtime-staging")))
         .entryInfoList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty());
+}
+
+void ApplicationTests::projectWorkspaceRecoveryClosesInterruptedStaging()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString projectRoot = QDir(directory.path()).filePath(QStringLiteral("recovery"));
+    aitrain::ProjectWorkspace workspace;
+    QString error;
+    QVERIFY2(workspace.open(projectRoot, &error), qPrintable(error));
+    const aitrain::TaskId taskId = aitrain::TaskId::create();
+    aitrain::TaskSnapshot task;
+    QVERIFY2(workspace.startTask(taskId, QStringLiteral("yolo.detect"),
+        QStringLiteral("training"), &task, &error), qPrintable(error));
+
+    aitrain::ArtifactStore artifacts(QDir(workspace.workspacePath()).filePath(QStringLiteral("artifacts")));
+    aitrain::ArtifactId artifactId;
+    QString stagingPath;
+    QVERIFY2(artifacts.begin(taskId, QStringLiteral("crash_output"), &artifactId,
+        &stagingPath, &error), qPrintable(error));
+    QVERIFY(writeFile(QDir(stagingPath).filePath(QStringLiteral("partial.bin")), QByteArrayLiteral("partial")));
+    QVERIFY(writeFile(QDir(workspace.workspacePath()).filePath(
+        QStringLiteral(".runtime-staging/%1/partial.bin").arg(taskId.toString())), QByteArrayLiteral("runtime")));
+    workspace.close();
+
+    QVERIFY2(workspace.open(projectRoot, &error), qPrintable(error));
+    aitrain::TaskSnapshot recovered;
+    QVERIFY2(workspace.task(taskId, &recovered, &error), qPrintable(error));
+    QCOMPARE(recovered.state, aitrain::TaskState::Failed);
+    QVERIFY(!QDir(stagingPath).exists());
+    QVERIFY(!QDir(workspace.runtimeStagingPath(taskId)).exists());
+    workspace.close();
 }
 
 void ApplicationTests::projectQueryServiceReadsOnlyPersistedTaskState()

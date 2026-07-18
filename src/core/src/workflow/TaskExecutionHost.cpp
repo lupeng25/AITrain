@@ -335,6 +335,47 @@ bool TaskExecutionHost::consumeTerminalEvent(const ProtocolEnvelope& event,
                 if (error) *error = QStringLiteral("重复 Workflow 终态与已持久化步骤终态不一致。");
                 return false;
             }
+            // 步骤终态本身不是整个 Workflow 的终态。只有所有步骤都已
+            // 收口，且根任务/ Evidence 门控事实也已经落盘，才允许消费
+            // outbox；否则崩溃恢复必须保留该 outbox 继续补齐收口。
+            const bool allStepsTerminal = std::all_of(steps.cbegin(), steps.cend(),
+                [](const WorkflowStepSnapshot& step) {
+                    return isTerminalWorkflowStepState(step.state);
+                });
+            if (!allStepsTerminal) {
+                // 这是已处理终态的重复帧；不能再次调用 handler，也不能
+                // 标记 outbox applied。保留 outbox 交给恢复流程补齐后继。
+                if (error) error->clear();
+                terminalEventSeen_ = true;
+                return true;
+            }
+            WorkflowRunSnapshot workflow;
+            TaskSnapshot rootTask;
+            if (!coordinator_->storage()->workflowRun(workflowRunId, &workflow, error)
+                || !coordinator_->storage()->task(workflow.taskId, &rootTask, error)) {
+                return false;
+            }
+            bool terminalPostcondition = false;
+            if (workflow.terminalPolicy == WorkflowTerminalPolicy::EvidenceRequired) {
+                WorkflowTerminalizationSnapshot terminalization;
+                if (coordinator_->storage()->workflowTerminalization(
+                        workflowRunId, &terminalization, error)) {
+                    terminalPostcondition = terminalization.state == WorkflowTerminalizationState::Sealed
+                        || terminalization.state == WorkflowTerminalizationState::EvidenceAttached
+                        || terminalization.state == WorkflowTerminalizationState::Closed;
+                } else if (error && !error->isEmpty()) {
+                    error->clear();
+                }
+            } else {
+                terminalPostcondition = isTerminalTaskState(rootTask.state);
+            }
+            if (!terminalPostcondition) {
+                // handler 可能已完成步骤，但根任务 finalize 或 Evidence
+                // seal 位于后续事务中；此时同样安全忽略重复帧并保留 outbox。
+                if (error) error->clear();
+                terminalEventSeen_ = true;
+                return true;
+            }
             if (!coordinator_->storage()->markWorkflowTerminalEventApplied(event.messageId, error)) {
                 return false;
             }

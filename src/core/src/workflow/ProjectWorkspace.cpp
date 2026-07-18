@@ -689,16 +689,124 @@ QString normalizedProjectRoot(const QString& projectRoot)
     return QDir::cleanPath(QDir(raw).absolutePath());
 }
 
-qint64 fileSizeOrZero(const QString& path)
+bool addFingerprintPath(QCryptographicHash* aggregate,
+    const QString& root,
+    const QString& absolutePath,
+    QString* error)
 {
-    const QFileInfo info(path);
-    return info.exists() && info.isFile() ? info.size() : 0;
+    const QFileInfo info(absolutePath);
+    const QString relative = QDir(root).relativeFilePath(absolutePath);
+    QByteArray entry = relative.toUtf8();
+    entry.append('\0');
+    if (info.isSymLink()) {
+        entry.append("symlink\0");
+        entry.append(info.symLinkTarget().toUtf8());
+        aggregate->addData(entry);
+        return true;
+    }
+    if (!info.isFile()) return true;
+    entry.append("file\0");
+    entry.append(QByteArray::number(info.size()));
+    entry.append('\0');
+    QFile file(info.absoluteFilePath());
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (error) *error = QStringLiteral("无法读取项目打开凭证文件：%1").arg(info.absoluteFilePath());
+        return false;
+    }
+    const QByteArray contentHash = [&file]() {
+        QCryptographicHash hash(QCryptographicHash::Sha256);
+        while (!file.atEnd()) {
+            const QByteArray block = file.read(1024 * 1024);
+            if (block.isEmpty() && file.error() != QFileDevice::NoError) return QByteArray();
+            hash.addData(block);
+        }
+        return hash.result();
+    }();
+    if (contentHash.isEmpty() && info.size() > 0) {
+        if (error) *error = QStringLiteral("读取项目打开凭证文件失败：%1").arg(info.absoluteFilePath());
+        return false;
+    }
+    entry.append(contentHash);
+    aggregate->addData(entry);
+    return true;
 }
 
-qint64 modifiedMsOrZero(const QString& path)
+bool addFingerprintTree(QCryptographicHash* aggregate,
+    const QString& root,
+    QString* error)
 {
-    const QFileInfo info(path);
-    return info.exists() ? info.lastModified().toMSecsSinceEpoch() : 0;
+    const QFileInfo rootInfo(root);
+    if (!rootInfo.exists()) {
+        aggregate->addData(QByteArray("missing\0") + root.toUtf8());
+        return true;
+    }
+    if (!rootInfo.isDir() || rootInfo.isSymLink()) {
+        if (error) *error = QStringLiteral("项目打开凭证目录无效：%1").arg(root);
+        return false;
+    }
+    QStringList paths;
+    QDirIterator iterator(root, QDir::AllEntries | QDir::NoDotAndDotDot,
+        QDirIterator::Subdirectories);
+    while (iterator.hasNext()) paths.append(iterator.next());
+    std::sort(paths.begin(), paths.end(), [](const QString& left, const QString& right) {
+        return left < right;
+    });
+    aggregate->addData(QByteArray("root\0") + root.toUtf8());
+    for (const QString& path : paths) {
+        if (!addFingerprintPath(aggregate, root, path, error)) return false;
+    }
+    return true;
+}
+
+bool captureRecoveryFingerprint(const QString& normalizedRoot, QString* result, QString* error)
+{
+    if (normalizedRoot.isEmpty() || !result) {
+        if (error) *error = QStringLiteral("生成项目打开指纹需要有效项目根目录和输出对象。");
+        return false;
+    }
+    const QString workspace = QDir(normalizedRoot).filePath(QStringLiteral(".aitrain"));
+    const QString database = QDir(workspace).filePath(QStringLiteral("project.sqlite"));
+    const QFileInfo databaseInfo(database);
+    if (!databaseInfo.exists() || !databaseInfo.isFile() || databaseInfo.isSymLink()) {
+        if (error) *error = QStringLiteral("项目打开凭证缺少有效 project.sqlite。");
+        return false;
+    }
+    QCryptographicHash aggregate(QCryptographicHash::Sha256);
+    // SQLite -shm 是连接级共享内存文件，候选关闭与激活连接之间可能
+    // 自动创建/删除，不属于项目持久化事实；project.sqlite 与 -wal 才是
+    // 需要阻断 TOCTOU 的恢复输入。
+    const QStringList databaseFiles = {database, database + QStringLiteral("-wal")};
+    for (const QString& path : databaseFiles) {
+        if (QFileInfo::exists(path) && !addFingerprintPath(&aggregate, workspace, path, error)) return false;
+        if (!QFileInfo::exists(path)) aggregate.addData(QByteArray("missing\0") + path.toUtf8());
+    }
+    const QStringList trees = {
+        QDir(workspace).filePath(QStringLiteral("artifacts/.staging")),
+        QDir(workspace).filePath(QStringLiteral("artifacts/.staging-meta")),
+        QDir(workspace).filePath(QStringLiteral(".runtime-staging"))};
+    for (const QString& tree : trees) {
+        if (!addFingerprintTree(&aggregate, tree, error)) return false;
+    }
+    *result = QString::fromLatin1(aggregate.result().toHex());
+    return true;
+}
+
+bool captureRecoveryTreesFingerprint(const QString& normalizedRoot, QString* result, QString* error)
+{
+    if (normalizedRoot.isEmpty() || !result) {
+        if (error) *error = QStringLiteral("生成项目暂存树指纹需要有效项目根目录和输出对象。");
+        return false;
+    }
+    const QString workspace = QDir(normalizedRoot).filePath(QStringLiteral(".aitrain"));
+    QCryptographicHash aggregate(QCryptographicHash::Sha256);
+    for (const QString& tree : {
+            QDir(workspace).filePath(QStringLiteral("artifacts/.staging")),
+            QDir(workspace).filePath(QStringLiteral("artifacts/.staging-meta")),
+            QDir(workspace).filePath(QStringLiteral(".runtime-staging"))}) {
+        if (!addFingerprintTree(&aggregate, tree, error)) return false;
+    }
+    *result = QString::fromLatin1(aggregate.result().toHex());
+    return true;
 }
 
 } // namespace
@@ -964,22 +1072,8 @@ bool ProjectWorkspace::capturePreparedOpenFingerprint(const QString& normalizedR
         if (error) *error = QStringLiteral("生成项目打开凭证需要有效项目根目录。");
         return false;
     }
-    const QString workspace = QDir(normalizedRoot).filePath(QStringLiteral(".aitrain"));
-    const QString database = QDir(workspace).filePath(QStringLiteral("project.sqlite"));
-    const QFileInfo databaseInfo(database);
-    if (!databaseInfo.exists() || !databaseInfo.isFile()) {
-        if (error) *error = QStringLiteral("项目打开凭证缺少 project.sqlite。");
-        return false;
-    }
     prepared->normalizedRoot = normalizedRoot;
-    prepared->databaseSize = fileSizeOrZero(database);
-    prepared->databaseLastModifiedMs = modifiedMsOrZero(database);
-    prepared->databaseWalSize = fileSizeOrZero(database + QStringLiteral("-wal"));
-    prepared->databaseWalLastModifiedMs = modifiedMsOrZero(database + QStringLiteral("-wal"));
-    prepared->stagingLastModifiedMs = modifiedMsOrZero(
-        QDir(workspace).filePath(QStringLiteral("artifacts/.staging")));
-    prepared->stagingMetadataLastModifiedMs = modifiedMsOrZero(
-        QDir(workspace).filePath(QStringLiteral("artifacts/.staging-meta")));
+    if (!captureRecoveryFingerprint(normalizedRoot, &prepared->fingerprintSha256, error)) return false;
     return prepared->isValid();
 }
 
@@ -995,16 +1089,9 @@ bool ProjectWorkspace::preparedOpenFingerprintMatches(
         if (error) *error = QStringLiteral("项目打开凭证路径已变化。");
         return false;
     }
-    const QString workspace = QDir(normalized).filePath(QStringLiteral(".aitrain"));
-    const QString database = QDir(workspace).filePath(QStringLiteral("project.sqlite"));
-    const bool matches = fileSizeOrZero(database) == prepared.databaseSize
-        && modifiedMsOrZero(database) == prepared.databaseLastModifiedMs
-        && fileSizeOrZero(database + QStringLiteral("-wal")) == prepared.databaseWalSize
-        && modifiedMsOrZero(database + QStringLiteral("-wal")) == prepared.databaseWalLastModifiedMs
-        && modifiedMsOrZero(QDir(workspace).filePath(QStringLiteral("artifacts/.staging")))
-            == prepared.stagingLastModifiedMs
-        && modifiedMsOrZero(QDir(workspace).filePath(QStringLiteral("artifacts/.staging-meta")))
-            == prepared.stagingMetadataLastModifiedMs;
+    QString currentFingerprint;
+    if (!captureRecoveryFingerprint(normalized, &currentFingerprint, error)) return false;
+    const bool matches = currentFingerprint == prepared.fingerprintSha256;
     if (!matches && error) {
         *error = QStringLiteral("项目在后台预检后发生变化，需要重新执行恢复。");
     }
@@ -1038,8 +1125,37 @@ bool ProjectWorkspace::openPrepared(const ProjectWorkspacePreparedOpen& prepared
     // 当前 session，失败时尽力恢复原工作区，避免一次候选项目失败把用户
     // 已打开的项目置于半关闭状态。
     const QString previousRoot = workspacePath_;
+    QString preActivationTreeFingerprint;
+    if (!captureRecoveryTreesFingerprint(prepared.normalizedRoot,
+            &preActivationTreeFingerprint, error)) {
+        return false;
+    }
     QString activationError;
     if (openInternal(prepared.normalizedRoot, false, &activationError)) {
+        // 激活本身与凭证复验之间仍存在文件系统竞态；复验失败时不能把
+        // 未经同一份恢复快照验证的暂存树留在当前 session。SQLite 打开时
+        // 会执行 journal_mode=WAL，可能合法地产生连接级数据库变更，故
+        // 这里只复验恢复实际消费的 staging/runtime 树。
+        QString postActivationError;
+        QString postActivationTreeFingerprint;
+        if (!captureRecoveryTreesFingerprint(prepared.normalizedRoot,
+                &postActivationTreeFingerprint, &postActivationError)
+            || postActivationTreeFingerprint != preActivationTreeFingerprint) {
+            close();
+            QString restoreError;
+            if (!previousRoot.isEmpty()) {
+                openInternal(previousRoot, true, &restoreError);
+            }
+            if (error) {
+                *error = postActivationError.isEmpty()
+                    ? QStringLiteral("候选项目在激活期间发生变化，需要重新执行恢复。")
+                    : postActivationError;
+                if (!restoreError.isEmpty()) {
+                    *error += QStringLiteral("；原项目恢复诊断：%1").arg(restoreError);
+                }
+            }
+            return false;
+        }
         if (error) error->clear();
         return true;
     }
@@ -1112,16 +1228,123 @@ bool ProjectWorkspace::openInternal(const QString& projectRoot, bool recover, QS
     workspacePath_ = candidate;
     if (recover) {
         QStringList diagnostics;
+        // 第一遍先恢复 journal/outbox；Evidence 恢复可能提交新的 Artifact，
+        // 随后再将仍未收口的任务标为中断失败，最后第二遍回收这些任务的
+        // staging，避免“先扫描时任务仍 Running，之后失败但永不再扫”的窗口。
         if (!artifactStore_->recoverStaging(&storage_, &diagnostics, error)
             || !recoverPendingWorkflowTerminalEvents(error)
             || !recoverEvidenceGatedWorkflows(error)
-            || !storage_.markInterruptedTasksFailed(error)) {
+            || !storage_.markInterruptedTasksFailed(error)
+            || !artifactStore_->recoverStaging(&storage_, &diagnostics, error)
+            || !recoverRuntimeStaging(error)) {
             close();
             return false;
         }
     }
     taskCoordinator_ = std::make_unique<TaskCoordinator>(&storage_);
     trainingAdapterHost_ = std::make_unique<TaskExecutionHost>(taskCoordinator_.get(), artifactStore_.get());
+    return true;
+}
+
+bool ProjectWorkspace::recoverRuntimeStaging(QString* error)
+{
+    if (!isOpen()) {
+        if (error) *error = QStringLiteral("回收运行暂存目录需要已打开工作区。");
+        return false;
+    }
+    const QString rootPath = QDir(workspacePath_).filePath(QStringLiteral(".runtime-staging"));
+    const QFileInfo rootInfo(rootPath);
+    if (!rootInfo.exists()) return true;
+    if (!rootInfo.isDir() || rootInfo.isSymLink()) {
+        if (error) *error = QStringLiteral("运行产物暂存根目录无效：%1").arg(rootPath);
+        return false;
+    }
+    const QDir root(rootPath);
+    const QFileInfoList entries = root.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot,
+        QDir::Name | QDir::IgnoreCase);
+    for (const QFileInfo& entry : entries) {
+        if (entry.isSymLink()) continue;
+        TaskId taskId;
+        if (!TaskId::parse(entry.fileName(), &taskId, nullptr)) continue;
+        bool exists = false;
+        if (!storage_.taskExists(taskId, &exists, error)) return false;
+        bool remove = !exists;
+        if (exists) {
+            TaskSnapshot task;
+            if (!storage_.task(taskId, &task, error)) return false;
+            remove = isTerminalTaskState(task.state);
+        }
+        if (remove && (!isChildPath(rootPath, entry.absoluteFilePath())
+                || !QDir(entry.absoluteFilePath()).removeRecursively())) {
+            if (error) *error = QStringLiteral("无法回收运行产物暂存目录：%1").arg(entry.absoluteFilePath());
+            return false;
+        }
+    }
+    return true;
+}
+
+bool ProjectWorkspace::recoverAfterWorkerLoss(const TaskId& taskId, QString* error)
+{
+    if (!isOpen() || !taskId.isValid()) {
+        if (error) *error = QStringLiteral("Worker 丢失恢复需要已打开工作区和有效任务 ID。");
+        return false;
+    }
+    bool exists = false;
+    if (!storage_.taskExists(taskId, &exists, error)) return false;
+    if (!exists) {
+        if (error) error->clear();
+        return true;
+    }
+    if (!recoverPendingWorkflowTerminalEvents(error)
+        || !recoverEvidenceGatedWorkflows(error)) return false;
+
+    TaskSnapshot task;
+    if (!storage_.task(taskId, &task, error)) return false;
+    if (!isTerminalTaskState(task.state)) {
+        const Failure failure{
+            task.state == TaskState::CancelRequested ? FailureCode::Canceled : FailureCode::ProcessCrashed,
+            task.state == TaskState::CancelRequested
+                ? QStringLiteral("Worker 在取消请求后丢失，任务按取消完成收口。")
+                : QStringLiteral("Worker 异常退出且未报告任务终态。"),
+            task.state == TaskState::CancelRequested
+                ? QStringLiteral("如需继续，请重新发起该任务。")
+                : defaultFailureSuggestedAction(FailureCode::ProcessCrashed),
+            QDateTime::currentDateTimeUtc()};
+        const QVector<WorkflowRunSnapshot> workflows = storage_.workflowRunsForTask(taskId, error);
+        if (error && !error->isEmpty()) return false;
+        for (const WorkflowRunSnapshot& workflow : workflows) {
+            if (workflow.terminalPolicy == WorkflowTerminalPolicy::EvidenceRequired) continue;
+            QVector<WorkflowStepSnapshot> steps = storage_.workflowSteps(workflow.id, error);
+            if (error && !error->isEmpty()) return false;
+            // 从后往前收口，满足 terminalizeWorkflowStepAndSkipSuccessors 对
+            // 后继 Running 步骤的并发保护；每次收口后重新读取状态。
+            for (;;) {
+                const auto active = std::find_if(steps.crbegin(), steps.crend(),
+                    [](const WorkflowStepSnapshot& step) {
+                        return !isTerminalWorkflowStepState(step.state);
+                    });
+                if (active == steps.crend()) break;
+                const WorkflowStepSnapshot& step = *active;
+                const WorkflowStepState terminalState = task.state == TaskState::CancelRequested
+                    ? WorkflowStepState::Canceled : WorkflowStepState::Failed;
+                if (!storage_.terminalizeWorkflowStepAndSkipSuccessors(step.id, step.state,
+                        terminalState, failure, error)) return false;
+                steps = storage_.workflowSteps(workflow.id, error);
+                if (error && !error->isEmpty()) return false;
+            }
+            TaskCoordinator coordinator(&storage_);
+            if (!coordinator.finalizeTask(taskId,
+                    task.state == TaskState::CancelRequested ? TaskState::Canceled : TaskState::Failed,
+                    failure, error)) return false;
+            if (!storage_.task(taskId, &task, error)) return false;
+            break;
+        }
+        if (!isTerminalTaskState(task.state)
+            && !storage_.markTaskInterruptedFailed(taskId, error)) return false;
+    }
+    QStringList diagnostics;
+    if (!artifactStore_->recoverStaging(&storage_, &diagnostics, error)
+        || !recoverRuntimeStaging(error)) return false;
     return true;
 }
 

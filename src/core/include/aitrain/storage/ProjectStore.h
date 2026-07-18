@@ -251,6 +251,9 @@ public:
         TaskState nextState,
         const Failure& failure = {},
         QString* error = nullptr);
+    // Worker 丢失后的定向恢复；任务不存在时按幂等 no-op 处理（例如进程
+    // 在 Worker 创建任务前启动失败）。
+    bool markTaskInterruptedFailed(const TaskId& taskId, QString* error = nullptr);
     bool markInterruptedTasksFailed(QString* error = nullptr);
     bool recordProtocolEvent(const TaskId& taskId,
         const RequestId& requestId,

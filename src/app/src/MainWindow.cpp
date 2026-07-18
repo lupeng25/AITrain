@@ -165,6 +165,24 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
         updateTaskCancelButton();
         updateHeaderState();
     });
+    connect(&worker_, &WorkerClient::workerLost, this,
+        [this](const aitrain::TaskId& taskId) {
+        if (!taskId.isValid() || !workspace_.isOpen()) return;
+        QString recoveryError;
+        if (!workspace_.recoverAfterWorkerLoss(taskId, &recoveryError)) {
+            appendLog(uiText("Worker 异常退出后任务恢复失败：%1").arg(recoveryError));
+            statusBar()->showMessage(uiText("任务恢复失败，请重新打开项目重试。"), 8000);
+            return;
+        }
+        // WorkerLost 事件已先清理瞬态投影；持久化恢复完成后立即刷新查询
+        // 服务，避免任务列表继续显示 Running/CancelRequested。
+        updateRecentTasks();
+        updateSelectedTaskDetails();
+        updateProjectSummary();
+        updateDashboardSummary();
+        updateDeliveryAcceptanceSummary();
+        updateModelRegistry();
+    });
     connect(&worker_, &WorkerClient::finished, this,
         [this](WorkerClient::WorkerTerminalStatus status, const QString& message) {
         const bool ok = status == WorkerClient::WorkerTerminalStatus::Succeeded;
