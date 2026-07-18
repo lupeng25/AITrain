@@ -1,6 +1,8 @@
 add_library(aitrain_domain STATIC
     include/aitrain/domain/DomainTypes.h
+    include/aitrain/domain/ArtifactMemberPath.h
     src/domain/DomainTypes.cpp
+    src/domain/ArtifactMemberPath.cpp
 )
 
 target_include_directories(aitrain_domain

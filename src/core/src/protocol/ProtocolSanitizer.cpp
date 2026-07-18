@@ -1,6 +1,7 @@
 #include "aitrain/protocol/ProtocolSanitizer.h"
 
 #include <QJsonArray>
+#include <QRegularExpression>
 
 namespace aitrain {
 namespace protocol {
@@ -48,6 +49,16 @@ QJsonValue redactValue(const QJsonValue& value)
         for (const QJsonValue& item : array) {
             redacted.append(redactValue(item));
         }
+        return redacted;
+    }
+    if (value.isString()) {
+        // 字段名黑名单无法覆盖 message/details/traceback 等自由文本。跨进程
+        // 协议在落盘和 GUI 转发前统一遮蔽 Windows 盘符路径及 UNC 路径；
+        // Artifact 的相对成员仍由字段名规则保留。
+        static const QRegularExpression absolutePath(
+            QStringLiteral("(?i)(?:[A-Z]:[\\\\/][^\\s\\\"'<>|]+|\\\\\\\\[^\\s\\\"'<>|]+[\\\\/][^\\s\\\"'<>|]+)"));
+        QString redacted = value.toString();
+        redacted.replace(absolutePath, QStringLiteral("<physical-path>"));
         return redacted;
     }
     return value;

@@ -56,6 +56,8 @@ if (-not $SkipLocalRc) {
     }
 }
 
+$buildPath = Resolve-RepoPath $BuildDir
+
 if (-not $SkipPackageBuild) {
     Invoke-Step "configure package build" {
         $configure = "$commandPrefix && cmake -S . -B `"$BuildDir`" -G `"NMake Makefiles`" -DCMAKE_PREFIX_PATH=`"$qt`" -DAITRAIN_BUILD_TESTS=ON"
@@ -68,26 +70,33 @@ if (-not $SkipPackageBuild) {
     }
 }
 
+$existingZipWriteTimes = @{}
+Get-ChildItem -LiteralPath $buildPath -Filter "AITrainStudio-*-win64.zip" -File -ErrorAction SilentlyContinue |
+    ForEach-Object {
+        $existingZipWriteTimes[$_.FullName] = $_.LastWriteTimeUtc.Ticks
+    }
+
 Invoke-Step "generate CPack ZIP" {
     $cpack = "$commandPrefix && cpack --config `"$BuildDir\CPackConfig.cmake`" -B `"$BuildDir`""
     Invoke-CommandLine $cpack
 }
 
-$buildPath = Resolve-RepoPath $BuildDir
 $handoffDir = Join-Path $buildPath "release-freeze-handoff"
 New-Item -ItemType Directory -Force -Path $handoffDir | Out-Null
 
-$zipFiles = @(
-    Get-ChildItem -LiteralPath $buildPath -Filter "AITrainStudio-*-win64.zip" -File -ErrorAction SilentlyContinue
-)
-if ($zipFiles.Count -eq 0) {
-    throw "No AITrainStudio ZIP package found under $buildPath"
+$zipFiles = @(Get-ChildItem -LiteralPath $buildPath -Filter "AITrainStudio-*-win64.zip" -File -ErrorAction SilentlyContinue |
+    Where-Object {
+        (-not $existingZipWriteTimes.ContainsKey($_.FullName)) `
+            -or $existingZipWriteTimes[$_.FullName] -ne $_.LastWriteTimeUtc.Ticks
+    })
+if ($zipFiles.Count -ne 1) {
+    throw "Expected exactly one new or changed AITrainStudio ZIP from this CPack run; found $($zipFiles.Count) under $buildPath"
 }
 
 $commit = (& git rev-parse HEAD).Trim()
 $statusShort = @(& git status --short)
 $packageEntries = @()
-foreach ($zip in $zipFiles | Sort-Object LastWriteTime -Descending) {
+foreach ($zip in $zipFiles) {
     $hash = Get-FileHash -LiteralPath $zip.FullName -Algorithm SHA256
     $packageEntries += [ordered]@{
         path = $zip.FullName

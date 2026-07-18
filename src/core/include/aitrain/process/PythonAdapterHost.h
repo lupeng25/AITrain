@@ -45,7 +45,7 @@ struct PythonAdapterExit final {
 
 class PythonAdapterHost final {
 public:
-    using EventHandler = std::function<void(const ProtocolEnvelope&)>;
+    using EventHandler = std::function<bool(const ProtocolEnvelope&)>;
     using ExitHandler = std::function<void(const PythonAdapterExit&)>;
 
     PythonAdapterHost();
@@ -76,7 +76,7 @@ private:
     void onProcessStarted();
     void drainProcessOutput();
     void appendProcessOutput(const QByteArray& bytes, const QString& channel);
-    void onAdapterEvent(const ProtocolEnvelope& event);
+    bool onAdapterEvent(const ProtocolEnvelope& event);
     void onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus);
     void onProcessError(QProcess::ProcessError error);
     void beginProcessDrain(PythonAdapterExit outcome);

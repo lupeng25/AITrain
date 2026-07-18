@@ -573,7 +573,6 @@ def run_process(
         on_line=lambda line: parse_official_metrics(backend, line, metrics) if metrics is not None else None,
     )
     if result.canceled:
-        emit(backend, "canceled", message="Official PaddleOCR child process canceled.", force=False)
         return -2, list(result.tail_lines)
     emit(backend, "log", level="info" if result.exit_code == 0 else "error",
          message=f"Official PaddleOCR child process finished (exitCode={result.exit_code}, tailLines={len(result.tail_lines)}).")
@@ -803,7 +802,9 @@ def run(request: dict[str, Any]) -> int:
                 report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
                 emit(backend, "artifact", name="paddleocr_official_rec_report.json", path=str(report_path), kind="report")
                 if train_exit == -2:
-                    return fail(backend, "Official PaddleOCR training canceled.", "canceled", {"exitCode": train_exit})
+                    emit(backend, "canceled", message="Official PaddleOCR training canceled.", force=False,
+                         exitCode=train_exit)
+                    return 130
                 return fail(backend, "Official PaddleOCR training failed.", "official_train_failed", {"exitCode": train_exit})
         export_exit, _ = run_process(backend, export_command, repo, env, parameters, log_path=export_log_path)
         report["exportExitCode"] = export_exit
@@ -812,7 +813,9 @@ def run(request: dict[str, Any]) -> int:
             report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             emit(backend, "artifact", name="paddleocr_official_rec_report.json", path=str(report_path), kind="report")
             if export_exit == -2:
-                return fail(backend, "Official PaddleOCR export canceled.", "canceled", {"exitCode": export_exit})
+                emit(backend, "canceled", message="Official PaddleOCR export canceled.", force=False,
+                     exitCode=export_exit)
+                return 130
             return fail(backend, "Official PaddleOCR export failed.", "official_export_failed", {"exitCode": export_exit})
         report["checkpointPath"] = str(checkpoint_file_from_base(export_checkpoint_base))
         report["inferenceModelDir"] = str(output_path / "official_inference")
@@ -844,7 +847,9 @@ def run(request: dict[str, Any]) -> int:
                 report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
                 emit(backend, "artifact", name="paddleocr_official_rec_report.json", path=str(report_path), kind="report")
                 if predict_exit == -2:
-                    return fail(backend, "Official PaddleOCR prediction canceled.", "canceled", {"exitCode": predict_exit})
+                    emit(backend, "canceled", message="Official PaddleOCR prediction canceled.", force=False,
+                         exitCode=predict_exit)
+                    return 130
                 return fail(backend, "Official PaddleOCR prediction failed.", "official_predict_failed", {"exitCode": predict_exit})
 
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

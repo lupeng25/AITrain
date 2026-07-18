@@ -65,11 +65,6 @@ QString sampleTextField(const QJsonObject& sample, const QStringList& keys)
     return QString();
 }
 
-QString samplePathField(const QJsonObject& sample, const QStringList& keys)
-{
-    return QDir::fromNativeSeparators(sampleTextField(sample, keys));
-}
-
 QString translatedText(const QString& source)
 {
     const QString fixCountTemplate = QStringLiteral("请修正 %1 个字段后再转换。");
@@ -853,25 +848,20 @@ void MainWindow::refreshSampleReviewTable()
         const QJsonObject sample = value.toObject();
         const int row = sampleReviewTable_->rowCount();
         sampleReviewTable_->insertRow(row);
-        const QString imagePath = samplePathField(sample, QStringList()
-            << QStringLiteral("imagePath")
-            << QStringLiteral("path")
-            << QStringLiteral("filePath")
-            << QStringLiteral("sampleRelativePath"));
-        const QString labelPath = samplePathField(sample, QStringList()
-            << QStringLiteral("labelPath")
-            << QStringLiteral("annotationPath")
-            << QStringLiteral("gtPath")
-            << QStringLiteral("sourceRelativePath"));
+        const ReviewSamplePathView paths = reviewSamplePathView(sample);
         sampleReviewTable_->setItem(row, 0, new QTableWidgetItem(sample.value(QStringLiteral("source")).toString()));
         sampleReviewTable_->setItem(row, 1, new QTableWidgetItem(sample.value(QStringLiteral("reason")).toString()));
         sampleReviewTable_->setItem(row, 2, new QTableWidgetItem(reviewClassText(sample)));
         sampleReviewTable_->setItem(row, 3, new QTableWidgetItem(reviewMetricText(sample)));
-        auto* imageItem = new QTableWidgetItem(imagePath);
-        imageItem->setToolTip(uiText("Snapshot 内相对路径：%1").arg(imagePath));
+        auto* imageItem = new QTableWidgetItem(paths.imageRelativePath);
+        imageItem->setToolTip(paths.imageRelativePath.isEmpty()
+            ? uiText("未提供有效的 Snapshot 相对路径；外部或越界路径已隐藏。")
+            : uiText("Snapshot 内相对路径：%1").arg(paths.imageRelativePath));
         sampleReviewTable_->setItem(row, 4, imageItem);
-        auto* labelItem = new QTableWidgetItem(labelPath);
-        labelItem->setToolTip(uiText("Snapshot 内相对路径：%1").arg(labelPath));
+        auto* labelItem = new QTableWidgetItem(paths.labelRelativePath);
+        labelItem->setToolTip(paths.labelRelativePath.isEmpty()
+            ? uiText("未提供有效的 Snapshot 相对路径；外部或越界路径已隐藏。")
+            : uiText("Snapshot 内相对路径：%1").arg(paths.labelRelativePath));
         sampleReviewTable_->setItem(row, 5, labelItem);
         sampleReviewTable_->setItem(row, 6, new QTableWidgetItem(sampleTextField(sample, QStringList()
             << QStringLiteral("message")

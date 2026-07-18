@@ -92,6 +92,10 @@ bool WorkflowRunner::beginNextStep(const WorkflowRunId& workflowRunId,
             return false;
         }
         if (step.state == WorkflowStepState::Failed || step.state == WorkflowStepState::Canceled) {
+            if (!storage_->terminalizeWorkflowStepAndSkipSuccessors(step.id, step.state,
+                    step.state, step.failure, error)) {
+                return false;
+            }
             dispatch->result.state = step.state;
             dispatch->result.failure = step.failure;
             return true;
@@ -105,9 +109,8 @@ bool WorkflowRunner::beginNextStep(const WorkflowRunId& workflowRunId,
         if (step.inputArtifactId.isValid() && previousOutput.isValid() && step.inputArtifactId != previousOutput) {
             const Failure failure = {FailureCode::ArtifactIncompatible,
                 QStringLiteral("工作流步骤输入 Artifact 与上一步输出不一致。"), {}, QDateTime::currentDateTimeUtc()};
-            if (!storage_->transitionWorkflowStep(step.id, WorkflowStepState::Pending,
-                    WorkflowStepState::Failed, {}, failure, error)
-                || !skipPendingSteps(steps, index + 1, error)) return false;
+            if (!storage_->terminalizeWorkflowStepAndSkipSuccessors(step.id,
+                    WorkflowStepState::Pending, WorkflowStepState::Failed, failure, error)) return false;
             dispatch->result.state = WorkflowStepState::Failed;
             dispatch->result.failure = failure;
             return true;
@@ -119,9 +122,8 @@ bool WorkflowRunner::beginNextStep(const WorkflowRunId& workflowRunId,
         if (aitrain::isCancellationRequested(cancellation)) {
             const Failure failure = failureFor(WorkflowStepState::Canceled,
                 QStringLiteral("Workflow 在步骤启动前收到取消请求。"));
-            if (!storage_->transitionWorkflowStep(step.id, WorkflowStepState::Pending,
-                    WorkflowStepState::Canceled, {}, failure, error)
-                || !skipPendingSteps(steps, index + 1, error)) return false;
+            if (!storage_->terminalizeWorkflowStepAndSkipSuccessors(step.id,
+                    WorkflowStepState::Pending, WorkflowStepState::Canceled, failure, error)) return false;
             dispatch->result.state = WorkflowStepState::Canceled;
             dispatch->result.failure = failure;
             return true;
@@ -166,9 +168,8 @@ bool WorkflowRunner::completeStep(const WorkflowRunId& workflowRunId,
         if (!execution.outputArtifactId.isValid()) {
             const Failure failure = {FailureCode::ArtifactIncomplete,
                 QStringLiteral("步骤执行器声明成功，但没有返回已提交 Artifact。"), {}, QDateTime::currentDateTimeUtc()};
-            if (!storage_->transitionWorkflowStep(workflowStepId, WorkflowStepState::Running,
-                    WorkflowStepState::Failed, {}, failure, error)
-                || !skipPendingSteps(steps, index + 1, error)) return false;
+            if (!storage_->terminalizeWorkflowStepAndSkipSuccessors(workflowStepId,
+                    WorkflowStepState::Running, WorkflowStepState::Failed, failure, error)) return false;
             dispatch->hasStep = false;
             dispatch->result = {WorkflowStepState::Failed, {}, failure};
             return true;
@@ -185,9 +186,8 @@ bool WorkflowRunner::completeStep(const WorkflowRunId& workflowRunId,
             ? QStringLiteral("步骤执行器已取消。")
             : QStringLiteral("步骤执行器失败。"));
     }
-    if (!storage_->transitionWorkflowStep(workflowStepId, WorkflowStepState::Running,
-            terminal, {}, failure, error)
-        || !skipPendingSteps(steps, index + 1, error)) return false;
+    if (!storage_->terminalizeWorkflowStepAndSkipSuccessors(workflowStepId,
+            WorkflowStepState::Running, terminal, failure, error)) return false;
     dispatch->hasStep = false;
     dispatch->result = {terminal, {}, failure};
     return true;

@@ -1,4 +1,5 @@
 #include "aitrain/model/ModelManifest.h"
+#include "aitrain/domain/ArtifactMemberPath.h"
 
 #include <QJsonArray>
 #include <QDir>
@@ -76,6 +77,7 @@ bool decodeTensors(const QJsonValue& value, QVector<TensorContract>* tensors, co
 
 bool validateModelManifest(const ModelManifest& manifest, QString* error)
 {
+    QString normalizedEntryPath;
     const QString artifactFormat = manifest.artifactFormat.trimmed().toLower();
     const bool isOnnx = artifactFormat == QStringLiteral("onnx");
     const bool isNcnn = artifactFormat == QStringLiteral("ncnn");
@@ -84,8 +86,9 @@ bool validateModelManifest(const ModelManifest& manifest, QString* error)
     const bool isPaddleOcrBundle = artifactFormat == QStringLiteral("paddleocr_inference_bundle");
     if (!manifest.modelPackageId.isValid() || !manifest.sourceTaskId.isValid() || !manifest.sourceSnapshotId.isValid()
         || manifest.modelFamily.trimmed().isEmpty() || manifest.taskType.trimmed().isEmpty() || manifest.sourceBackend.trimmed().isEmpty()
-        || !validSha256(manifest.sourceArtifactSha256) || manifest.artifactEntryPath.isEmpty() || QDir::isAbsolutePath(manifest.artifactEntryPath)
-        || QDir::cleanPath(manifest.artifactEntryPath).startsWith(QStringLiteral(".."))
+        || !validSha256(manifest.sourceArtifactSha256)
+        || !normalizeArtifactMemberPath(manifest.artifactEntryPath, &normalizedEntryPath, error)
+        || normalizedEntryPath != manifest.artifactEntryPath
         || (!isOnnx && !isNcnn && !isTensorRtEngine && !isAnomalibBundle && !isPaddleOcrBundle)
         || manifest.preprocessing.isEmpty() || manifest.postprocessing.isEmpty() || manifest.decoder.trimmed().isEmpty()
         || manifest.classNames.isEmpty() || manifest.exporterVersion.trimmed().isEmpty()

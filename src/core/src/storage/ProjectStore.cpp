@@ -1,4 +1,5 @@
 #include "aitrain/storage/ProjectStore.h"
+#include "aitrain/domain/ArtifactMemberPath.h"
 #include "aitrain/protocol/Protocol.h"
 #include "aitrain/protocol/ProtocolSanitizer.h"
 
@@ -383,7 +384,11 @@ bool ProjectStore::open(const QString& databasePath, QString* error)
         }
         return false;
     }
-    return initialize(error);
+    if (initialize(error)) {
+        return true;
+    }
+    close();
+    return false;
 }
 
 void ProjectStore::close()
@@ -1054,13 +1059,19 @@ bool ProjectStore::recordArtifactWithFiles(const ArtifactId& artifactId,
         }
         return false;
     }
+    QSet<QString> normalizedPaths;
     for (const ArtifactFileSnapshot& file : files) {
-        if (file.relativePath.isEmpty() || file.sha256.size() != 64 || file.byteCount < 0) {
+        QString normalizedPath;
+        if (!normalizeArtifactMemberPath(file.relativePath, &normalizedPath, error)
+            || normalizedPath != file.relativePath
+            || normalizedPaths.contains(normalizedPath.toCaseFolded())
+            || file.sha256.size() != 64 || file.byteCount < 0) {
             if (error) {
                 *error = QStringLiteral("Artifact 文件记录无效。");
             }
             return false;
         }
+        normalizedPaths.insert(normalizedPath.toCaseFolded());
     }
     if (!db_.transaction()) {
         if (error) {
@@ -1112,12 +1123,14 @@ bool ProjectStore::recordEvidenceArtifactWithFilesAndAttachTerminalization(
     }
     QSet<QString> paths;
     for (const ArtifactFileSnapshot& file : files) {
-        if (file.relativePath.isEmpty() || file.sha256.size() != 64 || file.byteCount < 0
-            || paths.contains(file.relativePath)) {
+        QString normalizedPath;
+        if (!normalizeArtifactMemberPath(file.relativePath, &normalizedPath, error)
+            || normalizedPath != file.relativePath || file.sha256.size() != 64 || file.byteCount < 0
+            || paths.contains(normalizedPath.toCaseFolded())) {
             if (error) *error = QStringLiteral("Evidence Artifact 文件记录无效或路径重复。");
             return false;
         }
-        paths.insert(file.relativePath);
+        paths.insert(normalizedPath.toCaseFolded());
     }
     if (!db_.transaction()) {
         if (error) *error = db_.lastError().text();
@@ -1511,8 +1524,9 @@ bool ProjectStore::registerModelPackage(const ModelPackageSnapshot& modelPackage
     }
 
     QSqlQuery hashQuery(db_);
-    hashQuery.prepare(QStringLiteral("select 1 from artifact_files where artifact_id = :artifact_id and sha256 = :sha256"));
+    hashQuery.prepare(QStringLiteral("select 1 from artifact_files where artifact_id = :artifact_id and relative_path = :relative_path and sha256 = :sha256"));
     hashQuery.bindValue(QStringLiteral(":artifact_id"), modelPackage.sourceArtifactId.toString());
+    hashQuery.bindValue(QStringLiteral(":relative_path"), manifest.artifactEntryPath);
     hashQuery.bindValue(QStringLiteral(":sha256"), manifest.sourceArtifactSha256);
     if (!hashQuery.exec() || !hashQuery.next()) {
         if (error) *error = hashQuery.lastError().isValid() ? sqlError(hashQuery) : QStringLiteral("Model Manifest 的来源哈希不属于指定 Artifact。");
@@ -2090,6 +2104,99 @@ bool ProjectStore::transitionWorkflowStep(const WorkflowStepId& workflowStepId,
     query.bindValue(QStringLiteral(":expected_state"), workflowStepStateToString(expectedState));
     if (!query.exec() || query.numRowsAffected() != 1) {
         if (error) *error = query.lastError().isValid() ? sqlError(query) : QStringLiteral("工作流步骤不存在或状态已被并发更新。");
+        db_.rollback();
+        return false;
+    }
+    if (db_.commit()) return true;
+    if (error) *error = db_.lastError().text();
+    return false;
+}
+
+bool ProjectStore::terminalizeWorkflowStepAndSkipSuccessors(
+    const WorkflowStepId& workflowStepId,
+    WorkflowStepState expectedState,
+    WorkflowStepState terminalState,
+    const Failure& failure,
+    QString* error)
+{
+    if (!workflowStepId.isValid()
+        || (terminalState != WorkflowStepState::Failed
+            && terminalState != WorkflowStepState::Canceled)
+        || !failure.isFailure()
+        || (expectedState != terminalState
+            && !isValidWorkflowStepTransition(expectedState, terminalState))) {
+        if (error) *error = QStringLiteral("原子收口 Workflow 步骤需要合法失败/取消终态和完整失败事实。");
+        return false;
+    }
+    if (!db_.transaction()) {
+        if (error) *error = db_.lastError().text();
+        return false;
+    }
+    QSqlQuery current(db_);
+    current.prepare(QStringLiteral(
+        "select workflow_run_id, ordinal, state from workflow_steps where id = :id"));
+    current.bindValue(QStringLiteral(":id"), workflowStepId.toString());
+    if (!current.exec() || !current.next()) {
+        if (error) *error = current.lastError().isValid() ? sqlError(current)
+            : QStringLiteral("待原子收口的 Workflow 步骤不存在。");
+        db_.rollback();
+        return false;
+    }
+    const QString workflowRunId = current.value(0).toString();
+    const int ordinal = current.value(1).toInt();
+    const QString currentState = current.value(2).toString();
+    const QString expectedText = workflowStepStateToString(expectedState);
+    const QString terminalText = workflowStepStateToString(terminalState);
+    if (currentState != expectedText && currentState != terminalText) {
+        if (error) *error = QStringLiteral("Workflow 步骤状态已被并发更新，不能原子收口。");
+        db_.rollback();
+        return false;
+    }
+    QSqlQuery runningSuccessor(db_);
+    runningSuccessor.prepare(QStringLiteral(
+        "select 1 from workflow_steps where workflow_run_id = :workflow_run_id "
+        "and ordinal > :ordinal and state = 'running' limit 1"));
+    runningSuccessor.bindValue(QStringLiteral(":workflow_run_id"), workflowRunId);
+    runningSuccessor.bindValue(QStringLiteral(":ordinal"), ordinal);
+    if (!runningSuccessor.exec() || runningSuccessor.next()) {
+        if (error) *error = runningSuccessor.lastError().isValid() ? sqlError(runningSuccessor)
+            : QStringLiteral("Workflow 存在并发运行的后继步骤，拒绝隐藏为 skipped。");
+        db_.rollback();
+        return false;
+    }
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    if (currentState == expectedText && expectedState != terminalState) {
+        QSqlQuery updateCurrent(db_);
+        updateCurrent.prepare(QStringLiteral(
+            "update workflow_steps set state = :terminal_state, finished_at = :now, "
+            "failure_code = :failure_code, failure_details = :failure_details, "
+            "failure_suggested_action = :failure_suggested_action, failure_occurred_at = :failure_occurred_at "
+            "where id = :id and state = :expected_state"));
+        updateCurrent.bindValue(QStringLiteral(":terminal_state"), terminalText);
+        updateCurrent.bindValue(QStringLiteral(":now"), utcText(now));
+        updateCurrent.bindValue(QStringLiteral(":failure_code"), failureCodeToString(failure.code));
+        updateCurrent.bindValue(QStringLiteral(":failure_details"), requiredText(failure.message));
+        updateCurrent.bindValue(QStringLiteral(":failure_suggested_action"), requiredText(failure.suggestedAction));
+        updateCurrent.bindValue(QStringLiteral(":failure_occurred_at"), utcText(
+            failure.occurredAt.isValid() ? failure.occurredAt : now));
+        updateCurrent.bindValue(QStringLiteral(":id"), workflowStepId.toString());
+        updateCurrent.bindValue(QStringLiteral(":expected_state"), expectedText);
+        if (!updateCurrent.exec() || updateCurrent.numRowsAffected() != 1) {
+            if (error) *error = updateCurrent.lastError().isValid() ? sqlError(updateCurrent)
+                : QStringLiteral("Workflow 步骤原子终态更新失败。");
+            db_.rollback();
+            return false;
+        }
+    }
+    QSqlQuery skip(db_);
+    skip.prepare(QStringLiteral(
+        "update workflow_steps set state = 'skipped', finished_at = :now "
+        "where workflow_run_id = :workflow_run_id and ordinal > :ordinal and state = 'pending'"));
+    skip.bindValue(QStringLiteral(":now"), utcText(now));
+    skip.bindValue(QStringLiteral(":workflow_run_id"), workflowRunId);
+    skip.bindValue(QStringLiteral(":ordinal"), ordinal);
+    if (!skip.exec()) {
+        if (error) *error = sqlError(skip);
         db_.rollback();
         return false;
     }

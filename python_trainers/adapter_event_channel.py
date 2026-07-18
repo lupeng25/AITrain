@@ -254,6 +254,18 @@ class AdapterEventChannel:
             self._socket.sendall(wire)
         except OSError as exc:
             raise AdapterEventChannelError("event channel write failed") from exc
+        if kind in {"event.succeeded", "event.failed", "event.canceled"}:
+            if self._reader is None:
+                raise AdapterEventChannelError("terminal event channel reader is unavailable")
+            try:
+                reply_line = self._reader.readline(MAX_CONTROL_MESSAGE_BYTES + 1)
+                reply = json.loads(reply_line.decode("utf-8")) if reply_line else None
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise AdapterEventChannelError("terminal event acknowledgment failed") from exc
+            if (not isinstance(reply, dict) or reply.get("status") != "accepted"
+                    or reply.get("terminal") is not True
+                    or str(reply.get("sequence") or "") != str(self._sequence)):
+                raise AdapterEventChannelError("terminal event was not durably accepted")
         return event
 
     def emit_event(self, event: Mapping[str, Any]) -> dict[str, Any]:

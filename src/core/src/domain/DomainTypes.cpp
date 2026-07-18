@@ -153,6 +153,7 @@ bool isValidWorkflowStepTransition(WorkflowStepState from, WorkflowStepState to)
     switch (from) {
     case WorkflowStepState::Pending:
         return to == WorkflowStepState::Running
+            || to == WorkflowStepState::Failed
             || to == WorkflowStepState::Canceled
             || to == WorkflowStepState::Skipped;
     case WorkflowStepState::Running:

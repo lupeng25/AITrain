@@ -421,7 +421,6 @@ def run_process(
         on_line=lambda line: parse_metrics(line, metrics) if metrics is not None else None,
     )
     if result.canceled:
-        emit("canceled", message="Official PaddleOCR child process canceled.", force=False)
         return -2
     emit("log", level="info" if result.exit_code == 0 else "error",
          message=f"Official PaddleOCR child process finished (exitCode={result.exit_code}, tailLines={len(result.tail_lines)}).")
@@ -610,7 +609,9 @@ def run(request: dict[str, Any]) -> int:
                 report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
                 emit("artifact", name="paddleocr_official_det_report.json", path=str(report_path), kind="report")
                 if train_exit == -2:
-                    return fail("Official PaddleOCR detection training canceled.", "canceled", {"exitCode": train_exit})
+                    emit("canceled", message="Official PaddleOCR detection training canceled.", force=False,
+                         exitCode=train_exit)
+                    return 130
                 return fail("Official PaddleOCR detection training failed.", "official_train_failed", {"exitCode": train_exit})
         pretrained_base = select_checkpoint_base(output_path, parameters.get("pretrainedModel"))
         export_command = [
@@ -632,7 +633,9 @@ def run(request: dict[str, Any]) -> int:
             report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             emit("artifact", name="paddleocr_official_det_report.json", path=str(report_path), kind="report")
             if export_exit == -2:
-                return fail("Official PaddleOCR detection export canceled.", "canceled", {"exitCode": export_exit})
+                emit("canceled", message="Official PaddleOCR detection export canceled.", force=False,
+                     exitCode=export_exit)
+                return 130
             return fail("Official PaddleOCR detection export failed.", "official_export_failed", {"exitCode": export_exit})
         report["checkpointPath"] = str(pretrained_base.with_suffix(".pdparams"))
         report["inferenceModelDir"] = str(output_path / "official_inference")

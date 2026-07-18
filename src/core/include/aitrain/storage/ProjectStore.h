@@ -297,6 +297,13 @@ public:
         const ArtifactId& outputArtifactId = {},
         const Failure& failure = {},
         QString* error = nullptr);
+    // 将失败/取消步骤与所有后继 pending 步骤在同一 SQLite 事务中收口。
+    // 若当前步骤已经处于相同终态，则执行幂等的半收口修复。
+    bool terminalizeWorkflowStepAndSkipSuccessors(const WorkflowStepId& workflowStepId,
+        WorkflowStepState expectedState,
+        WorkflowStepState terminalState,
+        const Failure& failure,
+        QString* error = nullptr);
     bool retryWorkflowStep(const WorkflowStepId& workflowStepId, QString* error = nullptr);
     bool sealWorkflowTerminalization(const WorkflowRunId& workflowRunId,
         TaskState terminalState,

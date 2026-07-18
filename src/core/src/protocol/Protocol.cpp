@@ -234,7 +234,12 @@ bool ProtocolSequenceTracker::observe(const ProtocolEnvelope& envelope,
         }
         return false;
     }
+    constexpr qsizetype kRetainedMessageIds = 4096;
     observedMessageIds_.insert(messageKey);
+    observedMessageOrder_.enqueue(messageKey);
+    while (observedMessageOrder_.size() > kRetainedMessageIds) {
+        observedMessageIds_.remove(observedMessageOrder_.dequeue());
+    }
     lastSequenceByRequest_.insert(requestKey, envelope.sequence);
     return true;
 }
@@ -248,6 +253,7 @@ void ProtocolSequenceTracker::clear()
 {
     lastSequenceByRequest_.clear();
     observedMessageIds_.clear();
+    observedMessageOrder_.clear();
 }
 
 } // namespace aitrain

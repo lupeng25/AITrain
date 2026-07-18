@@ -1,6 +1,6 @@
 # Current Project Status
 
-Last updated: 2026-07-17
+Last updated: 2026-07-18
 
 This file is the source of truth for phase status in new AI coding conversations. Use `docs/product-roadmap-local-training-platform.md` for current broad direction after reading this file. Deleted or external historical roadmap notes must not be used as current implementation plans or phase status sources.
 
@@ -10,7 +10,7 @@ This file is the source of truth for phase status in new AI coding conversations
 
 ## 本轮破坏性清理覆盖（2026-07-16）
 
-以下内容以本节为准，覆盖文档中较早的历史段落：SQLite 元数据版本为 schema 11；`ProjectStore`、`JsonProtocol`、`TaskModels`、`WorkerRequests` 以及 V1 `ProductWorkflow` 实现已物理删除，项目/总览、任务与产物、数据集目录、模型库、环境、交付证据和设置查询统一使用 `ProjectStore`、Query Service 和 Presenter，GUI 写入口统一由 `ProjectWorkspace`/Worker 收口。Worker 只保留 Protocol 的 `--self-check`、`--builtin-capabilities` 和 Socket 服务入口，旧裸模型、旧标注、旧数据集转换、TensorRT/NCNN/语义 ONNX smoke CLI 已删除；对应独立 smoke 脚本也已删除，验收必须使用 Workflow 或官方 Python 适配器。Qt 测试运行目录由 CMake 自动复制 Qt DLL、`platforms/qoffscreen` 和 `qt.conf`，CTest/VS Code 固定 `QT_QPA_PLATFORM=offscreen`，因此不再出现“Qt platform plugin could not be initialized”的旧启动环境问题。
+以下内容以本节为准，覆盖文档中较早的历史段落：SQLite 元数据版本为 schema 11；`JsonProtocol`、`TaskModels`、`WorkerRequests` 以及 V1 `ProductWorkflow` 实现已物理删除，项目/总览、任务与产物、数据集目录、模型库、环境、交付证据和设置查询统一使用 `ProjectStore`、Query Service 和 Presenter，GUI 写入口统一由 `ProjectWorkspace`/Worker 收口。Worker 只保留 Protocol 的 `--self-check`、`--builtin-capabilities` 和 Socket 服务入口，旧裸模型、旧标注、旧数据集转换、TensorRT/NCNN/语义 ONNX smoke CLI 已删除；对应独立 smoke 脚本也已删除，验收必须使用 Workflow 或官方 Python 适配器。Qt 测试运行目录由 CMake 自动复制 Qt DLL、`platforms/qoffscreen` 和 `qt.conf`，CTest/VS Code 固定 `QT_QPA_PLATFORM=offscreen`，因此不再出现“Qt platform plugin could not be initialized”的旧启动环境问题。
 
 ## 最终收口补充（2026-07-17）
 
@@ -18,6 +18,13 @@ This file is the source of truth for phase status in new AI coding conversations
 - Worker：取消、断开、退出和窗口关闭共用有限异步排空路径；Python Adapter 退出后的终态帧在读回调完成后再 finalize，不使用 GUI/Worker 嵌套事件循环。
 - Storage/Evidence：证据候选使用单条 SQL 查询并按 Artifact 数量限流；invalid evidence 保留在只读结果页并附带 Failure，而不是静默丢页；外部导入证据仍固定 `verified=false`。
 - GUI：评估报告与样本复核均以 committed ArtifactId + 包内相对成员读取；样本复核不再接收任意本地 JSON/图片路径，仅提供受控身份信息。
+
+## 最终收口补充（2026-07-18）
+
+- 当前执行分支为 `codex/v3-final-closeout`。Qt 测试运行时改为使用 `build-vscode/tests` 内由 CMake 复制的 Qt DLL、`platforms/qoffscreen` 与 `qt.conf`，CTest 环境显式设置 `QT_PLUGIN_PATH`、`QT_QPA_PLATFORM_PLUGIN_PATH` 和 `QT_QPA_PLATFORM=offscreen`；不会再从机器上的其他 Qt 安装目录加载平台插件。
+- Worker 终态交付采用“下游持久化成功后才发送终态确认，等待 WorkerClient 关闭连接”的握手；窗口关闭、取消、Worker 断开共用有限异步排空路径，仍保留 1 秒有界兜底。Python Adapter 只有在下游接受终态后才标记终态已见；拒绝终态时会继续生成可持久化的失败终态。
+- 最新 `.\tools\harness-check.ps1` 已通过：编码检查、架构检查、构建和 CTest 全部通过，当前测试目标计数为 36/36；本次 `acceptance-smoke` 重跑的全量 CTest 用时 263.94 秒。文档中此前的 37/37 记录属于 2026-07-17 的历史门禁结果，不覆盖本节的当前计数。
+- 本轮打包脚本已要求 Qt5Core/Qt5Gui/Qt5Widgets、`platforms\qwindows.dll`（Debug 包允许对应的 `qwindowsd.dll`）和双语翻译目录，并使用 `AITrainStudio.exe --package-startup-check` 做包根启动检查；`windeployqt` 失败会直接使构建失败。
 
 ##  破坏性重构执行状态（2026-07-16）
 
@@ -218,7 +225,7 @@ Recommended implementation order:
 7. Treat Phase 47 Det ONNX evidence as historical diagnostic material only. New OCR acceptance should use PaddleOCR official Det/Rec/System reports and customer-domain validation outputs.
 8. For production OCR readiness, keep the lowered `accuracy>0.7` gate explicitly documented for current public RTX evidence. It remains public Total-Text evidence rather than customer-domain production proof; customer-domain OCR claims require the Phase 49/customer OCR validation path and real customer data.
 9. Continue the Phase 40 industrial model backlog only for anomaly detection/localization, OBB, and dedicated semantic segmentation. SMP covers the first dedicated semantic segmentation route; OBB v1 now has local smoke/matrix evidence through Ultralytics OBB and AITrain ONNX Runtime, and anomaly v1 now has local public MVTec matrix evidence through Anomalib PatchCore/EfficientAD. Customer-domain OBB and anomaly readiness still require target-domain evidence. Keep unrelated product directions out of the backlog unless explicitly approved.
-10. Do not continue source-layout refactoring by default; the next refactor should be driven by a concrete maintenance blocker, with `ProductWorkflowQuality.cpp`, `ProductWorkflowEvaluation.cpp`, `ProductWorkflowAcceptance.cpp`, `ProductWorkflowDelivery.cpp`, `DetectionTrainer.cpp`, or `WorkerSession.cpp` evaluated separately.
+10. Do not continue source-layout refactoring by default; the next refactor should be driven by a concrete maintenance blocker, with the focused `ProjectWorkspace*.cpp` services, `DetectionTrainer.cpp`, or `WorkerSession.cpp` evaluated separately.
 
 Current constraints to preserve:
 

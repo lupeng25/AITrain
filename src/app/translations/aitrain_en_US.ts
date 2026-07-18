@@ -999,6 +999,38 @@
         <source>格式：%1 | 状态：%2 | 路径：%3\n%4</source>
         <translation>Format: %1 | Status: %2 | Path: %3\n%4</translation>
     </message>
+    <message>
+        <source>创建 / 打开项目</source>
+        <translation>Create / Open Project</translation>
+    </message>
+    <message>
+        <source>本地项目与元数据</source>
+        <translation>Local Project and Metadata</translation>
+    </message>
+    <message>
+        <source>未打开项目。</source>
+        <translation>No project is open.</translation>
+    </message>
+    <message>
+        <source>工作区由 .aitrain 管理，产物和元数据通过登记身份访问。</source>
+        <translation>The .aitrain workspace manages artifacts and metadata, which are accessed through registered identities.</translation>
+    </message>
+    <message>
+        <source>打开项目后，项目摘要只读取 .aitrain/project.sqlite 中已持久化的事实。</source>
+        <translation>After opening a project, the summary reads only persisted facts from .aitrain/project.sqlite.</translation>
+    </message>
+    <message>
+        <source>输出由 Artifact Store 托管，完成后在任务与产物中按 ArtifactId 预览。</source>
+        <translation>Outputs are managed by the Artifact Store and can be previewed by ArtifactId under Tasks and Artifacts.</translation>
+    </message>
+    <message>
+        <source>该产物过大，已跳过同步预览，避免阻塞界面。\nArtifact 相对项：%1\n大小：%2 bytes\n请通过后续异步工具检查内容。</source>
+        <translation>This artifact is too large for synchronous preview, which was skipped to keep the UI responsive.\nArtifact member: %1\nSize: %2 bytes\nInspect it with an asynchronous tool.</translation>
+    </message>
+    <message>
+        <source>未提供有效的 Snapshot 相对路径；外部或越界路径已隐藏。</source>
+        <translation>No valid Snapshot-relative path was provided; external or escaping paths are hidden.</translation>
+    </message>
 </context>
 <context>
     <name>RegistrationDialog</name>

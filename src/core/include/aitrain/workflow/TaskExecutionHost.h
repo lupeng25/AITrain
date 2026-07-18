@@ -41,11 +41,11 @@ public:
     AdapterEventEndpoint adapterEndpoint() const;
 
 private:
-    void consumeAdapterEvent(const ProtocolEnvelope& event);
+    bool consumeAdapterEvent(const ProtocolEnvelope& event);
     void finishAdapter(const PythonAdapterExit& outcome);
     bool emitHostTerminal(const QString& kind, const QJsonObject& payload, QString* error = nullptr);
     bool consumeTerminalEvent(const ProtocolEnvelope& event, const ArtifactId& outputArtifactId, QString* error);
-    bool startAdapter(const PythonAdapterLaunch& launch, QString* error);
+    bool startAdapter(const PythonAdapterLaunch& launch, bool terminalizeStartFailure, QString* error);
     bool stageArtifactCandidate(const ProtocolEnvelope& event, QString* error);
     bool commitArtifactBundle(ArtifactId* outputArtifactId, QString* error);
     void abortArtifactBundle();

@@ -12,6 +12,14 @@ enum class ArtifactCommitFailPoint {
     AfterDatabaseBeforeJournalRemoval
 };
 
+enum class ArtifactCommitPhase {
+    None,
+    Begun,
+    Prepared,
+    FilesCommitted,
+    DatabaseCommitted
+};
+
 using ArtifactCommitFailureInjector = std::function<bool(ArtifactCommitFailPoint)>;
 
 class ArtifactStore final {
@@ -29,7 +37,8 @@ public:
         QString* error = nullptr,
         const aitrain::CancellationCallback& cancellation = {},
         bool* canceled = nullptr,
-        const WorkflowRunId& workflowRunId = {});
+        const WorkflowRunId& workflowRunId = {},
+        ArtifactCommitPhase* phase = nullptr);
     bool abort(const QString& stagingPath, QString* error = nullptr);
     bool discardCommitted(const ArtifactId& artifactId, ProjectStore* storage, QString* error = nullptr);
     bool recoverStaging(ProjectStore* storage, QStringList* diagnostics, QString* error = nullptr);

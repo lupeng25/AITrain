@@ -25,6 +25,48 @@
 
 namespace aitrain_app {
 
+namespace {
+
+QString firstStringField(const QJsonObject& object, const QStringList& keys)
+{
+    for (const QString& key : keys) {
+        const QString value = object.value(key).toString().trimmed();
+        if (!value.isEmpty()) return value;
+    }
+    return QString();
+}
+
+QString verifiedRelativePath(const QString& rawPath)
+{
+    const QString normalized = QDir::cleanPath(QDir::fromNativeSeparators(rawPath.trimmed()));
+    if (normalized.isEmpty() || normalized == QStringLiteral(".")
+        || QDir::isAbsolutePath(normalized)
+        || normalized == QStringLiteral("..")
+        || normalized.startsWith(QStringLiteral("../"))
+        || QRegularExpression(QStringLiteral("^[A-Za-z]:")).match(normalized).hasMatch()) {
+        return QString();
+    }
+    return normalized;
+}
+
+} // namespace
+
+ReviewSamplePathView reviewSamplePathView(const QJsonObject& sample)
+{
+    ReviewSamplePathView view;
+    view.imageRelativePath = verifiedRelativePath(firstStringField(sample, QStringList()
+        << QStringLiteral("sampleRelativePath")
+        << QStringLiteral("imagePath")
+        << QStringLiteral("path")
+        << QStringLiteral("filePath")));
+    view.labelRelativePath = verifiedRelativePath(firstStringField(sample, QStringList()
+        << QStringLiteral("sourceRelativePath")
+        << QStringLiteral("labelPath")
+        << QStringLiteral("annotationPath")
+        << QStringLiteral("gtPath")));
+    return view;
+}
+
 QLabel* mutedLabel(const QString& text)
 {
     auto* label = new QLabel(text);

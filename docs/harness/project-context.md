@@ -127,7 +127,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 ## 当前源码组织说明
 
 - `src/app/src/MainWindow.cpp` 已完成第一层 companion 拆分；Qt Widgets shell 仍保持 left sidebar、top status bar、central `QStackedWidget` 架构。
-- `src/core/src/ProductWorkflow.cpp` 已完成第一层 companion 拆分，现在只作为 `ProductWorkflow.h` 的入口锚点；snapshot、quality、evaluation、benchmark、delivery、acceptance、pipeline 的实现分别位于同目录 `ProductWorkflow*.cpp` 文件，跨文件共享 helper 位于内部 `ProductWorkflowSupport.h/.cpp`。
+- Core 写入口由 `src/core/src/workflow/ProjectWorkspace.cpp` 及 `ProjectWorkspace*.cpp` 按 snapshot、quality、conversion、split、runtime delivery、OCR acceptance、diagnostics 等职责拆分；读模型集中在 `ProjectQueryService.cpp`，任务执行边界集中在 `TaskExecutionHost.cpp`。已删除的 `ProductWorkflow*` 文件不是当前扩展入口。
 - 这些拆分是行为保持型维护重构，不代表新的 Worker protocol、SQLite schema、内置能力注册表、训练/推理/评估算法或报告字段变更。
 
 ## 构建环境

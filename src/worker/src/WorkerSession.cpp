@@ -26,6 +26,8 @@ namespace wp = aitrain::worker_protocol;
 
 namespace {
 constexpr qint64 kMaxPendingWorkerControlBytes = 8 * 1024 * 1024;
+constexpr int kTerminalSettleMs = 750;
+constexpr int kTerminalClientCloseTimeoutMs = 1000;
 
 bool isDroppableControlEvent(const QString& type)
 {
@@ -40,6 +42,11 @@ WorkerSession::WorkerSession(QObject* parent)
 {
     connect(&socket_, &QLocalSocket::readyRead, this, &WorkerSession::readLines);
     connect(&socket_, &QLocalSocket::disconnected, this, &WorkerSession::handleSocketDisconnected);
+    terminalDrainTimer_.setInterval(25);
+    connect(&terminalDrainTimer_, &QTimer::timeout, this, &WorkerSession::maybeFinishSessionAfterWrite);
+    connect(&socket_, &QLocalSocket::bytesWritten, this, [this](qint64) {
+        maybeFinishSessionAfterWrite();
+    });
 }
 
 bool WorkerSession::connectToServer(const QString& serverName,
@@ -317,6 +324,9 @@ void WorkerSession::requestCancellationForTrackedWorkflows()
 void WorkerSession::handleSocketDisconnected()
 {
     if (finishingSession_) {
+        terminalDrainTimer_.stop();
+        terminalQuitScheduled_ = false;
+        qApp->quit();
         return;
     }
 
@@ -497,11 +507,60 @@ void WorkerSession::finishSession()
     activeTaskId_.clear();
     activeCommand_.clear();
     socket_.flush();
-    // 终态帧已经交给 QLocalSocket 的异步写缓冲。不要在这里同步等待或
-    // 调用 processEvents：该嵌套事件循环会重入 readLines、断线和析构回调，
-    // 使同一任务出现第二次取消/终态。保留一个有界的异步收尾窗口，让 Qt
-    // 自己处理 bytesWritten；窗口到期后由主事件循环退出 Worker。
-    QTimer::singleShot(750, qApp, [] { qApp->quit(); });
+    // QLocalSocket::bytesToWrite()==0 只说明数据已交给系统缓冲；在 Worker
+    // 即将退出的窗口中显式等待一次有界的 bytesWritten，避免短工作流的
+    // 终态帧还未被对端读取就随进程销毁。该等待仅发生在终态收尾，不阻塞
+    // GUI 线程或训练步骤。
+    socket_.waitForBytesWritten(1000);
+    // 不使用嵌套事件循环；由 bytesWritten 驱动确认终态及其之前的帧已经
+    // 离开 QLocalSocket 用户态缓冲。只有确认写空或明确超时才退出 Worker。
+    terminalDrainElapsed_.restart();
+    terminalQuitScheduled_ = false;
+    terminalDrainTimer_.start();
+    maybeFinishSessionAfterWrite();
+}
+
+void WorkerSession::maybeFinishSessionAfterWrite()
+{
+    if (!finishingSession_) {
+        return;
+    }
+    if (socket_.bytesToWrite() == 0) {
+        terminalDrainTimer_.stop();
+        if (!terminalQuitScheduled_) {
+            terminalQuitScheduled_ = true;
+            // bytesToWrite()==0 只代表 Qt 已把帧交给系统 socket，不能证明
+            // 对端已经完成 readyRead。保留与原有 Worker 生命周期一致的
+            // 750ms 异步稳定窗口，避免短工作流在慢消费者上丢失终态帧。
+            const int remainingMs = qMax(0, kTerminalSettleMs
+                - static_cast<int>(terminalDrainElapsed_.elapsed()));
+            QTimer::singleShot(remainingMs, qApp, [this] {
+                if (!finishingSession_) {
+                    return;
+                }
+                // 不由 Worker 主动发 FIN：QLocalSocket 的 disconnected 事件
+                // 可能先于对端 readyRead 到达，导致 WorkerClient 在进程退出
+                // 时无法再排空终态帧。让已收到终态的 WorkerClient 主动断开；
+                // 对异常客户端保留有界兜底，避免 Worker 永久驻留。
+                if (socket_.state() != QLocalSocket::ConnectedState) {
+                    qApp->quit();
+                    return;
+                }
+                QTimer::singleShot(kTerminalClientCloseTimeoutMs, qApp, [this] {
+                    if (finishingSession_) {
+                        qApp->quit();
+                    }
+                });
+            });
+        }
+        return;
+    }
+    if (terminalDrainElapsed_.isValid() && terminalDrainElapsed_.elapsed() >= 5000) {
+        qCritical().noquote() << QStringLiteral(
+            "Worker terminal frame drain timed out with %1 bytes pending.").arg(socket_.bytesToWrite());
+        terminalDrainTimer_.stop();
+        qApp->exit(5);
+    }
 }
 
 void WorkerSession::fail(const QString& message)

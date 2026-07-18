@@ -74,6 +74,7 @@ void ApplicationEventRouter::onTaskEvent(const wp::TaskEvent& event)
         metric.value = event.details.value(QStringLiteral("value")).toDouble();
         metric.details = event.details;
         state.metrics.append(metric);
+        ++state.metricSequence;
         while (state.metrics.size() > 1024) state.metrics.removeFirst();
         break;
     }
@@ -83,6 +84,8 @@ void ApplicationEventRouter::onTaskEvent(const wp::TaskEvent& event)
         artifact.kind = event.details.value(QStringLiteral("kind")).toString();
         artifact.relativePath = event.details.value(QStringLiteral("relativePath")).toString();
         state.artifacts.append(artifact);
+        ++state.artifactSequence;
+        while (state.artifacts.size() > 256) state.artifacts.removeFirst();
         break;
     }
     case wp::TaskEventKind::Succeeded:
@@ -111,7 +114,10 @@ void ApplicationEventRouter::onTaskEvent(const wp::TaskEvent& event)
     if (event.kind == wp::TaskEventKind::Succeeded
         || event.kind == wp::TaskEventKind::Failed
         || event.kind == wp::TaskEventKind::Canceled) {
+        const QString terminalMessage = state.terminalMessage;
         emit taskFactsInvalidated(taskId);
-        emit taskTerminalized(taskId, event.kind, state.terminalMessage);
+        emit taskTerminalized(taskId, event.kind, terminalMessage);
+        // Router 只保存活跃任务的瞬态投影；终态事实必须从 Query Service 重新读取。
+        states_.remove(taskId);
     }
 }

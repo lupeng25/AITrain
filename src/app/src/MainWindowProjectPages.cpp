@@ -136,18 +136,18 @@ QWidget* MainWindow::buildProjectPage()
     layout->setContentsMargins(18, 0, 18, 18);
     layout->setSpacing(16);
 
-    auto* headerOpenButton = primaryButton(QStringLiteral("创建 / 打开项目"));
+    auto* headerOpenButton = primaryButton(uiText("创建 / 打开项目"));
 
     auto* headerPanel = new QFrame;
     headerPanel->setObjectName(QStringLiteral("WorkspaceToolbar"));
     auto* headerRoot = new QHBoxLayout(headerPanel);
     headerRoot->setContentsMargins(14, 10, 14, 10);
     headerRoot->setSpacing(12);
-    auto* contextLabel = new QLabel(QStringLiteral("本地项目与元数据"));
+    auto* contextLabel = new QLabel(uiText("本地项目与元数据"));
     contextLabel->setObjectName(QStringLiteral("WorkspaceToolbarTitle"));
-    projectConsoleStatusLabel_ = inlineStatusLabel(QStringLiteral("未打开项目。"));
+    projectConsoleStatusLabel_ = inlineStatusLabel(uiText("未打开项目。"));
     projectConsoleStatusLabel_->setObjectName(QStringLiteral("WorkspaceToolbarStatus"));
-    auto* policyStatus = inlineStatusLabel(QStringLiteral("工作区由 .aitrain 管理，产物和元数据通过登记身份访问。"));
+    auto* policyStatus = inlineStatusLabel(uiText("工作区由 .aitrain 管理，产物和元数据通过登记身份访问。"));
     policyStatus->setObjectName(QStringLiteral("WorkspaceToolbarMeta"));
     allowLabelToShrink(projectConsoleStatusLabel_);
     allowLabelToShrink(policyStatus);
@@ -167,7 +167,7 @@ QWidget* MainWindow::buildProjectPage()
     projectNameEdit_->setObjectName(QStringLiteral("ProjectNameEdit"));
     projectRootEdit_ = new QLineEdit(QDir::toNativeSeparators(configuredDefaultProjectPath()));
     projectRootEdit_->setObjectName(QStringLiteral("ProjectRootEdit"));
-    auto* browseButton = new QPushButton(QStringLiteral("选择目录"));
+    auto* browseButton = new QPushButton(uiText("选择目录"));
 
     connect(browseButton, &QPushButton::clicked, this, [this]() {
         const QString directory = QFileDialog::getExistingDirectory(this, uiText("选择项目目录"));
@@ -191,7 +191,7 @@ QWidget* MainWindow::buildProjectPage()
     actionLayout->setContentsMargins(10, 8, 10, 8);
     actionLayout->setHorizontalSpacing(10);
     actionLayout->setVerticalSpacing(8);
-    auto* projectActionHint = mutedLabel(QStringLiteral("打开项目后，项目摘要只读取 .aitrain/project.sqlite 中已持久化的事实。"));
+    auto* projectActionHint = mutedLabel(uiText("打开项目后，项目摘要只读取 .aitrain/project.sqlite 中已持久化的事实。"));
     allowLabelToShrink(projectActionHint);
     actionLayout->addWidget(projectActionHint, 0, 0);
     actionLayout->setColumnStretch(0, 1);

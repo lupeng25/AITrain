@@ -26,6 +26,8 @@ using namespace aitrain_app;
 
 namespace {
 
+constexpr qint64 kMaximumSynchronousPreviewBytes = 16LL * 1024LL * 1024LL;
+
 QString formatArtifactJsonText(const QByteArray& data)
 {
     QJsonParseError error;
@@ -191,6 +193,7 @@ void TaskArtifactPanel::setDetails(const TaskArtifactDetails& details)
             ? QStringLiteral("（无文件清单）") : artifact.relativePath);
         relativePath->setData(Qt::UserRole, artifact.relativePath);
         relativePath->setData(Qt::UserRole + 1, artifact.artifactId);
+        relativePath->setData(Qt::UserRole + 2, artifact.byteCount);
         artifactTable_->setItem(row, 1, relativePath);
         artifactTable_->setItem(row, 2, new QTableWidgetItem(
             QStringLiteral("SHA-256 %1 · %2 bytes")
@@ -200,8 +203,6 @@ void TaskArtifactPanel::setDetails(const TaskArtifactDetails& details)
     }
     if (details.artifacts.isEmpty()) {
         clearTableWithPlaceholder(artifactTable_, uiText("暂无已提交产物"));
-    } else {
-        artifactTable_->selectRow(0);
     }
 
     metricTable_->setRowCount(0);
@@ -283,7 +284,20 @@ void TaskArtifactPanel::previewSelectedArtifact()
     auto* item = artifactTable_->item(row, 1);
     selectedRelativePath_ = item ? item->data(Qt::UserRole).toString() : QString();
     selectedArtifactId_ = item ? item->data(Qt::UserRole + 1).toString() : QString();
-    if (selectedArtifactId_.isEmpty() || selectedRelativePath_.isEmpty() || !presenter_) {
+    const qint64 byteCount = item ? item->data(Qt::UserRole + 2).toLongLong() : 0;
+    if (selectedArtifactId_.isEmpty() || selectedRelativePath_.isEmpty()) {
+        imagePreviewLabel_->setVisible(true);
+        previewText_->setVisible(false);
+        return;
+    }
+    if (byteCount > kMaximumSynchronousPreviewBytes) {
+        previewText_->setPlainText(uiText(
+            "该产物过大，已跳过同步预览，避免阻塞界面。\nArtifact 相对项：%1\n大小：%2 bytes\n请通过后续异步工具检查内容。")
+            .arg(selectedRelativePath_)
+            .arg(byteCount));
+        return;
+    }
+    if (!presenter_) {
         imagePreviewLabel_->setVisible(true);
         previewText_->setVisible(false);
         return;

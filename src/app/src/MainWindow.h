@@ -184,6 +184,8 @@ private:
     DeliveryEvidencePresenter* deliveryEvidencePresenter_ = nullptr;
     QString activeTaskId_;
     QString activeWorkflowKind_;
+    qint64 liveMetricSequence_ = 0;
+    qint64 liveArtifactSequence_ = 0;
     WorkerClient worker_;
     ApplicationEventRouter* eventRouter_ = nullptr;
     TaskExecutionController* taskController_ = nullptr;

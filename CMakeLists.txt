@@ -625,7 +625,7 @@ if(WIN32)
             "${AITRAIN_QT_RUNTIME_ROOT_DIR}/plugins/imageformats/*.dll"
         )
         set(AITRAIN_QT_CONF_FILE "${CMAKE_BINARY_DIR}/aitrain_qt.conf")
-        file(WRITE "${AITRAIN_QT_CONF_FILE}" "[Paths]\nPlugins = .\n")
+        file(WRITE "${AITRAIN_QT_CONF_FILE}" "[Paths]\nPlugins=.\n")
     endif()
 endif()
 
@@ -790,7 +790,7 @@ if(WIN32 AND AITRAIN_INSTALL_QT_RUNTIME AND AITRAIN_WINDEPLOYQT_EXECUTABLE)
             RESULT_VARIABLE AITRAIN_WINDEPLOYQT_RESULT
         )
         if(NOT AITRAIN_WINDEPLOYQT_RESULT EQUAL 0)
-            message(WARNING \"windeployqt failed with exit code \${AITRAIN_WINDEPLOYQT_RESULT}\")
+            message(FATAL_ERROR \"windeployqt failed with exit code \${AITRAIN_WINDEPLOYQT_RESULT}\")
         endif()
     ")
 endif()

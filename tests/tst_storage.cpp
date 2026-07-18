@@ -97,9 +97,11 @@ private slots:
     void rejectsLegacyDatabase();
     void enforcesForeignKeys();
     void hostStateEventsDoNotConsumeAdapterProtocolSequence();
+    void rejectsNonCanonicalArtifactMemberPaths();
     void registersModelPackageOnlyForMatchingArtifactProvenance();
     void listsRegisteredModelPackagesNewestFirst();
     void persistsWorkflowStepsWithArtifactAndRetryGuards();
+    void terminalizesWorkflowAndSkipsSuccessorsAtomically();
     void persistsCrossTaskWorkflowInputAndEnforcesOwnership();
     void listsDatasetCatalogThroughVersionJoin();
     void rejectsSchema7AndPersistsTerminalPolicy();
@@ -251,6 +253,7 @@ void StorageTests::rejectsLegacyDatabase()
     QString error;
     QVERIFY(!storage.open(path, &error));
     QVERIFY(error.contains(QStringLiteral("旧项目数据库")));
+    QVERIFY(!storage.isOpen());
 }
 
 void StorageTests::enforcesForeignKeys()
@@ -302,6 +305,37 @@ void StorageTests::hostStateEventsDoNotConsumeAdapterProtocolSequence()
     QCOMPARE(storage.eventCount(task.id, &error), 2);
 }
 
+void StorageTests::rejectsNonCanonicalArtifactMemberPaths()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    aitrain::ProjectStore storage;
+    QString error;
+    QVERIFY2(storage.open(directory.filePath(QStringLiteral("project.sqlite")), &error), qPrintable(error));
+    const aitrain::TaskSnapshot task = makeTask();
+    QVERIFY2(storage.createTask(task, &error), qPrintable(error));
+    const auto sha = QString(64, QLatin1Char('a'));
+
+    const QStringList invalidPaths = {
+        QStringLiteral("../escape.bin"),
+        QStringLiteral("/absolute.bin"),
+        QStringLiteral("C:/absolute.bin"),
+        QStringLiteral("nested/../model.onnx")};
+    for (const QString& path : invalidPaths) {
+        error.clear();
+        QVERIFY(!storage.recordArtifactWithFiles(aitrain::ArtifactId::create(), task.id,
+            QStringLiteral("fixture"), {{path, sha, 1}}, QDateTime::currentDateTimeUtc(), &error));
+        QVERIFY2(!error.isEmpty(), qPrintable(path));
+    }
+
+    error.clear();
+    QVERIFY(!storage.recordArtifactWithFiles(aitrain::ArtifactId::create(), task.id,
+        QStringLiteral("fixture"),
+        {{QStringLiteral("Model.onnx"), sha, 1}, {QStringLiteral("model.onnx"), sha, 1}},
+        QDateTime::currentDateTimeUtc(), &error));
+    QVERIFY(!error.isEmpty());
+}
+
 void StorageTests::registersModelPackageOnlyForMatchingArtifactProvenance()
 {
     QTemporaryDir directory;
@@ -313,7 +347,8 @@ void StorageTests::registersModelPackageOnlyForMatchingArtifactProvenance()
     QVERIFY2(storage.createTask(task, &error), qPrintable(error));
     const aitrain::ArtifactId artifactId = aitrain::ArtifactId::create();
     const QVector<aitrain::ArtifactFileSnapshot> files = {
-        {QStringLiteral("model.onnx"), QString(64, QLatin1Char('a')), 42}};
+        {QStringLiteral("model.onnx"), QString(64, QLatin1Char('a')), 42},
+        {QStringLiteral("unrelated.bin"), QString(64, QLatin1Char('b')), 7}};
     QVERIFY2(storage.recordArtifactWithFiles(artifactId, task.id, QStringLiteral("export_bundle"), files, QDateTime::currentDateTimeUtc(), &error), qPrintable(error));
 
     aitrain::ModelPackageSnapshot source;
@@ -327,6 +362,7 @@ void StorageTests::registersModelPackageOnlyForMatchingArtifactProvenance()
 
     aitrain::ModelPackageSnapshot invalid;
     invalid.manifest = makeManifest(task.id);
+    // 同一制品中的其他文件即使哈希匹配，也不能冒充清单指定的入口文件。
     invalid.manifest.sourceArtifactSha256 = QString(64, QLatin1Char('b'));
     invalid.sourceArtifactId = artifactId;
     QVERIFY(!storage.registerModelPackage(invalid, &error));
@@ -450,6 +486,50 @@ void StorageTests::persistsWorkflowStepsWithArtifactAndRetryGuards()
     QVERIFY(!steps.at(2).inputArtifactId.isValid());
     QVERIFY(!steps.at(2).outputArtifactId.isValid());
     QVERIFY(!steps.at(2).failure.isFailure());
+}
+
+void StorageTests::terminalizesWorkflowAndSkipsSuccessorsAtomically()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    aitrain::ProjectStore storage;
+    QString error;
+    QVERIFY2(storage.open(directory.filePath(QStringLiteral("project.sqlite")), &error), qPrintable(error));
+    const auto task = makeTask();
+    QVERIFY2(startTask(storage, task, &error), qPrintable(error));
+
+    aitrain::WorkflowRunSnapshot workflow;
+    workflow.id = aitrain::WorkflowRunId::create();
+    workflow.taskId = task.id;
+    workflow.templateId = QStringLiteral("atomic-terminalization-test");
+    QVector<aitrain::WorkflowStepSnapshot> steps;
+    for (int ordinal = 0; ordinal < 3; ++ordinal) {
+        aitrain::WorkflowStepSnapshot step;
+        step.id = aitrain::WorkflowStepId::create();
+        step.workflowRunId = workflow.id;
+        step.ordinal = ordinal;
+        step.kind = QStringLiteral("Step%1").arg(ordinal);
+        step.backend = QStringLiteral("fixture");
+        steps.push_back(step);
+    }
+    QVERIFY2(storage.createWorkflowRun(workflow, steps, &error), qPrintable(error));
+    QVERIFY2(storage.transitionWorkflowStep(steps.at(0).id, aitrain::WorkflowStepState::Pending,
+        aitrain::WorkflowStepState::Running, {}, {}, &error), qPrintable(error));
+    const aitrain::Failure failure{aitrain::FailureCode::ProcessCrashed,
+        QStringLiteral("fixture failure"), {}, QDateTime::currentDateTimeUtc()};
+    QVERIFY2(storage.terminalizeWorkflowStepAndSkipSuccessors(steps.at(0).id,
+        aitrain::WorkflowStepState::Running, aitrain::WorkflowStepState::Failed,
+        failure, &error), qPrintable(error));
+    auto loaded = storage.workflowSteps(workflow.id, &error);
+    QCOMPARE(loaded.size(), 3);
+    QCOMPARE(loaded.at(0).state, aitrain::WorkflowStepState::Failed);
+    QCOMPARE(loaded.at(1).state, aitrain::WorkflowStepState::Skipped);
+    QCOMPARE(loaded.at(2).state, aitrain::WorkflowStepState::Skipped);
+
+    // 幂等恢复：终态步骤再次收口时仍应保持后继步骤全部跳过。
+    QVERIFY2(storage.terminalizeWorkflowStepAndSkipSuccessors(steps.at(0).id,
+        aitrain::WorkflowStepState::Failed, aitrain::WorkflowStepState::Failed,
+        failure, &error), qPrintable(error));
 }
 
 void StorageTests::persistsCrossTaskWorkflowInputAndEnforcesOwnership()

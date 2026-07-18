@@ -25,7 +25,9 @@ struct AdapterEventEndpoint final {
 
 class AdapterEventServer final {
 public:
-    using EventHandler = std::function<void(const ProtocolEnvelope&)>;
+    // true means the event has been accepted by the downstream durable
+    // consumer. Terminal events are acknowledged to the Adapter only then.
+    using EventHandler = std::function<bool(const ProtocolEnvelope&)>;
 
     AdapterEventServer();
     ~AdapterEventServer();

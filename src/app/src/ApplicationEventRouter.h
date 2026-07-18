@@ -27,6 +27,8 @@ struct TaskViewState final {
     QStringList logs;
     QVector<TaskMetricView> metrics;
     QVector<TaskArtifactView> artifacts;
+    qint64 metricSequence = 0;
+    qint64 artifactSequence = 0;
     bool terminal = false;
 };
 

@@ -15,6 +15,11 @@ class QPushButton;
 
 namespace aitrain_app {
 
+struct ReviewSamplePathView final {
+    QString imageRelativePath;
+    QString labelRelativePath;
+};
+
 QLabel* mutedLabel(const QString& text);
 QLabel* emptyStateLabel(const QString& text);
 QLabel* inlineStatusLabel(const QString& text);
@@ -58,5 +63,6 @@ QString detectDatasetFormatFromPath(const QString& path);
 QString formatJsonTextForPreview(const QByteArray& data);
 void addTaskTypeItems(QComboBox* combo, const QStringList& taskTypes);
 QString comboCurrentDataOrText(const QComboBox* combo);
+ReviewSamplePathView reviewSamplePathView(const QJsonObject& sample);
 
 } // namespace aitrain_app

@@ -595,6 +595,8 @@ void MainWindow::startTraining()
     adapterParameters.remove(QStringLiteral("snapshotArtifactId"));
 
     metricsWidget_->clear();
+    liveMetricSequence_ = 0;
+    liveArtifactSequence_ = 0;
     logEdit_->clear();
     progressBar_->setValue(0);
     if (trainingPhaseLabel_) {
@@ -671,8 +673,12 @@ void MainWindow::importModelPackage()
     importCommand.context.projectRoot = currentProjectPath_;
     importCommand.sourceFilePath = sourceFilePath;
     importCommand.manifestDraft = document.object();
+    activeTaskId_ = taskId.toString();
+    activeWorkflowKind_ = QStringLiteral("model_import");
     if (!taskController_->start(workerExecutablePath(),
             aitrain::worker_protocol::TaskCommand{importCommand}, &error)) {
+        activeTaskId_.clear();
+        activeWorkflowKind_.clear();
         QMessageBox::critical(this, uiText("模型导入"), error);
         return;
     }
@@ -681,4 +687,5 @@ void MainWindow::importModelPackage()
         modelImportResultLabel_->setText(uiText("正在导入模型并计算 SHA-256：%1").arg(QDir::toNativeSeparators(sourceFilePath)));
     }
     workerPill_->setStatus(uiText("模型导入中"), StatusPill::Tone::Info);
+    updateTaskCancelButton();
 }

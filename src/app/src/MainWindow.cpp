@@ -165,10 +165,6 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
         [this](WorkerClient::WorkerTerminalStatus status, const QString& message) {
         const bool ok = status == WorkerClient::WorkerTerminalStatus::Succeeded;
         const bool canceled = status == WorkerClient::WorkerTerminalStatus::Canceled;
-        progressBar_->setValue(ok ? 100 : progressBar_->value());
-        if (auto* label = trainingLiveValueLabel(QStringLiteral("TrainingEtaValue")); label && ok) {
-            label->setText(QStringLiteral("0s"));
-        }
         workerPill_->setStatus(ok ? tr("任务完成") : (canceled ? tr("任务已取消") : tr("任务失败")),
             ok ? StatusPill::Tone::Success : (canceled ? StatusPill::Tone::Warning : StatusPill::Tone::Error));
         if (modelImportInProgress_) {

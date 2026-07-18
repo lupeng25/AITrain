@@ -70,11 +70,6 @@ QString sampleTextField(const QJsonObject& sample, const QStringList& keys)
     return QString();
 }
 
-QString samplePathField(const QJsonObject& sample, const QStringList& keys)
-{
-    return QDir::fromNativeSeparators(sampleTextField(sample, keys));
-}
-
 QJsonObject normalizedReviewSample(QJsonObject sample, const QString& source)
 {
     if (sample.value(QStringLiteral("source")).toString().isEmpty()) {

@@ -13,6 +13,7 @@ from collections import deque
 from dataclasses import dataclass
 import os
 import math
+import re
 from pathlib import Path
 from queue import Empty, Queue
 import subprocess
@@ -30,6 +31,19 @@ CancellationCheck = Callable[[], bool]
 # cannot push a child-process log frame over the wire limit.
 MAX_STRUCTURED_LOG_MESSAGE_BYTES = 48 * 1024
 MAX_BUFFERED_OUTPUT_LINES = 256
+MAX_CHILD_OUTPUT_CHARS_PER_CHUNK = 64 * 1024
+MAX_CHILD_LOG_BYTES = 64 * 1024 * 1024
+MAX_INITIAL_STRUCTURED_CHILD_LINES = 200
+STRUCTURED_CHILD_LOG_HEARTBEAT_LINES = 1000
+
+_WINDOWS_ABSOLUTE_PATH = re.compile(
+    r"(?i)(?:[a-z]:[\\/][^\s\"'<>|]+|\\\\[^\s\"'<>|]+[\\/][^\s\"'<>|]+)"
+)
+
+
+def redact_physical_paths(message: str) -> str:
+    """Remove Windows absolute/UNC paths from protocol-visible log text."""
+    return _WINDOWS_ABSOLUTE_PATH.sub("<physical-path>", str(message))
 
 
 class AdapterCanceled(RuntimeError):
@@ -90,6 +104,7 @@ class AdapterSdk:
         self._event_sink(event)
 
     def emit_log(self, message: str, *, level: str = "info", **details: Any) -> None:
+        message = redact_physical_paths(message)
         encoded = message.encode("utf-8")
         if len(encoded) > MAX_STRUCTURED_LOG_MESSAGE_BYTES:
             shortened = encoded[:MAX_STRUCTURED_LOG_MESSAGE_BYTES]
@@ -197,7 +212,10 @@ class AdapterSdk:
 
         def read_output() -> None:
             try:
-                for line in process.stdout:
+                while True:
+                    line = process.stdout.readline(MAX_CHILD_OUTPUT_CHARS_PER_CHUNK)
+                    if not line:
+                        break
                     output.put(line)
             finally:
                 output.put(None)
@@ -207,6 +225,9 @@ class AdapterSdk:
 
         tail: deque[str] = deque(maxlen=tail_line_limit)
         line_count = 0
+        suppressed_structured_lines = 0
+        log_bytes_written = 0
+        log_truncated = False
         canceled = False
         reader_done = False
         log_file = resolved_log_path.open("w", encoding="utf-8") if resolved_log_path is not None else None
@@ -233,11 +254,24 @@ class AdapterSdk:
                     tail_text = tail_bytes[:MAX_STRUCTURED_LOG_MESSAGE_BYTES].decode("utf-8", errors="ignore")
                 tail.append(tail_text)
                 if log_file is not None:
-                    log_file.write(text + "\n")
-                    log_file.flush()
+                    encoded_line = line.encode("utf-8")
+                    remaining = MAX_CHILD_LOG_BYTES - log_bytes_written
+                    if remaining > 0:
+                        chunk = encoded_line[:remaining]
+                        log_file.write(chunk.decode("utf-8", errors="ignore"))
+                        log_file.flush()
+                        log_bytes_written += len(chunk)
+                    if len(encoded_line) > max(0, remaining):
+                        log_truncated = True
                 if on_line is not None:
                     on_line(text)
-                self.emit_log(text, level="info", childProcess=True)
+                important = any(token in text.lower() for token in
+                                ("traceback", "error", "exception", "failed", "warning", "fatal"))
+                if (line_count <= MAX_INITIAL_STRUCTURED_CHILD_LINES or important
+                        or line_count % STRUCTURED_CHILD_LOG_HEARTBEAT_LINES == 0):
+                    self.emit_log(text, level="info", childProcess=True)
+                else:
+                    suppressed_structured_lines += 1
 
             try:
                 exit_code = process.wait(timeout=2.0)
@@ -265,7 +299,8 @@ class AdapterSdk:
             exitCode=exit_code,
             canceled=canceled,
             lineCount=line_count,
-            logPath=str(resolved_log_path) if resolved_log_path is not None else "",
+            suppressedStructuredLineCount=suppressed_structured_lines,
+            logTruncated=log_truncated,
         )
         return ChildProcessResult(exit_code, canceled, line_count, tuple(tail), resolved_log_path)
 

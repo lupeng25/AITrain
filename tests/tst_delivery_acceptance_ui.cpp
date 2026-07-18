@@ -1,5 +1,9 @@
 #include "MainWindow.h"
+#include "ApplicationEventRouter.h"
+#include "MainWindowSupport.h"
 #include "Sidebar.h"
+#include "TaskArtifactPanel.h"
+#include "TaskArtifactPresenter.h"
 #include "WorkerClient.h"
 #include "WorkspaceRouter.h"
 #include "aitrain/core/WorkerProtocol.h"
@@ -16,6 +20,7 @@
 #include <QLineEdit>
 #include <QMetaObject>
 #include <QPushButton>
+#include <QPlainTextEdit>
 #include <QSettings>
 #include <QSignalSpy>
 #include <QStackedWidget>
@@ -53,6 +58,9 @@ private slots:
     void projectAndDashboardExposeSummaryPresenter();
     void uiPathBoundariesStayAtExplicitImportAndIdentityEdges();
     void repeatedNavigationDoesNotAccumulatePages();
+    void reviewSamplePathsRejectExternalAndTraversalValues();
+    void largeArtifactsRequireExplicitSelectionAndSkipSynchronousPreview();
+    void eventRouterUsesBoundedRollingWindowsAndEvictsTerminalTasks();
 
 private:
     QString previousLanguage_;
@@ -60,6 +68,88 @@ private:
     MainWindow* window_ = nullptr;
     QTranslator translator_;
 };
+
+void EnvironmentDeliveryEvidenceUiTests::reviewSamplePathsRejectExternalAndTraversalValues()
+{
+    QJsonObject unsafe;
+    unsafe.insert(QStringLiteral("sampleRelativePath"), QStringLiteral("C:/private/image.jpg"));
+    unsafe.insert(QStringLiteral("sourceRelativePath"), QStringLiteral("../../labels/secret.txt"));
+    const aitrain_app::ReviewSamplePathView rejected = aitrain_app::reviewSamplePathView(unsafe);
+    QVERIFY(rejected.imageRelativePath.isEmpty());
+    QVERIFY(rejected.labelRelativePath.isEmpty());
+
+    QJsonObject safe;
+    safe.insert(QStringLiteral("sampleRelativePath"), QStringLiteral("images\\train\\a.jpg"));
+    safe.insert(QStringLiteral("sourceRelativePath"), QStringLiteral("labels/train/a.txt"));
+    const aitrain_app::ReviewSamplePathView accepted = aitrain_app::reviewSamplePathView(safe);
+    QCOMPARE(accepted.imageRelativePath, QStringLiteral("images/train/a.jpg"));
+    QCOMPARE(accepted.labelRelativePath, QStringLiteral("labels/train/a.txt"));
+}
+
+void EnvironmentDeliveryEvidenceUiTests::largeArtifactsRequireExplicitSelectionAndSkipSynchronousPreview()
+{
+    TaskArtifactPanel panel;
+    TaskArtifactDetails details;
+    ArtifactFileItem artifact;
+    artifact.artifactId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    artifact.kind = QStringLiteral("model");
+    artifact.relativePath = QStringLiteral("model.onnx");
+    artifact.byteCount = 32LL * 1024LL * 1024LL;
+    details.artifacts.append(artifact);
+    panel.setDetails(details);
+
+    auto* table = panel.findChild<QTableWidget*>(QStringLiteral("TaskArtifactTable"));
+    auto* preview = panel.findChild<QPlainTextEdit*>(QStringLiteral("ArtifactPreviewText"));
+    QVERIFY(table != nullptr);
+    QVERIFY(preview != nullptr);
+    QVERIFY(table->selectedItems().isEmpty());
+
+    table->selectRow(0);
+    QCoreApplication::processEvents();
+    QVERIFY(preview->toPlainText().contains(QStringLiteral("已跳过同步预览")));
+    QVERIFY(preview->toPlainText().contains(QStringLiteral("33554432")));
+}
+
+void EnvironmentDeliveryEvidenceUiTests::eventRouterUsesBoundedRollingWindowsAndEvictsTerminalTasks()
+{
+    namespace wp = aitrain::worker_protocol;
+    WorkerClient worker;
+    ApplicationEventRouter router(&worker);
+    const aitrain::TaskId taskId = aitrain::TaskId::create();
+    wp::TaskEvent event;
+    event.taskId = taskId;
+    event.kind = wp::TaskEventKind::Metric;
+    event.details.insert(QStringLiteral("name"), QStringLiteral("loss"));
+    for (int i = 0; i < 1100; ++i) {
+        event.details.insert(QStringLiteral("value"), i);
+        QVERIFY(QMetaObject::invokeMethod(&router, "onTaskEvent", Qt::DirectConnection,
+            Q_ARG(aitrain::worker_protocol::TaskEvent, event)));
+    }
+    TaskViewState state = router.viewState(taskId.toString());
+    QCOMPARE(state.metricSequence, qint64(1100));
+    QCOMPARE(state.metrics.size(), 1024);
+    QCOMPARE(state.metrics.constLast().value, 1099.0);
+
+    event.kind = wp::TaskEventKind::Artifact;
+    for (int i = 0; i < 300; ++i) {
+        event.details = QJsonObject{
+            {QStringLiteral("artifactId"), QString::number(i)},
+            {QStringLiteral("kind"), QStringLiteral("checkpoint")},
+            {QStringLiteral("relativePath"), QStringLiteral("checkpoints/%1.pt").arg(i)}};
+        QVERIFY(QMetaObject::invokeMethod(&router, "onTaskEvent", Qt::DirectConnection,
+            Q_ARG(aitrain::worker_protocol::TaskEvent, event)));
+    }
+    state = router.viewState(taskId.toString());
+    QCOMPARE(state.artifactSequence, qint64(300));
+    QCOMPARE(state.artifacts.size(), 256);
+    QCOMPARE(state.artifacts.constLast().artifactId, QStringLiteral("299"));
+
+    event.kind = wp::TaskEventKind::Succeeded;
+    event.details = QJsonObject{{QStringLiteral("message"), QStringLiteral("done")}};
+    QVERIFY(QMetaObject::invokeMethod(&router, "onTaskEvent", Qt::DirectConnection,
+        Q_ARG(aitrain::worker_protocol::TaskEvent, event)));
+    QVERIFY(router.viewState(taskId.toString()).taskId.isEmpty());
+}
 
 void EnvironmentDeliveryEvidenceUiTests::initTestCase()
 {

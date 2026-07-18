@@ -37,6 +37,32 @@ RUNTIME_ROUTE = "paddleocr_official"
 ARTIFACT_FORMAT = "paddleocr_inference_bundle"
 FIXED_ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 
+PRESET_CONFIGS: dict[str, dict[str, str]] = {
+    "det": {
+        "PP-OCRv4_mobile_det": "configs/det/PP-OCRv4/PP-OCRv4_mobile_det.yml",
+        "PP-OCRv5_mobile_det": "configs/det/PP-OCRv5/PP-OCRv5_mobile_det.yml",
+        "PP-OCRv5_server_det": "configs/det/PP-OCRv5/PP-OCRv5_server_det.yml",
+        "PP-OCRv6_tiny_det": "configs/det/PP-OCRv6/PP-OCRv6_tiny_det.yml",
+        "PP-OCRv6_small_det": "configs/det/PP-OCRv6/PP-OCRv6_small_det.yml",
+        "PP-OCRv6_medium_det": "configs/det/PP-OCRv6/PP-OCRv6_medium_det.yml",
+    },
+    "rec": {
+        "PP-OCRv4_mobile_rec": "configs/rec/PP-OCRv4/PP-OCRv4_mobile_rec.yml",
+        "PP-OCRv5_mobile_rec": "configs/rec/PP-OCRv5/PP-OCRv5_mobile_rec.yml",
+        "PP-OCRv5_server_rec": "configs/rec/PP-OCRv5/PP-OCRv5_server_rec.yml",
+        "en_PP-OCRv5_mobile_rec": "configs/rec/PP-OCRv5/multi_language/en_PP-OCRv5_mobile_rec.yaml",
+        "PP-OCRv6_tiny_rec": "configs/rec/PP-OCRv6/PP-OCRv6_tiny_rec.yml",
+        "PP-OCRv6_small_rec": "configs/rec/PP-OCRv6/PP-OCRv6_small_rec.yml",
+        "PP-OCRv6_medium_rec": "configs/rec/PP-OCRv6/PP-OCRv6_medium_rec.yml",
+    },
+}
+DEFAULT_PRESETS = {"det": "PP-OCRv5_mobile_det", "rec": "PP-OCRv5_mobile_rec"}
+PRESET_DICTIONARIES = {
+    "PP-OCRv5_mobile_rec": "ppocr/utils/dict/ppocrv5_dict.txt",
+    "PP-OCRv5_server_rec": "ppocr/utils/dict/ppocrv5_dict.txt",
+    "en_PP-OCRv5_mobile_rec": "ppocr/utils/dict/ppocrv5_en_dict.txt",
+}
+
 _adapter: AdapterSdk | None = None
 _event_channel: AdapterEventChannel | None = None
 
@@ -142,20 +168,26 @@ def python_program(request: dict[str, Any], options: dict[str, Any]) -> str:
     return str(first_value(request, options, "pythonProgram", "officialPython") or sys.executable)
 
 
-def resolve_config(component: str, request: dict[str, Any], options: dict[str, Any], repo: Path) -> Path:
+def selected_model_preset(component: str, request: dict[str, Any], options: dict[str, Any]) -> str:
+    preset = str(first_value(request, options, "modelPreset", "model") or DEFAULT_PRESETS[component]).strip()
+    if preset not in PRESET_CONFIGS[component]:
+        raise ValueError(f"paddleocr_model_preset_invalid: {preset}")
+    return preset
+
+
+def resolve_config(component: str, request: dict[str, Any], options: dict[str, Any], repo: Path) -> tuple[Path, str]:
+    preset = selected_model_preset(component, request, options)
     value = first_value(request, options, "configPath", "officialConfig")
     if value:
         path = Path(str(value)).expanduser()
         if not path.is_absolute():
             path = repo / path
     else:
-        relative = ("configs/det/PP-OCRv5/PP-OCRv5_mobile_det.yml" if component == "det"
-                    else "configs/rec/PP-OCRv5/PP-OCRv5_mobile_rec.yml")
-        path = repo / relative
+        path = repo / PRESET_CONFIGS[component][preset]
     path = path.resolve()
     if not path.is_file():
         raise FileNotFoundError(f"official PaddleOCR config is missing: {path}")
-    return path
+    return path, preset
 
 
 def require_snapshot(request: dict[str, Any], options: dict[str, Any]) -> tuple[Path, str]:
@@ -166,7 +198,7 @@ def require_snapshot(request: dict[str, Any], options: dict[str, Any]) -> tuple[
         raise ValueError("PaddleOCR Train/Evaluate requires Dataset Snapshot  manifest and staging path")
     manifest = Path(str(manifest_value)).resolve()
     staging = Path(str(staging_value)).resolve()
-    return materialize_dataset_snapshot(dataset_root, manifest, staging), str(manifest)
+    return materialize_dataset_snapshot(dataset_root, manifest, staging), sha256_file(manifest)
 
 
 def _safe_relative(name: str) -> Path:
@@ -283,12 +315,24 @@ def _find_dataset_file(root: Path, names: Iterable[str]) -> Path | None:
     return None
 
 
-def _dictionary(component: str, root: Path, request: dict[str, Any], options: dict[str, Any], repo: Path) -> Path | None:
+def _dictionary(component: str, root: Path, request: dict[str, Any], options: dict[str, Any], repo: Path,
+                preset: str, config_path: Path) -> Path | None:
     if component != "rec":
         return None
     value = first_value(request, options, "dictionaryPath", "characterDictPath")
     candidates = [Path(str(value)).expanduser()] if value else []
-    candidates.extend([root / "dict.txt", root / "dictionary.txt", repo / "ppocr/utils/ppocr_keys_v1.txt"])
+    candidates.extend([root / "dict.txt", root / "dictionary.txt"])
+    preset_dictionary = PRESET_DICTIONARIES.get(preset)
+    if preset_dictionary:
+        candidates.append(repo / preset_dictionary)
+    try:
+        match = re.search(r"(?m)^\s*character_dict_path\s*:\s*['\"]?([^'\"#\r\n]+)",
+                          config_path.read_text(encoding="utf-8-sig"))
+        if match:
+            candidates.append(repo / match.group(1).strip())
+    except OSError:
+        pass
+    candidates.append(repo / "ppocr/utils/ppocr_keys_v1.txt")
     for candidate in candidates:
         if not candidate.is_absolute():
             candidate = repo / candidate
@@ -332,21 +376,23 @@ def run_train(component: str, request: dict[str, Any]) -> int:
     sdk = configure_adapter(component, "train")
     options = merged_options(request)
     repo = resolve_repo(request, options)
-    dataset, manifest = require_snapshot(request, options)
+    dataset, manifest_hash = require_snapshot(request, options)
     output = required_output_path(request)
-    config_source = resolve_config(component, request, options, repo)
+    config_source, model_preset = resolve_config(component, request, options, repo)
     config_path = copy_file(config_source, output / "train.yml")
-    dictionary_source = _dictionary(component, dataset, request, options, repo)
+    dictionary_source = _dictionary(component, dataset, request, options, repo, model_preset, config_source)
     dictionary_path = copy_file(dictionary_source, output / "dict.txt") if dictionary_source else None
     official_output = output / "official-checkpoint"
     command = [python_program(request, options), str(official_script(repo, "tools/train.py")), "-c", str(config_path), "-o",
                f"Global.save_model_dir={official_output}", *_dataset_overrides(component, dataset, dictionary_path)]
-    sdk.emit_progress(10, message="Materialized verified PaddleOCR Dataset Snapshot ", datasetSnapshotManifest=manifest)
+    sdk.emit_progress(10, message="Materialized verified PaddleOCR Dataset Snapshot ",
+                      datasetSnapshotManifestSha256=manifest_hash)
     tail = _run_official(sdk, command, repo, output / "official_train.log")
     inventory = deterministic_zip(official_output, output / "model.zip")
     report = {
         "schemaVersion": 2, "backend": backend_id(component, "train"), "sourceTrainingBackend": backend_id(component, "train"),
-        "taskType": task_type(component), "component": component, "datasetSnapshotManifest": manifest,
+        "taskType": task_type(component), "component": component, "modelPreset": model_preset,
+        "datasetSnapshotManifestSha256": manifest_hash,
         "configPath": "train.yml", "checkpointPath": "model.zip", "dictionaryPath": "dict.txt" if dictionary_path else "",
         "checkpointInventory": inventory, "officialOutputTail": list(tail), "completedAt": now_iso(),
     }
@@ -398,7 +444,7 @@ def run_evaluate(component: str, request: dict[str, Any]) -> int:
     sdk = configure_adapter(component, "evaluate")
     options = merged_options(request)
     repo = resolve_repo(request, options)
-    dataset, manifest = require_snapshot(request, options)
+    dataset, manifest_hash = require_snapshot(request, options)
     output = required_output_path(request)
     checkpoint = _input_path(request, options, "checkpointPath", fallback_model=True)
     config = _input_path(request, options, "configPath")
@@ -410,11 +456,12 @@ def run_evaluate(component: str, request: dict[str, Any]) -> int:
     safe_extract_zip(checkpoint_copy, extracted)
     command = [python_program(request, options), str(official_script(repo, "tools/eval.py")), "-c", str(config_copy), "-o",
                f"Global.pretrained_model={_pretrained_base(extracted)}", *_dataset_overrides(component, dataset, dictionary_copy)]
-    sdk.emit_progress(15, message="Materialized verified PaddleOCR evaluation snapshot", datasetSnapshotManifest=manifest)
+    sdk.emit_progress(15, message="Materialized verified PaddleOCR evaluation snapshot",
+                      datasetSnapshotManifestSha256=manifest_hash)
     tail = _run_official(sdk, command, repo, output / "official_eval.log")
     metrics = _parse_metrics(tail)
     report = {"schemaVersion": 2, "backend": backend_id(component, "evaluate"), "taskType": task_type(component),
-              "component": component, "datasetSnapshotManifest": manifest, "metrics": metrics,
+              "component": component, "datasetSnapshotManifestSha256": manifest_hash, "metrics": metrics,
               "officialOutputTail": list(tail), "evaluatedAt": now_iso()}
     report_path = output / "evaluation_report.json"
     write_json(report_path, report)
@@ -549,6 +596,25 @@ def run_predict(component: str, request: dict[str, Any]) -> int:
     return 0
 
 
+def stable_failure_code(exc: BaseException) -> str:
+    message = str(exc).lower()
+    if isinstance(exc, AdapterCanceled):
+        return "canceled"
+    if "model_preset_invalid" in message:
+        return "invalid_request"
+    if "dataset snapshot" in message or "dataset_snapshot" in message:
+        return "dataset_snapshot_invalid"
+    if "subprocess failed" in message:
+        return "paddleocr_process_failed"
+    if isinstance(exc, FileNotFoundError):
+        if any(token in message for token in ("checkpoint", "bundle", "sidecar", "evaluationreport")):
+            return "model_missing"
+        return "paddleocr_dependency_missing"
+    if any(token in message for token in ("bundle hash", "bundle contract", "inventory")):
+        return "artifact_incompatible"
+    return "internal_error"
+
+
 def cli_main(component: str, operation: str, argv: list[str] | None = None) -> int:
     import argparse
     parser = argparse.ArgumentParser()
@@ -566,6 +632,6 @@ def cli_main(component: str, operation: str, argv: list[str] | None = None) -> i
     except Exception as exc:
         if sdk is None:
             sdk = configure_adapter(component, operation)
-        return sdk.emit_failed(str(exc), f"paddleocr_{component}_{operation}_failed", exception_details(exc))
+        return sdk.emit_failed(str(exc), stable_failure_code(exc), exception_details(exc))
     finally:
         close_adapter()

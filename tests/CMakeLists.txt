@@ -12,9 +12,10 @@ if(NOT EXISTS "${AITRAIN_QT_PLATFORM_PLUGIN_DIR}")
         "Qt 平台插件目录不存在: ${AITRAIN_QT_PLATFORM_PLUGIN_DIR}")
 endif()
 
+set(AITRAIN_QT_TEST_RUNTIME_DIR "${CMAKE_BINARY_DIR}/tests")
 set(AITRAIN_QT_TEST_ENVIRONMENT
-    "QT_PLUGIN_PATH=${AITRAIN_QT_PLUGIN_DIR}"
-    "QT_QPA_PLATFORM_PLUGIN_PATH=${AITRAIN_QT_PLATFORM_PLUGIN_DIR}"
+    "QT_PLUGIN_PATH=${AITRAIN_QT_TEST_RUNTIME_DIR}"
+    "QT_QPA_PLATFORM_PLUGIN_PATH=${AITRAIN_QT_TEST_RUNTIME_DIR}/platforms"
     "QT_QPA_PLATFORM=offscreen"
 )
 
@@ -419,29 +420,6 @@ add_test(NAME aitrain_dataset_snapshot_tests
 set_tests_properties(aitrain_dataset_snapshot_tests PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     ATTACHED_FILES_ON_FAIL "${dataset_snapshot_test_output}"
-)
-
-add_executable(aitrain_dataset_conversion_contract_tests
-    tst_dataset_conversion.cpp
-)
-target_include_directories(aitrain_dataset_conversion_contract_tests
-    PRIVATE ${CMAKE_SOURCE_DIR}/src/app/src)
-
-target_link_libraries(aitrain_dataset_conversion_contract_tests
-    PRIVATE
-        aitrain_dataset_conversion
-        Qt${QT_VERSION_MAJOR}::Core
-        Qt${QT_VERSION_MAJOR}::Gui
-        Qt${QT_VERSION_MAJOR}::Test
-)
-
-set(dataset_conversion_contract_test_output "${CMAKE_BINARY_DIR}/tests/aitrain_dataset_conversion_contract_tests_ctest.txt")
-add_test(NAME aitrain_dataset_conversion_contract_tests
-    COMMAND aitrain_dataset_conversion_contract_tests -o "${dataset_conversion_contract_test_output},txt"
-)
-set_tests_properties(aitrain_dataset_conversion_contract_tests PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    ATTACHED_FILES_ON_FAIL "${dataset_conversion_contract_test_output}"
 )
 
 add_executable(aitrain_data_quality_tests

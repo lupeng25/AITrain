@@ -5,6 +5,7 @@
 #include <QDateTime>
 #include <QHash>
 #include <QJsonObject>
+#include <QQueue>
 #include <QSet>
 
 namespace aitrain {
@@ -44,6 +45,7 @@ public:
 private:
     QHash<QString, quint64> lastSequenceByRequest_;
     QSet<QString> observedMessageIds_;
+    QQueue<QString> observedMessageOrder_;
 };
 
 } // namespace aitrain

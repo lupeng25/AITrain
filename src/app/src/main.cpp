@@ -10,6 +10,7 @@
 #include <QApplication>
 #include <QIcon>
 #include <QDir>
+#include <QFileInfo>
 #include <QStandardPaths>
 #include <QTranslator>
 
@@ -21,6 +22,18 @@ int main(int argc, char* argv[])
     QApplication::setApplicationName(QStringLiteral("AITrain Studio"));
     QApplication::setOrganizationName(QStringLiteral("AITrain"));
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/icons/app.ico")));
+
+    // 包根启动握手：QApplication 已成功加载平台插件；这里再验证产品自带翻译，
+    // 不进入许可证和主窗口流程，供 package-smoke 在干净目录中执行。
+    if (QCoreApplication::arguments().contains(QStringLiteral("--package-startup-check"))) {
+        const QDir appDir(QApplication::applicationDirPath());
+        const bool translationsReady = QFileInfo(
+            appDir.filePath(QStringLiteral("translations/aitrain_zh_CN.qm"))).isFile()
+            && QFileInfo(
+                appDir.filePath(QStringLiteral("translations/aitrain_en_US.qm"))).isFile();
+        return translationsReady ? 0 : 2;
+    }
+
     QTranslator translator;
     aitrain_app::loadTranslator(app, &translator, aitrain_app::configuredLanguageCode());
     AppStyle::apply(app);

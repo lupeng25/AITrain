@@ -67,6 +67,7 @@ private slots:
     void cancellationDuringCommitKeepsOnlyAbortableStaging();
     void abortRemovesStagingAndEmptyStagingCannotCommit();
     void recoveryPreservesActiveAndCleansAbandonedStaging();
+    void rejectsMismatchedStagingIdentity();
     void recoveryCompletesEvidenceCommitAfterDirectoryRename();
     void recoveryCleansJournalAfterDatabaseCommit();
 };
@@ -180,6 +181,32 @@ void ArtifactStoreTests::recoveryPreservesActiveAndCleansAbandonedStaging()
     QVERIFY2(artifacts.abort(activeStaging, &error), qPrintable(error));
 }
 
+void ArtifactStoreTests::rejectsMismatchedStagingIdentity()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    aitrain::ProjectStore storage;
+    QString error;
+    QVERIFY2(storage.open(directory.filePath(QStringLiteral("project.sqlite")), &error), qPrintable(error));
+    const aitrain::TaskSnapshot task = createTask(&storage);
+    aitrain::ArtifactStore artifacts(directory.filePath(QStringLiteral("store")));
+    aitrain::ArtifactId firstId;
+    aitrain::ArtifactId secondId;
+    QString firstStaging;
+    QString secondStaging;
+    QVERIFY2(artifacts.begin(task.id, QStringLiteral("model"), &firstId, &firstStaging, &error), qPrintable(error));
+    QVERIFY2(artifacts.begin(task.id, QStringLiteral("model"), &secondId, &secondStaging, &error), qPrintable(error));
+    QVERIFY(writeFile(QDir(secondStaging).filePath(QStringLiteral("model.onnx")), QByteArray("fixture")));
+
+    QVERIFY(!artifacts.commit(firstId, task.id, QStringLiteral("model"), secondStaging,
+        &storage, nullptr, &error));
+    QVERIFY(QFileInfo::exists(firstStaging));
+    QVERIFY(QFileInfo::exists(secondStaging));
+    QCOMPARE(storage.artifactCount(task.id, &error), 0);
+    QVERIFY2(artifacts.abort(firstStaging, &error), qPrintable(error));
+    QVERIFY2(artifacts.abort(secondStaging, &error), qPrintable(error));
+}
+
 void ArtifactStoreTests::recoveryCompletesEvidenceCommitAfterDirectoryRename()
 {
     QTemporaryDir directory;
@@ -204,7 +231,14 @@ void ArtifactStoreTests::recoveryCompletesEvidenceCommitAfterDirectoryRename()
     bool exists = true;
     QVERIFY2(storage.artifactExists(artifactId, &exists, &error), qPrintable(error));
     QVERIFY(!exists);
-    QVERIFY(QFileInfo::exists(QDir(storeRoot).filePath(QStringLiteral("committed/%1").arg(artifactId.toString()))));
+    const QString committedPath = QDir(storeRoot).filePath(QStringLiteral("committed/%1").arg(artifactId.toString()));
+    const QString journalPath = QDir(storeRoot).filePath(QStringLiteral(".staging-meta/%1.json").arg(artifactId.toString()));
+    QVERIFY(QFileInfo::exists(committedPath));
+    QVERIFY(QFileInfo::exists(journalPath));
+    QString abortError;
+    QVERIFY(!interrupted.abort(stagingPath, &abortError));
+    QVERIFY(QFileInfo::exists(committedPath));
+    QVERIFY(QFileInfo::exists(journalPath));
 
     aitrain::ArtifactStore recovered(storeRoot);
     QStringList diagnostics;
@@ -216,7 +250,7 @@ void ArtifactStoreTests::recoveryCompletesEvidenceCommitAfterDirectoryRename()
     QVERIFY2(storage.workflowTerminalization(workflow.id, &terminalization, &error), qPrintable(error));
     QCOMPARE(terminalization.state, aitrain::WorkflowTerminalizationState::EvidenceAttached);
     QCOMPARE(terminalization.evidenceArtifactId, artifactId);
-    QVERIFY(!QFileInfo::exists(QDir(storeRoot).filePath(QStringLiteral(".staging-meta/%1.json").arg(artifactId.toString()))));
+    QVERIFY(!QFileInfo::exists(journalPath));
 }
 
 void ArtifactStoreTests::recoveryCleansJournalAfterDatabaseCommit()

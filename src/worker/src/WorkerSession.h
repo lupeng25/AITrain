@@ -5,9 +5,11 @@
 #include "aitrain/workflow/ProjectWorkspace.h"
 
 #include <QJsonArray>
+#include <QElapsedTimer>
 #include <QLocalSocket>
 #include <QObject>
 #include <QProcess>
+#include <QTimer>
 #include <QVector>
 
 #include <memory>
@@ -59,6 +61,7 @@ private:
     bool pollPendingCancel(int timeoutMs = 100);
     void sendCanceledAndFinish(const QString& taskId, const QString& message);
     void finishSession();
+    void maybeFinishSessionAfterWrite();
     void fail(const QString& message);
     void failWithDetails(const QString& message, const QString& errorCode, const QJsonObject& details = {});
 
@@ -71,6 +74,9 @@ private:
     bool finishingSession_ = false;
     bool startTaskReceived_ = false;
     bool terminalEnvelopeSent_ = false;
+    QTimer terminalDrainTimer_;
+    QElapsedTimer terminalDrainElapsed_;
+    bool terminalQuitScheduled_ = false;
     // 控制面只允许有限的待写缓存；日志/进度/指标是可丢弃事件，不能反向
     // 把生产任务的速度绑定到 GUI 消费速度。终态 payload 会带出丢弃计数。
     quint64 droppedControlEventCount_ = 0;

@@ -200,12 +200,36 @@ if ((Test-Path $onnxRuntimeRootDll) -or (Test-Path $onnxRuntimeFolderDll)) {
     Write-Host "  [warn] ONNX Runtime DLL not packaged; ONNX Runtime SDK may be disabled for this build." -ForegroundColor Yellow
 }
 
-$qtCoreDll = Get-ChildItem -LiteralPath $prefixFull -Filter "Qt5Core*.dll" -File -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($qtCoreDll) {
-    Write-Host "  [ok] Qt runtime DLL"
-} else {
-    Write-Host "  [warn] Qt runtime DLL not found; check AITRAIN_INSTALL_QT_RUNTIME or windeployqt availability." -ForegroundColor Yellow
+foreach ($qtModule in @("Core", "Gui", "Widgets")) {
+    $qtDll = Get-ChildItem -LiteralPath $prefixFull -Filter "Qt5$qtModule*.dll" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $qtDll) {
+        throw "Missing required Qt5$qtModule runtime DLL under package root"
+    }
+    Write-Host "  [ok] Qt5$qtModule runtime DLL"
 }
+$qtWindowsPlugin = @("platforms\qwindows.dll", "platforms\qwindowsd.dll") |
+    ForEach-Object { Join-Path $prefixFull $_ } |
+    Where-Object { Test-Path -LiteralPath $_ } |
+    Select-Object -First 1
+if (-not $qtWindowsPlugin) {
+    throw "Missing Qt Windows platform plugin: platforms\qwindows.dll or platforms\qwindowsd.dll"
+}
+Write-Host ("  [ok] Qt Windows platform plugin: {0}" -f (Split-Path -Leaf $qtWindowsPlugin))
+Assert-PathExists "translations\aitrain_zh_CN.qm" "Chinese translation catalog"
+Assert-PathExists "translations\aitrain_en_US.qm" "English translation catalog"
+
+Write-Host "Package smoke: GUI package-root startup handshake" -ForegroundColor Cyan
+$studioExe = Join-Path $prefixFull "AITrainStudio.exe"
+$studioProcess = Start-Process -FilePath $studioExe `
+    -ArgumentList "--package-startup-check" `
+    -WorkingDirectory $prefixFull `
+    -WindowStyle Hidden `
+    -Wait `
+    -PassThru
+if ($studioProcess.ExitCode -ne 0) {
+    throw "Packaged GUI startup handshake failed with exit code $($studioProcess.ExitCode)"
+}
+Write-Host "  [ok] packaged GUI loaded Qt platform and translation runtime from package root"
 
 $workerExe = Join-Path $prefixFull "aitrain_worker.exe"
 

@@ -37,7 +37,7 @@ bool TaskExecutionHost::start(const QString& capabilityId,
     workflowTerminalHandler_ = {};
     adapterSettledHandler_ = {};
     adapterEventHandler_ = {};
-    if (!startAdapter(launch, error)) {
+    if (!startAdapter(launch, true, error)) {
         return false;
     }
     if (task) {
@@ -68,10 +68,14 @@ bool TaskExecutionHost::startExistingTask(const TaskSnapshot& task,
     workflowTerminalHandler_ = std::move(terminalHandler);
     adapterSettledHandler_ = std::move(settledHandler);
     adapterEventHandler_ = std::move(eventHandler);
-    return startAdapter(launch, error);
+    // Existing Workflow steps are completed by the Worker caller when launch
+    // preparation/start fails. Do not also synthesize a Core terminal here.
+    return startAdapter(launch, false, error);
 }
 
-bool TaskExecutionHost::startAdapter(const PythonAdapterLaunch& launch, QString* error)
+bool TaskExecutionHost::startAdapter(const PythonAdapterLaunch& launch,
+    bool terminalizeStartFailure,
+    QString* error)
 {
     lastSequence_ = 0;
     terminalEventSeen_ = false;
@@ -94,8 +98,11 @@ bool TaskExecutionHost::startAdapter(const PythonAdapterLaunch& launch, QString*
         }
     }
     if (!adapterHost_.start(normalizedLaunch, activeTask_.requestId, activeTask_.id,
-            [this](const ProtocolEnvelope& event) { consumeAdapterEvent(event); },
+            [this](const ProtocolEnvelope& event) { return consumeAdapterEvent(event); },
             [this](const PythonAdapterExit& outcome) { finishAdapter(outcome); }, error)) {
+        if (!terminalizeStartFailure) {
+            return false;
+        }
         const QString reason = error && !error->isEmpty()
             ? *error
             : QStringLiteral(" Python Adapter Host 无法启动。");
@@ -156,7 +163,7 @@ QString TaskExecutionHost::lastError() const
     return lastError_;
 }
 
-void TaskExecutionHost::consumeAdapterEvent(const ProtocolEnvelope& event)
+bool TaskExecutionHost::consumeAdapterEvent(const ProtocolEnvelope& event)
 {
     QString error;
     // 产物候选的原始 path 仅在本函数内部用于受控 staging 校验；进入
@@ -180,7 +187,7 @@ void TaskExecutionHost::consumeAdapterEvent(const ProtocolEnvelope& event)
             }
             QString ignored;
             adapterHost_.forceTerminate(&ignored);
-            return;
+            return false;
         }
         cancellationRequested = persisted.state == TaskState::CancelRequested;
     }
@@ -191,7 +198,8 @@ void TaskExecutionHost::consumeAdapterEvent(const ProtocolEnvelope& event)
         failure.payload = QJsonObject{
             {QStringLiteral("message"), QStringLiteral("无法原子提交 Python Adapter 产物：%1").arg(error)},
             {QStringLiteral("failureCode"), failureCodeToString(FailureCode::ArtifactIncomplete)}};
-        if (!consumeTerminalEvent(failure, {}, &error)) {
+        const bool failureAccepted = consumeTerminalEvent(failure, {}, &error);
+        if (!failureAccepted) {
             lastError_ = error;
             if (adapterEventHandler_) {
                 ProtocolEnvelope diagnostic;
@@ -200,13 +208,17 @@ void TaskExecutionHost::consumeAdapterEvent(const ProtocolEnvelope& event)
                     QStringLiteral("提交失败终态失败：%1").arg(error)}};
                 adapterEventHandler_(diagnostic);
             }
+        } else if (adapterEventHandler_) {
+            ProtocolEnvelope safeFailure = failure;
+            safeFailure.payload = protocol::redactPhysicalPathFields(failure.payload);
+            adapterEventHandler_(safeFailure);
         }
         lastSequence_ = failure.sequence;
         terminalEventSeen_ = true;
         abortArtifactBundle();
         QString ignored;
         adapterHost_.forceTerminate(&ignored);
-        return;
+        return failureAccepted;
     }
     if (cancellationRequested) {
         // 取消优先：Adapter 即使晚到 succeeded，也不得把成功产物提交为任务结果。
@@ -214,11 +226,6 @@ void TaskExecutionHost::consumeAdapterEvent(const ProtocolEnvelope& event)
     }
     if ((event.kind == QStringLiteral("event.failed") || event.kind == QStringLiteral("event.canceled"))) {
         abortArtifactBundle();
-    }
-    // 终态回调可能立即派发下一步或释放宿主；先转发已脱敏的失败详情，
-    // 确保 GUI/Worker 能保留官方后端给出的可诊断信息而不泄露物理路径。
-    if (terminal && adapterEventHandler_) {
-        adapterEventHandler_(safeEvent);
     }
     const bool consumed = terminal
         ? consumeTerminalEvent(safeEvent, outputArtifactId, &error)
@@ -233,12 +240,9 @@ void TaskExecutionHost::consumeAdapterEvent(const ProtocolEnvelope& event)
             adapterEventHandler_(diagnostic);
         }
         qWarning().noquote() << QStringLiteral("[task adapter event rejected] %1").arg(error);
-        // 终态已经由事件服务器验过身份/顺序；Workflow 回调失败时不能在
-        // 进程退出后再合成第二个终态事件。
-        terminalEventSeen_ = terminalEventSeen_ || terminal;
         QString ignored;
         adapterHost_.forceTerminate(&ignored);
-        return;
+        return false;
     }
     lastSequence_ = event.sequence;
     if (event.kind == QStringLiteral("event.artifact_candidate") && !stageArtifactCandidate(event, &error)) {
@@ -253,12 +257,15 @@ void TaskExecutionHost::consumeAdapterEvent(const ProtocolEnvelope& event)
         qWarning().noquote() << QStringLiteral("[task artifact candidate rejected] %1").arg(error);
         QString ignored;
         adapterHost_.forceTerminate(&ignored);
-        return;
+        return false;
     }
-    if (!terminal && adapterEventHandler_) {
+    // 只有 Coordinator/Workflow terminal handler 已持久化接受终态，才向
+    // Worker 转发并允许 AdapterEventServer 返回 terminal ACK。
+    if (adapterEventHandler_) {
         adapterEventHandler_(safeEvent);
     }
     terminalEventSeen_ = terminalEventSeen_ || terminal;
+    return true;
 }
 
 bool TaskExecutionHost::consumeTerminalEvent(const ProtocolEnvelope& event,

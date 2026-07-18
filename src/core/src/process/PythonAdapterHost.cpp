@@ -7,6 +7,13 @@
 
 #include <limits>
 
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace aitrain {
 
 namespace {
@@ -90,6 +97,15 @@ bool PythonAdapterHost::start(const PythonAdapterLaunch& launch,
     process_->setArguments(launch.arguments);
     process_->setWorkingDirectory(launch.workingDirectory);
     process_->setProcessEnvironment(environment);
+#ifdef Q_OS_WIN
+    // The root process must not execute user/official adapter code before it
+    // belongs to the Job Object. Otherwise it can create a child in the short
+    // window between CreateProcess and QProcess::started, and that child will
+    // not be retroactively added to the Job.
+    process_->setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments* arguments) {
+        arguments->flags |= CREATE_SUSPENDED;
+    });
+#endif
     QObject::connect(process_.get(), &QProcess::readyReadStandardOutput, process_.get(), [this] {
         drainProcessOutput();
     });
@@ -108,6 +124,7 @@ bool PythonAdapterHost::start(const PythonAdapterLaunch& launch,
     });
     cancellationTimer_ = std::make_unique<QTimer>();
     cancellationTimer_->setSingleShot(true);
+    cancellationTimer_->setInterval(launch.cancellationGraceMs);
     QObject::connect(cancellationTimer_.get(), &QTimer::timeout, cancellationTimer_.get(), [this] {
         QString ignored;
         forceTerminate(&ignored);
@@ -118,7 +135,7 @@ bool PythonAdapterHost::start(const PythonAdapterLaunch& launch,
         finalizeAfterDrainDeadline();
     });
     eventServer_.setEventHandler([this](const ProtocolEnvelope& event) {
-        onAdapterEvent(event);
+        return onAdapterEvent(event);
     });
     running_ = true;
     process_->start();
@@ -177,7 +194,8 @@ AdapterEventEndpoint PythonAdapterHost::endpoint() const
 void PythonAdapterHost::onProcessStarted()
 {
     QString error;
-    if (!processTree_.attach(process_.get(), &error)) {
+    if (!processTree_.attach(process_.get(), &error)
+        || !processTree_.resume(process_.get(), &error)) {
         lifecycleError_ = error;
         forceTerminate(nullptr);
     }
@@ -213,23 +231,30 @@ void PythonAdapterHost::appendProcessOutput(const QByteArray& bytes, const QStri
     processOutputTail_ = combined;
 }
 
-void PythonAdapterHost::onAdapterEvent(const ProtocolEnvelope& event)
+bool PythonAdapterHost::onAdapterEvent(const ProtocolEnvelope& event)
 {
     if (event.sequence > std::numeric_limits<quint64>::max() - eventSequenceOffset_) {
         lifecycleError_ = QStringLiteral("Python Adapter 事件序号溢出。");
         QString ignored;
         forceTerminate(&ignored);
-        return;
+        return false;
     }
     ProtocolEnvelope normalized = event;
     normalized.sequence += eventSequenceOffset_;
-    if (normalized.kind == QStringLiteral("event.succeeded")
+    const bool terminal = normalized.kind == QStringLiteral("event.succeeded")
         || normalized.kind == QStringLiteral("event.failed")
-        || normalized.kind == QStringLiteral("event.canceled")) {
-        terminalEventSeen_ = true;
+        || normalized.kind == QStringLiteral("event.canceled");
+    if (eventHandler_ && !eventHandler_(normalized)) {
+        lifecycleError_ = QStringLiteral("Python Adapter 事件未被下游持久化接受。");
+        QString ignored;
+        forceTerminate(&ignored);
+        return false;
     }
-    if (eventHandler_) {
-        eventHandler_(normalized);
+    // 只有下游已经持久化接受终态后，才把它计入 Host 生命周期。若终态
+    // 收口失败，finishAdapter() 必须继续合成明确的失败终态，不能因为
+    // 看见过终态帧而留下 Worker 无终态。
+    if (terminal) {
+        terminalEventSeen_ = true;
     }
     // QProcess::finished 与 QTcpSocket::readyRead 属于两个独立的事件源。
     // 若进程先退出，终态帧可能在 finished 回调返回后才到达；此时必须
@@ -250,6 +275,7 @@ void PythonAdapterHost::onAdapterEvent(const ProtocolEnvelope& event)
             finalizeProcessExit(outcome);
         });
     }
+    return true;
 }
 
 void PythonAdapterHost::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus)

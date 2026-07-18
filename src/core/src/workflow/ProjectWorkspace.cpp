@@ -87,6 +87,17 @@ bool writeArtifactFile(const QString& path, const QByteArray& contents, QString*
     return true;
 }
 
+QString stableProjectIdentity(const QString& workspacePath)
+{
+    // Evidence 是可交付报告，不能把工作区绝对路径写入持久化事实。当前
+    // schema 尚未提供项目名称/ProjectId 字段，因此以规范工作区路径的
+    // SHA-256 生成稳定 opaque identity；同一项目重开仍可关联，报告不会
+    // 暴露用户目录、盘符或 UNC 前缀。
+    const QString canonical = QDir(workspacePath).absolutePath();
+    const QByteArray digest = QCryptographicHash::hash(canonical.toUtf8(), QCryptographicHash::Sha256).toHex();
+    return QStringLiteral("project:%1").arg(QString::fromLatin1(digest));
+}
+
 bool verifyArtifactFile(const QString& artifactPath,
     const ArtifactFileSnapshot& expected,
     VerifiedWorkflowArtifactFile* result,
@@ -520,15 +531,20 @@ bool writeJsonFile(const QString& path, const QJsonObject& object, QString* erro
 
 QJsonObject artifactFacts(const ArtifactSnapshot& artifact)
 {
-    QJsonArray files;
+    QCryptographicHash inventory(QCryptographicHash::Sha256);
+    qint64 totalBytes = 0;
     for (const ArtifactFileSnapshot& file : artifact.files) {
-        files.append(QJsonObject{{QStringLiteral("relativePath"), file.relativePath},
-            {QStringLiteral("sha256"), file.sha256},
-            {QStringLiteral("byteCount"), static_cast<double>(file.byteCount)}});
+        inventory.addData(file.relativePath.toUtf8());
+        inventory.addData("\0", 1);
+        inventory.addData(file.sha256.toLatin1());
+        inventory.addData("\0", 1);
+        inventory.addData(QByteArray::number(file.byteCount));
+        inventory.addData("\n", 1);
+        totalBytes += file.byteCount;
     }
-    return {{QStringLiteral("ownerTaskId"), artifact.taskId.toString()},
-        {QStringLiteral("createdAt"), artifact.createdAt.toUTC().toString(Qt::ISODateWithMs)},
-        {QStringLiteral("files"), files}};
+    return {{QStringLiteral("fileCount"), artifact.files.size()},
+        {QStringLiteral("totalBytes"), static_cast<double>(totalBytes)},
+        {QStringLiteral("inventorySha256"), QString::fromLatin1(inventory.result().toHex())}};
 }
 
 WorkflowStepExecutionResult workflowExecutionForAdapterTerminal(const ProtocolEnvelope& event,
@@ -1786,7 +1802,7 @@ bool ProjectWorkspace::buildWorkflowEvidenceBundle(const WorkflowRunId& workflow
     if (error && !error->isEmpty()) return false;
 
     EvidenceBundle bundle;
-    bundle.projectIdentity = QDir(workspacePath_).absolutePath();
+    bundle.projectIdentity = stableProjectIdentity(workspacePath_);
     bundle.task = task;
     bundle.workflowRunId = workflow.id;
     bundle.createdAt = QDateTime::currentDateTimeUtc();

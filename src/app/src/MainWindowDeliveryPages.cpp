@@ -196,7 +196,7 @@ QWidget* MainWindow::buildInferenceValidationPanel()
     imageLayout->setSpacing(8);
     imageLayout->addWidget(inferenceSampleRelativePathEdit_);
     modelLayout->setSpacing(8);
-    auto* outputHint = mutedLabel(QStringLiteral("输出由 Artifact Store 托管，完成后在任务与产物中按 ArtifactId 预览。"));
+    auto* outputHint = mutedLabel(uiText("输出由 Artifact Store 托管，完成后在任务与产物中按 ArtifactId 预览。"));
     allowLabelToShrink(outputHint);
     inferForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     inferForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);

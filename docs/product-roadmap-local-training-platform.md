@@ -122,7 +122,7 @@ OCR 评估和验收使用 PaddleOCR 官方报告路径：
 - 生成 HTML、JSON、model card、artifact inventory。
 - 报告包含项目、数据集、snapshot hash、训练 backend、模型 preset、epochs、环境摘要、评估指标、错误样本摘要、benchmark 摘要、导出产物、ONNX sidecar、模型版本信息。
 - 报告必须明确列出 scaffold / official / hardware-blocked 限制。
-- 报告必须作为 task artifact 记录，并能从任务与产物页预览或打开目录。
+- 报告必须作为 committed task artifact 记录，并能从任务与产物页按 ArtifactId 和包内相对路径受控预览；GUI 不暴露或打开 Artifact Store 物理目录。
 
 ## 6. Phase 41 Lite：环境 profile 与修复向导
 
@@ -214,7 +214,7 @@ git diff --check
 - 导入 generated detection / segmentation / OCR Rec 数据集。
 - 运行质检、snapshot、训练、评估、benchmark、报告、`数据集 > 质量与复核`、`部署验证` 和诊断包。
 - 在任务与产物页检查 JSON / CSV / image / HTML artifact。
-- 在模型库检查模型版本、评估报告、模型对比、benchmark / pipeline 记录。
+- 在模型库检查已登记 Model Package；在任务与产物页检查评估、benchmark、workflow step、Metric 与 committed Artifact 记录。
 - 在 `环境 > 交付证据` 确认客户 OCR gate、TensorRT `hardware-blocked` 和 NCNN SDK/runtime/sample-image 要求文案。
 - 确认 scaffold 和 TensorRT hardware-blocked 文案清晰。
 

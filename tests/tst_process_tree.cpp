@@ -135,6 +135,7 @@ void ProcessTreeTests::adapterEventChannelAuthenticatesAndForwardsBoundEvent()
     QList<aitrain::ProtocolEnvelope> received;
     server.setEventHandler([&received](const aitrain::ProtocolEnvelope& event) {
         received.append(event);
+        return true;
     });
     QString error;
     QVERIFY2(server.start(requestId, taskId, &error), qPrintable(error));
@@ -180,6 +181,7 @@ void ProcessTreeTests::adapterEventChannelRejectsPostTerminalFrame()
     QList<aitrain::ProtocolEnvelope> received;
     server.setEventHandler([&received](const aitrain::ProtocolEnvelope& event) {
         received.append(event);
+        return true;
     });
     QString error;
     QVERIFY2(server.start(requestId, taskId, &error), qPrintable(error));
@@ -213,6 +215,11 @@ void ProcessTreeTests::adapterEventChannelRejectsPostTerminalFrame()
     sendEvent(1, QStringLiteral("event.succeeded"));
     QTRY_COMPARE(received.size(), 1);
     QCOMPARE(received.constFirst().kind, QStringLiteral("event.succeeded"));
+    QTRY_VERIFY(socket.bytesAvailable() > 0);
+    const QJsonObject terminalAck = QJsonDocument::fromJson(socket.readLine()).object();
+    QCOMPARE(terminalAck.value(QStringLiteral("status")).toString(), QStringLiteral("accepted"));
+    QCOMPARE(terminalAck.value(QStringLiteral("terminal")).toBool(), true);
+    QCOMPARE(terminalAck.value(QStringLiteral("sequence")).toString(), QStringLiteral("1"));
 
     sendEvent(2, QStringLiteral("event.log"));
     QTRY_VERIFY(socket.bytesAvailable() > 0);

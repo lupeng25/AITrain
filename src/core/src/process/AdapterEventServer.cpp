@@ -228,11 +228,21 @@ void AdapterEventServer::readSocket(QTcpSocket* socket)
             rejectSocket(socket, QStringLiteral("terminal_event_already_seen"));
             return;
         }
-        if (eventHandler_) {
-            eventHandler_(envelope);
+        if (eventHandler_ && !eventHandler_(envelope)) {
+            setFailure(QStringLiteral("downstream_event_rejected"));
+            rejectSocket(socket, QStringLiteral("downstream_event_rejected"));
+            return;
         }
         if (isTerminalEventKind(envelope.kind)) {
             terminalEventSeen_ = true;
+            QJsonObject acknowledgment;
+            acknowledgment.insert(QStringLiteral("status"), QStringLiteral("accepted"));
+            acknowledgment.insert(QStringLiteral("sequence"), QString::number(envelope.sequence));
+            acknowledgment.insert(QStringLiteral("terminal"), true);
+            QByteArray bytes = QJsonDocument(acknowledgment).toJson(QJsonDocument::Compact);
+            bytes.append('\n');
+            socket->write(bytes);
+            socket->flush();
         }
     }
 }
