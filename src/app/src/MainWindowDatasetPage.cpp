@@ -50,7 +50,7 @@ QWidget* MainWindow::buildDatasetPage()
     layout->setSpacing(16);
 
     auto* headerValidateButton = primaryButton(QStringLiteral("运行质量工作流"));
-    connect(headerValidateButton, &QPushButton::clicked, this, &MainWindow::validateDataset);
+    connect(headerValidateButton, &QPushButton::clicked, this, &MainWindow::runDataQualityWorkflow);
 
     auto* inputPanel = new InfoPanel(QStringLiteral("数据集操作"));
     auto* form = new QFormLayout;
@@ -93,7 +93,7 @@ QWidget* MainWindow::buildDatasetPage()
         refreshDatasetConversionDefaultsFromCurrentDataset();
     });
     auto* validateButton = primaryButton(QStringLiteral("校验数据集"));
-    connect(validateButton, &QPushButton::clicked, this, &MainWindow::validateDataset);
+    connect(validateButton, &QPushButton::clicked, this, &MainWindow::runDataQualityWorkflow);
     form->addRow(QStringLiteral("数据集目录"), pathRow);
     form->addRow(QStringLiteral("格式"), datasetFormatCombo_);
 
@@ -136,13 +136,13 @@ QWidget* MainWindow::buildDatasetPage()
     splitTestRatioEdit_ = new QLineEdit(QStringLiteral("0.0"));
     splitSeedEdit_ = new QLineEdit(QStringLiteral("42"));
     auto* splitButton = new QPushButton(QStringLiteral("划分数据集"));
-    connect(splitButton, &QPushButton::clicked, this, &MainWindow::splitDataset);
+    connect(splitButton, &QPushButton::clicked, this, &MainWindow::runDatasetSplitWorkflow);
     auto* curateButton = new QPushButton(QStringLiteral("运行 Data Quality "));
     curateButton->setObjectName(QStringLiteral("RunDataQualityWorkflowButton"));
-    connect(curateButton, &QPushButton::clicked, this, &MainWindow::curateDataset);
+    connect(curateButton, &QPushButton::clicked, this, &MainWindow::runDataQualityWorkflow);
     auto* snapshotButton = new QPushButton(QStringLiteral("创建数据快照"));
     snapshotButton->setObjectName(QStringLiteral("RunDatasetSnapshotImportWorkflowButton"));
-    connect(snapshotButton, &QPushButton::clicked, this, &MainWindow::createDatasetSnapshot);
+    connect(snapshotButton, &QPushButton::clicked, this, &MainWindow::runDatasetSnapshotImportWorkflow);
     datasetSnapshotTargetDatasetIdEdit_ = new QLineEdit(aitrain::DatasetId::create().toString());
     datasetSnapshotTargetDatasetIdEdit_->setObjectName(QStringLiteral("DatasetSnapshotTargetDatasetId"));
     datasetSnapshotTargetDatasetIdEdit_->setPlaceholderText(QStringLiteral("新 DatasetId，或已有同格式 DatasetId"));

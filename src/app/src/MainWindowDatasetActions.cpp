@@ -465,7 +465,7 @@ void MainWindow::startDatasetConversion()
     statusBar()->showMessage(uiText("正在转换数据集"), 3000);
 }
 
-void MainWindow::validateDataset()
+void MainWindow::runDataQualityWorkflow()
 {
     if (worker_.isRunning()) {
         QMessageBox::warning(this, uiText("数据质量报告"), uiText("Worker 正在执行任务，稍后再生成数据质量报告。"));
@@ -527,7 +527,7 @@ void MainWindow::validateDataset()
     workerPill_->setStatus(uiText("数据质量报告生成中"), StatusPill::Tone::Info);
 }
 
-void MainWindow::splitDataset()
+void MainWindow::runDatasetSplitWorkflow()
 {
     if (worker_.isRunning() || currentProjectPath_.isEmpty() || !workspace_.isOpen()) {
         QMessageBox::warning(this, uiText("数据集划分"), uiText("Worker 正在执行任务，稍后再划分数据集。"));
@@ -586,11 +586,6 @@ void MainWindow::splitDataset()
     }
     workerPill_->setStatus(uiText("数据集划分中"), StatusPill::Tone::Info);
     statusBar()->showMessage(uiText("正在划分数据集"), 3000);
-}
-
-void MainWindow::curateDataset()
-{
-    validateDataset();
 }
 
 void MainWindow::openDatasetQualityFixList()
@@ -897,7 +892,7 @@ void MainWindow::openSelectedReviewSample()
             .arg(state_.dataset.sampleReviewArtifactId, imagePath, labelPath));
 }
 
-void MainWindow::createDatasetSnapshot()
+void MainWindow::runDatasetSnapshotImportWorkflow()
 {
     if (worker_.isRunning() || currentProjectPath_.isEmpty() || !workspace_.isOpen()) {
         QMessageBox::warning(this, uiText("数据集快照"), uiText("Worker 正在执行任务，稍后再创建数据集快照。"));

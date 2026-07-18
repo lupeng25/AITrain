@@ -99,9 +99,35 @@ bool TaskCoordinator::finalizeTask(const TaskId& taskId, TaskState terminalState
     }
     TaskSnapshot task;
     if (!storage_->task(taskId, &task, error)) return false;
+    Failure normalizedFailure = failure;
+    if (terminalState == TaskState::Canceled) {
+        normalizedFailure.code = FailureCode::Canceled;
+        if (normalizedFailure.message.trimmed().isEmpty()) {
+            normalizedFailure.message = QStringLiteral("任务已取消。");
+        }
+        if (normalizedFailure.suggestedAction.trimmed().isEmpty()) {
+            normalizedFailure.suggestedAction = defaultFailureSuggestedAction(normalizedFailure.code);
+        }
+        if (!normalizedFailure.occurredAt.isValid()) {
+            normalizedFailure.occurredAt = QDateTime::currentDateTimeUtc();
+        }
+    } else if (terminalState == TaskState::Failed) {
+        if (normalizedFailure.code == FailureCode::None) {
+            normalizedFailure.code = FailureCode::InternalError;
+        }
+        if (normalizedFailure.message.trimmed().isEmpty()) {
+            normalizedFailure.message = QStringLiteral("任务执行失败。");
+        }
+        if (normalizedFailure.suggestedAction.trimmed().isEmpty()) {
+            normalizedFailure.suggestedAction = defaultFailureSuggestedAction(normalizedFailure.code);
+        }
+        if (!normalizedFailure.occurredAt.isValid()) {
+            normalizedFailure.occurredAt = QDateTime::currentDateTimeUtc();
+        }
+    }
     if (task.state == TaskState::CancelRequested && terminalState != TaskState::Canceled) {
         terminalState = TaskState::Canceled;
-        Failure canceled = failure;
+        Failure canceled = normalizedFailure;
         canceled.code = FailureCode::Canceled;
         if (canceled.message.trimmed().isEmpty()) {
             canceled.message = QStringLiteral("任务已请求取消，取消优先于适配器终态。" );
@@ -116,7 +142,7 @@ bool TaskCoordinator::finalizeTask(const TaskId& taskId, TaskState terminalState
         if (error) *error = QStringLiteral("当前任务状态不支持结束：%1").arg(taskStateToString(task.state));
         return false;
     }
-    return storage_->transitionTask(taskId, task.state, terminalState, failure, error);
+    return storage_->transitionTask(taskId, task.state, terminalState, normalizedFailure, error);
 }
 
 bool TaskCoordinator::consumeWorkerEvent(const ProtocolEnvelope& envelope, QString* error)
@@ -170,11 +196,22 @@ bool TaskCoordinator::consumeWorkerEvent(const ProtocolEnvelope& envelope, QStri
             || terminalFailure.code == FailureCode::None) {
             terminalFailure.code = FailureCode::InternalError;
         }
+        terminalFailure.suggestedAction = envelope.payload.value(QStringLiteral("suggestedAction"))
+            .toString().trimmed();
+        if (terminalFailure.suggestedAction.isEmpty()) {
+            terminalFailure.suggestedAction = defaultFailureSuggestedAction(terminalFailure.code);
+        }
         terminalFailure.occurredAt = envelope.timestamp;
     }
     if (envelope.kind == QStringLiteral("event.canceled")) {
         terminalState = TaskState::Canceled;
-        terminalFailure = {FailureCode::Canceled, envelope.payload.value(QStringLiteral("message")).toString(), {}, envelope.timestamp};
+        terminalFailure = {FailureCode::Canceled,
+            envelope.payload.value(QStringLiteral("message")).toString(),
+            envelope.payload.value(QStringLiteral("suggestedAction")).toString().trimmed(),
+            envelope.timestamp};
+        if (terminalFailure.suggestedAction.isEmpty()) {
+            terminalFailure.suggestedAction = QStringLiteral("确认任务已停止后重新发起。");
+        }
     }
 
     ProtocolEventEffect effect;

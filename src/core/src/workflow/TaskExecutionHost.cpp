@@ -103,13 +103,12 @@ bool TaskExecutionHost::startAdapter(const PythonAdapterLaunch& launch,
         if (!terminalizeStartFailure) {
             return false;
         }
-        const QString reason = error && !error->isEmpty()
-            ? *error
-            : QStringLiteral(" Python Adapter Host 无法启动。");
+        const QString reason = QStringLiteral(" Python Adapter Host 无法启动。详见受控 Worker 日志。");
         QString terminalError;
         emitHostTerminal(QStringLiteral("event.failed"), QJsonObject{
             {QStringLiteral("message"), reason},
-            {QStringLiteral("failureCode"), failureCodeToString(FailureCode::ProcessCrashed)}}, &terminalError);
+            {QStringLiteral("failureCode"), failureCodeToString(FailureCode::ProcessCrashed)},
+            {QStringLiteral("suggestedAction"), QStringLiteral("检查 Python Adapter 启动环境后重试。")}}, &terminalError);
         if (!terminalError.isEmpty()) {
             lastError_ = terminalError;
         }
@@ -132,11 +131,11 @@ bool TaskExecutionHost::requestCancellation(const TaskId& taskId, QString* error
     if (adapterHost_.requestCancellation(error)) {
         return true;
     }
-    const QString reason = error && !error->isEmpty()
-        ? *error
-        : QStringLiteral(" Python Adapter 已不可用，取消请求由 Host 收尾。");
+    const QString reason = QStringLiteral(" Python Adapter 已不可用，取消请求由 Host 收尾。");
     QString terminalError;
-    const bool terminalized = emitHostTerminal(QStringLiteral("event.canceled"), QJsonObject{{QStringLiteral("message"), reason}}, &terminalError);
+    const bool terminalized = emitHostTerminal(QStringLiteral("event.canceled"), QJsonObject{
+        {QStringLiteral("message"), reason},
+        {QStringLiteral("suggestedAction"), QStringLiteral("确认任务已停止后重新发起。")}}, &terminalError);
     if (!terminalized && !terminalError.isEmpty()) {
         lastError_ = terminalError;
     }
@@ -315,10 +314,11 @@ void TaskExecutionHost::finishAdapter(const PythonAdapterExit& outcome)
     if (outcome.cancelRequested) {
         emitHostTerminal(QStringLiteral("event.canceled"), QJsonObject{
             {QStringLiteral("message"), QStringLiteral("Python Adapter 在取消请求后退出，但未发送终态事件。")},
+            {QStringLiteral("suggestedAction"), QStringLiteral("确认任务已停止后重新发起。")},
             {QStringLiteral("force"), outcome.forceTerminated}}, &error);
     } else {
         const QString message = !lastError_.isEmpty()
-            ? lastError_
+            ? QStringLiteral("Python Adapter Host 收到内部错误。")
             : (outcome.diagnostic.isEmpty()
             ? QStringLiteral("Python Adapter 退出，但未发送终态事件。")
             : outcome.diagnostic);
@@ -327,7 +327,8 @@ void TaskExecutionHost::finishAdapter(const PythonAdapterExit& outcome)
             .arg(outcome.forceTerminated ? QStringLiteral("true") : QStringLiteral("false"));
         emitHostTerminal(QStringLiteral("event.failed"), QJsonObject{
             {QStringLiteral("message"), diagnostic},
-            {QStringLiteral("failureCode"), failureCodeToString(FailureCode::ProcessCrashed)}}, &error);
+            {QStringLiteral("failureCode"), failureCodeToString(FailureCode::ProcessCrashed)},
+            {QStringLiteral("suggestedAction"), QStringLiteral("检查 Python Adapter 日志后重试。")}}, &error);
     }
     if (!error.isEmpty()) {
         lastError_ = error;

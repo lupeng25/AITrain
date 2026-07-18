@@ -23,8 +23,17 @@ This file is the source of truth for phase status in new AI coding conversations
 
 - 当前执行分支为 `codex/v3-final-closeout`。Qt 测试运行时改为使用 `build-vscode/tests` 内由 CMake 复制的 Qt DLL、`platforms/qoffscreen` 与 `qt.conf`，CTest 环境显式设置 `QT_PLUGIN_PATH`、`QT_QPA_PLATFORM_PLUGIN_PATH` 和 `QT_QPA_PLATFORM=offscreen`；不会再从机器上的其他 Qt 安装目录加载平台插件。
 - Worker 终态交付采用“下游持久化成功后才发送终态确认，等待 WorkerClient 关闭连接”的握手；窗口关闭、取消、Worker 断开共用有限异步排空路径，仍保留 1 秒有界兜底。Python Adapter 只有在下游接受终态后才标记终态已见；拒绝终态时会继续生成可持久化的失败终态。
-- 最新 `.\tools\harness-check.ps1` 已通过：编码检查、架构检查、构建和 CTest 全部通过，当前测试目标计数为 36/36；本次 `acceptance-smoke` 重跑的全量 CTest 用时 263.94 秒。文档中此前的 37/37 记录属于 2026-07-17 的历史门禁结果，不覆盖本节的当前计数。
+- 最新 `.\tools\harness-check.ps1` 已通过：编码检查、架构检查、构建和 CTest 全部通过，当前测试目标计数为 37/37（含 `aitrain_paddleocr_system_python_tests`）；独立 `python -m pytest -q tests` 为 81/81。后续新增的终态契约、证据恢复分页、诊断事实脱敏、官方 Profile 规划和 Qt 运行时检查均有定向回归覆盖。
 - 本轮打包脚本已要求 Qt5Core/Qt5Gui/Qt5Widgets、`platforms\qwindows.dll`（Debug 包允许对应的 `qwindowsd.dll`）和双语翻译目录，并使用 `AITrainStudio.exe --package-startup-check` 做包根启动检查；`windeployqt` 失败会直接使构建失败。
+
+本轮二次深度审计的收口事实（2026-07-18）：
+
+- Storage 恢复查询同时覆盖 `queued/starting/running/cancel_requested` 的 EvidenceRequired Workflow，并以分页循环处理终态化和 Evidence 门禁恢复；普通中断任务会写入完整的 FailureCode、message、suggestedAction 和 occurredAt。终态 `Failed/Canceled` 不再接受缺少 Failure 字段的直接写入，稳定建议动作由 Domain Failure Catalog 提供。
+- Worker/Application 终态事件会补齐失败/取消建议动作；Model Import、Python Adapter、进程启动/取消和合成终态均不再把原始命令行输出或不稳定机器路径写入 Failure。Protocol Sanitizer 能递归清理带空格的 Windows/UNC 路径及 `paths/directories/filepaths` 字段。
+- Environment Check 与 Diagnostics 的事实 Artifact 在校验和提交前都经过物理路径脱敏；PaddleOCR System loopback 测试已注册到 CTest，并对终态 ACK 做完整握手。官方 YOLO/SMP/Anomalib Profile ID 由 Capability Planner 按 Profile 合同验证，不再误当成 Capability Registry backend。
+- GUI 已阻止 Worker 运行期间切换项目，删除数据集 legacy slot 命名，并将目录探测限制在有界读取；旧 `build-vscode/tests` 与 `build-vscode/bin` 中残留的版本化测试可执行文件已清除。Qt CMake 配置在启用运行时复制却缺少 DLL、平台插件或 `qt.conf` 时直接失败，避免 F5 回退到外部 Qt 安装。
+
+本轮仍明确不宣称已完成的边界：项目打开/恢复、数据集格式探测、Artifact 全文件哈希和样本预览仍有 GUI 线程同步路径；Evidence 终态持久化与 Workflow handler 尚未合并为单一数据库事务；Worker 终态后 watchdog、Artifact SHA-256 十六进制校验、Evidence lineage 强校验以及 `aitrain_foundation` 内部历史源文件的进一步 target 拆分仍需下一阶段处理。这些边界已写入审计与方案，不得在验收报告中描述为已收口能力。
 
 ##  破坏性重构执行状态（2026-07-16）
 

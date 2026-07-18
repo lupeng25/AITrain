@@ -165,7 +165,10 @@ bool parseTask(QSqlQuery& query, TaskSnapshot* result, QString* error)
     parsed.taskType = query.value(4).toString();
     parsed.createdAt = parseUtc(query.value(5).toString());
     parsed.updatedAt = parseUtc(query.value(6).toString());
-    failureCodeFromString(query.value(7).toString(), &parsed.failure.code);
+    if (!failureCodeFromString(query.value(7).toString(), &parsed.failure.code)) {
+        if (error) *error = QStringLiteral("任务记录包含未知 FailureCode。");
+        return false;
+    }
     parsed.failure.message = query.value(8).toString();
     parsed.failure.suggestedAction = query.value(9).toString();
     parsed.failure.occurredAt = parseUtc(query.value(10).toString());
@@ -206,7 +209,10 @@ bool parseTerminalization(QSqlQuery& query, WorkflowTerminalizationSnapshot* res
         if (error && error->isEmpty()) *error = QStringLiteral("工作流终态封存记录包含无效状态或标识。");
         return false;
     }
-    failureCodeFromString(query.value(4).toString(), &parsed.failure.code);
+    if (!failureCodeFromString(query.value(4).toString(), &parsed.failure.code)) {
+        if (error) *error = QStringLiteral("工作流终态记录包含未知 FailureCode。");
+        return false;
+    }
     parsed.failure.message = query.value(5).toString();
     parsed.failure.suggestedAction = query.value(6).toString();
     parsed.failure.occurredAt = parseUtc(query.value(7).toString());
@@ -214,7 +220,10 @@ bool parseTerminalization(QSqlQuery& query, WorkflowTerminalizationSnapshot* res
     if (!query.value(9).toString().isEmpty()
         && !ArtifactId::parse(query.value(9).toString(), &parsed.evidenceArtifactId, error)) return false;
     parsed.evidenceAttemptCount = query.value(10).toInt();
-    failureCodeFromString(query.value(11).toString(), &parsed.lastEvidenceFailure.code);
+    if (!failureCodeFromString(query.value(11).toString(), &parsed.lastEvidenceFailure.code)) {
+        if (error) *error = QStringLiteral("Evidence 失败记录包含未知 FailureCode。");
+        return false;
+    }
     parsed.lastEvidenceFailure.message = query.value(12).toString();
     parsed.lastEvidenceFailure.suggestedAction = query.value(13).toString();
     parsed.lastEvidenceFailure.occurredAt = parseUtc(query.value(14).toString());
@@ -255,7 +264,10 @@ bool parseWorkflowStep(QSqlQuery& query, WorkflowStepSnapshot* result, QString* 
     parsed.parameterSummary = parameters.object();
     parsed.startedAt = parseUtc(query.value(9).toString());
     parsed.finishedAt = parseUtc(query.value(10).toString());
-    failureCodeFromString(query.value(11).toString(), &parsed.failure.code);
+    if (!failureCodeFromString(query.value(11).toString(), &parsed.failure.code)) {
+        if (error) *error = QStringLiteral("工作流步骤记录包含未知 FailureCode。");
+        return false;
+    }
     parsed.failure.message = query.value(12).toString();
     parsed.failure.suggestedAction = query.value(13).toString();
     parsed.failure.occurredAt = parseUtc(query.value(14).toString());
@@ -600,6 +612,10 @@ bool ProjectStore::transitionTask(const TaskId& taskId,
         }
         return false;
     }
+    if (isTerminalTaskState(nextState) && !completeTerminalFailure(nextState, failure)) {
+        if (error) *error = QStringLiteral("任务终态 Failure 字段不完整或与终态不匹配。");
+        return false;
+    }
     if (!db_.transaction()) {
         if (error) {
             *error = db_.lastError().text();
@@ -676,7 +692,7 @@ bool ProjectStore::markInterruptedTasksFailed(QString* error)
                 : QStringLiteral("应用在任务未结束时关闭。"),
             cancellationWasPending
                 ? QStringLiteral("如需继续，请重新发起该任务。")
-                : QString(),
+                : defaultFailureSuggestedAction(FailureCode::ProcessCrashed),
             QDateTime::currentDateTimeUtc()};
         if (!transitionTask(item.first, item.second, recoveredState, recoveredFailure, error)) {
             return false;
@@ -776,6 +792,10 @@ bool ProjectStore::applyProtocolEvent(const ProtocolEnvelope& envelope,
     }
     if (effect.hasTerminal() && !isTerminalTaskState(effect.terminalState)) {
         if (error) *error = QStringLiteral("协议事件终态无效。" );
+        return false;
+    }
+    if (effect.hasTerminal() && !completeTerminalFailure(effect.terminalState, effect.terminalFailure)) {
+        if (error) *error = QStringLiteral("协议终态 Failure 字段不完整或与终态不匹配。");
         return false;
     }
 
@@ -2367,14 +2387,23 @@ QVector<WorkflowTerminalizationSnapshot> ProjectStore::pendingWorkflowTerminaliz
     int limit,
     QString* error) const
 {
+    return pendingWorkflowTerminalizations(limit, 0, error);
+}
+
+QVector<WorkflowTerminalizationSnapshot> ProjectStore::pendingWorkflowTerminalizations(
+    int limit,
+    int offset,
+    QString* error) const
+{
     QVector<WorkflowTerminalizationSnapshot> results;
-    if (limit <= 0) {
-        if (error) *error = QStringLiteral("查询待恢复工作流终态需要正数 limit。");
+    if (limit <= 0 || offset < 0) {
+        if (error) *error = QStringLiteral("查询待恢复工作流终态需要正数 limit 和非负 offset。");
         return results;
     }
     QSqlQuery query(db_);
-    query.prepare(QStringLiteral("select workflow_run_id from workflow_terminalizations where state in ('sealed','evidence_attached') order by sealed_at asc, workflow_run_id asc limit :limit"));
+    query.prepare(QStringLiteral("select workflow_run_id from workflow_terminalizations where state in ('sealed','evidence_attached') order by sealed_at asc, workflow_run_id asc limit :limit offset :offset"));
     query.bindValue(QStringLiteral(":limit"), limit);
+    query.bindValue(QStringLiteral(":offset"), offset);
     if (!query.exec()) {
         if (error) *error = sqlError(query);
         return {};
@@ -2398,14 +2427,23 @@ QVector<WorkflowRunSnapshot> ProjectStore::pendingEvidenceRequiredWorkflows(
     int limit,
     QString* error) const
 {
+    return pendingEvidenceRequiredWorkflows(limit, 0, error);
+}
+
+QVector<WorkflowRunSnapshot> ProjectStore::pendingEvidenceRequiredWorkflows(
+    int limit,
+    int offset,
+    QString* error) const
+{
     QVector<WorkflowRunSnapshot> results;
-    if (limit <= 0) {
-        if (error) *error = QStringLiteral("查询待恢复 Evidence 门控工作流需要正数 limit。");
+    if (limit <= 0 || offset < 0) {
+        if (error) *error = QStringLiteral("查询待恢复 Evidence 门控工作流需要正数 limit 和非负 offset。");
         return results;
     }
     QSqlQuery query(db_);
-    query.prepare(QStringLiteral("select w.id from workflow_runs w join tasks t on t.id = w.task_id left join workflow_terminalizations z on z.workflow_run_id = w.id where w.terminal_policy = 'evidence_required' and t.state in ('running','cancel_requested') and (z.workflow_run_id is null or z.state <> 'closed') order by w.created_at asc, w.id asc limit :limit"));
+    query.prepare(QStringLiteral("select w.id from workflow_runs w join tasks t on t.id = w.task_id left join workflow_terminalizations z on z.workflow_run_id = w.id where w.terminal_policy = 'evidence_required' and t.state in ('queued','starting','running','cancel_requested') and (z.workflow_run_id is null or z.state <> 'closed') order by w.created_at asc, w.id asc limit :limit offset :offset"));
     query.bindValue(QStringLiteral(":limit"), limit);
+    query.bindValue(QStringLiteral(":offset"), offset);
     if (!query.exec()) {
         if (error) *error = sqlError(query);
         return {};

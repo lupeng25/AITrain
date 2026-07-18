@@ -627,6 +627,15 @@ if(WIN32)
         set(AITRAIN_QT_CONF_FILE "${CMAKE_BINARY_DIR}/aitrain_qt.conf")
         file(WRITE "${AITRAIN_QT_CONF_FILE}" "[Paths]\nPlugins=.\n")
     endif()
+    if(AITRAIN_INSTALL_QT_RUNTIME
+        AND (NOT AITRAIN_QT_RUNTIME_BIN_DIR
+            OR NOT AITRAIN_QT_RUNTIME_DLLS
+            OR NOT AITRAIN_QT_PLATFORM_PLUGIN_DLLS
+            OR NOT AITRAIN_QT_CONF_FILE))
+        message(FATAL_ERROR
+            "AITRAIN_INSTALL_QT_RUNTIME=ON 但未能解析完整 Qt 运行时/平台插件/qt.conf；"
+            "拒绝生成会回退到外部 Qt 安装的包。")
+    endif()
 endif()
 
 function(aitrain_copy_qt_platform_runtime target_name)

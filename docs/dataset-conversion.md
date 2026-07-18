@@ -6,13 +6,13 @@
 
 ## V2 迁移边界
 
-下方“当前支持矩阵”记录尚未完成 V2 接线的既有 GUI/V1 转换入口，不能据此认定对应路线已经满足 V2 Artifact 合同。当前 V2 Core 只接受以下三条可由现有目标 Driver 完整校验的路线：
+下方矩阵保留历史转换路线记录；产品当前只把已接入 `runDatasetConversionWorkflow`、能够满足 V2 Artifact 合同的路线标记为支持。当前 V2 Core 只接受以下三条可由现有目标 Driver 完整校验的路线：
 
 - COCO bbox → YOLO Detection。
 - COCO instance polygon → YOLO Segmentation；COCO RLE 不属于该路线。
 - Pascal VOC bbox → YOLO Detection。
 
-V2 转换先冻结完整源文件哈希和确定输出清单，只允许写 Artifact staging，两次核对文件集合并通过目标 Driver 校验后才原子提交。YOLO → COCO/VOC 因 COCO/VOC 尚无 V2 目标 Driver 而返回 `BackendUnsupported`；YOLO ↔ X-AnyLabeling 因外部 CLI 不能在执行前给出可冻结的确定输出清单而返回 `BackendUnsupported`；VOC → YOLO Segmentation 因 VOC bbox 不具备 polygon 语义而返回 `BackendUnsupported`。这些拒绝是数据完整性边界，不应通过跳过校验或伪造目标 Driver 绕过。V2 Worker/GUI 接线完成前，下方旧入口仍属于待迁移范围。
+V2 转换先冻结完整源文件哈希和确定输出清单，只允许写 Artifact staging，两次核对文件集合并通过目标 Driver 校验后才原子提交。YOLO → COCO/VOC 因 COCO/VOC 尚无 V2 目标 Driver 而返回 `BackendUnsupported`；YOLO ↔ X-AnyLabeling 因外部 CLI 不能在执行前给出可冻结的确定输出清单而返回 `BackendUnsupported`；VOC → YOLO Segmentation 因 VOC bbox 不具备 polygon 语义而返回 `BackendUnsupported`。这些拒绝是数据完整性边界，不应通过跳过校验或伪造目标 Driver 绕过。Worker/GUI 当前已统一接入该工作流；未列入三条路线的历史入口只作为明确的 `BackendUnsupported` 诊断保留。
 
 ## 当前支持矩阵
 

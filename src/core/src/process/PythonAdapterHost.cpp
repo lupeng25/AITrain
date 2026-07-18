@@ -343,15 +343,13 @@ void PythonAdapterHost::finalizeProcessExit(PythonAdapterExit outcome)
     outcome.forceTerminated = forceTerminated_;
     outcome.terminalEventSeen = terminalEventSeen_;
     if (!lifecycleError_.isEmpty()) {
-        outcome.diagnostic = lifecycleError_;
+        // lifecycleError_ 可能来自第三方进程或 Qt，禁止把其原始文本（尤其是
+        // Windows 物理路径）跨越 Worker/Workflow 边界持久化或展示。
+        outcome.diagnostic = QStringLiteral("Python Adapter 生命周期失败。详见受控 Worker 日志。");
     } else if (!eventServer_.lastError().isEmpty()) {
-        outcome.diagnostic = QStringLiteral("Adapter 事件通道失败：%1").arg(eventServer_.lastError());
+        outcome.diagnostic = QStringLiteral("Adapter 事件通道失败。详见受控 Worker 日志。");
     } else if (!outcome.cancelRequested && !outcome.terminalEventSeen) {
         outcome.diagnostic = QStringLiteral("Python Adapter 在未发送终态事件时退出。");
-        if (!processOutputTail_.isEmpty()) {
-            outcome.diagnostic.append(QStringLiteral(" 输出尾部：%1")
-                .arg(QString::fromUtf8(processOutputTail_).trimmed()));
-        }
     } else {
         outcome.diagnostic.clear();
     }
@@ -373,7 +371,9 @@ void PythonAdapterHost::onProcessError(QProcess::ProcessError processError)
     outcome.cancelRequested = cancelRequested_;
     outcome.forceTerminated = forceTerminated_;
     outcome.terminalEventSeen = terminalEventSeen_;
-    outcome.diagnostic = QStringLiteral("Python Adapter 无法启动：%1").arg(process_ ? process_->errorString() : QString());
+    // QProcess::errorString() 可能包含可执行文件或工作目录的物理路径，
+    // 这里只返回稳定分类，避免泄漏到 Workflow failure/evidence。
+    outcome.diagnostic = QStringLiteral("Python Adapter 无法启动。详见受控 Worker 日志。");
     eventServer_.stop();
     processTree_.reset();
     emitExitOnce(outcome);

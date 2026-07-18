@@ -1,6 +1,7 @@
 #include "aitrain/workflow/CapabilityPlanner.h"
 
 #include "aitrain/core/CapabilityRegistry.h"
+#include "aitrain/workflow/TrainingWorkflowProfile.h"
 
 #include <QCryptographicHash>
 #include <QJsonDocument>
@@ -60,18 +61,40 @@ bool CapabilityPlanner::plan(const ExecutionRequest& request, ExecutionPlan* res
     if (!registry.supports(plan.capabilityId, plan.taskType, plan.datasetFormat, plan.trainingBackend, error)) {
         return false;
     }
-    if (!registry.supports(plan.capabilityId, plan.taskType, plan.datasetFormat, plan.evaluationBackend, error)) {
-        return false;
-    }
     const BackendDescriptor training = registry.backend(plan.trainingBackend);
     const BackendDescriptor evaluation = registry.backend(plan.evaluationBackend);
-    if (training.runtime != plan.runtimeRoute || evaluation.runtime != plan.runtimeRoute) {
-        if (error) {
-            *error = QStringLiteral("请求的运行时路由与训练或评估后端不一致。");
+    TrainingWorkflowProfile workflowProfile;
+    const bool hasWorkflowProfile = resolveTrainingWorkflowProfile(
+        plan.trainingBackend, &workflowProfile, nullptr)
+        && workflowProfile.evaluationBackend == plan.evaluationBackend;
+    if (hasWorkflowProfile) {
+        // 评估/导出是 Worker Workflow Adapter，不是 CapabilityRegistry 中的
+        // 训练后端。它们必须通过同一正式 profile 绑定，并使用 profile 声明的
+        // 交付运行时；不能把 adapter id 当作训练后端再次查 registry。
+        if (workflowProfile.capabilityTaskType != plan.taskType
+            || workflowProfile.datasetFormat != plan.datasetFormat
+            || !workflowProfile.runtimeRoutes.contains(plan.runtimeRoute)) {
+            if (error) {
+                *error = QStringLiteral("训练 Workflow Profile 与任务、数据集或运行时路由不一致。");
+            }
+            return false;
         }
-        return false;
+    } else {
+        if (!registry.supports(plan.capabilityId, plan.taskType, plan.datasetFormat,
+                plan.evaluationBackend, error)) {
+            return false;
+        }
+        if (training.runtime != plan.runtimeRoute || evaluation.runtime != plan.runtimeRoute) {
+            if (error) {
+                *error = QStringLiteral("请求的运行时路由与训练或评估后端不一致。");
+            }
+            return false;
+        }
     }
-    if (!plan.exportFormat.isEmpty() && !training.exportFormats.contains(plan.exportFormat)) {
+    const bool profileExportMatches = hasWorkflowProfile
+        && plan.exportFormat == normalized(workflowProfile.artifactFormat);
+    if (!plan.exportFormat.isEmpty() && !training.exportFormats.contains(plan.exportFormat)
+        && !profileExportMatches) {
         if (error) {
             *error = QStringLiteral("训练后端不支持请求的导出格式：%1").arg(plan.exportFormat);
         }

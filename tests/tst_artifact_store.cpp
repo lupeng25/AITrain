@@ -152,7 +152,9 @@ void ArtifactStoreTests::recoveryPreservesActiveAndCleansAbandonedStaging()
     const aitrain::TaskSnapshot activeTask = createTask(&storage);
     const aitrain::TaskSnapshot failedTask = createTask(&storage);
     QVERIFY2(storage.transitionTask(failedTask.id, aitrain::TaskState::Created, aitrain::TaskState::Failed,
-        {aitrain::FailureCode::ProcessCrashed, QStringLiteral("fixture")}, &error), qPrintable(error));
+        {aitrain::FailureCode::ProcessCrashed, QStringLiteral("fixture"),
+            aitrain::defaultFailureSuggestedAction(aitrain::FailureCode::ProcessCrashed),
+            QDateTime::currentDateTimeUtc()}, &error), qPrintable(error));
 
     aitrain::ArtifactStore artifacts(directory.filePath(QStringLiteral("store")));
     aitrain::ArtifactId activeArtifactId;

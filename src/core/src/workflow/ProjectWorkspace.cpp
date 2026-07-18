@@ -589,10 +589,23 @@ ProjectWorkspace::ProjectWorkspace() = default;
 
 bool ProjectWorkspace::recoverEvidenceGatedWorkflows(QString* error)
 {
-    const QVector<WorkflowRunSnapshot> workflows = storage_.pendingEvidenceRequiredWorkflows(1000, error);
-    if (error && !error->isEmpty()) return false;
-    const QVector<WorkflowTerminalizationSnapshot> pending = storage_.pendingWorkflowTerminalizations(1000, error);
-    if (error && !error->isEmpty()) return false;
+    constexpr int kRecoveryPageSize = 256;
+    QVector<WorkflowRunSnapshot> workflows;
+    for (int offset = 0;; offset += kRecoveryPageSize) {
+        const QVector<WorkflowRunSnapshot> page =
+            storage_.pendingEvidenceRequiredWorkflows(kRecoveryPageSize, offset, error);
+        if (error && !error->isEmpty()) return false;
+        workflows += page;
+        if (page.size() < kRecoveryPageSize) break;
+    }
+    QVector<WorkflowTerminalizationSnapshot> pending;
+    for (int offset = 0;; offset += kRecoveryPageSize) {
+        const QVector<WorkflowTerminalizationSnapshot> page =
+            storage_.pendingWorkflowTerminalizations(kRecoveryPageSize, offset, error);
+        if (error && !error->isEmpty()) return false;
+        pending += page;
+        if (page.size() < kRecoveryPageSize) break;
+    }
     QHash<QString, WorkflowTerminalizationSnapshot> terminalizations;
     for (const WorkflowTerminalizationSnapshot& terminalization : pending) {
         terminalizations.insert(terminalization.workflowRunId.toString(), terminalization);

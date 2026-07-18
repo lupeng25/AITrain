@@ -116,9 +116,43 @@ def run_adapter(request_path: Path) -> tuple[subprocess.CompletedProcess[str], l
                             line, _, remainder = buffer.partition(b"\n")
                             buffer = bytearray(remainder)
                             if line.strip():
-                                events.append(json.loads(line.decode("utf-8")))
+                                event = json.loads(line.decode("utf-8"))
+                                events.append(event)
+                                if event.get("kind") in {
+                                    "event.succeeded",
+                                    "event.failed",
+                                    "event.canceled",
+                                }:
+                                    connection.sendall(
+                                        json.dumps(
+                                            {
+                                                "status": "accepted",
+                                                "terminal": True,
+                                                "sequence": str(event["sequence"]),
+                                            },
+                                            separators=(",", ":"),
+                                        ).encode("utf-8")
+                                        + b"\n"
+                                    )
                     if buffer.strip():
-                        events.append(json.loads(bytes(buffer).decode("utf-8")))
+                        event = json.loads(bytes(buffer).decode("utf-8"))
+                        events.append(event)
+                        if event.get("kind") in {
+                            "event.succeeded",
+                            "event.failed",
+                            "event.canceled",
+                        }:
+                            connection.sendall(
+                                json.dumps(
+                                    {
+                                        "status": "accepted",
+                                        "terminal": True,
+                                        "sequence": str(event["sequence"]),
+                                    },
+                                    separators=(",", ":"),
+                                ).encode("utf-8")
+                                + b"\n"
+                            )
             except OSError as exc:
                 # Closing the adapter's socket can race the Windows file
                 # wrapper teardown and report WSAENOTSOCK after all frames

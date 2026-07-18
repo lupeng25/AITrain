@@ -47,6 +47,8 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 
 当前架构覆写（2026-07-10）：上段历史记录中的“本地插件 marketplace”、插件 tab 和五个插件骨架已从源码与发布包删除；当前能力矩阵统一来自 `src/core/CapabilityRegistry`，任务请求使用 `capabilityId`，旧 `plugin_id` 仅在 SQLite 打开迁移时读取并随后移除。
 
+说明：本节更早的能力清单是历史证据，不是当前实现清单；当历史段落与 `docs/harness/current-status.md` 冲突时，以后者和本段架构覆写为准。
+
 已完成：
 
 - `AITrainStudio.exe` Qt GUI。

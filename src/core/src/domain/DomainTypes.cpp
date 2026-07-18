@@ -194,6 +194,43 @@ bool failureCodeFromString(const QString& value, FailureCode* code)
     return false;
 }
 
+QString defaultFailureSuggestedAction(FailureCode code)
+{
+    switch (code) {
+    case FailureCode::Canceled:
+        return QStringLiteral("任务已取消；如需重试，请重新派发同一 Workflow。");
+    case FailureCode::InvalidRequest:
+        return QStringLiteral("检查请求中的登记 ID、格式和结构化参数。");
+    case FailureCode::InvalidDataset:
+        return QStringLiteral("返回数据集页重新校验已登记 Snapshot。");
+    case FailureCode::ArtifactIncomplete:
+        return QStringLiteral("在任务与产物页核对 committed Artifact 清单和哈希。");
+    case FailureCode::BackendUnsupported:
+        return QStringLiteral("检查内置能力矩阵和当前 Profile 的后端边界。");
+    case FailureCode::RuntimeNotImplemented:
+        return QStringLiteral("切换到产品支持的 runtime 路由；当前能力尚未实现。");
+    case FailureCode::DependencyMissing:
+        return QStringLiteral("进入环境页补齐缺失依赖后重试。");
+    case FailureCode::SdkMissing:
+        return QStringLiteral("安装并启用目标 SDK，再重新执行部署验证。");
+    case FailureCode::HardwareUnsupported:
+        return QStringLiteral("当前硬件不在产品支持矩阵内，不能将结果标记为通过。");
+    case FailureCode::ArtifactIncompatible:
+        return QStringLiteral("重新导入带完整 Manifest、入口和哈希的模型包。");
+    case FailureCode::ProcessCrashed:
+        return QStringLiteral("查看诊断 Artifact 和官方日志，确认 Worker/Python 进程退出原因。");
+    case FailureCode::ProtocolViolation:
+        return QStringLiteral("检查 Worker 控制面令牌、任务身份和序列号，不要重放旧帧。");
+    case FailureCode::Timeout:
+        return QStringLiteral("检查环境和输入规模；长任务应通过 Worker 重新派发。");
+    case FailureCode::InternalError:
+        return QStringLiteral("保留 Evidence 和诊断 Artifact，修复后重新运行 Workflow。");
+    case FailureCode::None:
+        return QString();
+    }
+    return QStringLiteral("查看任务 Evidence 和诊断 Artifact。");
+}
+
 bool Failure::isFailure() const
 {
     return code != FailureCode::None;

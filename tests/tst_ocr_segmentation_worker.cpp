@@ -2965,6 +2965,10 @@ private slots:
         QVERIFY(profiles.contains(QStringLiteral("tensorrt")));
         for (const QJsonValue& value : checks)
             QVERIFY(!value.toObject().contains(QStringLiteral("details")));
+        const QByteArray safeReport = QJsonDocument(report).toJson(QJsonDocument::Compact);
+        QVERIFY(!safeReport.contains("C:/"));
+        QVERIFY(!safeReport.contains("D:/"));
+        QVERIFY(!safeReport.contains("\\\\"));
     }
 };
 

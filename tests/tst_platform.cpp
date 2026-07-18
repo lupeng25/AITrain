@@ -86,6 +86,8 @@ private slots:
             {QStringLiteral("relativePath"), QStringLiteral("reports/metrics.json")},
             {QStringLiteral("details"), QJsonObject{
                 {QStringLiteral("log_path"), QStringLiteral("D:/private/train.log")},
+                {QStringLiteral("searchPaths"), QJsonArray{QStringLiteral("/opt/private/bin")}},
+                {QStringLiteral("message"), QStringLiteral("读取 C:/Users/Alice Smith/secret/train.log 失败")},
                 {QStringLiteral("artifactId"), QStringLiteral("artifact-1")}}},
             {QStringLiteral("items"), QJsonArray{
                 QJsonObject{{QStringLiteral("workDir"), QStringLiteral("E:/private/work")},
@@ -99,6 +101,8 @@ private slots:
             QStringLiteral("reports/metrics.json"));
         const QJsonObject details = redacted.value(QStringLiteral("details")).toObject();
         QVERIFY(!details.contains(QStringLiteral("log_path")));
+        QVERIFY(!details.contains(QStringLiteral("searchPaths")));
+        QVERIFY(!details.value(QStringLiteral("message")).toString().contains(QStringLiteral("Alice Smith")));
         QCOMPARE(details.value(QStringLiteral("artifactId")).toString(), QStringLiteral("artifact-1"));
         const QJsonObject item = redacted.value(QStringLiteral("items")).toArray().at(0).toObject();
         QVERIFY(!item.contains(QStringLiteral("workDir")));

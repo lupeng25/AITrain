@@ -1,6 +1,7 @@
 #include "aitrain/model/ModelImportService.h"
 
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -96,14 +97,16 @@ bool ModelImportService::importModel(const ModelImportRequest& request,
     QString stagingPath;
     QString artifactPath;
     const auto finalizeFailed = [&](const QString& message) {
+        const Failure failure{FailureCode::ArtifactIncomplete, message,
+            QStringLiteral("检查模型包与 Artifact 后重试。"), QDateTime::currentDateTimeUtc()};
         QString finalizationError;
         if (!coordinator_->finalizeTask(task.id, TaskState::Failed,
-                {FailureCode::ArtifactIncomplete, message, {}, QDateTime::currentDateTimeUtc()}, &finalizationError)) {
+                failure, &finalizationError)) {
             if (error) *error = finalizationError;
             return false;
         }
         result->task.state = TaskState::Failed;
-        result->task.failure = {FailureCode::ArtifactIncomplete, message, {}, QDateTime::currentDateTimeUtc()};
+        result->task.failure = failure;
         if (error) *error = message;
         return false;
     };
@@ -127,17 +130,19 @@ bool ModelImportService::importModel(const ModelImportRequest& request,
             stagingPath.clear();
         }
         QString finalizationError;
+        const Failure failure{FailureCode::Canceled, message,
+            QStringLiteral("确认任务已停止后重新发起。"), QDateTime::currentDateTimeUtc()};
         if (!coordinator_->requestCancellation(task.id, &finalizationError)) {
             if (error) *error = finalizationError;
             return false;
         }
         if (!coordinator_->finalizeTask(task.id, TaskState::Canceled,
-                {FailureCode::Canceled, message, {}, QDateTime::currentDateTimeUtc()}, &finalizationError)) {
+                failure, &finalizationError)) {
             if (error) *error = finalizationError;
             return false;
         }
         result->task.state = TaskState::Canceled;
-        result->task.failure = {FailureCode::Canceled, message, {}, QDateTime::currentDateTimeUtc()};
+        result->task.failure = failure;
         if (error) *error = message;
         return false;
     };

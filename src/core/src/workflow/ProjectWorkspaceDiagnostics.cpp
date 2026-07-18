@@ -1,4 +1,5 @@
 #include "aitrain/workflow/ProjectWorkspace.h"
+#include "aitrain/protocol/ProtocolSanitizer.h"
 
 #include "aitrain/core/CapabilityRegistry.h"
 #include "aitrain/core/Deployment.h"
@@ -349,7 +350,7 @@ bool ProjectWorkspace::runDiagnosticsWorkflow(const TaskId& taskId,
                     QStringLiteral("diagnostics_canceled_after_nvidia_probe"))};
             }
 
-            facts = {{QStringLiteral("schemaVersion"), 2},
+            facts = protocol::redactPhysicalPathFields(QJsonObject{{QStringLiteral("schemaVersion"), 2},
                 {QStringLiteral("kind"), QStringLiteral("diagnostic_facts")},
                 {QStringLiteral("collectedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
                 {QStringLiteral("projectSummary"), QJsonObject{
@@ -367,7 +368,7 @@ bool ProjectWorkspace::runDiagnosticsWorkflow(const TaskId& taskId,
                 {QStringLiteral("limitations"), QJsonArray{
                     QStringLiteral("外部同步探测在单次 waitForFinished 期间不可中断；取消只在探测前后检查。"),
                     QStringLiteral("探测输出有固定上限，超出内容会截断。"),
-                    QStringLiteral("诊断事实只陈述  Storage/Query、内置能力注册表、运行时矩阵和有限本机探测结果。")}}};
+                    QStringLiteral("诊断事实只陈述  Storage/Query、内置能力注册表、运行时矩阵和有限本机探测结果。")}}});
             if (!commitFiles(artifactStore_.get(), &storage_, taskId, QStringLiteral("diagnostic_facts"),
                     {{QStringLiteral("diagnostic_facts.json"), QJsonDocument(facts).toJson(QJsonDocument::Indented)}},
                     &output, &executionError, stepCancellation)) {
@@ -524,7 +525,11 @@ bool ProjectWorkspace::runEnvironmentCheckWorkflow(const TaskId& taskId,
         ArtifactId output;
         QString executionError;
         if (step.kind == QStringLiteral("ValidateEnvironmentFacts")) {
-            const QJsonObject facts = request.facts;
+            // Environment facts may originate from QProcess/SDK probes.  Strip
+            // physical paths before validation and before the facts Artifact is
+            // committed; the raw probe payload never crosses the persistence/UI
+            // boundary.
+            const QJsonObject facts = protocol::redactPhysicalPathFields(request.facts);
             const QByteArray serialized = QJsonDocument(facts).toJson(QJsonDocument::Compact);
             if (!validEnvironmentFacts(facts)
                 || serialized.size() > 4 * 1024 * 1024) {
@@ -698,11 +703,11 @@ bool ProjectWorkspace::environmentCheckReportForTask(
                 {QStringLiteral("repairHints"), profile.value(QStringLiteral("repairHints"))},
                 {QStringLiteral("checks"), profileChecks}});
         }
-        *report = QJsonObject{{QStringLiteral("schemaVersion"), 2},
+        *report = protocol::redactPhysicalPathFields(QJsonObject{{QStringLiteral("schemaVersion"), 2},
             {QStringLiteral("kind"), QStringLiteral("environment_profiles_report")},
             {QStringLiteral("checkedAt"), stored.value(QStringLiteral("checkedAt"))},
             {QStringLiteral("checks"), safeChecks}, {QStringLiteral("profiles"), safeProfiles},
-            {QStringLiteral("summary"), stored.value(QStringLiteral("summary"))}};
+            {QStringLiteral("summary"), stored.value(QStringLiteral("summary"))}});
         return true;
     }
     if (error) *error = QStringLiteral("所选任务没有已提交的 Environment Check  报告。");

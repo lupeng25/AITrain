@@ -85,6 +85,7 @@ private slots:
     void duplicateWorkerMessageIsRejectedWithoutDuplicateData();
     void invalidWorkerPayloadIsRejectedBeforePersistence();
     void capabilityPlannerProducesVerifiableImmutableSummary();
+    void capabilityPlannerAcceptsOfficialWorkflowAdapterProfiles();
     void cancellationTransitionsThroughCancelRequestedAndTerminalCanceled();
     void adapterHostSynthesizesCanceledTerminalAfterForcedCancellation();
     void adapterArtifactCandidatesCommitAsOneBundleBeforeSuccess();
@@ -197,6 +198,25 @@ void ApplicationTests::capabilityPlannerProducesVerifiableImmutableSummary()
     request.exportFormat = QStringLiteral("tensorrt");
     QVERIFY(!planner.plan(request, &plan, &error));
     QVERIFY(error.contains(QStringLiteral("导出格式")));
+}
+
+void ApplicationTests::capabilityPlannerAcceptsOfficialWorkflowAdapterProfiles()
+{
+    const QList<aitrain::ExecutionRequest> requests = {
+        {QStringLiteral("yolo"), QStringLiteral("detection"), QStringLiteral("yolo_detection"),
+            QStringLiteral("ultralytics_yolo_detect"), QStringLiteral("ultralytics_yolo_eval"),
+            QStringLiteral("onnx"), QStringLiteral("aitrain_onnxruntime")},
+        {QStringLiteral("anomaly_detection"), QStringLiteral("anomaly_detection"), QStringLiteral("anomaly_folder"),
+            QStringLiteral("anomalib_patchcore"), QStringLiteral("anomalib_python_eval"),
+            QStringLiteral("anomalib_bundle"), QStringLiteral("anomalib_python")}};
+    aitrain::CapabilityPlanner planner;
+    for (const aitrain::ExecutionRequest& request : requests) {
+        aitrain::ExecutionPlan plan;
+        QString error;
+        QVERIFY2(planner.plan(request, &plan, &error), qPrintable(error));
+        QCOMPARE(plan.evaluationBackend, request.evaluationBackend);
+        QVERIFY2(planner.verify(request, plan.summaryHash, nullptr, &error), qPrintable(error));
+    }
 }
 
 void ApplicationTests::cancellationTransitionsThroughCancelRequestedAndTerminalCanceled()
@@ -693,7 +713,7 @@ void ApplicationTests::projectWorkspaceOwnsRuntimeTaskLifecycle()
     const aitrain::Failure cancellation{
         aitrain::FailureCode::Canceled,
         QStringLiteral("用户取消"),
-        QString(),
+        QStringLiteral("确认任务已停止后重新运行。"),
         QDateTime::currentDateTimeUtc()};
     QVERIFY2(workspace.finalizeTask(taskId, aitrain::TaskState::Canceled, cancellation, &error), qPrintable(error));
 

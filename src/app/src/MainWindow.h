@@ -77,10 +77,9 @@ private slots:
     void updateDatasetConversionTargetFormats();
     void startDatasetConversion();
     void cancelDatasetConversion();
-    void validateDataset();
-    void splitDataset();
-    void curateDataset();
-    void createDatasetSnapshot();
+    void runDataQualityWorkflow();
+    void runDatasetSplitWorkflow();
+    void runDatasetSnapshotImportWorkflow();
     void openDatasetQualityReport();
     void openDatasetQualityFixList();
     void createXAnyLabelingAnnotationSession();

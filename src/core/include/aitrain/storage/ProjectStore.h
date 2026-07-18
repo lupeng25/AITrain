@@ -316,9 +316,17 @@ public:
     QVector<WorkflowTerminalizationSnapshot> pendingWorkflowTerminalizations(
         int limit,
         QString* error = nullptr) const;
+    QVector<WorkflowTerminalizationSnapshot> pendingWorkflowTerminalizations(
+        int limit,
+        int offset,
+        QString* error) const;
     QVector<WorkflowRunSnapshot> pendingEvidenceRequiredWorkflows(
         int limit,
         QString* error = nullptr) const;
+    QVector<WorkflowRunSnapshot> pendingEvidenceRequiredWorkflows(
+        int limit,
+        int offset,
+        QString* error) const;
     bool attachWorkflowTerminalizationEvidence(const WorkflowRunId& workflowRunId,
         const ArtifactId& evidenceArtifactId,
         QString* error = nullptr);

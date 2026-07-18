@@ -580,6 +580,7 @@ void WorkerSession::failWithDetails(const QString& message, const QString& error
     payload.insert(wp::field::status(), QStringLiteral("failed"));
     payload.insert(wp::field::errorCode(), errorCode.isEmpty() ? QStringLiteral("worker_failed") : errorCode);
     payload.insert(wp::field::message(), message);
+    payload.insert(QStringLiteral("suggestedAction"), QStringLiteral("检查 Worker/Adapter 日志后重试。"));
     if (!details.isEmpty()) {
         payload.insert(QStringLiteral("details"), details);
     }

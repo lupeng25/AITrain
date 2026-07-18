@@ -660,4 +660,10 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(aitrain_paddleocr_python_tests PROPERTIES
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     )
+    add_test(NAME aitrain_paddleocr_system_python_tests
+        COMMAND "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/test_paddleocr_system.py" -q
+    )
+    set_tests_properties(aitrain_paddleocr_system_python_tests PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    )
 endif()

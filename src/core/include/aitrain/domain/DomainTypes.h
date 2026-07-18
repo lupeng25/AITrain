@@ -134,6 +134,7 @@ enum class FailureCode {
 
 QString failureCodeToString(FailureCode code);
 bool failureCodeFromString(const QString& value, FailureCode* code);
+QString defaultFailureSuggestedAction(FailureCode code);
 
 struct Failure final {
     FailureCode code = FailureCode::None;

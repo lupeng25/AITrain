@@ -51,6 +51,11 @@ using namespace aitrain_app;
 
 void MainWindow::createProject()
 {
+    if (worker_.isRunning()) {
+        QMessageBox::warning(this, uiText("项目"),
+            uiText("Worker 正在执行任务，请等待任务终态后再切换项目。"));
+        return;
+    }
     currentProjectName_ = projectNameEdit_->text().trimmed();
     currentProjectPath_ = QDir::fromNativeSeparators(projectRootEdit_->text().trimmed());
     if (currentProjectName_.isEmpty() || currentProjectPath_.isEmpty()) {

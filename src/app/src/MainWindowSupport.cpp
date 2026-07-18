@@ -662,9 +662,16 @@ QStringList appImageNameFilters()
 
 QFileInfoList appImageFiles(const QDir& directory)
 {
+    constexpr int kFormatProbeMaxImages = 256;
     QFileInfoList files;
     for (const QString& filter : appImageNameFilters()) {
-        files.append(directory.entryInfoList({filter}, QDir::Files, QDir::Name));
+        const QFileInfoList matching = directory.entryInfoList({filter}, QDir::Files, QDir::Name);
+        for (const QFileInfo& file : matching) {
+            files.append(file);
+            if (files.size() >= kFormatProbeMaxImages) {
+                return files;
+            }
+        }
     }
     return files;
 }
@@ -759,11 +766,18 @@ QString detectDatasetFormatFromPath(const QString& path)
     bool yamlTaskObb = false;
     QFile yamlFile(root.filePath(QStringLiteral("data.yaml")));
     if (yamlFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        const QString yamlText = QString::fromUtf8(yamlFile.readAll()).toLower();
+        constexpr qint64 kFormatProbeMaxYamlBytes = 1024 * 1024;
+        if (yamlFile.size() > kFormatProbeMaxYamlBytes) {
+            // GUI 这里只做 bounded diagnostic；超限时拒绝猜测，交给 Worker
+            // 的完整 Driver 校验，避免截断 YAML 造成错误任务类型。
+            return QString();
+        }
+        const QString yamlText = QString::fromUtf8(yamlFile.read(kFormatProbeMaxYamlBytes)).toLower();
         yamlTaskObb = yamlText.contains(QRegularExpression(QStringLiteral("(?m)^\\s*task\\s*:\\s*obb\\b")));
     }
     const QString normalizedPath = QDir::fromNativeSeparators(QFileInfo(path).absoluteFilePath()).toLower();
     const bool pathSuggestsObb = normalizedPath.contains(QStringLiteral("obb")) || normalizedPath.contains(QStringLiteral("dota"));
+    bool probeTruncated = false;
 
     for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
         const QDir imageDir(root.filePath(QStringLiteral("images/%1").arg(split)));
@@ -777,8 +791,15 @@ QString detectDatasetFormatFromPath(const QString& path)
             if (!labelFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
                 continue;
             }
+            qint64 labelBytesRead = 0;
             while (!labelFile.atEnd()) {
-                const QString line = QString::fromUtf8(labelFile.readLine()).trimmed();
+                const QByteArray rawLine = labelFile.readLine();
+                labelBytesRead += rawLine.size();
+                if (labelBytesRead > 1024 * 1024) {
+                    probeTruncated = true;
+                    break;
+                }
+                const QString line = QString::fromUtf8(rawLine).trimmed();
                 if (line.isEmpty()) {
                     continue;
                 }
@@ -800,6 +821,9 @@ QString detectDatasetFormatFromPath(const QString& path)
                 }
             }
         }
+    }
+    if (probeTruncated) {
+        return QString();
     }
     return QStringLiteral("yolo_detection");
 }
