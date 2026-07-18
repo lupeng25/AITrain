@@ -2,6 +2,8 @@
 
 #include <QDateTime>
 
+#include <utility>
+
 namespace {
 
 QString localTimeText(const QDateTime& value)
@@ -197,6 +199,26 @@ bool TaskArtifactPresenter::previewArtifact(const QString& artifactIdText,
         return false;
     }
     return queryService_->artifactFilePreview(artifactId, relativePath, result, 512 * 1024, error);
+}
+
+bool TaskArtifactPresenter::previewArtifactAsync(const QString& artifactIdText,
+    const QString& relativePath,
+    QObject* receiver,
+    aitrain::ArtifactFilePreviewCallback callback,
+    qint64 maxBytes,
+    QString* error) const
+{
+    if (error) error->clear();
+    aitrain::ArtifactId artifactId;
+    if (!aitrain::ArtifactId::parse(artifactIdText, &artifactId, error)) {
+        return false;
+    }
+    if (!queryService_) {
+        if (error) *error = QStringLiteral("Artifact 异步预览查询服务不可用。");
+        return false;
+    }
+    return queryService_->artifactFilePreviewAsync(artifactId, relativePath,
+        receiver, std::move(callback), maxBytes, error);
 }
 
 void TaskArtifactPresenter::clearSelection()

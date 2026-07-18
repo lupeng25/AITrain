@@ -63,6 +63,8 @@ private slots:
     void reviewSamplePathsRejectExternalAndTraversalValues();
     void largeArtifactsRequireExplicitSelectionAndSkipSynchronousPreview();
     void datasetFormatProbeRunsOffUiThreadAndReturnsOnContextThread();
+    void projectOpenProbeRunsRecoveryOffUiThreadAndReturnsPreparedToken();
+    void projectOpenPreparedTokenRejectsMutationWithoutClosingCurrentWorkspace();
     void eventRouterUsesBoundedRollingWindowsAndEvictsTerminalTasks();
 
 private:
@@ -109,8 +111,10 @@ void EnvironmentDeliveryEvidenceUiTests::largeArtifactsRequireExplicitSelectionA
 
     table->selectRow(0);
     QCoreApplication::processEvents();
-    QVERIFY(preview->toPlainText().contains(QStringLiteral("已跳过同步预览")));
-    QVERIFY(preview->toPlainText().contains(QStringLiteral("33554432")));
+    // 预览入口不再执行同步文件读取；没有绑定查询服务时只显示即时错误，
+    // 不应再出现“跳过同步预览”这一旧边界文案。
+    QVERIFY(!preview->toPlainText().contains(QStringLiteral("已跳过同步预览")));
+    QVERIFY(preview->toPlainText().contains(QStringLiteral("查询服务不可用")));
 }
 
 void EnvironmentDeliveryEvidenceUiTests::datasetFormatProbeRunsOffUiThreadAndReturnsOnContextThread()
@@ -153,6 +157,68 @@ void EnvironmentDeliveryEvidenceUiTests::datasetFormatProbeRunsOffUiThreadAndRet
 
     QCOMPARE(detected, QStringLiteral("yolo_detection"));
     QCOMPARE(callbackThread, QCoreApplication::instance()->thread());
+}
+
+void EnvironmentDeliveryEvidenceUiTests::projectOpenProbeRunsRecoveryOffUiThreadAndReturnsPreparedToken()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+
+    QObject context;
+    QEventLoop loop;
+    QTimer timeout;
+    timeout.setSingleShot(true);
+    timeout.setInterval(15000);
+    aitrain_app::ProjectOpenProbeResult result;
+    QThread* callbackThread = nullptr;
+    connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+    aitrain_app::probeProjectOpenAsync(&context, directory.path(),
+        [&](const aitrain_app::ProjectOpenProbeResult& value) {
+            result = value;
+            callbackThread = QThread::currentThread();
+            loop.quit();
+        });
+    timeout.start();
+    loop.exec();
+
+    QVERIFY2(result.succeeded, qPrintable(result.error));
+    QVERIFY(result.prepared.isValid());
+    QCOMPARE(callbackThread, QCoreApplication::instance()->thread());
+
+    // 仅把值类型 prepared token 带回 GUI，再由 GUI 线程建立自己的 SQL 连接。
+    aitrain::ProjectWorkspace workspace;
+    QString error;
+    QVERIFY2(workspace.openPrepared(result.prepared, &error), qPrintable(error));
+    QVERIFY(workspace.isOpen());
+    workspace.close();
+}
+
+void EnvironmentDeliveryEvidenceUiTests::projectOpenPreparedTokenRejectsMutationWithoutClosingCurrentWorkspace()
+{
+    QTemporaryDir first;
+    QTemporaryDir second;
+    QVERIFY(first.isValid());
+    QVERIFY(second.isValid());
+
+    aitrain::ProjectWorkspace current;
+    QString error;
+    QVERIFY2(current.open(first.path(), &error), qPrintable(error));
+
+    aitrain::ProjectWorkspacePreparedOpen prepared;
+    QVERIFY2(aitrain::ProjectWorkspace::prepareOpen(second.path(), &prepared, &error),
+        qPrintable(error));
+    QVERIFY(prepared.isValid());
+
+    QFile database(QDir(second.path()).filePath(QStringLiteral(".aitrain/project.sqlite")));
+    QVERIFY(database.open(QIODevice::Append));
+    QVERIFY(database.write("mutation") > 0);
+    database.close();
+
+    QVERIFY(!current.openPrepared(prepared, &error));
+    QCOMPARE(current.workspacePath(),
+        QDir(first.path()).filePath(QStringLiteral(".aitrain")));
+    QVERIFY(current.isOpen());
+    current.close();
 }
 
 void EnvironmentDeliveryEvidenceUiTests::eventRouterUsesBoundedRollingWindowsAndEvictsTerminalTasks()

@@ -14,7 +14,7 @@ target_include_directories(AITrainLicenseGenerator
 
 target_link_libraries(AITrainLicenseGenerator
     PRIVATE
-        aitrain_foundation
+        aitrain_license
         Qt${QT_VERSION_MAJOR}::Core
         Qt${QT_VERSION_MAJOR}::Widgets
 )

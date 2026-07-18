@@ -13,6 +13,7 @@
 #include <QLabel>
 #include <QPixmap>
 #include <QPlainTextEdit>
+#include <QPointer>
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSplitter>
@@ -240,6 +241,7 @@ EvaluationReportView::EvaluationReportView(QWidget* parent)
 
 void EvaluationReportView::clear()
 {
+    invalidatePreviewRequest();
     const QSignalBlocker metricsBlocker(metricsTable_);
     const QSignalBlocker perClassBlocker(perClassTable_);
     const QSignalBlocker officialArtifactsBlocker(officialArtifactsTable_);
@@ -323,7 +325,14 @@ bool EvaluationReportView::loadReportObject(const QJsonObject& report)
 
 void EvaluationReportView::setArtifactPreviewProvider(ArtifactPreviewProvider provider)
 {
+    invalidatePreviewRequest();
     artifactPreviewProvider_ = std::move(provider);
+}
+
+void EvaluationReportView::invalidatePreviewRequest()
+{
+    ++previewGeneration_;
+    if (previewGeneration_ == 0) ++previewGeneration_;
 }
 
 QString EvaluationReportView::resolveArtifactRelativePath(const QString& declaredPath) const
@@ -351,6 +360,7 @@ QString EvaluationReportView::resolveArtifactRelativePath(const QString& declare
 void EvaluationReportView::updateArtifactPreview()
 {
     if (officialArtifactsTable_->selectedItems().isEmpty()) {
+        invalidatePreviewRequest();
         previewLabel_->clear();
         previewLabel_->setText(uiText("选择官方图表或样本 overlay 后显示预览。"));
         detailText_->setPlainText(uiText("选择官方产物或样本后显示详情。"));
@@ -367,6 +377,7 @@ void EvaluationReportView::updateArtifactPreview()
 void EvaluationReportView::updateSamplePreview()
 {
     if (sampleTable_->selectedItems().isEmpty()) {
+        invalidatePreviewRequest();
         previewLabel_->clear();
         previewLabel_->setText(uiText("选择官方图表或样本 overlay 后显示预览。"));
         detailText_->setPlainText(uiText("选择官方产物或样本后显示详情。"));
@@ -641,6 +652,8 @@ void EvaluationReportView::populateSamples(const QJsonObject& report)
 
 void EvaluationReportView::showPreviewImage(const QString& imagePath)
 {
+    invalidatePreviewRequest();
+    const quint64 generation = previewGeneration_;
     previewLabel_->clear();
     if (imagePath.isEmpty()) {
         previewLabel_->setText(uiText("该条目没有可预览图片。"));
@@ -650,27 +663,32 @@ void EvaluationReportView::showPreviewImage(const QString& imagePath)
         previewLabel_->setText(uiText("当前报告没有已提交 Artifact 预览提供者。"));
         return;
     }
-    QByteArray content;
-    QString error;
-    if (!artifactPreviewProvider_(imagePath, &content, &error)) {
-        previewLabel_->setText(error.isEmpty()
-            ? uiText("图片无法读取。")
-            : uiText("已提交 Artifact 图片无法读取：%1").arg(error));
-        return;
-    }
-    QPixmap image;
-    if (!image.loadFromData(content)) {
-        previewLabel_->setText(uiText("图片无法读取。"));
-        return;
-    }
-    previewLabel_->setPixmap(image.scaled(
-        previewLabel_->size().boundedTo(QSize(520, 320)),
-        Qt::KeepAspectRatio,
-        Qt::SmoothTransformation));
+    previewLabel_->setText(uiText("正在读取已提交 Artifact 图片……"));
+    QPointer<EvaluationReportView> self(this);
+    artifactPreviewProvider_(imagePath,
+        [self, generation](bool success, QByteArray content, QString error) {
+            if (!self || self->previewGeneration_ != generation) return;
+            if (!success) {
+                self->previewLabel_->setText(error.isEmpty()
+                    ? uiText("图片无法读取。")
+                    : uiText("已提交 Artifact 图片无法读取：%1").arg(error));
+                return;
+            }
+            QPixmap image;
+            if (!image.loadFromData(content)) {
+                self->previewLabel_->setText(uiText("图片无法读取。"));
+                return;
+            }
+            self->previewLabel_->setPixmap(image.scaled(
+                self->previewLabel_->size().boundedTo(QSize(520, 320)),
+                Qt::KeepAspectRatio,
+                Qt::SmoothTransformation));
+        });
 }
 
 void EvaluationReportView::showEmptyState(const QString& text)
 {
+    invalidatePreviewRequest();
     summaryLabel_->setText(text);
     metricsTable_->setRowCount(0);
     perClassTable_->setRowCount(0);

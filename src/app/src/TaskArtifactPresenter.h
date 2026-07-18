@@ -70,6 +70,12 @@ public:
         const QString& relativePath,
         aitrain::ArtifactFilePreview* result,
         QString* error = nullptr) const;
+    bool previewArtifactAsync(const QString& artifactId,
+        const QString& relativePath,
+        QObject* receiver,
+        aitrain::ArtifactFilePreviewCallback callback,
+        qint64 maxBytes = 512 * 1024,
+        QString* error = nullptr) const;
     void clearSelection();
 
     int taskCount() const;

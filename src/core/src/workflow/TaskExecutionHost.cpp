@@ -11,6 +11,8 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 
+#include <algorithm>
+
 namespace aitrain {
 
 TaskExecutionHost::TaskExecutionHost(TaskCoordinator* coordinator, ArtifactStore* artifactStore)
@@ -274,20 +276,83 @@ bool TaskExecutionHost::consumeTerminalEvent(const ProtocolEnvelope& event,
     if (!workflowTerminalHandler_) {
         return coordinator_->consumeWorkerEvent(event, error);
     }
-    if (!coordinator_->recordWorkflowTerminalEvent(event, error)) {
+    bool idempotent = false;
+    if (!coordinator_->recordWorkflowTerminalEvent(event, outputArtifactId, &idempotent, error)) {
         return false;
+    }
+    bool alreadyApplied = false;
+    bool outboxExists = false;
+    if (!coordinator_->storage()->workflowTerminalEventApplied(event.messageId,
+            &alreadyApplied, error, &outboxExists)) return false;
+    if (alreadyApplied) {
+        terminalEventSeen_ = true;
+        return true;
     }
     ProtocolEnvelope effectiveEvent = event;
     TaskSnapshot persisted;
-    if (coordinator_->storage()->task(event.taskId, &persisted, error)
-        && persisted.state == TaskState::CancelRequested
+    if (!coordinator_->storage()->task(event.taskId, &persisted, error)) {
+        return false;
+    }
+    if (persisted.state == TaskState::CancelRequested
         && event.kind != QStringLiteral("event.canceled")) {
         effectiveEvent.kind = QStringLiteral("event.canceled");
         effectiveEvent.payload = QJsonObject{
             {QStringLiteral("message"), QStringLiteral("任务已请求取消，忽略 Adapter 的晚到终态。")}};
-        return workflowTerminalHandler_(effectiveEvent, {}, error);
     }
-    return workflowTerminalHandler_(effectiveEvent, outputArtifactId, error);
+
+    // 同一终态可能在 Workflow handler 已完成步骤、但 outbox 尚未标记
+    // applied 的窗口内再次到达。此时不能盲目重调 handler（步骤已经不再
+    // Running），也不能把仍在 Running 的步骤误判为已处理；仅当持久化步骤
+    // 已经与这条终态完全一致时消费 outbox，否则继续执行一次真正的 handler。
+    if (idempotent && outboxExists) {
+        WorkflowRunId workflowRunId;
+        WorkflowStepId workflowStepId;
+        if (!coordinator_->storage()->workflowTerminalEventBinding(
+                event.messageId, &workflowRunId, &workflowStepId, error)) {
+            return false;
+        }
+        const QVector<WorkflowStepSnapshot> steps =
+            coordinator_->storage()->workflowSteps(workflowRunId, error);
+        if (error && !error->isEmpty()) return false;
+        const auto stepIt = std::find_if(steps.cbegin(), steps.cend(),
+            [&workflowStepId](const WorkflowStepSnapshot& step) {
+                return step.id == workflowStepId;
+            });
+        if (stepIt == steps.cend()) {
+            if (error) *error = QStringLiteral("重复 Workflow 终态绑定的步骤不存在。");
+            return false;
+        }
+        const WorkflowStepState expectedState =
+            effectiveEvent.kind == QStringLiteral("event.canceled")
+                ? WorkflowStepState::Canceled
+                : (effectiveEvent.kind == QStringLiteral("event.succeeded")
+                    && outputArtifactId.isValid()
+                    ? WorkflowStepState::Succeeded : WorkflowStepState::Failed);
+        if (isTerminalWorkflowStepState(stepIt->state)) {
+            if (stepIt->state != expectedState
+                || (expectedState == WorkflowStepState::Succeeded
+                    && stepIt->outputArtifactId != outputArtifactId)) {
+                if (error) *error = QStringLiteral("重复 Workflow 终态与已持久化步骤终态不一致。");
+                return false;
+            }
+            if (!coordinator_->storage()->markWorkflowTerminalEventApplied(event.messageId, error)) {
+                return false;
+            }
+            terminalEventSeen_ = true;
+            return true;
+        }
+    }
+
+    if (!workflowTerminalHandler_(effectiveEvent,
+            effectiveEvent.kind == QStringLiteral("event.canceled") ? ArtifactId{} : outputArtifactId,
+            error)) {
+        return false;
+    }
+    if (outboxExists && !coordinator_->storage()->markWorkflowTerminalEventApplied(event.messageId, error)) {
+        return false;
+    }
+    Q_UNUSED(idempotent);
+    return true;
 }
 
 void TaskExecutionHost::finishAdapter(const PythonAdapterExit& outcome)

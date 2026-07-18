@@ -39,6 +39,9 @@ function(add_aitrain_qt_test target source)
     target_link_libraries(${target}
         PRIVATE
             aitrain_foundation
+            aitrain_capability_registry
+            aitrain_license
+            aitrain_worker_protocol
             Qt${QT_VERSION_MAJOR}::Core
             Qt${QT_VERSION_MAJOR}::Network
             Qt${QT_VERSION_MAJOR}::Test
@@ -186,7 +189,7 @@ add_executable(aitrain_diagnostics_tests
 )
 target_include_directories(aitrain_diagnostics_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/app/src)
 target_link_libraries(aitrain_diagnostics_tests PRIVATE
-    aitrain_application aitrain_foundation Qt${QT_VERSION_MAJOR}::Core
+    aitrain_application aitrain_foundation aitrain_worker_protocol Qt${QT_VERSION_MAJOR}::Core
     Qt${QT_VERSION_MAJOR}::Sql Qt${QT_VERSION_MAJOR}::Test)
 set(diagnostics_test_output "${CMAKE_BINARY_DIR}/tests/aitrain_diagnostics_tests_ctest.txt")
 add_test(NAME aitrain_diagnostics_tests
@@ -334,7 +337,7 @@ add_executable(aitrain_artifact_tests
 )
 
 add_executable(aitrain_model_manifest_tests tst_model_manifest.cpp)
-target_link_libraries(aitrain_model_manifest_tests PRIVATE aitrain_model aitrain_onnx_runtime aitrain_runtime_matrix Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Test)
+target_link_libraries(aitrain_model_manifest_tests PRIVATE aitrain_model aitrain_onnx_runtime aitrain_runtime_matrix aitrain_worker_protocol Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Test)
 aitrain_copy_onnxruntime_runtime(aitrain_model_manifest_tests)
 set(model_manifest_test_output "${CMAKE_BINARY_DIR}/tests/aitrain_model_manifest_tests_ctest.txt")
 add_test(NAME aitrain_model_manifest_tests COMMAND aitrain_model_manifest_tests -o "${model_manifest_test_output},txt")
@@ -581,6 +584,8 @@ target_include_directories(aitrain_delivery_acceptance_ui_tests
 target_link_libraries(aitrain_delivery_acceptance_ui_tests
     PRIVATE
         aitrain_foundation
+        aitrain_worker_protocol
+        aitrain_license
         aitrain_application
         Qt${QT_VERSION_MAJOR}::Core
         Qt${QT_VERSION_MAJOR}::Widgets

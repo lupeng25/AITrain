@@ -68,6 +68,66 @@ target_compile_definitions(aitrain_training_workflow_profile
         QT_NO_CAST_FROM_ASCII
 )
 
+# 这三个边界原先被历史 foundation 聚合库携带。它们没有依赖训练/运行时
+# 实现，单独成 target 后，GUI、Worker 和许可证工具可以按实际能力声明依赖。
+add_library(aitrain_capability_registry STATIC
+    include/aitrain/core/CapabilityRegistry.h
+    src/CapabilityRegistry.cpp
+)
+target_include_directories(aitrain_capability_registry PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(aitrain_capability_registry PUBLIC Qt${QT_VERSION_MAJOR}::Core)
+target_compile_definitions(aitrain_capability_registry PUBLIC QT_NO_CAST_FROM_ASCII)
+
+add_library(aitrain_license STATIC
+    include/aitrain/core/LicenseManager.h
+    include/aitrain/core/LicenseSecurity.h
+    src/LicenseManager.cpp
+    src/LicenseSecurity.cpp
+)
+target_include_directories(aitrain_license PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(aitrain_license PUBLIC Qt${QT_VERSION_MAJOR}::Core)
+target_compile_definitions(aitrain_license PUBLIC QT_NO_CAST_FROM_ASCII)
+if(WIN32)
+    target_link_libraries(aitrain_license PRIVATE bcrypt crypt32 advapi32)
+endif()
+
+add_library(aitrain_worker_protocol STATIC
+    include/aitrain/core/Cancellation.h
+    include/aitrain/core/TaskTypes.h
+    include/aitrain/core/WorkerProtocol.h
+    include/aitrain/core/WorkflowResult.h
+    src/WorkerProtocol.cpp
+)
+target_include_directories(aitrain_worker_protocol PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(aitrain_worker_protocol PUBLIC aitrain_domain aitrain_protocol Qt${QT_VERSION_MAJOR}::Core)
+target_compile_definitions(aitrain_worker_protocol PUBLIC QT_NO_CAST_FROM_ASCII)
+
+# 数据集校验只依赖 Qt 的值类型和 YAML/文件处理辅助，不依赖 Workflow、模型
+# 运行时或存储。将它从历史 foundation 聚合库抽出，避免所有消费者被迫链接
+# 视觉/训练实现，同时让 dataset driver/conversion 共享同一稳定边界。
+add_library(aitrain_dataset_validation STATIC
+    include/aitrain/core/DatasetValidation.h
+    include/aitrain/core/DatasetValidators.h
+    include/aitrain/core/SemanticMask.h
+    src/DatasetValidation.cpp
+    src/DatasetValidators.cpp
+    src/SemanticMask.cpp
+    src/YoloDatasetLayout.h
+    src/YoloDatasetLayout.cpp
+)
+target_include_directories(aitrain_dataset_validation
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(aitrain_dataset_validation
+    PUBLIC
+        Qt${QT_VERSION_MAJOR}::Core
+        Qt${QT_VERSION_MAJOR}::Gui
+)
+target_compile_definitions(aitrain_dataset_validation PUBLIC QT_NO_CAST_FROM_ASCII)
+
 target_include_directories(aitrain_storage
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -130,6 +190,7 @@ target_link_libraries(aitrain_dataset_conversion
     PUBLIC
         aitrain_artifact
         aitrain_dataset
+        aitrain_dataset_validation
         aitrain_foundation
         Qt${QT_VERSION_MAJOR}::Core
 )
@@ -142,6 +203,7 @@ target_include_directories(aitrain_application
 
 target_link_libraries(aitrain_application
     PUBLIC
+        aitrain_capability_registry
         aitrain_training_workflow_profile
         aitrain_protocol
         aitrain_process
@@ -277,7 +339,7 @@ target_include_directories(aitrain_dataset
 target_link_libraries(aitrain_dataset
     PUBLIC
         aitrain_domain
-        aitrain_foundation
+        aitrain_dataset_validation
         Qt${QT_VERSION_MAJOR}::Core
 )
 
@@ -287,30 +349,19 @@ target_compile_definitions(aitrain_dataset
 )
 
 add_library(aitrain_foundation STATIC
-    include/aitrain/core/CapabilityRegistry.h
-    include/aitrain/core/DatasetValidation.h
     include/aitrain/core/AnnotationIntegration.h
     include/aitrain/core/Cancellation.h
     include/aitrain/core/Deployment.h
     include/aitrain/core/DatasetConversion.h
-    include/aitrain/core/DatasetValidators.h
     include/aitrain/core/DetectionDataset.h
     include/aitrain/core/DetectionTrainer.h
     include/aitrain/core/OcrRecDataset.h
     include/aitrain/core/SegmentationDataset.h
-    include/aitrain/core/SemanticMask.h
-    include/aitrain/core/LicenseManager.h
-    include/aitrain/core/LicenseSecurity.h
     include/aitrain/core/TaskTypes.h
     include/aitrain/core/VisionModelExport.h
     include/aitrain/core/VisionModelRuntime.h
     include/aitrain/core/VisionPostprocess.h
-    include/aitrain/core/WorkerProtocol.h
-    include/aitrain/core/WorkflowResult.h
-    src/CapabilityRegistry.cpp
     src/AnnotationIntegration.cpp
-    src/LicenseManager.cpp
-    src/LicenseSecurity.cpp
     src/Deployment.cpp
     src/DatasetConversion.cpp
     src/DatasetConversionCoco.cpp
@@ -318,10 +369,6 @@ add_library(aitrain_foundation STATIC
     src/DatasetConversionInternal.h
     src/DatasetConversionVoc.cpp
     src/DatasetConversionYolo.cpp
-    src/DatasetValidators.cpp
-    src/DatasetValidation.cpp
-    src/YoloDatasetLayout.h
-    src/YoloDatasetLayout.cpp
     src/DetectionDataset.cpp
     src/DetectionTrainer.cpp
     src/DetectionTrainerInternal.h
@@ -336,8 +383,6 @@ add_library(aitrain_foundation STATIC
     src/VisionPostprocessYolo.cpp
     src/OcrRecDataset.cpp
     src/SegmentationDataset.cpp
-    src/SemanticMask.cpp
-    src/WorkerProtocol.cpp
 )
 
 target_include_directories(aitrain_foundation
@@ -348,6 +393,7 @@ target_include_directories(aitrain_foundation
 target_link_libraries(aitrain_foundation
     PUBLIC
         aitrain_qt5_msvc_compat
+        aitrain_dataset_validation
         aitrain_protocol
         Qt${QT_VERSION_MAJOR}::Core
         Qt${QT_VERSION_MAJOR}::Gui

@@ -17,6 +17,8 @@
 #include <QStringList>
 #include <memory>
 
+class QObject;
+
 namespace aitrain {
 
 struct RuntimeArtifactCandidate final {
@@ -39,6 +41,20 @@ struct ArtifactFilePreview final {
     QByteArray content;
     bool truncated = false;
 };
+
+// 由当前线程根据已提交 Artifact 清单解析出的不可变文件读取来源。
+// 该结构只供 Query Service 的异步文件校验使用；后台任务不得捕获
+// ProjectWorkspace、ProjectStore 或 QSqlDatabase。
+struct CommittedArtifactFileReadSource final {
+    QString artifactRoot;
+    QString absolutePath;
+    ArtifactFileSnapshot expected;
+};
+
+// Artifact 文件预览回调。元数据查询在调用线程执行，文件内容和完整 SHA-256
+// 校验在受控线程池执行；回调总是排队回到 receiver 所在线程。
+using ArtifactFilePreviewCallback = std::function<void(
+    bool success, ArtifactFilePreview preview, QString error)>;
 
 struct EvidenceArtifactBundle final {
     ArtifactId artifactId;
@@ -368,6 +384,26 @@ struct TrainingDeploymentInvocation final {
     ArtifactId sourceArtifactId;
 };
 
+// 候选工作区在后台线程完成完整 open/recovery 后交给 GUI 的不可变激活凭证。
+// 只携带文件元数据，不携带 QSqlDatabase、ProjectStore 或 ArtifactStore。
+struct ProjectWorkspacePreparedOpen final {
+    QString normalizedRoot;
+    qint64 databaseSize = -1;
+    qint64 databaseLastModifiedMs = -1;
+    qint64 databaseWalSize = -1;
+    qint64 databaseWalLastModifiedMs = -1;
+    qint64 stagingLastModifiedMs = -1;
+    qint64 stagingMetadataLastModifiedMs = -1;
+
+    bool isValid() const
+    {
+        return !normalizedRoot.isEmpty() && databaseSize >= 0
+            && databaseLastModifiedMs >= 0 && databaseWalSize >= 0
+            && databaseWalLastModifiedMs >= 0 && stagingLastModifiedMs >= 0
+            && stagingMetadataLastModifiedMs >= 0;
+    }
+};
+
 // 真实后端步骤终态已落盘后才触发；调用方据此构建并派发下一步请求，不能直接
 // 修改 Workflow Step 状态。
 using TrainingWorkflowDispatchHandler = std::function<void(const TrainingWorkflowDispatch&)>;
@@ -381,6 +417,13 @@ public:
     ProjectWorkspace();
 
     bool open(const QString& projectRoot, QString* error = nullptr);
+    // 在调用线程创建临时 ProjectWorkspace，完整执行恢复并返回值类型凭证。
+    // 候选对象及其 QSqlDatabase 始终留在调用线程，适合由 QThreadPool 调用。
+    static bool prepareOpen(const QString& projectRoot,
+        ProjectWorkspacePreparedOpen* prepared, QString* error = nullptr);
+    // 仅在凭证指纹仍匹配时激活。恢复已由 prepareOpen 完成，GUI 不重复扫描/恢复。
+    bool openPrepared(const ProjectWorkspacePreparedOpen& prepared,
+        QString* error = nullptr);
     void close();
     bool isOpen() const;
 
@@ -542,6 +585,18 @@ public:
         ArtifactFilePreview* result,
         qint64 maxBytes = 512 * 1024,
         QString* error = nullptr) const;
+    bool prepareCommittedArtifactFileRead(const ArtifactSnapshot& snapshot,
+        const QString& relativePath,
+        CommittedArtifactFileReadSource* result,
+        QString* error = nullptr) const;
+    // 先在当前线程读取 committed Artifact 清单，再在后台读取文件并复验
+    // SHA-256。后台任务不持有 ProjectStore/QSqlDatabase。
+    bool readCommittedArtifactFileAsync(const ArtifactId& artifactId,
+        const QString& relativePath,
+        QObject* receiver,
+        ArtifactFilePreviewCallback callback,
+        qint64 maxBytes = 512 * 1024,
+        QString* error = nullptr) const;
     QVector<MetricSnapshot> metricsForTask(const TaskId& taskId, QString* error = nullptr) const;
     QVector<WorkflowRunSnapshot> workflowRunsForTask(const TaskId& taskId, QString* error = nullptr) const;
     QVector<WorkflowStepSnapshot> workflowSteps(const WorkflowRunId& workflowRunId, QString* error = nullptr) const;
@@ -551,6 +606,12 @@ public:
     QString workspacePath() const;
 
 private:
+    bool openInternal(const QString& projectRoot, bool recover, QString* error);
+    static bool capturePreparedOpenFingerprint(const QString& normalizedRoot,
+        ProjectWorkspacePreparedOpen* prepared, QString* error);
+    static bool preparedOpenFingerprintMatches(const ProjectWorkspacePreparedOpen& prepared,
+        QString* error);
+    bool recoverPendingWorkflowTerminalEvents(QString* error);
     bool recoverEvidenceGatedWorkflows(QString* error);
 
     ProjectStore storage_;

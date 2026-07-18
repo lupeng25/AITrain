@@ -1,6 +1,7 @@
 #include "MainWindowSupport.h"
 
 #include "aitrain/core/CapabilityRegistry.h"
+#include "aitrain/workflow/ProjectWorkspace.h"
 #include "InfoPanel.h"
 #include "LanguageSupport.h"
 
@@ -51,6 +52,43 @@ public:
 private:
     QString path_;
     DatasetFormatProbeCallback callback_;
+};
+
+class ProjectOpenProbeRunnable final : public QRunnable
+{
+public:
+    ProjectOpenProbeRunnable(QString path, ProjectOpenProbeCallback callback)
+        : path_(std::move(path)), callback_(std::move(callback))
+    {
+        setAutoDelete(true);
+    }
+
+    void run() override
+    {
+        ProjectOpenProbeResult result;
+        result.normalizedPath = QDir::cleanPath(QDir::fromNativeSeparators(path_.trimmed()));
+        if (result.normalizedPath.isEmpty()) {
+            result.error = QStringLiteral("打开项目工作区需要项目根目录。");
+        } else {
+            // ProjectWorkspace 在本 Runnable 所在线程中构造、打开和销毁。其
+            // ProjectStore 的 QSqlDatabase connectionName 也只在此线程使用，
+            // 所有跨线程结果均为值类型凭证，不传递 Qt SQL 对象。
+            QString error;
+            result.succeeded = aitrain::ProjectWorkspace::prepareOpen(
+                result.normalizedPath, &result.prepared, &error);
+            if (!result.succeeded) {
+                result.error = error.isEmpty()
+                    ? QStringLiteral("候选项目工作区打开预检失败。") : error;
+            }
+        }
+        if (callback_) {
+            callback_(result);
+        }
+    }
+
+private:
+    QString path_;
+    ProjectOpenProbeCallback callback_;
 };
 
 QString firstStringField(const QJsonObject& object, const QStringList& keys)
@@ -876,6 +914,31 @@ void detectDatasetFormatAsync(QObject* context, const QString& path,
             }, Qt::QueuedConnection);
     };
     QThreadPool::globalInstance()->start(new DatasetFormatProbeRunnable(
+        normalizedPath, std::move(completeOnContextThread)));
+}
+
+void probeProjectOpenAsync(QObject* context, const QString& path,
+    ProjectOpenProbeCallback callback)
+{
+    if (!context || !callback) {
+        return;
+    }
+
+    const QPointer<QObject> guardedContext(context);
+    const QString normalizedPath = QDir::fromNativeSeparators(path.trimmed());
+    auto completeOnContextThread = [guardedContext, callback = std::move(callback)](
+        const ProjectOpenProbeResult& result) mutable {
+        if (!guardedContext) {
+            return;
+        }
+        QMetaObject::invokeMethod(guardedContext.data(),
+            [guardedContext, callback = std::move(callback), result]() mutable {
+                if (guardedContext && callback) {
+                    callback(result);
+                }
+            }, Qt::QueuedConnection);
+    };
+    QThreadPool::globalInstance()->start(new ProjectOpenProbeRunnable(
         normalizedPath, std::move(completeOnContextThread)));
 }
 

@@ -271,7 +271,7 @@ try {
         throw "Packaged worker workspace self-check failed with exit code $LASTEXITCODE"
     }
     $workspaceSelfCheck = $workspaceSelfCheckOutput | Select-Object -Last 1 | ConvertFrom-Json
-    if ((-not $workspaceSelfCheck.ok) -or (-not $workspaceSelfCheck.firstOpen) -or (-not $workspaceSelfCheck.secondOpen) -or (-not $workspaceSelfCheck.layoutValid) -or (-not $workspaceSelfCheck.stagingClean) -or $workspaceSelfCheck.projectsTablePresent -or ($workspaceSelfCheck.storedSchemaVersion -ne 11)) {
+    if ((-not $workspaceSelfCheck.ok) -or (-not $workspaceSelfCheck.firstOpen) -or (-not $workspaceSelfCheck.secondOpen) -or (-not $workspaceSelfCheck.layoutValid) -or (-not $workspaceSelfCheck.stagingClean) -or $workspaceSelfCheck.projectsTablePresent -or ($workspaceSelfCheck.storedSchemaVersion -ne 12)) {
         throw "Workspace first-start self-check reported an invalid result"
     }
     Write-Host ("  [ok] firstOpen={0}, secondOpen={1}, schema={2}" -f `

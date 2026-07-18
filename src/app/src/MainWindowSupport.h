@@ -5,6 +5,7 @@
 #include <QJsonObject>
 #include <QString>
 #include <QStringList>
+#include "aitrain/workflow/ProjectWorkspace.h"
 
 #include <functional>
 
@@ -22,6 +23,17 @@ struct ReviewSamplePathView final {
     QString imageRelativePath;
     QString labelRelativePath;
 };
+
+// 项目打开预检的返回值只包含可跨线程传递的值类型。预检线程自行创建并销毁
+// ProjectWorkspace/ProjectStore，绝不把 QSqlDatabase 或其包装对象传回 GUI 线程。
+struct ProjectOpenProbeResult final {
+    QString normalizedPath;
+    QString error;
+    aitrain::ProjectWorkspacePreparedOpen prepared;
+    bool succeeded = false;
+};
+
+using ProjectOpenProbeCallback = std::function<void(const ProjectOpenProbeResult&)>;
 
 QLabel* mutedLabel(const QString& text);
 QLabel* emptyStateLabel(const QString& text);
@@ -68,6 +80,12 @@ QString detectDatasetFormatFromPath(const QString& path);
 using DatasetFormatProbeCallback = std::function<void(const QString& detectedFormat)>;
 void detectDatasetFormatAsync(QObject* context, const QString& path,
     DatasetFormatProbeCallback callback);
+
+// 在 QThreadPool 中执行一次完整的候选工作区打开/恢复预检。主线程收到成功结果后
+// 仍需在 ProjectWorkspace 上执行激活；该 API 的目的在于把 schema 检查、Artifact
+// staging 恢复和 Evidence 恢复从用户点击处理函数移出，并提供可丢弃的状态机结果。
+void probeProjectOpenAsync(QObject* context, const QString& path,
+    ProjectOpenProbeCallback callback);
 QString formatJsonTextForPreview(const QByteArray& data);
 void addTaskTypeItems(QComboBox* combo, const QStringList& taskTypes);
 QString comboCurrentDataOrText(const QComboBox* combo);

@@ -46,7 +46,7 @@ foundation → domain → protocol/storage/artifact/process
 
 ### 阶段 2：数据库、任务状态和事件事务
 
-- 新建最终 schema 11，不迁移旧数据库。
+- 新建最终 schema 12，不迁移旧数据库；Workflow 终态 outbox 属于该版本的持久化事实。
 - 项目根由 `ProjectWorkspace` 绑定到 `<project>/.aitrain`；不建立未使用的 `projects` 表，也不保留 GUI 第二套项目元数据事实源。
 - 引入 `TaskTerminalResolver`，规定取消优先规则。
 - 引入单一 `applyAdapterEvent` 事务入口，事件、Metric、Artifact link、Workflow Step 和终态必须同事务提交。

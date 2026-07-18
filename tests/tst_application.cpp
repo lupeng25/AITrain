@@ -21,6 +21,7 @@
 #include <QTemporaryDir>
 #include <QTcpSocket>
 #include <QTest>
+#include <QThread>
 #include <QUuid>
 
 #include <algorithm>
@@ -101,6 +102,7 @@ private slots:
     void externalAcceptanceEvidenceRequiresStrictSchemaAndStaysUnverified();
     void deliveryEvidenceLimitCountsEvidenceArtifacts();
     void deliveryEvidenceKeepsInvalidArtifactAsRow();
+    void deliveryEvidenceAsyncReadsAndValidatesOffUiThread();
     void projectWorkspaceCommitsRuntimeArtifactsBeforeSuccess();
     void projectWorkspaceRegistersDatasetSnapshotAndSequencesTrainingWorkflow();
     void datasetSnapshotImportRegistersNewAndExistingDatasetVersions();
@@ -113,6 +115,7 @@ private slots:
     void officialYoloWorkflowPreservesVariantTaskType_data();
     void officialYoloWorkflowPreservesVariantTaskType();
     void projectWorkspaceDispatchesOfficialAdapterStepThroughTrainingWorkflow();
+    void workflowTerminalRecoveryDoesNotLeaveSuccessorRunning();
     void workflowRunnerSequencesCommittedArtifactsAndStopsOnCancellation();
 };
 
@@ -955,6 +958,59 @@ void ApplicationTests::deliveryEvidenceKeepsInvalidArtifactAsRow()
     QVERIFY(!evidence.first().valid);
     QCOMPARE(evidence.first().validationFailure.code, aitrain::FailureCode::ArtifactIncomplete);
     QCOMPARE(evidence.first().runtimeStatus, QStringLiteral("invalid"));
+}
+
+void ApplicationTests::deliveryEvidenceAsyncReadsAndValidatesOffUiThread()
+{
+    QTemporaryDir project;
+    QTemporaryDir external;
+    QVERIFY(project.isValid());
+    QVERIFY(external.isValid());
+    aitrain::ProjectWorkspace workspace;
+    QString error;
+    QVERIFY2(workspace.open(project.path(), &error), qPrintable(error));
+
+    const QString sourcePath = QDir(external.path()).filePath(QStringLiteral("acceptance.json"));
+    QVERIFY(writeFile(sourcePath, QJsonDocument(QJsonObject{
+        {QStringLiteral("schemaVersion"), 1},
+        {QStringLiteral("kind"), QStringLiteral("aitrain_external_acceptance_evidence")},
+        {QStringLiteral("evidenceKind"), QStringLiteral("clean_windows")},
+        {QStringLiteral("status"), QStringLiteral("passed")},
+        {QStringLiteral("producer"), QStringLiteral("qa-lab")},
+        {QStringLiteral("observedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
+        {QStringLiteral("limitations"), QJsonArray{QStringLiteral("异步读取测试")}}})
+        .toJson(QJsonDocument::Compact)));
+
+    const aitrain::TaskId taskId = aitrain::TaskId::create();
+    aitrain::TaskSnapshot task;
+    QVERIFY2(workspace.startTask(taskId, QStringLiteral("delivery.external_acceptance"),
+        QStringLiteral("external_acceptance_evidence"), &task, &error), qPrintable(error));
+    aitrain::ExternalAcceptanceEvidenceImportResult imported;
+    QVERIFY2(workspace.importExternalAcceptanceEvidence(taskId,
+        aitrain::ExternalAcceptanceEvidenceImportRequest{sourcePath}, &imported, &error),
+        qPrintable(error));
+    QVERIFY2(workspace.finalizeTask(taskId, aitrain::TaskState::Succeeded, {}, &error),
+        qPrintable(error));
+
+    aitrain::ProjectQueryService queries(&workspace);
+    QObject receiver;
+    bool completed = false;
+    bool callbackOnReceiverThread = false;
+    QVector<aitrain::DeliveryEvidenceReadModel> records;
+    QVERIFY2(queries.deliveryEvidenceAsync(10, &receiver,
+        [&receiver, &completed, &callbackOnReceiverThread, &records](bool success,
+            QVector<aitrain::DeliveryEvidenceReadModel> result, QString callbackError) {
+            QVERIFY2(success, qPrintable(callbackError));
+            callbackOnReceiverThread = QThread::currentThread() == receiver.thread();
+            records = std::move(result);
+            completed = true;
+        }, &error), qPrintable(error));
+    QTRY_VERIFY_WITH_TIMEOUT(completed, 5000);
+    QVERIFY(callbackOnReceiverThread);
+    QCOMPARE(records.size(), 1);
+    QCOMPARE(records.first().evidenceArtifactId, imported.evidenceArtifactId);
+    QCOMPARE(records.first().evidenceKind, QStringLiteral("clean_windows"));
+    QVERIFY(!records.first().verified);
 }
 
 void ApplicationTests::projectWorkspaceCommitsRuntimeArtifactsBeforeSuccess()
@@ -1940,6 +1996,80 @@ void ApplicationTests::projectWorkspaceDispatchesOfficialAdapterStepThroughTrain
 #else
     QSKIP(" Adapter Host integration uses Windows Job Object.");
 #endif
+}
+
+void ApplicationTests::workflowTerminalRecoveryDoesNotLeaveSuccessorRunning()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString projectRoot = directory.filePath(QStringLiteral("project"));
+    const QString databasePath = QDir(projectRoot).filePath(QStringLiteral(".aitrain/project.sqlite"));
+    QVERIFY(QDir().mkpath(QFileInfo(databasePath).absolutePath()));
+
+    aitrain::TaskId taskId;
+    const aitrain::WorkflowRunId workflowId = aitrain::WorkflowRunId::create();
+    const aitrain::WorkflowStepId firstStepId = aitrain::WorkflowStepId::create();
+    const aitrain::WorkflowStepId secondStepId = aitrain::WorkflowStepId::create();
+    QString error;
+    {
+        aitrain::ProjectStore storage;
+        QVERIFY2(storage.open(databasePath, &error), qPrintable(error));
+        aitrain::TaskCoordinator coordinator(&storage);
+        aitrain::TaskSnapshot task;
+        QVERIFY2(coordinator.createAndStartTask(QStringLiteral("workflow"), QStringLiteral("training"),
+            &task, &error), qPrintable(error));
+        // createAndStartTask 生成随机任务 ID；以实际值继续构造恢复夹具。
+        taskId = task.id;
+        const aitrain::TaskId actualTaskId = task.id;
+        aitrain::WorkflowRunSnapshot workflow;
+        workflow.id = workflowId;
+        workflow.taskId = actualTaskId;
+        workflow.templateId = QStringLiteral("recovery-immediate");
+        workflow.terminalPolicy = aitrain::WorkflowTerminalPolicy::Immediate;
+        aitrain::WorkflowStepSnapshot first;
+        first.id = firstStepId;
+        first.workflowRunId = workflowId;
+        first.ordinal = 0;
+        first.kind = QStringLiteral("Train");
+        first.backend = QStringLiteral("adapter");
+        aitrain::WorkflowStepSnapshot second;
+        second.id = secondStepId;
+        second.workflowRunId = workflowId;
+        second.ordinal = 1;
+        second.kind = QStringLiteral("Evaluate");
+        second.backend = QStringLiteral("adapter");
+        QVERIFY2(storage.createWorkflowRun(workflow, {first, second}, &error), qPrintable(error));
+        QVERIFY2(storage.transitionWorkflowStep(firstStepId, aitrain::WorkflowStepState::Pending,
+            aitrain::WorkflowStepState::Running, {}, {}, &error), qPrintable(error));
+        const aitrain::ArtifactId output = aitrain::ArtifactId::create();
+        QVERIFY2(storage.recordArtifact(output, actualTaskId, QStringLiteral("training_output"),
+            QDateTime::currentDateTimeUtc(), &error), qPrintable(error));
+        aitrain::ProtocolEnvelope terminal;
+        terminal.messageId = aitrain::MessageId::create();
+        terminal.requestId = task.requestId;
+        terminal.taskId = actualTaskId;
+        terminal.sequence = 1;
+        terminal.kind = QStringLiteral("event.succeeded");
+        terminal.timestamp = QDateTime::currentDateTimeUtc();
+        bool idempotent = false;
+        QVERIFY2(storage.recordWorkflowTerminalEvent(terminal, output, &idempotent, &error), qPrintable(error));
+        QVERIFY(!idempotent);
+    }
+
+    aitrain::ProjectWorkspace recovered;
+    QVERIFY2(recovered.open(projectRoot, &error), qPrintable(error));
+    aitrain::ProjectStore storage;
+    QVERIFY2(storage.open(databasePath, &error), qPrintable(error));
+    aitrain::TaskSnapshot task;
+    QVERIFY2(storage.task(taskId, &task, &error), qPrintable(error));
+    QCOMPARE(task.state, aitrain::TaskState::Failed);
+    QCOMPARE(task.failure.code, aitrain::FailureCode::ProcessCrashed);
+    const QVector<aitrain::WorkflowStepSnapshot> steps = storage.workflowSteps(workflowId, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(steps.size(), 2);
+    QCOMPARE(steps.at(0).state, aitrain::WorkflowStepState::Succeeded);
+    QCOMPARE(steps.at(1).state, aitrain::WorkflowStepState::Failed);
+    QCOMPARE(storage.pendingWorkflowTerminalEvents(16, &error).size(), 0);
 }
 
 void ApplicationTests::workflowRunnerSequencesCommittedArtifactsAndStopsOnCancellation()

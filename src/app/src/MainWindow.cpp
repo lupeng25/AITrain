@@ -155,6 +155,10 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
         updateEnvironmentSummary();
         updateDashboardSummary();
     });
+    connect(deliveryEvidencePresenter_, &DeliveryEvidencePresenter::changed, this,
+        &MainWindow::renderDeliveryAcceptanceSummary);
+    connect(deliveryEvidencePresenter_, &DeliveryEvidencePresenter::queryFailed, this,
+        [this](const QString&) { renderDeliveryAcceptanceSummary(); });
     connect(&worker_, &WorkerClient::logLine, this, &MainWindow::appendLog);
     connect(&worker_, &WorkerClient::connected, this, [this]() {
         workerPill_->setStatus(tr("Worker 已连接"), StatusPill::Tone::Success);

@@ -245,8 +245,12 @@ bool TaskCoordinator::consumeWorkerEvent(const ProtocolEnvelope& envelope, QStri
     return true;
 }
 
-bool TaskCoordinator::recordWorkflowTerminalEvent(const ProtocolEnvelope& envelope, QString* error)
+bool TaskCoordinator::recordWorkflowTerminalEvent(const ProtocolEnvelope& envelope,
+    const ArtifactId& outputArtifactId,
+    bool* idempotent,
+    QString* error)
 {
+    if (idempotent) *idempotent = false;
     if (!storage_ || !storage_->isOpen()) {
         if (error) *error = QStringLiteral("TaskCoordinator 未连接  存储。");
         return false;
@@ -261,13 +265,22 @@ bool TaskCoordinator::recordWorkflowTerminalEvent(const ProtocolEnvelope& envelo
     if (!storage_->task(envelope.taskId, &task, error) || task.requestId != envelope.requestId) {
         return false;
     }
-    if (!storage_->recordProtocolEvent(envelope.taskId, envelope.requestId, envelope.messageId,
-        envelope.sequence, envelope.kind, protocol::redactPhysicalPathFields(envelope.payload),
-        envelope.timestamp, error)) {
+    bool storedIdempotently = false;
+    if (!storage_->recordWorkflowTerminalEvent(envelope, outputArtifactId, &storedIdempotently, error)) {
         return false;
     }
+    if (storedIdempotently) {
+        if (idempotent) *idempotent = true;
+        if (error) error->clear();
+        return true;
+    }
     // 仅在存储提交后更新 tracker，避免记录失败造成内存序号漂移。
-    return sequenceTracker_.observe(envelope, task.requestId, task.id, error);
+    ProtocolSequenceTracker candidateTracker = sequenceTracker_;
+    if (!candidateTracker.observe(envelope, task.requestId, task.id, error)) {
+        return false;
+    }
+    sequenceTracker_ = candidateTracker;
+    return true;
 }
 
 bool TaskCoordinator::transitionTerminalTask(const ProtocolEnvelope& envelope, TaskState targetState, const Failure& failure, QString* error)

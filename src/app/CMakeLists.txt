@@ -86,6 +86,9 @@ target_include_directories(AITrainStudio
 target_link_libraries(AITrainStudio
     PRIVATE
         aitrain_foundation
+        aitrain_capability_registry
+        aitrain_license
+        aitrain_worker_protocol
         aitrain_application
         Qt${QT_VERSION_MAJOR}::Core
         Qt${QT_VERSION_MAJOR}::Widgets

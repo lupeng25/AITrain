@@ -112,6 +112,7 @@ private slots:
     void persistsFailedAndCanceledTerminalFacts();
     void terminalizationWritesAreIdempotentAndRejectConflicts();
     void listsUnsealedGatedWorkflowsAndProtectsThemFromInterruption();
+    void durableWorkflowTerminalOutboxIsIdempotent();
 };
 
 void StorageTests::createAndTransitionTaskAtomically()
@@ -784,7 +785,7 @@ void StorageTests::createsCanonicalSchemaWithoutLegacyProjectTable()
     aitrain::ProjectStore storage;
     QString error;
     QVERIFY2(storage.open(databasePath, &error), qPrintable(error));
-    QCOMPARE(aitrain::ProjectStore::schemaVersion(), 11);
+    QCOMPARE(aitrain::ProjectStore::schemaVersion(), 12);
     storage.close();
 
     const QString connectionName = QStringLiteral("canonical_schema_check");
@@ -794,7 +795,7 @@ void StorageTests::createsCanonicalSchemaWithoutLegacyProjectTable()
     QSqlQuery query(database);
     QVERIFY(query.exec(QStringLiteral("select version from schema_info limit 1")));
     QVERIFY(query.next());
-    QCOMPARE(query.value(0).toInt(), 11);
+    QCOMPARE(query.value(0).toInt(), 12);
     QVERIFY(query.exec(QStringLiteral(
         "select 1 from sqlite_master where type = 'table' and name = 'projects'")));
     QVERIFY(!query.next());
@@ -1028,6 +1029,52 @@ void StorageTests::listsUnsealedGatedWorkflowsAndProtectsThemFromInterruption()
     QCOMPARE(loaded.state, aitrain::TaskState::Running);
     QVERIFY(storage.pendingEvidenceRequiredWorkflows(0, &error).isEmpty());
     QVERIFY(error.contains(QStringLiteral("limit")));
+}
+
+void StorageTests::durableWorkflowTerminalOutboxIsIdempotent()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    aitrain::ProjectStore storage;
+    QString error;
+    QVERIFY2(storage.open(directory.filePath(QStringLiteral("project.sqlite")), &error), qPrintable(error));
+    const aitrain::TaskSnapshot task = makeTask();
+    QVERIFY2(startTask(storage, task, &error), qPrintable(error));
+    aitrain::WorkflowStepSnapshot step;
+    const aitrain::WorkflowRunSnapshot workflow = createWorkflow(storage, task.id, &step, &error);
+    QVERIFY2(workflow.id.isValid(), qPrintable(error));
+    QVERIFY2(storage.transitionWorkflowStep(step.id, aitrain::WorkflowStepState::Pending,
+        aitrain::WorkflowStepState::Running, {}, {}, &error), qPrintable(error));
+
+    aitrain::ProtocolEnvelope event;
+    event.messageId = aitrain::MessageId::create();
+    event.requestId = task.requestId;
+    event.taskId = task.id;
+    event.sequence = 1;
+    event.kind = QStringLiteral("event.failed");
+    event.timestamp = QDateTime::currentDateTimeUtc();
+    event.payload = {{QStringLiteral("message"), QStringLiteral("adapter failed")},
+        {QStringLiteral("failureCode"), aitrain::failureCodeToString(aitrain::FailureCode::ProcessCrashed)},
+        {QStringLiteral("suggestedAction"), QStringLiteral("retry")}};
+    bool idempotent = false;
+    QVERIFY2(storage.recordWorkflowTerminalEvent(event, {}, &idempotent, &error), qPrintable(error));
+    QVERIFY(!idempotent);
+    QVector<aitrain::WorkflowTerminalEventSnapshot> pending =
+        storage.pendingWorkflowTerminalEvents(16, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(pending.size(), 1);
+    QCOMPARE(pending.first().workflowRunId, workflow.id);
+    QCOMPARE(pending.first().workflowStepId, step.id);
+    QCOMPARE(pending.first().kind, event.kind);
+    QVERIFY(!pending.first().applied);
+
+    QVERIFY2(storage.recordWorkflowTerminalEvent(event, {}, &idempotent, &error), qPrintable(error));
+    QVERIFY(idempotent);
+    QVERIFY2(storage.markWorkflowTerminalEventApplied(event.messageId, &error), qPrintable(error));
+    QVERIFY2(storage.markWorkflowTerminalEventApplied(event.messageId, &error), qPrintable(error));
+    pending = storage.pendingWorkflowTerminalEvents(16, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QVERIFY(pending.isEmpty());
 }
 
 QTEST_MAIN(StorageTests)

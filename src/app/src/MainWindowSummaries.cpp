@@ -444,7 +444,19 @@ void MainWindow::updateDeliveryAcceptanceSummary()
     }
 
     if (deliveryEvidencePresenter_ && workspace_.isOpen()) {
-        deliveryEvidencePresenter_->refresh();
+        // 候选元数据快照在当前线程完成，证据文件读取、哈希和 JSON 校验在线程池执行。
+        // changed() 到达后由 renderDeliveryAcceptanceSummary() 更新表格，避免阻塞 UI。
+        deliveryEvidencePresenter_->refreshAsync();
+    }
+    renderDeliveryAcceptanceSummary();
+}
+
+void MainWindow::renderDeliveryAcceptanceSummary()
+{
+    if (!deliveryAcceptanceTable_) {
+        return;
+    }
+    if (deliveryEvidencePresenter_) {
         for (const auto& evidence : deliveryEvidencePresenter_->viewModel().records) {
             QString stage = evidence.evidenceKind;
             const QString normalized = evidence.evidenceKind.toLower();

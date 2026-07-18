@@ -72,6 +72,23 @@ struct ProtocolEventApplyResult final {
     TaskState effectiveTaskState = TaskState::Created;
 };
 
+// Workflow Adapter 终态事件的 durable outbox 记录。事件事实与 outbox
+// 在同一 SQLite 事务写入；Workflow handler 成功后再将 applied 标记落库。
+// 若进程在 handler 前后崩溃，ProjectWorkspace 可按 workflow/step 身份重放。
+struct WorkflowTerminalEventSnapshot final {
+    MessageId messageId;
+    RequestId requestId;
+    TaskId taskId;
+    WorkflowRunId workflowRunId;
+    WorkflowStepId workflowStepId;
+    quint64 sequence = 0;
+    QString kind;
+    QDateTime occurredAt;
+    QJsonObject payload;
+    ArtifactId outputArtifactId;
+    bool applied = false;
+};
+
 // 数据快照既是训练输入，也是可审计的 Artifact 引用；不保存可直接执行的裸路径。
 struct DatasetSnapshotRecord final {
     DatasetId datasetId;
@@ -242,6 +259,21 @@ public:
         const QString& kind,
         const QJsonObject& payload,
         const QDateTime& occurredAt,
+        QString* error = nullptr);
+    // Workflow Adapter 终态的事件事实与 durable outbox 必须原子写入。
+    // outputArtifactId 是 Adapter 成功后已提交的输出；失败/取消时为空。
+    bool recordWorkflowTerminalEvent(const ProtocolEnvelope& envelope,
+        const ArtifactId& outputArtifactId = {},
+        bool* idempotent = nullptr,
+        QString* error = nullptr);
+    QVector<WorkflowTerminalEventSnapshot> pendingWorkflowTerminalEvents(
+        int limit, QString* error = nullptr) const;
+    bool workflowTerminalEventApplied(const MessageId& messageId,
+        bool* applied, QString* error = nullptr, bool* exists = nullptr) const;
+    bool workflowTerminalEventBinding(const MessageId& messageId,
+        WorkflowRunId* workflowRunId, WorkflowStepId* workflowStepId,
+        QString* error = nullptr) const;
+    bool markWorkflowTerminalEventApplied(const MessageId& messageId,
         QString* error = nullptr);
     // 原子应用 Adapter 事件：事件、Metric/Artifact 副作用、任务终态和状态审计
     // 要么全部落库，要么全部回滚。重复的同一事件返回 idempotent=true。

@@ -44,4 +44,5 @@ private:
     TaskArtifactPresenter* presenter_ = nullptr;
     QString selectedArtifactId_;
     QString selectedRelativePath_;
+    quint64 previewGeneration_ = 0;
 };

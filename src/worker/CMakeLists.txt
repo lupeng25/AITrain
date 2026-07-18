@@ -21,6 +21,8 @@ add_executable(aitrain_worker
 target_link_libraries(aitrain_worker
     PRIVATE
         aitrain_foundation
+        aitrain_capability_registry
+        aitrain_worker_protocol
         aitrain_onnx_runtime
         aitrain_application
         aitrain_runtime_matrix

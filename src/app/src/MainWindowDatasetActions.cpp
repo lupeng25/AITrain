@@ -29,6 +29,7 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPixmap>
+#include <QPointer>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScrollArea>
@@ -43,6 +44,8 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QUuid>
+
+#include <memory>
 
 using namespace aitrain_app;
 
@@ -804,60 +807,83 @@ void MainWindow::loadSampleReviewFile()
         QStringLiteral("xanylabeling_review_manifest.json"),
         QStringLiteral("repair_manifest.json"),
         QStringLiteral("quality_report.json")};
-    aitrain::ArtifactFilePreview preview;
-    QString selectedFile;
-    for (const QString& candidate : candidates) {
-        if (queryService_.artifactFilePreview(artifactId, candidate, &preview, 4 * 1024 * 1024, &error)) {
-            selectedFile = candidate;
-            break;
-        }
-    }
-    if (selectedFile.isEmpty()) {
+    ++sampleReviewPreviewGeneration_;
+    if (sampleReviewPreviewGeneration_ == 0) ++sampleReviewPreviewGeneration_;
+    const quint64 generation = sampleReviewPreviewGeneration_;
+    if (reviewSourceFilterCombo_) reviewSourceFilterCombo_->setEnabled(false);
+    if (reviewReasonFilterCombo_) reviewReasonFilterCombo_->setEnabled(false);
+    loadSampleReviewArtifactCandidate(artifactId, candidates, 0, generation);
+}
+
+void MainWindow::loadSampleReviewArtifactCandidate(const aitrain::ArtifactId& artifactId,
+    const QStringList& candidates, int index, quint64 generation, const QString& lastError)
+{
+    if (sampleReviewPreviewGeneration_ != generation) return;
+    if (index >= candidates.size()) {
         QMessageBox::warning(this, uiText("样本复核"),
-            uiText("Artifact 内没有可读取的质量/复核 JSON：%1").arg(error));
-        return;
-    }
-    QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(preview.content, &parseError);
-    if (parseError.error != QJsonParseError::NoError || (!document.isObject() && !document.isArray())) {
-        QMessageBox::critical(this, uiText("样本复核"), uiText("复核样本 JSON 解析失败：%1").arg(parseError.errorString()));
+            uiText("Artifact 内没有可读取的质量/复核 JSON：%1").arg(lastError));
+        if (reviewSourceFilterCombo_) reviewSourceFilterCombo_->setEnabled(true);
+        if (reviewReasonFilterCombo_) reviewReasonFilterCombo_->setEnabled(true);
         return;
     }
 
-    state_.dataset.sampleReviewArtifactId = artifactId.toString();
-    state_.dataset.sampleReviewSamples = extractReviewSamples(document);
-    if (reviewSourceFilterCombo_) {
-        reviewSourceFilterCombo_->clear();
-        reviewSourceFilterCombo_->addItem(uiText("全部来源"), QString());
+    const QString candidate = candidates.at(index);
+    QString requestError;
+    QPointer<MainWindow> self(this);
+    if (!queryService_.artifactFilePreviewAsync(artifactId, candidate, this,
+            [self, artifactId, candidates, index, generation]
+            (bool success, aitrain::ArtifactFilePreview preview, QString error) {
+                if (!self || self->sampleReviewPreviewGeneration_ != generation) return;
+                if (!success) {
+                    self->loadSampleReviewArtifactCandidate(artifactId, candidates,
+                        index + 1, generation, error);
+                    return;
+                }
+                QJsonParseError parseError;
+                const QJsonDocument document = QJsonDocument::fromJson(preview.content, &parseError);
+                if (parseError.error != QJsonParseError::NoError
+                    || (!document.isObject() && !document.isArray())) {
+                    self->loadSampleReviewArtifactCandidate(artifactId, candidates,
+                        index + 1, generation, parseError.errorString());
+                    return;
+                }
+
+                self->state_.dataset.sampleReviewArtifactId = artifactId.toString();
+                self->state_.dataset.sampleReviewSamples = extractReviewSamples(document);
+                if (self->reviewSourceFilterCombo_) {
+                    self->reviewSourceFilterCombo_->clear();
+                    self->reviewSourceFilterCombo_->addItem(uiText("全部来源"), QString());
+                }
+                if (self->reviewReasonFilterCombo_) {
+                    self->reviewReasonFilterCombo_->clear();
+                    self->reviewReasonFilterCombo_->addItem(uiText("全部问题"), QString());
+                }
+                QStringList sources;
+                QStringList reasons;
+                for (const QJsonValue& value : self->state_.dataset.sampleReviewSamples) {
+                    const QJsonObject sample = value.toObject();
+                    const QString source = sample.value(QStringLiteral("source")).toString();
+                    const QString reason = sample.value(QStringLiteral("reason")).toString();
+                    if (!source.isEmpty() && !sources.contains(source)) sources.append(source);
+                    if (!reason.isEmpty() && !reasons.contains(reason)) reasons.append(reason);
+                }
+                sources.sort(Qt::CaseInsensitive);
+                reasons.sort(Qt::CaseInsensitive);
+                if (self->reviewSourceFilterCombo_) {
+                    for (const QString& source : sources) self->reviewSourceFilterCombo_->addItem(source, source);
+                    self->reviewSourceFilterCombo_->setEnabled(true);
+                }
+                if (self->reviewReasonFilterCombo_) {
+                    for (const QString& reason : reasons) self->reviewReasonFilterCombo_->addItem(reason, reason);
+                    self->reviewReasonFilterCombo_->setEnabled(true);
+                }
+                self->refreshSampleReviewTable();
+                self->statusBar()->showMessage(uiText("已加载 Artifact %1 的复核样本：%2 条")
+                    .arg(artifactId.toString(), QString::number(self->state_.dataset.sampleReviewSamples.size())), 4000);
+            }, 4 * 1024 * 1024, &requestError)) {
+        loadSampleReviewArtifactCandidate(artifactId, candidates, index + 1,
+            generation, requestError);
     }
-    if (reviewReasonFilterCombo_) {
-        reviewReasonFilterCombo_->clear();
-        reviewReasonFilterCombo_->addItem(uiText("全部问题"), QString());
-    }
-    QStringList sources;
-    QStringList reasons;
-    for (const QJsonValue& value : state_.dataset.sampleReviewSamples) {
-        const QJsonObject sample = value.toObject();
-        const QString source = sample.value(QStringLiteral("source")).toString();
-        const QString reason = sample.value(QStringLiteral("reason")).toString();
-        if (!source.isEmpty() && !sources.contains(source)) {
-            sources.append(source);
-        }
-        if (!reason.isEmpty() && !reasons.contains(reason)) {
-            reasons.append(reason);
-        }
-    }
-    sources.sort(Qt::CaseInsensitive);
-    reasons.sort(Qt::CaseInsensitive);
-    for (const QString& source : sources) {
-        reviewSourceFilterCombo_->addItem(source, source);
-    }
-    for (const QString& reason : reasons) {
-        reviewReasonFilterCombo_->addItem(reason, reason);
-    }
-    refreshSampleReviewTable();
-    statusBar()->showMessage(uiText("已加载 Artifact %1 的复核样本：%2 条")
-        .arg(artifactId.toString(), QString::number(state_.dataset.sampleReviewSamples.size())), 4000);
 }
 
 QJsonArray MainWindow::filteredSampleReviewRows() const

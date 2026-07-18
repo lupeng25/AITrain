@@ -20,6 +20,7 @@ public:
         QObject* parent = nullptr);
 
     bool refresh(int limit = 64);
+    bool refreshAsync(int limit = 64);
     void clear();
     const DeliveryEvidenceViewModel& viewModel() const;
     QString lastError() const;
@@ -32,4 +33,5 @@ private:
     const aitrain::ProjectQueryService* queryService_ = nullptr;
     DeliveryEvidenceViewModel viewModel_;
     QString lastError_;
+    quint64 refreshGeneration_ = 0;
 };

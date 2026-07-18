@@ -15,8 +15,10 @@ class EvaluationReportView : public QWidget {
     Q_OBJECT
 
 public:
-    using ArtifactPreviewProvider = std::function<bool(
-        const QString& relativePath, QByteArray* content, QString* error)>;
+    using ArtifactPreviewCallback = std::function<void(
+        bool success, QByteArray content, QString error)>;
+    using ArtifactPreviewProvider = std::function<void(
+        const QString& relativePath, ArtifactPreviewCallback callback)>;
 
     explicit EvaluationReportView(QWidget* parent = nullptr);
 
@@ -38,6 +40,7 @@ private:
     QString resolveArtifactRelativePath(const QString& declaredPath) const;
     void showPreviewImage(const QString& imagePath);
     void showEmptyState(const QString& text);
+    void invalidatePreviewRequest();
 
     QLabel* statusLabel_ = nullptr;
     QLabel* summaryLabel_ = nullptr;
@@ -53,4 +56,5 @@ private:
     QHash<int, QString> artifactDetailTexts_;
     QHash<int, QString> samplePreviewPaths_;
     QHash<int, QString> sampleDetailTexts_;
+    quint64 previewGeneration_ = 0;
 };

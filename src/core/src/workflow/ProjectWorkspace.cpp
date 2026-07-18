@@ -11,11 +11,15 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonParseError>
+#include <QPointer>
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QSet>
+#include <QThreadPool>
+#include <QTimer>
 
 #include <algorithm>
+#include <utility>
 
 namespace aitrain {
 namespace {
@@ -134,6 +138,95 @@ bool verifyArtifactFile(const QString& artifactPath,
     }
     return true;
 }
+
+struct AsyncArtifactFileSource final {
+    QString artifactRoot;
+    QString absolutePath;
+    ArtifactFileSnapshot expected;
+    qint64 maxBytes = 0;
+};
+
+bool readAsyncArtifactFile(const AsyncArtifactFileSource& source,
+    ArtifactFilePreview* result, QString* error)
+{
+    if (error) error->clear();
+    const QFileInfo info(source.absolutePath);
+    if (source.artifactRoot.isEmpty() || source.absolutePath.isEmpty()
+        || !isChildPath(source.artifactRoot, info.absoluteFilePath())
+        || !info.exists() || !info.isFile() || info.isSymLink()
+        || info.size() != source.expected.byteCount) {
+        if (error) *error = QStringLiteral("已提交 Artifact 文件无效、越界或已被修改。");
+        return false;
+    }
+
+    QFile file(info.absoluteFilePath());
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (error) *error = QStringLiteral("无法读取已提交 Artifact 文件。");
+        return false;
+    }
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    QByteArray content;
+    if (source.maxBytes > 0) {
+        content.reserve(static_cast<int>(qMin<qint64>(source.maxBytes, source.expected.byteCount)));
+    }
+    while (!file.atEnd()) {
+        const QByteArray block = file.read(1024 * 1024);
+        if (block.isEmpty() && file.error() != QFileDevice::NoError) {
+            if (error) *error = QStringLiteral("读取已提交 Artifact 文件失败。");
+            return false;
+        }
+        hash.addData(block);
+        if (content.size() < source.maxBytes) {
+            const qint64 remaining = source.maxBytes - content.size();
+            content.append(block.left(static_cast<int>(qMin<qint64>(remaining, block.size()))));
+        }
+    }
+    if (QString::fromLatin1(hash.result().toHex()) != source.expected.sha256) {
+        if (error) *error = QStringLiteral("已提交 Artifact 文件 SHA-256 不匹配：%1")
+            .arg(source.expected.relativePath);
+        return false;
+    }
+    if (result) {
+        *result = {source.expected.relativePath, source.expected.sha256,
+            source.expected.byteCount, content,
+            source.expected.byteCount > source.maxBytes};
+    }
+    return true;
+}
+
+class ArtifactFilePreviewRunnable final : public QRunnable {
+public:
+    ArtifactFilePreviewRunnable(AsyncArtifactFileSource source,
+        QObject* receiver, ArtifactFilePreviewCallback callback)
+        : source_(std::move(source))
+        , receiver_(receiver)
+        , callback_(std::move(callback))
+    {
+        setAutoDelete(true);
+    }
+
+    void run() override
+    {
+        ArtifactFilePreview preview;
+        QString error;
+        const bool success = readAsyncArtifactFile(source_, &preview, &error);
+        if (!receiver_ || !callback_) return;
+
+        QPointer<QObject> receiver = receiver_;
+        ArtifactFilePreviewCallback callback = std::move(callback_);
+        QTimer::singleShot(0, receiver.data(),
+            [receiver, callback = std::move(callback), success,
+                preview = std::move(preview), error = std::move(error)]() mutable {
+                if (!receiver || !callback) return;
+                callback(success, std::move(preview), std::move(error));
+            });
+    }
+
+private:
+    AsyncArtifactFileSource source_;
+    QPointer<QObject> receiver_;
+    ArtifactFilePreviewCallback callback_;
+};
 
 const VerifiedWorkflowArtifactFile* selectArtifactFile(const VerifiedTrainingWorkflowInput& input,
     const QStringList& preferredRelativePaths)
@@ -587,6 +680,178 @@ WorkflowStepExecutionResult workflowExecutionForAdapterTerminal(const ProtocolEn
 
 ProjectWorkspace::ProjectWorkspace() = default;
 
+namespace {
+
+QString normalizedProjectRoot(const QString& projectRoot)
+{
+    const QString raw = QDir::fromNativeSeparators(projectRoot.trimmed());
+    if (raw.isEmpty()) return QString();
+    return QDir::cleanPath(QDir(raw).absolutePath());
+}
+
+qint64 fileSizeOrZero(const QString& path)
+{
+    const QFileInfo info(path);
+    return info.exists() && info.isFile() ? info.size() : 0;
+}
+
+qint64 modifiedMsOrZero(const QString& path)
+{
+    const QFileInfo info(path);
+    return info.exists() ? info.lastModified().toMSecsSinceEpoch() : 0;
+}
+
+} // namespace
+
+bool ProjectWorkspace::recoverPendingWorkflowTerminalEvents(QString* error)
+{
+    // 终态事件先落 task_events + workflow_terminal_outbox；只有 Workflow
+    // handler 完成后才标记 applied。这里按 outbox 顺序重放，覆盖 handler
+    // 之前、之后以及进程在根任务 Evidence seal 前崩溃的窗口。
+    constexpr int kRecoveryPageSize = 256;
+    for (;;) {
+        const QVector<WorkflowTerminalEventSnapshot> pending =
+            storage_.pendingWorkflowTerminalEvents(kRecoveryPageSize, error);
+        if (error && !error->isEmpty()) return false;
+        if (pending.isEmpty()) return true;
+        for (const WorkflowTerminalEventSnapshot& item : pending) {
+            TaskSnapshot task;
+            WorkflowRunSnapshot workflow;
+            QVector<WorkflowStepSnapshot> steps;
+            if (!storage_.task(item.taskId, &task, error)
+                || !storage_.workflowRun(item.workflowRunId, &workflow, error)
+                || !task.requestId.isValid() || task.requestId != item.requestId) {
+                if (error && error->isEmpty()) *error = QStringLiteral("Workflow 终态 outbox 绑定事实不完整。");
+                return false;
+            }
+            steps = storage_.workflowSteps(item.workflowRunId, error);
+            if (error && !error->isEmpty()) return false;
+            if (steps.isEmpty()) {
+                if (error) *error = QStringLiteral("Workflow 终态 outbox 绑定的 Workflow 不包含步骤。");
+                return false;
+            }
+            const auto stepIt = std::find_if(steps.cbegin(), steps.cend(),
+                [&item](const WorkflowStepSnapshot& step) { return step.id == item.workflowStepId; });
+            if (stepIt == steps.cend()) {
+                if (error) *error = QStringLiteral("Workflow 终态 outbox 指向不存在的步骤。");
+                return false;
+            }
+
+            ProtocolEnvelope event;
+            event.messageId = item.messageId;
+            event.requestId = item.requestId;
+            event.taskId = item.taskId;
+            event.sequence = item.sequence;
+            event.kind = item.kind;
+            event.timestamp = item.occurredAt;
+            event.payload = item.payload;
+            if (task.state == TaskState::CancelRequested
+                && event.kind != QStringLiteral("event.canceled")) {
+                event.kind = QStringLiteral("event.canceled");
+                event.payload = QJsonObject{{QStringLiteral("message"),
+                    QStringLiteral("任务已请求取消，忽略 Adapter 的晚到终态。")}};
+            }
+            const WorkflowStepState expectedState = event.kind == QStringLiteral("event.canceled")
+                ? WorkflowStepState::Canceled
+                : (event.kind == QStringLiteral("event.succeeded") && item.outputArtifactId.isValid()
+                    ? WorkflowStepState::Succeeded : WorkflowStepState::Failed);
+
+            WorkflowRunner runner(&storage_);
+            WorkflowStepDispatch dispatch;
+            if (stepIt->state == WorkflowStepState::Running) {
+                const WorkflowStepExecutionResult execution =
+                    workflowExecutionForAdapterTerminal(event, item.outputArtifactId);
+                if (!runner.completeStep(item.workflowRunId, item.workflowStepId,
+                        execution, &dispatch, error)) return false;
+            } else {
+                // handler 已经完成步骤但在 mark applied 前崩溃时只做一致性
+                // 证明，不重复执行当前步骤。
+                if (stepIt->state != expectedState
+                    || (expectedState == WorkflowStepState::Succeeded
+                        && stepIt->outputArtifactId != item.outputArtifactId)) {
+                    if (error) *error = QStringLiteral("Workflow 终态 outbox 与步骤终态不一致，拒绝静默丢弃。");
+                    return false;
+                }
+                if (!isTerminalWorkflowStepState(stepIt->state)) {
+                    if (error) *error = QStringLiteral("Workflow 终态 outbox 目标步骤仍未进入终态。");
+                    return false;
+                }
+
+                // completeStep() 可能在 handler 返回前已经把后继步骤置为
+                // Running。进程随后崩溃时没有任何 Adapter launch 可以重放，
+                // 直接 mark applied 会把后继永久留在 Running，下一次打开也
+                // 无法 beginNextStep()。将这个未完成的后继按进程崩溃收口，
+                // 让本次恢复形成可审计的工作流终态，而不是静默制造 stuck。
+                const QVector<WorkflowStepSnapshot> recoveredSteps =
+                    storage_.workflowSteps(item.workflowRunId, error);
+                if (error && !error->isEmpty()) return false;
+                const auto running = std::find_if(recoveredSteps.cbegin(), recoveredSteps.cend(),
+                    [](const WorkflowStepSnapshot& step) {
+                        return step.state == WorkflowStepState::Running;
+                    });
+                if (running != recoveredSteps.cend()) {
+                    WorkflowStepExecutionResult interrupted;
+                    interrupted.state = task.state == TaskState::CancelRequested
+                        ? WorkflowStepState::Canceled : WorkflowStepState::Failed;
+                    interrupted.failure = completeWorkflowFailure(
+                        interrupted.state == WorkflowStepState::Canceled
+                            ? TaskState::Canceled : TaskState::Failed,
+                        {interrupted.state == WorkflowStepState::Canceled
+                            ? FailureCode::Canceled : FailureCode::ProcessCrashed,
+                            interrupted.state == WorkflowStepState::Canceled
+                                ? QStringLiteral("应用恢复时发现后继步骤未启动。")
+                                : QStringLiteral("应用在 Workflow 后继步骤派发后崩溃。"),
+                            {}, QDateTime::currentDateTimeUtc()});
+                    if (!runner.completeStep(item.workflowRunId, running->id,
+                            interrupted, &dispatch, error)) return false;
+                } else if (!runner.beginNextStep(item.workflowRunId, &dispatch, error)) {
+                    return false;
+                }
+            }
+
+            // 无论当前终态事件是在 handler 前还是 handler 后落盘，恢复都
+            // 必须消费可能已经派发的后继；不能只标记 outbox 而留下 Running。
+            if (dispatch.hasStep) {
+                WorkflowStepExecutionResult interrupted;
+                interrupted.state = task.state == TaskState::CancelRequested
+                    ? WorkflowStepState::Canceled : WorkflowStepState::Failed;
+                interrupted.failure = completeWorkflowFailure(
+                    interrupted.state == WorkflowStepState::Canceled
+                        ? TaskState::Canceled : TaskState::Failed,
+                    {interrupted.state == WorkflowStepState::Canceled
+                        ? FailureCode::Canceled : FailureCode::ProcessCrashed,
+                        interrupted.state == WorkflowStepState::Canceled
+                            ? QStringLiteral("应用恢复时发现后继步骤未启动。")
+                            : QStringLiteral("应用在 Workflow 后继步骤派发后崩溃。"),
+                        {}, QDateTime::currentDateTimeUtc()});
+                if (!runner.completeStep(item.workflowRunId, dispatch.step.id,
+                        interrupted, &dispatch, error)) return false;
+            }
+            if (!dispatch.hasStep && isTerminalWorkflowStepState(dispatch.result.state)
+                && isTerminalTaskState(task.state)
+                && task.state != taskStateForWorkflowResult(dispatch.result)) {
+                if (error) *error = QStringLiteral("Workflow 终态 outbox 与已封存任务终态不一致，拒绝静默恢复。" );
+                return false;
+            }
+            if (!dispatch.hasStep && isTerminalWorkflowStepState(dispatch.result.state)
+                && !isTerminalTaskState(task.state)) {
+                const TaskState terminalState = taskStateForWorkflowResult(dispatch.result);
+                const Failure terminalFailure = completeWorkflowFailure(
+                    terminalState, dispatch.result.failure);
+                if (workflow.terminalPolicy == WorkflowTerminalPolicy::EvidenceRequired) {
+                    if (!storage_.sealWorkflowTerminalization(item.workflowRunId,
+                            terminalState, terminalFailure, item.occurredAt, error)) return false;
+                } else {
+                    TaskCoordinator coordinator(&storage_);
+                    if (!coordinator.finalizeTask(workflow.taskId, terminalState,
+                            terminalFailure, error)) return false;
+                }
+            }
+            if (!storage_.markWorkflowTerminalEventApplied(item.messageId, error)) return false;
+        }
+    }
+}
+
 bool ProjectWorkspace::recoverEvidenceGatedWorkflows(QString* error)
 {
     constexpr int kRecoveryPageSize = 256;
@@ -692,10 +957,124 @@ bool ProjectWorkspace::recoverEvidenceGatedWorkflows(QString* error)
     return true;
 }
 
+bool ProjectWorkspace::capturePreparedOpenFingerprint(const QString& normalizedRoot,
+    ProjectWorkspacePreparedOpen* prepared, QString* error)
+{
+    if (!prepared || normalizedRoot.isEmpty()) {
+        if (error) *error = QStringLiteral("生成项目打开凭证需要有效项目根目录。");
+        return false;
+    }
+    const QString workspace = QDir(normalizedRoot).filePath(QStringLiteral(".aitrain"));
+    const QString database = QDir(workspace).filePath(QStringLiteral("project.sqlite"));
+    const QFileInfo databaseInfo(database);
+    if (!databaseInfo.exists() || !databaseInfo.isFile()) {
+        if (error) *error = QStringLiteral("项目打开凭证缺少 project.sqlite。");
+        return false;
+    }
+    prepared->normalizedRoot = normalizedRoot;
+    prepared->databaseSize = fileSizeOrZero(database);
+    prepared->databaseLastModifiedMs = modifiedMsOrZero(database);
+    prepared->databaseWalSize = fileSizeOrZero(database + QStringLiteral("-wal"));
+    prepared->databaseWalLastModifiedMs = modifiedMsOrZero(database + QStringLiteral("-wal"));
+    prepared->stagingLastModifiedMs = modifiedMsOrZero(
+        QDir(workspace).filePath(QStringLiteral("artifacts/.staging")));
+    prepared->stagingMetadataLastModifiedMs = modifiedMsOrZero(
+        QDir(workspace).filePath(QStringLiteral("artifacts/.staging-meta")));
+    return prepared->isValid();
+}
+
+bool ProjectWorkspace::preparedOpenFingerprintMatches(
+    const ProjectWorkspacePreparedOpen& prepared, QString* error)
+{
+    if (!prepared.isValid()) {
+        if (error) *error = QStringLiteral("项目打开凭证无效或已过期。");
+        return false;
+    }
+    const QString normalized = normalizedProjectRoot(prepared.normalizedRoot);
+    if (normalized.compare(prepared.normalizedRoot, Qt::CaseInsensitive) != 0) {
+        if (error) *error = QStringLiteral("项目打开凭证路径已变化。");
+        return false;
+    }
+    const QString workspace = QDir(normalized).filePath(QStringLiteral(".aitrain"));
+    const QString database = QDir(workspace).filePath(QStringLiteral("project.sqlite"));
+    const bool matches = fileSizeOrZero(database) == prepared.databaseSize
+        && modifiedMsOrZero(database) == prepared.databaseLastModifiedMs
+        && fileSizeOrZero(database + QStringLiteral("-wal")) == prepared.databaseWalSize
+        && modifiedMsOrZero(database + QStringLiteral("-wal")) == prepared.databaseWalLastModifiedMs
+        && modifiedMsOrZero(QDir(workspace).filePath(QStringLiteral("artifacts/.staging")))
+            == prepared.stagingLastModifiedMs
+        && modifiedMsOrZero(QDir(workspace).filePath(QStringLiteral("artifacts/.staging-meta")))
+            == prepared.stagingMetadataLastModifiedMs;
+    if (!matches && error) {
+        *error = QStringLiteral("项目在后台预检后发生变化，需要重新执行恢复。");
+    }
+    return matches;
+}
+
+bool ProjectWorkspace::prepareOpen(const QString& projectRoot,
+    ProjectWorkspacePreparedOpen* prepared, QString* error)
+{
+    if (prepared) *prepared = ProjectWorkspacePreparedOpen();
+    const QString normalizedRoot = normalizedProjectRoot(projectRoot);
+    if (normalizedRoot.isEmpty()) {
+        if (error) *error = QStringLiteral("打开项目工作区需要项目根目录。");
+        return false;
+    }
+    ProjectWorkspace candidate;
+    if (!candidate.open(normalizedRoot, error)) {
+        return false;
+    }
+    candidate.close();
+    return capturePreparedOpenFingerprint(normalizedRoot, prepared, error);
+}
+
+bool ProjectWorkspace::openPrepared(const ProjectWorkspacePreparedOpen& prepared,
+    QString* error)
+{
+    if (!preparedOpenFingerprintMatches(prepared, error)) {
+        return false;
+    }
+    // 激活阶段仍可能因 GUI 线程上的连接、权限或插件初始化失败。先记住
+    // 当前 session，失败时尽力恢复原工作区，避免一次候选项目失败把用户
+    // 已打开的项目置于半关闭状态。
+    const QString previousRoot = workspacePath_;
+    QString activationError;
+    if (openInternal(prepared.normalizedRoot, false, &activationError)) {
+        if (error) error->clear();
+        return true;
+    }
+    if (!previousRoot.isEmpty()) {
+        QString restoreError;
+        if (openInternal(previousRoot, true, &restoreError)) {
+            if (error) {
+                *error = activationError;
+                if (!restoreError.isEmpty()) {
+                    *error += QStringLiteral("；原项目已恢复，但恢复过程有诊断：%1").arg(restoreError);
+                }
+            }
+            return false;
+        }
+        if (error) {
+            *error = activationError;
+            if (!restoreError.isEmpty()) {
+                *error += QStringLiteral("；原项目恢复失败：%1").arg(restoreError);
+            }
+        }
+        return false;
+    }
+    if (error) *error = activationError;
+    return false;
+}
+
 bool ProjectWorkspace::open(const QString& projectRoot, QString* error)
 {
+    return openInternal(projectRoot, true, error);
+}
+
+bool ProjectWorkspace::openInternal(const QString& projectRoot, bool recover, QString* error)
+{
     close();
-    const QString normalizedRoot = QDir::cleanPath(QDir::fromNativeSeparators(projectRoot.trimmed()));
+    const QString normalizedRoot = normalizedProjectRoot(projectRoot);
     if (normalizedRoot.isEmpty()) {
         if (error) *error = QStringLiteral("打开  项目工作区需要项目根目录。");
         return false;
@@ -731,12 +1110,15 @@ bool ProjectWorkspace::open(const QString& projectRoot, QString* error)
     artifactStore_ = std::make_unique<ArtifactStore>(QDir(candidate).filePath(QStringLiteral("artifacts")));
     storage_.setArtifactStoreRoot(artifactStore_->rootPath());
     workspacePath_ = candidate;
-    QStringList diagnostics;
-    if (!artifactStore_->recoverStaging(&storage_, &diagnostics, error)
-        || !recoverEvidenceGatedWorkflows(error)
-        || !storage_.markInterruptedTasksFailed(error)) {
-        close();
-        return false;
+    if (recover) {
+        QStringList diagnostics;
+        if (!artifactStore_->recoverStaging(&storage_, &diagnostics, error)
+            || !recoverPendingWorkflowTerminalEvents(error)
+            || !recoverEvidenceGatedWorkflows(error)
+            || !storage_.markInterruptedTasksFailed(error)) {
+            close();
+            return false;
+        }
     }
     taskCoordinator_ = std::make_unique<TaskCoordinator>(&storage_);
     trainingAdapterHost_ = std::make_unique<TaskExecutionHost>(taskCoordinator_.get(), artifactStore_.get());
@@ -2346,6 +2728,90 @@ bool ProjectWorkspace::readCommittedArtifactFile(const ArtifactSnapshot& snapsho
     }
     *result = {verified.relativePath, verified.sha256, verified.byteCount,
         content.left(maxBytes), content.size() > maxBytes};
+    return true;
+}
+
+bool ProjectWorkspace::prepareCommittedArtifactFileRead(
+    const ArtifactSnapshot& snapshot,
+    const QString& relativePath,
+    CommittedArtifactFileReadSource* result,
+    QString* error) const
+{
+    if (error) error->clear();
+    if (!isOpen() || !snapshot.id.isValid() || !result || !artifactStore_) {
+        if (error) *error = QStringLiteral("准备 Artifact 文件读取需要有效工作区、Artifact ID 和输出对象。");
+        return false;
+    }
+
+    const QString normalizedPath = QDir::cleanPath(
+        QDir::fromNativeSeparators(relativePath.trimmed()));
+    if (normalizedPath.isEmpty() || normalizedPath == QStringLiteral(".")
+        || QDir::isAbsolutePath(normalizedPath) || normalizedPath == QStringLiteral("..")
+        || normalizedPath.startsWith(QStringLiteral("../"))) {
+        if (error) *error = QStringLiteral("Artifact 预览相对路径无效。");
+        return false;
+    }
+
+    const auto fileIt = std::find_if(snapshot.files.cbegin(), snapshot.files.cend(),
+        [&normalizedPath](const ArtifactFileSnapshot& file) {
+            return QDir::cleanPath(QDir::fromNativeSeparators(file.relativePath)) == normalizedPath;
+        });
+    if (fileIt == snapshot.files.cend()) {
+        if (error) *error = QStringLiteral("Artifact 清单中不存在请求的文件。");
+        return false;
+    }
+
+    const QString artifactRoot = artifactStore_->artifactPath(snapshot.id);
+    const QString absolutePath = QDir(artifactRoot).filePath(normalizedPath);
+    const QFileInfo info(absolutePath);
+    if (artifactRoot.isEmpty() || !isChildPath(artifactRoot, info.absoluteFilePath())
+        || !info.exists() || !info.isFile() || info.isSymLink()
+        || info.size() != fileIt->byteCount) {
+        if (error) *error = QStringLiteral("已提交 Artifact 文件无效、越界或已被修改。");
+        return false;
+    }
+
+    result->artifactRoot = QDir(artifactRoot).absolutePath();
+    result->absolutePath = info.absoluteFilePath();
+    result->expected = *fileIt;
+    return true;
+}
+
+bool ProjectWorkspace::readCommittedArtifactFileAsync(const ArtifactId& artifactId,
+    const QString& relativePath,
+    QObject* receiver,
+    ArtifactFilePreviewCallback callback,
+    qint64 maxBytes,
+    QString* error) const
+{
+    if (error) error->clear();
+    if (!receiver || !callback) {
+        if (error) *error = QStringLiteral("Artifact 异步预览需要回调对象和回调函数。");
+        return false;
+    }
+    if (!isOpen() || !artifactId.isValid() || maxBytes <= 0 || maxBytes > 4 * 1024 * 1024) {
+        if (error) *error = QStringLiteral("读取 Artifact 预览需要有效工作区、Artifact ID 和合法大小限制。");
+        return false;
+    }
+    if (!artifactStore_) {
+        if (error) *error = QStringLiteral("Artifact 存储尚未初始化。");
+        return false;
+    }
+
+    // 这一段只访问当前线程绑定的 ProjectStore，生成不可变的文件读取快照。
+    // 之后投递的 QRunnable 不再捕获 workspace、ProjectStore 或 QSqlDatabase。
+    ArtifactSnapshot snapshot;
+    if (!storage_.artifact(artifactId, &snapshot, error)) return false;
+    CommittedArtifactFileReadSource prepared;
+    if (!prepareCommittedArtifactFileRead(snapshot, relativePath, &prepared, error)) return false;
+
+    AsyncArtifactFileSource source;
+    source.artifactRoot = prepared.artifactRoot;
+    source.absolutePath = prepared.absolutePath;
+    source.expected = prepared.expected;
+    source.maxBytes = maxBytes;
+    QThreadPool::globalInstance()->start(new ArtifactFilePreviewRunnable(
+        std::move(source), receiver, std::move(callback)));
     return true;
 }
 

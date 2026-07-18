@@ -137,6 +137,7 @@ QWidget* MainWindow::buildProjectPage()
     layout->setSpacing(16);
 
     auto* headerOpenButton = primaryButton(uiText("创建 / 打开项目"));
+    projectOpenButton_ = headerOpenButton;
 
     auto* headerPanel = new QFrame;
     headerPanel->setObjectName(QStringLiteral("WorkspaceToolbar"));

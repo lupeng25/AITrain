@@ -56,18 +56,84 @@ void MainWindow::createProject()
             uiText("Worker 正在执行任务，请等待任务终态后再切换项目。"));
         return;
     }
-    currentProjectName_ = projectNameEdit_->text().trimmed();
-    currentProjectPath_ = QDir::fromNativeSeparators(projectRootEdit_->text().trimmed());
-    if (currentProjectName_.isEmpty() || currentProjectPath_.isEmpty()) {
+    if (projectOpenInProgress_) {
+        return;
+    }
+    const QString projectName = projectNameEdit_->text().trimmed();
+    const QString projectPath = QDir::fromNativeSeparators(projectRootEdit_->text().trimmed());
+    if (projectName.isEmpty() || projectPath.isEmpty()) {
         QMessageBox::warning(this, uiText("项目"), uiText("项目名称和目录不能为空。"));
         return;
     }
 
-    QString error;
-    if (!workspace_.open(currentProjectPath_, &error)) {
-        QMessageBox::critical(this, uiText("项目"), uiText("无法打开项目工作区：%1").arg(error));
+    pendingProjectName_ = projectName;
+    pendingProjectPath_ = projectPath;
+    const quint64 generation = ++projectOpenGeneration_;
+    // 项目切换会改变 Artifact 根目录；丢弃旧项目尚未返回的样本复核
+    // 读取结果，防止其在新项目激活后污染 Dataset 工作区状态。
+    ++sampleReviewPreviewGeneration_;
+    if (sampleReviewPreviewGeneration_ == 0) ++sampleReviewPreviewGeneration_;
+    projectOpenInProgress_ = true;
+    setProjectOpenUiBusy(true);
+    if (projectConsoleStatusLabel_) {
+        projectConsoleStatusLabel_->setText(uiText("正在后台预检项目恢复，请稍候…"));
+    }
+    statusBar()->showMessage(uiText("正在后台打开项目：%1").arg(compactPathForStatus(projectPath)), 5000);
+
+    probeProjectOpenAsync(this, projectPath,
+        [this, projectName, projectPath, generation](
+            const ProjectOpenProbeResult& result) {
+            finishProjectOpen(projectName, projectPath, generation, result);
+        });
+}
+
+void MainWindow::setProjectOpenUiBusy(bool busy)
+{
+    if (projectOpenButton_) projectOpenButton_->setEnabled(!busy);
+    if (projectNameEdit_) projectNameEdit_->setEnabled(!busy);
+    if (projectRootEdit_) projectRootEdit_->setEnabled(!busy);
+}
+
+void MainWindow::finishProjectOpen(const QString& projectName, const QString& projectPath,
+    quint64 generation, const ProjectOpenProbeResult& result)
+{
+    if (!projectOpenInProgress_ || generation != projectOpenGeneration_
+        || projectPath != pendingProjectPath_) {
         return;
     }
+    projectOpenInProgress_ = false;
+    setProjectOpenUiBusy(false);
+    pendingProjectName_.clear();
+    pendingProjectPath_.clear();
+
+    if (!result.succeeded || !result.prepared.isValid()) {
+        const QString message = result.error.isEmpty()
+            ? uiText("候选项目工作区预检失败。") : result.error;
+        if (projectConsoleStatusLabel_) {
+            projectConsoleStatusLabel_->setText(uiText("项目预检失败：%1").arg(message));
+        }
+        statusBar()->showMessage(message, 8000);
+        QMessageBox::critical(this, uiText("项目"), uiText("无法打开项目工作区：%1").arg(message));
+        return;
+    }
+
+    // 预检线程已经完成完整恢复；这里仅在凭证仍匹配时把当前 GUI session
+    // 绑定到同一路径。openPrepared 不会把后台线程的 QSqlDatabase 带回 GUI。
+    QString error;
+    if (!workspace_.openPrepared(result.prepared, &error)) {
+        const QString message = error.isEmpty()
+            ? uiText("项目打开凭证已失效，需要重新尝试。") : error;
+        if (projectConsoleStatusLabel_) {
+            projectConsoleStatusLabel_->setText(uiText("项目激活失败：%1").arg(message));
+        }
+        statusBar()->showMessage(message, 8000);
+        QMessageBox::critical(this, uiText("项目"), uiText("无法激活项目工作区：%1").arg(message));
+        return;
+    }
+
+    currentProjectName_ = projectName;
+    currentProjectPath_ = result.prepared.normalizedRoot;
+    clearSelectedTaskDetails();
     state_.dataset = DatasetWorkbenchState();
     for (QLineEdit* field : {dataQualityDatasetIdEdit_, dataQualityDatasetVersionIdEdit_,
             dataQualitySnapshotIdEdit_, dataQualitySnapshotArtifactIdEdit_,

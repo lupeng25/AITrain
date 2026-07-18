@@ -13,6 +13,7 @@
 #include <QFileInfo>
 #include <QPixmap>
 #include <QPlainTextEdit>
+#include <QPointer>
 #include <QScrollArea>
 #include <QSize>
 #include <QSizePolicy>
@@ -22,11 +23,11 @@
 #include <QTabWidget>
 #include <QVBoxLayout>
 
+#include <utility>
+
 using namespace aitrain_app;
 
 namespace {
-
-constexpr qint64 kMaximumSynchronousPreviewBytes = 16LL * 1024LL * 1024LL;
 
 QString formatArtifactJsonText(const QByteArray& data)
 {
@@ -265,6 +266,9 @@ void TaskArtifactPanel::updatePreviewFromSelection()
 
 void TaskArtifactPanel::previewSelectedArtifact()
 {
+    ++previewGeneration_;
+    if (previewGeneration_ == 0) ++previewGeneration_;
+    const quint64 generation = previewGeneration_;
     if (!previewText_ || !imagePreviewLabel_ || !previewStack_) return;
     previewStack_->setCurrentIndex(0);
     if (evaluationReportView_) evaluationReportView_->clear();
@@ -273,6 +277,8 @@ void TaskArtifactPanel::previewSelectedArtifact()
     imagePreviewLabel_->setText(uiText("暂无产物预览"));
     previewText_->setVisible(true);
     previewText_->clear();
+    selectedArtifactId_.clear();
+    selectedRelativePath_.clear();
 
     if (!detailTabs_ || detailTabs_->currentIndex() != 0
         || !artifactTable_ || artifactTable_->selectedItems().isEmpty()) {
@@ -290,64 +296,90 @@ void TaskArtifactPanel::previewSelectedArtifact()
         previewText_->setVisible(false);
         return;
     }
-    if (byteCount > kMaximumSynchronousPreviewBytes) {
-        previewText_->setPlainText(uiText(
-            "该产物过大，已跳过同步预览，避免阻塞界面。\nArtifact 相对项：%1\n大小：%2 bytes\n请通过后续异步工具检查内容。")
-            .arg(selectedRelativePath_)
-            .arg(byteCount));
-        return;
-    }
     if (!presenter_) {
         imagePreviewLabel_->setVisible(true);
-        previewText_->setVisible(false);
+        previewText_->setVisible(true);
+        previewText_->setPlainText(uiText("Artifact 预览查询服务不可用。"));
         return;
     }
 
-    aitrain::ArtifactFilePreview preview;
-    QString error;
-    if (!presenter_->previewArtifact(selectedArtifactId_, selectedRelativePath_, &preview, &error)) {
-        previewText_->setPlainText(uiText("无法读取已提交 Artifact 预览：%1").arg(error));
-        return;
-    }
-    const QString suffix = suffixFor(preview.relativePath);
-    const QString fileName = QFileInfo(preview.relativePath).fileName();
-    if (suffix == QStringLiteral("json") && fileName == QStringLiteral("evaluation_report.json") && evaluationReportView_) {
-        evaluationReportView_->loadReportData(preview.content, preview.relativePath);
-        const QString artifactId = selectedArtifactId_;
-        evaluationReportView_->setArtifactPreviewProvider(
-            [this, artifactId](const QString& relativePath, QByteArray* content, QString* error) {
-                aitrain::ArtifactFilePreview related;
-                if (!presenter_ || !presenter_->previewArtifact(
-                        artifactId, relativePath, &related, error)) {
-                    return false;
+    previewText_->setPlainText(uiText("正在后台读取并校验 Artifact：%1\n大小：%2 bytes")
+        .arg(selectedRelativePath_).arg(byteCount));
+    const QString requestedArtifactId = selectedArtifactId_;
+    const QString requestedRelativePath = selectedRelativePath_;
+    QPointer<TaskArtifactPanel> self(this);
+    QString requestError;
+    if (!presenter_->previewArtifactAsync(requestedArtifactId, requestedRelativePath, this,
+        [self, generation, requestedArtifactId, requestedRelativePath]
+        (bool success, aitrain::ArtifactFilePreview preview, QString error) {
+            if (!self || self->previewGeneration_ != generation
+                || self->selectedArtifactId_ != requestedArtifactId
+                || self->selectedRelativePath_ != requestedRelativePath) {
+                return;
+            }
+            if (!success) {
+                self->previewText_->setPlainText(uiText("无法读取已提交 Artifact 预览：%1").arg(error));
+                return;
+            }
+            const QString suffix = suffixFor(preview.relativePath);
+            const QString fileName = QFileInfo(preview.relativePath).fileName();
+            if (suffix == QStringLiteral("json") && fileName == QStringLiteral("evaluation_report.json")
+                && self->evaluationReportView_) {
+                self->evaluationReportView_->loadReportData(preview.content, preview.relativePath);
+                const QString artifactId = requestedArtifactId;
+                QPointer<TaskArtifactPanel> panel = self;
+                QPointer<EvaluationReportView> reportView = self->evaluationReportView_;
+                reportView->setArtifactPreviewProvider(
+                    [panel, reportView, artifactId](const QString& relativePath,
+                        EvaluationReportView::ArtifactPreviewCallback callback) {
+                        if (!panel || !reportView || !panel->presenter_) {
+                            callback(false, {}, QStringLiteral("Artifact 预览查询服务不可用。"));
+                            return;
+                        }
+                        QString requestError;
+                        const auto callbackForWorker = [callback]
+                            (bool ok, aitrain::ArtifactFilePreview related, QString error) mutable {
+                                callback(ok, std::move(related.content), std::move(error));
+                            };
+                        if (!panel->presenter_->previewArtifactAsync(artifactId, relativePath,
+                                reportView,
+                                callbackForWorker, 4 * 1024 * 1024, &requestError)) {
+                            callback(false, {}, requestError);
+                        }
+                    });
+                self->previewStack_->setCurrentIndex(1);
+                return;
+            }
+            if (QStringList{QStringLiteral("png"), QStringLiteral("jpg"), QStringLiteral("jpeg"),
+                    QStringLiteral("bmp"), QStringLiteral("webp")}.contains(suffix)) {
+                QPixmap image;
+                if (image.loadFromData(preview.content)) {
+                    self->imagePreviewLabel_->setVisible(true);
+                    self->imagePreviewLabel_->setPixmap(image.scaled(
+                        self->imagePreviewLabel_->size().boundedTo(QSize(520, 360)),
+                        Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                } else {
+                    self->imagePreviewLabel_->setVisible(true);
+                    self->imagePreviewLabel_->setText(uiText("图片产物无法解码。"));
                 }
-                if (content) *content = related.content;
-                return true;
-            });
-        previewStack_->setCurrentIndex(1);
-        return;
+                self->previewText_->setPlainText(uiText("图片产物\nArtifact 相对项：%1\n尺寸：%2 x %3\n大小：%4 bytes")
+                    .arg(preview.relativePath).arg(image.width()).arg(image.height()).arg(preview.byteCount));
+                return;
+            }
+            const bool textLike = QStringList{QStringLiteral("json"), QStringLiteral("yaml"),
+                QStringLiteral("yml"), QStringLiteral("txt"), QStringLiteral("csv"),
+                QStringLiteral("log"), QStringLiteral("md")}.contains(suffix);
+            if (textLike) {
+                QString text = suffix == QStringLiteral("json")
+                    ? formatArtifactJsonText(preview.content) : QString::fromUtf8(preview.content);
+                if (preview.truncated) text.append(QStringLiteral("\n\n[文件超过 4MB，仅显示前部内容]"));
+                self->previewText_->setPlainText(text);
+                return;
+            }
+            self->previewText_->setPlainText(uiText("已提交模型/二进制产物\nArtifact 相对项：%1\nSHA-256：%2\n大小：%3 bytes")
+                .arg(preview.relativePath, preview.sha256).arg(preview.byteCount));
+        }, 4 * 1024 * 1024, &requestError)) {
+        // Metadata 快照阶段失败时不会进入线程池，直接呈现可操作错误。
+        previewText_->setPlainText(uiText("无法读取已提交 Artifact 预览：%1").arg(requestError));
     }
-    if (QStringList{QStringLiteral("png"), QStringLiteral("jpg"), QStringLiteral("jpeg"), QStringLiteral("bmp"), QStringLiteral("webp")}.contains(suffix)) {
-        QPixmap image;
-        if (image.loadFromData(preview.content)) {
-            imagePreviewLabel_->setVisible(true);
-            imagePreviewLabel_->setPixmap(image.scaled(
-                imagePreviewLabel_->size().boundedTo(QSize(520, 360)),
-                Qt::KeepAspectRatio, Qt::SmoothTransformation));
-        }
-        previewText_->setPlainText(uiText("图片产物\nArtifact 相对项：%1\n尺寸：%2 x %3\n大小：%4 bytes")
-            .arg(preview.relativePath).arg(image.width()).arg(image.height()).arg(preview.byteCount));
-        return;
-    }
-    const bool textLike = QStringList{QStringLiteral("json"), QStringLiteral("yaml"), QStringLiteral("yml"),
-        QStringLiteral("txt"), QStringLiteral("csv"), QStringLiteral("log"), QStringLiteral("md")}.contains(suffix);
-    if (textLike) {
-        QString text = suffix == QStringLiteral("json")
-            ? formatArtifactJsonText(preview.content) : QString::fromUtf8(preview.content);
-        if (preview.truncated) text.append(QStringLiteral("\n\n[文件超过 512KB，仅显示前部内容]"));
-        previewText_->setPlainText(text);
-        return;
-    }
-    previewText_->setPlainText(uiText("已提交模型/二进制产物\nArtifact 相对项：%1\nSHA-256：%2\n大小：%3 bytes")
-        .arg(preview.relativePath, preview.sha256).arg(preview.byteCount));
 }

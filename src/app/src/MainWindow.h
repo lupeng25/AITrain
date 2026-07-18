@@ -5,6 +5,7 @@
 #include "Sidebar.h"
 #include "StatusPill.h"
 #include "WorkerClient.h"
+#include "MainWindowSupport.h"
 #include "aitrain/workflow\ProjectWorkspace.h"
 #include "aitrain/workflow\ProjectQueryService.h"
 
@@ -156,6 +157,7 @@ private:
     void refreshEnvironmentReportView();
     void updateSettingsSummary();
     void updateDeliveryAcceptanceSummary();
+    void renderDeliveryAcceptanceSummary();
     void updateTaskCancelButton();
     void refreshSampleReviewTable();
     QJsonArray filteredSampleReviewRows() const;
@@ -174,6 +176,12 @@ private:
     void startDatasetFormatProbe(const QString& path, bool conversionSource);
     void applyDatasetFormatProbe(const QString& path, const QString& detectedFormat,
         bool conversionSource, quint64 generation);
+    void loadSampleReviewArtifactCandidate(const aitrain::ArtifactId& artifactId,
+        const QStringList& candidates, int index, quint64 generation,
+        const QString& lastError = QString());
+    void finishProjectOpen(const QString& projectName, const QString& projectPath,
+        quint64 generation, const aitrain_app::ProjectOpenProbeResult& result);
+    void setProjectOpenUiBusy(bool busy);
 
     aitrain::ProjectWorkspace workspace_;
     aitrain::ProjectQueryService queryService_;
@@ -196,7 +204,12 @@ private:
 
     QString currentProjectPath_;
     QString currentProjectName_;
+    QString pendingProjectPath_;
+    QString pendingProjectName_;
+    quint64 projectOpenGeneration_ = 0;
+    bool projectOpenInProgress_ = false;
     quint64 datasetFormatProbeGeneration_ = 0;
+    quint64 sampleReviewPreviewGeneration_ = 0;
 
     Sidebar* sidebar_ = nullptr;
     QFrame* inspector_ = nullptr;
@@ -271,6 +284,7 @@ private:
     QComboBox* taskStateFilterCombo_ = nullptr;
     QLineEdit* projectNameEdit_ = nullptr;
     QLineEdit* projectRootEdit_ = nullptr;
+    QPushButton* projectOpenButton_ = nullptr;
     QLineEdit* taskSearchEdit_ = nullptr;
     QLineEdit* datasetPathEdit_ = nullptr;
     QLabel* datasetProbeStatusLabel_ = nullptr;

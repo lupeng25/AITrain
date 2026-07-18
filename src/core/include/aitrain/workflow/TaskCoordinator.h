@@ -26,7 +26,10 @@ public:
     bool consumeWorkerEvent(const ProtocolEnvelope& envelope, QString* error = nullptr);
     // 多步骤 Workflow 的终态同样需要审计，但根任务只能由 Workflow Runner 收口。
     // 该入口只接受 Adapter 终态事件，不改变 tasks.state。
-    bool recordWorkflowTerminalEvent(const ProtocolEnvelope& envelope, QString* error = nullptr);
+    bool recordWorkflowTerminalEvent(const ProtocolEnvelope& envelope,
+        const ArtifactId& outputArtifactId = {},
+        bool* idempotent = nullptr,
+        QString* error = nullptr);
 
 private:
     bool transitionTerminalTask(const ProtocolEnvelope& envelope, TaskState targetState, const Failure& failure, QString* error);

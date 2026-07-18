@@ -20,7 +20,9 @@ namespace aitrain {
 namespace {
 
 constexpr qint64 kFirstHostStateEventSequence = 4000000000000000000LL;
-constexpr int kStorageSchemaVersion = 11;
+// durable Workflow terminal outbox 是本轮破坏性重构新增的持久化事实，
+// 因此显式提升 Storage schema，旧数据库不会被静默当作当前结构打开。
+constexpr int kStorageSchemaVersion = 12;
 
 QString terminalPolicyText(WorkflowTerminalPolicy policy)
 {
@@ -479,6 +481,7 @@ bool ProjectStore::initialize(QString* error)
         QStringLiteral("create table if not exists workflow_input_bindings (workflow_run_id text not null references workflow_runs(id) on delete restrict, role text not null, source_artifact_id text not null references artifacts(id) on delete restrict, source_task_id text not null references tasks(id) on delete restrict, source_artifact_kind text not null, dataset_id text references datasets(id) on delete restrict, dataset_snapshot_id text references dataset_snapshots(id) on delete restrict, dataset_version_id text references dataset_versions(id) on delete restrict, model_package_id text references model_packages(id) on delete restrict, manifest_sha256 text not null default '', root_hash text not null default '', bound_at text not null, primary key(workflow_run_id, role))"),
         QStringLiteral("create table if not exists workflow_steps (id text primary key, workflow_run_id text not null references workflow_runs(id) on delete restrict, ordinal integer not null check(ordinal >= 0), kind text not null, state text not null check(state in ('pending','running','succeeded','failed','canceled','skipped')), input_artifact_id text references artifacts(id) on delete restrict, output_artifact_id text references artifacts(id) on delete restrict, backend text not null, parameter_summary_json text not null, started_at text, finished_at text, failure_code text not null default 'none', failure_details text not null default '', failure_suggested_action text not null default '', failure_occurred_at text, retry_count integer not null default 0 check(retry_count >= 0), unique(workflow_run_id, ordinal))"),
         QStringLiteral("create table if not exists workflow_terminalizations (workflow_run_id text primary key references workflow_runs(id) on delete restrict, task_id text not null references tasks(id) on delete restrict, state text not null check(state in ('sealed','evidence_attached','closed')), terminal_state text not null check(terminal_state in ('succeeded','failed','canceled')), failure_code text not null, failure_details text not null, failure_suggested_action text not null, failure_occurred_at text, terminal_at text not null, evidence_artifact_id text unique references artifacts(id) on delete restrict, evidence_attempt_count integer not null default 0 check(evidence_attempt_count >= 0), last_evidence_failure_code text not null default 'none', last_evidence_failure_details text not null default '', last_evidence_failure_suggested_action text not null default '', last_evidence_failure_occurred_at text, sealed_at text not null, evidence_attached_at text, closed_at text, check((terminal_state = 'succeeded' and failure_code = 'none' and failure_details = '' and failure_suggested_action = '' and failure_occurred_at is null) or (terminal_state in ('failed','canceled') and failure_code <> 'none' and failure_details <> '' and failure_suggested_action <> '' and failure_occurred_at is not null)), check((terminal_state = 'canceled') = (failure_code = 'canceled')), check((last_evidence_failure_code = 'none' and last_evidence_failure_details = '' and last_evidence_failure_suggested_action = '' and last_evidence_failure_occurred_at is null) or (last_evidence_failure_code <> 'none' and last_evidence_failure_details <> '' and last_evidence_failure_suggested_action <> '' and last_evidence_failure_occurred_at is not null)), check((state = 'sealed' and evidence_artifact_id is null and evidence_attached_at is null and closed_at is null) or (state = 'evidence_attached' and evidence_artifact_id is not null and evidence_attached_at is not null and closed_at is null) or (state = 'closed' and evidence_artifact_id is not null and evidence_attached_at is not null and closed_at is not null)))"),
+        QStringLiteral("create table if not exists workflow_terminal_outbox (message_id text primary key references task_events(id) on delete restrict, task_id text not null references tasks(id) on delete restrict, request_id text not null, workflow_run_id text not null references workflow_runs(id) on delete restrict, workflow_step_id text not null references workflow_steps(id) on delete restrict, sequence integer not null check(sequence > 0), kind text not null check(kind in ('event.succeeded','event.failed','event.canceled')), occurred_at text not null, payload_json text not null, output_artifact_id text references artifacts(id) on delete restrict, state text not null check(state in ('pending','applied')), created_at text not null, applied_at text, unique(request_id, sequence), check((state = 'pending' and applied_at is null) or (state = 'applied' and applied_at is not null)))"),
         QStringLiteral("create trigger if not exists trg_tasks_require_evidence_before_terminal before update of state on tasks when new.state in ('succeeded','failed','canceled') and old.state not in ('succeeded','failed','canceled') and exists(select 1 from workflow_runs w left join workflow_terminalizations z on z.workflow_run_id = w.id where w.task_id = new.id and w.terminal_policy = 'evidence_required' and (z.workflow_run_id is null or z.state = 'sealed')) begin select raise(abort, 'evidence_required workflow must attach evidence before task terminal'); end"),
         QStringLiteral("create index if not exists idx_tasks_updated_at on tasks(updated_at desc)"),
         QStringLiteral("create index if not exists idx_task_events_task_id on task_events(task_id, sequence)"),
@@ -489,6 +492,7 @@ bool ProjectStore::initialize(QString* error)
         QStringLiteral("create index if not exists idx_workflow_steps_run_ordinal on workflow_steps(workflow_run_id, ordinal)"),
         QStringLiteral("create index if not exists idx_workflow_inputs_artifact on workflow_input_bindings(source_artifact_id)"),
         QStringLiteral("create index if not exists idx_workflow_terminalizations_pending on workflow_terminalizations(state, sealed_at)"),
+        QStringLiteral("create index if not exists idx_workflow_terminal_outbox_pending on workflow_terminal_outbox(state, created_at, message_id)"),
         QStringLiteral("create index if not exists idx_model_packages_source_task_id on model_packages(source_task_id)"),
         QStringLiteral("create index if not exists idx_model_packages_source_artifact_id on model_packages(source_artifact_id)")
     };
@@ -765,6 +769,409 @@ bool ProjectStore::recordProtocolEvent(const TaskId& taskId,
     }
     db_.rollback();
     return false;
+}
+
+bool ProjectStore::recordWorkflowTerminalEvent(const ProtocolEnvelope& envelope,
+    const ArtifactId& outputArtifactId,
+    bool* idempotent,
+    QString* error)
+{
+    if (idempotent) *idempotent = false;
+    const bool terminal = envelope.kind == QStringLiteral("event.succeeded")
+        || envelope.kind == QStringLiteral("event.failed")
+        || envelope.kind == QStringLiteral("event.canceled");
+    if (!validateProtocolEnvelope(envelope, error) || !terminal
+        || envelope.sequence > static_cast<quint64>(std::numeric_limits<qint64>::max())) {
+        if (error && error->isEmpty()) *error = QStringLiteral("Workflow 终态事件字段无效。");
+        return false;
+    }
+    if (envelope.kind != QStringLiteral("event.succeeded") && outputArtifactId.isValid()) {
+        if (error) *error = QStringLiteral("失败或取消的 Workflow 终态不能携带输出 Artifact。");
+        return false;
+    }
+    if (!db_.transaction()) {
+        if (error) *error = db_.lastError().text();
+        return false;
+    }
+
+    QSqlQuery owner(db_);
+    owner.prepare(QStringLiteral("select 1 from tasks where id = :task_id and request_id = :request_id"));
+    owner.bindValue(QStringLiteral(":task_id"), envelope.taskId.toString());
+    owner.bindValue(QStringLiteral(":request_id"), envelope.requestId.toString());
+    if (!owner.exec() || !owner.next()) {
+        if (error) *error = owner.lastError().isValid() ? sqlError(owner)
+            : QStringLiteral("Workflow 终态事件不属于指定的任务和请求。");
+        db_.rollback();
+        return false;
+    }
+
+    const QString payloadJson = QString::fromUtf8(QJsonDocument(
+        protocol::redactPhysicalPathFields(envelope.payload)).toJson(QJsonDocument::Compact));
+    bool eventAlreadyStored = false;
+    QSqlQuery duplicate(db_);
+    duplicate.prepare(QStringLiteral("select id, task_id, kind, payload_json from task_events where request_id = :request_id and sequence = :sequence"));
+    duplicate.bindValue(QStringLiteral(":request_id"), envelope.requestId.toString());
+    duplicate.bindValue(QStringLiteral(":sequence"), static_cast<qint64>(envelope.sequence));
+    if (!duplicate.exec()) {
+        if (error) *error = sqlError(duplicate);
+        db_.rollback();
+        return false;
+    }
+    if (duplicate.next()) {
+        if (duplicate.value(0).toString() != envelope.messageId.toString()
+            || duplicate.value(1).toString() != envelope.taskId.toString()
+            || duplicate.value(2).toString() != envelope.kind
+            || duplicate.value(3).toString() != payloadJson) {
+            if (error) *error = QStringLiteral("Workflow 终态事件序号已被不同事件占用。");
+            db_.rollback();
+            return false;
+        }
+        eventAlreadyStored = true;
+
+        // 已有 outbox 记录时，允许 Adapter 重复投递同一终态，即使
+        // Workflow Step 已由上一次 handler 完成而不再是 Running。
+        QSqlQuery existingOutbox(db_);
+        existingOutbox.prepare(QStringLiteral("select task_id, coalesce(output_artifact_id,'') from workflow_terminal_outbox where message_id = :message_id"));
+        existingOutbox.bindValue(QStringLiteral(":message_id"), envelope.messageId.toString());
+        if (!existingOutbox.exec()) {
+            if (error) *error = sqlError(existingOutbox);
+            db_.rollback();
+            return false;
+        }
+        if (existingOutbox.next()) {
+            if (existingOutbox.value(0).toString() != envelope.taskId.toString()
+                || existingOutbox.value(1).toString() != outputArtifactId.toString()) {
+                if (error) *error = QStringLiteral("Workflow 终态 outbox 已按不同 Task/Artifact 事实登记。");
+                db_.rollback();
+                return false;
+            }
+            if (!db_.commit()) {
+                if (error) *error = db_.lastError().text();
+                return false;
+            }
+            if (idempotent) *idempotent = true;
+            return true;
+        }
+    } else {
+        QSqlQuery existingMessage(db_);
+        existingMessage.prepare(QStringLiteral("select request_id, sequence from task_events where id = :id"));
+        existingMessage.bindValue(QStringLiteral(":id"), envelope.messageId.toString());
+        if (!existingMessage.exec()) {
+            if (error) *error = sqlError(existingMessage);
+            db_.rollback();
+            return false;
+        }
+        if (existingMessage.next()) {
+            if (error) *error = QStringLiteral("Workflow 终态事件 messageId 已用于另一条事件。");
+            db_.rollback();
+            return false;
+        }
+        QSqlQuery sequenceQuery(db_);
+        sequenceQuery.prepare(QStringLiteral("select coalesce(max(sequence), 0) from task_events where request_id = :request_id and kind <> 'task.state_changed'"));
+        sequenceQuery.bindValue(QStringLiteral(":request_id"), envelope.requestId.toString());
+        if (!sequenceQuery.exec() || !sequenceQuery.next()) {
+            if (error) *error = sqlError(sequenceQuery);
+            db_.rollback();
+            return false;
+        }
+        if (sequenceQuery.value(0).toLongLong() >= static_cast<qint64>(envelope.sequence)) {
+            if (error) *error = QStringLiteral("Workflow 终态事件 sequence 必须严格递增或已重复。");
+            db_.rollback();
+            return false;
+        }
+    }
+
+    // 记录事件时绑定唯一的 Running Workflow Step，恢复时不依赖进程内
+    // callback/closure，也不会把终态事件错误重放到后续步骤。
+    QSqlQuery stepQuery(db_);
+    stepQuery.prepare(QStringLiteral("select w.id, s.id from workflow_runs w join workflow_steps s on s.workflow_run_id = w.id where w.task_id = :task_id and s.state = 'running' order by s.ordinal asc limit 2"));
+    stepQuery.bindValue(QStringLiteral(":task_id"), envelope.taskId.toString());
+    if (!stepQuery.exec()) {
+        if (error) *error = sqlError(stepQuery);
+        db_.rollback();
+        return false;
+    }
+    if (!stepQuery.next()) {
+        // 普通（非多步骤 Workflow）Adapter 仍然使用同一入口记录终态
+        // 审计，但不创建 workflow outbox；只有声明过 Workflow 的任务才
+        // 要求事件绑定到 Running Step，避免把晚到终态写入错误的运行。
+        QSqlQuery workflowQuery(db_);
+        workflowQuery.prepare(QStringLiteral("select count(*) from workflow_runs where task_id = :task_id"));
+        workflowQuery.bindValue(QStringLiteral(":task_id"), envelope.taskId.toString());
+        if (!workflowQuery.exec() || !workflowQuery.next()) {
+            if (error) *error = sqlError(workflowQuery);
+            db_.rollback();
+            return false;
+        }
+        if (workflowQuery.value(0).toInt() == 0) {
+            if (outputArtifactId.isValid()) {
+                QSqlQuery artifactQuery(db_);
+                artifactQuery.prepare(QStringLiteral("select task_id from artifacts where id = :id"));
+                artifactQuery.bindValue(QStringLiteral(":id"), outputArtifactId.toString());
+                if (!artifactQuery.exec() || !artifactQuery.next()
+                    || artifactQuery.value(0).toString() != envelope.taskId.toString()) {
+                    if (error) *error = artifactQuery.lastError().isValid() ? sqlError(artifactQuery)
+                        : QStringLiteral("Adapter 终态输出 Artifact 不属于根任务。");
+                    db_.rollback();
+                    return false;
+                }
+            }
+            if (!eventAlreadyStored) {
+                QSqlQuery insertEvent(db_);
+                insertEvent.prepare(QStringLiteral("insert into task_events(id, task_id, request_id, sequence, kind, occurred_at, payload_json) values(:id, :task_id, :request_id, :sequence, :kind, :occurred_at, :payload_json)"));
+                insertEvent.bindValue(QStringLiteral(":id"), envelope.messageId.toString());
+                insertEvent.bindValue(QStringLiteral(":task_id"), envelope.taskId.toString());
+                insertEvent.bindValue(QStringLiteral(":request_id"), envelope.requestId.toString());
+                insertEvent.bindValue(QStringLiteral(":sequence"), static_cast<qint64>(envelope.sequence));
+                insertEvent.bindValue(QStringLiteral(":kind"), envelope.kind);
+                insertEvent.bindValue(QStringLiteral(":occurred_at"), utcText(envelope.timestamp));
+                insertEvent.bindValue(QStringLiteral(":payload_json"), payloadJson);
+                if (!insertEvent.exec()) {
+                    if (error) *error = sqlError(insertEvent);
+                    db_.rollback();
+                    return false;
+                }
+            }
+            if (!db_.commit()) {
+                if (error) *error = db_.lastError().text();
+                return false;
+            }
+            return true;
+        }
+        if (error) *error = QStringLiteral("Workflow 终态事件没有可绑定的 Running 步骤。");
+        db_.rollback();
+        return false;
+    }
+    const QString workflowRunText = stepQuery.value(0).toString();
+    const QString workflowStepText = stepQuery.value(1).toString();
+    WorkflowRunId workflowRunId;
+    WorkflowStepId workflowStepId;
+    if (!WorkflowRunId::parse(workflowRunText, &workflowRunId, error)
+        || !WorkflowStepId::parse(workflowStepText, &workflowStepId, error)) {
+        db_.rollback();
+        return false;
+    }
+    if (stepQuery.next()) {
+        if (error) *error = QStringLiteral("同一根任务存在多个 Running Workflow 步骤，拒绝绑定终态事件。");
+        db_.rollback();
+        return false;
+    }
+
+    if (outputArtifactId.isValid()) {
+        QSqlQuery artifactQuery(db_);
+        artifactQuery.prepare(QStringLiteral("select task_id from artifacts where id = :id"));
+        artifactQuery.bindValue(QStringLiteral(":id"), outputArtifactId.toString());
+        if (!artifactQuery.exec() || !artifactQuery.next()
+            || artifactQuery.value(0).toString() != envelope.taskId.toString()) {
+            if (error) *error = artifactQuery.lastError().isValid() ? sqlError(artifactQuery)
+                : QStringLiteral("Workflow 终态输出 Artifact 不属于根任务。");
+            db_.rollback();
+            return false;
+        }
+    }
+
+    if (!eventAlreadyStored) {
+        QSqlQuery insertEvent(db_);
+        insertEvent.prepare(QStringLiteral("insert into task_events(id, task_id, request_id, sequence, kind, occurred_at, payload_json) values(:id, :task_id, :request_id, :sequence, :kind, :occurred_at, :payload_json)"));
+        insertEvent.bindValue(QStringLiteral(":id"), envelope.messageId.toString());
+        insertEvent.bindValue(QStringLiteral(":task_id"), envelope.taskId.toString());
+        insertEvent.bindValue(QStringLiteral(":request_id"), envelope.requestId.toString());
+        insertEvent.bindValue(QStringLiteral(":sequence"), static_cast<qint64>(envelope.sequence));
+        insertEvent.bindValue(QStringLiteral(":kind"), envelope.kind);
+        insertEvent.bindValue(QStringLiteral(":occurred_at"), utcText(envelope.timestamp));
+        insertEvent.bindValue(QStringLiteral(":payload_json"), payloadJson);
+        if (!insertEvent.exec()) {
+            if (error) *error = sqlError(insertEvent);
+            db_.rollback();
+            return false;
+        }
+    }
+
+    QSqlQuery outbox(db_);
+    outbox.prepare(QStringLiteral("select task_id, workflow_run_id, workflow_step_id, coalesce(output_artifact_id,''), state from workflow_terminal_outbox where message_id = :message_id"));
+    outbox.bindValue(QStringLiteral(":message_id"), envelope.messageId.toString());
+    if (!outbox.exec()) {
+        if (error) *error = sqlError(outbox);
+        db_.rollback();
+        return false;
+    }
+    if (outbox.next()) {
+        if (outbox.value(0).toString() != envelope.taskId.toString()
+            || outbox.value(1).toString() != workflowRunId.toString()
+            || outbox.value(2).toString() != workflowStepId.toString()
+            || outbox.value(3).toString() != outputArtifactId.toString()) {
+            if (error) *error = QStringLiteral("Workflow 终态 outbox 已按不同 Workflow/Artifact 事实登记。");
+            db_.rollback();
+            return false;
+        }
+        if (!db_.commit()) {
+            if (error) *error = db_.lastError().text();
+            return false;
+        }
+        if (idempotent) *idempotent = true;
+        return true;
+    }
+
+    QSqlQuery insertOutbox(db_);
+    insertOutbox.prepare(QStringLiteral("insert into workflow_terminal_outbox(message_id, task_id, request_id, workflow_run_id, workflow_step_id, sequence, kind, occurred_at, payload_json, output_artifact_id, state, created_at, applied_at) values(:message_id, :task_id, :request_id, :workflow_run_id, :workflow_step_id, :sequence, :kind, :occurred_at, :payload_json, :output_artifact_id, 'pending', :created_at, null)"));
+    insertOutbox.bindValue(QStringLiteral(":message_id"), envelope.messageId.toString());
+    insertOutbox.bindValue(QStringLiteral(":task_id"), envelope.taskId.toString());
+    insertOutbox.bindValue(QStringLiteral(":request_id"), envelope.requestId.toString());
+    insertOutbox.bindValue(QStringLiteral(":workflow_run_id"), workflowRunId.toString());
+    insertOutbox.bindValue(QStringLiteral(":workflow_step_id"), workflowStepId.toString());
+    insertOutbox.bindValue(QStringLiteral(":sequence"), static_cast<qint64>(envelope.sequence));
+    insertOutbox.bindValue(QStringLiteral(":kind"), envelope.kind);
+    insertOutbox.bindValue(QStringLiteral(":occurred_at"), utcText(envelope.timestamp));
+    insertOutbox.bindValue(QStringLiteral(":payload_json"), payloadJson);
+    insertOutbox.bindValue(QStringLiteral(":output_artifact_id"), outputArtifactId.isValid()
+        ? QVariant(outputArtifactId.toString()) : QVariant());
+    insertOutbox.bindValue(QStringLiteral(":created_at"), utcText(QDateTime::currentDateTimeUtc()));
+    if (!insertOutbox.exec()) {
+        if (error) *error = sqlError(insertOutbox);
+        db_.rollback();
+        return false;
+    }
+    if (!db_.commit()) {
+        if (error) *error = db_.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+QVector<WorkflowTerminalEventSnapshot> ProjectStore::pendingWorkflowTerminalEvents(
+    int limit, QString* error) const
+{
+    QVector<WorkflowTerminalEventSnapshot> results;
+    if (limit <= 0) {
+        if (error) *error = QStringLiteral("查询 Workflow 终态 outbox 需要正数 limit。");
+        return results;
+    }
+    QSqlQuery query(db_);
+    query.prepare(QStringLiteral("select message_id, request_id, task_id, workflow_run_id, workflow_step_id, sequence, kind, occurred_at, payload_json, coalesce(output_artifact_id,''), state from workflow_terminal_outbox where state = 'pending' order by created_at asc, message_id asc limit :limit"));
+    query.bindValue(QStringLiteral(":limit"), limit);
+    if (!query.exec()) {
+        if (error) *error = sqlError(query);
+        return {};
+    }
+    while (query.next()) {
+        WorkflowTerminalEventSnapshot item;
+        if (!MessageId::parse(query.value(0).toString(), &item.messageId, error)
+            || !RequestId::parse(query.value(1).toString(), &item.requestId, error)
+            || !TaskId::parse(query.value(2).toString(), &item.taskId, error)
+            || !WorkflowRunId::parse(query.value(3).toString(), &item.workflowRunId, error)
+            || !WorkflowStepId::parse(query.value(4).toString(), &item.workflowStepId, error)) {
+            return {};
+        }
+        item.sequence = query.value(5).toULongLong();
+        item.kind = query.value(6).toString();
+        item.occurredAt = parseUtc(query.value(7).toString());
+        const QJsonDocument document = QJsonDocument::fromJson(query.value(8).toString().toUtf8());
+        if (!document.isObject()) {
+            if (error) *error = QStringLiteral("Workflow 终态 outbox payload 不是 JSON 对象。");
+            return {};
+        }
+        item.payload = document.object();
+        const QString artifactText = query.value(9).toString();
+        if (!artifactText.isEmpty() && !ArtifactId::parse(artifactText, &item.outputArtifactId, error)) return {};
+        item.applied = query.value(10).toString() == QStringLiteral("applied");
+        results.append(item);
+    }
+    return results;
+}
+
+bool ProjectStore::workflowTerminalEventApplied(const MessageId& messageId,
+    bool* applied, QString* error, bool* exists) const
+{
+    if (!messageId.isValid() || !applied) {
+        if (error) *error = QStringLiteral("查询 Workflow 终态 outbox 状态需要有效 messageId 和输出对象。");
+        return false;
+    }
+    QSqlQuery query(db_);
+    query.prepare(QStringLiteral("select state from workflow_terminal_outbox where message_id = :message_id"));
+    query.bindValue(QStringLiteral(":message_id"), messageId.toString());
+    if (!query.exec()) {
+        if (error) *error = sqlError(query);
+        return false;
+    }
+    if (!query.next()) {
+        // 普通 Adapter 任务只写入 task_events，不会有 outbox 行；将其
+        // 视为“未进入 Workflow outbox”，让调用方继续走普通终态回调。
+        *applied = false;
+        if (exists) *exists = false;
+        if (error) error->clear();
+        return true;
+    }
+    if (exists) *exists = true;
+    *applied = query.value(0).toString() == QStringLiteral("applied");
+    return true;
+}
+
+bool ProjectStore::workflowTerminalEventBinding(const MessageId& messageId,
+    WorkflowRunId* workflowRunId, WorkflowStepId* workflowStepId,
+    QString* error) const
+{
+    if (!messageId.isValid() || !workflowRunId || !workflowStepId) {
+        if (error) *error = QStringLiteral("查询 Workflow 终态绑定需要有效 messageId 和输出对象。");
+        return false;
+    }
+    QSqlQuery query(db_);
+    query.prepare(QStringLiteral(
+        "select workflow_run_id, workflow_step_id from workflow_terminal_outbox "
+        "where message_id = :message_id"));
+    query.bindValue(QStringLiteral(":message_id"), messageId.toString());
+    if (!query.exec()) {
+        if (error) *error = sqlError(query);
+        return false;
+    }
+    if (!query.next()) {
+        if (error) *error = QStringLiteral("Workflow 终态 outbox 记录不存在。");
+        return false;
+    }
+    return WorkflowRunId::parse(query.value(0).toString(), workflowRunId, error)
+        && WorkflowStepId::parse(query.value(1).toString(), workflowStepId, error);
+}
+
+bool ProjectStore::markWorkflowTerminalEventApplied(const MessageId& messageId,
+    QString* error)
+{
+    if (!messageId.isValid()) {
+        if (error) *error = QStringLiteral("标记 Workflow 终态 outbox 需要有效 messageId。");
+        return false;
+    }
+    if (!db_.transaction()) {
+        if (error) *error = db_.lastError().text();
+        return false;
+    }
+    QSqlQuery query(db_);
+    query.prepare(QStringLiteral("update workflow_terminal_outbox set state = 'applied', applied_at = :applied_at where message_id = :message_id and state = 'pending'"));
+    query.bindValue(QStringLiteral(":applied_at"), utcText(QDateTime::currentDateTimeUtc()));
+    query.bindValue(QStringLiteral(":message_id"), messageId.toString());
+    if (!query.exec()) {
+        if (error) *error = sqlError(query);
+        db_.rollback();
+        return false;
+    }
+    if (query.numRowsAffected() == 0) {
+        QSqlQuery existing(db_);
+        existing.prepare(QStringLiteral("select state from workflow_terminal_outbox where message_id = :message_id"));
+        existing.bindValue(QStringLiteral(":message_id"), messageId.toString());
+        if (!existing.exec() || !existing.next()) {
+            if (error) *error = existing.lastError().isValid() ? sqlError(existing)
+                : QStringLiteral("Workflow 终态 outbox 记录不存在。");
+            db_.rollback();
+            return false;
+        }
+        if (existing.value(0).toString() != QStringLiteral("applied")) {
+            if (error) *error = QStringLiteral("Workflow 终态 outbox 状态无法标记为 applied。");
+            db_.rollback();
+            return false;
+        }
+    }
+    if (!db_.commit()) {
+        if (error) *error = db_.lastError().text();
+        return false;
+    }
+    return true;
 }
 
 bool ProjectStore::applyProtocolEvent(const ProtocolEnvelope& envelope,

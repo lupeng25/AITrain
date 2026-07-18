@@ -4,7 +4,7 @@
 
 定位：Windows + Qt Widgets + Worker 的本地视觉训练平台。
 
-> 2026-07-16 破坏性重构覆盖：本文早期 Phase/脚本描述仅作历史证据。当前实现以 SQLite schema 11、V2 Storage/Artifact/Workflow、Protocol V2 和官方适配器为准；旧 Repository、ProductWorkflow、裸路径 Worker 命令及独立 smoke 脚本均已删除。
+> 2026-07-18 破坏性重构覆盖：本文早期 Phase/脚本描述仅作历史证据。当前实现以 SQLite schema 12、V2 Storage/Artifact/Workflow、Protocol V2 和官方适配器为准；旧 Repository、ProductWorkflow、裸路径 Worker 命令及独立 smoke 脚本均已删除。
 
 本文是 Phase 39+ 的当前方向文档。当前权威状态仍以 `docs/harness/current-status.md` 为准。已删除或外部保留的历史路线笔记不作为下一步实施、阶段状态或验收口径来源。
 

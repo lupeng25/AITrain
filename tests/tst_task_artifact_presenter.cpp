@@ -5,11 +5,16 @@
 
 #include <QDir>
 #include <QCryptographicHash>
+#include <QEventLoop>
 #include <QFile>
 #include <QHash>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QThread>
+#include <QTimer>
 #include <QTest>
+
+#include <utility>
 
 class TaskArtifactPresenterTests : public QObject {
     Q_OBJECT
@@ -17,6 +22,7 @@ class TaskArtifactPresenterTests : public QObject {
 private slots:
     void readsPersistedTaskArtifactsMetricsAndWorkflowOnly();
     void readsCommittedArtifactPreviewByIdentity();
+    void readsCommittedArtifactPreviewAsynchronouslyWithMetadataSnapshot();
     void invalidSelectionClearsReadModelWithoutPrivateAccess();
 };
 
@@ -159,6 +165,73 @@ void TaskArtifactPresenterTests::readsCommittedArtifactPreviewByIdentity()
     QCOMPARE(preview.content, content);
     QVERIFY(!preview.truncated);
     QVERIFY(!query.artifactFilePreview(artifactId, QStringLiteral("../project.sqlite"), &preview, 1024, &error));
+}
+
+void TaskArtifactPresenterTests::readsCommittedArtifactPreviewAsynchronouslyWithMetadataSnapshot()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    aitrain::ProjectWorkspace workspace;
+    QString error;
+    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
+    const aitrain::TaskId taskId = aitrain::TaskId::create();
+    aitrain::TaskSnapshot task;
+    QVERIFY2(workspace.startTask(taskId, QStringLiteral("preview_async"), QStringLiteral("report"),
+        &task, &error), qPrintable(error));
+
+    const aitrain::ArtifactId artifactId = aitrain::ArtifactId::create();
+    QByteArray content;
+    content.resize(2 * 1024 * 1024);
+    for (int i = 0; i < content.size(); ++i) content[i] = static_cast<char>(i % 251);
+    const QString sha256 = QString::fromLatin1(QCryptographicHash::hash(
+        content, QCryptographicHash::Sha256).toHex());
+    const QString artifactRoot = QDir(workspace.workspacePath()).filePath(
+        QStringLiteral("artifacts/committed/%1").arg(artifactId.toString()));
+    QVERIFY(QDir().mkpath(artifactRoot));
+    QFile file(QDir(artifactRoot).filePath(QStringLiteral("large.bin")));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QCOMPARE(file.write(content), content.size());
+    file.close();
+
+    aitrain::ProjectStore storage;
+    QVERIFY2(storage.open(QDir(workspace.workspacePath()).filePath(QStringLiteral("project.sqlite")),
+        &error), qPrintable(error));
+    QVERIFY2(storage.recordArtifactWithFiles(artifactId, taskId, QStringLiteral("report"),
+        {{QStringLiteral("large.bin"), sha256, content.size()}},
+        QDateTime::currentDateTimeUtc(), &error), qPrintable(error));
+
+    aitrain::ProjectQueryService query(&workspace);
+    QObject receiver;
+    QEventLoop loop;
+    QTimer timeout;
+    timeout.setSingleShot(true);
+    timeout.setInterval(5000);
+    connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+    bool callbackCalled = false;
+    bool callbackSuccess = false;
+    bool callbackOnCallingThread = false;
+    aitrain::ArtifactFilePreview result;
+    QString callbackError;
+    QThread* callingThread = QThread::currentThread();
+    QVERIFY2(query.artifactFilePreviewAsync(artifactId, QStringLiteral("large.bin"), &receiver,
+        [&](bool success, aitrain::ArtifactFilePreview preview, QString readError) {
+            callbackCalled = true;
+            callbackSuccess = success;
+            callbackOnCallingThread = QThread::currentThread() == callingThread;
+            result = std::move(preview);
+            callbackError = std::move(readError);
+            loop.quit();
+        }, 1024, &error), qPrintable(error));
+    timeout.start();
+    loop.exec();
+    QVERIFY2(callbackCalled, "异步 Artifact 预览回调未返回");
+    QVERIFY2(callbackSuccess, qPrintable(callbackError));
+    QVERIFY(callbackOnCallingThread);
+    QCOMPARE(result.relativePath, QStringLiteral("large.bin"));
+    QCOMPARE(result.sha256, sha256);
+    QCOMPARE(result.byteCount, qint64(content.size()));
+    QCOMPARE(result.content, content.left(1024));
+    QVERIFY(result.truncated);
 }
 
 QTEST_MAIN(TaskArtifactPresenterTests)
