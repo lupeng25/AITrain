@@ -1626,6 +1626,20 @@ void ApplicationTests::trainingWorkflowEvidenceGatePersistsEvidenceBeforeTermina
     aitrain::EvidenceArtifactBundle committed;
     QVERIFY2(workspace.buildWorkflowEvidenceBundle(workflow.workflowRunId, &evidence, &error), qPrintable(error));
     QCOMPARE(evidence.task.state, aitrain::TaskState::Failed);
+
+    // Evidence 提交边界必须重新验证 Artifact lineage/facts，不能信任
+    // build 后由调用方携带的可变 Bundle。
+    QVERIFY(!evidence.artifacts.isEmpty());
+    aitrain::EvidenceBundle tampered = evidence;
+    tampered.artifacts[0].artifactId = aitrain::ArtifactId::create();
+    QVERIFY(!workspace.commitEvidenceBundle(tampered, &committed, &error));
+    QVERIFY(error.contains(QStringLiteral("lineage")) || error.contains(QStringLiteral("Artifact")));
+    error.clear();
+    tampered = evidence;
+    tampered.artifacts[0].facts.insert(QStringLiteral("inventorySha256"), QString(64, QLatin1Char('f')));
+    QVERIFY(!workspace.commitEvidenceBundle(tampered, &committed, &error));
+    QVERIFY(error.contains(QStringLiteral("facts")));
+    error.clear();
     QVERIFY2(workspace.commitEvidenceBundle(evidence, &committed, &error), qPrintable(error));
     QVERIFY(committed.artifactId.isValid());
 

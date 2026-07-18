@@ -33,7 +33,10 @@ This file is the source of truth for phase status in new AI coding conversations
 - Environment Check 与 Diagnostics 的事实 Artifact 在校验和提交前都经过物理路径脱敏；PaddleOCR System loopback 测试已注册到 CTest，并对终态 ACK 做完整握手。官方 YOLO/SMP/Anomalib Profile ID 由 Capability Planner 按 Profile 合同验证，不再误当成 Capability Registry backend。
 - GUI 已阻止 Worker 运行期间切换项目，删除数据集 legacy slot 命名，并将目录探测限制在有界读取；旧 `build-vscode/tests` 与 `build-vscode/bin` 中残留的版本化测试可执行文件已清除。Qt CMake 配置在启用运行时复制却缺少 DLL、平台插件或 `qt.conf` 时直接失败，避免 F5 回退到外部 Qt 安装。
 
-本轮仍明确不宣称已完成的边界：项目打开/恢复、数据集格式探测、Artifact 全文件哈希和样本预览仍有 GUI 线程同步路径；Evidence 终态持久化与 Workflow handler 尚未合并为单一数据库事务；Worker 终态后 watchdog、Artifact SHA-256 十六进制校验、Evidence lineage 强校验以及 `aitrain_foundation` 内部历史源文件的进一步 target 拆分仍需下一阶段处理。这些边界已写入审计与方案，不得在验收报告中描述为已收口能力。
+- 本轮结构尾项已完成三项：数据集目录/转换输入的格式探测改为 `QThreadPool` 有界后台任务，使用 generation 与当前路径双重检查丢弃陈旧回调；Python Adapter 在下游接受终态后增加默认 5 秒的进程退出 watchdog，超时只终止遗留进程、不合成第二个任务终态；Artifact、Dataset、Model、Runtime 和 Evidence 的 SHA-256 统一要求小写 64 位十六进制，并在 Evidence 提交前重新核验 Workflow lineage、Artifact 所有权、Dataset Snapshot 绑定及 inventory facts。对应 UI、Process、Storage、Application 回归均已通过。
+- 为避免 VS Code/调试器继承机器上其他 Qt 安装的 `QT_PLUGIN_PATH`，Run/Debug 配置显式指向当前 `build-vscode/bin` 的插件和平台插件目录；测试仍固定使用 `build-vscode/tests/platforms/qoffscreen`。直接运行时如环境变量被外部脚本覆盖，应清理后重新构建并从 `build-vscode/bin/AITrainStudio.exe` 启动。
+
+本轮仍明确不宣称已完成的边界：项目打开/恢复仍在 GUI 线程同步执行；Artifact 全文件哈希和样本预览的实际读取仍为受控同步查询（未将大文件读取迁移到独立 Worker）；Evidence 终态事件持久化与 Workflow handler 尚未合并为单一 SQLite 事务，当前依靠终态门禁、Evidence 重验和恢复流程保证可恢复性；`aitrain_foundation` 内部历史源文件的进一步 target 拆分也尚未实施。这些边界已写入审计与方案，不得在验收报告中描述为已收口能力。
 
 ##  破坏性重构执行状态（2026-07-16）
 

@@ -70,7 +70,12 @@
       "type": "shell",
       "command": "${workspaceFolder}\\build-vscode\\bin\\AITrainStudio.exe",
       "options": {
-        "cwd": "${workspaceFolder}"
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "QT_PLUGIN_PATH": "${workspaceFolder}\\build-vscode\\bin",
+          "QT_QPA_PLATFORM_PLUGIN_PATH": "${workspaceFolder}\\build-vscode\\bin\\platforms",
+          "QT_QPA_PLATFORM": "windows"
+        }
       },
       "dependsOn": "Build AITrain",
       "problemMatcher": []

@@ -300,8 +300,8 @@ bool parseDatasetSnapshot(QSqlQuery& query, DatasetSnapshotRecord* result, QStri
     parsed.totalBytes = query.value(12).toLongLong();
     parsed.createdAt = parseUtc(query.value(13).toString());
     if (parsed.rootPath.isEmpty() || parsed.datasetFormat.isEmpty() || parsed.driverId.isEmpty()
-        || parsed.driverVersion.isEmpty() || parsed.rootHash.size() != 64
-        || parsed.manifestSha256.size() != 64 || parsed.fileCount < 0 || parsed.totalBytes < 0
+        || parsed.driverVersion.isEmpty() || !isSha256Hex(parsed.rootHash)
+        || !isSha256Hex(parsed.manifestSha256) || parsed.fileCount < 0 || parsed.totalBytes < 0
         || !parsed.createdAt.isValid()) {
         if (error) *error = QStringLiteral("数据集快照记录字段无效。");
         return false;
@@ -466,14 +466,14 @@ bool ProjectStore::initialize(QString* error)
         QStringLiteral("insert into schema_info(version) select %1 where not exists(select 1 from schema_info)")
             .arg(kStorageSchemaVersion),
         QStringLiteral("create table if not exists datasets (id text primary key, dataset_format text not null, created_at text not null)"),
-        QStringLiteral("create table if not exists dataset_versions (id text primary key, dataset_id text not null references datasets(id) on delete restrict, root_hash text not null check(length(root_hash) = 64), created_at text not null, unique(dataset_id, root_hash))"),
-        QStringLiteral("create table if not exists dataset_snapshots (id text primary key, dataset_version_id text not null references dataset_versions(id) on delete restrict, task_id text not null references tasks(id) on delete restrict, artifact_id text not null unique references artifacts(id) on delete restrict, root_path text not null, driver_id text not null, driver_version text not null, manifest_sha256 text not null check(length(manifest_sha256) = 64), file_count integer not null check(file_count >= 0), total_bytes integer not null check(total_bytes >= 0), created_at text not null)"),
+        QStringLiteral("create table if not exists dataset_versions (id text primary key, dataset_id text not null references datasets(id) on delete restrict, root_hash text not null check(length(root_hash) = 64 and root_hash not glob '*[^0-9a-f]*'), created_at text not null, unique(dataset_id, root_hash))"),
+        QStringLiteral("create table if not exists dataset_snapshots (id text primary key, dataset_version_id text not null references dataset_versions(id) on delete restrict, task_id text not null references tasks(id) on delete restrict, artifact_id text not null unique references artifacts(id) on delete restrict, root_path text not null, driver_id text not null, driver_version text not null, manifest_sha256 text not null check(length(manifest_sha256) = 64 and manifest_sha256 not glob '*[^0-9a-f]*'), file_count integer not null check(file_count >= 0), total_bytes integer not null check(total_bytes >= 0), created_at text not null)"),
         QStringLiteral("create table if not exists tasks (id text primary key, request_id text not null unique, state text not null check(state in ('created','queued','starting','running','cancel_requested','succeeded','failed','canceled')), capability_id text not null, task_type text not null, failure_code text not null default 'none', failure_details text not null default '', failure_suggested_action text not null default '', failure_occurred_at text, created_at text not null, updated_at text not null)"),
         QStringLiteral("create table if not exists task_events (id text primary key, task_id text not null references tasks(id) on delete restrict, request_id text not null, sequence integer not null check(sequence > 0), kind text not null, occurred_at text not null, payload_json text not null, unique(request_id, sequence))"),
         QStringLiteral("create table if not exists task_metrics (id text primary key, task_id text not null references tasks(id) on delete restrict, name text not null, value real not null, occurred_at text not null)"),
         QStringLiteral("create table if not exists artifacts (id text primary key, task_id text not null references tasks(id) on delete restrict, kind text not null, created_at text not null)"),
-        QStringLiteral("create table if not exists artifact_files (id text primary key, artifact_id text not null references artifacts(id) on delete restrict, relative_path text not null, sha256 text not null, byte_count integer not null check(byte_count >= 0), unique(artifact_id, relative_path))"),
-        QStringLiteral("create table if not exists model_packages (id text primary key, model_family text not null, task_type text not null, source_backend text not null, source_task_id text not null references tasks(id) on delete restrict, source_snapshot_id text not null, source_artifact_id text not null references artifacts(id) on delete restrict, source_artifact_sha256 text not null check(length(source_artifact_sha256) = 64), manifest_json text not null, verified integer not null check(verified in (0, 1)), created_at text not null)"),
+        QStringLiteral("create table if not exists artifact_files (id text primary key, artifact_id text not null references artifacts(id) on delete restrict, relative_path text not null, sha256 text not null check(length(sha256) = 64 and sha256 not glob '*[^0-9a-f]*'), byte_count integer not null check(byte_count >= 0), unique(artifact_id, relative_path))"),
+        QStringLiteral("create table if not exists model_packages (id text primary key, model_family text not null, task_type text not null, source_backend text not null, source_task_id text not null references tasks(id) on delete restrict, source_snapshot_id text not null, source_artifact_id text not null references artifacts(id) on delete restrict, source_artifact_sha256 text not null check(length(source_artifact_sha256) = 64 and source_artifact_sha256 not glob '*[^0-9a-f]*'), manifest_json text not null, verified integer not null check(verified in (0, 1)), created_at text not null)"),
         QStringLiteral("create table if not exists evaluation_reports (id text primary key, task_id text not null references tasks(id) on delete restrict, artifact_id text not null references artifacts(id) on delete restrict, created_at text not null)"),
         QStringLiteral("create table if not exists workflow_runs (id text primary key, task_id text not null references tasks(id) on delete restrict, template_id text not null, terminal_policy text not null check(terminal_policy in ('immediate','evidence_required')), created_at text not null)"),
         QStringLiteral("create table if not exists workflow_input_bindings (workflow_run_id text not null references workflow_runs(id) on delete restrict, role text not null, source_artifact_id text not null references artifacts(id) on delete restrict, source_task_id text not null references tasks(id) on delete restrict, source_artifact_kind text not null, dataset_id text references datasets(id) on delete restrict, dataset_snapshot_id text references dataset_snapshots(id) on delete restrict, dataset_version_id text references dataset_versions(id) on delete restrict, model_package_id text references model_packages(id) on delete restrict, manifest_sha256 text not null default '', root_hash text not null default '', bound_at text not null, primary key(workflow_run_id, role))"),
@@ -1085,7 +1085,7 @@ bool ProjectStore::recordArtifactWithFiles(const ArtifactId& artifactId,
         if (!normalizeArtifactMemberPath(file.relativePath, &normalizedPath, error)
             || normalizedPath != file.relativePath
             || normalizedPaths.contains(normalizedPath.toCaseFolded())
-            || file.sha256.size() != 64 || file.byteCount < 0) {
+            || !isSha256Hex(file.sha256) || file.byteCount < 0) {
             if (error) {
                 *error = QStringLiteral("Artifact 文件记录无效。");
             }
@@ -1145,7 +1145,7 @@ bool ProjectStore::recordEvidenceArtifactWithFilesAndAttachTerminalization(
     for (const ArtifactFileSnapshot& file : files) {
         QString normalizedPath;
         if (!normalizeArtifactMemberPath(file.relativePath, &normalizedPath, error)
-            || normalizedPath != file.relativePath || file.sha256.size() != 64 || file.byteCount < 0
+            || normalizedPath != file.relativePath || !isSha256Hex(file.sha256) || file.byteCount < 0
             || paths.contains(normalizedPath.toCaseFolded())) {
             if (error) *error = QStringLiteral("Evidence Artifact 文件记录无效或路径重复。");
             return false;
@@ -1272,7 +1272,7 @@ bool ProjectStore::registerDatasetSnapshot(DatasetSnapshotRecord* snapshot, QStr
     if (!snapshot || !snapshot->id.isValid() || !snapshot->taskId.isValid() || !snapshot->artifactId.isValid()
         || snapshot->rootPath.trimmed().isEmpty() || snapshot->datasetFormat.trimmed().isEmpty()
         || snapshot->driverId.trimmed().isEmpty() || snapshot->driverVersion.trimmed().isEmpty()
-        || snapshot->rootHash.size() != 64 || snapshot->manifestSha256.size() != 64
+        || !isSha256Hex(snapshot->rootHash) || !isSha256Hex(snapshot->manifestSha256)
         || snapshot->fileCount < 0 || snapshot->totalBytes < 0) {
         if (error) *error = QStringLiteral("登记数据集快照需要完整且已校验的快照元数据。");
         return false;
@@ -1773,7 +1773,7 @@ bool ProjectStore::createWorkflowRunInternal(const WorkflowRunSnapshot& workflow
         if (datasetInput) {
             if (!input->datasetId.isValid() || !input->datasetSnapshotId.isValid()
                 || !input->datasetVersionId.isValid() || input->modelPackageId.isValid()
-                || input->manifestSha256.size() != 64 || input->rootHash.size() != 64
+                || !isSha256Hex(input->manifestSha256) || !isSha256Hex(input->rootHash)
                 || input->sourceArtifactKind != QStringLiteral("dataset_snapshot")
                 || !datasetSnapshot(input->datasetSnapshotId, &snapshot, error)
                 || snapshot.artifactId != input->sourceArtifactId
@@ -2698,7 +2698,7 @@ bool ProjectStore::artifact(const ArtifactId& artifactId, ArtifactSnapshot* resu
         file.relativePath = filesQuery.value(0).toString();
         file.sha256 = filesQuery.value(1).toString();
         file.byteCount = filesQuery.value(2).toLongLong();
-        if (file.relativePath.isEmpty() || file.sha256.size() != 64 || file.byteCount < 0) {
+        if (file.relativePath.isEmpty() || !isSha256Hex(file.sha256) || file.byteCount < 0) {
             if (error) *error = QStringLiteral("Artifact 文件记录字段无效。");
             return false;
         }
@@ -2799,7 +2799,7 @@ QVector<DeliveryEvidenceCandidate> ProjectStore::deliveryEvidenceCandidates(
             file.relativePath = query.value(15).toString();
             file.sha256 = query.value(16).toString();
             file.byteCount = query.value(17).toLongLong();
-            if (file.relativePath.isEmpty() || file.sha256.size() != 64 || file.byteCount < 0) {
+            if (file.relativePath.isEmpty() || !isSha256Hex(file.sha256) || file.byteCount < 0) {
                 if (error) *error = QStringLiteral("交付证据 Artifact 文件记录无效。");
                 return {};
             }

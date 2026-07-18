@@ -100,6 +100,7 @@ AITrain Studio 是一个 Windows + NVIDIA GPU 本地视觉训练平台。当前�
 - 客户域 OCR 生产声明必须使用真实客户/目标域数据和官方报告；public Total-Text、generated smoke、`.deps` 示例只能证明流程。
 - NCNN runtime validation 已替代 artifact-only：有 NCNN SDK/runtime 和样本图时验证 YOLO 检测/分割推理；无 SDK/runtime 时必须明确 failed/blocked。本机 2026-05-16 证据覆盖 Hyuto YOLOv8 detection ONNX -> NCNN 和 nihui 预转换 YOLOv8n-seg pnnx/DFL NCNN；YOLOv8-seg ONNX 若经 `onnx2ncnn` 后仍包含 unsupported `Shape` layer，当前是失败报告而不是通过项。
 - 工业异常检测/定位 v1 已有 Python/Anomalib 接入路径和本地 public MVTec workflow/quality evidence，但还没有客户域工业精度证据，也没有 C++ ONNX/TensorRT/NCNN anomaly runtime；OBB v1 已有本地 public DOTA/workflow 质量证据，但客户域工业精度仍需目标域数据验证；专用语义分割已有 SMP 首版闭环和本机 RTX 4090D GPU 实测，但不能把现有 YOLO 检测/实例分割能力描述成语义分割、异常检测或 OBB。
+- 结构性尾项：项目打开/恢复仍是 GUI 线程同步入口；Artifact 大文件哈希/预览仍是受控同步查询；Evidence 终态事件与 Workflow handler 尚无单一 SQLite 事务；`aitrain_foundation` 仍包含待进一步拆分的历史聚合源文件。这些是后续维护性与一致性工作，不得写成已完成能力。
 
 不作为当前项目方向：
 

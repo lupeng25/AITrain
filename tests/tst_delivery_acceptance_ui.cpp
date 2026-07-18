@@ -28,7 +28,9 @@
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QTest>
+#include <QThread>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <QTranslator>
 #include <QUuid>
 
@@ -60,6 +62,7 @@ private slots:
     void repeatedNavigationDoesNotAccumulatePages();
     void reviewSamplePathsRejectExternalAndTraversalValues();
     void largeArtifactsRequireExplicitSelectionAndSkipSynchronousPreview();
+    void datasetFormatProbeRunsOffUiThreadAndReturnsOnContextThread();
     void eventRouterUsesBoundedRollingWindowsAndEvictsTerminalTasks();
 
 private:
@@ -108,6 +111,48 @@ void EnvironmentDeliveryEvidenceUiTests::largeArtifactsRequireExplicitSelectionA
     QCoreApplication::processEvents();
     QVERIFY(preview->toPlainText().contains(QStringLiteral("已跳过同步预览")));
     QVERIFY(preview->toPlainText().contains(QStringLiteral("33554432")));
+}
+
+void EnvironmentDeliveryEvidenceUiTests::datasetFormatProbeRunsOffUiThreadAndReturnsOnContextThread()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString root = directory.path();
+    QVERIFY(QDir().mkpath(QDir(root).filePath(QStringLiteral("images/train"))));
+    QVERIFY(QDir().mkpath(QDir(root).filePath(QStringLiteral("labels/train"))));
+
+    QFile yaml(QDir(root).filePath(QStringLiteral("data.yaml")));
+    QVERIFY(yaml.open(QIODevice::WriteOnly | QIODevice::Text));
+    QVERIFY(yaml.write("path: .\nnames: [item]\n") > 0);
+    yaml.close();
+    QFile image(QDir(root).filePath(QStringLiteral("images/train/sample.jpg")));
+    QVERIFY(image.open(QIODevice::WriteOnly));
+    QVERIFY(image.write("not-a-real-image") > 0);
+    image.close();
+    QFile label(QDir(root).filePath(QStringLiteral("labels/train/sample.txt")));
+    QVERIFY(label.open(QIODevice::WriteOnly | QIODevice::Text));
+    QVERIFY(label.write("0 0.5 0.5 0.25 0.25\n") > 0);
+    label.close();
+
+    QObject context;
+    QEventLoop loop;
+    QTimer timeout;
+    timeout.setSingleShot(true);
+    timeout.setInterval(5000);
+    QString detected;
+    QThread* callbackThread = nullptr;
+    connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+    aitrain_app::detectDatasetFormatAsync(&context, root,
+        [&](const QString& format) {
+            detected = format;
+            callbackThread = QThread::currentThread();
+            loop.quit();
+        });
+    timeout.start();
+    loop.exec();
+
+    QCOMPARE(detected, QStringLiteral("yolo_detection"));
+    QCOMPARE(callbackThread, QCoreApplication::instance()->thread());
 }
 
 void EnvironmentDeliveryEvidenceUiTests::eventRouterUsesBoundedRollingWindowsAndEvictsTerminalTasks()

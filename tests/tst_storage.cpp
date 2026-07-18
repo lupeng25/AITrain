@@ -98,6 +98,7 @@ private slots:
     void enforcesForeignKeys();
     void hostStateEventsDoNotConsumeAdapterProtocolSequence();
     void rejectsNonCanonicalArtifactMemberPaths();
+    void rejectsNonHexArtifactSha256();
     void registersModelPackageOnlyForMatchingArtifactProvenance();
     void listsRegisteredModelPackagesNewestFirst();
     void persistsWorkflowStepsWithArtifactAndRetryGuards();
@@ -334,6 +335,33 @@ void StorageTests::rejectsNonCanonicalArtifactMemberPaths()
         {{QStringLiteral("Model.onnx"), sha, 1}, {QStringLiteral("model.onnx"), sha, 1}},
         QDateTime::currentDateTimeUtc(), &error));
     QVERIFY(!error.isEmpty());
+}
+
+void StorageTests::rejectsNonHexArtifactSha256()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    aitrain::ProjectStore storage;
+    QString error;
+    QVERIFY2(storage.open(directory.filePath(QStringLiteral("project.sqlite")), &error), qPrintable(error));
+    const aitrain::TaskSnapshot task = makeTask();
+    QVERIFY2(storage.createTask(task, &error), qPrintable(error));
+
+    const QVector<QString> invalidDigests{
+        QString(63, QLatin1Char('a')) + QStringLiteral("g"),
+        QString(64, QLatin1Char('A')),
+        QString(64, QLatin1Char('0')) + QStringLiteral(" ")};
+    for (const QString& digest : invalidDigests) {
+        error.clear();
+        QVERIFY(!storage.recordArtifactWithFiles(aitrain::ArtifactId::create(), task.id,
+            QStringLiteral("fixture"), {{QStringLiteral("model.bin"), digest, 1}},
+            QDateTime::currentDateTimeUtc(), &error));
+        QVERIFY2(!error.isEmpty(), qPrintable(digest));
+    }
+
+    QVERIFY2(storage.recordArtifactWithFiles(aitrain::ArtifactId::create(), task.id,
+        QStringLiteral("fixture"), {{QStringLiteral("model.bin"), QString(64, QLatin1Char('a')), 1}},
+        QDateTime::currentDateTimeUtc(), &error), qPrintable(error));
 }
 
 void StorageTests::registersModelPackageOnlyForMatchingArtifactProvenance()

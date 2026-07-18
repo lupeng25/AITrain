@@ -18,14 +18,40 @@
 #include <QLabel>
 #include <QPixmap>
 #include <QPushButton>
+#include <QMetaObject>
+#include <QPointer>
+#include <QRunnable>
 #include <QRegularExpression>
 #include <QSizePolicy>
 #include <QStandardPaths>
+#include <QThreadPool>
 #include <QVBoxLayout>
 
 namespace aitrain_app {
 
 namespace {
+
+class DatasetFormatProbeRunnable final : public QRunnable
+{
+public:
+    DatasetFormatProbeRunnable(QString path, DatasetFormatProbeCallback callback)
+        : path_(std::move(path)), callback_(std::move(callback))
+    {
+        setAutoDelete(true);
+    }
+
+    void run() override
+    {
+        const QString detectedFormat = detectDatasetFormatFromPath(path_);
+        if (callback_) {
+            callback_(detectedFormat);
+        }
+    }
+
+private:
+    QString path_;
+    DatasetFormatProbeCallback callback_;
+};
 
 QString firstStringField(const QJsonObject& object, const QStringList& keys)
 {
@@ -826,6 +852,31 @@ QString detectDatasetFormatFromPath(const QString& path)
         return QString();
     }
     return QStringLiteral("yolo_detection");
+}
+
+void detectDatasetFormatAsync(QObject* context, const QString& path,
+    DatasetFormatProbeCallback callback)
+{
+    if (!context || !callback) {
+        return;
+    }
+
+    const QPointer<QObject> guardedContext(context);
+    const QString normalizedPath = QDir::fromNativeSeparators(path.trimmed());
+    auto completeOnContextThread = [guardedContext, callback = std::move(callback)](
+        const QString& detectedFormat) mutable {
+        if (!guardedContext) {
+            return;
+        }
+        QMetaObject::invokeMethod(guardedContext.data(),
+            [guardedContext, callback = std::move(callback), detectedFormat]() mutable {
+                if (guardedContext && callback) {
+                    callback(detectedFormat);
+                }
+            }, Qt::QueuedConnection);
+    };
+    QThreadPool::globalInstance()->start(new DatasetFormatProbeRunnable(
+        normalizedPath, std::move(completeOnContextThread)));
 }
 
 QString formatJsonTextForPreview(const QByteArray& data)

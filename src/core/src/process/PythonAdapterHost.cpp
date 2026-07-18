@@ -53,6 +53,12 @@ bool PythonAdapterHost::start(const PythonAdapterLaunch& launch,
         }
         return false;
     }
+    if (launch.terminalExitTimeoutMs < 1) {
+        if (error) {
+            *error = QStringLiteral("Python Adapter 终态退出窗口必须为正数。");
+        }
+        return false;
+    }
     if (!processTree_.create(error) || !eventServer_.start(requestId, taskId, error)) {
         processTree_.reset();
         return false;
@@ -89,6 +95,7 @@ bool PythonAdapterHost::start(const PythonAdapterLaunch& launch,
     drainFinalizeScheduled_ = false;
     eventSequenceOffset_ = launch.eventSequenceOffset;
     eventDrainTimeoutMs_ = launch.eventDrainTimeoutMs;
+    terminalExitTimeoutMs_ = launch.terminalExitTimeoutMs;
     lifecycleError_.clear();
     processOutputTail_.clear();
     processOutputDroppedBytes_ = 0;
@@ -133,6 +140,18 @@ bool PythonAdapterHost::start(const PythonAdapterLaunch& launch,
     drainTimer_->setSingleShot(true);
     QObject::connect(drainTimer_.get(), &QTimer::timeout, drainTimer_.get(), [this] {
         finalizeAfterDrainDeadline();
+    });
+    terminalExitTimer_ = std::make_unique<QTimer>();
+    terminalExitTimer_->setSingleShot(true);
+    terminalExitTimer_->setInterval(terminalExitTimeoutMs_);
+    QObject::connect(terminalExitTimer_.get(), &QTimer::timeout, terminalExitTimer_.get(), [this] {
+        if (!running_ || !terminalEventSeen_) {
+            return;
+        }
+        // 终态帧已经通过下游持久化校验；这里只解决 Adapter 进程不退出
+        // 的生命周期问题，不再合成第二个任务终态。
+        QString ignored;
+        forceTerminate(&ignored);
     });
     eventServer_.setEventHandler([this](const ProtocolEnvelope& event) {
         return onAdapterEvent(event);
@@ -255,6 +274,9 @@ bool PythonAdapterHost::onAdapterEvent(const ProtocolEnvelope& event)
     // 看见过终态帧而留下 Worker 无终态。
     if (terminal) {
         terminalEventSeen_ = true;
+        if (running_ && terminalExitTimer_) {
+            terminalExitTimer_->start();
+        }
     }
     // QProcess::finished 与 QTcpSocket::readyRead 属于两个独立的事件源。
     // 若进程先退出，终态帧可能在 finished 回调返回后才到达；此时必须
@@ -283,6 +305,9 @@ void PythonAdapterHost::onProcessFinished(int exitCode, QProcess::ExitStatus exi
     drainProcessOutput();
     if (cancellationTimer_) {
         cancellationTimer_->stop();
+    }
+    if (terminalExitTimer_) {
+        terminalExitTimer_->stop();
     }
     running_ = false;
     PythonAdapterExit outcome;
@@ -364,6 +389,9 @@ void PythonAdapterHost::onProcessError(QProcess::ProcessError processError)
         return;
     }
     running_ = false;
+    if (terminalExitTimer_) {
+        terminalExitTimer_->stop();
+    }
     drainState_ = DrainState::Finalized;
     pendingExit_.reset();
     drainFinalizeScheduled_ = false;
@@ -400,6 +428,10 @@ void PythonAdapterHost::stop()
         drainTimer_->stop();
         drainTimer_.reset();
     }
+    if (terminalExitTimer_) {
+        terminalExitTimer_->stop();
+        terminalExitTimer_.reset();
+    }
     if (process_ && process_->state() != QProcess::NotRunning) {
         QString ignored;
         processTree_.terminate(&ignored);
@@ -415,6 +447,7 @@ void PythonAdapterHost::stop()
     pendingExit_.reset();
     drainFinalizeScheduled_ = false;
     eventDrainTimeoutMs_ = 1000;
+    terminalExitTimeoutMs_ = 5000;
 }
 
 } // namespace aitrain

@@ -159,7 +159,7 @@ RuntimeOperationResult NcnnRuntimeAdapter::validateModel(const RuntimeModelLocat
             QStringLiteral("NCNN 模型包缺少与 .param 同名的安全 .bin 产物。"));
     }
     const QString expectedBinSha256 = ncnnContract.value(QStringLiteral("binSha256")).toString();
-    if (expectedBinSha256.size() != 64 || fileSha256(bin.absoluteFilePath()) != expectedBinSha256) {
+    if (!isSha256Hex(expectedBinSha256) || fileSha256(bin.absoluteFilePath()) != expectedBinSha256) {
         return failed(RuntimeStatus::ArtifactIncompatible,
             QStringLiteral("NCNN .bin 的 SHA-256 缺失或与 Manifest 不一致。"));
     }

@@ -252,7 +252,7 @@ bool ProjectWorkspace::runRuntimeDeliveryWorkflow(const TaskId& taskId,
             break;
         }
     }
-    if (!sampleListed || expectedSample.byteCount < 0 || expectedSample.sha256.size() != 64) {
+    if (!sampleListed || expectedSample.byteCount < 0 || !isSha256Hex(expectedSample.sha256)) {
         if (error) *error = QStringLiteral("Runtime Delivery Workflow 样本不属于 Snapshot Artifact 文件清单：%1")
             .arg(sampleRelativePath);
         return false;

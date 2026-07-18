@@ -213,16 +213,9 @@ void MainWindow::browseDataset()
     const QString directory = QFileDialog::getExistingDirectory(this, uiText("选择数据集目录"));
     if (!directory.isEmpty()) {
         datasetPathEdit_->setText(QDir::toNativeSeparators(directory));
-        const QString detectedFormat = detectDatasetFormatFromPath(directory);
-        if (!detectedFormat.isEmpty() && datasetFormatCombo_) {
-            const int index = datasetFormatCombo_->findData(detectedFormat);
-            if (index >= 0) {
-                datasetFormatCombo_->setCurrentIndex(index);
-            }
-        }
+        startDatasetFormatProbe(directory, false);
         state_.dataset.currentPath = directory;
-        const QString selectedFormat = currentDatasetFormat();
-        state_.dataset.currentFormat = selectedFormat.isEmpty() ? detectedFormat : selectedFormat;
+        state_.dataset.currentFormat = currentDatasetFormat();
         state_.dataset.currentDatasetId.clear();
         state_.dataset.currentDatasetVersionId.clear();
         state_.dataset.currentSnapshotId.clear();
@@ -316,14 +309,9 @@ void MainWindow::browseDatasetConversionInput()
     }
 
     if (!expectsCocoJsonFile) {
-        const QString detectedFormat = detectDatasetFormatFromPath(normalizedInputPath);
-        if (!detectedFormat.isEmpty()
-            && supportedDatasetConversionSourceFormats().contains(detectedFormat)
-            && datasetConversionSourceFormatCombo_) {
-            setComboCurrentData(datasetConversionSourceFormatCombo_, detectedFormat);
-        } else {
-            updateDatasetConversionTargetFormats();
-        }
+        startDatasetFormatProbe(normalizedInputPath, true);
+    } else if (datasetConversionProbeStatusLabel_) {
+        datasetConversionProbeStatusLabel_->setText(uiText("COCO JSON 输入无需目录格式探测。"));
     }
 
     if (datasetConversionTargetDatasetNameEdit_
@@ -331,6 +319,73 @@ void MainWindow::browseDatasetConversionInput()
         datasetConversionTargetDatasetNameEdit_->setText(
             QStringLiteral("%1-%2").arg(QFileInfo(normalizedInputPath).completeBaseName(),
                 comboCurrentDataOrText(datasetConversionTargetFormatCombo_)));
+    }
+}
+
+void MainWindow::startDatasetFormatProbe(const QString& path, bool conversionSource)
+{
+    const QString normalizedPath = QDir::fromNativeSeparators(path.trimmed());
+    if (normalizedPath.isEmpty()) {
+        return;
+    }
+
+    const quint64 generation = ++datasetFormatProbeGeneration_;
+    QLabel* statusLabel = conversionSource
+        ? datasetConversionProbeStatusLabel_ : datasetProbeStatusLabel_;
+    if (statusLabel) {
+        statusLabel->setText(uiText("正在后台探测数据集格式，完整校验仍由 Worker 执行。"));
+        statusLabel->setVisible(true);
+    }
+
+    detectDatasetFormatAsync(this, normalizedPath,
+        [this, normalizedPath, conversionSource, generation](const QString& detectedFormat) {
+            applyDatasetFormatProbe(normalizedPath, detectedFormat, conversionSource, generation);
+        });
+}
+
+void MainWindow::applyDatasetFormatProbe(const QString& path, const QString& detectedFormat,
+    bool conversionSource, quint64 generation)
+{
+    if (generation != datasetFormatProbeGeneration_) {
+        return;
+    }
+
+    QLabel* statusLabel = conversionSource
+        ? datasetConversionProbeStatusLabel_ : datasetProbeStatusLabel_;
+    const QString currentPath = conversionSource
+        ? (datasetConversionInputEdit_ ? datasetConversionInputEdit_->text().trimmed() : QString())
+        : (datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
+    if (QDir::cleanPath(QDir::fromNativeSeparators(currentPath))
+        != QDir::cleanPath(QDir::fromNativeSeparators(path.trimmed()))) {
+        return;
+    }
+    if (conversionSource) {
+        const bool supported = !detectedFormat.isEmpty()
+            && supportedDatasetConversionSourceFormats().contains(detectedFormat)
+            && datasetConversionSourceFormatCombo_;
+        if (supported) {
+            setComboCurrentData(datasetConversionSourceFormatCombo_, detectedFormat);
+            if (statusLabel) {
+                statusLabel->setText(uiText("后台探测完成：%1。Worker 将在转换前重新校验。")
+                    .arg(datasetConversionFormatLabel(detectedFormat)));
+            }
+        } else if (statusLabel) {
+            statusLabel->setText(uiText("后台探测未识别格式；请手动选择，Worker 将执行完整校验。"));
+        }
+        return;
+    }
+
+    const int index = datasetFormatCombo_ && !detectedFormat.isEmpty()
+        ? datasetFormatCombo_->findData(detectedFormat) : -1;
+    if (index >= 0) {
+        datasetFormatCombo_->setCurrentIndex(index);
+        state_.dataset.currentFormat = detectedFormat;
+        if (statusLabel) {
+            statusLabel->setText(uiText("后台探测完成：%1。Worker 将在校验前重新验证。")
+                .arg(datasetFormatLabel(detectedFormat)));
+        }
+    } else if (statusLabel) {
+        statusLabel->setText(uiText("后台探测未识别格式；请手动选择，Worker 将执行完整校验。"));
     }
 }
 

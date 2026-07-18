@@ -6,12 +6,15 @@
 #include <QString>
 #include <QStringList>
 
+#include <functional>
+
 class InfoPanel;
 class QComboBox;
 class QDir;
 class QFrame;
 class QLabel;
 class QPushButton;
+class QObject;
 
 namespace aitrain_app {
 
@@ -60,6 +63,11 @@ QString confidencePercent(double confidence);
 QString resolvedXAnyLabelingProgram();
 QString xAnyLabelingStatusText();
 QString detectDatasetFormatFromPath(const QString& path);
+// 在后台线程执行有界格式探测，并将结果排队回调到 context 所在线程。
+// 回调只返回诊断结果，真正的 Dataset Driver 校验仍必须由 Worker/Core 完成。
+using DatasetFormatProbeCallback = std::function<void(const QString& detectedFormat)>;
+void detectDatasetFormatAsync(QObject* context, const QString& path,
+    DatasetFormatProbeCallback callback);
 QString formatJsonTextForPreview(const QByteArray& data);
 void addTaskTypeItems(QComboBox* combo, const QStringList& taskTypes);
 QString comboCurrentDataOrText(const QComboBox* combo);

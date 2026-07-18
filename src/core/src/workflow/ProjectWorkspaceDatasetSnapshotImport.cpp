@@ -114,7 +114,7 @@ bool copyFrozenInventory(const QString& sourceRoot,
         QString actualHash;
         if (!safeRelativePath(relative) || relative == QStringLiteral("dataset_snapshot.json")
             || !sourceInfo.isFile() || sourceInfo.isSymLink()
-            || sourceInfo.size() != expectedBytes || expectedHash.size() != 64
+            || sourceInfo.size() != expectedBytes || !isSha256Hex(expectedHash)
             || !hashFile(sourcePath, &actualHash, error) || actualHash != expectedHash) {
             if (error && error->isEmpty()) {
                 *error = QStringLiteral("dataset_snapshot_import_source_changed:%1").arg(relative);

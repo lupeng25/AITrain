@@ -2016,6 +2016,124 @@ bool ProjectWorkspace::commitEvidenceBundle(const EvidenceBundle& bundle,
         if (error) *error = QStringLiteral("Evidence Bundle 的终态任务事实与已持久化记录不一致。");
         return false;
     }
+
+    // Evidence 不能只通过结构校验后就提交。提交前重新从 Storage 建立
+    // Artifact/Workflow lineage：证据中的 Artifact 必须是根任务产物、步骤
+    // 输入/输出，或已登记的 Workflow 外部输入；facts 中的库存摘要也必须
+    // 与数据库清单一致。这样调用方即使在 build 后篡改 Bundle，也不能把
+    // 其他任务的 Artifact 或伪造的摘要写成交付证据。
+    const QVector<WorkflowStepSnapshot> persistedSteps = storage_.workflowSteps(bundle.workflowRunId, error);
+    if (error && !error->isEmpty()) return false;
+    const QVector<ArtifactSnapshot> rootArtifacts = storage_.artifactsForTask(persisted.id, error);
+    if (error && !error->isEmpty()) return false;
+    QSet<QString> allowedArtifactIds;
+    QSet<QString> allowedProducerTaskIds{persisted.id.toString()};
+    for (const ArtifactSnapshot& artifact : rootArtifacts) {
+        allowedArtifactIds.insert(artifact.id.toString());
+    }
+    for (const WorkflowStepSnapshot& step : persistedSteps) {
+        if (step.inputArtifactId.isValid()) allowedArtifactIds.insert(step.inputArtifactId.toString());
+        if (step.outputArtifactId.isValid()) allowedArtifactIds.insert(step.outputArtifactId.toString());
+    }
+
+    // 当前 Evidence Bundle schema 的 externalInputs 专门承载 Dataset
+    // Snapshot lineage；其他外部输入仍必须通过步骤 inputArtifactId 进入
+    // allowedArtifactIds，不能伪造一套未绑定的外部身份。
+    for (const QString& role : {QStringLiteral("dataset_snapshot"),
+                                QStringLiteral("dataset_repair_manifest"),
+                                QStringLiteral("annotation_session"),
+                                QStringLiteral("model_package")}) {
+        WorkflowInputBinding binding;
+        QString bindingError;
+        if (storage_.workflowInput(bundle.workflowRunId, role, &binding, &bindingError)) {
+            allowedArtifactIds.insert(binding.sourceArtifactId.toString());
+            allowedProducerTaskIds.insert(binding.sourceTaskId.toString());
+        } else if (!bindingError.contains(QStringLiteral("不存在"))) {
+            if (error) *error = bindingError;
+            return false;
+        }
+    }
+
+    const auto sameExternalInput = [](const EvidenceExternalInput& input,
+                                      const WorkflowInputBinding& binding) {
+        return input.role == binding.role
+            && input.producerTaskId == binding.sourceTaskId
+            && input.artifactId == binding.sourceArtifactId
+            && input.datasetId == binding.datasetId
+            && input.datasetVersionId == binding.datasetVersionId
+            && input.datasetSnapshotId == binding.datasetSnapshotId
+            && input.manifestSha256 == binding.manifestSha256
+            && input.rootHash == binding.rootHash;
+    };
+    for (const EvidenceExternalInput& input : bundle.externalInputs) {
+        if (input.role != QStringLiteral("dataset_snapshot")) {
+            if (error) *error = QStringLiteral("Evidence external input role 未被当前 schema 授权：%1").arg(input.role);
+            return false;
+        }
+        WorkflowInputBinding binding;
+        QString bindingError;
+        if (!storage_.workflowInput(bundle.workflowRunId, input.role, &binding, &bindingError)) {
+            if (error) *error = bindingError.isEmpty()
+                ? QStringLiteral("Evidence external input 缺少对应 Workflow 绑定。") : bindingError;
+            return false;
+        }
+        DatasetSnapshotRecord snapshot;
+        if (!storage_.datasetSnapshot(input.datasetSnapshotId, &snapshot, error)
+            || !sameExternalInput(input, binding)
+            || snapshot.id != input.datasetSnapshotId
+            || snapshot.datasetId != input.datasetId
+            || snapshot.datasetVersionId != input.datasetVersionId
+            || snapshot.artifactId != input.artifactId
+            || snapshot.taskId != input.producerTaskId
+            || snapshot.manifestSha256 != input.manifestSha256
+            || snapshot.rootHash != input.rootHash) {
+            if (error && error->isEmpty()) {
+                *error = QStringLiteral("Evidence external input 与已登记 Dataset Snapshot lineage 不一致。");
+            }
+            return false;
+        }
+        allowedArtifactIds.insert(input.artifactId.toString());
+        allowedProducerTaskIds.insert(input.producerTaskId.toString());
+    }
+    if (bundle.datasetSnapshotId.isValid()) {
+        DatasetSnapshotRecord snapshot;
+        if (!storage_.datasetSnapshot(bundle.datasetSnapshotId, &snapshot, error)) return false;
+        if (!allowedArtifactIds.contains(snapshot.artifactId.toString())) {
+            if (error) *error = QStringLiteral("Evidence Dataset Snapshot Artifact 未被当前 Workflow 引用。");
+            return false;
+        }
+    } else if (!bundle.externalInputs.isEmpty()) {
+        if (error) *error = QStringLiteral("Evidence external input 存在时必须声明 datasetSnapshotId。");
+        return false;
+    }
+
+    for (const EvidenceArtifact& evidenceArtifact : bundle.artifacts) {
+        if (!allowedArtifactIds.contains(evidenceArtifact.artifactId.toString())) {
+            if (error) *error = QStringLiteral("Evidence Artifact 不属于当前 Workflow lineage：%1")
+                .arg(evidenceArtifact.artifactId.toString());
+            return false;
+        }
+        ArtifactSnapshot persistedArtifact;
+        if (!storage_.artifact(evidenceArtifact.artifactId, &persistedArtifact, error)) return false;
+        if (!allowedProducerTaskIds.contains(persistedArtifact.taskId.toString())
+            || persistedArtifact.kind != evidenceArtifact.kind) {
+            if (error) *error = QStringLiteral("Evidence Artifact 的生产任务或 kind 与 Workflow lineage 不一致：%1")
+                .arg(evidenceArtifact.artifactId.toString());
+            return false;
+        }
+        const QJsonObject expectedFacts = artifactFacts(persistedArtifact);
+        const QJsonObject& actualFacts = evidenceArtifact.facts;
+        if (actualFacts.value(QStringLiteral("fileCount")).toInt(-1)
+                != expectedFacts.value(QStringLiteral("fileCount")).toInt(-1)
+            || actualFacts.value(QStringLiteral("totalBytes")).toDouble(-1.0)
+                != expectedFacts.value(QStringLiteral("totalBytes")).toDouble(-1.0)
+            || actualFacts.value(QStringLiteral("inventorySha256")).toString()
+                != expectedFacts.value(QStringLiteral("inventorySha256")).toString()) {
+            if (error) *error = QStringLiteral("Evidence Artifact facts 与已持久化文件清单不一致：%1")
+                .arg(evidenceArtifact.artifactId.toString());
+            return false;
+        }
+    }
     const QByteArray json = EvidenceRenderer::renderJson(bundle, error);
     if (json.isEmpty()) return false;
     const QString markdown = EvidenceRenderer::renderMarkdown(bundle, error);

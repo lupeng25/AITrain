@@ -118,7 +118,7 @@ bool verifyArtifactInventory(const ArtifactSnapshot& artifact,
         const QFileInfo info(path);
         QString actualHash;
         if (!safeRelativePath(relative) || !info.isFile() || info.isSymLink()
-            || info.size() != expected.byteCount || expected.sha256.size() != 64
+            || info.size() != expected.byteCount || !isSha256Hex(expected.sha256)
             || !hashFile(path, &actualHash, error) || actualHash != expected.sha256) {
             if (error && error->isEmpty()) {
                 *error = QStringLiteral("dataset_split_source_artifact_tampered:%1").arg(relative);

@@ -3,8 +3,6 @@
 #include <QJsonArray>
 #include <QSet>
 
-#include <algorithm>
-
 namespace aitrain {
 namespace {
 
@@ -26,11 +24,7 @@ bool parseTimestamp(const QJsonValue& value, QDateTime* result, QString* error, 
 
 bool isSha256(const QString& value)
 {
-    if (value.size() != 64) return false;
-    return std::all_of(value.cbegin(), value.cend(), [](QChar character) {
-        const ushort code = character.unicode();
-        return (code >= '0' && code <= '9') || (code >= 'a' && code <= 'f');
-    });
+    return isSha256Hex(value);
 }
 
 QJsonObject encodeFailure(const Failure& failure)

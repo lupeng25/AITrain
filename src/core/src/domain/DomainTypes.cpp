@@ -231,6 +231,18 @@ QString defaultFailureSuggestedAction(FailureCode code)
     return QStringLiteral("查看任务 Evidence 和诊断 Artifact。");
 }
 
+bool isSha256Hex(const QString& value)
+{
+    if (value.size() != 64) return false;
+    for (const QChar character : value) {
+        const ushort code = character.unicode();
+        if (!((code >= '0' && code <= '9') || (code >= 'a' && code <= 'f'))) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool Failure::isFailure() const
 {
     return code != FailureCode::None;

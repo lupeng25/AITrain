@@ -32,6 +32,10 @@ struct PythonAdapterLaunch final {
     // 最后的终态帧。Host 在该窗口内等待终态；超时后才将“无终态退出”
     // 作为失败收口。该值必须显式为正数，便于集成测试覆盖延迟交付。
     int eventDrainTimeoutMs = 1000;
+    // Adapter 已发送并被 Core 接受终态后，进程仍可能由于子进程、阻塞
+    // IO 或实现缺陷迟迟不退出。Host 在这个有界窗口后强制收尾，避免
+    // Worker 永远保持 running。终态已经落库时，强制退出不会改写终态。
+    int terminalExitTimeoutMs = 5000;
 };
 
 struct PythonAdapterExit final {
@@ -91,6 +95,7 @@ private:
     std::unique_ptr<QTemporaryDir> cancellationDirectory_;
     std::unique_ptr<QTimer> cancellationTimer_;
     std::unique_ptr<QTimer> drainTimer_;
+    std::unique_ptr<QTimer> terminalExitTimer_;
     EventHandler eventHandler_;
     ExitHandler exitHandler_;
     bool running_ = false;
@@ -102,6 +107,7 @@ private:
     std::optional<PythonAdapterExit> pendingExit_;
     bool drainFinalizeScheduled_ = false;
     int eventDrainTimeoutMs_ = 1000;
+    int terminalExitTimeoutMs_ = 5000;
     quint64 eventSequenceOffset_ = 0;
     QString lifecycleError_;
     QByteArray processOutputTail_;

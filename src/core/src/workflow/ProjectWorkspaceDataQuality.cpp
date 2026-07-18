@@ -121,7 +121,7 @@ bool loadVerifiedSnapshot(ProjectStore* storage, ArtifactStore* artifacts,
         const QJsonObject item = value.toObject();
         const QString relative = QDir::cleanPath(item.value(QStringLiteral("relativePath")).toString());
         if (!safeRelative(relative) || declaredFiles.contains(relative.toCaseFolded())
-            || item.value(QStringLiteral("sha256")).toString().size() != 64) {
+            || !isSha256Hex(item.value(QStringLiteral("sha256")).toString())) {
             if (error) *error = QStringLiteral("quality.snapshot.file_manifest_invalid:%1").arg(relative);
             return false;
         }

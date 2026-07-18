@@ -619,7 +619,7 @@ bool ValidatedDatasetDriver::materializeSplit(const DatasetSplitPlan& plan,
         const bool hasInline = entry.contains(QStringLiteral("inlineBase64"));
         if (!safeRelativePath(target) || targets.contains(target)
             || (source.isEmpty() == !hasInline)
-            || entry.value(QStringLiteral("sha256")).toString().size() != 64
+            || !isSha256Hex(entry.value(QStringLiteral("sha256")).toString())
             || (!source.isEmpty() && (!safeRelativePath(source) || sources.contains(source)))) {
             if (error) {
                 *error = QStringLiteral("dataset_split_entry_path_or_leakage_invalid:%1").arg(target);

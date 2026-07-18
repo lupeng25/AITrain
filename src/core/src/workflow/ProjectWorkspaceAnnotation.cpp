@@ -216,7 +216,7 @@ bool loadBaseline(ProjectStore* storage, ArtifactStore* store, const SnapshotId&
         const QString relative = QDir::cleanPath(item.value(QStringLiteral("relativePath")).toString());
         const QString key = pathKey(relative);
         if (!safeRelative(relative) || files.contains(key)
-            || item.value(QStringLiteral("sha256")).toString().size() != 64
+            || !isSha256Hex(item.value(QStringLiteral("sha256")).toString())
             || item.value(QStringLiteral("bytes")).toString().toLongLong() < 0) {
             if (error) *error = QStringLiteral("annotation.snapshot_inventory_invalid:%1").arg(relative);
             return false;
@@ -541,7 +541,7 @@ bool loadSessionContract(ProjectStore* storage, ArtifactStore* store, const Arti
         const QJsonObject item = value.toObject();
         const QString relative = QDir::cleanPath(item.value(QStringLiteral("relativePath")).toString());
         const QString hash = item.value(QStringLiteral("sha256")).toString();
-        if (!safeRelative(relative) || hash.size() != 64 || parsed.baselineHashes.contains(pathKey(relative))) {
+        if (!safeRelative(relative) || !isSha256Hex(hash) || parsed.baselineHashes.contains(pathKey(relative))) {
             if (error) *error = QStringLiteral("annotation.session_baseline_inventory_invalid:%1").arg(relative);
             return false;
         }

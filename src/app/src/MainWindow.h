@@ -171,6 +171,9 @@ private:
     void updateModelRegistry();
     QLabel* trainingLiveValueLabel(const QString& objectName) const;
     QString selectedTaskId() const;
+    void startDatasetFormatProbe(const QString& path, bool conversionSource);
+    void applyDatasetFormatProbe(const QString& path, const QString& detectedFormat,
+        bool conversionSource, quint64 generation);
 
     aitrain::ProjectWorkspace workspace_;
     aitrain::ProjectQueryService queryService_;
@@ -193,6 +196,7 @@ private:
 
     QString currentProjectPath_;
     QString currentProjectName_;
+    quint64 datasetFormatProbeGeneration_ = 0;
 
     Sidebar* sidebar_ = nullptr;
     QFrame* inspector_ = nullptr;
@@ -269,6 +273,7 @@ private:
     QLineEdit* projectRootEdit_ = nullptr;
     QLineEdit* taskSearchEdit_ = nullptr;
     QLineEdit* datasetPathEdit_ = nullptr;
+    QLabel* datasetProbeStatusLabel_ = nullptr;
     QLineEdit* splitSourceDatasetIdEdit_ = nullptr;
     QLineEdit* splitSourceDatasetVersionIdEdit_ = nullptr;
     QLineEdit* splitSourceSnapshotIdEdit_ = nullptr;
@@ -289,6 +294,7 @@ private:
     QComboBox* datasetConversionSourceFormatCombo_ = nullptr;
     QComboBox* datasetConversionTargetFormatCombo_ = nullptr;
     QLineEdit* datasetConversionInputEdit_ = nullptr;
+    QLabel* datasetConversionProbeStatusLabel_ = nullptr;
     QLineEdit* datasetConversionTargetDatasetIdEdit_ = nullptr;
     QLineEdit* datasetConversionTargetDatasetNameEdit_ = nullptr;
     QLabel* datasetConversionStatusLabel_ = nullptr;

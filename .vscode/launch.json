@@ -9,6 +9,20 @@
       "args": [],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
+      "environment": [
+        {
+          "name": "QT_PLUGIN_PATH",
+          "value": "${workspaceFolder}\\build-vscode\\bin"
+        },
+        {
+          "name": "QT_QPA_PLATFORM_PLUGIN_PATH",
+          "value": "${workspaceFolder}\\build-vscode\\bin\\platforms"
+        },
+        {
+          "name": "QT_QPA_PLATFORM",
+          "value": "windows"
+        }
+      ],
       "console": "integratedTerminal",
       "preLaunchTask": "Build AITrain"
     },
@@ -23,6 +37,20 @@
       ],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
+      "environment": [
+        {
+          "name": "QT_PLUGIN_PATH",
+          "value": "${workspaceFolder}\\build-vscode\\bin"
+        },
+        {
+          "name": "QT_QPA_PLATFORM_PLUGIN_PATH",
+          "value": "${workspaceFolder}\\build-vscode\\bin\\platforms"
+        },
+        {
+          "name": "QT_QPA_PLATFORM",
+          "value": "windows"
+        }
+      ],
       "console": "integratedTerminal",
       "preLaunchTask": "Build AITrain"
     }

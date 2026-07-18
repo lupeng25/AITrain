@@ -3,15 +3,13 @@
 
 #include <QJsonArray>
 #include <QDir>
-#include <QRegularExpression>
 
 namespace aitrain {
 namespace {
 
 bool validSha256(const QString& value)
 {
-    static const QRegularExpression expression(QStringLiteral("^[0-9a-f]{64}$"));
-    return expression.match(value).hasMatch();
+    return isSha256Hex(value);
 }
 
 bool validateTensor(const TensorContract& tensor, const QString& role, QString* error)

@@ -136,6 +136,11 @@ QString failureCodeToString(FailureCode code);
 bool failureCodeFromString(const QString& value, FailureCode* code);
 QString defaultFailureSuggestedAction(FailureCode code);
 
+// 所有持久化 Artifact/数据集 lineage 摘要统一使用小写十六进制 SHA-256。
+// 仅检查长度会允许任意 64 字符伪造摘要进入 SQLite，最终破坏不可变
+// Artifact 的身份与证据链，因此校验集中在 Domain 层供各边界复用。
+bool isSha256Hex(const QString& value);
+
 struct Failure final {
     FailureCode code = FailureCode::None;
     QString message;

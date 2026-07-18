@@ -65,6 +65,11 @@ QWidget* MainWindow::buildDatasetPage()
     pathLayout->addWidget(datasetPathEdit_);
     pathLayout->addWidget(browseButton);
 
+    datasetProbeStatusLabel_ = mutedLabel(QStringLiteral(
+        "格式探测在后台执行；最终格式由 Worker/Core 完整校验。"));
+    datasetProbeStatusLabel_->setObjectName(QStringLiteral("DatasetProbeStatus"));
+    allowLabelToShrink(datasetProbeStatusLabel_);
+
     datasetFormatCombo_ = new QComboBox;
     {
         const QSignalBlocker blocker(datasetFormatCombo_);
@@ -95,6 +100,7 @@ QWidget* MainWindow::buildDatasetPage()
     auto* validateButton = primaryButton(QStringLiteral("校验数据集"));
     connect(validateButton, &QPushButton::clicked, this, &MainWindow::runDataQualityWorkflow);
     form->addRow(QStringLiteral("数据集目录"), pathRow);
+    form->addRow(QString(), datasetProbeStatusLabel_);
     form->addRow(QStringLiteral("格式"), datasetFormatCombo_);
 
     dataQualityDatasetIdEdit_ = new QLineEdit;
@@ -225,6 +231,10 @@ QWidget* MainWindow::buildDatasetPage()
     conversionInputLayout->setSpacing(8);
     conversionInputLayout->addWidget(datasetConversionInputEdit_, 1);
     conversionInputLayout->addWidget(datasetConversionBrowseInputButton_);
+    datasetConversionProbeStatusLabel_ = mutedLabel(QStringLiteral(
+        "选择目录后将在后台探测源格式；Worker 转换前会重新校验。"));
+    datasetConversionProbeStatusLabel_->setObjectName(QStringLiteral("DatasetConversionProbeStatus"));
+    allowLabelToShrink(datasetConversionProbeStatusLabel_);
 
     datasetConversionTargetDatasetIdEdit_ = new QLineEdit(
         aitrain::DatasetId::create().toString());
@@ -249,6 +259,7 @@ QWidget* MainWindow::buildDatasetPage()
     datasetConversionTargetErrorLabel_->hide();
     conversionForm->addRow(QString(), datasetConversionTargetErrorLabel_);
     conversionForm->addRow(QStringLiteral("输入路径"), conversionInputRow);
+    conversionForm->addRow(QString(), datasetConversionProbeStatusLabel_);
     datasetConversionInputErrorLabel_ = new QLabel;
     datasetConversionInputErrorLabel_->setObjectName(QStringLiteral("FieldErrorText"));
     datasetConversionInputErrorLabel_->hide();
