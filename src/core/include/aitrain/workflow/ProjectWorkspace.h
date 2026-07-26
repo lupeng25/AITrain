@@ -15,9 +15,11 @@
 #include <QDateTime>
 #include <QHash>
 #include <QStringList>
+#include <atomic>
 #include <memory>
 
 class QObject;
+class QLockFile;
 
 namespace aitrain {
 
@@ -384,17 +386,22 @@ struct TrainingDeploymentInvocation final {
     ArtifactId sourceArtifactId;
 };
 
-// 候选工作区在后台线程完成完整 open/recovery 后交给 GUI 的不可变激活凭证。
-// 只携带文件元数据，不携带 QSqlDatabase、ProjectStore 或 ArtifactStore。
-struct ProjectWorkspacePreparedOpen final {
-    QString normalizedRoot;
-    // 覆盖恢复会读取的所有持久化文件与暂存树，避免仅依赖父目录
-    // mtime/文件大小导致同大小快速修改绕过激活校验。
-    QString fingerprintSha256;
+// 后台 prepare 阶段完成恢复后交给 GUI 的一次性会话票据。票据不携带
+// QSqlDatabase；Owner Lease 持续跨越 prepare/activate，ProjectMetaSnapshot
+// 是激活阶段唯一需要复核的持久化事实。
+struct PreparedProjectSession final {
+    QString canonicalRoot;
+    ProjectMetaSnapshot projectMeta;
+    std::shared_ptr<QLockFile> ownerLease;
+    std::shared_ptr<std::atomic_bool> consumed =
+        std::make_shared<std::atomic_bool>(false);
 
     bool isValid() const
     {
-        return !normalizedRoot.isEmpty() && fingerprintSha256.size() == 64;
+        return !canonicalRoot.isEmpty() && projectMeta.projectId.isValid()
+            && projectMeta.schemaVersion == ProjectStore::schemaVersion()
+            && projectMeta.openGeneration > 0 && ownerLease && consumed
+            && !consumed->load();
     }
 };
 
@@ -411,12 +418,19 @@ public:
     ProjectWorkspace();
 
     bool open(const QString& projectRoot, QString* error = nullptr);
+    bool createProject(const QString& projectRoot, QString* error = nullptr);
+    bool rebuildProject(const QString& projectRoot, QString* error = nullptr);
+    // 仅供已通过本地控制通道认证并接受 start_task 的 Worker 子进程调用。
+    // 该入口不取得 Owner Lease、不执行全项目恢复，也不递增 generation。
+    bool openForWorkerChild(const QString& projectRoot, QString* error = nullptr);
     // 在调用线程创建临时 ProjectWorkspace，完整执行恢复并返回值类型凭证。
     // 候选对象及其 QSqlDatabase 始终留在调用线程，适合由 QThreadPool 调用。
     static bool prepareOpen(const QString& projectRoot,
-        ProjectWorkspacePreparedOpen* prepared, QString* error = nullptr);
-    // 仅在凭证指纹仍匹配时激活。恢复已由 prepareOpen 完成，GUI 不重复扫描/恢复。
-    bool openPrepared(const ProjectWorkspacePreparedOpen& prepared,
+        PreparedProjectSession* prepared, QString* error = nullptr);
+    static bool prepareCreate(const QString& projectRoot,
+        PreparedProjectSession* prepared, QString* error = nullptr);
+    // 仅在 ProjectId + openGeneration 仍匹配时消费票据。
+    bool openPrepared(PreparedProjectSession prepared,
         QString* error = nullptr);
     // Worker 异常退出后立即收口当前任务；应用重启恢复仍会再次执行同一套
     // 幂等检查，因此该入口不会依赖 GUI 的瞬态事件是否成功送达。
@@ -603,11 +617,17 @@ public:
     QString workspacePath() const;
 
 private:
-    bool openInternal(const QString& projectRoot, bool recover, QString* error);
-    static bool capturePreparedOpenFingerprint(const QString& normalizedRoot,
-        ProjectWorkspacePreparedOpen* prepared, QString* error);
-    static bool preparedOpenFingerprintMatches(const ProjectWorkspacePreparedOpen& prepared,
-        QString* error);
+    enum class OpenMode {
+        ExistingOwner,
+        CreateOwner,
+        WorkerChild
+    };
+    bool openInternal(const QString& projectRoot, OpenMode mode, bool recover,
+        bool preserveOwnerLease, QString* error);
+    static bool acquireOwnerLease(const QString& canonicalRoot,
+        std::shared_ptr<QLockFile>* lease, QString* error);
+    static bool acquireWorkerLease(const QString& canonicalRoot,
+        std::shared_ptr<QLockFile>* lease, QString* error);
     bool recoverPendingWorkflowTerminalEvents(QString* error);
     bool recoverEvidenceGatedWorkflows(QString* error);
     bool recoverRuntimeStaging(QString* error);
@@ -617,6 +637,9 @@ private:
     std::unique_ptr<TaskCoordinator> taskCoordinator_;
     std::unique_ptr<TaskExecutionHost> trainingAdapterHost_;
     QString workspacePath_;
+    QString canonicalRoot_;
+    std::shared_ptr<QLockFile> ownerLease_;
+    std::shared_ptr<QLockFile> workerLease_;
 };
 
 } // namespace aitrain

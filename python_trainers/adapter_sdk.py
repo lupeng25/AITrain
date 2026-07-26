@@ -68,6 +68,10 @@ class ChildProcessResult:
 class AdapterSdk:
     """Emit structured adapter events and run a cancellable direct child."""
 
+    OPEN = "OPEN"
+    TERMINAL_SENDING = "TERMINAL_SENDING"
+    TERMINAL_ATTEMPTED = "TERMINAL_ATTEMPTED"
+
     def __init__(
         self,
         backend: str,
@@ -87,12 +91,20 @@ class AdapterSdk:
         # constructor argument.
         resolved_cancel_file = cancel_file if cancel_file is not None else os.environ.get("AITRAIN_CANCEL_FILE")
         self._cancel_file = Path(resolved_cancel_file) if resolved_cancel_file else None
+        self._state = self.OPEN
 
     @property
     def backend(self) -> str:
         return self._backend
 
     def _emit(self, event_type: str, **payload: Any) -> None:
+        if self._state != self.OPEN:
+            raise RuntimeError(
+                f"adapter event rejected after terminal attempt: {event_type}"
+            )
+        self._deliver(event_type, payload)
+
+    def _deliver(self, event_type: str, payload: Mapping[str, Any]) -> None:
         event = {"type": event_type, **payload, "backend": self._backend}
         if self._event_sink is None:
             if standalone_protocol_enabled():
@@ -102,6 +114,18 @@ class AdapterSdk:
                 "authenticated Worker event channel is required; stdout JSONL is only available to an explicit standalone smoke runner"
             )
         self._event_sink(event)
+
+    def _emit_terminal(self, event_type: str, **payload: Any) -> None:
+        if self._state != self.OPEN:
+            raise RuntimeError(
+                f"adapter terminal event already attempted: {event_type}"
+            )
+        self._state = self.TERMINAL_SENDING
+        try:
+            self._deliver(event_type, payload)
+        finally:
+            # 终态 sink 即使抛错，也不能通过第二次终态掩盖第一次尝试。
+            self._state = self.TERMINAL_ATTEMPTED
 
     def emit_log(self, message: str, *, level: str = "info", **details: Any) -> None:
         message = redact_physical_paths(message)
@@ -143,16 +167,16 @@ class AdapterSdk:
         self._emit("artifact", kind=kind, path=artifact_path, message=message, **details)
 
     def emit_completed(self, message: str, **details: Any) -> None:
-        self._emit("completed", message=message, **details)
+        self._emit_terminal("completed", message=message, **details)
 
     def emit_failed(self, message: str, code: str, details: Mapping[str, Any] | None = None) -> int:
         if not code.strip():
             raise ValueError("failure code must not be empty")
-        self._emit("failed", message=message, code=code, details=dict(details or {}))
+        self._emit_terminal("failed", message=message, code=code, details=dict(details or {}))
         return 1
 
     def emit_canceled(self, message: str = "Canceled by request", *, force: bool = False, **details: Any) -> None:
-        self._emit("canceled", message=message, force=force, **details)
+        self._emit_terminal("canceled", message=message, force=force, **details)
 
     def check_canceled(self) -> bool:
         if self._cancellation_check is not None and self._cancellation_check():

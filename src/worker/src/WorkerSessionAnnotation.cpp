@@ -55,7 +55,7 @@ void WorkerSession::createAnnotationSession(const wp::AnnotationSessionCreateCom
     }
 
     annotationWorkspace_ = std::make_unique<aitrain::ProjectWorkspace>();
-    if (!annotationWorkspace_->open(projectRoot, &error)) {
+    if (!annotationWorkspace_->openForWorkerChild(projectRoot, &error)) {
         annotationWorkspace_.reset();
         annotationTaskId_ = {};
         fail(QStringLiteral("无法打开 Annotation Session  工作区：%1").arg(error));
@@ -152,7 +152,7 @@ void WorkerSession::syncAnnotationSession(const wp::AnnotationSessionSyncCommand
     }
 
     annotationWorkspace_ = std::make_unique<aitrain::ProjectWorkspace>();
-    if (!annotationWorkspace_->open(projectRoot, &error)) {
+    if (!annotationWorkspace_->openForWorkerChild(projectRoot, &error)) {
         annotationWorkspace_.reset();
         annotationTaskId_ = {};
         fail(QStringLiteral("无法打开 Annotation Sync  工作区：%1").arg(error));

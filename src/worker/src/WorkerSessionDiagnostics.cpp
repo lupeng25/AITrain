@@ -27,7 +27,7 @@ void WorkerSession::runDiagnosticsWorkflow(const wp::DiagnosticsCommand& command
     }
 
     diagnosticsWorkspace_ = std::make_unique<aitrain::ProjectWorkspace>();
-    if (!diagnosticsWorkspace_->open(projectRoot, &error)) {
+    if (!diagnosticsWorkspace_->openForWorkerChild(projectRoot, &error)) {
         diagnosticsWorkspace_.reset();
         diagnosticsTaskId_ = {};
         fail(QStringLiteral("无法打开 Diagnostics Bundle  工作区：%1").arg(error));

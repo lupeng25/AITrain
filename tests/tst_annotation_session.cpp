@@ -266,7 +266,7 @@ void AnnotationSessionTests::yoloAllowedChangeCreatesSelfContainedSnapshot()
     QVERIFY(directory.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
     const YoloFixture fixture = prepareYolo(&directory, &workspace, &error);
     QVERIFY2(fixture.quality.repairManifestArtifactId.isValid(), qPrintable(error));
     const QString work = directory.filePath(QStringLiteral("外部工作副本"));
@@ -349,7 +349,7 @@ void AnnotationSessionTests::paddleOcrRecAllowedChangeCreatesVersion()
         "images/a.png\tabcabc\nimages/b.png\tab\n"));
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY(workspace.open(directory.filePath(QStringLiteral("project")), &error));
+    QVERIFY(workspace.createProject(directory.filePath(QStringLiteral("project")), &error));
     const auto snapshot = commitSnapshot(&workspace, root, QStringLiteral("paddleocr_rec"), &error);
     const auto quality = qualityRepair(&workspace, snapshot.snapshot.id,
         {{QStringLiteral("maximumLabelLength"), 3}}, &error);
@@ -374,7 +374,7 @@ void AnnotationSessionTests::noChangesDoesNotCreateVersion()
     QVERIFY(directory.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY(workspace.open(directory.filePath(QStringLiteral("project")), &error));
+    QVERIFY(workspace.createProject(directory.filePath(QStringLiteral("project")), &error));
     const YoloFixture fixture = prepareYolo(&directory, &workspace, &error);
     const QString work = directory.filePath(QStringLiteral("no changes"));
     const auto session = createSession(&workspace, fixture.quality.repairManifestArtifactId, work, &error);
@@ -393,7 +393,7 @@ void AnnotationSessionTests::changedBaselineProducesConflictAndEvidence()
     QVERIFY(directory.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY(workspace.open(directory.filePath(QStringLiteral("project")), &error));
+    QVERIFY(workspace.createProject(directory.filePath(QStringLiteral("project")), &error));
     const YoloFixture fixture = prepareYolo(&directory, &workspace, &error);
     const QString work = directory.filePath(QStringLiteral("conflict"));
     const auto session = createSession(&workspace, fixture.quality.repairManifestArtifactId, work, &error);
@@ -418,7 +418,7 @@ void AnnotationSessionTests::outOfScopeChangeIsRejected()
     QVERIFY(directory.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY(workspace.open(directory.filePath(QStringLiteral("project")), &error));
+    QVERIFY(workspace.createProject(directory.filePath(QStringLiteral("project")), &error));
     const YoloFixture fixture = prepareYolo(&directory, &workspace, &error);
     const QString work = directory.filePath(QStringLiteral("越界"));
     const auto session = createSession(&workspace, fixture.quality.repairManifestArtifactId, work, &error);
@@ -442,7 +442,7 @@ void AnnotationSessionTests::cancellationHasNoFormalVersionAndHasEvidence()
     QVERIFY(directory.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY(workspace.open(directory.filePath(QStringLiteral("project")), &error));
+    QVERIFY(workspace.createProject(directory.filePath(QStringLiteral("project")), &error));
     const YoloFixture fixture = prepareYolo(&directory, &workspace, &error);
     const QString work = directory.filePath(QStringLiteral("cancel"));
     const auto session = createSession(&workspace, fixture.quality.repairManifestArtifactId, work, &error);
@@ -460,7 +460,7 @@ void AnnotationSessionTests::canceledCreateRemovesOnlyPreparedWorkingCopy()
     QVERIFY(directory.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY(workspace.open(directory.filePath(QStringLiteral("project")), &error));
+    QVERIFY(workspace.createProject(directory.filePath(QStringLiteral("project")), &error));
     const YoloFixture fixture = prepareYolo(&directory, &workspace, &error);
     const QString work = directory.filePath(QStringLiteral("cancel during copy"));
     const auto taskId = startTask(&workspace, QStringLiteral("dataset.annotation.session"),
@@ -497,7 +497,7 @@ void AnnotationSessionTests::remainingEditableFormatsCreateSelfContainedSnapshot
     QVERIFY(directory.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
     const FormatFixture fixture = prepareRemainingFormat(format, &directory, &workspace, &error);
     QVERIFY2(fixture.quality.repairManifestArtifactId.isValid(), qPrintable(error));
     QFile originalFile(QDir(fixture.root).filePath(fixture.editableFile));
@@ -547,7 +547,7 @@ void AnnotationSessionTests::remainingEditableFormatsEnforceSafety()
     QVERIFY(directory.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
     const FormatFixture fixture = prepareRemainingFormat(format, &directory, &workspace, &error);
     QVERIFY2(fixture.quality.repairManifestArtifactId.isValid(), qPrintable(error));
     const QString work = directory.filePath(QStringLiteral("safe-%1-%2").arg(format, scenario));
@@ -589,7 +589,7 @@ void AnnotationSessionTests::anomalyFolderReviewOnlyActionIsUnsupported()
     QVERIFY(writeImage(QDir(root).filePath(QStringLiteral("train/good/a.png"))));
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
     const auto snapshot = commitSnapshot(&workspace, root, QStringLiteral("anomaly_folder"), &error);
     const auto quality = qualityRepair(&workspace, snapshot.snapshot.id, {}, &error);
     QVERIFY2(quality.repairManifestArtifactId.isValid(), qPrintable(error));

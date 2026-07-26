@@ -7,7 +7,7 @@
 #include "LanguageSupport.h"
 #include "MainWindowSupport.h"
 #include "aitrain/core/CapabilityRegistry.h"
-#include "aitrain/core/DetectionTrainer.h"
+#include "aitrain/core/VisionModelRuntime.h"
 #include "aitrain/core/WorkerProtocol.h"
 
 #include <QApplication>

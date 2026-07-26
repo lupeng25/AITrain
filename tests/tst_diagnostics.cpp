@@ -18,7 +18,7 @@ namespace {
 bool startDiagnosticsTask(aitrain::ProjectWorkspace* workspace,
     const QString& root, aitrain::TaskId* taskId, QString* error)
 {
-    if (!workspace->open(root, error)) return false;
+    if (!workspace->createProject(root, error)) return false;
     *taskId = aitrain::TaskId::create();
     aitrain::TaskSnapshot task;
     return workspace->startTask(*taskId, QStringLiteral("diagnostics.bundle"),
@@ -181,7 +181,7 @@ void DiagnosticsTests::environmentWorkflowAndPresenterUseCommittedSanitizedRepor
     QVERIFY(directory.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.path(), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.path(), &error), qPrintable(error));
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     aitrain::TaskSnapshot task;
     QVERIFY2(workspace.startTask(taskId, QStringLiteral("environment.check"),
@@ -228,7 +228,7 @@ void DiagnosticsTests::environmentInvalidFactsAndCancellationStillCommitEvidence
         QVERIFY(directory.isValid());
         aitrain::ProjectWorkspace workspace;
         QString error;
-        QVERIFY2(workspace.open(directory.path(), &error), qPrintable(error));
+        QVERIFY2(workspace.createProject(directory.path(), &error), qPrintable(error));
         const aitrain::TaskId taskId = aitrain::TaskId::create();
         aitrain::TaskSnapshot task;
         QVERIFY2(workspace.startTask(taskId, QStringLiteral("environment.check"),

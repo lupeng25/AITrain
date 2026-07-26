@@ -2,6 +2,7 @@
 
 #include "aitrain/core/Deployment.h"
 #include "aitrain/core/VisionModelRuntime.h"
+#include "aitrain/product/ProductCapabilityContract.h"
 
 #include <QDateTime>
 #include <QCoreApplication>
@@ -143,25 +144,30 @@ void configurePackagedPythonEnvironment(QProcessEnvironment* environment)
     }
 }
 
-QString firstUsablePythonExecutable(const QJsonObject& parameters)
+PythonExecutableResolution resolvePythonExecutable(const QString& profileId)
 {
-    QStringList candidates;
-    const QString requested = parameters.value(QStringLiteral("pythonExecutable")).toString().trimmed();
-    if (!requested.isEmpty()) {
-        candidates.append(requested);
-    }
-    const QString envRequested = QString::fromLocal8Bit(qgetenv("AITRAIN_PYTHON_EXECUTABLE")).trimmed();
-    if (!envRequested.isEmpty()) {
-        candidates.append(envRequested);
+    PythonExecutableResolution result;
+    result.profileId = profileId;
+    aitrain::PythonEnvironmentProfile profile;
+    if (!aitrain::ProductCapabilityContract::instance().resolvePythonProfile(
+            profileId, &profile)) {
+        result.errorCode = QStringLiteral("python_profile_unknown");
+        result.message = QStringLiteral("未知 Python Profile：%1").arg(profileId);
+        return result;
     }
 
+    QStringList candidates;
+    const QString profileRequested =
+        QString::fromLocal8Bit(qgetenv(profile.dedicatedEnvironmentVariable.toUtf8().constData())).trimmed();
+    const QString commonRequested =
+        QString::fromLocal8Bit(qgetenv("AITRAIN_PYTHON_EXECUTABLE")).trimmed();
+    const QString explicitCandidate = !profileRequested.isEmpty()
+        ? profileRequested : commonRequested;
+
     const QString applicationDir = QCoreApplication::applicationDirPath();
+    if (!explicitCandidate.isEmpty()) candidates.append(explicitCandidate);
     candidates.append(QDir(applicationDir).absoluteFilePath(QStringLiteral("python_env/Scripts/python.exe")));
     candidates.append(QDir(applicationDir).absoluteFilePath(QStringLiteral("python_env/python.exe")));
-    candidates.append(QDir(applicationDir).absoluteFilePath(QStringLiteral("../python_env/Scripts/python.exe")));
-    candidates.append(QDir(applicationDir).absoluteFilePath(QStringLiteral("../python_env/python.exe")));
-    candidates.append(QDir::current().absoluteFilePath(QStringLiteral("python_env/Scripts/python.exe")));
-    candidates.append(QDir::current().absoluteFilePath(QStringLiteral("python_env/python.exe")));
     candidates.append(QDir(applicationDir).absoluteFilePath(QStringLiteral("../../.deps/python-3.13.13-embed-amd64/python.exe")));
     candidates.append(QDir(applicationDir).absoluteFilePath(QStringLiteral("../.deps/python-3.13.13-embed-amd64/python.exe")));
     candidates.append(QDir::current().absoluteFilePath(QStringLiteral(".deps/python-3.13.13-embed-amd64/python.exe")));
@@ -177,17 +183,40 @@ QString firstUsablePythonExecutable(const QJsonObject& parameters)
         QProcess process;
         process.start(candidate, QStringList() << QStringLiteral("--version"));
         if (!process.waitForStarted(1500)) {
+            if (candidate == explicitCandidate) {
+                result.errorCode = QStringLiteral("explicit_python_unavailable");
+                result.message = QStringLiteral("%1 指向的解释器无法启动：%2")
+                    .arg(!profileRequested.isEmpty()
+                            ? profile.dedicatedEnvironmentVariable
+                            : QStringLiteral("AITRAIN_PYTHON_EXECUTABLE"),
+                        candidate);
+                return result;
+            }
             continue;
         }
         if (!process.waitForFinished(2500)) {
             killAndReapBounded(&process);
+            if (candidate == explicitCandidate) {
+                result.errorCode = QStringLiteral("explicit_python_unavailable");
+                result.message = QStringLiteral("显式 Python 解释器启动超时：%1").arg(candidate);
+                return result;
+            }
             continue;
         }
         if (process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0) {
-            return candidate;
+            result.executable = QFileInfo(candidate).exists()
+                ? QFileInfo(candidate).absoluteFilePath() : candidate;
+            return result;
+        }
+        if (candidate == explicitCandidate) {
+            result.errorCode = QStringLiteral("explicit_python_unavailable");
+            result.message = QStringLiteral("显式 Python 解释器返回失败：%1").arg(candidate);
+            return result;
         }
     }
-    return {};
+    result.errorCode = QStringLiteral("python_unavailable");
+    result.message = QStringLiteral("未找到可启动的 %1 Python 解释器。").arg(profileId);
+    return result;
 }
 
 QJsonObject runPythonCommandCheck(
@@ -308,7 +337,7 @@ QJsonObject yoloEnvironmentProfile(const QString& pythonExecutable)
             QStringLiteral("pythonExecutable"),
             QStringLiteral("missing"),
             QStringLiteral("No usable Python executable was found for YOLO official backends.")));
-        repairHints.append(QStringLiteral("Set training parameter `pythonExecutable` or environment variable `AITRAIN_PYTHON_EXECUTABLE` to a valid Python path."));
+        repairHints.append(QStringLiteral("Set `AITRAIN_YOLO_PYTHON_EXECUTABLE` or `AITRAIN_PYTHON_EXECUTABLE` to a valid Python path."));
         repairHints.append(QStringLiteral("Install the AITrain Python AI Environment package so `python_env` is available beside the application."));
         repairHints.append(QStringLiteral("Use local embed Python under `.deps/python-3.13.13-embed-amd64/python.exe` when available."));
     } else {
@@ -356,7 +385,7 @@ QJsonObject smpEnvironmentProfile(const QString& pythonExecutable)
             QStringLiteral("pythonExecutable"),
             QStringLiteral("missing"),
             QStringLiteral("No usable Python executable was found for SMP semantic segmentation.")));
-        repairHints.append(QStringLiteral("Set training parameter `pythonExecutable` or AITRAIN_PYTHON_EXECUTABLE to a valid Python path."));
+        repairHints.append(QStringLiteral("Set `AITRAIN_SMP_PYTHON_EXECUTABLE` or `AITRAIN_PYTHON_EXECUTABLE` to a valid Python path."));
     } else {
         checks.append(profileCheck(
             QStringLiteral("pythonExecutable"),
@@ -412,7 +441,7 @@ QJsonObject anomalibEnvironmentProfile(const QString& pythonExecutable)
             QStringLiteral("pythonExecutable"),
             QStringLiteral("missing"),
             QStringLiteral("No usable Python executable was found for Anomalib anomaly detection.")));
-        repairHints.append(QStringLiteral("Set training parameter `pythonExecutable` or AITRAIN_PYTHON_EXECUTABLE to a valid Python path."));
+        repairHints.append(QStringLiteral("Set `AITRAIN_ANOMALIB_PYTHON_EXECUTABLE` or `AITRAIN_PYTHON_EXECUTABLE` to a valid Python path."));
     } else {
         checks.append(profileCheck(
             QStringLiteral("pythonExecutable"),
@@ -458,9 +487,9 @@ QJsonObject anomalibEnvironmentProfile(const QString& pythonExecutable)
         QStringLiteral("numpy is missing; anomaly reports and heatmaps require numpy.")));
     checks.append(runModuleProbe(
         pythonExecutable,
-        QStringLiteral("opencv"),
-        QStringLiteral("c"),
-        QStringLiteral("opencv-python is missing; anomaly overlays and masks require c.")));
+        QStringLiteral("cv2"),
+        QStringLiteral("cv2"),
+        QStringLiteral("opencv-python is missing; anomaly overlays and masks require cv2.")));
 
     repairHints.append(QStringLiteral("Install Anomalib profile packages: `pip install -r python_trainers/requirements-anomaly.txt`."));
     repairHints.append(QStringLiteral("EfficientAD requires imagenetDir from parameters, AITRAIN_ANOMALIB_IMAGENET_DIR, or `.deps/anomalib/imagenette`; AITrain will not auto-download external data."));
@@ -474,32 +503,7 @@ QJsonObject ocrEnvironmentProfile(const QString& pythonExecutable)
     QJsonArray checks;
     QJsonArray repairHints;
 
-    const QString isolatedOcrPython = QString::fromLocal8Bit(qgetenv("AITRAIN_OCR_PYTHON_EXECUTABLE")).trimmed();
-    const QString packagedPython = firstUsablePythonExecutable();
-    const QString normalizedPackagedPython = QFileInfo(packagedPython).absoluteFilePath().replace(QLatin1Char('\\'), QLatin1Char('/'));
-    const bool packagedPythonDetected = !packagedPython.isEmpty()
-        && normalizedPackagedPython.contains(QStringLiteral("/python_env/"), Qt::CaseInsensitive);
-    if (isolatedOcrPython.isEmpty() && !packagedPythonDetected) {
-        checks.append(profileCheck(
-            QStringLiteral("isolatedOcrPython"),
-            QStringLiteral("warning"),
-            QStringLiteral("No isolated OCR Python is configured via AITRAIN_OCR_PYTHON_EXECUTABLE or packaged python_env.")));
-        repairHints.append(QStringLiteral("Set `AITRAIN_OCR_PYTHON_EXECUTABLE` to isolated OCR Python for PaddleOCR official workflows."));
-        repairHints.append(QStringLiteral("Install the AITrain Python AI Environment package into the application directory."));
-    } else {
-        checks.append(profileCheck(
-            QStringLiteral("isolatedOcrPython"),
-            QStringLiteral("ok"),
-            isolatedOcrPython.isEmpty()
-                ? QStringLiteral("Packaged OCR Python environment was found.")
-                : QStringLiteral("Isolated OCR Python is configured."),
-            QJsonObject{{QStringLiteral("path"), isolatedOcrPython.isEmpty() ? packagedPython : isolatedOcrPython}}));
-    }
-
-    const QString activePython = !isolatedOcrPython.isEmpty()
-        ? isolatedOcrPython
-        : (!packagedPython.isEmpty() ? packagedPython : pythonExecutable);
-    if (activePython.isEmpty()) {
+    if (pythonExecutable.isEmpty()) {
         checks.append(profileCheck(
             QStringLiteral("pythonExecutable"),
             QStringLiteral("missing"),
@@ -509,16 +513,16 @@ QJsonObject ocrEnvironmentProfile(const QString& pythonExecutable)
             QStringLiteral("pythonExecutable"),
             QStringLiteral("ok"),
             QStringLiteral("Python executable is available for OCR profile checks."),
-            QJsonObject{{QStringLiteral("path"), activePython}}));
+            QJsonObject{{QStringLiteral("path"), pythonExecutable}}));
     }
 
     checks.append(runModuleProbe(
-        activePython,
+        pythonExecutable,
         QStringLiteral("paddle"),
         QStringLiteral("paddle"),
         QStringLiteral("PaddlePaddle is missing; official OCR adapters will be unavailable.")));
     checks.append(runModuleProbe(
-        activePython,
+        pythonExecutable,
         QStringLiteral("paddleocr"),
         QStringLiteral("paddleocr"),
         QStringLiteral("PaddleOCR is missing; official OCR adapters will be unavailable.")));

@@ -11,6 +11,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonParseError>
+#include <QLockFile>
 #include <QPointer>
 #include <QRegularExpression>
 #include <QSaveFile>
@@ -89,17 +90,6 @@ bool writeArtifactFile(const QString& path, const QByteArray& contents, QString*
         return false;
     }
     return true;
-}
-
-QString stableProjectIdentity(const QString& workspacePath)
-{
-    // Evidence 是可交付报告，不能把工作区绝对路径写入持久化事实。当前
-    // schema 尚未提供项目名称/ProjectId 字段，因此以规范工作区路径的
-    // SHA-256 生成稳定 opaque identity；同一项目重开仍可关联，报告不会
-    // 暴露用户目录、盘符或 UNC 前缀。
-    const QString canonical = QDir(workspacePath).absolutePath();
-    const QByteArray digest = QCryptographicHash::hash(canonical.toUtf8(), QCryptographicHash::Sha256).toHex();
-    return QStringLiteral("project:%1").arg(QString::fromLatin1(digest));
 }
 
 bool verifyArtifactFile(const QString& artifactPath,
@@ -689,124 +679,13 @@ QString normalizedProjectRoot(const QString& projectRoot)
     return QDir::cleanPath(QDir(raw).absolutePath());
 }
 
-bool addFingerprintPath(QCryptographicHash* aggregate,
-    const QString& root,
-    const QString& absolutePath,
-    QString* error)
+QString canonicalProjectRoot(const QString& projectRoot)
 {
-    const QFileInfo info(absolutePath);
-    const QString relative = QDir(root).relativeFilePath(absolutePath);
-    QByteArray entry = relative.toUtf8();
-    entry.append('\0');
-    if (info.isSymLink()) {
-        entry.append("symlink\0");
-        entry.append(info.symLinkTarget().toUtf8());
-        aggregate->addData(entry);
-        return true;
-    }
-    if (!info.isFile()) return true;
-    entry.append("file\0");
-    entry.append(QByteArray::number(info.size()));
-    entry.append('\0');
-    QFile file(info.absoluteFilePath());
-    if (!file.open(QIODevice::ReadOnly)) {
-        if (error) *error = QStringLiteral("无法读取项目打开凭证文件：%1").arg(info.absoluteFilePath());
-        return false;
-    }
-    const QByteArray contentHash = [&file]() {
-        QCryptographicHash hash(QCryptographicHash::Sha256);
-        while (!file.atEnd()) {
-            const QByteArray block = file.read(1024 * 1024);
-            if (block.isEmpty() && file.error() != QFileDevice::NoError) return QByteArray();
-            hash.addData(block);
-        }
-        return hash.result();
-    }();
-    if (contentHash.isEmpty() && info.size() > 0) {
-        if (error) *error = QStringLiteral("读取项目打开凭证文件失败：%1").arg(info.absoluteFilePath());
-        return false;
-    }
-    entry.append(contentHash);
-    aggregate->addData(entry);
-    return true;
-}
-
-bool addFingerprintTree(QCryptographicHash* aggregate,
-    const QString& root,
-    QString* error)
-{
-    const QFileInfo rootInfo(root);
-    if (!rootInfo.exists()) {
-        aggregate->addData(QByteArray("missing\0") + root.toUtf8());
-        return true;
-    }
-    if (!rootInfo.isDir() || rootInfo.isSymLink()) {
-        if (error) *error = QStringLiteral("项目打开凭证目录无效：%1").arg(root);
-        return false;
-    }
-    QStringList paths;
-    QDirIterator iterator(root, QDir::AllEntries | QDir::NoDotAndDotDot,
-        QDirIterator::Subdirectories);
-    while (iterator.hasNext()) paths.append(iterator.next());
-    std::sort(paths.begin(), paths.end(), [](const QString& left, const QString& right) {
-        return left < right;
-    });
-    aggregate->addData(QByteArray("root\0") + root.toUtf8());
-    for (const QString& path : paths) {
-        if (!addFingerprintPath(aggregate, root, path, error)) return false;
-    }
-    return true;
-}
-
-bool captureRecoveryFingerprint(const QString& normalizedRoot, QString* result, QString* error)
-{
-    if (normalizedRoot.isEmpty() || !result) {
-        if (error) *error = QStringLiteral("生成项目打开指纹需要有效项目根目录和输出对象。");
-        return false;
-    }
-    const QString workspace = QDir(normalizedRoot).filePath(QStringLiteral(".aitrain"));
-    const QString database = QDir(workspace).filePath(QStringLiteral("project.sqlite"));
-    const QFileInfo databaseInfo(database);
-    if (!databaseInfo.exists() || !databaseInfo.isFile() || databaseInfo.isSymLink()) {
-        if (error) *error = QStringLiteral("项目打开凭证缺少有效 project.sqlite。");
-        return false;
-    }
-    QCryptographicHash aggregate(QCryptographicHash::Sha256);
-    // SQLite -shm 是连接级共享内存文件，候选关闭与激活连接之间可能
-    // 自动创建/删除，不属于项目持久化事实；project.sqlite 与 -wal 才是
-    // 需要阻断 TOCTOU 的恢复输入。
-    const QStringList databaseFiles = {database, database + QStringLiteral("-wal")};
-    for (const QString& path : databaseFiles) {
-        if (QFileInfo::exists(path) && !addFingerprintPath(&aggregate, workspace, path, error)) return false;
-        if (!QFileInfo::exists(path)) aggregate.addData(QByteArray("missing\0") + path.toUtf8());
-    }
-    const QStringList trees = {
-        QDir(workspace).filePath(QStringLiteral("artifacts/.staging")),
-        QDir(workspace).filePath(QStringLiteral("artifacts/.staging-meta")),
-        QDir(workspace).filePath(QStringLiteral(".runtime-staging"))};
-    for (const QString& tree : trees) {
-        if (!addFingerprintTree(&aggregate, tree, error)) return false;
-    }
-    *result = QString::fromLatin1(aggregate.result().toHex());
-    return true;
-}
-
-bool captureRecoveryTreesFingerprint(const QString& normalizedRoot, QString* result, QString* error)
-{
-    if (normalizedRoot.isEmpty() || !result) {
-        if (error) *error = QStringLiteral("生成项目暂存树指纹需要有效项目根目录和输出对象。");
-        return false;
-    }
-    const QString workspace = QDir(normalizedRoot).filePath(QStringLiteral(".aitrain"));
-    QCryptographicHash aggregate(QCryptographicHash::Sha256);
-    for (const QString& tree : {
-            QDir(workspace).filePath(QStringLiteral("artifacts/.staging")),
-            QDir(workspace).filePath(QStringLiteral("artifacts/.staging-meta")),
-            QDir(workspace).filePath(QStringLiteral(".runtime-staging"))}) {
-        if (!addFingerprintTree(&aggregate, tree, error)) return false;
-    }
-    *result = QString::fromLatin1(aggregate.result().toHex());
-    return true;
+    const QFileInfo info(projectRoot);
+    const QString canonical = info.canonicalFilePath();
+    return canonical.isEmpty()
+        ? QString()
+        : QDir::cleanPath(QDir::fromNativeSeparators(canonical));
 }
 
 } // namespace
@@ -962,33 +841,25 @@ bool ProjectWorkspace::recoverPendingWorkflowTerminalEvents(QString* error)
 
 bool ProjectWorkspace::recoverEvidenceGatedWorkflows(QString* error)
 {
-    constexpr int kRecoveryPageSize = 256;
-    QVector<WorkflowRunSnapshot> workflows;
-    for (int offset = 0;; offset += kRecoveryPageSize) {
-        const QVector<WorkflowRunSnapshot> page =
-            storage_.pendingEvidenceRequiredWorkflows(kRecoveryPageSize, offset, error);
+    constexpr int kRecoveryPageSize = 200;
+    for (;;) {
+        const QVector<WorkflowRunSnapshot> workflows =
+            storage_.pendingEvidenceRequiredWorkflows(kRecoveryPageSize, error);
         if (error && !error->isEmpty()) return false;
-        workflows += page;
-        if (page.size() < kRecoveryPageSize) break;
-    }
-    QVector<WorkflowTerminalizationSnapshot> pending;
-    for (int offset = 0;; offset += kRecoveryPageSize) {
-        const QVector<WorkflowTerminalizationSnapshot> page =
-            storage_.pendingWorkflowTerminalizations(kRecoveryPageSize, offset, error);
-        if (error && !error->isEmpty()) return false;
-        pending += page;
-        if (page.size() < kRecoveryPageSize) break;
-    }
-    QHash<QString, WorkflowTerminalizationSnapshot> terminalizations;
-    for (const WorkflowTerminalizationSnapshot& terminalization : pending) {
-        terminalizations.insert(terminalization.workflowRunId.toString(), terminalization);
-    }
+        if (workflows.isEmpty()) break;
 
-    for (const WorkflowRunSnapshot& workflow : workflows) {
+        for (const WorkflowRunSnapshot& workflow : workflows) {
         TaskSnapshot task;
         if (!storage_.task(workflow.taskId, &task, error)) return false;
-        WorkflowTerminalizationSnapshot terminalization = terminalizations.value(workflow.id.toString());
-        if (!terminalization.workflowRunId.isValid()) {
+        WorkflowTerminalizationSnapshot terminalization;
+        bool terminalizationExists = false;
+        if (!storage_.workflowTerminalizationExists(
+                workflow.id, &terminalizationExists, error)) return false;
+        if (terminalizationExists
+            && !storage_.workflowTerminalization(workflow.id, &terminalization, error)) {
+            return false;
+        }
+        if (!terminalizationExists) {
             WorkflowRunner runner(&storage_);
             WorkflowStepDispatch dispatch;
             const QVector<WorkflowStepSnapshot> steps = storage_.workflowSteps(workflow.id, error);
@@ -1061,146 +932,263 @@ bool ProjectWorkspace::recoverEvidenceGatedWorkflows(QString* error)
         }
         if (terminalization.state == WorkflowTerminalizationState::EvidenceAttached
             && !closeWorkflowTerminalization(workflow.id, error)) return false;
+        }
     }
     return true;
 }
 
-bool ProjectWorkspace::capturePreparedOpenFingerprint(const QString& normalizedRoot,
-    ProjectWorkspacePreparedOpen* prepared, QString* error)
+bool ProjectWorkspace::acquireOwnerLease(const QString& canonicalRoot,
+    std::shared_ptr<QLockFile>* lease, QString* error)
 {
-    if (!prepared || normalizedRoot.isEmpty()) {
-        if (error) *error = QStringLiteral("生成项目打开凭证需要有效项目根目录。");
+    if (canonicalRoot.isEmpty() || !lease) {
+        if (error) *error = QStringLiteral("取得项目 Owner Lease 需要规范项目根目录。");
         return false;
     }
-    prepared->normalizedRoot = normalizedRoot;
-    if (!captureRecoveryFingerprint(normalizedRoot, &prepared->fingerprintSha256, error)) return false;
-    return prepared->isValid();
+    auto owner = std::make_shared<QLockFile>(
+        QDir(canonicalRoot).filePath(QStringLiteral(".aitrain.owner.lock")));
+    owner->setStaleLockTime(0);
+    if (!owner->tryLock(0)) {
+        qint64 pid = 0;
+        QString host;
+        QString application;
+        owner->getLockInfo(&pid, &host, &application);
+        if (error) {
+            *error = QStringLiteral("ProjectLocked：项目已由 %1@%2（PID %3）打开。")
+                .arg(application.isEmpty() ? QStringLiteral("AITrain Studio") : application,
+                    host.isEmpty() ? QStringLiteral("local") : host)
+                .arg(pid);
+        }
+        return false;
+    }
+    QLockFile workerProbe(
+        QDir(canonicalRoot).filePath(QStringLiteral(".aitrain.worker.lock")));
+    workerProbe.setStaleLockTime(0);
+    if (!workerProbe.tryLock(0)) {
+        qint64 pid = 0;
+        QString host;
+        QString application;
+        workerProbe.getLockInfo(&pid, &host, &application);
+        owner->unlock();
+        if (error) {
+            *error = QStringLiteral("ProjectBusy：旧 Worker 仍在活动（%1@%2，PID %3）。")
+                .arg(application.isEmpty() ? QStringLiteral("AITrain Worker") : application,
+                    host.isEmpty() ? QStringLiteral("local") : host)
+                .arg(pid);
+        }
+        return false;
+    }
+    workerProbe.unlock();
+    *lease = std::move(owner);
+    return true;
 }
 
-bool ProjectWorkspace::preparedOpenFingerprintMatches(
-    const ProjectWorkspacePreparedOpen& prepared, QString* error)
+bool ProjectWorkspace::acquireWorkerLease(const QString& canonicalRoot,
+    std::shared_ptr<QLockFile>* lease, QString* error)
 {
-    if (!prepared.isValid()) {
-        if (error) *error = QStringLiteral("项目打开凭证无效或已过期。");
+    if (canonicalRoot.isEmpty() || !lease) {
+        if (error) *error = QStringLiteral("取得 Worker Lease 需要规范项目根目录。");
         return false;
     }
-    const QString normalized = normalizedProjectRoot(prepared.normalizedRoot);
-    if (normalized.compare(prepared.normalizedRoot, Qt::CaseInsensitive) != 0) {
-        if (error) *error = QStringLiteral("项目打开凭证路径已变化。");
+    auto worker = std::make_shared<QLockFile>(
+        QDir(canonicalRoot).filePath(QStringLiteral(".aitrain.worker.lock")));
+    worker->setStaleLockTime(0);
+    if (!worker->tryLock(0)) {
+        if (error) *error = QStringLiteral("ProjectBusy：项目已有活动 Worker。");
         return false;
     }
-    QString currentFingerprint;
-    if (!captureRecoveryFingerprint(normalized, &currentFingerprint, error)) return false;
-    const bool matches = currentFingerprint == prepared.fingerprintSha256;
-    if (!matches && error) {
-        *error = QStringLiteral("项目在后台预检后发生变化，需要重新执行恢复。");
-    }
-    return matches;
+    *lease = std::move(worker);
+    return true;
 }
 
 bool ProjectWorkspace::prepareOpen(const QString& projectRoot,
-    ProjectWorkspacePreparedOpen* prepared, QString* error)
+    PreparedProjectSession* prepared, QString* error)
 {
-    if (prepared) *prepared = ProjectWorkspacePreparedOpen();
-    const QString normalizedRoot = normalizedProjectRoot(projectRoot);
-    if (normalizedRoot.isEmpty()) {
-        if (error) *error = QStringLiteral("打开项目工作区需要项目根目录。");
+    if (prepared) *prepared = PreparedProjectSession();
+    if (!prepared) {
+        if (error) *error = QStringLiteral("准备项目会话需要输出票据。");
         return false;
     }
     ProjectWorkspace candidate;
-    if (!candidate.open(normalizedRoot, error)) {
-        return false;
-    }
+    if (!candidate.open(projectRoot, error)) return false;
+    ProjectMetaSnapshot projectMeta;
+    if (!candidate.storage_.advanceOpenGeneration(&projectMeta, error)) return false;
+    prepared->canonicalRoot = candidate.canonicalRoot_;
+    prepared->projectMeta = projectMeta;
+    prepared->ownerLease = std::move(candidate.ownerLease_);
     candidate.close();
-    return capturePreparedOpenFingerprint(normalizedRoot, prepared, error);
+    return prepared->isValid();
 }
 
-bool ProjectWorkspace::openPrepared(const ProjectWorkspacePreparedOpen& prepared,
+bool ProjectWorkspace::prepareCreate(const QString& projectRoot,
+    PreparedProjectSession* prepared, QString* error)
+{
+    if (prepared) *prepared = PreparedProjectSession();
+    if (!prepared) {
+        if (error) *error = QStringLiteral("准备新项目会话需要输出票据。");
+        return false;
+    }
+    ProjectWorkspace candidate;
+    if (!candidate.createProject(projectRoot, error)) return false;
+    ProjectMetaSnapshot projectMeta;
+    if (!candidate.storage_.advanceOpenGeneration(&projectMeta, error)) return false;
+    prepared->canonicalRoot = candidate.canonicalRoot_;
+    prepared->projectMeta = projectMeta;
+    prepared->ownerLease = std::move(candidate.ownerLease_);
+    candidate.close();
+    return prepared->isValid();
+}
+
+bool ProjectWorkspace::openPrepared(PreparedProjectSession prepared,
     QString* error)
 {
-    if (!preparedOpenFingerprintMatches(prepared, error)) {
+    if (!prepared.isValid()) {
+        if (error) *error = QStringLiteral("项目会话票据无效或已消费。");
         return false;
     }
-    // 激活阶段仍可能因 GUI 线程上的连接、权限或插件初始化失败。先记住
-    // 当前 session，失败时尽力恢复原工作区，避免一次候选项目失败把用户
-    // 已打开的项目置于半关闭状态。
-    const QString previousRoot = workspacePath_;
-    QString preActivationTreeFingerprint;
-    if (!captureRecoveryTreesFingerprint(prepared.normalizedRoot,
-            &preActivationTreeFingerprint, error)) {
+    bool expected = false;
+    if (!prepared.consumed->compare_exchange_strong(expected, true)) {
+        if (error) *error = QStringLiteral("项目会话票据已消费。");
         return false;
     }
-    QString activationError;
-    if (openInternal(prepared.normalizedRoot, false, &activationError)) {
-        // 激活本身与凭证复验之间仍存在文件系统竞态；复验失败时不能把
-        // 未经同一份恢复快照验证的暂存树留在当前 session。SQLite 打开时
-        // 会执行 journal_mode=WAL，可能合法地产生连接级数据库变更，故
-        // 这里只复验恢复实际消费的 staging/runtime 树。
-        QString postActivationError;
-        QString postActivationTreeFingerprint;
-        if (!captureRecoveryTreesFingerprint(prepared.normalizedRoot,
-                &postActivationTreeFingerprint, &postActivationError)
-            || postActivationTreeFingerprint != preActivationTreeFingerprint) {
-            close();
-            QString restoreError;
-            if (!previousRoot.isEmpty()) {
-                openInternal(previousRoot, true, &restoreError);
-            }
-            if (error) {
-                *error = postActivationError.isEmpty()
-                    ? QStringLiteral("候选项目在激活期间发生变化，需要重新执行恢复。")
-                    : postActivationError;
-                if (!restoreError.isEmpty()) {
-                    *error += QStringLiteral("；原项目恢复诊断：%1").arg(restoreError);
-                }
-            }
-            return false;
-        }
-        if (error) error->clear();
-        return true;
+    ProjectWorkspace candidate;
+    candidate.ownerLease_ = std::move(prepared.ownerLease);
+    if (!candidate.openInternal(prepared.canonicalRoot, OpenMode::ExistingOwner,
+            false, true, error)) {
+        return false;
     }
-    if (!previousRoot.isEmpty()) {
-        QString restoreError;
-        if (openInternal(previousRoot, true, &restoreError)) {
-            if (error) {
-                *error = activationError;
-                if (!restoreError.isEmpty()) {
-                    *error += QStringLiteral("；原项目已恢复，但恢复过程有诊断：%1").arg(restoreError);
-                }
-            }
-            return false;
-        }
-        if (error) {
-            *error = activationError;
-            if (!restoreError.isEmpty()) {
-                *error += QStringLiteral("；原项目恢复失败：%1").arg(restoreError);
-            }
+    ProjectMetaSnapshot activatedMeta;
+    if (!candidate.storage_.projectMeta(&activatedMeta, error)
+        || activatedMeta.projectId != prepared.projectMeta.projectId
+        || activatedMeta.openGeneration != prepared.projectMeta.openGeneration) {
+        if (error && error->isEmpty()) {
+            *error = QStringLiteral("PreparedOpenStale：项目身份或 open_generation 已变化。");
         }
         return false;
     }
-    if (error) *error = activationError;
-    return false;
+    trainingAdapterHost_.reset();
+    taskCoordinator_.reset();
+    candidate.trainingAdapterHost_.reset();
+    candidate.taskCoordinator_.reset();
+    storage_.swap(candidate.storage_);
+    artifactStore_.swap(candidate.artifactStore_);
+    workspacePath_.swap(candidate.workspacePath_);
+    canonicalRoot_.swap(candidate.canonicalRoot_);
+    ownerLease_.swap(candidate.ownerLease_);
+    workerLease_.swap(candidate.workerLease_);
+    taskCoordinator_ = std::make_unique<TaskCoordinator>(&storage_);
+    trainingAdapterHost_ = std::make_unique<TaskExecutionHost>(
+        taskCoordinator_.get(), artifactStore_.get());
+    if (error) error->clear();
+    return true;
 }
 
 bool ProjectWorkspace::open(const QString& projectRoot, QString* error)
 {
-    return openInternal(projectRoot, true, error);
+    return openInternal(projectRoot, OpenMode::ExistingOwner, true, false, error);
 }
 
-bool ProjectWorkspace::openInternal(const QString& projectRoot, bool recover, QString* error)
+bool ProjectWorkspace::createProject(const QString& projectRoot, QString* error)
+{
+    return openInternal(projectRoot, OpenMode::CreateOwner, true, false, error);
+}
+
+bool ProjectWorkspace::rebuildProject(const QString& projectRoot, QString* error)
 {
     close();
+    const QString normalizedRoot = normalizedProjectRoot(projectRoot);
+    const QFileInfo rootInfo(normalizedRoot);
+    if (normalizedRoot.isEmpty() || !rootInfo.exists() || !rootInfo.isDir()
+        || rootInfo.isSymLink()) {
+        if (error) *error = QStringLiteral("重建项目要求已存在的非符号链接项目根目录。");
+        return false;
+    }
+    const QString canonicalRoot = canonicalProjectRoot(normalizedRoot);
+    if (canonicalRoot.isEmpty()
+        || !acquireOwnerLease(canonicalRoot, &ownerLease_, error)) {
+        close();
+        return false;
+    }
+    const QString workspace = QDir(canonicalRoot).filePath(QStringLiteral(".aitrain"));
+    const QFileInfo workspaceInfo(workspace);
+    if (workspaceInfo.exists()
+        && (!workspaceInfo.isDir() || workspaceInfo.isSymLink())) {
+        if (error) *error = QStringLiteral("项目元数据目录必须是非符号链接目录。");
+        close();
+        return false;
+    }
+    if (workspaceInfo.exists() && !QDir(workspace).removeRecursively()) {
+        if (error) *error = QStringLiteral("无法删除项目元数据目录：%1").arg(workspace);
+        close();
+        return false;
+    }
+    canonicalRoot_ = canonicalRoot;
+    return openInternal(canonicalRoot, OpenMode::CreateOwner, true, true, error);
+}
+
+bool ProjectWorkspace::openForWorkerChild(const QString& projectRoot, QString* error)
+{
+    return openInternal(projectRoot, OpenMode::WorkerChild, false, false, error);
+}
+
+bool ProjectWorkspace::openInternal(const QString& projectRoot, OpenMode mode,
+    bool recover, bool preserveOwnerLease, QString* error)
+{
+    if (error) error->clear();
+    const bool workerChild = mode == OpenMode::WorkerChild;
+    const bool create = mode == OpenMode::CreateOwner;
+    std::shared_ptr<QLockFile> retainedOwner;
+    if (preserveOwnerLease) retainedOwner = std::move(ownerLease_);
+    close();
+    ownerLease_ = std::move(retainedOwner);
     const QString normalizedRoot = normalizedProjectRoot(projectRoot);
     if (normalizedRoot.isEmpty()) {
         if (error) *error = QStringLiteral("打开  项目工作区需要项目根目录。");
         return false;
     }
-    const QFileInfo rootInfo(normalizedRoot);
+    QFileInfo rootInfo(normalizedRoot);
     if (rootInfo.exists() && (!rootInfo.isDir() || rootInfo.isSymLink())) {
         if (error) *error = QStringLiteral(" 项目根目录必须是非符号链接目录。");
         return false;
     }
-    const QString candidate = QDir(normalizedRoot).filePath(QStringLiteral(".aitrain"));
+    if (!rootInfo.exists()) {
+        if (!create || !QDir().mkpath(normalizedRoot)) {
+            if (error) *error = create
+                ? QStringLiteral("无法创建项目根目录：%1").arg(normalizedRoot)
+                : QStringLiteral("打开项目不能创建缺失的项目根目录：%1").arg(normalizedRoot);
+            return false;
+        }
+        rootInfo = QFileInfo(normalizedRoot);
+    }
+    canonicalRoot_ = canonicalProjectRoot(normalizedRoot);
+    if (canonicalRoot_.isEmpty()) {
+        if (error) *error = QStringLiteral("无法解析项目根目录的 canonical path。");
+        close();
+        return false;
+    }
+    if (workerChild) {
+        if (!acquireWorkerLease(canonicalRoot_, &workerLease_, error)) {
+            close();
+            return false;
+        }
+    } else if (!ownerLease_
+        && !acquireOwnerLease(canonicalRoot_, &ownerLease_, error)) {
+        close();
+        return false;
+    }
+    const QString candidate = QDir(canonicalRoot_).filePath(QStringLiteral(".aitrain"));
+    const QString databasePath = QDir(candidate).filePath(QStringLiteral("project.sqlite"));
+    if (!create && (!QDir(candidate).exists() || !QFileInfo::exists(databasePath))) {
+        if (error) *error = workerChild
+            ? QStringLiteral("Worker 子进程不能创建缺失的项目工作区。")
+            : QStringLiteral("项目不存在：缺少 .aitrain/project.sqlite。");
+        close();
+        return false;
+    }
+    if (create && QFileInfo::exists(databasePath)) {
+        if (error) *error = QStringLiteral("项目已存在；创建入口不会覆盖现有项目。");
+        close();
+        return false;
+    }
     if (!QDir().mkpath(candidate)) {
         if (error) *error = QStringLiteral("无法创建  项目工作区：%1").arg(candidate);
         return false;
@@ -1219,7 +1207,7 @@ bool ProjectWorkspace::openInternal(const QString& projectRoot, bool recover, QS
             return false;
         }
     }
-    if (!storage_.open(QDir(candidate).filePath(QStringLiteral("project.sqlite")), error)) {
+    if (!storage_.open(databasePath, error)) {
         close();
         return false;
     }
@@ -1355,6 +1343,9 @@ void ProjectWorkspace::close()
     artifactStore_.reset();
     storage_.close();
     workspacePath_.clear();
+    canonicalRoot_.clear();
+    workerLease_.reset();
+    ownerLease_.reset();
 }
 
 bool ProjectWorkspace::isOpen() const
@@ -2120,7 +2111,8 @@ bool ProjectWorkspace::registerTrainingWorkflowModel(const WorkflowRunId& workfl
         artifactStore_->abort(registrationStagingPath, &ignored);
         return false;
     }
-    ModelPackageSnapshot package{manifest, exportIt->outputArtifactId, QDateTime::currentDateTimeUtc()};
+    ModelPackageSnapshot package{manifest, exportIt->outputArtifactId,
+        QDateTime::currentDateTimeUtc(), ModelSourceSnapshotBinding::ProjectSnapshot};
     if (!storage_.registerModelPackage(package, error)) {
         const QString registrationError = error ? *error : QStringLiteral("无法登记 Model Package。");
         QString cleanupError;
@@ -2419,8 +2411,10 @@ bool ProjectWorkspace::buildWorkflowEvidenceBundle(const WorkflowRunId& workflow
     const QVector<MetricSnapshot> metrics = storage_.metricsForTask(task.id, error);
     if (error && !error->isEmpty()) return false;
 
+    ProjectMetaSnapshot projectMeta;
+    if (!storage_.projectMeta(&projectMeta, error)) return false;
     EvidenceBundle bundle;
-    bundle.projectIdentity = stableProjectIdentity(workspacePath_);
+    bundle.projectIdentity = QStringLiteral("project:%1").arg(projectMeta.projectId.toString());
     bundle.task = task;
     bundle.workflowRunId = workflow.id;
     bundle.createdAt = QDateTime::currentDateTimeUtc();
@@ -2801,11 +2795,7 @@ bool ProjectWorkspace::closeWorkflowTerminalization(const WorkflowRunId& workflo
         if (error) *error = QStringLiteral("关闭 Workflow 终态需要已打开工作区和有效 Workflow ID。");
         return false;
     }
-    WorkflowTerminalizationSnapshot terminalization;
-    TaskSnapshot task;
-    if (!storage_.workflowTerminalization(workflowRunId, &terminalization, error)
-        || !storage_.task(terminalization.taskId, &task, error)) return false;
-    return storage_.closeWorkflowTerminalization(workflowRunId, task.state, error);
+    return storage_.closeWorkflowTerminalization(workflowRunId, error);
 }
 
 QString ProjectWorkspace::runtimeStagingPath(const TaskId& taskId) const

@@ -7,7 +7,7 @@
 #include "LanguageSupport.h"
 #include "MainWindowSupport.h"
 #include "aitrain/core/CapabilityRegistry.h"
-#include "aitrain/core/DetectionTrainer.h"
+#include "aitrain/core/VisionModelRuntime.h"
 #include "aitrain/core/WorkerProtocol.h"
 #include "aitrain/workflow/TrainingWorkflowProfile.h"
 
@@ -162,7 +162,7 @@ QJsonValue yoloTrainArgJsonValue(const QString& key, const QString& text)
     }
     const QSet<QString> boolKeys = {
         QStringLiteral("cos_lr"), QStringLiteral("amp"), QStringLiteral("deterministic"),
-        QStringLiteral("resume"), QStringLiteral("rect"), QStringLiteral("single_cls"),
+        QStringLiteral("rect"), QStringLiteral("single_cls"),
         QStringLiteral("val"), QStringLiteral("plots"), QStringLiteral("overlap_mask")
     };
     if (boolKeys.contains(key)) {
@@ -232,7 +232,7 @@ QJsonObject yoloTrainArgsFromUi(const QWidget* root)
         QStringLiteral("device"), QStringLiteral("workers"), QStringLiteral("patience"), QStringLiteral("optimizer"),
         QStringLiteral("lr0"), QStringLiteral("lrf"), QStringLiteral("momentum"), QStringLiteral("weight_decay"),
         QStringLiteral("warmup_epochs"), QStringLiteral("cos_lr"), QStringLiteral("amp"), QStringLiteral("deterministic"),
-        QStringLiteral("cache"), QStringLiteral("pretrained"), QStringLiteral("resume"), QStringLiteral("save_period"),
+        QStringLiteral("cache"), QStringLiteral("pretrained"), QStringLiteral("save_period"),
         QStringLiteral("fraction"), QStringLiteral("rect"), QStringLiteral("multi_scale"), QStringLiteral("single_cls"),
         QStringLiteral("classes"), QStringLiteral("freeze"), QStringLiteral("box"), QStringLiteral("cls"),
         QStringLiteral("dfl"), QStringLiteral("nbs"), QStringLiteral("val"), QStringLiteral("plots"),

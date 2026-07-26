@@ -80,7 +80,7 @@ GUI 只暴露已经接入 Worker 和核心转换实现的组合：
 |---|---|
 | `ok` | 转换是否成功。 |
 | `sourceFormat` / `targetFormat` | 源格式与目标格式。 |
-| `sourcePath` / `outputPath` | 输入与输出路径。 |
+| `sourcePath` | 仅表示导入边界的输入路径；转换输出只写入项目 Artifact staging，成功后登记 Dataset/Version/Snapshot 身份，不接受任意外部输出目录。 |
 | `sampleCount` / `convertedSampleCount` / `skippedSampleCount` | 样本总数、已转换数、跳过数。 |
 | `annotationCount` / `convertedAnnotationCount` / `skippedAnnotationCount` | 标注总数、已转换数、跳过数。 |
 | `classMap` | 类别映射。 |

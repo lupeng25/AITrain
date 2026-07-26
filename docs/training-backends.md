@@ -40,7 +40,7 @@ python -m venv .venv-yolo
 .\.venv-yolo\Scripts\python.exe -m pip install -r python_trainers\requirements-yolo.txt
 ```
 
-GPU YOLO training with `device=0` requires the selected Python to provide CUDA-enabled PyTorch. A CPU-only YOLO environment must use `device=cpu`; otherwise Ultralytics fails before training with an invalid CUDA device error. For packaged or validation runs, set training parameter `pythonExecutable` or `AITRAIN_PYTHON_EXECUTABLE` to the CUDA-capable YOLO Python path and verify `torch.cuda.is_available()` before starting long jobs.
+使用 `device=0` 的 YOLO GPU 训练要求所选 Python 安装 CUDA 版 PyTorch；CPU 环境必须使用 `device=cpu`。解释器由 `yolo` Profile 统一解析，显式设置 `AITRAIN_YOLO_PYTHON_EXECUTABLE` 或 `AITRAIN_PYTHON_EXECUTABLE` 后若解释器无效会立即失败，不会静默回退。长任务开始前应由 Environment Check 验证 `torch.cuda.is_available()`。
 
 YOLO model-family status is tracked in `docs\yolo-model-support-matrix.md`. The product defaults remain `yolov8n.yaml` for detection, `yolov8n-seg.yaml` for segmentation, and `yolo11n-obb.pt` for OBB. P1 adds editable GUI presets for YOLOv5u standard P5 detection, YOLOv8 / YOLO11 / YOLO12 detection across `n/s/m/l/x` with `.yaml` and `.pt`, YOLOv8 / YOLO11 instance segmentation with `-seg.yaml` and `-seg.pt`, YOLO12 instance segmentation with `-seg.yaml`, plus YOLOv8 P2/P6 detection YAML architectures. OBB v1 exposes YOLO11 OBB `n/s/m/l/x` `.pt` and `.yaml` presets; YOLO26 OBB remains manual/future compatibility only and is not a default preset. YOLO12 `-seg.pt` is currently a blocked upstream-weight case in Ultralytics 8.3.171, not a data or AITrain runtime failure. YOLO26 detection and instance-segmentation presets are imported as an independent compatibility phase, not into P1; the isolated YOLO26 full matrix gates training/ONNX/TensorRT only. YOLO26 NCNN export/conversion is not a product option. YOLOv5u uses `yolov5n/s/m/l/x.yaml` architecture entries and `yolov5nu/su/mu/lu/xu.pt` pretrained entries; original `ultralytics/yolov5` repository weights are not a compatibility promise. `.pt` weights are not bundled; the installed Ultralytics package may download them into the user environment.
 
@@ -269,7 +269,7 @@ The official Rec adapter accepts these extra parameters in addition to the commo
 - `trainLabelFile`, `valLabelFile`, and `dictionaryFile` to use explicit PaddleOCR Rec materials.
 - `modelPreset` to select `PP-OCRv4_mobile_rec`, `PP-OCRv5_mobile_rec`, `PP-OCRv5_server_rec`, `en_PP-OCRv5_mobile_rec`, `PP-OCRv6_tiny_rec`, `PP-OCRv6_small_rec`, or `PP-OCRv6_medium_rec`.
 - `officialConfig` to start from a specific PaddleOCR recognition config.
-- `pretrainedModel` and `resumeCheckpoint` for official train/export inputs.
+- `pretrainedModel` 用于官方训练/导出输入；当前不支持 Resume checkpoint。
 - `exportOnly=true` to skip training and export an existing checkpoint.
 - `runInferenceAfterExport=true` plus `inferenceImage` to run official `predict_rec.py` after export and write `official_prediction.json`.
 - `recImageShape` to override the generated recognition image shape, for example `3,48,320`.
@@ -281,7 +281,7 @@ The official Det adapter accepts these extra parameters:
 - `trainLabelFile` and `valLabelFile` to use explicit PaddleOCR Det label files.
 - `modelPreset` to select `PP-OCRv4_mobile_det`, `PP-OCRv5_mobile_det`, `PP-OCRv5_server_det`, `PP-OCRv6_tiny_det`, `PP-OCRv6_small_det`, or `PP-OCRv6_medium_det`.
 - `officialConfig` to start from a specific PaddleOCR detection config.
-- `pretrainedModel` and `resumeCheckpoint` for official train/export inputs.
+- `pretrainedModel` 用于官方训练/导出输入；当前不支持 Resume checkpoint。
 - `exportOnly=true` to skip training and export an existing checkpoint.
 - `imageSize` to override generated detection image size.
 

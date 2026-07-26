@@ -1,0 +1,5 @@
+ultralytics==8.4.48
+onnx==1.22.0
+onnxruntime==1.24.1
+numpy==2.4.6
+pillow==12.2.0

@@ -171,7 +171,7 @@ void OcrAcceptanceTests::customerOfficialReportsProduceFourStepsAndEvidence()
     QVERIFY(directory.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
     const Fixture fixture = commitFixture(&workspace, QStringLiteral("customer_domain"), 20,
         0.88, 0.92, 0.08, 0.86, &error);
     QVERIFY2(fixture.det.isValid() && fixture.rec.isValid() && fixture.system.isValid(), qPrintable(error));
@@ -203,7 +203,7 @@ void OcrAcceptanceTests::missingReportFailsPreciselyWithEvidence()
     QTemporaryDir directory;
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY(workspace.open(directory.filePath(QStringLiteral("project")), &error));
+    QVERIFY(workspace.createProject(directory.filePath(QStringLiteral("project")), &error));
     Fixture fixture = commitFixture(&workspace, QStringLiteral("customer_domain"), 20, 0.9, 0.9, 0.1, 0.9, &error);
     fixture.system = aitrain::ArtifactId::create();
     aitrain::OcrAcceptanceWorkflowResult result;
@@ -219,7 +219,7 @@ void OcrAcceptanceTests::tamperedReportFailsPreciselyWithEvidence()
     QTemporaryDir directory;
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY(workspace.open(directory.filePath(QStringLiteral("project")), &error));
+    QVERIFY(workspace.createProject(directory.filePath(QStringLiteral("project")), &error));
     const Fixture fixture = commitFixture(&workspace, QStringLiteral("customer_domain"), 20, 0.9, 0.9, 0.1, 0.9, &error);
     QVERIFY(writeBytes(artifactFile(workspace, fixture.rec,
         QStringLiteral("report/paddleocr_official_rec_report.json")), QByteArray("{}\n")));
@@ -235,7 +235,7 @@ void OcrAcceptanceTests::insufficientSamplesFailPrecisely()
     QTemporaryDir directory;
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY(workspace.open(directory.filePath(QStringLiteral("project")), &error));
+    QVERIFY(workspace.createProject(directory.filePath(QStringLiteral("project")), &error));
     const Fixture fixture = commitFixture(&workspace, QStringLiteral("customer_domain"), 3, 0.9, 0.9, 0.1, 0.9, &error);
     aitrain::OcrAcceptanceWorkflowResult result;
     QVERIFY2(run(&workspace, fixture, &result, &error), qPrintable(error));
@@ -250,7 +250,7 @@ void OcrAcceptanceTests::thresholdsNotMetFailPrecisely()
     QTemporaryDir directory;
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY(workspace.open(directory.filePath(QStringLiteral("project")), &error));
+    QVERIFY(workspace.createProject(directory.filePath(QStringLiteral("project")), &error));
     const Fixture fixture = commitFixture(&workspace, QStringLiteral("customer_domain"), 20, 0.4, 0.6, 0.4, 0.5, &error);
     aitrain::OcrAcceptanceWorkflowResult result;
     QVERIFY2(run(&workspace, fixture, &result, &error), qPrintable(error));
@@ -264,7 +264,7 @@ void OcrAcceptanceTests::publicEvidenceCannotBecomeProductionAccepted()
     QTemporaryDir directory;
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY(workspace.open(directory.filePath(QStringLiteral("project")), &error));
+    QVERIFY(workspace.createProject(directory.filePath(QStringLiteral("project")), &error));
     const Fixture fixture = commitFixture(&workspace, QStringLiteral("public"), 20, 0.9, 0.9, 0.1, 0.9, &error);
     aitrain::OcrAcceptanceWorkflowResult result;
     QVERIFY2(run(&workspace, fixture, &result, &error), qPrintable(error));
@@ -280,7 +280,7 @@ void OcrAcceptanceTests::cancellationHasUniqueTerminalAndEvidence()
     QTemporaryDir directory;
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY(workspace.open(directory.filePath(QStringLiteral("project")), &error));
+    QVERIFY(workspace.createProject(directory.filePath(QStringLiteral("project")), &error));
     const Fixture fixture = commitFixture(&workspace, QStringLiteral("customer_domain"), 20, 0.9, 0.9, 0.1, 0.9, &error);
     aitrain::OcrAcceptanceWorkflowResult result;
     QVERIFY2(run(&workspace, fixture, &result, &error, [] { return true; }), qPrintable(error));

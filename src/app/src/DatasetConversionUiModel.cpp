@@ -1,32 +1,11 @@
 #include "DatasetConversionUiModel.h"
+#include "aitrain/product/ProductCapabilityContract.h"
 
 #include <QDir>
 #include <QFileInfo>
 
 namespace aitrain_app {
 namespace {
-
-struct DatasetConversionPair {
-    const char* source;
-    const char* const* targets;
-    int targetCount;
-};
-
-const char* const cocoTargets[] = {"yolo_detection", "yolo_segmentation"};
-const char* const vocTargets[] = {"yolo_detection"};
-const char* const yoloDetectionTargets[] = {"coco_json", "voc_xml", "xanylabeling_xlabel"};
-const char* const yoloSegmentationTargets[] = {"coco_json", "xanylabeling_xlabel"};
-const char* const yoloObbTargets[] = {"xanylabeling_xlabel"};
-const char* const xAnyLabelingXLabelTargets[] = {"yolo_detection", "yolo_segmentation", "yolo_obb"};
-
-const DatasetConversionPair conversionMatrix[] = {
-    {"coco_json", cocoTargets, 2},
-    {"voc_xml", vocTargets, 1},
-    {"yolo_detection", yoloDetectionTargets, 3},
-    {"yolo_segmentation", yoloSegmentationTargets, 2},
-    {"yolo_obb", yoloObbTargets, 1},
-    {"xanylabeling_xlabel", xAnyLabelingXLabelTargets, 3},
-};
 
 void appendIfPresent(QStringList* messages, const QString& message)
 {
@@ -45,9 +24,6 @@ int errorFieldCount(const DatasetConversionValidation& validation)
         ++count;
     }
     if (!validation.inputPathError.isEmpty()) {
-        ++count;
-    }
-    if (!validation.outputPathError.isEmpty()) {
         ++count;
     }
     return count;
@@ -80,26 +56,25 @@ QString datasetConversionFormatLabel(const QString& format)
 
 QStringList supportedDatasetConversionSourceFormats()
 {
-    return QStringList({QStringLiteral("coco_json"),
-        QStringLiteral("voc_xml"),
-        QStringLiteral("yolo_detection"),
-        QStringLiteral("yolo_segmentation"),
-        QStringLiteral("yolo_obb"),
-        QStringLiteral("xanylabeling_xlabel")});
+    QStringList formats;
+    for (const aitrain::DatasetConversionRouteContract& route :
+        aitrain::ProductCapabilityContract::instance().datasetConversionRoutes()) {
+        if (!formats.contains(route.sourceFormat)) formats.append(route.sourceFormat);
+    }
+    return formats;
 }
 
 QStringList supportedDatasetConversionTargets(const QString& sourceFormat)
 {
-    for (const DatasetConversionPair& pair : conversionMatrix) {
-        if (sourceFormat == QLatin1String(pair.source)) {
-            QStringList targets;
-            for (int index = 0; index < pair.targetCount; ++index) {
-                targets.append(QLatin1String(pair.targets[index]));
-            }
-            return targets;
+    const QString source = sourceFormat.trimmed().toLower();
+    QStringList targets;
+    for (const aitrain::DatasetConversionRouteContract& route :
+        aitrain::ProductCapabilityContract::instance().datasetConversionRoutes()) {
+        if (route.sourceFormat == source && !targets.contains(route.targetFormat)) {
+            targets.append(route.targetFormat);
         }
     }
-    return {};
+    return targets;
 }
 
 bool isSupportedDatasetConversionPair(const QString& sourceFormat, const QString& targetFormat)
@@ -160,36 +135,9 @@ DatasetConversionValidation validateDatasetConversionForm(const DatasetConversio
         }
     }
 
-    if (form.outputPath.trimmed().isEmpty()) {
-        validation.outputPathError = QStringLiteral("请选择输出目录。");
-    } else {
-        const QString normalizedOutputPath = normalizedDatasetConversionPath(form.outputPath);
-        const QFileInfo outputInfo(normalizedOutputPath);
-        if (outputInfo.exists() && !outputInfo.isDir()) {
-            validation.outputPathError = QStringLiteral("输出路径必须是目录。");
-        } else if (!normalizedInputPath.isEmpty()
-#ifdef Q_OS_WIN
-            && normalizedOutputPath.compare(normalizedInputPath, Qt::CaseInsensitive) == 0
-#else
-            && normalizedOutputPath == normalizedInputPath
-#endif
-        ) {
-            validation.outputPathError = QStringLiteral("输出目录不能与输入路径相同。");
-        } else {
-            const QDir outputParent = outputInfo.absoluteDir();
-            const QFileInfo outputParentInfo(outputParent.absolutePath());
-            if (!outputParent.exists()) {
-                validation.outputPathError = QStringLiteral("输出目录的父目录不存在。");
-            } else if (!outputParentInfo.isWritable()) {
-                validation.outputPathError = QStringLiteral("输出目录的父目录不可写。");
-            }
-        }
-    }
-
     appendIfPresent(&validation.messages, validation.sourceFormatError);
     appendIfPresent(&validation.messages, validation.targetFormatError);
     appendIfPresent(&validation.messages, validation.inputPathError);
-    appendIfPresent(&validation.messages, validation.outputPathError);
 
     validation.ok = validation.messages.isEmpty();
     if (validation.ok) {

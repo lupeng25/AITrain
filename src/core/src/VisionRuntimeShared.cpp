@@ -1,4 +1,4 @@
-#include "DetectionTrainerInternal.h"
+#include "VisionRuntimeInternal.h"
 
 #include <QtMath>
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "aitrain/product/ProductCapabilityContract.h"
 #include "aitrain/runtime/RuntimeAdapter.h"
 
 #include <QJsonObject>
@@ -24,6 +25,8 @@ struct RuntimeCapabilityQuery final {
 
 struct RuntimeCapability final {
     RuntimeCapabilityStatus status = RuntimeCapabilityStatus::UnsupportedByProduct;
+    RuntimeExecutionAuthority executionAuthority = RuntimeExecutionAuthority::AitrainCpp;
+    RuntimeProductState productState = RuntimeProductState::UnsupportedByProduct;
     QString modelFamily;
     QString runtimeRoute;
     QString message;

@@ -68,7 +68,7 @@ bool isForbiddenTrainingPathKey(const QString& key)
     static const QSet<QString> forbidden{
         QStringLiteral("datasetpath"), QStringLiteral("datasetformat"),
         QStringLiteral("sampleimagepath"), QStringLiteral("pythonexecutable"),
-        QStringLiteral("trainersroot"), QStringLiteral("resumecheckpointpath"),
+        QStringLiteral("trainersroot"),
         QStringLiteral("imagenetdir"), QStringLiteral("pythonpathprepend"),
         QStringLiteral("paddleocrrepopath"), QStringLiteral("datasetsnapshotmanifest"),
         QStringLiteral("projectroot"), QStringLiteral("outputpath"),
@@ -205,10 +205,14 @@ void WorkerSession::runTrainingWorkflow(const wp::TrainingCommand& command)
         fail(QStringLiteral("runTrainingWorkflow 的项目目录不存在。"));
         return;
     }
-    const QString pythonProgram = firstUsablePythonExecutable();
+    const PythonExecutableResolution pythonResolution =
+        resolvePythonExecutable(profile.pythonProfileId);
+    const QString pythonProgram = pythonResolution.executable;
     const QString trainersRoot = defaultTrainersRoot();
     if (pythonProgram.isEmpty() || trainersRoot.isEmpty()) {
-        fail(QStringLiteral(" 训练 Workflow 需要可用 Python 和 python_trainers 目录。"));
+        fail(pythonResolution.message.isEmpty()
+            ? QStringLiteral("训练 Workflow 需要可用 Python 和 python_trainers 目录。")
+            : pythonResolution.message);
         return;
     }
 
@@ -231,7 +235,7 @@ void WorkerSession::runTrainingWorkflow(const wp::TrainingCommand& command)
         parameters.value(QStringLiteral("cancellationGraceMs")).toInt(5000));
     send(wp::event::log(), QJsonObject{{wp::field::taskId(), taskIdText},
         {wp::field::message(), QStringLiteral(" 训练 Workflow：正在打开项目工作区。")} });
-    if (!trainingWorkspace_->open(projectRoot, &error)) {
+    if (!trainingWorkspace_->openForWorkerChild(projectRoot, &error)) {
         trainingWorkspace_.reset();
         fail(QStringLiteral("无法打开  项目工作区：%1").arg(error));
         return;

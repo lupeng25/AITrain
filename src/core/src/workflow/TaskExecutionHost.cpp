@@ -192,8 +192,19 @@ bool TaskExecutionHost::consumeAdapterEvent(const ProtocolEnvelope& event)
         }
         cancellationRequested = persisted.state == TaskState::CancelRequested;
     }
+    ArtifactCommitResult artifactCommit;
     if (event.kind == QStringLiteral("event.succeeded") && !cancellationRequested
-        && !commitArtifactBundle(&outputArtifactId, &error)) {
+        && !commitArtifactBundle(&outputArtifactId, &artifactCommit, &error)) {
+        if (artifactCommit.status == ArtifactCommitStatus::PendingRecovery) {
+            // 文件 rename 已成为成功事实。此后不得合成 ArtifactIncomplete
+            // 或业务失败；终止 Adapter Host，项目恢复会完成原提交语义。
+            lastError_ = error.isEmpty()
+                ? QStringLiteral("Artifact 文件已提交，等待项目恢复完成目录登记。")
+                : error;
+            QString ignored;
+            adapterHost_.forceTerminate(&ignored);
+            return false;
+        }
         ProtocolEnvelope failure = event;
         failure.kind = QStringLiteral("event.failed");
         failure.payload = QJsonObject{
@@ -517,9 +528,14 @@ bool TaskExecutionHost::stageArtifactCandidate(const ProtocolEnvelope& event, QS
     return true;
 }
 
-bool TaskExecutionHost::commitArtifactBundle(ArtifactId* outputArtifactId, QString* error)
+bool TaskExecutionHost::commitArtifactBundle(ArtifactId* outputArtifactId,
+    ArtifactCommitResult* commitResult, QString* error)
 {
+    if (commitResult) *commitResult = {};
     if (!artifactBundleId_.isValid()) {
+        if (commitResult) {
+            *commitResult = {ArtifactCommitStatus::Committed};
+        }
         return true;
     }
     QSaveFile candidatesFile(QDir(artifactBundleStagingPath_).filePath(QStringLiteral("candidates.json")));
@@ -533,8 +549,12 @@ bool TaskExecutionHost::commitArtifactBundle(ArtifactId* outputArtifactId, QStri
     }
     QString artifactPath;
     const ArtifactId committedArtifactId = artifactBundleId_;
-    if (!artifactStore_->commit(committedArtifactId, activeTask_.id, QStringLiteral("adapter_output_bundle"), artifactBundleStagingPath_,
-            coordinator_->storage(), &artifactPath, error, {}, nullptr)) {
+    const ArtifactCommitResult committed = artifactStore_->commit(
+        committedArtifactId, activeTask_.id, QStringLiteral("adapter_output_bundle"),
+        artifactBundleStagingPath_, coordinator_->storage(), &artifactPath,
+        error, {}, nullptr);
+    if (commitResult) *commitResult = committed;
+    if (!committed) {
         return false;
     }
     artifactBundleId_ = {};

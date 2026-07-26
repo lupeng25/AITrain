@@ -85,7 +85,11 @@ target_include_directories(AITrainStudio
 
 target_link_libraries(AITrainStudio
     PRIVATE
-        aitrain_foundation
+        aitrain_vision_data
+        aitrain_annotation_integration
+        aitrain_dataset_conversion
+        aitrain_model_export
+        aitrain_vision_runtime
         aitrain_capability_registry
         aitrain_license
         aitrain_worker_protocol
@@ -135,7 +139,9 @@ if(AITRAIN_LRELEASE_EXECUTABLE)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${AITRAIN_TRANSLATION_QM} "$<TARGET_FILE_DIR:AITrainStudio>/translations"
         VERBATIM
     )
-    install(FILES ${AITRAIN_TRANSLATION_QM} DESTINATION translations)
+    install(FILES ${AITRAIN_TRANSLATION_QM}
+        DESTINATION translations
+        COMPONENT Runtime)
 else()
     message(WARNING "lrelease was not found; AITrain translation .qm files will not be generated")
 endif()
@@ -147,4 +153,5 @@ aitrain_copy_qt_platform_runtime(AITrainStudio)
 
 install(TARGETS AITrainStudio
     RUNTIME DESTINATION .
+    COMPONENT Runtime
 )

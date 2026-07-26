@@ -22,7 +22,7 @@ if str(TRAINER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRAINER_ROOT))
 REPO_ROOT = TRAINER_ROOT.parent
 
-from adapter_event_channel import AdapterEventChannel, event_channel_from_environment, standalone_protocol_enabled
+from adapter_runtime import AdapterRuntime
 from adapter_sdk import AdapterCanceled, AdapterSdk
 from dataset_snapshot import materialize_dataset_snapshot
 from trainer_protocol import configure_stdio, exception_details
@@ -30,28 +30,16 @@ from trainer_protocol import configure_stdio, exception_details
 
 configure_stdio()
 
-_adapter: Optional[AdapterSdk] = None
-_event_channel: Optional[AdapterEventChannel] = None
+_runtime = AdapterRuntime()
 
 
 def configure_adapter(backend: str) -> AdapterSdk:
     """Create the SDK on the authenticated Worker event channel."""
-    global _adapter, _event_channel
-    if _event_channel is None and not standalone_protocol_enabled() and _adapter is None:
-        _event_channel = event_channel_from_environment()
-        _event_channel.connect()
-    if _adapter is None or _adapter.backend != backend:
-        sink = _event_channel.emit_event if _event_channel is not None else None
-        _adapter = AdapterSdk(backend, event_sink=sink)
-    return _adapter
+    return _runtime.sdk(backend)
 
 
 def close_adapter() -> None:
-    global _adapter, _event_channel
-    if _event_channel is not None:
-        _event_channel.close()
-    _adapter = None
-    _event_channel = None
+    _runtime.close()
 
 
 def emit_event(backend: str, event_type: str, **payload: Any) -> None:
@@ -903,6 +891,56 @@ def save_prediction_images(image_path: Path, output_path: Path, result: Any) -> 
     return str(heatmap_path), str(overlay_path), str(mask_path)
 
 
+@dataclass
+class AnomalibInferenceSession:
+    """一次加载、无事件副作用的 Anomalib 推理会话。"""
+
+    backend: str
+    image_path: Path
+    checkpoint: Path
+    model: Any
+    engine: Any
+
+    @classmethod
+    def from_request(cls, request: Dict[str, Any], output_path: Path) -> "AnomalibInferenceSession":
+        model_path = Path(str(request.get("modelPath") or request.get("checkpointPath") or "")).resolve()
+        image_path = Path(str(request.get("imagePath") or request.get("sampleImagePath") or "")).resolve()
+        sidecar = load_sidecar(model_path)
+        backend = str(sidecar.get("trainingBackend") or request.get("backend") or BACKEND_PATCHCORE).strip().lower()
+        checkpoint = checkpoint_from_sidecar(model_path, sidecar)
+        if not checkpoint.exists():
+            raise FileNotFoundError(f"checkpoint_missing: {checkpoint}")
+        if not image_path.exists():
+            raise FileNotFoundError(f"sample_image_missing: {image_path}")
+        _, _, engine_cls, patchcore_cls, efficientad_cls = import_anomalib_symbols()
+        params = merge_preset(
+            backend,
+            dict(sidecar.get("parameters") or request.get("parameters") or {}),
+        )
+        requested_device = str((request.get("options") or {}).get("device") or params.get("device") or "auto")
+        params["device"] = requested_device
+        return cls(
+            backend=backend,
+            image_path=image_path,
+            checkpoint=checkpoint,
+            model=build_model(backend, params, patchcore_cls, efficientad_cls),
+            engine=make_engine(engine_cls, output_path, params),
+        )
+
+    def predict_once(self) -> Tuple[Any, float]:
+        started = time.perf_counter()
+        predictions = self.engine.predict(
+            model=self.model,
+            data_path=str(self.image_path),
+            ckpt_path=str(self.checkpoint),
+            return_predictions=True,
+        )
+        result = first_prediction(predictions)
+        if result is None:
+            raise RuntimeError("Anomalib predict returned no predictions.")
+        return result, (time.perf_counter() - started) * 1000.0
+
+
 def infer(request: Dict[str, Any]) -> int:
     output_path = Path(str(request.get("outputPath") or ".")).resolve()
     output_path.mkdir(parents=True, exist_ok=True)
@@ -1090,54 +1128,77 @@ def benchmark(request: Dict[str, Any]) -> int:
     output_path = Path(str(request.get("outputPath") or ".")).resolve()
     output_path.mkdir(parents=True, exist_ok=True)
     options = dict(request.get("options") or {})
-    warmup = max(0, int(options.get("warmupIterations", 2)))
-    iterations = max(1, int(options.get("iterations", 10)))
+    warmup = max(0, int(options.get("warmupIterations", 3)))
+    iterations = max(1, int(options.get("iterations", 20)))
     timings: List[float] = []
-    status = "completed"
-    message = ""
-    for index in range(warmup + iterations):
-        started = time.perf_counter()
-        code = infer({**request, "outputPath": str(output_path / f"run_{index:03d}")})
-        elapsed = (time.perf_counter() - started) * 1000.0
-        if code != 0:
-            status = "blocked"
-            message = "Anomalib benchmark requires successful Python infer runs."
-            break
-        if index >= warmup:
-            timings.append(elapsed)
-    avg = statistics.mean(timings) if timings else 0.0
-    sorted_timings = sorted(timings)
-
-    def percentile(pct: float) -> float:
-        if not sorted_timings:
-            return 0.0
-        index = int(round((pct / 100.0) * (len(sorted_timings) - 1)))
-        return sorted_timings[max(0, min(index, len(sorted_timings) - 1))]
-
-    report = {
-        "schemaVersion": 1,
-        "kind": "benchmark_report",
-        "createdAt": now_iso(),
-        "ok": status == "completed",
-        "status": status,
-        "modelFamily": "anomaly_detection",
-        "runtime": RUNTIME,
-        "runtimeUsable": status == "completed",
-        "timedInference": bool(timings),
-        "warmupIterations": warmup,
-        "iterations": iterations,
-        "averageMs": avg,
-        "p50Ms": percentile(50),
-        "p95Ms": percentile(95),
-        "p99Ms": percentile(99),
-        "throughput": 1000.0 / avg if avg > 0 else 0.0,
-        "message": message,
-        "scaffold": False,
-        "deploymentConclusion": "local-runtime-available" if status == "completed" else "anomalib-python-blocked",
-    }
     report_path = output_path / "benchmark_report.json"
-    write_json(report_path, report)
-    return 0 if status == "completed" else 1
+    backend = str(request.get("backend") or BACKEND_PATCHCORE)
+    try:
+        setup_started = time.perf_counter()
+        session = AnomalibInferenceSession.from_request(request, output_path)
+        backend = session.backend
+        setup_ms = (time.perf_counter() - setup_started) * 1000.0
+        adapter = configure_adapter(backend)
+        for index in range(warmup + iterations):
+            adapter.raise_if_canceled()
+            _, elapsed_ms = session.predict_once()
+            if index >= warmup:
+                timings.append(elapsed_ms)
+        sorted_timings = sorted(timings)
+
+        def percentile(pct: float) -> float:
+            index = int(round((pct / 100.0) * (len(sorted_timings) - 1)))
+            return sorted_timings[max(0, min(index, len(sorted_timings) - 1))]
+
+        mean_ms = statistics.mean(timings)
+        report = {
+            "schemaVersion": 2,
+            "kind": "benchmark_report",
+            "createdAt": now_iso(),
+            "ok": True,
+            "status": "completed",
+            "modelFamily": "anomaly_detection",
+            "runtime": RUNTIME,
+            "runtimeUsable": True,
+            "timedInference": True,
+            "warmupIterations": warmup,
+            "iterations": iterations,
+            "setupMs": setup_ms,
+            "minMs": min(timings),
+            "meanMs": mean_ms,
+            "p50Ms": percentile(50),
+            "p95Ms": percentile(95),
+            "p99Ms": percentile(99),
+            "maxMs": max(timings),
+            "throughput": 1000.0 / mean_ms if mean_ms > 0 else 0.0,
+            "timingDefinition": "Anomalib engine.predict and prediction extraction only; excludes model setup and report IO.",
+            "smokeTiming": True,
+            "scaffold": False,
+            "deploymentConclusion": "local-runtime-available",
+        }
+        write_json(report_path, report)
+        emit_event(backend, "artifact", kind="benchmark_report", path=str(report_path), message="Anomaly benchmark report")
+        emit_event(backend, "completed", message="Anomalib benchmark completed.", reportPath=str(report_path))
+        return 0
+    except AdapterCanceled:
+        configure_adapter(backend).emit_canceled("Anomalib benchmark canceled.")
+        return 2
+    except Exception as exc:
+        report = {
+            "schemaVersion": 2,
+            "kind": "benchmark_report",
+            "createdAt": now_iso(),
+            "ok": False,
+            "status": "failed",
+            "runtime": RUNTIME,
+            "errorCode": "anomalib_benchmark_failed",
+            "message": str(exc),
+            "smokeTiming": True,
+        }
+        write_json(report_path, report)
+        emit_event(backend, "artifact", kind="benchmark_report", path=str(report_path), message="Failed anomaly benchmark report")
+        emit_failed(backend, str(exc), "anomalib_benchmark_failed", {"reportPath": str(report_path)})
+        return 1
 
 
 def main(argv: Optional[List[str]] = None) -> int:

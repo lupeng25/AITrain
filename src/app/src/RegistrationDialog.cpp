@@ -33,8 +33,11 @@ QPushButton* primaryDialogButton(const QString& text)
 RegistrationDialog::RegistrationDialog(const QByteArray& publicKeyBase64, QWidget* parent)
     : QDialog(parent)
     , publicKeyBase64_(publicKeyBase64)
-    , machineCode_(aitrain::currentMachineCode())
 {
+    const aitrain::MachineCodeResult machineCodeResult =
+        aitrain::currentMachineCodeResult();
+    machineCode_ = machineCodeResult.machineCode;
+    machineCodeUnavailableReason_ = machineCodeResult.unavailableReason;
     setWindowTitle(tr("AITrain Studio 注册"));
     setModal(true);
     resize(620, 460);
@@ -63,7 +66,8 @@ RegistrationDialog::RegistrationDialog(const QByteArray& publicKeyBase64, QWidge
     languageRow->addWidget(languageCombo_, 1);
 
     auto* machineRow = new QHBoxLayout;
-    machineCodeLabel_ = new QLabel(machineCode_);
+    machineCodeLabel_ = new QLabel(machineCode_.isEmpty()
+        ? tr("机器码不可用") : machineCode_);
     machineCodeLabel_->setObjectName(QStringLiteral("InlineStatus"));
     machineCodeLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     auto* copyButton = new QPushButton(tr("复制机器码"));
@@ -83,6 +87,8 @@ RegistrationDialog::RegistrationDialog(const QByteArray& publicKeyBase64, QWidge
     auto* cancelButton = new QPushButton(tr("退出"));
     cancelButton->setCursor(Qt::PointingHandCursor);
     auto* activateButton = primaryDialogButton(tr("验证并启动"));
+    copyButton->setEnabled(!machineCode_.isEmpty());
+    activateButton->setEnabled(!machineCode_.isEmpty());
     actions->addStretch();
     actions->addWidget(cancelButton);
     actions->addWidget(activateButton);
@@ -102,6 +108,11 @@ RegistrationDialog::RegistrationDialog(const QByteArray& publicKeyBase64, QWidge
     connect(activateButton, &QPushButton::clicked, this, &RegistrationDialog::activateLicense);
     connect(languageCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RegistrationDialog::handleLanguageChanged);
 
+    if (machineCode_.isEmpty()) {
+        statusLabel_->setText(machineCodeUnavailableReason_.isEmpty()
+            ? tr("无法取得稳定机器码，注册流程已停止。")
+            : machineCodeUnavailableReason_);
+    }
 }
 
 aitrain::LicensePayload RegistrationDialog::activatedPayload() const
@@ -117,6 +128,12 @@ void RegistrationDialog::copyMachineCode()
 
 void RegistrationDialog::activateLicense()
 {
+    if (machineCode_.isEmpty()) {
+        statusLabel_->setText(machineCodeUnavailableReason_.isEmpty()
+            ? tr("无法取得稳定机器码，不能验证注册码。")
+            : machineCodeUnavailableReason_);
+        return;
+    }
     const QString token = tokenEdit_->toPlainText().trimmed();
     const QString trustedClockPath = QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
         .filePath(QStringLiteral("license/trusted-utc.dat"));

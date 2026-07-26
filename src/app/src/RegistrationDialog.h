@@ -26,6 +26,7 @@ private:
 
     QByteArray publicKeyBase64_;
     QString machineCode_;
+    QString machineCodeUnavailableReason_;
     aitrain::LicensePayload activatedPayload_;
 
     QLabel* machineCodeLabel_ = nullptr;

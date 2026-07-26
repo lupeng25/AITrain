@@ -18,6 +18,7 @@ struct BackendDescriptor {
     QStringList exportFormats;
     QString runtime;
     QString devicePolicy;
+    bool supportsCancel = false;
     QStringList limitations;
 
     QJsonObject toJson() const;

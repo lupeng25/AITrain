@@ -115,7 +115,7 @@ void ProjectSummaryQueryTests::readsEmptyProject()
     QVERIFY(project.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(project.path(), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(project.path(), &error), qPrintable(error));
 
     aitrain::ProjectQueryService query(&workspace);
     aitrain::ProjectSummaryReadModel summary;
@@ -136,7 +136,7 @@ void ProjectSummaryQueryTests::countsMixedTaskStates()
     QVERIFY(project.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(project.path(), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(project.path(), &error), qPrintable(error));
     aitrain::ProjectStore storage;
     QVERIFY2(storage.open(databasePath(project.path()), &error), qPrintable(error));
 
@@ -176,7 +176,7 @@ void ProjectSummaryQueryTests::countsOnlyCommittedArtifacts()
     QVERIFY(project.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(project.path(), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(project.path(), &error), qPrintable(error));
     aitrain::ProjectStore storage;
     QVERIFY2(storage.open(databasePath(project.path()), &error), qPrintable(error));
     const auto task = createTask(storage, &error);
@@ -206,7 +206,7 @@ void ProjectSummaryQueryTests::reportsDatasetModelWorkflowAndEvidenceFacts()
     QVERIFY(project.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(project.path(), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(project.path(), &error), qPrintable(error));
     aitrain::ProjectStore storage;
     QVERIFY2(storage.open(databasePath(project.path()), &error), qPrintable(error));
     const auto task = createTask(storage, &error);
@@ -264,8 +264,7 @@ void ProjectSummaryQueryTests::reportsDatasetModelWorkflowAndEvidenceFacts()
         evidenceId, task.id, workflow.id,
         {{QStringLiteral("evidence.json"), QString(64, QLatin1Char('e')), 32}},
         QDateTime::currentDateTimeUtc(), &error), qPrintable(error));
-    QVERIFY2(storage.closeWorkflowTerminalization(workflow.id,
-        aitrain::TaskState::Running, &error), qPrintable(error));
+    QVERIFY2(storage.closeWorkflowTerminalization(workflow.id, &error), qPrintable(error));
     QVERIFY2(query.projectSummary(&summary, &error), qPrintable(error));
     QCOMPARE(summary.evidencePendingWorkflowCount, qint64(0));
     QCOMPARE(summary.evidenceAvailableWorkflowCount, qint64(1));
@@ -283,7 +282,7 @@ void ProjectSummaryQueryTests::rejectsInvalidInput()
     QVERIFY(project.isValid());
     aitrain::ProjectWorkspace workspace;
     error.clear();
-    QVERIFY2(workspace.open(project.path(), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(project.path(), &error), qPrintable(error));
     aitrain::ProjectQueryService query(&workspace);
     QVERIFY(!query.projectSummary(nullptr, &error));
     QVERIFY(!error.isEmpty());

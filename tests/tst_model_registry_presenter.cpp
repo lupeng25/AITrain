@@ -100,7 +100,7 @@ void ModelRegistryPresenterTests::emptyProjectHasEmptyModelRegistry()
     QVERIFY(directory.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
     aitrain::ProjectQueryService query(&workspace);
     ModelRegistryPresenter presenter(&query);
     QSignalSpy changed(&presenter, &ModelRegistryPresenter::modelPackagesChanged);
@@ -119,7 +119,7 @@ void ModelRegistryPresenterTests::exposesNewestFirstIdentityLineageRuntimeAndLim
     const QString projectRoot = directory.filePath(QStringLiteral("带 空格 project"));
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(projectRoot, &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(projectRoot, &error), qPrintable(error));
     aitrain::ProjectStore storage;
     QVERIFY2(storage.open(databasePath(projectRoot), &error), qPrintable(error));
     const auto task = createTask(&storage, &error);

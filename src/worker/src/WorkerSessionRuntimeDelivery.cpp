@@ -94,7 +94,7 @@ void WorkerSession::runRuntimeDeliveryWorkflow(const wp::RuntimeDeliveryCommand&
     }
 
     runtimeDeliveryWorkspace_ = std::make_unique<aitrain::ProjectWorkspace>();
-    if (!runtimeDeliveryWorkspace_->open(projectRoot, &error)) {
+    if (!runtimeDeliveryWorkspace_->openForWorkerChild(projectRoot, &error)) {
         runtimeDeliveryWorkspace_.reset();
         fail(QStringLiteral("无法打开 Runtime Delivery  工作区：%1").arg(error));
         return;

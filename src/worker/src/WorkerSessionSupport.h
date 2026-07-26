@@ -10,10 +10,19 @@
 
 namespace worker_support {
 
+struct PythonExecutableResolution final {
+    QString profileId;
+    QString executable;
+    QString errorCode;
+    QString message;
+
+    bool isAvailable() const { return !executable.isEmpty(); }
+};
+
 QJsonObject checkObject(const QString& name, const QString& status, const QString& message, const QJsonObject& details = {});
 bool writeJsonFile(const QString& path, const QJsonObject& object, QString* error);
 QJsonObject nvidiaSmiCheck();
-QString firstUsablePythonExecutable(const QJsonObject& parameters = {});
+PythonExecutableResolution resolvePythonExecutable(const QString& profileId);
 QString packagedPaddleOcrRepoPath();
 void configurePackagedPythonEnvironment(QProcessEnvironment* environment);
 QJsonObject runPythonCommandCheck(

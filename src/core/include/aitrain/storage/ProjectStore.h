@@ -12,6 +12,29 @@ namespace aitrain {
 
 struct ProtocolEnvelope;
 
+enum class ProjectErrorCode {
+    None,
+    ProjectLocked,
+    ProjectBusy,
+    SchemaRebuildRequired,
+    PreparedOpenStale,
+    RecoveryRequired,
+    ArtifactIntegrityError,
+    ProjectMetaCorrupt,
+    InvalidPageCursor,
+    SqlError
+};
+
+struct ProjectMetaSnapshot final {
+    ProjectId projectId;
+    int schemaVersion = 0;
+    QString displayName;
+    qint64 openGeneration = 0;
+    QDateTime createdAt;
+    QDateTime updatedAt;
+    QDateTime lastOpenedAt;
+};
+
 struct TaskSnapshot final {
     TaskId id;
     RequestId requestId;
@@ -121,10 +144,16 @@ struct DatasetCatalogItem final {
     QDateTime latestCreatedAt;
 };
 
+enum class ModelSourceSnapshotBinding {
+    ProjectSnapshot,
+    ExternalDeclared
+};
+
 struct ModelPackageSnapshot final {
     ModelManifest manifest;
     ArtifactId sourceArtifactId;
     QDateTime createdAt;
+    ModelSourceSnapshotBinding sourceSnapshotBinding = ModelSourceSnapshotBinding::ExternalDeclared;
 };
 
 // Dashboard/Presenter 可安全消费的项目级聚合事实。这里仅包含  SQLite 中
@@ -239,10 +268,14 @@ public:
 
     ProjectStore(const ProjectStore&) = delete;
     ProjectStore& operator=(const ProjectStore&) = delete;
+    void swap(ProjectStore& other) noexcept;
 
     bool open(const QString& databasePath, QString* error = nullptr);
     void close();
     bool isOpen() const;
+    ProjectErrorCode lastErrorCode() const;
+    bool projectMeta(ProjectMetaSnapshot* result, QString* error = nullptr) const;
+    bool advanceOpenGeneration(ProjectMetaSnapshot* result, QString* error = nullptr);
     void setArtifactStoreRoot(QString artifactStoreRoot);
 
     bool createTask(const TaskSnapshot& task, QString* error = nullptr);
@@ -305,6 +338,9 @@ public:
         DatasetSnapshotRecord* result,
         QString* error = nullptr) const;
     QVector<DatasetCatalogItem> datasets(int limit, QString* error = nullptr) const;
+    bool artifactDiscardable(const ArtifactId& artifactId,
+        bool* discardable,
+        QString* error = nullptr) const;
     bool removeUnreferencedArtifact(const ArtifactId& artifactId, QString* error = nullptr);
     bool registerModelPackage(const ModelPackageSnapshot& modelPackage, QString* error = nullptr);
     bool modelPackage(const ModelPackageId& modelPackageId, ModelPackageSnapshot* result, QString* error = nullptr) const;
@@ -348,29 +384,23 @@ public:
     bool workflowTerminalization(const WorkflowRunId& workflowRunId,
         WorkflowTerminalizationSnapshot* result,
         QString* error = nullptr) const;
-    QVector<WorkflowTerminalizationSnapshot> pendingWorkflowTerminalizations(
-        int limit,
+    bool workflowTerminalizationExists(const WorkflowRunId& workflowRunId,
+        bool* exists,
         QString* error = nullptr) const;
     QVector<WorkflowTerminalizationSnapshot> pendingWorkflowTerminalizations(
-        int limit,
-        int offset,
-        QString* error) const;
-    QVector<WorkflowRunSnapshot> pendingEvidenceRequiredWorkflows(
         int limit,
         QString* error = nullptr) const;
     QVector<WorkflowRunSnapshot> pendingEvidenceRequiredWorkflows(
         int limit,
-        int offset,
-        QString* error) const;
+        QString* error = nullptr) const;
     bool attachWorkflowTerminalizationEvidence(const WorkflowRunId& workflowRunId,
         const ArtifactId& evidenceArtifactId,
         QString* error = nullptr);
     bool recordWorkflowTerminalizationEvidenceFailure(const WorkflowRunId& workflowRunId,
         const Failure& failure,
         QString* error = nullptr);
-    bool closeWorkflowTerminalization(const WorkflowRunId& workflowRunId,
-        TaskState expectedTaskState,
-        QString* error = nullptr);
+    bool closeWorkflowTerminalization(
+        const WorkflowRunId& workflowRunId, QString* error = nullptr);
     bool taskExists(const TaskId& taskId, bool* exists, QString* error = nullptr) const;
     bool artifactExists(const ArtifactId& artifactId, bool* exists, QString* error = nullptr) const;
     bool task(const TaskId& taskId, TaskSnapshot* result, QString* error = nullptr) const;
@@ -406,6 +436,7 @@ private:
     QString connectionName_;
     QString artifactStoreRoot_;
     QSqlDatabase db_;
+    ProjectErrorCode lastErrorCode_ = ProjectErrorCode::None;
 };
 
 } // namespace aitrain

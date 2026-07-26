@@ -7,7 +7,7 @@
 #include "LanguageSupport.h"
 #include "MainWindowSupport.h"
 #include "aitrain/core/CapabilityRegistry.h"
-#include "aitrain/core/DetectionTrainer.h"
+#include "aitrain/core/VisionModelRuntime.h"
 #include "aitrain/core/WorkerProtocol.h"
 
 #include <QApplication>
@@ -132,7 +132,7 @@ void MainWindow::finishProjectOpen(const QString& projectName, const QString& pr
     }
 
     currentProjectName_ = projectName;
-    currentProjectPath_ = result.prepared.normalizedRoot;
+    currentProjectPath_ = result.prepared.canonicalRoot;
     clearSelectedTaskDetails();
     state_.dataset = DatasetWorkbenchState();
     for (QLineEdit* field : {dataQualityDatasetIdEdit_, dataQualityDatasetVersionIdEdit_,

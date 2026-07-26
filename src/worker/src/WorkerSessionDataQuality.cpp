@@ -41,7 +41,7 @@ void WorkerSession::runDataQualityWorkflow(const wp::DataQualityCommand& command
     request.options = command.options;
 
     dataQualityWorkspace_ = std::make_unique<aitrain::ProjectWorkspace>();
-    if (!dataQualityWorkspace_->open(projectRoot, &error)) {
+    if (!dataQualityWorkspace_->openForWorkerChild(projectRoot, &error)) {
         dataQualityWorkspace_.reset();
         dataQualityTaskId_ = {};
         fail(QStringLiteral("无法打开 Data Quality  工作区：%1").arg(error));

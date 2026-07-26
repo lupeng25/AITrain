@@ -154,21 +154,17 @@ def test_yolo_callbacks_emit_structured_progress_and_epoch_metrics() -> None:
 
 def test_ultralytics_event_adapter_uses_sdk_and_preserves_backend() -> None:
     events: list[dict] = []
-    original_adapter = trainer._adapter
-    original_backend = trainer._adapter_backend
-    original_channel = trainer._event_channel
-    trainer._adapter = AdapterSdk("ultralytics_yolo_detect", event_sink=events.append)
-    trainer._adapter_backend = "ultralytics_yolo_detect"
-    trainer._event_channel = None
+    original_runtime = trainer._runtime
+    trainer._runtime = trainer.AdapterRuntime()
+    trainer._runtime._sdk = AdapterSdk(
+        "ultralytics_yolo_detect", event_sink=events.append)
     try:
         trainer.emit("log", backend="spoofed", level="info", message="sdk event")
         trainer.emit("progress", percent=5, message="running", epoch=1)
         trainer.emit("artifact", kind="report", path="out/report.json", message="report")
         trainer.emit("completed", reportPath="out/report.json")
     finally:
-        trainer._adapter = original_adapter
-        trainer._adapter_backend = original_backend
-        trainer._event_channel = original_channel
+        trainer._runtime = original_runtime
 
     assert [event["type"] for event in events] == ["log", "progress", "artifact", "completed"]
     assert all(event["backend"] == "ultralytics_yolo_detect" for event in events)

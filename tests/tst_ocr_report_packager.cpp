@@ -141,7 +141,7 @@ void OcrReportPackagerTests::packagesThreeVerifiedReportsAndSnapshotDerivedCount
     QVERIFY(directory.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
     const Fixture fixture = createFixture(directory, &workspace, true, &error);
     QVERIFY2(fixture.detSnapshot.snapshot.id.isValid() && fixture.recSnapshot.snapshot.id.isValid(), qPrintable(error));
     const aitrain::TaskId taskId = startTask(&workspace, QStringLiteral("ocr.report.import"), &error);
@@ -170,7 +170,7 @@ void OcrReportPackagerTests::missingSystemAccuracyIsUnsupportedAndCommitsNothing
     QTemporaryDir directory;
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY(workspace.open(directory.filePath(QStringLiteral("project")), &error));
+    QVERIFY(workspace.createProject(directory.filePath(QStringLiteral("project")), &error));
     const Fixture fixture = createFixture(directory, &workspace, false, &error);
     const aitrain::TaskId taskId = startTask(&workspace, QStringLiteral("ocr.report.import"), &error);
     aitrain::OcrOfficialReportImportResult result;
@@ -185,7 +185,7 @@ void OcrReportPackagerTests::changedSnapshotSourceIsInvalidEvidenceAndCommitsNot
     QTemporaryDir directory;
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY(workspace.open(directory.filePath(QStringLiteral("project")), &error));
+    QVERIFY(workspace.createProject(directory.filePath(QStringLiteral("project")), &error));
     const Fixture fixture = createFixture(directory, &workspace, true, &error);
     QVERIFY(writeBytes(QDir(fixture.detSnapshot.snapshot.rootPath)
         .filePath(QStringLiteral("images/a.jpg")), QByteArray("changed")));
@@ -202,7 +202,7 @@ void OcrReportPackagerTests::cancellationCommitsNothing()
     QTemporaryDir directory;
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY(workspace.open(directory.filePath(QStringLiteral("project")), &error));
+    QVERIFY(workspace.createProject(directory.filePath(QStringLiteral("project")), &error));
     const Fixture fixture = createFixture(directory, &workspace, true, &error);
     const aitrain::TaskId taskId = startTask(&workspace, QStringLiteral("ocr.report.import"), &error);
     aitrain::OcrOfficialReportImportResult result;

@@ -74,7 +74,7 @@ if ($cachedCompiler -and -not (Test-Path -LiteralPath $cachedCompiler)) {
 }
 
 Write-Host "Harness check: configure" -ForegroundColor Cyan
-$configure = "$commandPrefix && cmake -S . -B $buildDir -G `"NMake Makefiles`" -DCMAKE_PREFIX_PATH=$qt -DAITRAIN_BUILD_TESTS=ON"
+$configure = "$commandPrefix && cmake -S . -B $buildDir -G `"NMake Makefiles`" -DCMAKE_PREFIX_PATH=$qt -DAITRAIN_BUILD_TESTS=ON -DAITRAIN_REQUIRE_PYTHON_TESTS=ON"
 cmd /c $configure
 if ($LASTEXITCODE -ne 0) {
     throw "Configure failed with exit code $LASTEXITCODE"

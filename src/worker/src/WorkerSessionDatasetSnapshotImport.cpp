@@ -36,7 +36,7 @@ void WorkerSession::runDatasetSnapshotImportWorkflow(const wp::DatasetSnapshotIm
     }
 
     datasetSnapshotImportWorkspace_ = std::make_unique<aitrain::ProjectWorkspace>();
-    if (!datasetSnapshotImportWorkspace_->open(projectRoot, &error)) {
+    if (!datasetSnapshotImportWorkspace_->openForWorkerChild(projectRoot, &error)) {
         datasetSnapshotImportWorkspace_.reset();
         datasetSnapshotImportTaskId_ = {};
         fail(QStringLiteral("无法打开 Dataset Snapshot Import  工作区：%1").arg(error));

@@ -35,6 +35,7 @@ struct TrainingWorkflowProfile final {
     QString exportScript;
     QString deploymentBackend;
     QStringList runtimeRoutes;
+    QString pythonProfileId;
     QStringList limitations;
     QVector<TrainingWorkflowStepProfile> steps;
 };

@@ -22,7 +22,7 @@ void ProjectSummaryPresenterTests::mapsOnlyPersistedSummaryFacts()
     QVERIFY(directory.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
 
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     aitrain::TaskSnapshot task;

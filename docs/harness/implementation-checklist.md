@@ -1,4 +1,12 @@
-# Implementation Checklist
+# 实施检查清单
+
+## 稳定化基线
+
+- 新项目必须使用 Schema 13 单行 `project_meta`；Schema 12 只读识别后返回 `SchemaRebuildRequired`。
+- 项目打开必须先取得 canonical root 的 Owner Lease；Worker 只能通过认证控制通道和 Worker Lease 使用 `openForWorkerChild()`。
+- Product Contract 是 backend、Python Profile、Runtime route 和三条数据集转换路线的唯一编译期事实。
+- Artifact rename 后不得合成业务失败；只允许完成 journal v2 固化的 completion action 或进入恢复。
+- 当前无 Resume、任意转换 outputPath、任务级 Python 解释器和 Runtime 自动回退。
 
 ## 开始前
 

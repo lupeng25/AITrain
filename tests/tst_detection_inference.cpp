@@ -1,6 +1,6 @@
 #include "TestSupport.h"
 
-#include "../src/core/src/DetectionTrainerInternal.h"
+#include "../src/core/src/VisionRuntimeInternal.h"
 
 #include "aitrain/core/VisionPostprocess.h"
 

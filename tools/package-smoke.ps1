@@ -25,8 +25,10 @@ Set-Location $root
 
 $buildPath = Join-Path $root $BuildDir
 $prefix = Join-Path $buildPath "package-smoke"
+$acceptancePrefix = Join-Path $buildPath "acceptance-tools-smoke"
 $buildPathFull = [System.IO.Path]::GetFullPath($buildPath)
 $prefixFull = [System.IO.Path]::GetFullPath($prefix)
+$acceptancePrefixFull = [System.IO.Path]::GetFullPath($acceptancePrefix)
 $expectedPrefixParent = [System.IO.Path]::GetFullPath((Join-Path $buildPathFull "."))
 
 if (-not $prefixFull.StartsWith($expectedPrefixParent, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -56,9 +58,15 @@ if (Test-Path $prefixFull) {
     }
     Remove-Item -LiteralPath $prefixFull -Recurse -Force
 }
+if (Test-Path $acceptancePrefixFull) {
+    if ((Split-Path -Leaf $acceptancePrefixFull) -ne "acceptance-tools-smoke") {
+        throw "Refusing to remove unexpected AcceptanceTools directory: $acceptancePrefixFull"
+    }
+    Remove-Item -LiteralPath $acceptancePrefixFull -Recurse -Force
+}
 
 Write-Host "Package smoke: install" -ForegroundColor Cyan
-$install = "$commandPrefix && cmake --install `"$BuildDir`" --prefix `"$prefixFull`""
+$install = "$commandPrefix && cmake --install `"$BuildDir`" --prefix `"$prefixFull`" --component Runtime && cmake --install `"$BuildDir`" --prefix `"$acceptancePrefixFull`" --component AcceptanceTools"
 cmd /c $install
 if ($LASTEXITCODE -ne 0) {
     throw "Install failed with exit code $LASTEXITCODE"
@@ -77,6 +85,19 @@ function Assert-PathExists {
     Write-Host "  [ok] $RelativePath"
 }
 
+function Assert-AcceptancePathExists {
+    param(
+        [string]$RelativePath,
+        [string]$Description
+    )
+
+    $path = Join-Path $acceptancePrefixFull $RelativePath
+    if (-not (Test-Path $path)) {
+        throw "Missing AcceptanceTools $Description`: $RelativePath"
+    }
+    Write-Host "  [ok] AcceptanceTools/$RelativePath"
+}
+
 Write-Host "Package smoke: verify layout" -ForegroundColor Cyan
 Assert-PathExists "AITrainStudio.exe" "AITrain Studio executable"
 Assert-PathExists "aitrain_worker.exe" "Worker executable"
@@ -84,22 +105,24 @@ Assert-PathExists "runtimes\onnxruntime" "ONNX Runtime folder"
 Assert-PathExists "runtimes\tensorrt" "TensorRT folder"
 Assert-PathExists "examples" "examples folder"
 Assert-PathExists "examples\create-minimal-datasets.py" "minimal dataset generator"
-Assert-PathExists "docs\harness\current-status.md" "harness docs"
 Assert-PathExists "docs\user-guide.md" "user guide"
-Assert-PathExists "docs\deps-layout.md" ".deps layout docs"
 Assert-PathExists "docs\training-backends.md" "training backend docs"
+Assert-PathExists "docs\dataset-conversion.md" "dataset conversion docs"
 Assert-PathExists "docs\hardware-compatibility.md" "hardware compatibility docs"
-Assert-PathExists "docs\acceptance-runbook.md" "acceptance runbook"
-Assert-PathExists "docs\yolo-model-support-matrix.md" "YOLO model support matrix"
-Assert-PathExists "docs\local-rc-closeout.md" "local RC closeout checklist"
-Assert-PathExists "docs\external-acceptance-handoff.md" "external acceptance handoff"
-Assert-PathExists "docs\release-freeze-handoff.md" "release freeze handoff"
-Assert-PathExists "docs\production-ocr-acceptance.md" "production OCR acceptance runbook"
-Assert-PathExists "docs\customer-ocr-validation.md" "customer OCR validation runbook"
-Assert-PathExists "docs\acceptance-templates\clean-windows-acceptance-result.md" "clean Windows acceptance template"
-Assert-PathExists "docs\acceptance-templates\tensorrt-acceptance-result.md" "TensorRT acceptance template"
-Assert-PathExists "docs\acceptance-templates\production-ocr-acceptance-result.md" "production OCR acceptance template"
-Assert-PathExists "docs\product-roadmap-local-training-platform.md" "local training platform roadmap"
+Assert-PathExists "docs\operations-runbook.md" "operations runbook"
+Assert-AcceptancePathExists "docs\harness\current-status.md" "harness docs"
+Assert-AcceptancePathExists "docs\deps-layout.md" ".deps layout docs"
+Assert-AcceptancePathExists "docs\acceptance-runbook.md" "acceptance runbook"
+Assert-AcceptancePathExists "docs\yolo-model-support-matrix.md" "YOLO model support matrix"
+Assert-AcceptancePathExists "docs\local-rc-closeout.md" "local RC closeout checklist"
+Assert-AcceptancePathExists "docs\external-acceptance-handoff.md" "external acceptance handoff"
+Assert-AcceptancePathExists "docs\release-freeze-handoff.md" "release freeze handoff"
+Assert-AcceptancePathExists "docs\production-ocr-acceptance.md" "production OCR acceptance runbook"
+Assert-AcceptancePathExists "docs\customer-ocr-validation.md" "customer OCR validation runbook"
+Assert-AcceptancePathExists "docs\acceptance-templates\clean-windows-acceptance-result.md" "clean Windows acceptance template"
+Assert-AcceptancePathExists "docs\acceptance-templates\tensorrt-acceptance-result.md" "TensorRT acceptance template"
+Assert-AcceptancePathExists "docs\acceptance-templates\production-ocr-acceptance-result.md" "production OCR acceptance template"
+Assert-AcceptancePathExists "docs\product-roadmap-local-training-platform.md" "local training platform roadmap"
 Assert-PathExists "python_trainers\requirements-yolo.txt" "YOLO Python requirements"
 Assert-PathExists "python_trainers\requirements-smp.txt" "SMP Python requirements"
 Assert-PathExists "python_trainers\requirements-anomaly.txt" "Anomalib Python requirements"
@@ -117,31 +140,24 @@ if (Test-Path (Join-Path $prefixFull "python_trainers\mock_trainer.py")) {
 if (Test-Path (Join-Path $prefixFull "python_trainers\ocr_rec\paddleocr_trainer.py")) {
     throw "Removed small PaddleOCR CTC trainer must not be packaged"
 }
-Assert-PathExists "installer\AITrainStudio.iss" "Inno Setup installer script"
-Assert-PathExists "installer\AITrainStudioDependencies.iss" "Inno Setup dependency installer script"
-Assert-PathExists "installer\AITrainStudioPythonEnv.iss" "Inno Setup Python environment installer script"
-Assert-PathExists "tools\acceptance-smoke.ps1" "acceptance smoke script"
-Assert-PathExists "tools\build-inno-installer.ps1" "Inno Setup installer build script"
-Assert-PathExists "tools\ui-workbench-walkthrough.ps1" "UI workbench walkthrough RC script"
-Assert-PathExists "tools\phase45-yolo-model-matrix-smoke.ps1" "Phase 45 YOLO model matrix smoke script"
-Assert-PathExists "tools\phase-smp-semantic-segmentation-smoke.ps1" "SMP semantic segmentation smoke script"
-Assert-PathExists "tools\phase-anomaly-anomalib-smoke.ps1" "Anomalib anomaly detection smoke script"
-Assert-PathExists "tools\phase-anomaly-mvtec-quality-matrix.ps1" "Anomalib MVTec quality matrix script"
-Assert-PathExists "tools\full-model-lifecycle-progress-server.py" "full model lifecycle progress server"
-Assert-PathExists "tools\local-rc-closeout.ps1" "local RC closeout script"
-Assert-PathExists "tools\release-freeze-handoff.ps1" "release freeze handoff script"
-Assert-PathExists "tools\materialize-ultralytics-dataset.py" "Ultralytics dataset materializer"
-Assert-PathExists "tools\materialize-oxford-pets-semantic.py" "Oxford Pets SMP dataset materializer"
-Assert-PathExists "tools\phase31-paddleocr-full-official-smoke.ps1" "Phase 31 PaddleOCR full smoke script"
-Assert-PathExists "tools\phase-ppocrv6-model-matrix-smoke.ps1" "PP-OCRv6 model matrix smoke script"
-Assert-PathExists "tools\phase47-paddleocr-det-onnx-smoke.ps1" "historical Phase 47 PaddleOCR Det ONNX compatibility script"
-Assert-PathExists "tools\prepare-production-ocr-data.ps1" "production OCR public data preparation script"
-Assert-PathExists "tools\prepare_production_ocr_data.py" "production OCR public data preparation helper"
-Assert-PathExists "tools\run-production-ocr-rec-experiment.ps1" "production OCR Rec experiment script"
-Assert-PathExists "tools\run-production-ocr-official-chain.ps1" "production OCR official chain script"
-Assert-PathExists "tools\production-ocr-acceptance.ps1" "production OCR acceptance script"
-Assert-PathExists "tools\customer-ocr-validation.ps1" "customer OCR validation script"
-Assert-PathExists "tools\phase50-paddleocr-v5-gpu-official-chain.ps1" "Phase 50 PP-OCRv5 GPU official chain script"
+Assert-AcceptancePathExists "installer\AITrainStudio.iss" "Inno Setup installer script"
+Assert-AcceptancePathExists "installer\AITrainStudioDependencies.iss" "Inno Setup dependency installer script"
+Assert-AcceptancePathExists "installer\AITrainStudioPythonEnv.iss" "Inno Setup Python environment installer script"
+Assert-AcceptancePathExists "tools\acceptance-smoke.ps1" "acceptance smoke script"
+Assert-AcceptancePathExists "tools\build-inno-installer.ps1" "Inno Setup installer build script"
+Assert-AcceptancePathExists "tools\build-python-env.ps1" "Python Profile build script"
+Assert-AcceptancePathExists "tools\ui-workbench-walkthrough.ps1" "UI workbench walkthrough RC script"
+Assert-AcceptancePathExists "tools\phase45-yolo-model-matrix-smoke.ps1" "YOLO model matrix smoke script"
+Assert-AcceptancePathExists "tools\phase-smp-semantic-segmentation-smoke.ps1" "SMP smoke script"
+Assert-AcceptancePathExists "tools\phase-anomaly-anomalib-smoke.ps1" "Anomalib smoke script"
+Assert-AcceptancePathExists "tools\phase31-paddleocr-full-official-smoke.ps1" "PaddleOCR full smoke script"
+
+foreach ($internalPath in @("docs\harness", "docs\product-roadmap-local-training-platform.md",
+        "installer", "tools", "docs\acceptance-templates")) {
+    if (Test-Path (Join-Path $prefixFull $internalPath)) {
+        throw "Runtime component contains internal material: $internalPath"
+    }
+}
 
 $forbiddenLegacyPaths = @(
     "plugins",
@@ -155,6 +171,7 @@ foreach ($legacyPath in $forbiddenLegacyPaths) {
         throw "Package contains removed legacy plugin path: $legacyPath"
     }
 }
+
 Write-Host "  [ok] no legacy dynamic-plugin package paths"
 
 $pythonCacheDirs = @(Get-ChildItem -LiteralPath $prefixFull -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue)
@@ -271,7 +288,7 @@ try {
         throw "Packaged worker workspace self-check failed with exit code $LASTEXITCODE"
     }
     $workspaceSelfCheck = $workspaceSelfCheckOutput | Select-Object -Last 1 | ConvertFrom-Json
-    if ((-not $workspaceSelfCheck.ok) -or (-not $workspaceSelfCheck.firstOpen) -or (-not $workspaceSelfCheck.secondOpen) -or (-not $workspaceSelfCheck.layoutValid) -or (-not $workspaceSelfCheck.stagingClean) -or $workspaceSelfCheck.projectsTablePresent -or ($workspaceSelfCheck.storedSchemaVersion -ne 12)) {
+    if ((-not $workspaceSelfCheck.ok) -or (-not $workspaceSelfCheck.firstOpen) -or (-not $workspaceSelfCheck.secondOpen) -or (-not $workspaceSelfCheck.layoutValid) -or (-not $workspaceSelfCheck.stagingClean) -or $workspaceSelfCheck.projectsTablePresent -or ($workspaceSelfCheck.storedSchemaVersion -ne 13) -or (-not $workspaceSelfCheck.projectId)) {
         throw "Workspace first-start self-check reported an invalid result"
     }
     Write-Host ("  [ok] firstOpen={0}, secondOpen={1}, schema={2}" -f `

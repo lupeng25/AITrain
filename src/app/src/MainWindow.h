@@ -341,7 +341,6 @@ private:
     QLineEdit* batchEdit_ = nullptr;
     QLineEdit* imageSizeEdit_ = nullptr;
     QLineEdit* gridSizeEdit_ = nullptr;
-    QLineEdit* resumeCheckpointEdit_ = nullptr;
     QLineEdit* deploymentSampleDatasetIdEdit_ = nullptr;
     QLineEdit* deploymentSampleDatasetVersionIdEdit_ = nullptr;
     QLineEdit* deploymentSampleSnapshotIdEdit_ = nullptr;

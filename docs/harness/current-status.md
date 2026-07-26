@@ -1,336 +1,157 @@
-# Current Project Status
-
-Last updated: 2026-07-18
-
-This file is the source of truth for phase status in new AI coding conversations. Use `docs/product-roadmap-local-training-platform.md` for current broad direction after reading this file. Deleted or external historical roadmap notes must not be used as current implementation plans or phase status sources.
-
-## Current architectural override (2026-07-10)
-
-当前实现已完成能力架构收口：模型、数据集、导出、推理和校验能力由 `src/core/CapabilityRegistry` 编译期注册，并由 GUI、Worker 和环境检查共同查询。旧的动态插件接口、插件市场、插件包模板、插件目录和 `--plugin-smoke` 入口已删除；本文件中 Phase 48 及更早记录的插件市场内容仅保留为历史证据，不代表当前代码或发布包。任务状态机不再提供暂停/恢复命令，旧数据库中的 `paused` 记录会在打开时迁移为失败。
-
-## 本轮破坏性清理覆盖（2026-07-16）
-
-以下内容以本节为准，覆盖文档中较早的历史段落：SQLite 元数据版本为 schema 12；`JsonProtocol`、`TaskModels`、`WorkerRequests` 以及 V1 `ProductWorkflow` 实现已物理删除，项目/总览、任务与产物、数据集目录、模型库、环境、交付证据和设置查询统一使用 `ProjectStore`、Query Service 和 Presenter，GUI 写入口统一由 `ProjectWorkspace`/Worker 收口。Worker 只保留 Protocol 的 `--self-check`、`--builtin-capabilities` 和 Socket 服务入口，旧裸模型、旧标注、旧数据集转换、TensorRT/NCNN/语义 ONNX smoke CLI 已删除；对应独立 smoke 脚本也已删除，验收必须使用 Workflow 或官方 Python 适配器。Qt 测试运行目录由 CMake 自动复制 Qt DLL、`platforms/qoffscreen` 和 `qt.conf`，CTest/VS Code 固定 `QT_QPA_PLATFORM=offscreen`，因此不再出现“Qt platform plugin could not be initialized”的旧启动环境问题。
-
-## 最终收口补充（2026-07-17）
-
-- Protocol/Adapter：`TaskEvent.taskId` 与 Envelope 统一为事件身份事实；非空 payload taskId 不一致时拒绝，步骤启动前的空 taskId 诊断由 Envelope 补齐；Python Adapter 统一使用 `emit_event`，认证通道注入 taskId 并保留稳定的 adapter/domain failure code。
-- Worker：取消、断开、退出和窗口关闭共用有限异步排空路径；Python Adapter 退出后的终态帧在读回调完成后再 finalize，不使用 GUI/Worker 嵌套事件循环。
-- Storage/Evidence：证据候选使用单条 SQL 查询并按 Artifact 数量限流；invalid evidence 保留在只读结果页并附带 Failure，而不是静默丢页；外部导入证据仍固定 `verified=false`。
-- GUI：评估报告与样本复核均以 committed ArtifactId + 包内相对成员读取；样本复核不再接收任意本地 JSON/图片路径，仅提供受控身份信息。
-
-## 最终收口补充（2026-07-18）
-
-- 当前执行分支为 `codex/v3-final-closeout`。Qt 测试运行时改为使用 `build-vscode/tests` 内由 CMake 复制的 Qt DLL、`platforms/qoffscreen` 与 `qt.conf`，CTest 环境显式设置 `QT_PLUGIN_PATH`、`QT_QPA_PLATFORM_PLUGIN_PATH` 和 `QT_QPA_PLATFORM=offscreen`；不会再从机器上的其他 Qt 安装目录加载平台插件。
-- Worker 终态交付采用“下游持久化成功后才发送终态确认，等待 WorkerClient 关闭连接”的握手；窗口关闭、取消、Worker 断开共用有限异步排空路径，仍保留 1 秒有界兜底。Python Adapter 只有在下游接受终态后才标记终态已见；拒绝终态时会继续生成可持久化的失败终态。
-- 最新 `.\tools\harness-check.ps1` 已通过：编码检查、架构检查、构建和 CTest 全部通过，当前测试目标计数为 37/37（含 `aitrain_paddleocr_system_python_tests`）；独立 `python -m pytest -q tests` 为 81/81。后续新增的终态契约、证据恢复分页、诊断事实脱敏、官方 Profile 规划和 Qt 运行时检查均有定向回归覆盖。
-- 本轮打包脚本已要求 Qt5Core/Qt5Gui/Qt5Widgets、`platforms\qwindows.dll`（Debug 包允许对应的 `qwindowsd.dll`）和双语翻译目录，并使用 `AITrainStudio.exe --package-startup-check` 做包根启动检查；`windeployqt` 失败会直接使构建失败。
-
-本轮二次深度审计的收口事实（2026-07-18）：
-
-- Storage 恢复查询同时覆盖 `queued/starting/running/cancel_requested` 的 EvidenceRequired Workflow，并以分页循环处理终态化和 Evidence 门禁恢复；普通中断任务会写入完整的 FailureCode、message、suggestedAction 和 occurredAt。终态 `Failed/Canceled` 不再接受缺少 Failure 字段的直接写入，稳定建议动作由 Domain Failure Catalog 提供。
-- Worker/Application 终态事件会补齐失败/取消建议动作；Model Import、Python Adapter、进程启动/取消和合成终态均不再把原始命令行输出或不稳定机器路径写入 Failure。Protocol Sanitizer 能递归清理带空格的 Windows/UNC 路径及 `paths/directories/filepaths` 字段。
-- Environment Check 与 Diagnostics 的事实 Artifact 在校验和提交前都经过物理路径脱敏；PaddleOCR System loopback 测试已注册到 CTest，并对终态 ACK 做完整握手。官方 YOLO/SMP/Anomalib Profile ID 由 Capability Planner 按 Profile 合同验证，不再误当成 Capability Registry backend。
-- GUI 已阻止 Worker 运行期间切换项目，删除数据集 legacy slot 命名，并将目录探测限制在有界读取；旧 `build-vscode/tests` 与 `build-vscode/bin` 中残留的版本化测试可执行文件已清除。Qt CMake 配置在启用运行时复制却缺少 DLL、平台插件或 `qt.conf` 时直接失败，避免 F5 回退到外部 Qt 安装。
-
-- 本轮结构尾项已完成收口：数据集目录/转换输入的格式探测、项目打开预检、Artifact 文件预览、样本复核 JSON 和交付 Evidence 文件读取均使用 `QThreadPool` 有界后台任务，并用 generation、路径/指纹和 `QPointer` 丢弃陈旧回调；SQLite/Artifact 元数据只在调用线程快照，后台不携带 `QSqlDatabase` 或 `ProjectWorkspace`。Python Adapter 在下游接受终态后增加默认 5 秒的进程退出 watchdog，超时只终止遗留进程、不合成第二个任务终态；Artifact、Dataset、Model、Runtime 和 Evidence 的 SHA-256 统一要求小写 64 位十六进制，并在 Evidence 提交前重新核验 Workflow lineage、Artifact 所有权、Dataset Snapshot 绑定及 inventory facts。对应 UI、Process、Storage、Application 回归均已通过。
-- 终态事件现在使用 `workflow_terminal_outbox` durable outbox：`task_events` 与 Workflow/Step/output Artifact 绑定在同一 SQLite 事务写入，handler 成功后标记 `applied`；项目打开时先按绑定步骤恢复未确认事件，再进入 Evidence 恢复，已完成步骤只做事实校验，避免重复派发。恢复不尝试重放未知的外部 Adapter launch；如果崩溃窗口中后继步骤已经进入 `Running`，则按 `ProcessCrashed`（取消竞态按 `Canceled`）收口并按 Workflow 策略 finalize/seal，确保不会留下永久 `Running`。`aitrain_foundation` 已移出 Capability Registry、License、Worker Protocol、Dataset Validation 四组低耦合实现，新增专用 CMake targets；数据集 driver 不再被视觉/训练实现拖入，GUI、Worker、许可证工具和测试按需链接。
-- 为避免 VS Code/调试器继承机器上其他 Qt 安装的 `QT_PLUGIN_PATH`，Run/Debug 配置显式指向当前 `build-vscode/bin` 的插件和平台插件目录；测试仍固定使用 `build-vscode/tests/platforms/qoffscreen`。直接运行时如环境变量被外部脚本覆盖，应清理后重新构建并从 `build-vscode/bin/AITrainStudio.exe` 启动。
-
-本轮保留的明确架构边界（不是未收口故障）：SQLite/Artifact 身份元数据必须在拥有连接的调用线程快照，文件内容、哈希和 JSON 校验才进入线程池；Evidence 终态事件与 Workflow handler 不是同一 SQLite 事务，而是 durable outbox + 幂等恢复边界，不能描述为单事务；`aitrain_foundation` 仍保留 Annotation/Conversion、数据集读取器和可选 SDK 视觉运行时的高耦合实现，后续只有在依赖图进一步隔离后才拆分。以上边界均有对应测试或产品限制，不得在验收报告中夸大为更强能力。
-
-##  破坏性重构执行状态（2026-07-16）
-
-任务与产物文件预览现通过 `ProjectQueryService::artifactFilePreview` 按 ArtifactId 和包内相对路径读取，经 committed 清单 SHA-256 复验后以内存内容渲染；旧路径操作入口已删除，不再把 Artifact Store 物理路径交给 GUI。
-
-数据集目录现通过 `ProjectQueryService::datasetCatalog` 和 `DatasetCatalogPresenter` 提供无路径只读 ViewModel；GUI 仅显示 Dataset/Version/Snapshot/Artifact 身份、格式、文件数和根哈希摘要，不再直接调用 `ProjectWorkspace::datasets` 或接触数据集执行根。
-
-Worker 的模型导入响应和 Artifact 事件已删除 `artifactPath`/`path` 物理路径字段；GUI 不再从事件路径打开图片、overlay 或预测 JSON，统一提示用户回到任务与产物页按 ArtifactId 和相对项预览。
-
-任务页已删除永久禁用的“复现实验”入口和未使用的产物物理路径状态；“取消当前任务”只在 Worker 已连接且存在当前活动 TaskId 时启用，历史任务始终只读，取消请求仍由 Worker/Core 唯一收口。
-
-本轮进一步完成 WorkerClient 与窗口生命周期收口：GUI 启动、Socket 排空、进程退出和析构不再使用同步等待或嵌套事件循环；终态排空改为一次有限的异步 Timer 窗口。窗口关闭时若存在活动 Worker，会先发出取消请求并忽略关闭事件，收到 `idle` 后再异步关闭，避免析构阶段遗留运行中的 Worker。交付验收表对外部导入证据只显示文件名和字节数，不再把绝对路径写入表格。
-
-任务详情 Presenter 已加入稳定 Failure Catalog：持久化 FailureCode 缺少 suggestedAction 时按失败码补充可执行建议，并将失败码、摘要和建议显示在只读任务详情中；该目录不改变 Core 失败事实，也不把 RuntimeNotImplemented、HardwareUnsupported 或客户域 OCR 结果误标为成功。
-
-本轮继续加固 Worker 控制面：GUI 每次启动 Worker 都生成一次性 `controlToken`，启动参数与每个 Protocol Envelope 均携带该令牌，GUI 与 Worker 双向严格校验；缺少令牌、令牌不匹配或重复/乱序帧均在业务执行前拒绝。Worker 控制 Socket 的待写缓存上限固定为 8 MiB，日志、进度和指标在背压时可丢弃，终态与 Artifact 事件保留，终态额外记录 `droppedControlEventCount`。新增错误令牌、缺少启动令牌、越界产物候选与终态背压相关回归覆盖；干净重建后全量 37/37 CTest 通过。
-
-最终门禁结果（2026-07-17 最新收口）：`.\tools\harness-check.ps1` 连续三次独立通过，三次均为 37/37 CTest（含 8 个隔离 Worker 场景与 5 个 Python 适配器测试）；`architecture-check`、`encoding-check`、`git diff --check` 均通过。`tools\package-smoke.ps1` 已通过，`acceptance-smoke.ps1 -LocalBaseline -Package -SkipBuild` 已通过，结果见 `.deps\acceptance-smoke\acceptance_summary.json`。本机 UI wrapper 生成 `.deps\UI-Walkthrough\rc\ui_walkthrough_rc_summary.json`，因未安装外部 `qt-gui-walkthrough` 脚本记录为 `blocked/walkthrough_script_missing`；QtTest UI 合同测试仍通过。三次 harness 日志保存在 `.deps\final-harness\harness-1.log` 至 `harness-3.log`。`harness-context.ps1` 的 SQLite 关键文件路径已同步到当前 `src/core/include/aitrain/storage/ProjectStore.h`。
-
-GUI↔Worker 接线与六格式 Core 扩展已完成统一验证。Core 标注会话按 Data Quality 的真实 repair action 合同覆盖 YOLO Detection/Segmentation/OBB、Semantic Mask、PaddleOCR Det/Rec：只允许修改对应标签文本、Mask 或 Det/Rec 清单，并在同步后重新执行目标 Dataset Driver 全量校验。Anomaly Folder 的 `collect_anomaly_evaluation_samples` 需要新增样本，而会话合同禁止增删基线文件，因此精确返回 `BackendUnsupported`，不伪装为可编辑格式。2026-07-16 统一构建 Annotation、OCR Core、Worker、AITrainStudio 与 UI 黑盒目标成功，五项定向 CTest 5/5 通过（62.81 秒），其中标注六格式成功/冲突/越界/取消与 Anomaly unsupported 回归耗时 19.61 秒。独立历史 `aitrain_worker --annotation-session-request` / `--annotation-sync-request` CLI、对应 WorkerRequests parser/type、V1 ProductWorkflow 会话 API/实现及旧集成测试已物理删除；X-AnyLabeling smoke 脚本只保留格式转换验证，GUI↔Worker Annotation Session 保持不变。本轮全量门禁随后验证通过。
-
-当前按依赖切片执行 最终破坏性重构实施计划 的阶段 2～7。训练 Workflow 已统一为 `ValidateDataset → CreateSnapshot → Train → Evaluate → Export → DeploymentValidate → RegisterModel → RenderDeliveryReport` 八步，且校验报告、数据快照、训练/评估/导出/部署产物、模型登记、交付报告与终态 Evidence 均通过  Artifact/Storage 持久化。训练不再把外部数据目录当作任务输入：Snapshot 由独立生产任务提交，训练根任务在 Workflow 创建时以 `workflow_input_bindings` 原子绑定 Dataset/Version/Snapshot/Artifact 四重身份、生产任务和双哈希；只有 `CreateSnapshot` 可显式借用该外部 Artifact，其余成功步骤输出必须属于训练根任务。
-
-YOLO Detection、Segmentation 与 OBB 已完成 Worker 级八步端到端自动化回归；OBB 回归实际验证旋转框类别、角度、四点坐标、ONNX Runtime 路由，以及不声明 NCNN/TensorRT 的 Evidence 限制。失败和取消终态也已验证 Evidence 落盘。终态门禁现由 SQLite schema 12 的持久化 terminalization 状态机、Workflow 外部输入绑定、终态 outbox 与 Artifact commit journal 共同保证：先冻结终态事实，再原子关联 Evidence，最后关闭根任务；进程中断后可恢复，不能绕过 Evidence 直接写入根任务终态。旧开发数据库不迁移，需按破坏性重构策略重新创建。
-
-SMP 语义分割已完成 Worker 级八步端到端迁移：训练 Profile 是 Worker、Workspace 与 GUI 的唯一执行路由，真实 SMP Trainer/Evaluator/Exporter 使用认证  事件通道和不可变 Snapshot，模型合同固定为 ONNX Runtime-only，并验证语义 mask、overlay、模型登记、交付报告与 Evidence。Anomalib PatchCore/EfficientAD 也已完成同一八步迁移：`ModelManifest` 以 `artifactFormat=anomalib_bundle` 区分 Python 模型包，明确禁止伪造 ONNX tensor/opset，Export 将 sidecar/checkpoint 原子重打包为包内相对路径，部署验证仅通过 Worker 管理的 `anomalib_python` 提交报告、预测、热力图、overlay 与 mask。PaddleOCR Det/Rec 已完成八步迁移：使用 `paddleocr_inference_bundle`、确定性 ZIP、完整 inventory/hash 和唯一官方 runtime；System 组合 wiring 不代表客户域质量验收。上述六类 Profile 共八种训练后端行均有 Worker E2E。
-
- Dataset Driver  现已覆盖 YOLO Detection/Segmentation/OBB、Semantic Mask、Anomaly Folder、PaddleOCR Det/Rec 七种格式；拆分 Plan 固化逐文件源/目标、split、SHA-256 和字节数，Materialize 只按不可变清单写空 staging。Data Quality Workflow  的 Core 质量规则已覆盖上述七种格式并通过 `aitrain_data_quality_tests` 定向 CTest：只消费已登记 Snapshot Artifact，依次提交快照校验、质量分析、修复/X-AnyLabeling 清单和质量报告 Artifact，并为成功、失败、取消生成 Evidence。规则保持保守且可解释：Detection 检查小框/空标签，Segmentation 与 OBB 检查小面积多边形，Semantic Mask 检查全背景 Mask，Anomaly Folder 标记仅正常样本评估受限，PaddleOCR Det 检查极小文本多边形，PaddleOCR Rec 检查长文本与重复引用；所有问题均使用稳定 code、severity 和相对路径，修复清单不修改源数据。这些规则只产生复核建议，不代表客户域质量或模型精度结论。Data Quality GUI↔Worker 已验证迁移到单一 `runDataQualityWorkflow`：请求同时携带 DatasetId、DatasetVersionId、SnapshotId、committed Snapshot ArtifactId 和结构化选项，Core 在 `ValidateSnapshot` 步骤核对四重身份，结果只返回 Workflow/Artifact/Evidence ID 与摘要；旧 `validateDataset` / `curateDataset` Socket command、Client 和 Worker handler 已物理删除，终态通过 Query/Presenter 刷新且不写第二套质量任务镜像。2026-07-16 Core、Worker、AITrainStudio、OCR Worker、UI 与 Platform 目标构建成功，四项定向 CTest 4/4 通过（79.11 秒）。Annotation Session 已覆盖除 Anomaly Folder 外的六种可编辑格式；创建、同步、冲突、越界、无变化和取消均由 Worker/Core 收口并保留 Evidence。旧 Socket 标注命令、裸路径 handler 与对应旧 Worker 测试已删除。训练、数据集、模型库、环境、交付证据和设置页面均已使用统一 Query/Presenter 或受控 Worker 写入口；剩余测试桥接仅存在于测试代码，产品运行时不依赖。外部验收证据固定为 `verified=false`，TensorRT 真实 decoder/infer 仍未实现，二者是明确产品边界而非迁移缺口。
-
-Dataset Snapshot Import 已完成接线与统一验证：`PlanSnapshotImport → MaterializeAndRegisterSnapshot` 两步 EvidenceRequired 工作流只在显式导入边界接受外部 `sourcePath`，冻结 inventory/hash 后按空 staging 逐文件重验复制，再次运行目标 Driver并提交自包含 `dataset_snapshot`。Storage schema 12 不再以 rootPath 判定 Dataset 身份；同一 DatasetId 可登记多个 Version/Snapshot，每个 Snapshot 的可执行根独立属于其 committed Snapshot Artifact。旧 `createDatasetSnapshot` Socket/Client/Worker 路径事件和 GUI legacy Repository 双写已删除；目标名称当前仅进入审计参数，不伪造名称持久化。Storage、Application、Dataset、Worker、AITrainStudio、UI 与 Platform 目标构建成功，六项定向 CTest 6/6 通过（64.80 秒）。
-
-Dataset Split  已完成接线与统一验证。`runDatasetSplitWorkflow` 只接收源 DatasetId/DatasetVersionId/SnapshotId/committed Snapshot ArtifactId、预分配目标 DatasetId、审计名称和 ratios/seed/options，固定执行 `PlanSplit → MaterializeSplit → RegisterSnapshot` 三步 EvidenceRequired 工作流。Core 在 Plan 步骤核对源四重身份、committed kind、manifest 和 inventory/hash；Plan Artifact 不保存绝对路径。Materialize 只按不可变计划写空 staging并再次 Driver 校验；Register 从 committed split inventory 重验、排除拆分元数据、重打包纯目标树，再次 Driver/manifest 后提交独立自包含 Snapshot 并登记。失败或取消不登记目标 Version/Snapshot，已提交 plan/split 可由 Evidence 引用。Semantic Mask 计划已把绝对 `sourceImage/sourceMask` 改为相对路径、SHA-256 和字节数。旧 `splitDataset` Socket/Client/Worker handler、路径结果事件、GUI 输出目录和 legacy Repository 双写已删除。修复一处 Qt 5.12 `QJsonObject` 迭代 API 后，Core/Application/Worker/AITrainStudio/OCR Worker/UI/Platform 目标构建成功，五项定向 CTest 5/5 通过（68.03 秒）。
-
-Project Summary Query Core 与“项目/总览”只读 Presenter 切片已完成：`ProjectSummaryPresenter` 只从 SQLite 聚合 Task 各状态、committed Artifact、Dataset/Version/Snapshot、Model Package、Workflow 与 Evidence 可用事实，ViewModel 不暴露裸 Artifact 路径，也不读取 Worker payload 或 legacy `project.sqlite`。项目页与总览页的统计卡片及下一步提示已使用该 Presenter，`updateProjectSummary`、`updateDashboardSummary` 不再读取 legacy 数据集、任务、导出或模型版本列表。项目创建/初始化写入口仍由 `ProjectWorkspace` 委托 `ProjectStore` 完成，GUI 不再直接接触 SQL 或第二套 legacy 数据库。
-
-Environment Check  已完成 GUI↔Worker↔Core↔Presenter 迁移。环境页为每次检查创建 TaskId，只派发项目根、TaskId 和固定命令；Worker 在受控 staging 执行 NVIDIA、Runtime、Python/官方模块与 X-AnyLabeling 探测，Core 以 `ValidateEnvironmentFacts → RenderEnvironmentReport` 两步 EvidenceRequired 工作流提交 `environment_facts`、`environment_profiles_report` 和 Evidence。Socket 结果只含 Task/Workflow/Artifact ID 与摘要，不返回 checks/profiles/reportPath；`EnvironmentCheckPresenter` 按 TaskId 读取经 inventory/hash 复验且剥离 details/机器路径的报告 DTO，环境表和摘要按报告动态渲染，不再保留静态 LibTorch 行或历史 TensorRT 验收文案。GUI 已删除逐行 `ProjectStore::insertEnvironmentCheck` 双写，旧 `environmentCheck` 命令返回 Unsupported。Core、Worker、AITrainStudio 和三组测试目标构建成功，Worker/Presenter/UI 定向 CTest 3/3 通过；全量 harness 最新 37/37 通过。同步外部探测仍只能在单次调用前后观察取消，此限制进入 Evidence。
-
-Training/Queue GUI 的 legacy 双写与裸路径请求已切断：当前产品明确为单 Worker/单活动训练，忙时直接拒绝，不再创建 GUI queued Task 或内存排队镜像；Worker/Core 唯一创建并终结根任务。GUI 和 Worker 请求只传 DatasetId、DatasetVersionId、SnapshotId、Snapshot ArtifactId、Profile 与结构化参数，拒绝 dataset/sample/Python/trainer/checkpoint/preflight 等业务裸路径；Python 与 trainer 根由 Worker 本地运行环境解析。部署样本只允许 Snapshot Artifact 包内相对路径，Core 重新校验 inventory、字节数和 SHA-256 后选择确定性图像。训练交付报告与 Evidence 均记录生产任务到消费任务的外部输入 lineage，不保存绝对路径。`ModelRegistryPresenter` 已以无路径 DTO 接管模型包表及推理/部署模型选择器；旧 ModelVersion/Evaluation/Pipeline 记录不再运行时查询，模型库旧版本、评估报告、对比和流水线页签已物理删除，任务评估证据统一从任务与产物页按 Task/Artifact/Metric/Workflow Step 查看。历史复现服务和不可达 GUI 源码已删除，重新训练必须显式新建任务。
-
-任务产物中的 `EvaluationReportView` 也已收敛为 Artifact 边界：只允许预览报告所在 committed Artifact 根目录内的真实文件，报告中的外部绝对路径、目录候选和旧 `perClassMetricsPath`/`errorSamplesPath`/`overlayDir` 字段不会再被 GUI 直接打开或显示；外部记录仅保留文件名和“已隐藏”状态，用户必须回到任务产物列表查看已提交文件。这样不会因历史报告字段把 UI 重新连接到 Worker staging 或训练机路径。
-
-Windows Qt 测试启动环境已显式固定 `QT_PLUGIN_PATH` 与 `QT_QPA_PLATFORM_PLUGIN_PATH` 到构建目录，VS Code Test 任务使用同一设置；`aitrain_application_tests` 与 `aitrain_delivery_acceptance_ui_tests` 已验证通过，不再依赖父进程插件搜索顺序。
-
-GUI `WorkerClient` 与 `aitrain_worker` 的本地 Socket 外层控制面已切换到 Protocol：进程启动参数预绑定 RequestId/TaskId，请求只允许 `command.start_task` / `command.cancel_task`，命令采用 `aitrain.task-command.typed` 的强类型扁平字段；WorkerSession 全部业务 handler 直接消费 typed TaskCommand variant，JSON 只停留在 codec 边界；事件采用 `aitrain.task-event.typed` 与 `TaskEvent`，不再使用 `businessCommand/businessPayload`。双向各自维护严格递增 sequence，每帧使用唯一 MessageId，并拒绝跨请求/任务、重复、乱序、未知 kind、超限帧及终态后的事件。Annotation Session、Runtime Delivery、Diagnostics、外部验收证据导入与交付报告展示使用 ArtifactId/TaskId 边界；MainWindow 的任务状态只由 ApplicationEventRouter 接收并转为 Presenter 查询刷新。旧 WorkerClient request wrapper 与测试兼容消息桥均已删除。
-
-数据转换  已完成三条由目标 Driver 完整校验的原子路径：COCO bbox → YOLO Detection、COCO instance polygon → YOLO Segmentation、Pascal VOC bbox → YOLO Detection。每条路线都冻结完整源哈希和确定输出清单，实际 staging 文件集合两次严格对照 Plan，目标 Driver 校验通过后才提交 Artifact；VOC 标准兄弟图片目录也纳入冻结，未冻结外部图片、冲突、源变化、未计划输出、取消和失败均不登记正式 Artifact。YOLO → COCO/VOC 因目标格式没有  Driver，YOLO ↔ X-AnyLabeling 因外部 CLI 输出无法预先冻结，VOC → YOLO Segmentation 因缺少 polygon 语义，当前均精确返回 `BackendUnsupported`。-208 本机稳定故障矩阵已覆盖大量小文件、32 MiB 稀疏大文件分块哈希、可移植长相对路径边界、复制取消，以及在物化写入/报告写入/提交 seam 上模拟磁盘耗尽、目标锁定和提交目标占用；全部失败路径 committed Artifact 为零。Worker kill 遗留 staging 恢复还验证不删除活动任务 staging 与既有 committed Artifact。GUI↔Worker 已验证迁移到单一 `runDatasetConversionWorkflow`：请求只在显式导入边界携带外部 source path，并携带源/目标格式、预分配目标 DatasetId、审计名称与结构化选项，不接受客户端 output/report/artifact path。两步 EvidenceRequired Workflow 先提交 conversion Artifact，再从其受控 inventory 重验并重打包纯目标数据树、再次运行目标 Driver，成功才提交独立 Snapshot Artifact 并登记真实 Dataset/Version/Snapshot；RegisterSnapshot 失败或取消不形成 Dataset Version/Snapshot，已提交 conversion Artifact 可进入 Evidence。名称当前没有 Storage 字段，仅作审计且不声明已持久化。统一构建全部目标成功；首次综合 Worker 回归暴露并修复“同批协议错误被同步业务失败掩盖”和“步骤启动前取消缺少 suggestedAction 无法封存 Evidence”两个终态问题，三个失败用例复测 5/5 通过，Worker/Application/Conversion 完整定向 CTest 3/3 通过（44.80 秒）。真实物理磁盘耗尽及跨机器文件锁语义仍需外部平台验收。
-
-Runtime Delivery （-503）已完成并统一为单一产品入口：GUI 推理页与部署页都只派发 `runRuntimeDeliveryWorkflow`，传递 ModelPackageId、runtime route、样本图和选项；Worker 独占打开  Workspace 并执行 Core 固定六步，返回结构化步骤状态和 Evidence ArtifactId。旧推理/部署验证单步命令、GUI 终态提交逻辑及 Core 单步派发 API 已删除。成功、失败、取消均由 Core terminalization 唯一收口并提交四格式 Evidence。P50/P95 只代表本机固定样本 smoke timing；底层 ONNX Runtime 单次同步 infer 进入后不可中途抢占，取消请求只能在该次调用返回后被观察并完成终态收口。NCNN  只实现产品矩阵允许且具有显式 tensor/blob/decoder 合同的 Detection/Segmentation 路由，OBB、SMP、异常检测、OCR 及未声明 decoder 不属于其已实现能力；TensorRT  仍只有 probe/合同与状态分类，官方 YOLO decoder 和真实 infer 尚未实现，不得把六步工作流失败或外部历史 TensorRT 证据描述为  TensorRT 推理通过。
-
-OCR Acceptance （-508）的 Core、受控 Packager/Importer 与 GUI↔Worker 两步链路已完成并通过统一验证。GUI 先用 `importOcrOfficialReports` 显式选择 Det/Rec/System 原始官方报告及三个 committed Snapshot 身份，Worker 重新校验 Snapshot manifest/源文件哈希，从已提交标签事实计算不可填写的样本数，并原子提交三份规范化报告 Artifact 和导入 Evidence；System 缺少真实 `accuracy` 时精确返回 `BackendUnsupported` / `ocr_report_import.system_accuracy_unsupported` 且零提交。随后 `runOcrAcceptanceWorkflow` 只消费三个报告 ArtifactId 与阈值，固定四步重新校验 Artifact 文件集合、哈希、官方后端、客户域 lineage 和 Det/Rec 绑定；结果事件只返回 ArtifactId/Evidence，不暴露报告或 Evidence 裸路径。旧 `runOcrAcceptanceWorkflow` Socket 协议、Client、handler、GUI 动作和路径状态已物理删除。只有客户域分类、样本数和 Det hmean、Rec accuracy/CER、System accuracy 全部达标才生成 production accepted；public/generated/smoke、报告缺失或篡改、样本不足、阈值不达均精确失败并保留 Evidence。现有 Python Adapter 未修改，且该切片不替代真实客户数据采集，不能据此宣称客户域 OCR 已完成生产验收。
-
-## Phase Status
-
-| Phase | Status | Current interpretation |
-|---|---|---|
-| Phase 1: Platform stabilization | Done as platform scaffold | Task state transitions, Worker commands, SQLite metadata, artifacts/exports/environment records, and harness checks are in place. |
-| Phase 2: Dataset system | Done as initial system | YOLO detection, YOLO segmentation, YOLO OBB, and PaddleOCR Rec validation exist. Dataset split now covers YOLO detection, YOLO segmentation, YOLO OBB, semantic Mask PNG, PaddleOCR Det, and PaddleOCR Rec layouts. |
-| Phase 3: YOLO detection training | Official backend only | Production detection training routes through `ultralytics_yolo_detect`. The legacy C++ tiny detector training/checkpoint/export implementation has been physically removed. |
-| Phase 4: ONNX export and inference | Official artifact path with AITrain C++ runtime | Export and inference now expect official ONNX/NCNN/TensorRT artifacts. YOLO product inference, benchmark, and deployment validation use AITrain C++ runtime paths over those official artifacts, not Ultralytics Python `predict` as the packaged runtime. YOLO detection/segmentation/OBB evaluation is official-only through Ultralytics `val()` and no longer computes local AP/mAP, rotated AP, or mask IoU in C++. Legacy AITrain tiny-detector checkpoint and JSON export support has been removed from production code. |
-| Phase 5: YOLO segmentation training | Official backend only | Dataset validation/loading, polygon-to-mask quality paths, and ONNX Runtime segmentation postprocess remain; production segmentation training routes through `ultralytics_yolo_segment`. The legacy C++ segmentation training scaffold has been physically removed. |
-| Phase 6: OCR recognition training | Official backend only | PaddleOCR Rec dataset validation remains. Production OCR Rec training, prediction, and evaluation evidence routes through `paddleocr_rec_official` and official reports. The adapter supports PP-OCRv4, PP-OCRv5, and PP-OCRv6 presets through `modelPreset`; PP-OCRv5 mobile is still the default, while v4/v6 remain explicitly selectable. The legacy C++ OCR Rec scaffold and small CTC trainer have been physically removed. |
-| Phase 7: TensorRT and packaging | RTX 4090 evidence archived; current package gate is dependency-only | Install layout, package smoke, ZIP packaging target, runtime DLL discovery and SDK-backed capability classification are in place. The old tiny-detector and裸路径 TensorRT smoke entry points have been removed. Current Runtime Delivery only reports Manifest、SDK、依赖、硬件和 decoder 状态；真实 TensorRT decoder/infer 仍不声明通过。历史 RTX 4090 D evidence is archived in `docs/validation/rtx4090-validation-evidence-20260615.json`. |
-| Phase 8: Python Trainer Adapter and environment management | Done | Worker can launch official Python adapters, pass a JSON request, establish an authenticated loopback event channel, persist typed log/progress/metric/artifact/terminal events, propagate failures, and report Python/Ultralytics/PaddleOCR/PaddlePaddle availability in environment checks. stdout/stderr is raw bounded diagnostics only. The shipped `python_mock` trainer has been removed; protocol tests use explicit temporary fixtures only. |
-| Phase 9: Official YOLO detection training integration | Done on local CPU smoke | Worker routes `trainingBackend=ultralytics_yolo_detect` to `python_trainers/detection/ultralytics_trainer.py`. The adapter normalizes YOLO data yaml, calls official `ultralytics.YOLO(...).train()`, accepts a whitelisted `ultralyticsTrainArgs` object for common official training parameters, exports ONNX, forwards metrics/artifacts, and has deterministic Worker coverage with a fake official API package. Downstream packaged inference/benchmark/deployment validation uses AITrain C++ runtime over the official artifacts, while detection evaluation uses Ultralytics official `val()`. Local `.deps` Python has Ultralytics 8.4.45, Torch 2.11.0 CPU, ONNX 1.21.0, and ONNX Runtime 1.25.1; a 1-epoch CPU smoke with `yolov8n.yaml` produced `best.pt`, `best.onnx`, and `ultralytics_training_report.json`. |
-| Phase 10: Real detection ONNX inference and conversion | Done for ONNX Runtime and RTX 4090 TensorRT smoke | C++ ONNX Runtime can run Ultralytics YOLO detection ONNX models with letterbox preprocessing, YOLOv8-style output decode, confidence filtering, NMS, class mapping from the Phase 9 data yaml/report, prediction JSON, and overlay rendering. `exportDetectionCheckpoint(..., format=onnx)` can copy a real YOLO ONNX and write an AITrain sidecar; TensorRT conversion has archived RTX 4090 D smoke evidence in `docs/validation/rtx4090-validation-evidence-20260615.json`. |
-| Phase 11: Official YOLO segmentation training integration | Done on local CPU smoke | Worker routes `trainingBackend=ultralytics_yolo_segment` to `python_trainers/segmentation/ultralytics_trainer.py`, which reuses the official Ultralytics adapter with segmentation defaults and whitelisted `ultralyticsTrainArgs`. A 1-epoch CPU smoke with a minimal polygon dataset and `yolov8n-seg.yaml` produced `best.pt`, `best.onnx`, `ultralytics_training_report.json`, and mask metrics (`maskPrecision`, `maskRecall`, `maskMap50`, `maskMap50_95`). C++ ONNX Runtime still decodes YOLOv8-seg boxes/masks for product inference and deployment validation artifacts; segmentation evaluation now uses Ultralytics official `val()`. |
-| Phase 12: PaddleOCR Rec officialization | Official backend only | `paddleocr_rec` remains a dataset format, but not a training backend. Production OCR Rec training uses `paddleocr_rec_official` and official PaddleOCR train/export/inference; the small CTC trainer has been physically removed. |
-| Phase 13: Productization and acceptance | Local package/docs/examples complete; external acceptance pending | Added Python requirements, training backend docs, hardware compatibility docs, minimal dataset generator, package layout checks for docs/examples/requirements, and README/protocol updates. Generated Phase 13 examples run official CPU trainer smoke for YOLO detection, YOLO segmentation, and PaddleOCR Rec. Clean Windows machine validation and RTX / SM 75+ TensorRT acceptance remain external tasks. |
-| Phase 14: Official PaddleOCR Rec adapter | Done for PP-OCRv4/v5/v6 adapter/config smoke; official long run environment-isolated | Worker routes `trainingBackend=paddleocr_rec_official` to `python_trainers/ocr_rec/paddleocr_official_adapter.py`. The adapter turns AITrain PaddleOCR-style Rec data into PP-OCRv4, PP-OCRv5, or PP-OCRv6 train/val lists, dictionary selection, generated config, report, and reproducible train/export/inference command files. Built-in PP-OCRv5 presets resolve official configs and dictionaries from a PaddleOCR source checkout, while PP-OCRv6 reads dictionary and algorithm metadata from official configs and fails clearly when required metadata or the repo is missing. Full official `tools/train.py` is available through `runOfficial=true` and a PaddleOCR source checkout, but should be run in an isolated OCR Python environment. |
-| Phase 15: Inference result UI summary | Done | GUI inference status now reads existing `inference_predictions.json` and summarizes task type, count, first detection/segmentation class and confidence, segmentation mask area, or OCR text/confidence. Worker inference protocol, overlay artifact paths, and model postprocess code are unchanged. |
-| Phase 16: Isolated official PaddleOCR Rec smoke | Done on local CPU smoke | Added `tools/phase16-ocr-official-smoke.ps1`, which creates/uses an isolated OCR Python 3.13 embeddable environment, checks out a pinned PaddleOCR source ref, installs pinned OCR smoke constraints, verifies `tools/train.py`, generates a minimal OCR Rec dataset, runs official PP-OCRv4 Rec training for 1 epoch on CPU through `paddleocr_rec_official`, exports the official inference model with `tools/export_model.py`, runs official `tools/infer/predict_rec.py` on one sample image, and verifies `best_accuracy.pdparams`, `official_inference/inference.yml`, `official_prediction.json`, report metrics, and the requested/resolved PaddleOCR ref. |
-| Phase 17: Local baseline freeze | Done locally | Reviewed the dirty worktree as Phase 16 / inference / docs work, checked key diffs, ran `git diff --check`, `tools\harness-check.ps1`, `tools\package-smoke.ps1 -SkipBuild`, and `tools\phase16-ocr-official-smoke.ps1`. Only real local passes are recorded; scaffold/baseline wording remains explicit. Later RTX 4090 validation recorded TensorRT passing evidence separately. |
-| Phase 18: Acceptance runbook and unified smoke script | Done locally | Added `docs\acceptance-runbook.md` and `tools\acceptance-smoke.ps1`, installed them into the package layout, and extended package smoke to assert their presence. Source and packaged `-Package` modes pass, and failure paths distinguish missing layout, missing Python modules, missing GPU, and hardware-blocked TensorRT. |
-| Phase 19: TensorRT evidence boundary | RTX 4090 evidence archived; external rerun deferred | 本地只通过 `package-smoke.ps1` 和 Runtime Delivery 能力矩阵检查依赖；旧 `acceptance-smoke.ps1 -TensorRT` 与 `--tensorrt-smoke` 已删除。重新开放外部验收时必须提交已登记 ModelPackage 的 SDK、硬件、Manifest、Artifact 与 Runtime Delivery 报告；GTX 1060 / SM 61 仍应为 `hardware-blocked`。 |
-| Phase 20: Small training / inference / conversion acceptance | Done on local smoke; public COCO8 materialization passed locally | `tools\acceptance-smoke.ps1 -PublicDatasets` generates minimal datasets, materializes official Ultralytics COCO8 / COCO8-seg when available, and falls back to generated datasets only when public materialization fails. The current production acceptance line trains YOLO detection/segmentation through official Ultralytics adapters and OCR Rec through the official PaddleOCR adapter; diagnostic CTC training is no longer a passed mainline acceptance substitute. |
-| Phase 21: Release closeout | Done locally; external machine checks pending | README, training backend docs, hardware compatibility notes, acceptance runbook, current status, and the long-range implementation plan now describe the Phase 17-21 delivery baseline. No Worker JSON protocol, SQLite schema, plugin interface, or GUI architecture changes were made for this phase set. Clean Windows packaged validation and RTX / SM 75+ TensorRT remain external acceptance items. |
-| Phase 22: Task history and artifact index | Done locally | GUI-triggered inference, dataset validation, and dataset split now create SQLite task records, pass task ids into Worker requests, and record Worker artifacts. `ProjectStore` now exposes read-only task artifact/metric/export queries and dataset version history queries. `tools\acceptance-smoke.ps1` writes `acceptance_summary.json` for each run, including modes, status, work directory, timing, failure reason, and hardware-blocked reason. |
-| Phase 23: Unified GUI artifact browser | Done locally | The task queue page now has a task detail area showing artifacts, metrics, and exports for the selected task. JSON/YAML/TXT previews are read-only and size-limited, image overlays render inline, ONNX artifacts show model-family inference, directory/model artifacts show metadata, and actions can open the directory, copy a path, or reuse an artifact as inference/export input. |
-| Phase 24: Dataset management enhancements | Done locally | The dataset page now includes a registered dataset list, format auto-detection for YOLO detection, YOLO segmentation, and PaddleOCR Rec, Worker-backed split support for all three formats, and a Worker-backed dataset conversion GUI entry for the implemented COCO/VOC/YOLO conversion matrix. Split reports are recorded as artifacts and dataset versions remain in SQLite; conversion results show output/report paths and are intentionally not auto-registered as datasets. |
-| Phase 25: Public dataset materialization stabilization | Done locally | Added `tools\materialize-ultralytics-dataset.py` and wired `acceptance-smoke.ps1 -PublicDatasets` to materialize COCO8 / COCO8-seg from the installed Ultralytics package yaml and download URL. Reports record source yaml, download URL, Ultralytics version, output `data.yaml`, and fallback state; `-RequirePublicDatasets` fails clearly instead of falling back. |
-| Phase 26: Official PaddleOCR Rec chain enhancement | Done locally | The official PaddleOCR adapter supports explicit train/val label files, dictionary file, official config, pretrained/resume checkpoints, export-only mode, post-export official inference, inference image, and `recImageShape`. Reports now record Python/Paddle/PaddleOCR versions, PaddleOCR source refs, commands, configs, labels, dictionary, checkpoint/model paths, metrics, exit codes, log paths, and `official_prediction.json` when inference is requested. |
-| Phase 27: Mature local workbench UI | Done locally; manual GUI walkthrough still recommended | The Qt Widgets shell has been reorganized into grouped workbench navigation, a project/data/task/model/environment dashboard, dataset library/details workflow, official-backend-first training launch controls, task-history-centered artifact browsing, and less demo-like export/inference copy. This is UI information architecture only; Worker JSON, SQLite schema, plugin interfaces, and training implementation remain unchanged. |
-| Phase 28: Annotation workflow productization | Done locally; manual GUI walkthrough still recommended | The dataset page now uses X-AnyLabeling as the fixed external annotation tool, detects local installation paths, launches it with the selected dataset path, documents recommended export formats, and provides a post-labeling refresh/revalidation action. LabelMe is no longer exposed as a UI choice. |
-| Phase 29: Release-candidate package validation | Done locally; external clean-machine check pending | The release-candidate path remains source/package smoke driven: package layout includes docs, examples, Python trainers, requirements, Worker, plugins, and acceptance scripts while excluding `.deps`, downloaded tools, datasets, model weights, and build artifacts from source control. `package-smoke.ps1`, `acceptance-smoke.ps1 -LocalBaseline -Package -SkipBuild`, and CPack ZIP generation pass locally. X-AnyLabeling remains a local dependency unless separately reviewed for redistribution. |
-| Phase 30: Daily usability enhancements | Done locally; manual GUI walkthrough still recommended | Dataset import already auto-detects YOLO detection, YOLO segmentation, and PaddleOCR Rec formats and recommends official backends. The training page now gives clearer current-backend capability text, task history can be filtered by category/status/search, and failed tasks show a short diagnostic next-step summary. |
-| Phase 31: Official PaddleOCR full toolchain | Done on local CPU smoke; PP-OCRv5/v6 presets added | Added PaddleOCR Det dataset validation/split, official Det adapter, official System `predict_system.py` adapter, GUI/backend defaults, example requests, package checks, and `tools\phase31-paddleocr-full-official-smoke.ps1`. The Det and Rec adapters now support PP-OCRv4, PP-OCRv5, and PP-OCRv6 built-in presets while keeping the existing backend ids; System inference derives the official Rec algorithm from preset/report metadata so `PP-OCRv5_server_rec` uses `SVTR_HGNet` and PP-OCRv6 uses Rec report or `inference.yml` metadata. This is the current OCR product route for Det+Rec+System artifacts. PP-OCRv5/PP-OCRv6 support does not add PaddleOCR C++ local deployment, PP-StructureV3, PP-ChatOCR, PaddleOCR-VL, document orientation classification, document unwarping, or text-line orientation classification. |
-| Phase 32: Localization and offline licensing | Done locally; manual GUI walkthrough still recommended | Added Qt-based Chinese/English GUI switching with `QSettings` persistence and restart-to-apply behavior, expanded translation coverage for main-window controls, combo items, read-only text views, table headers/body cells, status text, and the registration dialog. Added offline signed, machine-bound license validation before the main window opens, plus `AITrainLicenseGenerator.exe` as a separate Qt tool for private-key license issuance. No Worker JSON protocol, SQLite schema, plugin interface, training, export, or inference logic changes were made for this phase. |
-| Phase 33: Local CPU small/medium training smoke | Done locally; official-only policy now applies | Added `tools\acceptance-smoke.ps1 -CpuTrainingSmoke` and `examples\create-minimal-datasets.py --profile cpu-smoke`. This smoke now trains YOLO detection/segmentation through official Ultralytics adapters and obtains OCR Rec evidence from `phase16-ocr-official-smoke.ps1`. Missing official OCR environment is blocked/failed rather than downgraded to the diagnostic CTC trainer. |
-| Phase 34: Local product loop metadata | 历史 V1 记录 | 当时新增了评估、benchmark、本地 pipeline 等 V1 命令和 GUI 入口；这些裸路径产品命令与 pipeline 入口现已在 -703 物理删除。历史 SQLite 记录只用于迁移期审计，不代表当前 Worker 协议能力。 |
-| Phase 35: Dataset snapshots and explicit training inputs | Retired reproduction shortcut; snapshot lineage retained | Dataset snapshot manifests freeze file roles, split counts, summaries, and hashes. Training requests carry seed, backend, model preset, and snapshot lineage; no usable snapshot blocks the new task until the user creates one. Historical tasks remain read-only and no longer expose a reproduction shortcut. |
-| Phase 36: Detection evaluation and error analysis | Official Ultralytics val only | YOLO Detection 的  Workflow `Evaluate` 步骤只使用 Ultralytics 官方 `YOLO(...).val()`；独立 `evaluateModel` 命令已删除。 |
-| Phase 37: Dataset quality checks and fix loop | Done locally | `curateDataset` now performs real dataset quality analysis for YOLO detection/segmentation and PaddleOCR Det/Rec, including unreadable images, zero-byte files, missing/orphan labels, bbox and polygon validation, OCR label checks, duplicate samples, split and class distribution warnings, and X-AnyLabeling repair manifests. The GUI shows report summaries, problem samples, and repair-list actions without moving long work into `MainWindow`. |
-| Phase 38: Local pipeline templates execution | 历史实现，已由  重构删除 | 原 `runLocalPipeline` 模板属于 V1 重复编排路径，现已从 Core、Worker、GUI、协议与构建清单物理删除；训练与后续交付统一迁移到  Workflow。 |
-| Phase 39A: Official segmentation evaluation; OCR official-only evaluation policy | Done locally | YOLO Segmentation 的  Workflow `Evaluate` 步骤只使用 Ultralytics 官方 `YOLO(...).val()`，并保留 AITrain wrapper 报告；独立 `evaluateModel` 命令已删除。OCR 产品评估只使用 PaddleOCR 官方报告与客户域验收证据。 |
-
-| Phase 39B: Official backend local pipeline execution | 历史实现，已由  重构删除 | 原本地流水线中的官方后端执行已被八类 `TrainingWorkflowProfile` 训练工作流替代；不得再把旧 Pipeline 作为产品入口或验收证据。 |
-| Phase 39C: Benchmark, model registry, and delivery report hardening | 历史 V1 已由  接管并验证 | 旧 `benchmarkModel` 与 `generateDeliveryReport` 裸路径命令均已删除。训练交付摘要由 Training Workflow 的 `RenderDeliveryReport` 生成，运行时交付摘要由 Runtime Delivery Workflow 生成；GUI 只按 TaskId 通过 `TaskArtifactPresenter` 展示已提交报告与 Evidence。Core/Worker/AITrainStudio/Presenter/UI/Platform 构建成功，旧命令 Unsupported、三类 Artifact ID/相对清单/hash 与 UI 无独立生成按钮定向 CTest 4/4 通过（40.92 秒）。 |
-| Phase 41 Lite: Environment profiles and repair guidance | 已由 Environment Check  接管 | GUI 只派发 `runEnvironmentCheckWorkflow`；Core 提交结构化环境事实、脱敏 profile 报告与 Evidence，Presenter 按 TaskId 查询 committed 报告。旧临时 `environment_profiles_report.json` Socket/path 事件及 legacy 环境记录双写已删除。TensorRT SM 61 继续显示为 `hardware-blocked` 警告语义。 |
-| Phase 42 Lite: Local RC closeout | Done locally with CPU smoke | Added `docs/local-rc-closeout.md` and `tools/local-rc-closeout.ps1` as the local release-candidate closeout entry point. Package layout checks now assert the closeout doc/script are installed. Current closeout invokes `acceptance-smoke.ps1 -CpuTrainingSmoke`; OCR evidence must come from the official PaddleOCR adapter. Historical CTC smoke artifacts are diagnostic-only and no longer counted as production closeout evidence. |
-| Phase 43 Lite: External acceptance handoff package | Prepared locally; external collection deferred for current lane | Added `docs/external-acceptance-handoff.md` and result templates under `docs/acceptance-templates` for clean Windows package acceptance and RTX / SM 75+ TensorRT acceptance. Package install and package smoke checks now assert the handoff doc and templates are present. This phase prepares external evidence collection only. For the current local RC lane, sending the bundle, clean Windows acceptance, and package-root TensorRT rerun are explicitly deferred; they must still be recorded from external machines before any future status claims them as passed. |
-| Phase 44 Lite: Release freeze package identity | Local RC handoff tooling in place; package identity lives in generated manifest | Added `docs/release-freeze-handoff.md` and `tools/release-freeze-handoff.ps1` to run local RC closeout, generate the CPack ZIP, compute SHA256 hashes, and write `release_handoff_manifest.json` / `release_handoff_summary.md` under `build-vscode\release-freeze-handoff`. Package install and package smoke checks assert the release-freeze doc/script are present. Treat the generated manifest as the source for the exact source commit, dirty-worktree state, ZIP path, bytes, SHA256, and handoff timestamp for each run; do not hard-code one historical package hash as the current handoff identity in long-lived docs. This phase does not mark clean Windows or package-root TensorRT external acceptance as passed. |
-| Phase 45: YOLO new-version productization | Done locally for YOLO11/YOLO12 detection/segmentation smoke | Added `docs\yolo-model-support-matrix.md` and `tools\phase45-yolo-model-matrix-smoke.ps1` for newer Ultralytics detection/segmentation model-family acceptance. The required matrix passes for `yolo11n.yaml`, `yolo11n-seg.yaml`, `yolo12n.yaml`, and `yolo12n-seg.yaml`, producing `best.pt`, `best.onnx`, `ultralytics_training_report.json`, and `yolo_model_matrix_summary.json`; CTest also passes with `AITRAIN_ACCEPTANCE_SMOKE_ROOT` pointed at the Phase 45 work directory. The 2026-06-05 repaired RTX follow-up evidence is archived in `docs\validation\rtx4090-validation-evidence-20260615.json` with `status=passed` and `ctestStatus=passed`; the original `.deps` output directory has been cleaned. Classification, pose, OBB, anomaly, YOLO-World, YOLOE, and TensorRT remain out of this phase. |
-| Phase 46: Historical PaddleOCR Det C++ ONNX postprocess wiring | Historical diagnostic evidence only | The former C++ `ocr_detection` DB-style ONNX probability-map postprocess remains historical wiring evidence, but it is no longer a product OCR inference, evaluation, benchmark, deployment, or acceptance route. OCR product routes are official-only through PaddleOCR Det/Rec/System adapters and reports. |
-| Phase 47: Historical PaddleOCR Det ONNX wiring smoke | Historical RTX validation evidence only | The 2026-06-05 follow-up evidence is archived in `docs/validation/rtx4090-validation-evidence-20260615.json` and remains historical conversion/postprocess wiring evidence. New OCR acceptance must not require or cite `aitrain_worker --ocr-det-onnx-smoke`; the compatibility CLI now reports `blocked` and points users to PaddleOCR official Det/Rec/System reports. |
-| Phase 48 Lite: Local plugin marketplace v1 | Done locally | Added a local/offline-first plugin marketplace for existing Qt `IModelPlugin` packages: marketplace index loading, expanded/zip package inspection, `plugin.json` layout/hash/compatibility/Qt entrypoint validation, install/enable/disable/uninstall state, GUI plugin page, Worker plugin-smoke marketplace state reporting, package format docs, package template, and demo/package scripts. Local validation generated `.deps\plugin-marketplace-demo\marketplace.json`, Worker plugin smoke saw the then-current three built-in plugins, and `harness-check.ps1` passed. Latest local revalidation on 2026-05-12 regenerated the demo package with SHA256 `9c1aacd7fe956cfeda7c0b45d7a56eb63089a57b5ef7ac2ce2a45bab7c780e84`; packaged Worker plugin smoke then reported `pluginCount=3`, and `package-smoke.ps1 -SkipBuild -BuildDir build-vscode` passed. The current codebase now has five built-in plugins after SMP, OBB-adjacent routing, and Anomalib additions; new plugin smoke/package evidence should use the current count. Packaged GUI walkthrough loaded `.deps\plugin-marketplace-demo\marketplace.json`, imported the demo zip, disabled it successfully by releasing only its recorded active DLL, and uninstalled it; final state had zero installed marketplace plugin records, the active DLL was removed, and the app remained running. The marketplace also preserves state and reports `disable-failed` if an active DLL cannot be removed. After disable/uninstall, the marketplace table updates immediately; the global plugin capability matrix should be refreshed with the existing rescan button instead of forcing a hot full-plugin rescan inside the disable/uninstall path. CTest now runs QtTest with file output to avoid the Windows console-capture hang seen during full-suite runs. Signature enforcement remains reserved for a later release; v1 records local packages as unsigned and does not add cloud accounts, payments, remote execution, or new plugin interfaces. |
-| Phase 49 Lite: Delivery closeout workbench | Done locally; OCR route now official-only | 此阶段曾加入客户域 OCR、V1 诊断包与裸路径部署验证。旧 `collectDiagnostics` 已删除；诊断统一为 EvidenceRequired 的 `runDiagnosticsWorkflow` 两步工作流。推理和部署验证统一到只接受  模型包的 `runRuntimeDeliveryWorkflow`。 |
-| Diagnostics Bundle  | 已完成并统一验证 | `CollectDiagnostics → RenderDiagnostics` 只读取  Storage/Query、内置能力注册表、运行时矩阵、默认依赖检查和有限本机探测；事实、Bundle、Evidence 均提交为 Artifact。Worker/GUI 只交换 TaskId、WorkflowRunId、Diagnostics/Evidence ArtifactId 和摘要，不返回磁盘路径。同步外部探测期间不可中断，取消在探测前后检查，此限制写入 Evidence。Core/Presenter/Worker/AITrainStudio/UI/Platform 构建成功；修正 UI 测试 target 依赖与篡改夹具路径后，定向 CTest 4/4 通过（42.09 秒）。 |
-| Next stage: Industrial model expansion | SMP semantic route implemented and 4090D GPU realtest passed; OBB v1 locally validated; anomaly v1 MVTec matrix passed locally | Reopened the industrial model backlog only for anomaly detection/localization, OBB, and dedicated semantic segmentation. The first dedicated semantic segmentation route now uses `smp_semantic_segmentation` over Mask PNG datasets with SMP training/evaluation, ONNX export, ONNX Runtime inference/overlay/benchmark, GUI entry points, package smoke checks, and dedicated smoke scripts. `tools\phase-smp-4090d-gpu-realtest.ps1` passed locally on RTX 4090D with `smp_unet_resnet34` 20-epoch GPU training, ONNX evaluation, AITrain C++ ONNX inference/overlay/benchmark/deployment validation, and short GPU matrix rows for the other four public SMP presets. OBB v1 is implemented through `taskType=obb_detection`, `datasetFormat=yolo_obb`, `trainingBackend=ultralytics_yolo_obb`, `modelFamily=yolo_obb`, official Ultralytics OBB training/val/export, and AITrain C++ ONNX Runtime rotated-box inference/overlay/benchmark/deployment validation. On 2026-06-17, `tools\phase-obb-ultralytics-smoke.ps1` and `tools\phase-obb-dota-quality-matrix.ps1` both passed locally; the DOTA quality matrix ran `yolo11n-obb.pt` for 30 epochs on RTX 4090 D and recorded `mAP50=0.995`, `mAP50_95=0.831`, ONNX export, and AITrain ONNX Runtime deployment validation. Treat this as public DOTA/workflow evidence, not customer-domain industrial accuracy proof. OBB v1 remains ONNX Runtime-only for product deployment; NCNN is not an OBB v1 capability, and TensorRT runtime inference is not claimed. Anomaly v1 is wired as `taskType=anomaly_detection`, `datasetFormat=anomaly_folder`, `trainingBackend=anomalib_patchcore` / `anomalib_efficientad`, `modelFamily=anomaly_detection`, and `runtime=anomalib_python`; it uses Worker-managed Python/Anomalib artifacts, `anomaly_sidecar.json`, `inference_predictions.json`, heatmap/overlay/mask outputs, environment profile checks, and `tools\phase-anomaly-anomalib-smoke.ps1`. On 2026-06-18, `tools\phase-anomaly-mvtec-quality-matrix.ps1` passed the default public MVTec `bottle/hazelnut/leather` x `PatchCore/EfficientAD` matrix 6/6 locally and wrote `.deps\anomaly-mvtec-quality-matrix\anomaly_mvtec_quality_matrix_summary.json`. EfficientAD is constrained to Anomalib 2.5 `modelSize=small|medium` and training `batchSize=1`; `.ckpt` inference routes through `Engine.predict`. This does not add AITrain C++ ONNX/TensorRT/NCNN anomaly runtime or customer-domain production accuracy evidence. Other algorithm families or cloud/multi-user expansion are outside the current project direction unless a new scope decision changes that. |
-
-| Production OCR acceptance preparation | RTX 4090 evidence accepted under acc>0.7 gate; PP-OCRv5/v6 chain added | Added `docs\production-ocr-acceptance.md`, `docs\acceptance-templates\production-ocr-acceptance-result.md`, and `tools\prepare-production-ocr-data.ps1` / `.py` to define and prepare the production OCR evidence package. `tools\run-production-ocr-official-chain.ps1` now generates Det/Rec/System request JSON for PP-OCRv4, PP-OCRv5, or PP-OCRv6 presets, runs official adapters, and invokes the production gate from one repeatable entry point; `tools\phase50-paddleocr-v5-gpu-official-chain.ps1` adds a PP-OCRv5 GPU gate that blocks when Paddle is not CUDA-enabled instead of falling back to CPU. `tools\phase-ppocrv6-model-matrix-smoke.ps1` validates the six PP-OCRv6 Det/Rec presets and one v6 tiny official-chain smoke. The public-data pass downloaded the PaddleOCR-documented Total-Text archive under `.deps`, normalized Det labels, cropped 3000 Rec samples, copied 100 System images, and wrote `manifests\production_ocr_data_manifest.json`. Historical CPU Rec evidence included `accuracy=0.0` and `CER=0.925639`/`0.958901679695572`, which is blocked evidence rather than the current best signal. English-config pretrained CPU experiments improved as high as `accuracy=0.6458332660590348` and `CER=0.17084158273310235`. On the RTX 4090 D validation machine, the retained GPU Paddle environment exposed through `.deps\envs\ocr-gpu` ran official English PP-OCRv4 Rec for 20 epochs with `en_dict.txt` and the downloaded pretrained checkpoint; train/export/predict exited 0 and produced public workflow passes. The 2026-06-05 public OCR GPU rerun is archived in `docs/validation/rtx4090-validation-evidence-20260615.json` and passed the current `accuracy>0.7` gate with Rec `accuracy=0.71874997504340365` and `CER=0.13828554259854942`; the 2026-05-13 closeout remains a historical higher-accuracy public baseline at `accuracy=0.73263886345003948`, `CER=0.13776229079138269`. This does not claim customer-domain production OCR readiness, full-dataset Rec quality acceptance, PP-OCRv5 accuracy parity, or PP-OCRv6 customer-domain readiness. |
-
-## Maintenance Baseline
-
-The first-pass UI and core source-layout refactors are complete locally. `MainWindow` and the current workflow services are split into focused companion files; the legacy `ProductWorkflow` implementation and compatibility façade are deleted. Snapshot, quality, evaluation, benchmark, delivery, acceptance, and pipeline logic are owned by the corresponding workspace services. This is the current destructive architecture, not a compatibility layer.
-
-The hotspot source-layout refactor is complete locally. `DetectionTrainer.cpp` has been split into focused ONNX Runtime, TensorRT, postprocess, output rendering, and export companion files with private implementation declarations in `DetectionTrainerInternal.h`; WorkerSession has been split into support, environment, dataset command, model command, pipeline, Python trainer, and training companion files; and the former monolithic `tst_core.cpp` has been split into focused QtTest executables with shared test support.
-
-第一轮非全屏 UI 布局已在本地完成。`推理验证` 与 `任务与产物` 针对 1280x820 工作台视口使用可滚动容器、可收缩长文本和首屏关键操作。主导航为 `总览`、`项目`、`数据集`、`训练实验`、`任务与产物`、`模型库`、`部署验证`、`环境` 和 `系统设置` 九项；页签包括 `数据集 > 质量与复核`、`模型库 > 已验证模型包`、`部署验证 > 部署验证 / 推理验证`、`系统设置 > 内置能力 / 应用设置` 与 `环境 > 交付证据`。评估报告预览统一位于任务与产物页的 committed Artifact 面板；部署页已删除裸路径模型导出入口，两项运行入口都只接受  模型包。
-
-交付收口的 QtTest UI 合同已在本地完成，覆盖主 `环境` 页及 `环境 > 交付证据`、样本复核、评估报告、导出/推理、设置等页签。固定 1280x820 walkthrough wrapper 已生成结果，但本机缺少外部 `qt-gui-walkthrough` 脚本，因此当前 wrapper 状态必须记录为 `blocked/walkthrough_script_missing`，不能冒充布局通过。这些检查均使用 Worker/core 报告命令，不把训练、评估、导出、推理、OCR 验收或诊断逻辑移入 `MainWindow`。
-
-The RC hardening pass now makes the non-fullscreen GUI walkthrough repeatable through `tools\ui-workbench-walkthrough.ps1`, which runs the fixed 1280x820 page set and writes `ui_walkthrough_rc_summary.json`. NCNN deployment validation failed reports now include `errorCode`, `failureCategory`, `nextAction`, and `diagnosticHints` with categories `sdk_missing`, `sample_missing`, `sidecar_missing`, `unsupported_layer`, and `runtime_failed`. Worker terminal failures/cancellations now carry `taskId`, `command`, `status`, `errorCode`, and `outputPath`/`reportPath` where available, while preserving the existing Worker command names and JSON message types.
-
-The claudereport hardening pass treats the previously tracked `tools\aitrain-license-private-key.json` as leaked key material. The real private key file is removed from the working tree, `.gitignore` blocks future `*aitrain-license-private-key*.json` files, and only `tools\aitrain-license-private-key.example.json` may remain in source. Operators must rotate to a new key pair outside the repo, rebuild with the new `AITRAIN_LICENSE_PUBLIC_KEY`, and handle any Git history purge as a separate security procedure if the repository has been pushed or distributed.
-
-The GUI walkthrough wrapper treats missing automation tooling or the offline registration dialog as `status=blocked` (respectively `walkthrough_script_missing` or `license_required`); both are environment/setup evidence, not a GUI layout pass. Install the walkthrough dependency and use a licensed build before claiming the gate passed.
-
-## Local Hardware Note
-
-Recorded validation baseline on 2026-05-12:
-
-- Current validation machine: NVIDIA GeForce RTX 4090 D. NVIDIA Driver `591.86`, CUDA runtime `13.1`, and `nvcc 12.6` are archived in `docs/validation/rtx4090-validation-evidence-20260615.json`.
-- Phase 7 / Phase 10 historical impact: TensorRT was not hardware-blocked in the RTX 4090 D validation lane; that external evidence is archived in `docs/validation/rtx4090-validation-evidence-20260615.json`. The current source tree has no standalone TensorRT smoke command.
-- GPU Paddle environment is exposed through `.deps/envs/ocr-gpu`; on this machine that canonical path may point at the retained `.deps/rtx4090-validation/python-ocr-gpu` compatibility target. `paddlepaddle-gpu==3.3.1` reports CUDA ready on RTX 4090 D.
-- Closeout refresh on 2026-05-13 is archived in `docs/validation/rtx4090-validation-evidence-20260615.json`: local RC closeout with local baseline and CPU training smoke passed, package acceptance passed, TensorRT passed with GPU compute capability `8.9`, Phase 45 YOLO11/YOLO12 detection/segmentation matrix passed, Phase 47 PaddleOCR Det ONNX wiring passed through a fresh Paddle 2.6 old-IR export plus Paddle2ONNX direct conversion, and the public Total-Text OCR chain passed the current `accuracy>0.7` gate with official GPU Rec `accuracy=0.73263886345003948` and `CER=0.13776229079138269`. This remains public workflow evidence, not customer-domain production OCR proof.
-- RTX 4090D refresh on 2026-06-05 and follow-up repair evidence are archived in `docs/validation/rtx4090-validation-evidence-20260615.json`. The follow-up records `acceptance-smoke.ps1 -LocalBaseline -Package -SkipBuild` passed, the then-current repeatable 1280x820 Qt GUI walkthrough passed, and Phase 47 Det ONNX old-IR conversion plus Worker smoke and CTest passed with `predictionCount=100`. The current workbench walkthrough target is the 9-entry object workspace set documented below. The repaired CPU training smoke and repaired Phase 45 matrix are both preserved in the archive as passing evidence for the 2026-06-05 lane; their original `.deps` output directories have been cleaned. TensorRT and public OCR GPU workflow also passed in the initial 2026-06-05 refresh, but the public OCR result remains workflow-only evidence.
-- Historical GTX 1060 / SM 61 results remain useful only as compatibility notes for older machines; they are not the current acceptance baseline.
-- Python note: downloaded Python runtimes and venvs under `.deps/` are ignored and should not be committed.
-
-## NCNN Runtime Smoke Note
-
-Recorded NCNN runtime validation refresh on 2026-05-16:
-
-- NCNN SDK/runtime is exposed through `.deps\sdks\ncnn` with `include\ncnn\net.h`, `lib\ncnn.lib`, `bin\ncnn.dll`, and `bin\onnx2ncnn.exe`. Legacy `.deps\ncnn` may still exist on older worktrees as a fallback/compatibility target, but this machine has been migrated to the canonical SDK path.
-- Hyuto YOLOv8 detection ONNX from `https://raw.githubusercontent.com/Hyuto/yolov8-onnxruntime-web/master/public/model/yolov8n.onnx` converted through `onnx2ncnn` and passed runtime deployment validation with the sample image from `https://raw.githubusercontent.com/Hyuto/yolov8-onnxruntime-web/master/sample.png`; evidence is under `.deps\github-ncnn-smoke\hyuto-yolov8\runtime-output` and reported `predictionCount=14`.
-- YOLOv8-seg ONNX conversion was tested with Hyuto and X-AnyLabeling segmentation ONNX files. Both converted NCNN params still contained unsupported `Shape` layers, so AITrain now returns a failed deployment validation report instead of crashing Worker. These runs are blocked conversion compatibility evidence, not passing segmentation runtime evidence.
-- nihui `ncnn-android-yolov8` preconverted `yolov8n_seg.ncnn.param/.bin` passed the NCNN DFL segmentation runtime path after providing an AITrain sidecar with `inputBlob=in0`, `outputBlobs=["out0","out1","out2"]`, `decoder=dfl`, `inputSize=640`, `strides=[8,16,32]`, and `regMax=16`. Evidence is under `.deps\github-ncnn-smoke\nihui-yolov8n-seg-ncnn\runtime-output\deployment-validation` and reported `predictionCount=100`.
-- NCNN external artifacts are validated only through the Runtime Delivery workflow with a registered ModelPackage and committed Artifact; there is no standalone NCNN smoke CLI.
-- Deployment reports distinguish NCNN `sdk_missing`, `sample_missing`, `sidecar_missing`, `unsupported_layer`, and `runtime_failed`. Unsupported layers such as `Shape` must remain failed compatibility evidence with a report and next action, not a runtime pass.
-
-## Full Model Lifecycle Findings
-
-Recorded during the `.deps\full-model-lifecycle` validation lane on 2026-06-14. These are software-impacting findings from the in-progress full lifecycle run, not a final all-matrix pass/fail summary:
-
-- `yolo12n-segment-pt` failed before training because official Ultralytics 8.3.171 could not resolve `yolo12n-seg.pt`. Treat YOLO12 segmentation `.pt` rows as `blocked_missing_official_weight` until upstream official `yolo12*-seg.pt` weights resolve. Keep YOLO12 segmentation `.yaml` architecture evidence and YOLO12 detection `.pt` evidence separate.
-- The main full lifecycle run found all 20 YOLO26 rows blocked/failed in the shared Ultralytics 8.3.171 YOLO Python environment because `cfg/models/26` configs, official `yolo26*` weights, or matching package code were unavailable. The isolated YOLO26 targeted lane produced archival evidence on 2026-06-15 with 20/20 rows passing training, official ONNX export, AITrain C++ ONNX inference, and TensorRT deployment validation; the producing script was deleted and is not a current gate.
-- YOLO26 NCNN is no longer a supported target: the 2026-06-15 targeted lane recorded NCNN `failed` for 20/20 YOLO26 rows, even after forcing an `end2end=false` NCNN intermediate ONNX. The product now removes the YOLO26 NCNN option and rejects `format=ncnn` for YOLO26; use ONNX or TensorRT for YOLO26 deployment evidence.
-- The progress server/browser view now uses the current `runId` for primary row counts and exposes historical rows separately through `historicalRowCount` / `historicalByStatus`. If old failures are still visible, treat them as historical evidence rather than current-run failures and check the displayed `runId`.
-- GPU YOLO training with `device=0` requires a CUDA-enabled PyTorch environment. CPU-only YOLO Python environments must use `device=cpu`; otherwise Ultralytics fails before training with an invalid CUDA device error. Use training parameter `pythonExecutable` or `AITRAIN_PYTHON_EXECUTABLE` to select the validated CUDA YOLO Python.
-- `end2end` is an AITrain export metadata/compatibility option, but the installed Ultralytics package may reject it for generic ONNX export. `end2end=auto` now reads the loaded model config when possible; NCNN intermediate ONNX export forces `end2end=false`; unsupported combinations must be recorded as failed or blocked.
-- Worker self-check 只检查当前产品运行时所需的 CUDA、cuDNN、TensorRT 和 ONNX Runtime；LibTorch/C++ 训练路线已删除，因此不会再以缺失的 LibTorch 行阻塞或污染环境结论。YOLO、SMP、Anomalib 与 PaddleOCR 训练均由 Worker 管理的官方 Python 适配器负责。
-- TensorRT evidence in the current build covers engine export and deployment validation status for official ONNX artifacts. Single-image TensorRT runtime decoding is not enabled in the GUI/runtime path and must not be claimed as a passed inference route.
-- Public COCO128, COCO128-seg, and Total-Text lifecycle metrics are engineering wiring/artifact evidence only. They are not production accuracy benchmarks and do not replace customer-domain OCR or customer-domain vision validation.
-
-## OBB Local Evidence Note
-
-Recorded OBB validation refresh on 2026-06-17:
-
-- `tools\phase-obb-ultralytics-smoke.ps1` passed locally with public Ultralytics `DOTA8.yaml` materialization, OBB label sanitization, YOLO OBB dataset validation, `yolo11n-obb.pt` 1-epoch CPU training, official Ultralytics ONNX export and `val()` evaluation, AITrain ONNX Runtime rotated-box inference, benchmark, overlay, and deployment validation. The summary is `E:\code\AITrain\.deps\phase-obb-ultralytics-smoke\obb_ultralytics_smoke_summary.json`.
-- `tools\phase-obb-dota-quality-matrix.ps1` passed locally with `yolo11n-obb.pt`, 30 epochs, image size 640, batch size 2, and `device=0` on RTX 4090 D. The run recorded `mAP50=0.995`, `mAP50_95=0.831`, `p95Ms=140.9423`, official `best.pt`, official `best.onnx`, official evaluation report, and AITrain ONNX Runtime deployment validation. The summary is `E:\code\AITrain\.deps\obb-quality\dota\obb_dota_quality_matrix_summary.json`.
-- This evidence closes the previous OBB smoke/matrix gap for the local official Ultralytics + AITrain ONNX Runtime route. It remains public DOTA/workflow evidence, not customer-domain industrial accuracy evidence.
-- OBB v1 deployment scope is ONNX Runtime. NCNN is not an OBB v1 capability. TensorRT export/deployment status may be reported where supported, but GUI/runtime single-image TensorRT OBB inference is not a passed route and must not be claimed.
-
-## Current Next Task
-
-The Phase 49 delivery closeout workbench is implemented and locally validated. The current codebase can present sample review, environment-page delivery evidence, diagnostics, customer OCR gate results, deployment validation, and updated evaluation metrics in the packaged GUI. Remaining release evidence tasks are external: returned clean Windows package acceptance, any package-root TensorRT rerun that is intentionally reopened, and customer-domain OCR evidence from real customer data. Do not use public Total-Text, generated smoke data, or `.deps` examples as a production OCR claim.
-
-The next approved development direction is industrial model expansion for anomaly detection/localization, OBB, and dedicated semantic segmentation. Dedicated semantic segmentation has its first implementation through SMP: `taskType=semantic_segmentation`, `datasetFormat=semantic_segmentation_mask`, `trainingBackend=smp_semantic_segmentation`, and `modelFamily=semantic_segmentation`. It supports Mask PNG validation/split/snapshot, SMP training/evaluation, ONNX export, ONNX Runtime inference/overlay/benchmark, GUI defaults, and package smoke checks. The archived RTX 4090D evidence under `.deps\smp-realtest\gpu-4090d` covers GPU training, ONNX evaluation, AITrain C++ semantic ONNX inference, timed benchmark, deployment validation, ONNX-only deployment scope, and public preset artifacts; the producing script was deleted. NCNN/TensorRT export is not part of the SMP capability scope and is not required for SMP acceptance. OBB v1 and Anomaly v1 remain bounded by public workflow evidence and still require target-domain evidence for production claims. Do not broaden this approval outside the current local industrial vision direction without a new priority decision.
-
-NCNN runtime closeout on 2026-05-16 is locally refreshed: detection ONNX -> NCNN runtime validation passed with a public Hyuto YOLOv8 model/sample, and segmentation runtime validation passed with nihui's preconverted pnnx/DFL YOLOv8n-seg NCNN artifact plus an explicit AITrain sidecar. Generic YOLOv8-seg ONNX -> `onnx2ncnn` remains compatibility-sensitive because unsupported `Shape` layers may survive conversion; current behavior is to write a clear failed deployment report rather than crash Worker.
-
-Dataset conversion GUI closeout on 2026-05-15 is complete locally: the dataset page exposes the implemented conversion matrix through a Worker-backed form with preflight validation, progress/log/cancel handling, result rendering, and English fallback text. Validation passed focused conversion tests, the full harness, and a 1280x820 Qt walkthrough with no horizontal overflow. A follow-up UI preflight fix aligns COCO JSON source conversion with the core converter by allowing JSON file input, while keeping YOLO inputs directory-based and VOC inputs file-or-directory based. This did not change core conversion semantics, SQLite schema, plugin interfaces, or automatic dataset registration.
-
-P0-P2 documentation closeout on 2026-05-15 is complete locally: README, user guide, local RC closeout, next-stage RC plan, project context, dataset conversion guide, delivery evidence index, operations runbook, and developer architecture notes now separate RTX 4090 D validation evidence from clean Windows/package-root external evidence, document the implemented dataset conversion matrix, and add operator/developer/user entry points for plugin marketplace and delivery evidence handling.
-
-Current RTX 4090 validation follow-up: the 2026-06-05 lane has passing follow-up evidence for local baseline/package acceptance, GUI walkthrough, historical Phase 47 Det ONNX wiring evidence with CTest, repaired CPU training smoke, repaired Phase 45 YOLO11/YOLO12 detection/segmentation matrix, TensorRT smoke, and public Total-Text official Det/Rec/System OCR workflow. The RTX4090 historical evidence is archived in `docs/validation/rtx4090-validation-evidence-20260615.json` with scope boundaries; large `.deps\rtx4090-validation` outputs were cleaned after archive except the retained OCR GPU environment. The original repaired CPU training smoke and Phase 45 `.deps` output directories have also been cleaned after archive. The 2026-05-13 closeout remains a historical passing baseline with public GPU Rec `accuracy=0.73263886345003948` and `CER=0.13776229079138269`; the 2026-06-05 public workflow rerun also passed under the `accuracy>0.7` gate. These public Total-Text results remain workflow evidence rather than customer-domain production proof.
-
-Productization Phase 1-5 closeout on 2026-05-12 added dataset training-readiness artifacts, GUI training preflight request metadata, evaluation decision/error-taxonomy summaries, delivery manifests with forbidden-content checks, and a packaged customer-domain OCR validation gate. These additions strengthen the existing local product loop; they do not change the scaffold/official/hardware-blocked boundaries or claim customer-domain OCR readiness without returned customer evidence.
-
-Recommended implementation order:
-
-1. Treat external bundle sending, clean Windows package acceptance, and package-root TensorRT rerun as deferred for the current lane unless a new priority explicitly reopens them.
-2. Do not mark clean Windows or package-root TensorRT external acceptance as passed without returned external `acceptance_summary.json`, console output, filled templates, Worker self-check JSON, package layout, and GPU/driver evidence.
-3. Keep `tools\local-rc-closeout.ps1` as the repeatable local RC gate before future release-candidate handoff.
-4. GUI marketplace evidence exists under `.deps\plugin-marketplace-demo\gui-marketplace-success-flow.json` plus screenshots. Import, disable, and uninstall pass in the packaged GUI; after disable/uninstall, use the rescan button if the global plugin matrix needs an immediate count refresh.
-5. Use `环境 > 交付证据` as a status aggregator only. The real gates remain `tools\local-rc-closeout.ps1`, `tools\release-freeze-handoff.ps1`, `tools\customer-ocr-validation.ps1`, Worker report commands, and returned external evidence.
-6. Keep `tools\phase45-yolo-model-matrix-smoke.ps1` as the repeatable YOLO11/YOLO12 detection/segmentation matrix gate.
-7. Treat Phase 47 Det ONNX evidence as historical diagnostic material only. New OCR acceptance should use PaddleOCR official Det/Rec/System reports and customer-domain validation outputs.
-8. For production OCR readiness, keep the lowered `accuracy>0.7` gate explicitly documented for current public RTX evidence. It remains public Total-Text evidence rather than customer-domain production proof; customer-domain OCR claims require the Phase 49/customer OCR validation path and real customer data.
-9. Continue the Phase 40 industrial model backlog only for anomaly detection/localization, OBB, and dedicated semantic segmentation. SMP covers the first dedicated semantic segmentation route; OBB v1 now has local smoke/matrix evidence through Ultralytics OBB and AITrain ONNX Runtime, and anomaly v1 now has local public MVTec matrix evidence through Anomalib PatchCore/EfficientAD. Customer-domain OBB and anomaly readiness still require target-domain evidence. Keep unrelated product directions out of the backlog unless explicitly approved.
-10. Do not continue source-layout refactoring by default; the next refactor should be driven by a concrete maintenance blocker, with the focused `ProjectWorkspace*.cpp` services, `DetectionTrainer.cpp`, or `WorkerSession.cpp` evaluated separately.
-
-Current constraints to preserve:
-
-- Phase 7 / Phase 10 TensorRT has RTX 4090 D acceptance evidence. Older GTX 1060 / SM 61 machines must still report `hardware-blocked` and must not override the RTX evidence.
-- Phase 8 Python trainer adapter is complete as a protocol layer; the shipped `python_mock` trainer has been removed, and protocol tests must use temporary fixtures.
-- Phase 9 / Phase 11 official Ultralytics detection and segmentation training are available through Worker-managed Python trainers; keep license constraints visible before redistribution.
-- Phase 12 small PaddlePaddle OCR Rec CTC training has been removed; production OCR Rec training uses the official PaddleOCR adapter.
-- Phase 31 `paddleocr_system_official` is official-tool inference through PaddleOCR `predict_system.py`; OCR product inference, evaluation, benchmark, deployment validation, and acceptance are now official-only. Its recognition algorithm must come from Rec preset/report metadata, especially `SVTR_HGNet` for `PP-OCRv5_server_rec`; PP-OCRv6 must provide the algorithm through the Rec report, Rec `inference.yml`, or explicit `recAlgorithm`.
-- Phase 39A YOLO segmentation evaluation is official-only through Ultralytics `val()`; OCR evaluation is official-only through PaddleOCR reports and customer-domain acceptance.
-- Phase 39B 的 V1 本地流水线已经删除；其中官方训练能力由  Training Workflow Profiles 承接。Phase 39C 的 standalone 交付报告生成链已删除，当前交付摘要与 Evidence 只来自 Training/Runtime  Workflow；其他旧模型摘要仍不能作为当前  完成证据。
-- Phase 45 validates newer YOLO detection/segmentation model names only; it is separate from OBB evidence and does not change the current local industrial vision scope.
-- Phase 46/47 C++ OCR ONNX evidence is historical wiring evidence only. New OCR product routes must use PaddleOCR official Det/Rec/System adapters and reports.
-- Phase 48 plugin marketplace v1 is local/offline-first around existing Qt `IModelPlugin` packages. Do not claim publisher signature enforcement, remote marketplace services, payment/account features, or new training backends from this phase.
-- Phase 49 delivery closeout is a local report/GUI/workflow layer over existing capabilities. Do not claim new algorithms, clean Windows acceptance, customer OCR production readiness, NCNN runtime validation without SDK/sample smoke evidence, or TensorRT success on unsupported hardware from this phase. Current NCNN local evidence covers Hyuto YOLOv8 detection ONNX -> NCNN and nihui preconverted YOLOv8n-seg pnnx/DFL NCNN; YOLOv8-seg ONNX conversion that leaves unsupported `Shape` layers is a failed/blocked conversion case, not a passed runtime case.
-- Next-stage industrial model expansion is approved for anomaly detection/localization, OBB, and dedicated semantic segmentation only. SMP semantic segmentation now has a first ONNX Runtime route and a local RTX 4090D GPU realtest pass. OBB v1 now has local smoke/quality evidence through the official Ultralytics + AITrain ONNX Runtime route; anomaly v1 now has local public MVTec matrix evidence through Anomalib PatchCore/EfficientAD. Customer-domain OBB/anomaly readiness still requires target-domain evidence.
-- Keep training, evaluation, export, inference, benchmark, and report logic inside core/plugin/Worker boundaries, not in `MainWindow`.
-- Keep production training entry points official-only: Ultralytics YOLO detection/segmentation/OBB and PaddleOCR Det/Rec official adapters. PP-OCRv5 and PP-OCRv6 are selected through `modelPreset` on the existing PaddleOCR official adapters, not through new backend ids. `python_mock`, `tiny_linear_detector`, and small `paddleocr_rec` CTC are removed implementations, not internal product backends.
-- Keep YOLO product runtime boundaries explicit: official Ultralytics is the source for training, first ONNX export, and detection/segmentation/OBB evaluation via `val()`, while AITrain C++ runtime owns packaged YOLO inference, benchmark, supported deployment validation, overlays, and delivery reports. OBB v1 is ONNX Runtime-only for product deployment; NCNN is not an OBB capability, and TensorRT runtime OBB inference is not enabled. Do not describe YOLO as end-to-end official-only the way OCR is now described.
-- Classification, pose/keypoint, YOLO-World, YOLOE, 3D/RGB-D, video/time-series, and cloud/multi-user expansion are not current project directions. Do not track them as remaining project work unless a new scope decision explicitly adds them.
-
-Primary direction document:
-
-```text
-docs/product-roadmap-local-training-platform.md
-```
-
-For document-only changes, run:
+# AITrain Studio 当前状态
+
+更新时间：2026-07-26
+
+本文只记录当前代码与产品边界。历史路线、旧阶段结论和已删除实现不属于当前实施依据；宽路线请查看 `docs/product-roadmap-local-training-platform.md`。
+
+## 当前基线
+
+- SQLite 项目格式为破坏性的 Schema 13。
+- `project_meta` 是项目版本、ProjectId、显示名和 `open_generation` 的唯一来源；旧 `schema_info` 不再使用。
+- Schema 12 及更早数据库只返回 `SchemaRebuildRequired`，打开过程不迁移、不修改旧库。
+- `openProject`、`createProject`、`rebuildProject` 已分离：
+  - 打开缺失目录或缺失 `.aitrain/project.sqlite` 时不创建任何内容；
+  - 创建入口不覆盖已有项目；
+  - 重建只删除已校验项目根目录中的 `.aitrain`，并生成新的 ProjectId。
+- Studio 使用 `.aitrain.owner.lock` 持有项目所有者 Lease；Worker 子进程使用 `.aitrain.worker.lock`。两者均采用 `QLockFile` 和零 stale 超时，不强抢活动锁。
+- 后台 prepare 完成恢复并递增 generation 后返回一次性 `PreparedProjectSession`；GUI 激活时复核 ProjectId 与 generation，候选失败不替换现有 Session。
+- Worker 只通过 `openForWorkerChild()` 建立独立 SQLite 连接，不取得 Owner Lease、不执行全项目恢复、不递增 generation。
+
+## 模块与构建边界
+
+- `aitrain_foundation` 已删除。
+- 产品事实由 Qt Core-only 的 `aitrain_product_contract` 统一提供。
+- 视觉数据、标注集成、数据集转换、模型导出和视觉运行时分别由以下窄目标承载：
+  - `aitrain_vision_data`
+  - `aitrain_annotation_integration`
+  - `aitrain_dataset_conversion`
+  - `aitrain_model_export`
+  - `aitrain_vision_runtime`
+- 历史伪训练入口 `DetectionTrainer` 及其伞形头已删除；生产训练只走官方 Python 后端。
+- Protocol V2、控制 Envelope、TaskCommand JSON、既有 backend/capability ID 保持不变。
+- 不存在动态插件产品入口，不得重新引入运行期插件接口。
+
+## 产品能力合同
+
+- 八个生产训练 backend ID 均由 Product Contract 声明，并与一个 Workflow Profile、一个 Python Profile 一一对应。
+- `officialArtifactFormat` 表示正式训练交付格式。
+- `exportFormats` 只表示可继续导出的目标，不代表可执行 Runtime。
+- `runtimeRoutes` 单独来自 Runtime Route Contract。
+- Worker `--builtin-capabilities` 保留原字段，并输出 `trainingWorkflowContracts` 与 `contractsValid`。
+
+当前 Runtime 产品边界：
+
+- YOLO Detection / Segmentation：ONNX Runtime；只有已验证 NCNN 包可使用 NCNN。
+- OBB v1：仅 ONNX Runtime。
+- SMP：仅 ONNX Runtime。
+- TensorRT engine 可以导出，但 AITrain 当前没有 TensorRT 推理解码器，推理路线为 `NotImplemented`。
+- Anomalib：Worker-managed Python，不声明 AITrain C++ ONNX/TensorRT/NCNN Runtime。
+- PaddleOCR：只通过官方 Det/Rec/System 报告和验收流程形成 `OfficialEvidence`。
+- `ExternalEvidenceRequired` 不等于本机 Runtime 可执行。
+- Runtime 探测失败不会自动切换到其他路线。
+
+## Storage、Artifact 与 Evidence
+
+- `ProjectStore` 是跨聚合事务 façade；GUI 不直接访问 Store。
+- Schema 13 已建立任务、数据集、模型包、Artifact 文件、指标、Workflow Run、terminalization 和 outbox 的实际查询索引。
+- Evidence 的 `projectIdentity` 使用持久化 ProjectId，项目移动后身份不变。
+- 训练模型使用 `project_snapshot` 来源绑定；显式外部导入使用 `external_declared`，不伪造项目 Snapshot 血缘。
+- Artifact journal 为 v2，并在 rename 前冻结 inventory、SHA-256 和 completion action。
+- staging 到 committed 的同卷原子 rename 是提交线性化点。
+- rename 前失败可安全中止；rename 后只能完成原 completion 或进入 `PendingRecovery`，不能反转成业务失败。
+- 数据库已提交但 journal 清理失败仍是业务成功，只报告 `cleanupPending`。
+- discard 先把 committed 原子移动到 `.trash/<ArtifactId>`，再在事务中复核引用并删除目录记录；恢复会按数据库事实恢复或清理 trash。
+- terminalization 保持 `sealed → evidence_attached → closed`：
+  - Evidence Artifact catalog 与 attach 同事务；
+  - 根任务状态、状态事件与 close 同事务；
+  - EvidenceRequired 根任务在 attach 前进入终态会被数据库 trigger 拒绝；
+  - outbox 只有在 handler 后置条件成立后才标记 applied。
+
+## 数据集、模型和许可
+
+正式数据集转换路线只有三条：
+
+1. COCO bbox → YOLO Detection
+2. COCO polygon → YOLO Segmentation
+3. Pascal VOC bbox → YOLO Detection
+
+COCO RLE 和其他组合明确返回不支持。转换输出只进入 Artifact staging，成功后形成 Dataset、Version 和 Snapshot 身份，不接受任意 committed 输出目录。
+
+Resume/Checkpoint 裸路径入口已删除。未来若恢复，只能重新设计为基于 ArtifactId 或 ModelPackageId 的能力。
+
+机器码无法取得稳定种子时返回 typed unavailable；注册码界面阻止继续并显示原因，不使用 `unknown-machine` 回退。
+
+## Worker 与 Python
+
+- start/cancel 控制帧先完成 token、sequence、kind 和批次校验，再产生副作用。
+- 取消是幂等请求；Worker 不在 Core 持久化终态前发送业务终态。
+- Socket 断开只触发取消和进程退出，不伪造终态；项目恢复负责收口。
+- Environment Check 与 Training 共用 Python Profile resolver。
+- 解释器候选顺序固定为：
+  1. Profile 专用环境变量；
+  2. `AITRAIN_PYTHON_EXECUTABLE`；
+  3. 应用旁 `python_env`；
+  4. CMake 明确配置的开发候选；
+  5. PATH 的 `python` / `python3`。
+- 显式环境变量无效时立即失败，不静默回退。
+- Profile 与必查模块：
+  - `yolo`：ultralytics、torch、onnx、onnxruntime；
+  - `smp_semantic_segmentation`：segmentation_models_pytorch、torch、torchvision、timm、onnx、onnxruntime；
+  - `anomaly_detection`：anomalib、torch、torchvision、lightning、timm、PIL、numpy、cv2；
+  - `ocr`：paddle、paddleocr，并检查 PaddleOCR 源码目录。
+- Task 参数不再接受 `pythonExecutable`。
+- 每个 Profile 同时使用 `requirements-*.txt` 与 `locks/<profile>-windows.txt`。
+- `adapter_runtime.py` 统一请求读取、事件通道、AdapterSdk、异常/取消映射和单终态生命周期，不抽象算法实现。
+- AdapterSdk 终态状态为 `OPEN → TERMINAL_SENDING → TERMINAL_ATTEMPTED`；sink 抛错后也不补发第二终态。
+- Anomalib benchmark 使用无事件副作用的单次推理，默认 warmup=3、iterations=20，只产生一个报告 Artifact 和一个终态。
+
+## GUI
+
+- 主导航固定为九页：总览、项目、数据集、训练实验、任务与产物、模型库、部署验证、环境、系统设置。
+- 当前 Qt Widgets 工作台继续保持左侧栏、顶部状态栏和中央 `QStackedWidget`。
+- 长任务只通过 Worker 执行，训练逻辑不进入 MainWindow。
+- GUI 只传 DatasetId、SnapshotId、ArtifactId、ModelPackageId 和 TaskId，不重新暴露 committed 物理路径。
+- Resume 控件、字段、翻译和文档入口已删除。
+- Runtime Delivery 只允许 Product Contract 判定为 `AitrainCpp + Supported` 且本机 `Available` 的路线；不会静默 fallback。
+- 英文 TS 不允许 `unfinished`；语言切换继续采用重启生效。
+
+## 构建与发布
+
+- Python trainer 由 `SyncPythonTrainers.cmake` 同步到固定构建目录；同步前只清理该目录，并排除 Python cache。
+- CTest 会写入 stale sentinel，验证同步可删除陈旧文件。
+- `AITRAIN_REQUIRE_PYTHON_TESTS=ON` 时，缺少 Python、pytest 或测试注册会在 configure 阶段失败。
+- Python CTest 运行完整 `pytest tests -q` 与独立 compileall。
+- 安装组件：
+  - `Runtime`：GUI、Worker、运行库、Python trainers、requirements/constraints、正式文档和最小示例；
+  - `AcceptanceTools`：Harness、验收模板、正式 smoke、报告采集与交接材料。
+- Runtime 不包含 Harness、roadmap、release freeze 历史材料、安装器源码或历史 phase 脚本。
+- 主安装器只面向 Runtime；AcceptanceTools 独立交付；Python AI Environment 仍是独立包。
+
+## 本地验证结果
+
+2026-07-26 当前工作树已通过：
 
 ```powershell
-git diff --check
-.\tools\harness-context.ps1
-```
-
-For code changes, run:
-
-```powershell
+.\tools\encoding-check.ps1
+.\tools\architecture-check.ps1
 .\tools\harness-check.ps1
+.\tools\package-smoke.ps1
 ```
 
-For local baseline acceptance, run:
+`harness-check.ps1`：34/34 CTest 通过，包含完整 Python pytest、compileall 和 trainer stale 同步测试。
 
-```powershell
-.\tools\acceptance-smoke.ps1 -LocalBaseline
-```
+`package-smoke.ps1`：Runtime 与 AcceptanceTools 使用全新 install prefix；包根 GUI 启动、Worker self-check、内置 Product Contract、Schema 13 首次创建和二次打开均通过。
 
-For packaging smoke checks, run:
+## 仍需外部证据的边界
 
-```powershell
-.\tools\acceptance-smoke.ps1 -Package -SkipBuild
-```
+以下内容没有因本次稳定化而被声明完成：
 
-For the local CPU small/medium training smoke, run:
+- TensorRT 真正推理解码器；
+- Schema 12 数据迁移工具；
+- 基于 ArtifactId 的正式 Resume；
+- 客户域 OCR、OBB、异常检测和 SMP 精度证据；
+- Clean Windows 外部验收；
+- package-root TensorRT 外部复验；
+- 新算法、云调度、多用户和远程协作。
 
-```powershell
-.\tools\acceptance-smoke.ps1 -CpuTrainingSmoke
-```
-
-For the Phase 45 YOLO model-family smoke, run:
-
-```powershell
-.\tools\phase45-yolo-model-matrix-smoke.ps1
-```
-
-RTX 4090 TensorRT acceptance evidence was recorded with:
-
-```powershell
-历史 RTX 4090 TensorRT 证据保存在 `docs/validation/rtx4090-validation-evidence-20260615.json`；当前重新验收必须使用已登记 ModelPackage 的 Runtime Delivery，不再执行裸路径 smoke。
-```
-
-## Non-Negotiable Notes
-
-- Do not reintroduce the C++ tiny detector, segmentation baseline, OCR baseline, small CTC trainer, or shipped Python mock as product training paths.
-- The official Ultralytics and PaddleOCR backends require installed official Python packages and license review before redistribution.
-- Current detection, segmentation, PaddleOCR Det, and PaddleOCR Rec production training workflows are official-adapter workflows.
-- Real training should now be implemented through Worker-managed Python trainer subprocesses; do not embed Python inside the GUI process.
-- Phase 5 production segmentation training is the official Ultralytics adapter path.
-- Phase 6 production OCR Rec training is the official PaddleOCR adapter path.
-- Phase 11 adds official YOLO segmentation training/export and C++ ONNX Runtime mask postprocess for YOLOv8-seg smoke models.
-- Phase 12 legacy CTC training is removed; `paddleocr_rec` is retained only as a dataset format.
-- Phase 13 local productization is complete. Clean-machine package acceptance can still be repeated externally, but RTX 4090 TensorRT acceptance has passing evidence for this validation lane.
-- Phase 14/31 PaddleOCR official adapters support PP-OCRv4, PP-OCRv5, and PP-OCRv6 presets. Prepare-only artifacts are not trained model artifacts.
-- Phase 15 is UI-only and must continue to read Worker artifacts instead of duplicating inference logic in `MainWindow`.
-- Phase 16 validates official PaddleOCR train/export/inference smoke only on a tiny dataset; it proves wiring and artifacts, not OCR accuracy.
-- Phase 17-21 add acceptance scripts, docs, and smoke coverage only; they do not change public Worker JSON protocol, SQLite schema, plugin interfaces, or GUI architecture.
-- Phase 20 generated-data smoke proves integration and artifacts, not useful model accuracy.
-- Phase 22-26 improve local usability and repeatability; they do not change the recorded RTX 4090 TensorRT acceptance evidence.
-- Phase 27 is UI-only: it may reorganize pages, labels, and helper widgets, but must not move training/export/inference work into `MainWindow`.
-- Phase 32 is product-shell only: it must not change Worker JSON protocol, SQLite schema, plugin interfaces, training/export/inference behavior, or the machine-bound offline licensing trust model without an explicit follow-up plan.
-- Phase 33 local CPU small/medium smoke validates training/export/inference wiring only; it is not a production accuracy benchmark.
-- Phase 45 YOLO11/YOLO12 matrix validates productized detection/segmentation wiring and artifacts only; it is not an accuracy benchmark and does not expand scope to other YOLO tasks.
-- Phase 46/47 PaddleOCR Det ONNX smoke evidence is historical diagnostic material only; it is not a current production OCR route or acceptance requirement.
-- PP-OCRv5/PP-OCRv6 support is scoped to PaddleOCR official Det/Rec/System OCR. It does not claim PP-StructureV3, PP-ChatOCR, PaddleOCR-VL, document direction classification, image correction, text-line direction classification, or PaddleOCR C++ local deployment support.
-- Phase 49 adds sample review, customer OCR acceptance, diagnostics, and deployment validation surfaces. Customer OCR production claims still require customer-domain evidence; NCNN runtime validation requires SDK/runtime plus sample evidence and currently has local Hyuto detection plus nihui pnnx/DFL segmentation smoke evidence; TensorRT may correctly remain `hardware-blocked`.
-- Keep long-running execution in `aitrain_worker`.
-- Keep model-specific behavior behind core/plugin/Worker boundaries, not in `MainWindow`.
+任何 smoke、scaffold、公共数据结果或历史报告都不能替代上述外部证据。

@@ -97,6 +97,7 @@ private slots:
     void importCancellationLeavesNoRegisteredPackageOrArtifact();
     void runtimeResolutionAcceptsOnlyRegisteredUntamperedModelPackages();
     void projectWorkspaceFirstStartCreatesStableLayout();
+    void projectWorkspaceSeparatesOpenCreateAndRebuild();
     void projectWorkspaceRecoveryClosesInterruptedStaging();
     void projectWorkspaceOwnsRuntimeTaskLifecycle();
     void projectQueryServiceReadsOnlyPersistedTaskState();
@@ -707,7 +708,7 @@ void ApplicationTests::projectWorkspaceOwnsRuntimeTaskLifecycle()
     QVERIFY(directory.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
 
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     aitrain::TaskSnapshot started;
@@ -744,7 +745,7 @@ void ApplicationTests::projectWorkspaceFirstStartCreatesStableLayout()
 
     QString error;
     aitrain::ProjectWorkspace firstWorkspace;
-    QVERIFY2(firstWorkspace.open(projectRoot, &error), qPrintable(error));
+    QVERIFY2(firstWorkspace.createProject(projectRoot, &error), qPrintable(error));
     QCOMPARE(firstWorkspace.workspacePath(), QDir(projectRoot).filePath(QStringLiteral(".aitrain")));
     firstWorkspace.close();
 
@@ -764,10 +765,14 @@ void ApplicationTests::projectWorkspaceFirstStartCreatesStableLayout()
         database.setDatabaseName(QDir(metadataRoot).filePath(QStringLiteral("project.sqlite")));
         QVERIFY2(database.open(), qPrintable(database.lastError().text()));
         QSqlQuery schema(database);
-        QVERIFY2(schema.exec(QStringLiteral("select version from schema_info limit 1")),
+        QVERIFY2(schema.exec(QStringLiteral(
+            "select project_id, schema_version from project_meta where singleton = 1")),
             qPrintable(schema.lastError().text()));
         QVERIFY(schema.next());
-        QCOMPARE(schema.value(0).toInt(), aitrain::ProjectStore::schemaVersion());
+        aitrain::ProjectId projectId;
+        QVERIFY(aitrain::ProjectId::parse(schema.value(0).toString(), &projectId, &error));
+        QCOMPARE(schema.value(1).toInt(), aitrain::ProjectStore::schemaVersion());
+        QVERIFY(!schema.next());
         QSqlQuery projects(database);
         QVERIFY2(projects.exec(QStringLiteral(
             "select 1 from sqlite_master where type = 'table' and name = 'projects'")),
@@ -788,6 +793,37 @@ void ApplicationTests::projectWorkspaceFirstStartCreatesStableLayout()
         .entryInfoList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty());
 }
 
+void ApplicationTests::projectWorkspaceSeparatesOpenCreateAndRebuild()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString missingRoot = directory.filePath(QStringLiteral("missing"));
+    aitrain::ProjectWorkspace workspace;
+    QString error;
+    QVERIFY(!workspace.open(missingRoot, &error));
+    QVERIFY(error.contains(QStringLiteral("不能创建缺失")));
+    QVERIFY(!QFileInfo::exists(missingRoot));
+
+    const QString projectRoot = directory.filePath(QStringLiteral("project"));
+    QVERIFY2(workspace.createProject(projectRoot, &error), qPrintable(error));
+    const QString databasePath = QDir(projectRoot).filePath(QStringLiteral(".aitrain/project.sqlite"));
+    aitrain::ProjectStore firstStore;
+    QVERIFY2(firstStore.open(databasePath, &error), qPrintable(error));
+    aitrain::ProjectMetaSnapshot firstMeta;
+    QVERIFY2(firstStore.projectMeta(&firstMeta, &error), qPrintable(error));
+    firstStore.close();
+
+    QVERIFY(!workspace.createProject(projectRoot, &error));
+    QVERIFY(error.contains(QStringLiteral("已存在")));
+    QVERIFY2(workspace.rebuildProject(projectRoot, &error), qPrintable(error));
+    aitrain::ProjectStore rebuiltStore;
+    QVERIFY2(rebuiltStore.open(databasePath, &error), qPrintable(error));
+    aitrain::ProjectMetaSnapshot rebuiltMeta;
+    QVERIFY2(rebuiltStore.projectMeta(&rebuiltMeta, &error), qPrintable(error));
+    QCOMPARE(rebuiltMeta.schemaVersion, 13);
+    QVERIFY(rebuiltMeta.projectId != firstMeta.projectId);
+}
+
 void ApplicationTests::projectWorkspaceRecoveryClosesInterruptedStaging()
 {
     QTemporaryDir directory;
@@ -795,7 +831,7 @@ void ApplicationTests::projectWorkspaceRecoveryClosesInterruptedStaging()
     const QString projectRoot = QDir(directory.path()).filePath(QStringLiteral("recovery"));
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(projectRoot, &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(projectRoot, &error), qPrintable(error));
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     aitrain::TaskSnapshot task;
     QVERIFY2(workspace.startTask(taskId, QStringLiteral("yolo.detect"),
@@ -826,7 +862,7 @@ void ApplicationTests::projectQueryServiceReadsOnlyPersistedTaskState()
     QVERIFY(project.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(project.path(), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(project.path(), &error), qPrintable(error));
 
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     aitrain::TaskSnapshot started;
@@ -864,7 +900,7 @@ void ApplicationTests::externalAcceptanceEvidenceRequiresStrictSchemaAndStaysUnv
     QVERIFY(external.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(project.path(), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(project.path(), &error), qPrintable(error));
     const QString sourcePath = QDir(external.path()).filePath(QStringLiteral("acceptance.json"));
     QVERIFY(writeFile(sourcePath, QJsonDocument(QJsonObject{
         {QStringLiteral("schemaVersion"), 1},
@@ -924,7 +960,7 @@ void ApplicationTests::deliveryEvidenceLimitCountsEvidenceArtifacts()
     QVERIFY(external.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(project.path(), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(project.path(), &error), qPrintable(error));
 
     const QString sourcePath = QDir(external.path()).filePath(QStringLiteral("acceptance.json"));
     QVERIFY(writeFile(sourcePath, QJsonDocument(QJsonObject{
@@ -973,7 +1009,7 @@ void ApplicationTests::deliveryEvidenceKeepsInvalidArtifactAsRow()
     QVERIFY(project.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(project.path(), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(project.path(), &error), qPrintable(error));
 
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     aitrain::TaskSnapshot task;
@@ -1007,7 +1043,7 @@ void ApplicationTests::deliveryEvidenceAsyncReadsAndValidatesOffUiThread()
     QVERIFY(external.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(project.path(), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(project.path(), &error), qPrintable(error));
 
     const QString sourcePath = QDir(external.path()).filePath(QStringLiteral("acceptance.json"));
     QVERIFY(writeFile(sourcePath, QJsonDocument(QJsonObject{
@@ -1058,7 +1094,7 @@ void ApplicationTests::projectWorkspaceCommitsRuntimeArtifactsBeforeSuccess()
     QVERIFY(directory.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
 
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     aitrain::TaskSnapshot task;
@@ -1098,7 +1134,7 @@ void ApplicationTests::datasetSnapshotImportRegistersNewAndExistingDatasetVersio
     QVERIFY(createYoloImportFixture(sourceRoot, QByteArray("0 0.5 0.5 0.25 0.25\n")));
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
     const aitrain::DatasetId datasetId = aitrain::DatasetId::create();
 
     const auto runImport = [&](aitrain::DatasetSnapshotImportWorkflowResult* result) {
@@ -1156,7 +1192,7 @@ void ApplicationTests::datasetSnapshotImportRejectsSourceChangedAfterPlanWithEvi
     const QString projectRoot = directory.filePath(QStringLiteral("project"));
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(projectRoot, &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(projectRoot, &error), qPrintable(error));
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     aitrain::TaskSnapshot task;
     QVERIFY2(workspace.startTask(taskId, QStringLiteral("dataset.snapshot.import"),
@@ -1202,7 +1238,7 @@ void ApplicationTests::datasetSplitWorkflowRegistersSelfContainedSnapshotAndReje
     const QString projectRoot = directory.filePath(QStringLiteral("project"));
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(projectRoot, &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(projectRoot, &error), qPrintable(error));
 
     const aitrain::TaskId importTaskId = aitrain::TaskId::create();
     aitrain::TaskSnapshot task;
@@ -1293,7 +1329,7 @@ void ApplicationTests::datasetSplitWorkflowCancellationAfterMaterializeDoesNotRe
     const QString projectRoot = directory.filePath(QStringLiteral("project"));
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(projectRoot, &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(projectRoot, &error), qPrintable(error));
     aitrain::TaskSnapshot task;
     const aitrain::TaskId importTaskId = aitrain::TaskId::create();
     QVERIFY2(workspace.startTask(importTaskId, QStringLiteral("dataset.snapshot.import"),
@@ -1353,7 +1389,7 @@ void ApplicationTests::projectWorkspaceRegistersDatasetSnapshotAndSequencesTrain
 
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
     const aitrain::TaskId snapshotTaskId = aitrain::TaskId::create();
     aitrain::TaskSnapshot snapshotTask;
     QVERIFY2(workspace.startTask(snapshotTaskId, QStringLiteral("dataset.snapshot"),
@@ -1651,7 +1687,7 @@ void ApplicationTests::trainingWorkflowRejectsCrossProfileBackendMix()
     QVERIFY(directory.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     aitrain::TaskSnapshot task;
     QVERIFY2(workspace.startTask(taskId, QStringLiteral("yolo"), QStringLiteral("detection"),
@@ -1675,7 +1711,7 @@ void ApplicationTests::trainingWorkflowEvidenceGatePersistsEvidenceBeforeTermina
 
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
 
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     aitrain::TaskSnapshot started;
@@ -1756,7 +1792,7 @@ void ApplicationTests::trainingWorkflowEvidenceGateRecoversAcrossReopen()
     QString error;
     {
         aitrain::ProjectWorkspace workspace;
-        QVERIFY2(workspace.open(projectRoot, &error), qPrintable(error));
+        QVERIFY2(workspace.createProject(projectRoot, &error), qPrintable(error));
         aitrain::TaskSnapshot started;
         QVERIFY2(workspace.startTask(taskId, QStringLiteral("yolo.detect"), QStringLiteral("detection"),
             &started, &error), qPrintable(error));
@@ -1843,7 +1879,7 @@ void ApplicationTests::officialYoloWorkflowPreservesVariantTaskType()
 
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     aitrain::TaskSnapshot task;
     QVERIFY2(workspace.startTask(taskId, QStringLiteral("yolo"), rootTaskType, &task, &error), qPrintable(error));
@@ -1946,7 +1982,7 @@ void ApplicationTests::projectWorkspaceDispatchesOfficialAdapterStepThroughTrain
 
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     aitrain::TaskSnapshot task;
     QVERIFY2(workspace.startTask(taskId, QStringLiteral("yolo.detect"), QStringLiteral("detection"), &task, &error), qPrintable(error));

@@ -53,6 +53,26 @@ add_library(aitrain_training_workflow_profile STATIC
     src/workflow/TrainingWorkflowProfile.cpp
 )
 
+add_library(aitrain_product_contract STATIC
+    include/aitrain/product/ProductCapabilityContract.h
+    src/product/ProductCapabilityContract.cpp
+)
+
+target_include_directories(aitrain_product_contract
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_link_libraries(aitrain_product_contract
+    PUBLIC
+        Qt${QT_VERSION_MAJOR}::Core
+)
+
+target_compile_definitions(aitrain_product_contract
+    PUBLIC
+        QT_NO_CAST_FROM_ASCII
+)
+
 target_include_directories(aitrain_training_workflow_profile
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -60,6 +80,7 @@ target_include_directories(aitrain_training_workflow_profile
 
 target_link_libraries(aitrain_training_workflow_profile
     PUBLIC
+        aitrain_product_contract
         Qt${QT_VERSION_MAJOR}::Core
 )
 
@@ -75,7 +96,7 @@ add_library(aitrain_capability_registry STATIC
     src/CapabilityRegistry.cpp
 )
 target_include_directories(aitrain_capability_registry PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(aitrain_capability_registry PUBLIC Qt${QT_VERSION_MAJOR}::Core)
+target_link_libraries(aitrain_capability_registry PUBLIC aitrain_product_contract Qt${QT_VERSION_MAJOR}::Core)
 target_compile_definitions(aitrain_capability_registry PUBLIC QT_NO_CAST_FROM_ASCII)
 
 add_library(aitrain_license STATIC
@@ -182,17 +203,26 @@ add_library(aitrain_application STATIC
 
 add_library(aitrain_dataset_conversion STATIC
     include/aitrain/dataset/DatasetConversionService.h
+    include/aitrain/core/DatasetConversion.h
     src/dataset/DatasetConversionService.cpp
+    src/DatasetConversion.cpp
+    src/DatasetConversionCoco.cpp
+    src/DatasetConversionCommon.cpp
+    src/DatasetConversionInternal.h
+    src/DatasetConversionVoc.cpp
+    src/DatasetConversionYolo.cpp
 )
 
 target_include_directories(aitrain_dataset_conversion PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(aitrain_dataset_conversion
     PUBLIC
         aitrain_artifact
+        aitrain_annotation_integration
         aitrain_dataset
         aitrain_dataset_validation
-        aitrain_foundation
         Qt${QT_VERSION_MAJOR}::Core
+        Qt${QT_VERSION_MAJOR}::Gui
+        Qt${QT_VERSION_MAJOR}::Xml
 )
 target_compile_definitions(aitrain_dataset_conversion PUBLIC QT_NO_CAST_FROM_ASCII)
 
@@ -214,7 +244,10 @@ target_link_libraries(aitrain_application
         aitrain_native_runtimes
         aitrain_dataset
         aitrain_dataset_conversion
-        aitrain_foundation
+        aitrain_vision_data
+        aitrain_annotation_integration
+        aitrain_model_export
+        aitrain_vision_runtime
         Qt${QT_VERSION_MAJOR}::Core
 )
 
@@ -245,7 +278,7 @@ add_library(aitrain_onnx_runtime STATIC
     src/runtime/OnnxRuntimeAdapter.cpp
 )
 target_include_directories(aitrain_onnx_runtime PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(aitrain_onnx_runtime PUBLIC aitrain_model aitrain_foundation Qt${QT_VERSION_MAJOR}::Core)
+target_link_libraries(aitrain_onnx_runtime PUBLIC aitrain_model aitrain_vision_runtime Qt${QT_VERSION_MAJOR}::Core)
 target_compile_definitions(aitrain_onnx_runtime PUBLIC QT_NO_CAST_FROM_ASCII)
 
 add_library(aitrain_native_runtimes STATIC
@@ -255,7 +288,7 @@ add_library(aitrain_native_runtimes STATIC
     src/runtime/TensorRtRuntimeAdapter.cpp
 )
 target_include_directories(aitrain_native_runtimes PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(aitrain_native_runtimes PUBLIC aitrain_model aitrain_foundation Qt${QT_VERSION_MAJOR}::Core)
+target_link_libraries(aitrain_native_runtimes PUBLIC aitrain_model aitrain_vision_runtime Qt${QT_VERSION_MAJOR}::Core)
 target_compile_definitions(aitrain_native_runtimes PUBLIC QT_NO_CAST_FROM_ASCII)
 
 add_library(aitrain_runtime_matrix STATIC
@@ -263,7 +296,7 @@ add_library(aitrain_runtime_matrix STATIC
     src/runtime/RuntimeCapabilityMatrix.cpp
 )
 target_include_directories(aitrain_runtime_matrix PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(aitrain_runtime_matrix PUBLIC aitrain_model aitrain_foundation Qt${QT_VERSION_MAJOR}::Core)
+target_link_libraries(aitrain_runtime_matrix PUBLIC aitrain_model aitrain_product_contract aitrain_vision_runtime Qt${QT_VERSION_MAJOR}::Core)
 target_compile_definitions(aitrain_runtime_matrix PUBLIC QT_NO_CAST_FROM_ASCII)
 
 target_include_directories(aitrain_artifact
@@ -348,31 +381,28 @@ target_compile_definitions(aitrain_dataset
         QT_NO_CAST_FROM_ASCII
 )
 
-add_library(aitrain_foundation STATIC
-    include/aitrain/core/AnnotationIntegration.h
-    include/aitrain/core/Cancellation.h
-    include/aitrain/core/Deployment.h
-    include/aitrain/core/DatasetConversion.h
+add_library(aitrain_vision_data STATIC
     include/aitrain/core/DetectionDataset.h
-    include/aitrain/core/DetectionTrainer.h
     include/aitrain/core/OcrRecDataset.h
     include/aitrain/core/SegmentationDataset.h
+    src/DetectionDataset.cpp
+    src/OcrRecDataset.cpp
+    src/SegmentationDataset.cpp
+)
+
+add_library(aitrain_annotation_integration STATIC
+    include/aitrain/core/AnnotationIntegration.h
+    src/AnnotationIntegration.cpp
+)
+
+add_library(aitrain_vision_runtime STATIC
+    include/aitrain/core/Deployment.h
     include/aitrain/core/TaskTypes.h
-    include/aitrain/core/VisionModelExport.h
     include/aitrain/core/VisionModelRuntime.h
     include/aitrain/core/VisionPostprocess.h
-    src/AnnotationIntegration.cpp
     src/Deployment.cpp
-    src/DatasetConversion.cpp
-    src/DatasetConversionCoco.cpp
-    src/DatasetConversionCommon.cpp
-    src/DatasetConversionInternal.h
-    src/DatasetConversionVoc.cpp
-    src/DatasetConversionYolo.cpp
-    src/DetectionDataset.cpp
-    src/DetectionTrainer.cpp
-    src/DetectionTrainerInternal.h
-    src/VisionModelExport.cpp
+    src/VisionRuntimeShared.cpp
+    src/VisionRuntimeInternal.h
     src/VisionModelRuntimeHelpers.cpp
     src/VisionModelRuntimeNcnn.cpp
     src/VisionModelRuntimeOnnx.cpp
@@ -381,20 +411,36 @@ add_library(aitrain_foundation STATIC
     src/VisionPostprocessOcr.cpp
     src/VisionPostprocessOutput.cpp
     src/VisionPostprocessYolo.cpp
-    src/OcrRecDataset.cpp
-    src/SegmentationDataset.cpp
 )
 
-target_include_directories(aitrain_foundation
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
+add_library(aitrain_model_export STATIC
+    include/aitrain/core/VisionModelExport.h
+    src/VisionModelExport.cpp
 )
 
-target_link_libraries(aitrain_foundation
-    PUBLIC
+foreach(target_name IN ITEMS
+        aitrain_vision_data
+        aitrain_annotation_integration
+        aitrain_vision_runtime
+        aitrain_model_export)
+    target_include_directories(${target_name} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_definitions(${target_name} PUBLIC QT_NO_CAST_FROM_ASCII)
+endforeach()
+
+target_link_libraries(aitrain_vision_data PUBLIC
+    aitrain_dataset_validation
+    Qt${QT_VERSION_MAJOR}::Core
+    Qt${QT_VERSION_MAJOR}::Gui)
+
+target_link_libraries(aitrain_annotation_integration PUBLIC
+    aitrain_dataset_validation
+    Qt${QT_VERSION_MAJOR}::Core)
+
+target_link_libraries(aitrain_vision_runtime PUBLIC
         aitrain_qt5_msvc_compat
         aitrain_dataset_validation
         aitrain_protocol
+        aitrain_vision_data
         Qt${QT_VERSION_MAJOR}::Core
         Qt${QT_VERSION_MAJOR}::Gui
         Qt${QT_VERSION_MAJOR}::Network
@@ -402,43 +448,43 @@ target_link_libraries(aitrain_foundation
         Qt${QT_VERSION_MAJOR}::Xml
 )
 
-target_compile_definitions(aitrain_foundation
-    PUBLIC
-        QT_NO_CAST_FROM_ASCII
-)
+target_link_libraries(aitrain_model_export PUBLIC
+    aitrain_vision_runtime
+    Qt${QT_VERSION_MAJOR}::Core
+    Qt${QT_VERSION_MAJOR}::Gui)
 
 if(AITRAIN_WITH_ONNXRUNTIME)
-    target_compile_definitions(aitrain_foundation
+    target_compile_definitions(aitrain_vision_runtime
         PUBLIC
             AITRAIN_WITH_ONNXRUNTIME
     )
-    target_include_directories(aitrain_foundation
+    target_include_directories(aitrain_vision_runtime
         PRIVATE
             ${AITRAIN_ONNXRUNTIME_INCLUDE_DIR}
     )
-    target_link_libraries(aitrain_foundation
+    target_link_libraries(aitrain_vision_runtime
         PRIVATE
             ${AITRAIN_ONNXRUNTIME_LIBRARY}
     )
 endif()
 
 if(AITRAIN_WITH_NCNN)
-    target_compile_definitions(aitrain_foundation
+    target_compile_definitions(aitrain_vision_runtime
         PUBLIC
             AITRAIN_WITH_NCNN
     )
-    target_include_directories(aitrain_foundation
+    target_include_directories(aitrain_vision_runtime
         PRIVATE
             ${AITRAIN_NCNN_INCLUDE_DIR}
     )
-    target_link_libraries(aitrain_foundation
+    target_link_libraries(aitrain_vision_runtime
         PRIVATE
             ${AITRAIN_NCNN_LIBRARY}
     )
 endif()
 
 if(WIN32)
-    target_link_libraries(aitrain_foundation
+    target_link_libraries(aitrain_vision_runtime
         PRIVATE
             bcrypt
             crypt32
@@ -447,11 +493,17 @@ if(WIN32)
 endif()
 
 if(AITRAIN_WITH_TENSORRT_SDK)
-    target_compile_definitions(aitrain_foundation
+    target_compile_definitions(aitrain_vision_runtime
         PUBLIC
             AITRAIN_WITH_TENSORRT_SDK
     )
-    target_include_directories(aitrain_foundation
+    target_include_directories(aitrain_vision_runtime
+        PRIVATE
+            ${AITRAIN_TENSORRT_INCLUDE_DIR}
+            ${AITRAIN_CUDA_INCLUDE_DIR}
+            ${AITRAIN_CUDA_CRT_INCLUDE_DIR}
+    )
+    target_include_directories(aitrain_model_export
         PRIVATE
             ${AITRAIN_TENSORRT_INCLUDE_DIR}
             ${AITRAIN_CUDA_INCLUDE_DIR}

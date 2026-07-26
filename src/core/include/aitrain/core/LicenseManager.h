@@ -43,7 +43,15 @@ struct LicenseValidationResult {
     bool isValid() const { return status == LicenseStatus::Valid; }
 };
 
+struct MachineCodeResult final {
+    QString machineCode;
+    QString unavailableReason;
+
+    bool isAvailable() const { return !machineCode.isEmpty(); }
+};
+
 QString licenseProductName();
+MachineCodeResult currentMachineCodeResult();
 QString currentMachineCode();
 QString normalizeMachineCode(const QString& machineCode);
 bool licenseCryptoAvailable();

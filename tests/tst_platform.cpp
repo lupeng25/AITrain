@@ -3,6 +3,7 @@
 #include "aitrain/core/CapabilityRegistry.h"
 #include "aitrain/core/Deployment.h"
 #include "aitrain/core/WorkerProtocol.h"
+#include "aitrain/product/ProductCapabilityContract.h"
 #include "aitrain/protocol/Protocol.h"
 #include "aitrain/protocol/ProtocolSanitizer.h"
 
@@ -59,6 +60,18 @@ private slots:
         QVERIFY(!json.contains(QStringLiteral("aliases")));
         QVERIFY(json.value(QStringLiteral("capabilities")).toArray().size() >= 4);
         QVERIFY(json.value(QStringLiteral("backends")).toArray().size() >= 8);
+
+        const auto& contract = aitrain::ProductCapabilityContract::instance();
+        QVERIFY2(contract.validationErrors().isEmpty(),
+            qPrintable(contract.validationErrors().join(QLatin1Char('\n'))));
+        QCOMPARE(contract.trainingBackends().size(), 8);
+        QCOMPARE(contract.pythonProfiles().size(), 4);
+        QCOMPARE(contract.datasetConversionRoutes().size(), 3);
+        for (const aitrain::TrainingBackendContract& backend : contract.trainingBackends()) {
+            QVERIFY(backend.supportsCancel);
+            QVERIFY(!backend.pythonProfileId.isEmpty());
+            QVERIFY(!backend.officialArtifactFormat.isEmpty());
+        }
     }
 
     void workerProtocolBuildersStayTyped()

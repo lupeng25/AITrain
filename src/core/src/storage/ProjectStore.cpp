@@ -15,6 +15,7 @@
 
 #include <cmath>
 #include <limits>
+#include <utility>
 
 namespace aitrain {
 namespace {
@@ -22,7 +23,7 @@ namespace {
 constexpr qint64 kFirstHostStateEventSequence = 4000000000000000000LL;
 // durable Workflow terminal outbox 是本轮破坏性重构新增的持久化事实，
 // 因此显式提升 Storage schema，旧数据库不会被静默当作当前结构打开。
-constexpr int kStorageSchemaVersion = 12;
+constexpr int kStorageSchemaVersion = 13;
 
 QString terminalPolicyText(WorkflowTerminalPolicy policy)
 {
@@ -65,6 +66,27 @@ bool parseTerminalizationState(const QString& value, WorkflowTerminalizationStat
     }
     if (value == QStringLiteral("closed")) {
         if (result) *result = WorkflowTerminalizationState::Closed;
+        return true;
+    }
+    return false;
+}
+
+QString modelSourceSnapshotBindingText(ModelSourceSnapshotBinding binding)
+{
+    return binding == ModelSourceSnapshotBinding::ProjectSnapshot
+        ? QStringLiteral("project_snapshot")
+        : QStringLiteral("external_declared");
+}
+
+bool parseModelSourceSnapshotBinding(const QString& value,
+    ModelSourceSnapshotBinding* result)
+{
+    if (value == QStringLiteral("project_snapshot")) {
+        if (result) *result = ModelSourceSnapshotBinding::ProjectSnapshot;
+        return true;
+    }
+    if (value == QStringLiteral("external_declared")) {
+        if (result) *result = ModelSourceSnapshotBinding::ExternalDeclared;
         return true;
     }
     return false;
@@ -134,21 +156,42 @@ bool hasTable(QSqlDatabase database, const QString& tableName, QString* error)
     return query.next();
 }
 
-bool hasExpectedSchemaVersion(QSqlDatabase database, QString* error)
+bool readProjectMeta(QSqlDatabase database, ProjectMetaSnapshot* result, QString* error)
 {
     QSqlQuery query(database);
-    if (!query.exec(QStringLiteral("select version from schema_info limit 1")) || !query.next()) {
+    if (!query.exec(QStringLiteral(
+            "select project_id, schema_version, display_name, open_generation, "
+            "created_at, updated_at, last_opened_at from project_meta where singleton = 1"))
+        || !query.next()) {
         if (error) {
-            *error = query.lastError().isValid() ? sqlError(query) : QStringLiteral("数据库缺少 schema 版本记录。");
+            *error = query.lastError().isValid()
+                ? sqlError(query)
+                : QStringLiteral("数据库缺少 project_meta 记录。");
         }
         return false;
     }
-    if (query.value(0).toInt() != kStorageSchemaVersion) {
+    ProjectMetaSnapshot parsed;
+    if (!ProjectId::parse(query.value(0).toString(), &parsed.projectId, error)) {
+        return false;
+    }
+    parsed.schemaVersion = query.value(1).toInt();
+    parsed.displayName = query.value(2).toString();
+    parsed.openGeneration = query.value(3).toLongLong();
+    parsed.createdAt = parseUtc(query.value(4).toString());
+    parsed.updatedAt = parseUtc(query.value(5).toString());
+    parsed.lastOpenedAt = parseUtc(query.value(6).toString());
+    if (parsed.schemaVersion != kStorageSchemaVersion) {
         if (error) {
-            *error = QStringLiteral("数据库 schema 版本不受支持；项目尚未上线，请删除后重新创建项目。");
+            *error = QStringLiteral("SchemaRebuildRequired：项目数据库不是 Schema 13，请显式重建项目。");
         }
         return false;
     }
+    if (parsed.displayName.trimmed().isEmpty() || parsed.openGeneration < 0
+        || !parsed.createdAt.isValid() || !parsed.updatedAt.isValid() || query.next()) {
+        if (error) *error = QStringLiteral("project_meta 记录损坏或不唯一。");
+        return false;
+    }
+    if (result) *result = parsed;
     return true;
 }
 
@@ -387,15 +430,26 @@ ProjectStore::~ProjectStore()
     close();
 }
 
+void ProjectStore::swap(ProjectStore& other) noexcept
+{
+    using std::swap;
+    swap(connectionName_, other.connectionName_);
+    swap(db_, other.db_);
+    swap(artifactStoreRoot_, other.artifactStoreRoot_);
+    swap(lastErrorCode_, other.lastErrorCode_);
+}
+
 bool ProjectStore::open(const QString& databasePath, QString* error)
 {
     close();
+    lastErrorCode_ = ProjectErrorCode::None;
     db_ = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName_);
     db_.setDatabaseName(databasePath);
     if (!db_.open()) {
         if (error) {
             *error = db_.lastError().text();
         }
+        lastErrorCode_ = ProjectErrorCode::SqlError;
         return false;
     }
     if (initialize(error)) {
@@ -420,6 +474,46 @@ bool ProjectStore::isOpen() const
     return db_.isValid() && db_.isOpen();
 }
 
+ProjectErrorCode ProjectStore::lastErrorCode() const
+{
+    return lastErrorCode_;
+}
+
+bool ProjectStore::projectMeta(ProjectMetaSnapshot* result, QString* error) const
+{
+    if (!isOpen() || !result) {
+        if (error) *error = QStringLiteral("读取 project_meta 需要已打开的 Storage 和输出对象。");
+        return false;
+    }
+    return readProjectMeta(db_, result, error);
+}
+
+bool ProjectStore::advanceOpenGeneration(ProjectMetaSnapshot* result, QString* error)
+{
+    if (!isOpen()) {
+        if (error) *error = QStringLiteral("更新 open_generation 需要已打开的 Storage。");
+        return false;
+    }
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    if (!db_.transaction()) {
+        if (error) *error = db_.lastError().text();
+        return false;
+    }
+    QSqlQuery query(db_);
+    query.prepare(QStringLiteral(
+        "update project_meta set open_generation = open_generation + 1, "
+        "last_opened_at = :now, updated_at = :now where singleton = 1"));
+    query.bindValue(QStringLiteral(":now"), utcText(now));
+    if (!query.exec() || query.numRowsAffected() != 1 || !db_.commit()) {
+        if (error) {
+            *error = query.lastError().isValid() ? sqlError(query) : db_.lastError().text();
+        }
+        db_.rollback();
+        return false;
+    }
+    return result ? projectMeta(result, error) : true;
+}
+
 void ProjectStore::setArtifactStoreRoot(QString artifactStoreRoot)
 {
     artifactStoreRoot_ = QDir::cleanPath(QDir(artifactStoreRoot).absolutePath());
@@ -428,17 +522,25 @@ void ProjectStore::setArtifactStoreRoot(QString artifactStoreRoot)
 bool ProjectStore::initialize(QString* error)
 {
     QString lookupError;
-    const bool hasSchema = hasTable(db_, QStringLiteral("schema_info"), &lookupError);
+    const bool hasMeta = hasTable(db_, QStringLiteral("project_meta"), &lookupError);
     if (!lookupError.isEmpty()) {
         if (error) {
             *error = lookupError;
         }
         return false;
     }
-    if (!hasSchema && hasTable(db_, QStringLiteral("tasks"), &lookupError)) {
+    const bool hasLegacySchema = hasTable(db_, QStringLiteral("schema_info"), &lookupError);
+    if (!lookupError.isEmpty()) {
+        if (error) *error = lookupError;
+        lastErrorCode_ = ProjectErrorCode::SqlError;
+        return false;
+    }
+    if (hasLegacySchema || (!hasMeta && hasTable(db_, QStringLiteral("tasks"), &lookupError))) {
         if (error) {
-            *error = QStringLiteral("检测到旧项目数据库；当前版本不支持迁移，请删除后重新创建项目。");
+            *error = QStringLiteral(
+                "SchemaRebuildRequired：检测到旧项目数据库；当前版本不迁移旧库，请显式重建项目。");
         }
+        lastErrorCode_ = ProjectErrorCode::SchemaRebuildRequired;
         return false;
     }
     if (!lookupError.isEmpty()) {
@@ -447,7 +549,10 @@ bool ProjectStore::initialize(QString* error)
         }
         return false;
     }
-    if (hasSchema && !hasExpectedSchemaVersion(db_, error)) {
+    if (hasMeta && !readProjectMeta(db_, nullptr, error)) {
+        lastErrorCode_ = error && error->contains(QStringLiteral("SchemaRebuildRequired"))
+            ? ProjectErrorCode::SchemaRebuildRequired
+            : ProjectErrorCode::ProjectMetaCorrupt;
         return false;
     }
 
@@ -463,10 +568,7 @@ bool ProjectStore::initialize(QString* error)
     }
 
     const QStringList statements = {
-        QStringLiteral("create table if not exists schema_info (version integer not null check(version = %1))")
-            .arg(kStorageSchemaVersion),
-        QStringLiteral("insert into schema_info(version) select %1 where not exists(select 1 from schema_info)")
-            .arg(kStorageSchemaVersion),
+        QStringLiteral("create table if not exists project_meta (singleton integer primary key check(singleton = 1), project_id text not null unique, schema_version integer not null check(schema_version = 13), display_name text not null check(length(display_name) > 0), open_generation integer not null default 0 check(open_generation >= 0), created_at text not null, updated_at text not null, last_opened_at text)"),
         QStringLiteral("create table if not exists datasets (id text primary key, dataset_format text not null, created_at text not null)"),
         QStringLiteral("create table if not exists dataset_versions (id text primary key, dataset_id text not null references datasets(id) on delete restrict, root_hash text not null check(length(root_hash) = 64 and root_hash not glob '*[^0-9a-f]*'), created_at text not null, unique(dataset_id, root_hash))"),
         QStringLiteral("create table if not exists dataset_snapshots (id text primary key, dataset_version_id text not null references dataset_versions(id) on delete restrict, task_id text not null references tasks(id) on delete restrict, artifact_id text not null unique references artifacts(id) on delete restrict, root_path text not null, driver_id text not null, driver_version text not null, manifest_sha256 text not null check(length(manifest_sha256) = 64 and manifest_sha256 not glob '*[^0-9a-f]*'), file_count integer not null check(file_count >= 0), total_bytes integer not null check(total_bytes >= 0), created_at text not null)"),
@@ -475,7 +577,7 @@ bool ProjectStore::initialize(QString* error)
         QStringLiteral("create table if not exists task_metrics (id text primary key, task_id text not null references tasks(id) on delete restrict, name text not null, value real not null, occurred_at text not null)"),
         QStringLiteral("create table if not exists artifacts (id text primary key, task_id text not null references tasks(id) on delete restrict, kind text not null, created_at text not null)"),
         QStringLiteral("create table if not exists artifact_files (id text primary key, artifact_id text not null references artifacts(id) on delete restrict, relative_path text not null, sha256 text not null check(length(sha256) = 64 and sha256 not glob '*[^0-9a-f]*'), byte_count integer not null check(byte_count >= 0), unique(artifact_id, relative_path))"),
-        QStringLiteral("create table if not exists model_packages (id text primary key, model_family text not null, task_type text not null, source_backend text not null, source_task_id text not null references tasks(id) on delete restrict, source_snapshot_id text not null, source_artifact_id text not null references artifacts(id) on delete restrict, source_artifact_sha256 text not null check(length(source_artifact_sha256) = 64 and source_artifact_sha256 not glob '*[^0-9a-f]*'), manifest_json text not null, verified integer not null check(verified in (0, 1)), created_at text not null)"),
+        QStringLiteral("create table if not exists model_packages (id text primary key, model_family text not null, task_type text not null, source_backend text not null, source_task_id text not null references tasks(id) on delete restrict, source_snapshot_id text not null, source_snapshot_binding text not null check(source_snapshot_binding in ('project_snapshot','external_declared')), source_artifact_id text not null references artifacts(id) on delete restrict, source_artifact_sha256 text not null check(length(source_artifact_sha256) = 64 and source_artifact_sha256 not glob '*[^0-9a-f]*'), manifest_json text not null, verified integer not null check(verified in (0, 1)), created_at text not null)"),
         QStringLiteral("create table if not exists evaluation_reports (id text primary key, task_id text not null references tasks(id) on delete restrict, artifact_id text not null references artifacts(id) on delete restrict, created_at text not null)"),
         QStringLiteral("create table if not exists workflow_runs (id text primary key, task_id text not null references tasks(id) on delete restrict, template_id text not null, terminal_policy text not null check(terminal_policy in ('immediate','evidence_required')), created_at text not null)"),
         QStringLiteral("create table if not exists workflow_input_bindings (workflow_run_id text not null references workflow_runs(id) on delete restrict, role text not null, source_artifact_id text not null references artifacts(id) on delete restrict, source_task_id text not null references tasks(id) on delete restrict, source_artifact_kind text not null, dataset_id text references datasets(id) on delete restrict, dataset_snapshot_id text references dataset_snapshots(id) on delete restrict, dataset_version_id text references dataset_versions(id) on delete restrict, model_package_id text references model_packages(id) on delete restrict, manifest_sha256 text not null default '', root_hash text not null default '', bound_at text not null, primary key(workflow_run_id, role))"),
@@ -483,16 +585,22 @@ bool ProjectStore::initialize(QString* error)
         QStringLiteral("create table if not exists workflow_terminalizations (workflow_run_id text primary key references workflow_runs(id) on delete restrict, task_id text not null references tasks(id) on delete restrict, state text not null check(state in ('sealed','evidence_attached','closed')), terminal_state text not null check(terminal_state in ('succeeded','failed','canceled')), failure_code text not null, failure_details text not null, failure_suggested_action text not null, failure_occurred_at text, terminal_at text not null, evidence_artifact_id text unique references artifacts(id) on delete restrict, evidence_attempt_count integer not null default 0 check(evidence_attempt_count >= 0), last_evidence_failure_code text not null default 'none', last_evidence_failure_details text not null default '', last_evidence_failure_suggested_action text not null default '', last_evidence_failure_occurred_at text, sealed_at text not null, evidence_attached_at text, closed_at text, check((terminal_state = 'succeeded' and failure_code = 'none' and failure_details = '' and failure_suggested_action = '' and failure_occurred_at is null) or (terminal_state in ('failed','canceled') and failure_code <> 'none' and failure_details <> '' and failure_suggested_action <> '' and failure_occurred_at is not null)), check((terminal_state = 'canceled') = (failure_code = 'canceled')), check((last_evidence_failure_code = 'none' and last_evidence_failure_details = '' and last_evidence_failure_suggested_action = '' and last_evidence_failure_occurred_at is null) or (last_evidence_failure_code <> 'none' and last_evidence_failure_details <> '' and last_evidence_failure_suggested_action <> '' and last_evidence_failure_occurred_at is not null)), check((state = 'sealed' and evidence_artifact_id is null and evidence_attached_at is null and closed_at is null) or (state = 'evidence_attached' and evidence_artifact_id is not null and evidence_attached_at is not null and closed_at is null) or (state = 'closed' and evidence_artifact_id is not null and evidence_attached_at is not null and closed_at is not null)))"),
         QStringLiteral("create table if not exists workflow_terminal_outbox (message_id text primary key references task_events(id) on delete restrict, task_id text not null references tasks(id) on delete restrict, request_id text not null, workflow_run_id text not null references workflow_runs(id) on delete restrict, workflow_step_id text not null references workflow_steps(id) on delete restrict, sequence integer not null check(sequence > 0), kind text not null check(kind in ('event.succeeded','event.failed','event.canceled')), occurred_at text not null, payload_json text not null, output_artifact_id text references artifacts(id) on delete restrict, state text not null check(state in ('pending','applied')), created_at text not null, applied_at text, unique(request_id, sequence), check((state = 'pending' and applied_at is null) or (state = 'applied' and applied_at is not null)))"),
         QStringLiteral("create trigger if not exists trg_tasks_require_evidence_before_terminal before update of state on tasks when new.state in ('succeeded','failed','canceled') and old.state not in ('succeeded','failed','canceled') and exists(select 1 from workflow_runs w left join workflow_terminalizations z on z.workflow_run_id = w.id where w.task_id = new.id and w.terminal_policy = 'evidence_required' and (z.workflow_run_id is null or z.state = 'sealed')) begin select raise(abort, 'evidence_required workflow must attach evidence before task terminal'); end"),
-        QStringLiteral("create index if not exists idx_tasks_updated_at on tasks(updated_at desc)"),
+        QStringLiteral("create index if not exists idx_tasks_updated_at_id on tasks(updated_at desc, id desc)"),
         QStringLiteral("create index if not exists idx_task_events_task_id on task_events(task_id, sequence)"),
-        QStringLiteral("create index if not exists idx_artifacts_task_id on artifacts(task_id)"),
+        QStringLiteral("create index if not exists idx_artifacts_task_created_id on artifacts(task_id, created_at, id)"),
+        QStringLiteral("create index if not exists idx_artifact_files_artifact_path on artifact_files(artifact_id, relative_path)"),
+        QStringLiteral("create index if not exists idx_task_metrics_task_occurred_id on task_metrics(task_id, occurred_at, id)"),
         QStringLiteral("create index if not exists idx_artifacts_kind_created_at on artifacts(kind, created_at desc, id desc)"),
+        QStringLiteral("create index if not exists idx_datasets_created_id on datasets(created_at desc, id desc)"),
         QStringLiteral("create index if not exists idx_dataset_versions_dataset_id on dataset_versions(dataset_id, created_at desc)"),
         QStringLiteral("create index if not exists idx_dataset_snapshots_task_id on dataset_snapshots(task_id, created_at desc)"),
+        QStringLiteral("create index if not exists idx_workflow_runs_task_created_id on workflow_runs(task_id, created_at, id)"),
+        QStringLiteral("create index if not exists idx_workflow_runs_policy_created_id on workflow_runs(terminal_policy, created_at, id)"),
         QStringLiteral("create index if not exists idx_workflow_steps_run_ordinal on workflow_steps(workflow_run_id, ordinal)"),
         QStringLiteral("create index if not exists idx_workflow_inputs_artifact on workflow_input_bindings(source_artifact_id)"),
-        QStringLiteral("create index if not exists idx_workflow_terminalizations_pending on workflow_terminalizations(state, sealed_at)"),
+        QStringLiteral("create index if not exists idx_workflow_terminalizations_pending on workflow_terminalizations(state, sealed_at, workflow_run_id)"),
         QStringLiteral("create index if not exists idx_workflow_terminal_outbox_pending on workflow_terminal_outbox(state, created_at, message_id)"),
+        QStringLiteral("create index if not exists idx_model_packages_created_id on model_packages(created_at desc, id desc)"),
         QStringLiteral("create index if not exists idx_model_packages_source_task_id on model_packages(source_task_id)"),
         QStringLiteral("create index if not exists idx_model_packages_source_artifact_id on model_packages(source_artifact_id)")
     };
@@ -509,7 +617,35 @@ bool ProjectStore::initialize(QString* error)
             return false;
         }
     }
-    return db_.commit();
+    if (!hasMeta) {
+        QDir projectDirectory = QFileInfo(db_.databaseName()).absoluteDir();
+        projectDirectory.cdUp();
+        QString displayName = projectDirectory.dirName().trimmed();
+        if (displayName.isEmpty()) displayName = QStringLiteral("AITrain Project");
+        const QDateTime now = QDateTime::currentDateTimeUtc();
+        QSqlQuery metaQuery(db_);
+        metaQuery.prepare(QStringLiteral(
+            "insert into project_meta(singleton, project_id, schema_version, display_name, "
+            "open_generation, created_at, updated_at, last_opened_at) "
+            "values(1, :project_id, 13, :display_name, 0, :created_at, :updated_at, null)"));
+        metaQuery.bindValue(QStringLiteral(":project_id"), ProjectId::create().toString());
+        metaQuery.bindValue(QStringLiteral(":display_name"), displayName);
+        metaQuery.bindValue(QStringLiteral(":created_at"), utcText(now));
+        metaQuery.bindValue(QStringLiteral(":updated_at"), utcText(now));
+        if (!metaQuery.exec()) {
+            if (error) *error = sqlError(metaQuery);
+            db_.rollback();
+            lastErrorCode_ = ProjectErrorCode::SqlError;
+            return false;
+        }
+    }
+    if (!db_.commit()) {
+        if (error) *error = db_.lastError().text();
+        lastErrorCode_ = ProjectErrorCode::SqlError;
+        return false;
+    }
+    lastErrorCode_ = ProjectErrorCode::None;
+    return true;
 }
 
 bool ProjectStore::appendStateEvent(const TaskId& taskId,
@@ -1935,6 +2071,32 @@ QVector<DatasetCatalogItem> ProjectStore::datasets(int limit, QString* error) co
     return results;
 }
 
+bool ProjectStore::artifactDiscardable(
+    const ArtifactId& artifactId, bool* discardable, QString* error) const
+{
+    if (!artifactId.isValid() || !discardable) {
+        if (error) *error = QStringLiteral("检查 Artifact 引用需要有效 ID 和输出对象。");
+        return false;
+    }
+    QSqlQuery dependencyQuery(db_);
+    dependencyQuery.prepare(QStringLiteral(
+        "select 1 from model_packages where source_artifact_id = :artifact_id "
+        "union all select 1 from evaluation_reports where artifact_id = :artifact_id "
+        "union all select 1 from dataset_snapshots where artifact_id = :artifact_id "
+        "union all select 1 from workflow_input_bindings where source_artifact_id = :artifact_id "
+        "union all select 1 from workflow_steps where input_artifact_id = :artifact_id or output_artifact_id = :artifact_id "
+        "union all select 1 from workflow_terminalizations where evidence_artifact_id = :artifact_id "
+        "union all select 1 from workflow_terminal_outbox where output_artifact_id = :artifact_id "
+        "limit 1"));
+    dependencyQuery.bindValue(QStringLiteral(":artifact_id"), artifactId.toString());
+    if (!dependencyQuery.exec()) {
+        if (error) *error = sqlError(dependencyQuery);
+        return false;
+    }
+    *discardable = !dependencyQuery.next();
+    return true;
+}
+
 bool ProjectStore::removeUnreferencedArtifact(const ArtifactId& artifactId, QString* error)
 {
     if (!artifactId.isValid()) {
@@ -1945,11 +2107,9 @@ bool ProjectStore::removeUnreferencedArtifact(const ArtifactId& artifactId, QStr
         if (error) *error = db_.lastError().text();
         return false;
     }
-    QSqlQuery dependencyQuery(db_);
-    dependencyQuery.prepare(QStringLiteral("select 1 from model_packages where source_artifact_id = :artifact_id union all select 1 from evaluation_reports where artifact_id = :artifact_id union all select 1 from dataset_snapshots where artifact_id = :artifact_id limit 1"));
-    dependencyQuery.bindValue(QStringLiteral(":artifact_id"), artifactId.toString());
-    if (!dependencyQuery.exec() || dependencyQuery.next()) {
-        if (error) *error = dependencyQuery.lastError().isValid() ? sqlError(dependencyQuery) : QStringLiteral("Artifact 已被引用，不能删除。");
+    bool discardable = false;
+    if (!artifactDiscardable(artifactId, &discardable, error) || !discardable) {
+        if (error && error->isEmpty()) *error = QStringLiteral("Artifact 已被引用，不能删除。");
         db_.rollback();
         return false;
     }
@@ -1990,6 +2150,20 @@ bool ProjectStore::registerModelPackage(const ModelPackageSnapshot& modelPackage
         if (error) *error = QStringLiteral("Model Manifest 的 sourceTaskId 与来源 Artifact 不一致。");
         return false;
     }
+    if (modelPackage.sourceSnapshotBinding == ModelSourceSnapshotBinding::ProjectSnapshot) {
+        QSqlQuery snapshotQuery(db_);
+        snapshotQuery.prepare(QStringLiteral(
+            "select 1 from dataset_snapshots where id = :snapshot_id"));
+        snapshotQuery.bindValue(QStringLiteral(":snapshot_id"), manifest.sourceSnapshotId.toString());
+        if (!snapshotQuery.exec() || !snapshotQuery.next()) {
+            if (error) {
+                *error = snapshotQuery.lastError().isValid()
+                    ? sqlError(snapshotQuery)
+                    : QStringLiteral("项目训练模型必须关联已登记的 Dataset Snapshot。");
+            }
+            return false;
+        }
+    }
 
     QSqlQuery hashQuery(db_);
     hashQuery.prepare(QStringLiteral("select 1 from artifact_files where artifact_id = :artifact_id and relative_path = :relative_path and sha256 = :sha256"));
@@ -2009,13 +2183,15 @@ bool ProjectStore::registerModelPackage(const ModelPackageSnapshot& modelPackage
     }
     const QDateTime createdAt = modelPackage.createdAt.isValid() ? modelPackage.createdAt.toUTC() : QDateTime::currentDateTimeUtc();
     QSqlQuery query(db_);
-    query.prepare(QStringLiteral("insert into model_packages(id, model_family, task_type, source_backend, source_task_id, source_snapshot_id, source_artifact_id, source_artifact_sha256, manifest_json, verified, created_at) values(:id, :model_family, :task_type, :source_backend, :source_task_id, :source_snapshot_id, :source_artifact_id, :source_artifact_sha256, :manifest_json, :verified, :created_at)"));
+    query.prepare(QStringLiteral("insert into model_packages(id, model_family, task_type, source_backend, source_task_id, source_snapshot_id, source_snapshot_binding, source_artifact_id, source_artifact_sha256, manifest_json, verified, created_at) values(:id, :model_family, :task_type, :source_backend, :source_task_id, :source_snapshot_id, :source_snapshot_binding, :source_artifact_id, :source_artifact_sha256, :manifest_json, :verified, :created_at)"));
     query.bindValue(QStringLiteral(":id"), manifest.modelPackageId.toString());
     query.bindValue(QStringLiteral(":model_family"), manifest.modelFamily);
     query.bindValue(QStringLiteral(":task_type"), manifest.taskType);
     query.bindValue(QStringLiteral(":source_backend"), manifest.sourceBackend);
     query.bindValue(QStringLiteral(":source_task_id"), manifest.sourceTaskId.toString());
     query.bindValue(QStringLiteral(":source_snapshot_id"), manifest.sourceSnapshotId.toString());
+    query.bindValue(QStringLiteral(":source_snapshot_binding"),
+        modelSourceSnapshotBindingText(modelPackage.sourceSnapshotBinding));
     query.bindValue(QStringLiteral(":source_artifact_id"), modelPackage.sourceArtifactId.toString());
     query.bindValue(QStringLiteral(":source_artifact_sha256"), manifest.sourceArtifactSha256);
     query.bindValue(QStringLiteral(":manifest_json"), QString::fromUtf8(QJsonDocument(encoded).toJson(QJsonDocument::Compact)));
@@ -2033,7 +2209,9 @@ bool ProjectStore::modelPackage(const ModelPackageId& modelPackageId, ModelPacka
         return false;
     }
     QSqlQuery query(db_);
-    query.prepare(QStringLiteral("select source_artifact_id, manifest_json, created_at from model_packages where id = :id"));
+    query.prepare(QStringLiteral(
+        "select source_artifact_id, manifest_json, created_at, source_snapshot_binding "
+        "from model_packages where id = :id"));
     query.bindValue(QStringLiteral(":id"), modelPackageId.toString());
     if (!query.exec() || !query.next()) {
         if (error) *error = query.lastError().isValid() ? sqlError(query) : QStringLiteral("模型包不存在。");
@@ -2052,9 +2230,16 @@ bool ProjectStore::modelPackage(const ModelPackageId& modelPackageId, ModelPacka
         if (error) *error = QStringLiteral("已登记模型包的主键与 Manifest 不一致。");
         return false;
     }
+    ModelSourceSnapshotBinding sourceSnapshotBinding;
+    if (!parseModelSourceSnapshotBinding(query.value(3).toString(),
+            &sourceSnapshotBinding)) {
+        if (error) *error = QStringLiteral("已登记模型包的 Snapshot 来源绑定无效。");
+        return false;
+    }
     result->manifest = manifest;
     result->sourceArtifactId = sourceArtifactId;
     result->createdAt = parseUtc(query.value(2).toString());
+    result->sourceSnapshotBinding = sourceSnapshotBinding;
     return true;
 }
 
@@ -2831,27 +3016,37 @@ bool ProjectStore::workflowTerminalization(const WorkflowRunId& workflowRunId,
     return parseTerminalization(query, result, error);
 }
 
-QVector<WorkflowTerminalizationSnapshot> ProjectStore::pendingWorkflowTerminalizations(
-    int limit,
-    QString* error) const
+bool ProjectStore::workflowTerminalizationExists(
+    const WorkflowRunId& workflowRunId, bool* exists, QString* error) const
 {
-    return pendingWorkflowTerminalizations(limit, 0, error);
+    if (!workflowRunId.isValid() || !exists) {
+        if (error) *error = QStringLiteral("检查工作流终态封存需要有效 ID 和输出对象。");
+        return false;
+    }
+    QSqlQuery query(db_);
+    query.prepare(QStringLiteral(
+        "select 1 from workflow_terminalizations where workflow_run_id = :id"));
+    query.bindValue(QStringLiteral(":id"), workflowRunId.toString());
+    if (!query.exec()) {
+        if (error) *error = sqlError(query);
+        return false;
+    }
+    *exists = query.next();
+    return true;
 }
 
 QVector<WorkflowTerminalizationSnapshot> ProjectStore::pendingWorkflowTerminalizations(
     int limit,
-    int offset,
     QString* error) const
 {
     QVector<WorkflowTerminalizationSnapshot> results;
-    if (limit <= 0 || offset < 0) {
-        if (error) *error = QStringLiteral("查询待恢复工作流终态需要正数 limit 和非负 offset。");
+    if (limit <= 0) {
+        if (error) *error = QStringLiteral("查询待恢复工作流终态需要正数 limit。");
         return results;
     }
     QSqlQuery query(db_);
-    query.prepare(QStringLiteral("select workflow_run_id from workflow_terminalizations where state in ('sealed','evidence_attached') order by sealed_at asc, workflow_run_id asc limit :limit offset :offset"));
+    query.prepare(QStringLiteral("select workflow_run_id from workflow_terminalizations where state in ('sealed','evidence_attached') order by sealed_at asc, workflow_run_id asc limit :limit"));
     query.bindValue(QStringLiteral(":limit"), limit);
-    query.bindValue(QStringLiteral(":offset"), offset);
     if (!query.exec()) {
         if (error) *error = sqlError(query);
         return {};
@@ -2875,23 +3070,14 @@ QVector<WorkflowRunSnapshot> ProjectStore::pendingEvidenceRequiredWorkflows(
     int limit,
     QString* error) const
 {
-    return pendingEvidenceRequiredWorkflows(limit, 0, error);
-}
-
-QVector<WorkflowRunSnapshot> ProjectStore::pendingEvidenceRequiredWorkflows(
-    int limit,
-    int offset,
-    QString* error) const
-{
     QVector<WorkflowRunSnapshot> results;
-    if (limit <= 0 || offset < 0) {
-        if (error) *error = QStringLiteral("查询待恢复 Evidence 门控工作流需要正数 limit 和非负 offset。");
+    if (limit <= 0) {
+        if (error) *error = QStringLiteral("查询待恢复 Evidence 门控工作流需要正数 limit。");
         return results;
     }
     QSqlQuery query(db_);
-    query.prepare(QStringLiteral("select w.id from workflow_runs w join tasks t on t.id = w.task_id left join workflow_terminalizations z on z.workflow_run_id = w.id where w.terminal_policy = 'evidence_required' and t.state in ('queued','starting','running','cancel_requested') and (z.workflow_run_id is null or z.state <> 'closed') order by w.created_at asc, w.id asc limit :limit offset :offset"));
+    query.prepare(QStringLiteral("select w.id from workflow_runs w join tasks t on t.id = w.task_id left join workflow_terminalizations z on z.workflow_run_id = w.id where w.terminal_policy = 'evidence_required' and t.state in ('queued','starting','running','cancel_requested') and (z.workflow_run_id is null or z.state <> 'closed') order by w.created_at asc, w.id asc limit :limit"));
     query.bindValue(QStringLiteral(":limit"), limit);
-    query.bindValue(QStringLiteral(":offset"), offset);
     if (!query.exec()) {
         if (error) *error = sqlError(query);
         return {};
@@ -3021,9 +3207,8 @@ bool ProjectStore::recordWorkflowTerminalizationEvidenceFailure(const WorkflowRu
     return false;
 }
 
-bool ProjectStore::closeWorkflowTerminalization(const WorkflowRunId& workflowRunId,
-    TaskState expectedTaskState,
-    QString* error)
+bool ProjectStore::closeWorkflowTerminalization(
+    const WorkflowRunId& workflowRunId, QString* error)
 {
     if (!workflowRunId.isValid()) {
         if (error) *error = QStringLiteral("关闭工作流终态需要有效工作流 ID。");
@@ -3068,8 +3253,7 @@ bool ProjectStore::closeWorkflowTerminalization(const WorkflowRunId& workflowRun
         db_.rollback();
         return false;
     }
-    if (currentTaskState != expectedTaskState
-        || !isValidTaskStateTransition(expectedTaskState, terminalization.terminalState)) {
+    if (!isValidTaskStateTransition(currentTaskState, terminalization.terminalState)) {
         if (error) *error = QStringLiteral("根任务不存在、状态已被并发更新或终态迁移非法。");
         db_.rollback();
         return false;
@@ -3084,7 +3268,7 @@ bool ProjectStore::closeWorkflowTerminalization(const WorkflowRunId& workflowRun
         ? utcText(terminalization.failure.occurredAt) : QVariant());
     updateTask.bindValue(QStringLiteral(":terminal_at"), utcText(terminalization.terminalAt));
     updateTask.bindValue(QStringLiteral(":id"), terminalization.taskId.toString());
-    updateTask.bindValue(QStringLiteral(":expected_state"), taskStateToString(expectedTaskState));
+    updateTask.bindValue(QStringLiteral(":expected_state"), taskStateToString(currentTaskState));
     if (!updateTask.exec() || updateTask.numRowsAffected() != 1
         || !appendStateEvent(terminalization.taskId, requestId, terminalization.terminalState,
             terminalization.failure, terminalization.terminalAt, error)) {

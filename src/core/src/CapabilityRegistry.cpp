@@ -1,4 +1,5 @@
 #include "aitrain/core/CapabilityRegistry.h"
+#include "aitrain/product/ProductCapabilityContract.h"
 
 #include <QJsonArray>
 
@@ -20,107 +21,6 @@ QString canonicalBackendId(const QString& value)
     return value.trimmed().toLower();
 }
 
-QStringList yoloModelPresets(bool segmentation)
-{
-    const QStringList families = {
-        QStringLiteral("yolov8"),
-        QStringLiteral("yolo11"),
-        QStringLiteral("yolo12"),
-        QStringLiteral("yolo26")
-    };
-    const QStringList scales = {
-        QStringLiteral("n"),
-        QStringLiteral("s"),
-        QStringLiteral("m"),
-        QStringLiteral("l"),
-        QStringLiteral("x")
-    };
-    QStringList presets;
-    if (!segmentation) {
-        for (const QString& scale : scales) {
-            presets << QStringLiteral("yolov5%1.yaml").arg(scale)
-                    << QStringLiteral("yolov5%1u.pt").arg(scale);
-        }
-    }
-    for (const QString& family : families) {
-        for (const QString& scale : scales) {
-            const QString stem = segmentation
-                ? QStringLiteral("%1%2-seg").arg(family, scale)
-                : QStringLiteral("%1%2").arg(family, scale);
-            presets << QStringLiteral("%1.yaml").arg(stem)
-                    << QStringLiteral("%1.pt").arg(stem);
-        }
-    }
-    if (!segmentation) {
-        for (const QString& scale : scales) {
-            presets << QStringLiteral("yolov8%1-p2.yaml").arg(scale)
-                    << QStringLiteral("yolov8%1-p6.yaml").arg(scale);
-        }
-    }
-    return presets;
-}
-
-QStringList yoloObbModelPresets()
-{
-    const QStringList scales = {
-        QStringLiteral("n"),
-        QStringLiteral("s"),
-        QStringLiteral("m"),
-        QStringLiteral("l"),
-        QStringLiteral("x")
-    };
-    QStringList presets;
-    for (const QString& scale : scales) {
-        presets << QStringLiteral("yolo11%1-obb.pt").arg(scale);
-    }
-    for (const QString& scale : scales) {
-        presets << QStringLiteral("yolo11%1-obb.yaml").arg(scale);
-    }
-    return presets;
-}
-
-BackendDescriptor makeBackend(
-    const QString& id,
-    const QString& displayName,
-    const QStringList& taskTypes,
-    const QStringList& datasetFormats,
-    const QStringList& presets,
-    const QStringList& exportFormats,
-    const QString& runtime,
-    const QString& devicePolicy,
-    const QStringList& limitations = {})
-{
-    BackendDescriptor value;
-    value.id = id;
-    value.displayName = displayName;
-    value.taskTypes = taskTypes;
-    value.datasetFormats = datasetFormats;
-    value.modelPresets = presets;
-    value.exportFormats = exportFormats;
-    value.runtime = runtime;
-    value.devicePolicy = devicePolicy;
-    value.limitations = limitations;
-    return value;
-}
-
-CapabilityDescriptor makeCapability(
-    const QString& id,
-    const QString& displayName,
-    const QStringList& taskTypes,
-    const QStringList& datasetFormats,
-    const QStringList& backendIds,
-    const QStringList& limitations = {})
-{
-    CapabilityDescriptor value;
-    value.id = id;
-    value.displayName = displayName;
-    value.taskTypes = taskTypes;
-    value.datasetFormats = datasetFormats;
-    value.backendIds = backendIds;
-    value.limitations = limitations;
-    return value;
-}
-
 QJsonArray jsonArray(const QStringList& values)
 {
     return QJsonArray::fromStringList(values);
@@ -139,7 +39,7 @@ QJsonObject BackendDescriptor::toJson() const
         {QStringLiteral("exportFormats"), jsonArray(exportFormats)},
         {QStringLiteral("runtime"), runtime},
         {QStringLiteral("devicePolicy"), devicePolicy},
-        {QStringLiteral("supportsCancel"), true},
+        {QStringLiteral("supportsCancel"), supportsCancel},
         {QStringLiteral("limitations"), jsonArray(limitations)}};
 }
 
@@ -162,79 +62,31 @@ const BuiltinCapabilityRegistry& BuiltinCapabilityRegistry::instance()
 
 BuiltinCapabilityRegistry::BuiltinCapabilityRegistry()
 {
-    backends_ = {
-        makeBackend(QStringLiteral("ultralytics_yolo_detect"), QStringLiteral("Ultralytics YOLO Detection"),
-            {QStringLiteral("detection")}, {QStringLiteral("yolo_detection")},
-            yoloModelPresets(false),
-            {QStringLiteral("onnx"), QStringLiteral("ncnn"), QStringLiteral("tensorrt")},
-            QStringLiteral("aitrain_yolo_runtime"), QStringLiteral("gpu_recommended")),
-        makeBackend(QStringLiteral("ultralytics_yolo_segment"), QStringLiteral("Ultralytics YOLO Segmentation"),
-            {QStringLiteral("segmentation")}, {QStringLiteral("yolo_segmentation")},
-            yoloModelPresets(true),
-            {QStringLiteral("onnx"), QStringLiteral("ncnn"), QStringLiteral("tensorrt")},
-            QStringLiteral("aitrain_yolo_runtime"), QStringLiteral("gpu_recommended")),
-        makeBackend(QStringLiteral("ultralytics_yolo_obb"), QStringLiteral("Ultralytics YOLO OBB"),
-            {QStringLiteral("obb_detection")}, {QStringLiteral("yolo_obb")},
-            yoloObbModelPresets(), {QStringLiteral("onnx")},
-            QStringLiteral("aitrain_onnxruntime"), QStringLiteral("gpu_recommended"),
-            {QStringLiteral("OBB v1 仅支持 ONNX Runtime 部署。")}),
-        makeBackend(QStringLiteral("smp_semantic_segmentation"), QStringLiteral("SMP Semantic Segmentation"),
-            {QStringLiteral("semantic_segmentation")}, {QStringLiteral("semantic_segmentation_mask")},
-            {QStringLiteral("smp_unet_resnet34"), QStringLiteral("smp_unetplusplus_resnet34"),
-                QStringLiteral("smp_fpn_resnet34"), QStringLiteral("smp_deeplabv3plus_resnet50"),
-                QStringLiteral("smp_segformer_mit_b0")},
-            {QStringLiteral("onnx")},
-            QStringLiteral("aitrain_onnxruntime"), QStringLiteral("cpu_supported"),
-            {QStringLiteral("SMP 不支持 NCNN 或 TensorRT 导出。")}),
-        makeBackend(QStringLiteral("anomalib_patchcore"), QStringLiteral("Anomalib PatchCore"),
-            {QStringLiteral("anomaly_detection")}, {QStringLiteral("anomaly_folder")},
-            {QStringLiteral("anomalib_patchcore_wide_resnet50_2")}, {},
-            QStringLiteral("anomalib_python"), QStringLiteral("cpu_supported"),
-            {QStringLiteral("异常检测仅使用 Worker 管理的 Anomalib Python Runtime。")}),
-        makeBackend(QStringLiteral("anomalib_efficientad"), QStringLiteral("Anomalib EfficientAD"),
-            {QStringLiteral("anomaly_detection")}, {QStringLiteral("anomaly_folder")},
-            {QStringLiteral("anomalib_efficientad_s")}, {},
-            QStringLiteral("anomalib_python"), QStringLiteral("gpu_recommended"),
-            {QStringLiteral("EfficientAD 需要显式 ImageNet 数据目录且 batchSize 固定为 1。")}),
-        makeBackend(QStringLiteral("paddleocr_det_official"), QStringLiteral("PaddleOCR Detection"),
-            {QStringLiteral("ocr_detection")}, {QStringLiteral("paddleocr_det")},
-            {QStringLiteral("PP-OCRv5_mobile_det"), QStringLiteral("PP-OCRv5_server_det"),
-                QStringLiteral("PP-OCRv6_tiny_det"), QStringLiteral("PP-OCRv6_small_det"),
-                QStringLiteral("PP-OCRv6_medium_det"), QStringLiteral("PP-OCRv4_mobile_det")},
-            {},
-            QStringLiteral("paddleocr_official"), QStringLiteral("cpu_supported"),
-            {QStringLiteral("OCR 交付与验收仅使用 PaddleOCR 官方报告。")}),
-        makeBackend(QStringLiteral("paddleocr_rec_official"), QStringLiteral("PaddleOCR Recognition"),
-            {QStringLiteral("ocr_recognition")}, {QStringLiteral("paddleocr_rec")},
-            {QStringLiteral("PP-OCRv5_mobile_rec"), QStringLiteral("PP-OCRv5_server_rec"),
-                QStringLiteral("en_PP-OCRv5_mobile_rec"), QStringLiteral("PP-OCRv6_tiny_rec"),
-                QStringLiteral("PP-OCRv6_small_rec"), QStringLiteral("PP-OCRv6_medium_rec"),
-                QStringLiteral("PP-OCRv4_mobile_rec")},
-            {},
-            QStringLiteral("paddleocr_official"), QStringLiteral("cpu_supported"),
-            {QStringLiteral("OCR 交付与验收仅使用 PaddleOCR 官方报告。")})};
-
-    capabilities_ = {
-        makeCapability(QStringLiteral("yolo"), QStringLiteral("YOLO"),
-            {QStringLiteral("detection"), QStringLiteral("segmentation"), QStringLiteral("obb_detection")},
-            {QStringLiteral("yolo_detection"), QStringLiteral("yolo_segmentation"), QStringLiteral("yolo_obb")},
-            {QStringLiteral("ultralytics_yolo_detect"), QStringLiteral("ultralytics_yolo_segment"), QStringLiteral("ultralytics_yolo_obb")}),
-        makeCapability(QStringLiteral("semantic_segmentation"), QStringLiteral("专用语义分割"),
-            {QStringLiteral("semantic_segmentation")}, {QStringLiteral("semantic_segmentation_mask")},
-            {QStringLiteral("smp_semantic_segmentation")}),
-        makeCapability(QStringLiteral("anomaly_detection"), QStringLiteral("异常检测与定位"),
-            {QStringLiteral("anomaly_detection")}, {QStringLiteral("anomaly_folder")},
-            {QStringLiteral("anomalib_patchcore"), QStringLiteral("anomalib_efficientad")}),
-        makeCapability(QStringLiteral("paddleocr"), QStringLiteral("PaddleOCR"),
-            {QStringLiteral("ocr_detection"), QStringLiteral("ocr_recognition")},
-            {QStringLiteral("paddleocr_det"), QStringLiteral("paddleocr_rec")},
-            {QStringLiteral("paddleocr_det_official"), QStringLiteral("paddleocr_rec_official")},
-            {QStringLiteral("OCR 仅提供官方链路与证据材料。")}),
-        makeCapability(QStringLiteral("dataset_interop"), QStringLiteral("数据集互操作"),
-            {QStringLiteral("dataset_conversion")},
-            {QStringLiteral("coco_json"), QStringLiteral("voc_xml"), QStringLiteral("yolo_detection"),
-                QStringLiteral("yolo_segmentation"), QStringLiteral("yolo_obb"), QStringLiteral("xanylabeling_xlabel")}, {},
-            {QStringLiteral("不提供 LabelMe 作为产品数据格式。")})};
+    const ProductCapabilityContract& contract = ProductCapabilityContract::instance();
+    for (const TrainingBackendContract& source : contract.trainingBackends()) {
+        BackendDescriptor backend;
+        backend.id = source.id;
+        backend.displayName = source.displayName;
+        backend.taskTypes = QStringList{source.taskType};
+        backend.datasetFormats = QStringList{source.datasetFormat};
+        backend.modelPresets = source.modelPresets;
+        backend.exportFormats = source.exportFormats;
+        backend.runtime = source.legacyRuntimeId;
+        backend.devicePolicy = source.devicePolicy;
+        backend.supportsCancel = source.supportsCancel;
+        backend.limitations = source.limitations;
+        backends_.append(backend);
+    }
+    for (const CapabilityContract& source : contract.capabilities()) {
+        CapabilityDescriptor capability;
+        capability.id = source.id;
+        capability.displayName = source.displayName;
+        capability.taskTypes = source.taskTypes;
+        capability.datasetFormats = source.datasetFormats;
+        capability.backendIds = source.backendIds;
+        capability.limitations = source.limitations;
+        capabilities_.append(capability);
+    }
 }
 
 QVector<CapabilityDescriptor> BuiltinCapabilityRegistry::capabilities() const

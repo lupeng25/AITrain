@@ -173,7 +173,7 @@ void RuntimeDeliveryWorkflowTests::successCommitsSixChainedStepsAndFourEvidenceF
     QVERIFY(createYoloDetectionFixture(datasetRoot));
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("workspace")), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("workspace")), &error), qPrintable(error));
     const auto imported = importFixtureModel(&workspace, modelPath, &error);
     QVERIFY2(imported.modelPackage.manifest.modelPackageId.isValid(), qPrintable(error));
     const auto sampleSnapshot = importFixtureSnapshot(&workspace, datasetRoot, &error);
@@ -237,7 +237,7 @@ void RuntimeDeliveryWorkflowTests::cancellationProducesOneTerminalStateAndEviden
     QVERIFY(createYoloDetectionFixture(datasetRoot));
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("workspace")), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("workspace")), &error), qPrintable(error));
     const auto imported = importFixtureModel(&workspace, modelPath, &error);
     QVERIFY2(imported.modelPackage.manifest.modelPackageId.isValid(), qPrintable(error));
     const auto sampleSnapshot = importFixtureSnapshot(&workspace, datasetRoot, &error);
@@ -282,7 +282,7 @@ void RuntimeDeliveryWorkflowTests::sdkMissingProducesPreciseFailureAndEvidence()
     QVERIFY(createYoloDetectionFixture(datasetRoot));
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("workspace")), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("workspace")), &error), qPrintable(error));
     const auto imported = importFixtureModel(&workspace, modelPath, &error);
     QVERIFY2(imported.modelPackage.manifest.modelPackageId.isValid(), qPrintable(error));
     const auto sampleSnapshot = importFixtureSnapshot(&workspace, datasetRoot, &error);

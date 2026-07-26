@@ -464,7 +464,6 @@ def build_config(
             "save_epoch_step": save_epoch_step,
             "eval_batch_step": [0, eval_every_steps],
             "pretrained_model": parameters.get("pretrainedModel") or None,
-            "checkpoints": parameters.get("resumeCheckpoint") or None,
             "save_inference_dir": str(save_inference_dir),
             "infer_img": str((dataset_path / first_image).resolve()),
             "character_dict_path": str(dict_path),

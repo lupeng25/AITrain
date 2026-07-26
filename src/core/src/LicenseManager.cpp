@@ -288,11 +288,11 @@ QString licenseProductName()
     return QStringLiteral("AITrain Studio");
 }
 
-QString currentMachineCode()
+MachineCodeResult currentMachineCodeResult()
 {
-    QByteArray seed = machineSeed();
+    const QByteArray seed = machineSeed();
     if (seed.isEmpty()) {
-        seed = QByteArrayLiteral("aitrain-unknown-machine");
+        return {{}, QStringLiteral("无法取得稳定的本机身份种子，机器码不可用。")};
     }
     const QByteArray digest = sha256(seed + QByteArrayLiteral("|aitrain-license-v1"));
     const QString hex = QString::fromLatin1(digest.toHex()).toUpper().left(kMachineCodeHexLength);
@@ -300,7 +300,12 @@ QString currentMachineCode()
     for (int i = 0; i < hex.size(); i += 4) {
         groups.append(hex.mid(i, 4));
     }
-    return groups.join(QStringLiteral("-"));
+    return {groups.join(QStringLiteral("-")), {}};
+}
+
+QString currentMachineCode()
+{
+    return currentMachineCodeResult().machineCode;
 }
 
 QString normalizeMachineCode(const QString& machineCode)

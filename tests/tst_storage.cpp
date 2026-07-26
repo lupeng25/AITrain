@@ -763,7 +763,8 @@ void StorageTests::rejectsSchema7AndPersistsTerminalPolicy()
     aitrain::ProjectStore rejected;
     QString error;
     QVERIFY(!rejected.open(oldPath, &error));
-    QVERIFY(error.contains(QStringLiteral("schema")));
+    QCOMPARE(rejected.lastErrorCode(), aitrain::ProjectErrorCode::SchemaRebuildRequired);
+    QVERIFY(error.contains(QStringLiteral("SchemaRebuildRequired")));
 
     aitrain::ProjectStore storage;
     QVERIFY2(storage.open(directory.filePath(QStringLiteral("schema8.sqlite")), &error), qPrintable(error));
@@ -785,7 +786,12 @@ void StorageTests::createsCanonicalSchemaWithoutLegacyProjectTable()
     aitrain::ProjectStore storage;
     QString error;
     QVERIFY2(storage.open(databasePath, &error), qPrintable(error));
-    QCOMPARE(aitrain::ProjectStore::schemaVersion(), 12);
+    QCOMPARE(aitrain::ProjectStore::schemaVersion(), 13);
+    aitrain::ProjectMetaSnapshot meta;
+    QVERIFY2(storage.projectMeta(&meta, &error), qPrintable(error));
+    QVERIFY(meta.projectId.isValid());
+    QCOMPARE(meta.schemaVersion, 13);
+    QCOMPARE(meta.openGeneration, qint64(0));
     storage.close();
 
     const QString connectionName = QStringLiteral("canonical_schema_check");
@@ -793,9 +799,17 @@ void StorageTests::createsCanonicalSchemaWithoutLegacyProjectTable()
     database.setDatabaseName(databasePath);
     QVERIFY(database.open());
     QSqlQuery query(database);
-    QVERIFY(query.exec(QStringLiteral("select version from schema_info limit 1")));
+    QVERIFY(query.exec(QStringLiteral(
+        "select project_id, schema_version, open_generation from project_meta "
+        "where singleton = 1")));
     QVERIFY(query.next());
-    QCOMPARE(query.value(0).toInt(), 12);
+    QCOMPARE(query.value(0).toString(), meta.projectId.toString());
+    QCOMPARE(query.value(1).toInt(), 13);
+    QCOMPARE(query.value(2).toLongLong(), qint64(0));
+    QVERIFY(!query.next());
+    QVERIFY(query.exec(QStringLiteral(
+        "select 1 from sqlite_master where type = 'table' and name = 'schema_info'")));
+    QVERIFY(!query.next());
     QVERIFY(query.exec(QStringLiteral(
         "select 1 from sqlite_master where type = 'table' and name = 'projects'")));
     QVERIFY(!query.next());
@@ -881,8 +895,7 @@ void StorageTests::evidenceGatedSuccessSurvivesReopen()
         QCOMPARE(pending.size(), 1);
         QCOMPARE(pending.first().state, aitrain::WorkflowTerminalizationState::EvidenceAttached);
         QCOMPARE(pending.first().evidenceArtifactId, evidenceId);
-        QVERIFY2(storage.closeWorkflowTerminalization(workflowId,
-            aitrain::TaskState::Running, &error), qPrintable(error));
+        QVERIFY2(storage.closeWorkflowTerminalization(workflowId, &error), qPrintable(error));
         aitrain::TaskSnapshot terminal;
         QVERIFY2(storage.task(task.id, &terminal, &error), qPrintable(error));
         QCOMPARE(terminal.state, aitrain::TaskState::Succeeded);
@@ -929,10 +942,7 @@ void StorageTests::persistsFailedAndCanceledTerminalFacts()
         const auto evidence = aitrain::ArtifactId::create();
         QVERIFY2(storage.recordEvidenceArtifactWithFilesAndAttachTerminalization(evidence,
             task.id, workflow.id, evidenceFiles(), QDateTime::currentDateTimeUtc(), &error), qPrintable(error));
-        QVERIFY2(storage.closeWorkflowTerminalization(workflow.id,
-            terminalState == aitrain::TaskState::Canceled
-                ? aitrain::TaskState::CancelRequested : aitrain::TaskState::Running,
-            &error), qPrintable(error));
+        QVERIFY2(storage.closeWorkflowTerminalization(workflow.id, &error), qPrintable(error));
         aitrain::TaskSnapshot loaded;
         QVERIFY2(storage.task(task.id, &loaded, &error), qPrintable(error));
         QCOMPARE(loaded.state, terminalState);
@@ -1002,10 +1012,8 @@ void StorageTests::terminalizationWritesAreIdempotentAndRejectConflicts()
         task.id, workflow.id, evidenceFiles(), evidenceAt, &error));
     QVERIFY2(storage.artifactExists(conflictingArtifact, &exists, &error), qPrintable(error));
     QVERIFY(!exists);
-    QVERIFY2(storage.closeWorkflowTerminalization(workflow.id,
-        aitrain::TaskState::Running, &error), qPrintable(error));
-    QVERIFY2(storage.closeWorkflowTerminalization(workflow.id,
-        aitrain::TaskState::Running, &error), qPrintable(error));
+    QVERIFY2(storage.closeWorkflowTerminalization(workflow.id, &error), qPrintable(error));
+    QVERIFY2(storage.closeWorkflowTerminalization(workflow.id, &error), qPrintable(error));
 }
 
 void StorageTests::listsUnsealedGatedWorkflowsAndProtectsThemFromInterruption()

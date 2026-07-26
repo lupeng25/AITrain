@@ -4,7 +4,7 @@
 #include "aitrain/core/DatasetValidators.h"
 #include "aitrain/core/AnnotationIntegration.h"
 #include "aitrain/core/Deployment.h"
-#include "aitrain/core/DetectionTrainer.h"
+#include "aitrain/core/VisionModelRuntime.h"
 #include "aitrain/core/WorkerProtocol.h"
 #include "aitrain/runtime/RuntimeCapabilityMatrix.h"
 
@@ -45,7 +45,7 @@ void WorkerSession::runEnvironmentCheckWorkflow(const wp::EnvironmentCheckComman
         return;
     }
     auto workspace = std::make_unique<aitrain::ProjectWorkspace>();
-    if (!workspace->open(projectRoot, &error)) {
+    if (!workspace->openForWorkerChild(projectRoot, &error)) {
         fail(QStringLiteral("无法打开 Environment Check  工作区：%1").arg(error));
         return;
     }
@@ -70,38 +70,21 @@ void WorkerSession::runEnvironmentCheckWorkflow(const wp::EnvironmentCheckComman
     for (const aitrain::RuntimeDependencyCheck& check : runtimeChecks) {
         checks.append(check.toJson());
     }
-    const QString pythonExecutable = firstUsablePythonExecutable();
+    const PythonExecutableResolution yoloPython =
+        resolvePythonExecutable(QStringLiteral("yolo"));
+    const PythonExecutableResolution smpPython =
+        resolvePythonExecutable(QStringLiteral("smp_semantic_segmentation"));
+    const PythonExecutableResolution anomalyPython =
+        resolvePythonExecutable(QStringLiteral("anomaly_detection"));
+    const PythonExecutableResolution ocrPython =
+        resolvePythonExecutable(QStringLiteral("ocr"));
     checks.append(runPythonCommandCheck(
         QStringLiteral("Python"),
-        pythonExecutable,
+        yoloPython.executable,
         QStringList() << QStringLiteral("--version"),
         5000,
-        QStringLiteral("Python executable is not available. Configure pythonExecutable or install Python before using official Python trainers.")));
-    checks.append(pythonModuleCheck(
-        pythonExecutable,
-        QStringLiteral("Ultralytics YOLO"),
-        QStringLiteral("ultralytics"),
-        QStringLiteral("Ultralytics is not installed. The official YOLO detection/segmentation/OBB trainer backends will be unavailable.")));
-    checks.append(pythonModuleCheck(
-        pythonExecutable,
-        QStringLiteral("Segmentation Models PyTorch"),
-        QStringLiteral("segmentation_models_pytorch"),
-        QStringLiteral("segmentation-models-pytorch is not installed. The SMP semantic segmentation trainer backend will be unavailable.")));
-    checks.append(pythonModuleCheck(
-        pythonExecutable,
-        QStringLiteral("Anomalib"),
-        QStringLiteral("anomalib"),
-        QStringLiteral("Anomalib is not installed. PatchCore and EfficientAD anomaly detection backends will be unavailable.")));
-    checks.append(pythonModuleCheck(
-        pythonExecutable,
-        QStringLiteral("PaddleOCR"),
-        QStringLiteral("paddleocr"),
-        QStringLiteral("PaddleOCR is not installed. Official OCR detection, recognition, and system adapters will be unavailable.")));
-    checks.append(pythonModuleCheck(
-        pythonExecutable,
-        QStringLiteral("PaddlePaddle"),
-        QStringLiteral("paddle"),
-        QStringLiteral("PaddlePaddle is not installed. Official PaddleOCR Det/Rec/System workflows will be unavailable.")));
+        yoloPython.message.isEmpty()
+            ? QStringLiteral("Python executable is unavailable.") : yoloPython.message));
 
     const aitrain::WorkflowResult xAnyEnvironment =
         aitrain::inspectXAnyLabelingEnvironment(reportDir, {}, pollingCancellationCallback(20));
@@ -133,10 +116,12 @@ void WorkerSession::runEnvironmentCheckWorkflow(const wp::EnvironmentCheckComman
     checks.append(checkObject(QStringLiteral("Worker"), QStringLiteral("ok"), QStringLiteral("Worker 环境自检命令可用。")));
 
     QJsonObject profiles;
-    profiles.insert(QStringLiteral("yolo"), yoloEnvironmentProfile(pythonExecutable));
-    profiles.insert(QStringLiteral("smp_semantic_segmentation"), smpEnvironmentProfile(pythonExecutable));
-    profiles.insert(QStringLiteral("anomaly_detection"), anomalibEnvironmentProfile(pythonExecutable));
-    profiles.insert(QStringLiteral("ocr"), ocrEnvironmentProfile(pythonExecutable));
+    profiles.insert(QStringLiteral("yolo"), yoloEnvironmentProfile(yoloPython.executable));
+    profiles.insert(QStringLiteral("smp_semantic_segmentation"),
+        smpEnvironmentProfile(smpPython.executable));
+    profiles.insert(QStringLiteral("anomaly_detection"),
+        anomalibEnvironmentProfile(anomalyPython.executable));
+    profiles.insert(QStringLiteral("ocr"), ocrEnvironmentProfile(ocrPython.executable));
     profiles.insert(QStringLiteral("tensorrt"), tensorRtEnvironmentProfile(checks));
     {
         QJsonArray profileChecks;

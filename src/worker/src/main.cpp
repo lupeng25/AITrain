@@ -3,6 +3,7 @@
 #include "aitrain/core/CapabilityRegistry.h"
 #include "aitrain/core/Deployment.h"
 #include "aitrain/core/VisionModelRuntime.h"
+#include "aitrain/product/ProductCapabilityContract.h"
 #include "aitrain/runtime/RuntimeCapabilityMatrix.h"
 #include "aitrain/storage/ProjectStore.h"
 #include "aitrain/workflow/ProjectWorkspace.h"
@@ -54,6 +55,7 @@ int runSelfCheck()
     result.insert(QStringLiteral("ncnnBackend"), aitrain::ncnnBackendStatus().toJson());
     result.insert(QStringLiteral("tensorRtBackend"), aitrain::tensorRtBackendStatus().toJson());
     result.insert(QStringLiteral("builtinCapabilities"), aitrain::BuiltinCapabilityRegistry::instance().toJson());
+    result.insert(QStringLiteral("productContract"), aitrain::ProductCapabilityContract::instance().toJson());
     result.insert(QStringLiteral("runtimeCapabilityMatrix"), aitrain::RuntimeCapabilityMatrix().toJson());
     result.insert(QStringLiteral("checks"), checks);
     writeJsonLine(result);
@@ -63,11 +65,16 @@ int runSelfCheck()
 int runBuiltinCapabilityCheck()
 {
     const auto& registry = aitrain::BuiltinCapabilityRegistry::instance();
+    const auto& contract = aitrain::ProductCapabilityContract::instance();
+    const QStringList contractErrors = contract.validationErrors();
     QJsonObject result;
-    result.insert(QStringLiteral("ok"), !registry.capabilities().isEmpty() && !registry.backends().isEmpty());
+    result.insert(QStringLiteral("ok"), !registry.capabilities().isEmpty()
+        && !registry.backends().isEmpty() && contractErrors.isEmpty());
+    result.insert(QStringLiteral("contractsValid"), contractErrors.isEmpty());
     result.insert(QStringLiteral("capabilityCount"), registry.capabilities().size());
     result.insert(QStringLiteral("backendCount"), registry.backends().size());
     result.insert(QStringLiteral("registry"), registry.toJson());
+    result.insert(QStringLiteral("trainingWorkflowContracts"), contract.toJson());
     writeJsonLine(result);
     return result.value(QStringLiteral("ok")).toBool() ? 0 : 4;
 }
@@ -108,8 +115,8 @@ int runWorkspaceSelfCheck(const QString& requestedRoot)
 
     aitrain::ProjectWorkspace firstWorkspace;
     QString error;
-    if (!firstWorkspace.open(root, &error)) {
-        return fail(QStringLiteral("首次打开工作区失败：%1").arg(error));
+    if (!firstWorkspace.createProject(root, &error)) {
+        return fail(QStringLiteral("首次创建工作区失败：%1").arg(error));
     }
     const QString metadataRoot = firstWorkspace.workspacePath();
     firstWorkspace.close();
@@ -137,6 +144,7 @@ int runWorkspaceSelfCheck(const QString& requestedRoot)
         .arg(QUuid::createUuid().toString(QUuid::Id128));
     int storedSchemaVersion = 0;
     bool hasProjectsTable = false;
+    QString storedProjectId;
     {
         QSqlDatabase database = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
         database.setDatabaseName(databasePath);
@@ -144,11 +152,13 @@ int runWorkspaceSelfCheck(const QString& requestedRoot)
             return fail(QStringLiteral("无法读取首启数据库：%1").arg(database.lastError().text()));
         }
         QSqlQuery schemaQuery(database);
-        if (!schemaQuery.exec(QStringLiteral("select version from schema_info limit 1"))
+        if (!schemaQuery.exec(QStringLiteral(
+                "select schema_version, project_id from project_meta where singleton = 1"))
             || !schemaQuery.next()) {
-            return fail(QStringLiteral("首启数据库缺少 schema 版本记录。"));
+            return fail(QStringLiteral("首启数据库缺少唯一 project_meta 记录。"));
         }
         storedSchemaVersion = schemaQuery.value(0).toInt();
+        storedProjectId = schemaQuery.value(1).toString();
         QSqlQuery projectsQuery(database);
         if (!projectsQuery.exec(QStringLiteral(
                 "select 1 from sqlite_master where type = 'table' and name = 'projects'"))) {
@@ -159,8 +169,12 @@ int runWorkspaceSelfCheck(const QString& requestedRoot)
     }
     QSqlDatabase::removeDatabase(connectionName);
     result.insert(QStringLiteral("storedSchemaVersion"), storedSchemaVersion);
+    result.insert(QStringLiteral("projectId"), storedProjectId);
     result.insert(QStringLiteral("projectsTablePresent"), hasProjectsTable);
-    if (storedSchemaVersion != aitrain::ProjectStore::schemaVersion() || hasProjectsTable) {
+    aitrain::ProjectId parsedProjectId;
+    if (storedSchemaVersion != aitrain::ProjectStore::schemaVersion()
+        || !aitrain::ProjectId::parse(storedProjectId, &parsedProjectId)
+        || hasProjectsTable) {
         return fail(QStringLiteral("首启数据库 schema 或死表检查失败。"));
     }
 

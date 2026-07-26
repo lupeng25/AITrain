@@ -74,8 +74,13 @@ public:
             // ProjectStore 的 QSqlDatabase connectionName 也只在此线程使用，
             // 所有跨线程结果均为值类型凭证，不传递 Qt SQL 对象。
             QString error;
-            result.succeeded = aitrain::ProjectWorkspace::prepareOpen(
-                result.normalizedPath, &result.prepared, &error);
+            const QString databasePath = QDir(result.normalizedPath)
+                .filePath(QStringLiteral(".aitrain/project.sqlite"));
+            result.succeeded = QFileInfo::exists(databasePath)
+                ? aitrain::ProjectWorkspace::prepareOpen(
+                    result.normalizedPath, &result.prepared, &error)
+                : aitrain::ProjectWorkspace::prepareCreate(
+                    result.normalizedPath, &result.prepared, &error);
             if (!result.succeeded) {
                 result.error = error.isEmpty()
                     ? QStringLiteral("候选项目工作区打开预检失败。") : error;

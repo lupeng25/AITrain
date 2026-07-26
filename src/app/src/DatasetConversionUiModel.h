@@ -9,7 +9,6 @@ struct DatasetConversionForm {
     QString sourceFormat;
     QString targetFormat;
     QString inputPath;
-    QString outputPath;
     bool workerRunning = false;
 };
 
@@ -19,7 +18,6 @@ struct DatasetConversionValidation {
     QString sourceFormatError;
     QString targetFormatError;
     QString inputPathError;
-    QString outputPathError;
     QStringList messages;
 };
 

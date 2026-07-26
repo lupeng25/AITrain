@@ -45,6 +45,14 @@ QMetaObject::Connection connectWorkerEvents(
 bool writeFakeSmpWorkflowAdapters(const QString& root);
 bool writeFakeAnomalibWorkflowAdapters(const QString& root);
 
+bool initializeWorkerProject(const QString& projectRoot, QString* error)
+{
+    aitrain::ProjectWorkspace workspace;
+    if (!workspace.createProject(projectRoot, error)) return false;
+    workspace.close();
+    return true;
+}
+
 class ScopedEnvironment final {
 public:
     ~ScopedEnvironment()
@@ -90,7 +98,12 @@ aitrain::DatasetSnapshotArtifactBundle commitTrainingSnapshotFixture(
     request.datasetFormat = datasetFormat;
     request.driverId = QStringLiteral("worker-training-fixture.%1").arg(datasetFormat);
     request.driverVersion = QStringLiteral("2");
-    if (!workspace.open(projectRoot, error)
+    const QString databasePath = QDir(projectRoot)
+        .filePath(QStringLiteral(".aitrain/project.sqlite"));
+    const bool opened = QFileInfo::exists(databasePath)
+        ? workspace.open(projectRoot, error)
+        : workspace.createProject(projectRoot, error);
+    if (!opened
         || !workspace.startTask(producerTaskId, QStringLiteral("dataset.snapshot"),
             QStringLiteral("dataset_snapshot"), &task, error)
         || !workspace.commitDatasetSnapshot(producerTaskId, request, &snapshot, error)
@@ -544,7 +557,7 @@ QString createRuntimeDeliveryModel(const QString& projectRoot, const QString& fi
     }
 
     aitrain::ProjectWorkspace workspace;
-    if (!workspace.open(projectRoot, error)) return {};
+    if (!workspace.createProject(projectRoot, error)) return {};
     aitrain::ModelImportRequest request;
     request.taskId = aitrain::TaskId::create();
     request.sourceFilePath = modelPath;
@@ -627,7 +640,7 @@ QString createAnnotationRepairFixture(const QString& projectRoot, const QString&
         QStringLiteral("0 0.5 0.5 0.5 0.5\n"));
 
     aitrain::ProjectWorkspace workspace;
-    if (!workspace.open(projectRoot, error)) return {};
+    if (!workspace.createProject(projectRoot, error)) return {};
     aitrain::TaskSnapshot task;
     const aitrain::TaskId snapshotTaskId = aitrain::TaskId::create();
     if (!workspace.startTask(snapshotTaskId, QStringLiteral("dataset.snapshot"),
@@ -683,7 +696,7 @@ OcrAcceptanceWorkerFixture createOcrAcceptanceWorkerFixture(const QString& proje
         QStringLiteral("images/a.png\tA\nimages/b.png\tB\n"));
 
     aitrain::ProjectWorkspace workspace;
-    if (!workspace.open(projectRoot, error)) return {};
+    if (!workspace.createProject(projectRoot, error)) return {};
     const auto commitSnapshot = [&](const QString& root, const QString& format,
                                     aitrain::DatasetSnapshotArtifactBundle* snapshot) -> bool {
         const aitrain::TaskId taskId = aitrain::TaskId::create();
@@ -1280,6 +1293,8 @@ private slots:
         const QString sourcePath = createWorkerCocoConversionFixture(
             directory.filePath(QStringLiteral("coco")));
         QVERIFY(QDir().mkpath(projectRoot));
+        QString error;
+        QVERIFY2(initializeWorkerProject(projectRoot, &error), qPrintable(error));
         WorkerClient client;
         bool finished = false;
         bool ok = false;
@@ -1294,7 +1309,6 @@ private slots:
             [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
                 ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
             });
-        QString error;
         const QString targetDatasetId = aitrain::DatasetId::create().toString();
         const QString taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
         QVERIFY2(startTaskFromPayload(client, workerExecutablePath(),
@@ -1326,6 +1340,8 @@ private slots:
         const QString sourcePath = createWorkerCocoConversionFixture(
             directory.filePath(QStringLiteral("coco")));
         QVERIFY(QDir().mkpath(projectRoot));
+        QString error;
+        QVERIFY2(initializeWorkerProject(projectRoot, &error), qPrintable(error));
         WorkerClient client;
         bool finished = false;
         bool ok = true;
@@ -1340,7 +1356,6 @@ private slots:
             [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
                 ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
             });
-        QString error;
         const QString taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
         QVERIFY2(startTaskFromPayload(client, workerExecutablePath(),
             wp::command::runDatasetConversionWorkflow(),
@@ -1365,6 +1380,8 @@ private slots:
         const QString sourcePath = createWorkerCocoConversionFixture(
             directory.filePath(QStringLiteral("coco")));
         QVERIFY(QDir().mkpath(projectRoot));
+        QString error;
+        QVERIFY2(initializeWorkerProject(projectRoot, &error), qPrintable(error));
         WorkerClient client;
         bool finished = false;
         bool ok = true;
@@ -1380,7 +1397,6 @@ private slots:
             [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
                 ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
             });
-        QString error;
         const QString taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
         QVERIFY2(startTaskFromPayload(client, workerExecutablePath(),
             wp::command::runDatasetConversionWorkflow(),
@@ -1441,6 +1457,8 @@ private slots:
         const QString sourcePath = createWorkerYoloSnapshotImportFixture(
             directory.filePath(QStringLiteral("外部 数据集")));
         QVERIFY(QDir().mkpath(projectRoot));
+        QString error;
+        QVERIFY2(initializeWorkerProject(projectRoot, &error), qPrintable(error));
         WorkerClient client;
         bool finished = false;
         bool ok = false;
@@ -1455,7 +1473,6 @@ private slots:
             [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
                 ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
             });
-        QString error;
         const QString datasetId = aitrain::DatasetId::create().toString();
         const QString taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
         QVERIFY2(startTaskFromPayload(client, workerExecutablePath(),
@@ -1500,6 +1517,8 @@ private slots:
         const QString sourcePath = createWorkerYoloSnapshotImportFixture(
             directory.filePath(QStringLiteral("source")));
         QVERIFY(QDir().mkpath(projectRoot));
+        QString error;
+        QVERIFY2(initializeWorkerProject(projectRoot, &error), qPrintable(error));
         WorkerClient client;
         bool finished = false;
         bool ok = true;
@@ -1515,7 +1534,6 @@ private slots:
             [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
                 ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
             });
-        QString error;
         const QString taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
         QVERIFY2(startTaskFromPayload(client, workerExecutablePath(),
             wp::command::runDatasetSnapshotImportWorkflow(),
@@ -1542,7 +1560,7 @@ private slots:
         QVERIFY(QDir().mkpath(projectRoot));
         QString error;
         aitrain::ProjectWorkspace workspace;
-        QVERIFY2(workspace.open(projectRoot, &error), qPrintable(error));
+        QVERIFY2(workspace.createProject(projectRoot, &error), qPrintable(error));
         const aitrain::TaskId importTaskId = aitrain::TaskId::create();
         aitrain::TaskSnapshot task;
         QVERIFY2(workspace.startTask(importTaskId, QStringLiteral("dataset.snapshot.import"),
@@ -1616,6 +1634,8 @@ private slots:
         QTemporaryDir directory;
         const QString projectRoot = directory.filePath(QStringLiteral("project"));
         QVERIFY(QDir().mkpath(projectRoot));
+        QString error;
+        QVERIFY2(initializeWorkerProject(projectRoot, &error), qPrintable(error));
         WorkerClient client;
         bool finished = false;
         bool ok = false;
@@ -1628,7 +1648,6 @@ private slots:
             [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
                 ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
             });
-        QString error;
         const QString taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
         QVERIFY2(startTaskFromPayload(client, workerExecutablePath(),
             wp::command::runDiagnosticsWorkflow(),
@@ -1654,6 +1673,8 @@ private slots:
         QTemporaryDir directory;
         const QString projectRoot = directory.filePath(QStringLiteral("project"));
         QVERIFY(QDir().mkpath(projectRoot));
+        QString error;
+        QVERIFY2(initializeWorkerProject(projectRoot, &error), qPrintable(error));
         WorkerClient client;
         bool finished = false;
         bool ok = true;
@@ -1668,7 +1689,6 @@ private slots:
             [&](WorkerClient::WorkerTerminalStatus value, const QString&) {
                 ok = value == WorkerClient::WorkerTerminalStatus::Succeeded; finished = true;
             });
-        QString error;
         const QString taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
         QVERIFY2(startTaskFromPayload(client, workerExecutablePath(),
             wp::command::runDiagnosticsWorkflow(),
@@ -2920,6 +2940,8 @@ private slots:
         QTemporaryDir projectDir;
         QVERIFY(projectDir.isValid());
         const aitrain::TaskId taskId = aitrain::TaskId::create();
+        QString error;
+        QVERIFY2(initializeWorkerProject(projectDir.path(), &error), qPrintable(error));
 
         WorkerClient client;
         QVector<QPair<QString, QJsonObject>> messages;
@@ -2931,7 +2953,6 @@ private slots:
             finished = true;
         });
 
-        QString error;
         QVERIFY2(startTaskFromPayload(client, workerExecutablePath(),
             aitrain::worker_protocol::command::runEnvironmentCheckWorkflow(),
             QJsonObject{{aitrain::worker_protocol::field::taskId(), taskId.toString()},

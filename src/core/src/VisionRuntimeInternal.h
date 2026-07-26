@@ -1,6 +1,8 @@
 #pragma once
 
-#include "aitrain/core/DetectionTrainer.h"
+#include "aitrain/core/VisionModelExport.h"
+#include "aitrain/core/VisionModelRuntime.h"
+#include "aitrain/core/VisionPostprocess.h"
 
 #include <QByteArray>
 #include <QColor>

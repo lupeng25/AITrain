@@ -44,7 +44,7 @@ void WorkerSession::runDatasetSplitWorkflow(const wp::DatasetSplitCommand& comma
     datasetSplitTaskId_ = taskId;
 
     datasetSplitWorkspace_ = std::make_unique<aitrain::ProjectWorkspace>();
-    if (!datasetSplitWorkspace_->open(projectRoot, &error)) {
+    if (!datasetSplitWorkspace_->openForWorkerChild(projectRoot, &error)) {
         datasetSplitWorkspace_.reset();
         datasetSplitTaskId_ = {};
         fail(QStringLiteral("无法打开 Dataset Split  工作区：%1").arg(error));

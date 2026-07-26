@@ -29,7 +29,7 @@ struct ReviewSamplePathView final {
 struct ProjectOpenProbeResult final {
     QString normalizedPath;
     QString error;
-    aitrain::ProjectWorkspacePreparedOpen prepared;
+    aitrain::PreparedProjectSession prepared;
     bool succeeded = false;
 };
 

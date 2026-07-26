@@ -1,0 +1,6 @@
+paddlepaddle==3.3.1
+paddleocr==3.7.0
+onnx==1.22.0
+numpy==2.3.5
+pillow==12.3.0
+pyyaml==6.0.2

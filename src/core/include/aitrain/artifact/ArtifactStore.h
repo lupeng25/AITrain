@@ -17,7 +17,48 @@ enum class ArtifactCommitPhase {
     Begun,
     Prepared,
     FilesCommitted,
-    DatabaseCommitted
+    CatalogCommitted
+};
+
+enum class ArtifactCommitStatus {
+    Committed,
+    PendingRecovery,
+    RejectedBeforeFilesCommitted
+};
+
+struct ArtifactCommitResult final {
+    ArtifactCommitStatus status =
+        ArtifactCommitStatus::RejectedBeforeFilesCommitted;
+    bool cleanupPending = false;
+
+    ArtifactCommitResult() = default;
+    ArtifactCommitResult(ArtifactCommitStatus value, bool cleanup = false)
+        : status(value), cleanupPending(cleanup) {}
+    ArtifactCommitResult(bool committed)
+        : status(committed ? ArtifactCommitStatus::Committed
+                           : ArtifactCommitStatus::RejectedBeforeFilesCommitted) {}
+
+    operator bool() const
+    {
+        return status == ArtifactCommitStatus::Committed;
+    }
+};
+
+enum class ArtifactDiscardStatus {
+    Discarded,
+    CleanupPending,
+    NotDiscardable,
+    Failed
+};
+
+struct ArtifactDiscardResult final {
+    ArtifactDiscardStatus status = ArtifactDiscardStatus::Failed;
+
+    operator bool() const
+    {
+        return status == ArtifactDiscardStatus::Discarded
+            || status == ArtifactDiscardStatus::CleanupPending;
+    }
 };
 
 using ArtifactCommitFailureInjector = std::function<bool(ArtifactCommitFailPoint)>;
@@ -28,7 +69,7 @@ public:
         ArtifactCommitFailureInjector failureInjector = {});
 
     bool begin(const TaskId& taskId, const QString& kind, ArtifactId* artifactId, QString* stagingPath, QString* error = nullptr);
-    bool commit(const ArtifactId& artifactId,
+    ArtifactCommitResult commit(const ArtifactId& artifactId,
         const TaskId& taskId,
         const QString& kind,
         const QString& stagingPath,
@@ -40,7 +81,8 @@ public:
         const WorkflowRunId& workflowRunId = {},
         ArtifactCommitPhase* phase = nullptr);
     bool abort(const QString& stagingPath, QString* error = nullptr);
-    bool discardCommitted(const ArtifactId& artifactId, ProjectStore* storage, QString* error = nullptr);
+    ArtifactDiscardResult discardCommitted(
+        const ArtifactId& artifactId, ProjectStore* storage, QString* error = nullptr);
     bool recoverStaging(ProjectStore* storage, QStringList* diagnostics, QString* error = nullptr);
 
     QString rootPath() const;

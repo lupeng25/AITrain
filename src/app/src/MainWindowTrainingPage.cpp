@@ -195,7 +195,6 @@ QWidget* buildYoloOfficialArgsPanel()
         {QStringLiteral("true"), QStringLiteral("true")},
         {QStringLiteral("false"), QStringLiteral("false")}
     }));
-    addYoloRow(deviceGroup, QStringLiteral("resume"), yoloBoolComboBox(QStringLiteral("resume")));
     addYoloRow(deviceGroup, QStringLiteral("save_period"), yoloArgLineEdit(QStringLiteral("save_period"), QStringLiteral("-1 / 10")));
     addYoloRow(deviceGroup, QStringLiteral("fraction"), yoloArgLineEdit(QStringLiteral("fraction"), QStringLiteral("0.0-1.0")));
     addYoloRow(deviceGroup, QStringLiteral("rect"), yoloBoolComboBox(QStringLiteral("rect")));
@@ -412,8 +411,6 @@ QWidget* MainWindow::buildTrainingPage()
     batchEdit_ = new QLineEdit(QStringLiteral("8"));
     imageSizeEdit_ = new QLineEdit(QStringLiteral("640"));
     gridSizeEdit_ = new QLineEdit(QStringLiteral("4"));
-    resumeCheckpointEdit_ = new QLineEdit;
-    resumeCheckpointEdit_->setPlaceholderText(QStringLiteral("可选：选择已有 checkpoint 继续训练"));
     horizontalFlipCheck_ = new QCheckBox(QStringLiteral("水平翻转增强"));
     colorJitterCheck_ = new QCheckBox(QStringLiteral("亮度扰动增强"));
     connect(capabilityCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
@@ -578,7 +575,6 @@ QWidget* MainWindow::buildTrainingPage()
     advancedForm->setVerticalSpacing(10);
     advancedForm->addRow(QStringLiteral("内置能力"), capabilityCombo_);
     advancedForm->addRow(QStringLiteral("Grid Size"), gridSizeEdit_);
-    advancedForm->addRow(QStringLiteral("Resume"), resumeCheckpointEdit_);
     auto* augmentRow = new QWidget;
     auto* augmentLayout = new QHBoxLayout(augmentRow);
     augmentLayout->setContentsMargins(0, 0, 0, 0);

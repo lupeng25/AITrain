@@ -2,6 +2,8 @@
 
 Harness 的目标是让 AITrain Studio 更适合 vibe coding：每次改动都能快速获得项目上下文、明确任务边界、遵守架构约束，并用固定命令验证结果。
 
+当前稳定化基线为 Schema 13、单 Studio Owner Lease、Artifact journal v2、编译期 Product Contract 与四个 Python Profile。Protocol V2、现有 backend/capability ID 保持不变；不提供 Schema 12 迁移、Resume、动态插件或 Runtime 自动回退。
+
 这里的 harness 不是测试框架本身，而是一套工程护栏：
 
 - 明确当前系统是什么。

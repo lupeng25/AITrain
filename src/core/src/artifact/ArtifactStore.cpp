@@ -23,11 +23,12 @@ namespace {
 constexpr auto kStagingDirectoryName = ".staging";
 constexpr auto kStagingMetadataDirectoryName = ".staging-meta";
 constexpr auto kCommittedDirectoryName = "committed";
-constexpr auto kJournalSchemaVersion = 1;
+constexpr auto kTrashDirectoryName = ".trash";
+constexpr auto kJournalSchemaVersion = 2;
 constexpr auto kPhaseBegun = "begun";
 constexpr auto kPhasePrepared = "prepared";
 constexpr auto kPhaseFilesCommitted = "files_committed";
-constexpr auto kPhaseDatabaseCommitted = "database_committed";
+constexpr auto kPhaseCatalogCommitted = "catalog_committed";
 
 struct FileEntry final {
     QString relativePath;
@@ -42,6 +43,8 @@ struct CommitJournal final {
     QString phase;
     QDateTime createdAt;
     WorkflowRunId workflowRunId;
+    QVector<FileEntry> files;
+    QString completionAction;
 };
 
 ArtifactCommitPhase commitPhase(const QString& value)
@@ -49,7 +52,7 @@ ArtifactCommitPhase commitPhase(const QString& value)
     if (value == QLatin1String(kPhaseBegun)) return ArtifactCommitPhase::Begun;
     if (value == QLatin1String(kPhasePrepared)) return ArtifactCommitPhase::Prepared;
     if (value == QLatin1String(kPhaseFilesCommitted)) return ArtifactCommitPhase::FilesCommitted;
-    if (value == QLatin1String(kPhaseDatabaseCommitted)) return ArtifactCommitPhase::DatabaseCommitted;
+    if (value == QLatin1String(kPhaseCatalogCommitted)) return ArtifactCommitPhase::CatalogCommitted;
     return ArtifactCommitPhase::None;
 }
 
@@ -165,6 +168,7 @@ bool writeManifest(const QString& stagingPath,
         {QStringLiteral("commitPhase"), QString::fromLatin1(kPhasePrepared)},
         {QStringLiteral("createdAt"), utcText(journal.createdAt)},
         {QStringLiteral("workflowRunId"), journal.workflowRunId.toString()},
+        {QStringLiteral("completionAction"), journal.completionAction},
         {QStringLiteral("files"), files}};
     QSaveFile file(QDir(stagingPath).filePath(QStringLiteral("manifest.json")));
     if (!file.open(QIODevice::WriteOnly)
@@ -193,13 +197,22 @@ bool writeStagingMetadata(const QString& rootPath, const CommitJournal& journal,
         return false;
     }
     QSaveFile file(path);
+    QJsonArray files;
+    for (const FileEntry& entry : journal.files) {
+        files.append(QJsonObject{
+            {QStringLiteral("relativePath"), entry.relativePath},
+            {QStringLiteral("sha256"), entry.sha256},
+            {QStringLiteral("bytes"), QString::number(entry.bytes)}});
+    }
     const QJsonObject metadata{{QStringLiteral("schemaVersion"), kJournalSchemaVersion},
         {QStringLiteral("artifactId"), journal.artifactId.toString()},
         {QStringLiteral("taskId"), journal.taskId.toString()},
         {QStringLiteral("kind"), journal.kind},
         {QStringLiteral("phase"), journal.phase},
         {QStringLiteral("createdAt"), utcText(journal.createdAt)},
-        {QStringLiteral("workflowRunId"), journal.workflowRunId.toString()}};
+        {QStringLiteral("workflowRunId"), journal.workflowRunId.toString()},
+        {QStringLiteral("completionAction"), journal.completionAction},
+        {QStringLiteral("files"), files}};
     if (!file.open(QIODevice::WriteOnly)
         || file.write(QJsonDocument(metadata).toJson(QJsonDocument::Compact)) < 0
         || !file.commit()) {
@@ -245,11 +258,28 @@ bool readCommitJournal(const QString& metadataPath, CommitJournal* journal, QStr
     parsed.createdAt = QDateTime::fromString(object.value(QStringLiteral("createdAt")).toString(), Qt::ISODateWithMs);
     const QString workflowRunId = object.value(QStringLiteral("workflowRunId")).toString();
     if (!workflowRunId.isEmpty() && !WorkflowRunId::parse(workflowRunId, &parsed.workflowRunId, error)) return false;
+    parsed.completionAction = object.value(QStringLiteral("completionAction")).toString();
+    for (const QJsonValue& value : object.value(QStringLiteral("files")).toArray()) {
+        const QJsonObject fileObject = value.toObject();
+        bool byteCountOk = false;
+        FileEntry entry;
+        entry.relativePath = fileObject.value(QStringLiteral("relativePath")).toString();
+        entry.sha256 = fileObject.value(QStringLiteral("sha256")).toString();
+        entry.bytes = fileObject.value(QStringLiteral("bytes")).toString().toLongLong(&byteCountOk);
+        if (!byteCountOk || entry.relativePath.isEmpty()
+            || entry.sha256.size() != 64 || entry.bytes < 0) {
+            if (error) *error = QStringLiteral("Artifact journal v2 inventory 无效：%1").arg(metadataPath);
+            return false;
+        }
+        parsed.files.append(entry);
+    }
     if (parsed.kind.isEmpty() || !parsed.createdAt.isValid()
         || (parsed.phase != QLatin1String(kPhaseBegun)
             && parsed.phase != QLatin1String(kPhasePrepared)
             && parsed.phase != QLatin1String(kPhaseFilesCommitted)
-            && parsed.phase != QLatin1String(kPhaseDatabaseCommitted))) {
+            && parsed.phase != QLatin1String(kPhaseCatalogCommitted))
+        || (parsed.phase != QLatin1String(kPhaseBegun)
+            && (parsed.files.isEmpty() || parsed.completionAction.isEmpty()))) {
         if (error) *error = QStringLiteral("Artifact 提交日志字段无效：%1").arg(metadataPath);
         return false;
     }
@@ -276,7 +306,8 @@ bool readAndVerifyManifest(const QString& artifactPath,
         || object.value(QStringLiteral("taskId")).toString() != journal.taskId.toString()
         || object.value(QStringLiteral("kind")).toString() != journal.kind
         || object.value(QStringLiteral("createdAt")).toString() != utcText(journal.createdAt)
-        || object.value(QStringLiteral("workflowRunId")).toString() != journal.workflowRunId.toString()) {
+        || object.value(QStringLiteral("workflowRunId")).toString() != journal.workflowRunId.toString()
+        || object.value(QStringLiteral("completionAction")).toString() != journal.completionAction) {
         if (error) *error = QStringLiteral("Artifact manifest 与提交日志不一致：%1").arg(file.fileName());
         return false;
     }
@@ -306,11 +337,32 @@ bool readAndVerifyManifest(const QString& artifactPath,
         declared.insert(item.value(QStringLiteral("relativePath")).toString(),
             {item.value(QStringLiteral("sha256")).toString(), bytes});
     }
+    if (declared.size() != files.size()) {
+        if (error) *error = QStringLiteral("Artifact manifest 包含重复文件路径：%1").arg(file.fileName());
+        return false;
+    }
     for (const FileEntry& entry : actual) {
         if (!declared.contains(entry.relativePath)
             || declared.value(entry.relativePath).first != entry.sha256
             || declared.value(entry.relativePath).second != entry.bytes) {
             if (error) *error = QStringLiteral("Artifact 文件与 manifest 校验失败：%1").arg(entry.relativePath);
+            return false;
+        }
+    }
+    if (actual.size() != journal.files.size()) {
+        if (error) *error = QStringLiteral("Artifact 文件与 journal v2 固化清单数量不一致：%1").arg(artifactPath);
+        return false;
+    }
+    QHash<QString, QPair<QString, qint64>> journalInventory;
+    for (const FileEntry& entry : journal.files) {
+        journalInventory.insert(entry.relativePath, {entry.sha256, entry.bytes});
+    }
+    for (const FileEntry& entry : actual) {
+        if (!journalInventory.contains(entry.relativePath)
+            || journalInventory.value(entry.relativePath).first != entry.sha256
+            || journalInventory.value(entry.relativePath).second != entry.bytes) {
+            if (error) *error = QStringLiteral("Artifact 文件与 journal v2 固化清单不一致：%1")
+                .arg(entry.relativePath);
             return false;
         }
     }
@@ -394,7 +446,7 @@ bool ArtifactStore::begin(const TaskId& taskId, const QString& kind, ArtifactId*
         return false;
     }
     const CommitJournal journal{id, taskId, kind.trimmed(), QString::fromLatin1(kPhaseBegun),
-        QDateTime::currentDateTimeUtc(), {}};
+        QDateTime::currentDateTimeUtc(), {}, {}, {}};
     if (!writeStagingMetadata(rootPath_, journal, error)) {
         QDir(path).removeRecursively();
         return false;
@@ -404,7 +456,7 @@ bool ArtifactStore::begin(const TaskId& taskId, const QString& kind, ArtifactId*
     return true;
 }
 
-bool ArtifactStore::commit(const ArtifactId& artifactId,
+ArtifactCommitResult ArtifactStore::commit(const ArtifactId& artifactId,
     const TaskId& taskId,
     const QString& kind,
     const QString& stagingPath,
@@ -452,13 +504,16 @@ bool ArtifactStore::commit(const ArtifactId& artifactId,
     }
     QVector<FileEntry> entries;
     bool collectCanceled = false;
-    if (!collectFiles(staging.absolutePath(), &entries, error, cancellation, &collectCanceled)
-        || !writeManifest(staging.absolutePath(), journal, entries, error)) {
+    if (!collectFiles(staging.absolutePath(), &entries, error, cancellation, &collectCanceled)) {
         if (collectCanceled && canceled) {
             *canceled = true;
         }
         return false;
     }
+    journal.files = entries;
+    journal.completionAction = journal.workflowRunId.isValid()
+        ? QStringLiteral("attach_evidence") : QStringLiteral("catalog_only");
+    if (!writeManifest(staging.absolutePath(), journal, entries, error)) return false;
     journal.phase = QString::fromLatin1(kPhasePrepared);
     if (!writeStagingMetadata(rootPath_, journal, error)) return false;
     if (phase) *phase = ArtifactCommitPhase::Prepared;
@@ -482,30 +537,37 @@ bool ArtifactStore::commit(const ArtifactId& artifactId,
         return false;
     }
     journal.phase = QString::fromLatin1(kPhaseFilesCommitted);
-    if (!writeStagingMetadata(rootPath_, journal, error)) return false;
+    if (!writeStagingMetadata(rootPath_, journal, error)) {
+        if (artifactPath) *artifactPath = finalPath;
+        return {ArtifactCommitStatus::PendingRecovery};
+    }
     if (phase) *phase = ArtifactCommitPhase::FilesCommitted;
     if (failureInjector_
         && failureInjector_(ArtifactCommitFailPoint::AfterDirectoryRenameBeforeDatabase)) {
         if (error) *error = QStringLiteral("故障注入：Artifact 目录已提交但数据库尚未登记。");
-        return false;
+        if (artifactPath) *artifactPath = finalPath;
+        return {ArtifactCommitStatus::PendingRecovery};
     }
     if (!persistArtifactRecord(storage, journal, entries, error)) {
-        return false;
+        if (artifactPath) *artifactPath = finalPath;
+        return {ArtifactCommitStatus::PendingRecovery};
     }
-    journal.phase = QString::fromLatin1(kPhaseDatabaseCommitted);
+    journal.phase = QString::fromLatin1(kPhaseCatalogCommitted);
     QString journalError;
     writeStagingMetadata(rootPath_, journal, &journalError);
-    if (phase) *phase = ArtifactCommitPhase::DatabaseCommitted;
+    if (phase) *phase = ArtifactCommitPhase::CatalogCommitted;
     if (failureInjector_
         && failureInjector_(ArtifactCommitFailPoint::AfterDatabaseBeforeJournalRemoval)) {
         if (error) *error = QStringLiteral("故障注入：Artifact 数据库已登记但提交日志尚未清理。");
-        return false;
+        if (artifactPath) *artifactPath = finalPath;
+        return {ArtifactCommitStatus::Committed, true};
     }
     if (!QFile::remove(stagingMetadataPath(rootPath_, artifactId))
         && QFileInfo::exists(stagingMetadataPath(rootPath_, artifactId))) {
         if (error) *error = QStringLiteral("Artifact 已提交，但无法清理提交日志：%1")
             .arg(stagingMetadataPath(rootPath_, artifactId));
-        return false;
+        if (artifactPath) *artifactPath = finalPath;
+        return {ArtifactCommitStatus::Committed, true};
     }
     if (artifactPath) {
         *artifactPath = finalPath;
@@ -543,7 +605,7 @@ bool ArtifactStore::abort(const QString& stagingPath, QString* error)
         if (!readCommitJournal(metadataPath, &journal, error)) return false;
         if (journal.artifactId != artifactId
             || journal.phase == QLatin1String(kPhaseFilesCommitted)
-            || journal.phase == QLatin1String(kPhaseDatabaseCommitted)) {
+            || journal.phase == QLatin1String(kPhaseCatalogCommitted)) {
             if (error) *error = QStringLiteral("Artifact 已进入文件提交阶段，必须保留日志交由恢复流程处理：%1")
                 .arg(artifactId.toString());
             return false;
@@ -561,20 +623,45 @@ bool ArtifactStore::abort(const QString& stagingPath, QString* error)
     return true;
 }
 
-bool ArtifactStore::discardCommitted(const ArtifactId& artifactId, ProjectStore* storage, QString* error)
+ArtifactDiscardResult ArtifactStore::discardCommitted(
+    const ArtifactId& artifactId, ProjectStore* storage, QString* error)
 {
     if (!artifactId.isValid() || !storage || !storage->isOpen()) {
         if (error) *error = QStringLiteral("清理已提交 Artifact 需要有效 ID 和已打开存储。");
-        return false;
+        return {ArtifactDiscardStatus::Failed};
     }
-    if (!storage->removeUnreferencedArtifact(artifactId, error)) return false;
+    bool discardable = false;
+    if (!storage->artifactDiscardable(artifactId, &discardable, error)) {
+        return {ArtifactDiscardStatus::Failed};
+    }
+    if (!discardable) {
+        if (error) *error = QStringLiteral("Artifact 已被引用，不能删除。");
+        return {ArtifactDiscardStatus::NotDiscardable};
+    }
     const QString finalPath = QDir(rootPath_).filePath(QStringLiteral("%1/%2")
         .arg(QString::fromLatin1(kCommittedDirectoryName), artifactId.toString()));
-    if (QFileInfo::exists(finalPath) && !QDir(finalPath).removeRecursively()) {
-        if (error) *error = QStringLiteral("Artifact 元数据已删除，但无法清理磁盘目录：%1").arg(finalPath);
-        return false;
+    const QString trashPath = QDir(rootPath_).filePath(QStringLiteral("%1/%2")
+        .arg(QString::fromLatin1(kTrashDirectoryName), artifactId.toString()));
+    if (!QDir(finalPath).exists() || QFileInfo::exists(trashPath)
+        || !QDir().mkpath(QFileInfo(trashPath).absolutePath())) {
+        if (error) *error = QStringLiteral("Artifact discard 文件状态无效：%1").arg(artifactId.toString());
+        return {ArtifactDiscardStatus::Failed};
     }
-    return true;
+    if (!QDir().rename(finalPath, trashPath)) {
+        if (error) *error = QStringLiteral("无法把 Artifact 原子移动到 trash：%1").arg(finalPath);
+        return {ArtifactDiscardStatus::Failed};
+    }
+    if (!storage->removeUnreferencedArtifact(artifactId, error)) {
+        if (!QDir().rename(trashPath, finalPath) && error) {
+            *error += QStringLiteral("；同时无法从 trash 恢复 committed 目录。");
+        }
+        return {ArtifactDiscardStatus::NotDiscardable};
+    }
+    if (!QDir(trashPath).removeRecursively()) {
+        if (error) *error = QStringLiteral("Artifact 已从目录删除，但 trash 清理待恢复：%1").arg(trashPath);
+        return {ArtifactDiscardStatus::CleanupPending};
+    }
+    return {ArtifactDiscardStatus::Discarded};
 }
 
 bool ArtifactStore::recoverStaging(ProjectStore* storage, QStringList* diagnostics, QString* error)
@@ -584,6 +671,45 @@ bool ArtifactStore::recoverStaging(ProjectStore* storage, QStringList* diagnosti
             *error = QStringLiteral("恢复 Artifact staging 需要已打开的  存储。");
         }
         return false;
+    }
+    const QDir trashRoot(QDir(rootPath_).filePath(QString::fromLatin1(kTrashDirectoryName)));
+    const QDir committedRoot(QDir(rootPath_).filePath(QString::fromLatin1(kCommittedDirectoryName)));
+    if (trashRoot.exists()) {
+        const QFileInfoList trashDirectories =
+            trashRoot.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+        for (const QFileInfo& trashInfo : trashDirectories) {
+            ArtifactId artifactId;
+            if (!ArtifactId::parse(trashInfo.fileName(), &artifactId)) {
+                appendDiagnostic(diagnostics,
+                    QStringLiteral("保留未知名称的 Artifact trash：%1").arg(trashInfo.absoluteFilePath()));
+                continue;
+            }
+            const QString finalPath = committedRoot.filePath(artifactId.toString());
+            if (QDir(finalPath).exists()) {
+                if (error) *error = QStringLiteral("Artifact committed 与 trash 同时存在：%1")
+                    .arg(artifactId.toString());
+                return false;
+            }
+            bool databaseExists = false;
+            if (!storage->artifactExists(artifactId, &databaseExists, error)) return false;
+            if (databaseExists) {
+                if (!QDir().rename(trashInfo.absoluteFilePath(), finalPath)) {
+                    if (error) *error = QStringLiteral("无法从 trash 恢复已登记 Artifact：%1")
+                        .arg(artifactId.toString());
+                    return false;
+                }
+                appendDiagnostic(diagnostics,
+                    QStringLiteral("已从 trash 恢复数据库仍引用的 Artifact：%1").arg(finalPath));
+            } else if (!QDir(trashInfo.absoluteFilePath()).removeRecursively()) {
+                appendDiagnostic(diagnostics,
+                    QStringLiteral("Artifact 数据库记录已删除，但 trash 清理仍待完成：%1")
+                        .arg(trashInfo.absoluteFilePath()));
+            } else {
+                appendDiagnostic(diagnostics,
+                    QStringLiteral("已清理无数据库记录的 Artifact trash：%1")
+                        .arg(trashInfo.absoluteFilePath()));
+            }
+        }
     }
     const QDir stagingRoot(QDir(rootPath_).filePath(QString::fromLatin1(kStagingDirectoryName)));
     const QDir finalRoot(QDir(rootPath_).filePath(QString::fromLatin1(kCommittedDirectoryName)));

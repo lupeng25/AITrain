@@ -21,6 +21,8 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 option(AITRAIN_BUILD_TESTS "Build AITrain Studio tests" ON)
+option(AITRAIN_REQUIRE_PYTHON_TESTS
+    "Require Python, pytest and complete Python test registration" OFF)
 option(AITRAIN_BUILD_LICENSE_GENERATOR "Build the AITrain graphical license generator" OFF)
 option(AITRAIN_INSTALL_LICENSE_GENERATOR "Install the AITrain license generator with the package" OFF)
 option(AITRAIN_ENABLE_ONNXRUNTIME "Enable ONNX Runtime inference when an SDK is available" ON)
@@ -695,29 +697,38 @@ add_subdirectory(src/app)
 add_subdirectory(src/worker)
 
 add_custom_target(aitrain_python_trainers_copy ALL
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_SOURCE_DIR}/python_trainers
-        ${CMAKE_BINARY_DIR}/bin/python_trainers
+    COMMAND ${CMAKE_COMMAND}
+        -DAITRAIN_PYTHON_TRAINERS_SOURCE=${CMAKE_SOURCE_DIR}/python_trainers
+        -DAITRAIN_PYTHON_TRAINERS_DESTINATION=${CMAKE_BINARY_DIR}/bin/python_trainers
+        -DAITRAIN_BUILD_ROOT=${CMAKE_BINARY_DIR}
+        -P ${CMAKE_SOURCE_DIR}/cmake/SyncPythonTrainers.cmake
     VERBATIM
 )
 add_dependencies(AITrainStudio aitrain_python_trainers_copy)
 add_dependencies(aitrain_worker aitrain_python_trainers_copy)
 
-install(DIRECTORY DESTINATION runtimes/onnxruntime)
-install(DIRECTORY DESTINATION runtimes/ncnn)
-install(DIRECTORY DESTINATION runtimes/tensorrt)
-install(DIRECTORY DESTINATION docs)
-install(DIRECTORY docs/harness DESTINATION docs)
-install(DIRECTORY docs/acceptance-templates DESTINATION docs)
+install(DIRECTORY DESTINATION runtimes/onnxruntime COMPONENT Runtime)
+install(DIRECTORY DESTINATION runtimes/ncnn COMPONENT Runtime)
+install(DIRECTORY DESTINATION runtimes/tensorrt COMPONENT Runtime)
+install(DIRECTORY DESTINATION docs COMPONENT Runtime)
+install(FILES
+    docs/user-guide.md
+    docs/training-backends.md
+    docs/dataset-conversion.md
+    docs/hardware-compatibility.md
+    docs/operations-runbook.md
+    DESTINATION docs
+    COMPONENT Runtime
+)
 install(DIRECTORY examples DESTINATION .
+    COMPONENT Runtime
     PATTERN "__pycache__" EXCLUDE
     PATTERN "*.pyc" EXCLUDE
     PATTERN "*.pyo" EXCLUDE)
+install(DIRECTORY docs/harness DESTINATION docs COMPONENT AcceptanceTools)
+install(DIRECTORY docs/acceptance-templates DESTINATION docs COMPONENT AcceptanceTools)
 install(FILES
-    docs/user-guide.md
     docs/deps-layout.md
-    docs/training-backends.md
-    docs/hardware-compatibility.md
     docs/acceptance-runbook.md
     docs/yolo-model-support-matrix.md
     docs/local-rc-closeout.md
@@ -726,22 +737,28 @@ install(FILES
     docs/production-ocr-acceptance.md
     docs/customer-ocr-validation.md
     docs/product-roadmap-local-training-platform.md
+    docs/developer-architecture.md
     DESTINATION docs
+    COMPONENT AcceptanceTools
 )
 install(DIRECTORY python_trainers DESTINATION .
+    COMPONENT Runtime
     PATTERN "__pycache__" EXCLUDE
     PATTERN "*.pyc" EXCLUDE
-)
+    PATTERN "*.pyo" EXCLUDE
+    PATTERN ".pytest_cache" EXCLUDE)
 install(FILES
     installer/AITrainStudio.iss
     installer/AITrainStudioDependencies.iss
     installer/AITrainStudioPythonEnv.iss
     DESTINATION installer
+    COMPONENT AcceptanceTools
 )
 install(FILES
     tools/acceptance-smoke.ps1
     tools/toolchain-env.ps1
     tools/build-inno-installer.ps1
+    tools/build-python-env.ps1
     tools/ui-workbench-walkthrough.ps1
     tools/phase45-yolo-model-matrix-smoke.ps1
     tools/phase-smp-semantic-segmentation-smoke.ps1
@@ -764,30 +781,31 @@ install(FILES
     tools/customer-ocr-validation.ps1
     tools/phase50-paddleocr-v5-gpu-official-chain.ps1
     DESTINATION tools
+    COMPONENT AcceptanceTools
 )
 
 if(AITRAIN_WITH_ONNXRUNTIME)
-    install(FILES ${AITRAIN_ONNXRUNTIME_DLL} DESTINATION .)
-    install(FILES ${AITRAIN_ONNXRUNTIME_DLL} DESTINATION runtimes/onnxruntime)
+    install(FILES ${AITRAIN_ONNXRUNTIME_DLL} DESTINATION . COMPONENT Runtime)
+    install(FILES ${AITRAIN_ONNXRUNTIME_DLL} DESTINATION runtimes/onnxruntime COMPONENT Runtime)
     if(AITRAIN_ONNXRUNTIME_PROVIDERS_DLL)
-        install(FILES ${AITRAIN_ONNXRUNTIME_PROVIDERS_DLL} DESTINATION .)
-        install(FILES ${AITRAIN_ONNXRUNTIME_PROVIDERS_DLL} DESTINATION runtimes/onnxruntime)
+        install(FILES ${AITRAIN_ONNXRUNTIME_PROVIDERS_DLL} DESTINATION . COMPONENT Runtime)
+        install(FILES ${AITRAIN_ONNXRUNTIME_PROVIDERS_DLL} DESTINATION runtimes/onnxruntime COMPONENT Runtime)
     endif()
 endif()
 
 if(AITRAIN_WITH_NCNN AND AITRAIN_NCNN_DLL)
-    install(FILES ${AITRAIN_NCNN_DLL} DESTINATION .)
-    install(FILES ${AITRAIN_NCNN_DLL} DESTINATION runtimes/ncnn)
+    install(FILES ${AITRAIN_NCNN_DLL} DESTINATION . COMPONENT Runtime)
+    install(FILES ${AITRAIN_NCNN_DLL} DESTINATION runtimes/ncnn COMPONENT Runtime)
 endif()
 if(AITRAIN_NCNN_ONNX2NCNN)
-    install(FILES ${AITRAIN_NCNN_ONNX2NCNN} DESTINATION runtimes/ncnn)
+    install(FILES ${AITRAIN_NCNN_ONNX2NCNN} DESTINATION runtimes/ncnn COMPONENT Runtime)
 endif()
 if(AITRAIN_NCNN_PNNX)
-    install(FILES ${AITRAIN_NCNN_PNNX} DESTINATION runtimes/ncnn)
+    install(FILES ${AITRAIN_NCNN_PNNX} DESTINATION runtimes/ncnn COMPONENT Runtime)
 endif()
 
 if(AITRAIN_PACKAGED_ACCELERATOR_DLLS)
-    install(FILES ${AITRAIN_PACKAGED_ACCELERATOR_DLLS} DESTINATION runtimes/tensorrt)
+    install(FILES ${AITRAIN_PACKAGED_ACCELERATOR_DLLS} DESTINATION runtimes/tensorrt COMPONENT Runtime)
 endif()
 
 if(WIN32 AND AITRAIN_INSTALL_QT_RUNTIME AND AITRAIN_WINDEPLOYQT_EXECUTABLE)
@@ -801,7 +819,7 @@ if(WIN32 AND AITRAIN_INSTALL_QT_RUNTIME AND AITRAIN_WINDEPLOYQT_EXECUTABLE)
         if(NOT AITRAIN_WINDEPLOYQT_RESULT EQUAL 0)
             message(FATAL_ERROR \"windeployqt failed with exit code \${AITRAIN_WINDEPLOYQT_RESULT}\")
         endif()
-    ")
+    " COMPONENT Runtime)
 endif()
 
 if(AITRAIN_BUILD_TESTS)
@@ -814,4 +832,6 @@ set(CPACK_PACKAGE_VENDOR "AITrain")
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${PROJECT_VERSION}-win64")
 set(CPACK_GENERATOR "ZIP")
+set(CPACK_COMPONENTS_ALL Runtime AcceptanceTools)
+set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
 include(CPack)

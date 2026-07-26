@@ -8,7 +8,7 @@
 #include "LanguageSupport.h"
 #include "MainWindowSupport.h"
 #include "TaskArtifactPanel.h"
-#include "aitrain/core/DetectionTrainer.h"
+#include "aitrain/core/VisionModelRuntime.h"
 
 #include <QApplication>
 #include <QCheckBox>

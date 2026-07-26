@@ -42,7 +42,7 @@ void WorkerSession::importModel(const wp::ModelImportCommand& command)
     send(wp::event::progress(), started);
 
     aitrain::ProjectWorkspace workspace;
-    if (!workspace.open(projectRoot, &error)) {
+    if (!workspace.openForWorkerChild(projectRoot, &error)) {
         fail(QStringLiteral("无法打开  项目工作区：%1").arg(error));
         return;
     }

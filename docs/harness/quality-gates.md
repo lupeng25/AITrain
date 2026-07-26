@@ -1,4 +1,11 @@
-# Quality Gates
+# 质量门禁
+
+## 稳定化专项 Gate
+
+- `AITRAIN_REQUIRE_PYTHON_TESTS=ON` 时，配置阶段必须找到 Python、pytest 与完整测试注册。
+- Runtime 与 AcceptanceTools 必须安装到两个全新 prefix；Runtime 不得含 Harness、roadmap、安装器源码或历史 phase 脚本。
+- package-root Worker 必须输出 `contractsValid=true`，并通过 Schema 13 首次打开、二次打开与 ProjectId 检查。
+- Python trainer 同步必须删除目标目录中的 stale 文件，且排除 `__pycache__`、pyc/pyo 和 pytest cache。
 
 ## 通用 Gate
 

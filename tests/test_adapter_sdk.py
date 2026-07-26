@@ -9,6 +9,8 @@ import uuid
 import os
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 TRAINERS = ROOT / "python_trainers"
@@ -42,6 +44,30 @@ def test_structured_events_preserve_existing_jsonl_shape() -> None:
     assert all(item["backend"] == "official_test" for item in events)
     assert events[1]["percent"] == 12.5
     assert events[3]["path"] == "out\\report.json" or events[3]["path"] == "out/report.json"
+
+
+def test_terminal_sink_failure_cannot_trigger_second_terminal() -> None:
+    attempts: list[dict] = []
+
+    def failing_sink(event: dict) -> None:
+        attempts.append(event)
+        raise RuntimeError("sink failed")
+
+    sdk = AdapterSdk("official_test", event_sink=failing_sink)
+    with pytest.raises(RuntimeError, match="sink failed"):
+        sdk.emit_completed("done")
+    with pytest.raises(RuntimeError, match="already attempted"):
+        sdk.emit_failed("fallback", "fallback_failed")
+    assert len(attempts) == 1
+
+
+def test_events_are_rejected_after_terminal_attempt() -> None:
+    events: list[dict] = []
+    sdk = AdapterSdk("official_test", event_sink=events.append)
+    sdk.emit_canceled("canceled")
+    with pytest.raises(RuntimeError, match="after terminal attempt"):
+        sdk.emit_progress(100, message="late")
+    assert [event["type"] for event in events] == ["canceled"]
 
 
 def test_run_child_process_streams_log_and_records_exit_code() -> None:

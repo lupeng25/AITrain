@@ -1,6 +1,7 @@
 #include "aitrain/runtime/RuntimeCapabilityMatrix.h"
 
 #include "aitrain/core/VisionModelRuntime.h"
+#include "aitrain/product/ProductCapabilityContract.h"
 
 #include <QJsonArray>
 
@@ -12,8 +13,12 @@ QString normalized(const QString& value)
     return value.trimmed().toLower();
 }
 
-RuntimeCapability result(RuntimeCapabilityStatus status, const QString& family, const QString& route,
-    const QString& message, const QStringList& limitations = {})
+RuntimeCapability result(const RuntimeRouteContract* contract,
+    RuntimeCapabilityStatus status,
+    const QString& family,
+    const QString& route,
+    const QString& message,
+    const QStringList& limitations = {})
 {
     RuntimeStatus runtimeStatus = RuntimeStatus::RuntimeNotImplemented;
     if (status == RuntimeCapabilityStatus::Supported
@@ -26,13 +31,20 @@ RuntimeCapability result(RuntimeCapabilityStatus status, const QString& family, 
     } else if (status == RuntimeCapabilityStatus::RequiresHardware) {
         runtimeStatus = RuntimeStatus::HardwareUnsupported;
     }
-    return {status, family, route, message, limitations, runtimeStatus};
-}
-
-bool onnxFamily(const QString& family)
-{
-    return family == QStringLiteral("yolo_detection") || family == QStringLiteral("yolo_segmentation")
-        || family == QStringLiteral("yolo_obb") || family == QStringLiteral("semantic_segmentation");
+    RuntimeCapability value;
+    value.status = status;
+    value.executionAuthority = contract
+        ? contract->executionAuthority
+        : RuntimeExecutionAuthority::AitrainCpp;
+    value.productState = contract
+        ? contract->productState
+        : RuntimeProductState::UnsupportedByProduct;
+    value.modelFamily = family;
+    value.runtimeRoute = route;
+    value.message = message;
+    value.limitations = limitations;
+    value.runtimeStatus = runtimeStatus;
+    return value;
 }
 
 } // namespace
@@ -54,6 +66,8 @@ QString runtimeCapabilityStatusToString(RuntimeCapabilityStatus status)
 QJsonObject RuntimeCapability::toJson() const
 {
     return {{QStringLiteral("status"), runtimeCapabilityStatusToString(status)},
+        {QStringLiteral("executionAuthority"), runtimeExecutionAuthorityToString(executionAuthority)},
+        {QStringLiteral("productState"), runtimeProductStateToString(productState)},
         {QStringLiteral("modelFamily"), modelFamily}, {QStringLiteral("runtimeRoute"), runtimeRoute},
         {QStringLiteral("message"), message}, {QStringLiteral("limitations"), QJsonArray::fromStringList(limitations)},
         {QStringLiteral("runtimeStatus"), runtimeStatusToString(runtimeStatus)}};
@@ -64,67 +78,69 @@ RuntimeCapability RuntimeCapabilityMatrix::query(const RuntimeCapabilityQuery& r
     const QString family = normalized(request.modelFamily);
     const QString route = normalized(request.runtimeRoute);
     if (family.isEmpty() || route.isEmpty()) {
-        return result(RuntimeCapabilityStatus::UnsupportedByProduct, family, route, QStringLiteral("Runtime 矩阵查询需要模型族与运行时路由。"));
+        return result(nullptr, RuntimeCapabilityStatus::UnsupportedByProduct, family, route,
+            QStringLiteral("Runtime 矩阵查询需要模型族与运行时路由。"));
+    }
+    RuntimeRouteContract contract;
+    if (!ProductCapabilityContract::instance().resolveRuntimeRoute(family, route, &contract)) {
+        return result(nullptr, RuntimeCapabilityStatus::UnsupportedByProduct, family, route,
+            QStringLiteral("未知或未注册的 Runtime 路由。"));
+    }
+    if (contract.productState == RuntimeProductState::NotImplemented) {
+        return result(&contract, RuntimeCapabilityStatus::RuntimeNotImplemented, family, route,
+            contract.limitations.isEmpty()
+                ? QStringLiteral("该产品 Runtime 路线尚未实现。")
+                : contract.limitations.constFirst(),
+            contract.limitations);
+    }
+    if (contract.productState == RuntimeProductState::UnsupportedByProduct) {
+        return result(&contract, RuntimeCapabilityStatus::UnsupportedByProduct, family, route,
+            QStringLiteral("该模型族与 Runtime 组合不在产品支持范围内。"),
+            contract.limitations);
+    }
+    if (contract.executionAuthority == RuntimeExecutionAuthority::WorkerManaged) {
+        return result(&contract, RuntimeCapabilityStatus::RequiresExternalEvidence, family, route,
+            QStringLiteral("该路线由 Worker 管理的官方 Python Runtime 执行，不属于 AITrain C++ Runtime Delivery。"),
+            contract.limitations);
+    }
+    if (contract.executionAuthority == RuntimeExecutionAuthority::OfficialEvidence) {
+        return result(&contract, RuntimeCapabilityStatus::RequiresExternalEvidence, family, route,
+            QStringLiteral("该路线仅通过官方工具链报告和验收证据收口。"),
+            contract.limitations);
     }
     if (route == QStringLiteral("aitrain_onnxruntime")) {
-        if (!onnxFamily(family)) {
-            return result(RuntimeCapabilityStatus::UnsupportedByProduct, family, route,
-                QStringLiteral("该模型族不在 AITrain ONNX Runtime 产品部署范围内。"));
-        }
         if (!aitrain::isOnnxRuntimeInferenceAvailable()) {
-            return result(RuntimeCapabilityStatus::RequiresDependency, family, route, QStringLiteral("当前构建缺少 ONNX Runtime 依赖。"));
+            return result(&contract, RuntimeCapabilityStatus::RequiresDependency, family, route,
+                QStringLiteral("当前构建缺少 ONNX Runtime 依赖。"), contract.limitations);
         }
-        return result(RuntimeCapabilityStatus::Supported, family, route,
-            QStringLiteral("由 Manifest 指定 decoder 的 AITrain ONNX Runtime 路线可用。"));
+        return result(&contract, RuntimeCapabilityStatus::Supported, family, route,
+            QStringLiteral("由 Manifest 指定 decoder 的 AITrain ONNX Runtime 路线可用。"),
+            contract.limitations);
     }
     if (route == QStringLiteral("aitrain_ncnn")) {
-        if (family != QStringLiteral("yolo_detection") && family != QStringLiteral("yolo_segmentation")) {
-            return result(RuntimeCapabilityStatus::UnsupportedByProduct, family, route,
-                QStringLiteral("NCNN 仅支持已验证的 YOLO Detection/Segmentation 路线。"));
-        }
         const aitrain::NcnnBackendStatus ncnn = aitrain::ncnnBackendStatus();
-        if (!ncnn.sdkAvailable) return result(RuntimeCapabilityStatus::RequiresSdk, family, route, ncnn.message);
-        if (!ncnn.inferenceAvailable) return result(RuntimeCapabilityStatus::RuntimeNotImplemented, family, route, ncnn.message);
-        return result(RuntimeCapabilityStatus::Supported, family, route, QStringLiteral("NCNN 运行时可用。"));
-    }
-    if (route == QStringLiteral("aitrain_tensorrt")) {
-        if (family != QStringLiteral("yolo_detection") && family != QStringLiteral("yolo_segmentation")) {
-            return result(RuntimeCapabilityStatus::UnsupportedByProduct, family, route,
-                QStringLiteral("TensorRT 不支持该模型族的产品部署。"));
+        if (!ncnn.sdkAvailable) {
+            return result(&contract, RuntimeCapabilityStatus::RequiresSdk, family, route,
+                ncnn.message, contract.limitations);
         }
-        const aitrain::TensorRtBackendStatus tensorRt = aitrain::tensorRtBackendStatus();
-        if (!tensorRt.sdkAvailable) return result(RuntimeCapabilityStatus::RequiresSdk, family, route, tensorRt.message);
-        if (tensorRt.status == QStringLiteral("dependency_missing") || !tensorRt.dependenciesAvailable) {
-            return result(RuntimeCapabilityStatus::RequiresDependency, family, route, tensorRt.message);
+        if (!ncnn.inferenceAvailable) {
+            return result(&contract, RuntimeCapabilityStatus::RuntimeNotImplemented, family, route,
+                ncnn.message, contract.limitations);
         }
-        if (!tensorRt.hardwareSupported) return result(RuntimeCapabilityStatus::RequiresHardware, family, route, tensorRt.message);
-        if (!tensorRt.inferenceAvailable) return result(RuntimeCapabilityStatus::RuntimeNotImplemented, family, route, tensorRt.message);
-        return result(RuntimeCapabilityStatus::Supported, family, route,
-            QStringLiteral("TensorRT runtime 可用；engine 仍只对当前探测到的 GPU 有效。"),
-            {QStringLiteral("跨 GPU 部署必须重新执行 engine 兼容性验证。")});
+        return result(&contract, RuntimeCapabilityStatus::Supported, family, route,
+            QStringLiteral("NCNN 运行时可用。"), contract.limitations);
     }
-    if (route == QStringLiteral("anomalib_python") && family == QStringLiteral("anomaly_detection")) {
-        return result(RuntimeCapabilityStatus::RequiresExternalEvidence, family, route,
-            QStringLiteral("异常检测仅使用 Worker 管理的 Anomalib Python Artifact Runtime。"),
-            {QStringLiteral("不声明 AITrain C++ ONNX/TensorRT/NCNN 异常检测运行时。")});
-    }
-    if (route == QStringLiteral("paddleocr_official") && (family == QStringLiteral("ocr_detection") || family == QStringLiteral("ocr_recognition"))) {
-        return result(RuntimeCapabilityStatus::RequiresExternalEvidence, family, route,
-            QStringLiteral("OCR 只接受 PaddleOCR 官方工具链与报告作为运行/验收证据。"));
-    }
-    return result(RuntimeCapabilityStatus::UnsupportedByProduct, family, route, QStringLiteral("未知或未注册的 Runtime 路由。"));
+    return result(&contract, RuntimeCapabilityStatus::RuntimeNotImplemented, family, route,
+        QStringLiteral("产品合同已登记该路线，但 AITrain C++ Runtime Adapter 尚未实现。"),
+        contract.limitations);
 }
 
 QJsonObject RuntimeCapabilityMatrix::toJson() const
 {
     QJsonArray entries;
-    const QStringList families = {QStringLiteral("yolo_detection"), QStringLiteral("yolo_segmentation"),
-        QStringLiteral("yolo_obb"), QStringLiteral("semantic_segmentation"), QStringLiteral("anomaly_detection"),
-        QStringLiteral("ocr_detection"), QStringLiteral("ocr_recognition")};
-    const QStringList routes = {QStringLiteral("aitrain_onnxruntime"), QStringLiteral("aitrain_ncnn"),
-        QStringLiteral("aitrain_tensorrt"), QStringLiteral("anomalib_python"), QStringLiteral("paddleocr_official")};
-    for (const QString& family : families) {
-        for (const QString& route : routes) entries.append(query({family, route}).toJson());
+    for (const RuntimeRouteContract& route :
+        ProductCapabilityContract::instance().runtimeRoutes()) {
+        entries.append(query({route.modelFamily, route.routeId}).toJson());
     }
     return {{QStringLiteral("entries"), entries}};
 }

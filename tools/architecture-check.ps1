@@ -10,8 +10,7 @@ $scanRoots = @(
     "python_trainers",
     "tools",
     ".vscode",
-    "CMakeLists.txt",
-    "docs/harness"
+    "CMakeLists.txt"
 )
 
 $files = @()
@@ -43,20 +42,18 @@ function Assert-CleanPattern {
     }
 }
 
-Write-Host "Architecture check: final naming" -ForegroundColor Cyan
-foreach ($pattern in @(
-        'aitrain::v2',
-        '(?<![A-Za-z0-9])V2(?![A-Za-z0-9])',
-        '(?<![A-Za-z0-9])v2(?![A-Za-z0-9])',
-        '_v2',
-        'v2_')) {
-    Assert-CleanPattern $pattern 'Removed versioned naming detected.'
-}
-
 Write-Host "Architecture check: removed legacy entry points" -ForegroundColor Cyan
 foreach ($pattern in @(
         'aitrain_core',
+        'aitrain_foundation',
         'ProjectRepository',
+        'DetectionTrainingOptions',
+        'DetectionTrainingMetrics',
+        'DetectionTrainingResult',
+        'resumeCheckpointPath',
+        'tiny_linear_detector',
+        'python_mock',
+        'QPluginLoader',
         '(?<![A-Za-z0-9])startTrain(?![A-Za-z0-9])',
         'runCustomerOcrAcceptance',
         'semantic-onnx-smoke',

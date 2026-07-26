@@ -165,8 +165,15 @@ bool ModelImportService::importModel(const ModelImportRequest& request,
     manifest.sourceArtifactSha256 = hash;
     if (!validateModelManifest(manifest, error)) return fail(error ? *error : QStringLiteral("导入 Manifest 无效。"));
     bool commitCanceled = false;
-    if (!artifactStore_->commit(artifactId, task.id, QStringLiteral("model_import_bundle"), stagingPath,
-            coordinator_->storage(), &artifactPath, error, cancellation, &commitCanceled)) {
+    const ArtifactCommitResult commitResult = artifactStore_->commit(
+        artifactId, task.id, QStringLiteral("model_import_bundle"), stagingPath,
+        coordinator_->storage(), &artifactPath, error, cancellation,
+        &commitCanceled);
+    if (!commitResult) {
+        if (commitResult.status == ArtifactCommitStatus::PendingRecovery) {
+            // rename 后只允许恢复原提交；不得把已提交文件反转成模型导入失败。
+            return false;
+        }
         return commitCanceled
             ? cancel(error ? *error : QStringLiteral("模型导入在 Artifact 提交时已取消。"))
             : fail(error ? *error : QStringLiteral("无法提交导入 Artifact。"));

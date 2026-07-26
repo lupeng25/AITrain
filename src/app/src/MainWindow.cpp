@@ -17,7 +17,7 @@
 #include "WorkspaceRouter.h"
 #include "TaskArtifactPresenter.h"
 #include "aitrain/core/CapabilityRegistry.h"
-#include "aitrain/core/DetectionTrainer.h"
+#include "aitrain/core/VisionModelRuntime.h"
 
 #include <QApplication>
 #include <QCloseEvent>

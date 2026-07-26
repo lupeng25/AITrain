@@ -72,7 +72,7 @@ void WorkerSession::importOcrOfficialReports(const wp::OcrOfficialReportImportCo
     request.evidenceClass = command.evidenceClass.trimmed();
 
     ocrAcceptanceWorkspace_ = std::make_unique<aitrain::ProjectWorkspace>();
-    if (!ocrAcceptanceWorkspace_->open(projectRoot, &error)) {
+    if (!ocrAcceptanceWorkspace_->openForWorkerChild(projectRoot, &error)) {
         ocrAcceptanceWorkspace_.reset();
         ocrAcceptanceTaskId_ = {};
         fail(QStringLiteral("无法打开 OCR Acceptance  工作区：%1").arg(error));
@@ -172,7 +172,7 @@ void WorkerSession::runOcrAcceptanceWorkflow(const wp::OcrAcceptanceCommand& com
     request.minimumSystemAccuracy = thresholds.value(QStringLiteral("minimumSystemAccuracy")).toDouble(0.70);
 
     ocrAcceptanceWorkspace_ = std::make_unique<aitrain::ProjectWorkspace>();
-    if (!ocrAcceptanceWorkspace_->open(projectRoot, &error)) {
+    if (!ocrAcceptanceWorkspace_->openForWorkerChild(projectRoot, &error)) {
         ocrAcceptanceWorkspace_.reset();
         ocrAcceptanceTaskId_ = {};
         fail(QStringLiteral("无法打开 OCR Acceptance  工作区：%1").arg(error));

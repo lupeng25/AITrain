@@ -30,7 +30,7 @@ void WorkerSession::importExternalAcceptanceEvidence(
     activeTaskId_ = taskIdText;
 
     auto workspace = std::make_unique<aitrain::ProjectWorkspace>();
-    if (!workspace->open(projectRoot, &error)) {
+    if (!workspace->openForWorkerChild(projectRoot, &error)) {
         fail(QStringLiteral("无法打开外部验收证据工作区：%1").arg(error));
         return;
     }

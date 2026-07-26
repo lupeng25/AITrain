@@ -181,7 +181,7 @@ Common SMP semantic segmentation parameters:
 - `imageSize` / `imgsz`
 - `device`: `cpu` or CUDA device
 - `numClasses`, `ignoreIndex`, and class metadata from `classes.txt`
-- `pythonExecutable`: optional Python path for SMP training/evaluation
+- Python 解释器不属于 Task 参数；SMP 由 `smp_semantic_segmentation` Profile 统一解析。
 
 Common Anomalib parameters:
 
@@ -189,12 +189,12 @@ Common Anomalib parameters:
 - `backbone`, `layers`, `coresetSamplingRatio`, and `numNeighbors` for PatchCore
 - `modelSize=small|medium` for EfficientAD; any other value is rejected as an invalid request
 - `imagenetDir` or `AITRAIN_ANOMALIB_IMAGENET_DIR` for EfficientAD auxiliary data
-- `threshold`, `imageSize`, `batchSize`, `device`, and `pythonExecutable`
+- `threshold`、`imageSize`、`batchSize` 与 `device`
 
 Common YOLO evaluation options:
 
 - `ultralyticsValArgs`: optional JSON object passed through the official evaluator after whitelist validation. Supported keys include `split`, `batch`, `imgsz`, `device`, `workers`, `conf`, `iou`, `max_det`, `half`, `dnn`, `plots`, `save_json`, `save_txt`, `save_conf`, `rect`, `classes`, `single_cls`, `augment`, `agnostic_nms`, `visualize`, and `end2end`.
-- `pythonExecutable`: optional Python path for official evaluation.
+- 官方评估与训练使用同一个 Profile resolver，不接受任务级解释器路径。
 - `pythonPathPrepend`: optional test/dev-only module path injection.
 
 Common official PaddleOCR Rec parameters:
@@ -205,7 +205,7 @@ Common official PaddleOCR Rec parameters:
 - `modelPreset`: `PP-OCRv4_mobile_rec`, `PP-OCRv5_mobile_rec`, `PP-OCRv5_server_rec`, `en_PP-OCRv5_mobile_rec`, `PP-OCRv6_tiny_rec`, `PP-OCRv6_small_rec`, or `PP-OCRv6_medium_rec`.
 - `officialConfig`: optional official config source path.
 - `pretrainedModel`: optional pretrained/export input checkpoint.
-- `resumeCheckpoint`: optional official resume checkpoint.
+- 当前不接受 `resumeCheckpoint`；未来恢复能力只能基于 ArtifactId 或 ModelPackageId 另行设计。
 - `exportOnly`: skip train and run export from an existing checkpoint.
 - `runInferenceAfterExport`: run official recognition inference after export.
 - `inferenceImage`: sample image for official recognition inference.
@@ -218,7 +218,7 @@ Common official PaddleOCR Det parameters:
 - `modelPreset`: `PP-OCRv4_mobile_det`, `PP-OCRv5_mobile_det`, `PP-OCRv5_server_det`, `PP-OCRv6_tiny_det`, `PP-OCRv6_small_det`, or `PP-OCRv6_medium_det`.
 - `officialConfig`: optional official config source path.
 - `pretrainedModel`: optional pretrained/export input checkpoint.
-- `resumeCheckpoint`: optional official resume checkpoint.
+- 当前不接受 `resumeCheckpoint`；未来恢复能力只能基于 ArtifactId 或 ModelPackageId 另行设计。
 - `exportOnly`: skip train and run export from an existing checkpoint.
 - `imageSize`: generated detection image size.
 

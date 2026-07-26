@@ -63,7 +63,7 @@
 
 如果环境自检失败，先按“环境”页的修复建议处理，再启动训练、导出或推理。不要把缺少依赖的训练失败当作数据集或模型问题。
 
-如果训练参数使用 `device=0` 或其他 GPU 设备号，YOLO Python 环境必须安装 CUDA 版 PyTorch。CPU-only 环境只能使用 `device=cpu`，否则会在训练前失败。现场可通过训练参数 `pythonExecutable` 或环境变量 `AITRAIN_PYTHON_EXECUTABLE` 指向已验证的 CUDA YOLO Python。
+如果训练参数使用 `device=0` 或其他 GPU 设备号，YOLO Python 环境必须安装 CUDA 版 PyTorch。CPU-only 环境只能使用 `device=cpu`，否则会在训练前失败。解释器由 Python Profile 统一解析：优先读取 `AITRAIN_YOLO_PYTHON_EXECUTABLE`，其次读取 `AITRAIN_PYTHON_EXECUTABLE`，不再接受任务参数指定解释器。
 
 ## 4. 制作数据集
 
@@ -238,7 +238,7 @@ images/sample.png<TAB>[{"transcription":"text","points":[[1,1],[30,1],[30,20],[1
 3. 选择训练后端。
 4. 选择或输入模型预设。
 5. 设置 Epochs、Batch Size、Image Size。
-6. 如需继续训练，在“高级 / 诊断后端”中选择 Resume checkpoint。
+6. 当前版本不提供 Resume。需要继续训练时应重新发起任务；未来只会基于 ArtifactId 或 ModelPackageId 设计正式恢复能力。
 7. 点击“启动训练”。
 8. 在“训练监控”查看进度和指标曲线。
 9. 在“训练日志”和“任务与产物”查看日志、checkpoint、报告、ONNX 和预览图。

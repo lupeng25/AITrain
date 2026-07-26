@@ -74,7 +74,7 @@ void DatasetCatalogPresenterTests::exposesNewestSnapshotIdentityWithoutPaths()
     const QString projectRoot = directory.filePath(QStringLiteral("project"));
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(projectRoot, &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(projectRoot, &error), qPrintable(error));
 
     aitrain::ProjectStore storage;
     QVERIFY2(storage.open(QDir(projectRoot).filePath(QStringLiteral(".aitrain/project.sqlite")), &error),

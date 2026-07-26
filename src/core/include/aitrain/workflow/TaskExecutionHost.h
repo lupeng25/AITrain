@@ -47,7 +47,8 @@ private:
     bool consumeTerminalEvent(const ProtocolEnvelope& event, const ArtifactId& outputArtifactId, QString* error);
     bool startAdapter(const PythonAdapterLaunch& launch, bool terminalizeStartFailure, QString* error);
     bool stageArtifactCandidate(const ProtocolEnvelope& event, QString* error);
-    bool commitArtifactBundle(ArtifactId* outputArtifactId, QString* error);
+    bool commitArtifactBundle(ArtifactId* outputArtifactId,
+        ArtifactCommitResult* commitResult, QString* error);
     void abortArtifactBundle();
 
     TaskCoordinator* coordinator_ = nullptr;

@@ -40,7 +40,7 @@ void WorkerSession::runDatasetConversionWorkflow(const wp::DatasetConversionComm
     datasetConversionTaskId_ = taskId;
 
     datasetConversionWorkspace_ = std::make_unique<aitrain::ProjectWorkspace>();
-    if (!datasetConversionWorkspace_->open(projectRoot, &error)) {
+    if (!datasetConversionWorkspace_->openForWorkerChild(projectRoot, &error)) {
         datasetConversionWorkspace_.reset();
         datasetConversionTaskId_ = {};
         fail(QStringLiteral("无法打开 Dataset Conversion  工作区：%1").arg(error));

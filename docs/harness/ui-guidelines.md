@@ -1,5 +1,9 @@
 # UI Guidelines
 
+## 页面与状态所有权
+
+固定页面为 Dashboard、Project、Dataset、Training、Task & Artifact、Model Registry、Runtime Delivery、Environment、Settings。`MainWindow` 只承担 App Shell；页面视觉状态属于 Widget，表单与命令构造属于 Controller，持久化事实属于 Presenter/Query，Worker 瞬时状态属于 `TaskRuntimeController`。不得恢复 Resume 控件，也不得向 UI 暴露 committed 物理路径。
+
 ## 设计方向
 
 AITrain Studio 的 UI 定位是本地视觉训练工作台，不是营销页。

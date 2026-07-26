@@ -70,6 +70,7 @@ private slots:
     void rejectsMismatchedStagingIdentity();
     void recoveryCompletesEvidenceCommitAfterDirectoryRename();
     void recoveryCleansJournalAfterDatabaseCommit();
+    void discardUsesTrashAndRecoveryRestoresDatabaseOwnedArtifact();
 };
 
 void ArtifactStoreTests::commitsVerifiedArtifactAtomically()
@@ -228,8 +229,10 @@ void ArtifactStoreTests::recoveryCompletesEvidenceCommitAfterDirectoryRename()
     QString stagingPath;
     QVERIFY2(interrupted.begin(task.id, QStringLiteral("evidence_bundle"), &artifactId, &stagingPath, &error), qPrintable(error));
     QVERIFY(writeFile(QDir(stagingPath).filePath(QStringLiteral("evidence.json")), QByteArray("{}")));
-    QVERIFY(!interrupted.commit(artifactId, task.id, QStringLiteral("evidence_bundle"), stagingPath,
-        &storage, nullptr, &error, {}, nullptr, workflow.id));
+    const aitrain::ArtifactCommitResult pending = interrupted.commit(
+        artifactId, task.id, QStringLiteral("evidence_bundle"), stagingPath,
+        &storage, nullptr, &error, {}, nullptr, workflow.id);
+    QCOMPARE(pending.status, aitrain::ArtifactCommitStatus::PendingRecovery);
     bool exists = true;
     QVERIFY2(storage.artifactExists(artifactId, &exists, &error), qPrintable(error));
     QVERIFY(!exists);
@@ -274,8 +277,11 @@ void ArtifactStoreTests::recoveryCleansJournalAfterDatabaseCommit()
     QString stagingPath;
     QVERIFY2(interrupted.begin(task.id, QStringLiteral("evidence_bundle"), &artifactId, &stagingPath, &error), qPrintable(error));
     QVERIFY(writeFile(QDir(stagingPath).filePath(QStringLiteral("evidence.json")), QByteArray("{}")));
-    QVERIFY(!interrupted.commit(artifactId, task.id, QStringLiteral("evidence_bundle"), stagingPath,
-        &storage, nullptr, &error, {}, nullptr, workflow.id));
+    const aitrain::ArtifactCommitResult committed = interrupted.commit(
+        artifactId, task.id, QStringLiteral("evidence_bundle"), stagingPath,
+        &storage, nullptr, &error, {}, nullptr, workflow.id);
+    QCOMPARE(committed.status, aitrain::ArtifactCommitStatus::Committed);
+    QVERIFY(committed.cleanupPending);
     bool exists = false;
     QVERIFY2(storage.artifactExists(artifactId, &exists, &error), qPrintable(error));
     QVERIFY(exists);
@@ -291,6 +297,43 @@ void ArtifactStoreTests::recoveryCleansJournalAfterDatabaseCommit()
     aitrain::WorkflowTerminalizationSnapshot terminalization;
     QVERIFY2(storage.workflowTerminalization(workflow.id, &terminalization, &error), qPrintable(error));
     QCOMPARE(terminalization.state, aitrain::WorkflowTerminalizationState::EvidenceAttached);
+}
+
+void ArtifactStoreTests::discardUsesTrashAndRecoveryRestoresDatabaseOwnedArtifact()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    aitrain::ProjectStore storage;
+    QString error;
+    QVERIFY2(storage.open(directory.filePath(QStringLiteral("project.sqlite")), &error), qPrintable(error));
+    const aitrain::TaskSnapshot task = createTask(&storage);
+    const QString storeRoot = directory.filePath(QStringLiteral("store"));
+    aitrain::ArtifactStore artifacts(storeRoot);
+    aitrain::ArtifactId artifactId;
+    QString stagingPath;
+    QString committedPath;
+    QVERIFY2(artifacts.begin(task.id, QStringLiteral("report"), &artifactId, &stagingPath, &error), qPrintable(error));
+    QVERIFY(writeFile(QDir(stagingPath).filePath(QStringLiteral("report.json")), QByteArray("{}")));
+    QVERIFY2(artifacts.commit(artifactId, task.id, QStringLiteral("report"), stagingPath,
+        &storage, &committedPath, &error), qPrintable(error));
+
+    const QString trashPath = QDir(storeRoot).filePath(
+        QStringLiteral(".trash/%1").arg(artifactId.toString()));
+    QVERIFY(QDir().mkpath(QFileInfo(trashPath).absolutePath()));
+    QVERIFY(QDir().rename(committedPath, trashPath));
+    QStringList diagnostics;
+    QVERIFY2(artifacts.recoverStaging(&storage, &diagnostics, &error), qPrintable(error));
+    QVERIFY(QDir(committedPath).exists());
+    QVERIFY(!QFileInfo::exists(trashPath));
+
+    const aitrain::ArtifactDiscardResult discarded =
+        artifacts.discardCommitted(artifactId, &storage, &error);
+    QCOMPARE(discarded.status, aitrain::ArtifactDiscardStatus::Discarded);
+    bool exists = true;
+    QVERIFY2(storage.artifactExists(artifactId, &exists, &error), qPrintable(error));
+    QVERIFY(!exists);
+    QVERIFY(!QFileInfo::exists(committedPath));
+    QVERIFY(!QFileInfo::exists(trashPath));
 }
 
 QTEST_MAIN(ArtifactStoreTests)

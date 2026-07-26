@@ -6,7 +6,7 @@
 #include "InfoPanel.h"
 #include "LanguageSupport.h"
 #include "MainWindowSupport.h"
-#include "aitrain/core/DetectionTrainer.h"
+#include "aitrain/core/VisionModelRuntime.h"
 #include "aitrain/core/WorkerProtocol.h"
 
 #include <QApplication>
@@ -87,7 +87,6 @@ DatasetConversionValidation translatedValidation(DatasetConversionValidation val
     validation.sourceFormatError = translatedText(validation.sourceFormatError);
     validation.targetFormatError = translatedText(validation.targetFormatError);
     validation.inputPathError = translatedText(validation.inputPathError);
-    validation.outputPathError = translatedText(validation.outputPathError);
     QStringList messages;
     for (const QString& message : validation.messages) {
         messages.append(translatedText(message));

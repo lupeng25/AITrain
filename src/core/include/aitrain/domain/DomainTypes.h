@@ -71,6 +71,7 @@ struct SnapshotIdTag final {};
 struct ModelPackageIdTag final {};
 struct WorkflowRunIdTag final {};
 struct WorkflowStepIdTag final {};
+struct ProjectIdTag final {};
 
 using TaskId = Identifier<TaskIdTag>;
 using RequestId = Identifier<RequestIdTag>;
@@ -82,6 +83,7 @@ using SnapshotId = Identifier<SnapshotIdTag>;
 using ModelPackageId = Identifier<ModelPackageIdTag>;
 using WorkflowRunId = Identifier<WorkflowRunIdTag>;
 using WorkflowStepId = Identifier<WorkflowStepIdTag>;
+using ProjectId = Identifier<ProjectIdTag>;
 
 enum class TaskState {
     Created,

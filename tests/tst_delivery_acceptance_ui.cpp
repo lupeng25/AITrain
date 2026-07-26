@@ -202,30 +202,27 @@ void EnvironmentDeliveryEvidenceUiTests::projectOpenPreparedTokenRejectsMutation
 
     aitrain::ProjectWorkspace current;
     QString error;
-    QVERIFY2(current.open(first.path(), &error), qPrintable(error));
+    QVERIFY2(current.createProject(first.path(), &error), qPrintable(error));
 
-    // 修改已有 staging 文件且保持大小不变，不能依赖父目录 mtime/文件大小
-    // 指纹放行；prepared token 必须覆盖文件内容。
     aitrain::ProjectWorkspace secondInitializer;
-    QVERIFY2(secondInitializer.open(second.path(), &error), qPrintable(error));
-    const QString fingerprintedStaging = QDir(secondInitializer.workspacePath()).filePath(
-        QStringLiteral("artifacts/.staging/%1/input.bin")
-            .arg(QUuid::createUuid().toString(QUuid::Id128)));
-    QVERIFY(QDir().mkpath(QFileInfo(fingerprintedStaging).absolutePath()));
-    QFile stagingFile(fingerprintedStaging);
-    QVERIFY(stagingFile.open(QIODevice::WriteOnly));
-    QVERIFY(stagingFile.write("aaaa") == 4);
-    stagingFile.close();
+    QVERIFY2(secondInitializer.createProject(second.path(), &error), qPrintable(error));
+    const QString secondDatabase = QDir(secondInitializer.workspacePath())
+        .filePath(QStringLiteral("project.sqlite"));
     secondInitializer.close();
 
-    aitrain::ProjectWorkspacePreparedOpen prepared;
+    aitrain::PreparedProjectSession prepared;
     QVERIFY2(aitrain::ProjectWorkspace::prepareOpen(second.path(), &prepared, &error),
         qPrintable(error));
     QVERIFY(prepared.isValid());
 
-    QVERIFY(stagingFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
-    QVERIFY(stagingFile.write("bbbb") == 4);
-    stagingFile.close();
+    // 激活只复核 ProjectId + openGeneration，不再读取 DB/WAL/staging 全量
+    // 指纹。模拟票据生成后 generation 变化，候选必须被拒绝且当前 Session
+    // 保持原样。
+    aitrain::ProjectStore concurrentStore;
+    QVERIFY2(concurrentStore.open(secondDatabase, &error), qPrintable(error));
+    aitrain::ProjectMetaSnapshot advanced;
+    QVERIFY2(concurrentStore.advanceOpenGeneration(&advanced, &error), qPrintable(error));
+    concurrentStore.close();
 
     QVERIFY(!current.openPrepared(prepared, &error));
     QCOMPARE(current.workspacePath(),

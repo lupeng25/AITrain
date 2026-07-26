@@ -38,7 +38,11 @@ function(add_aitrain_qt_test target source)
 
     target_link_libraries(${target}
         PRIVATE
-            aitrain_foundation
+            aitrain_vision_data
+            aitrain_annotation_integration
+            aitrain_dataset_conversion
+            aitrain_model_export
+            aitrain_vision_runtime
             aitrain_capability_registry
             aitrain_license
             aitrain_worker_protocol
@@ -93,6 +97,11 @@ add_aitrain_qt_test(aitrain_detection_inference_tests tst_detection_inference.cp
 add_aitrain_qt_test(aitrain_ocr_segmentation_worker_tests tst_ocr_segmentation_worker.cpp)
 target_link_libraries(aitrain_ocr_segmentation_worker_tests PRIVATE
     aitrain_application aitrain_storage aitrain_protocol)
+
+add_executable(aitrain_worker_runtime_tests tst_worker_runtime.cpp)
+target_link_libraries(aitrain_worker_runtime_tests PRIVATE
+    aitrain_worker_runtime Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Test)
+add_test(NAME aitrain_worker_runtime_tests COMMAND aitrain_worker_runtime_tests)
 
 add_executable(aitrain_domain_tests
     tst_domain.cpp
@@ -189,7 +198,7 @@ add_executable(aitrain_diagnostics_tests
 )
 target_include_directories(aitrain_diagnostics_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/app/src)
 target_link_libraries(aitrain_diagnostics_tests PRIVATE
-    aitrain_application aitrain_foundation aitrain_worker_protocol Qt${QT_VERSION_MAJOR}::Core
+    aitrain_application aitrain_vision_runtime aitrain_worker_protocol Qt${QT_VERSION_MAJOR}::Core
     Qt${QT_VERSION_MAJOR}::Sql Qt${QT_VERSION_MAJOR}::Test)
 set(diagnostics_test_output "${CMAKE_BINARY_DIR}/tests/aitrain_diagnostics_tests_ctest.txt")
 add_test(NAME aitrain_diagnostics_tests
@@ -583,7 +592,11 @@ target_include_directories(aitrain_delivery_acceptance_ui_tests
 
 target_link_libraries(aitrain_delivery_acceptance_ui_tests
     PRIVATE
-        aitrain_foundation
+        aitrain_vision_data
+        aitrain_annotation_integration
+        aitrain_dataset_conversion
+        aitrain_model_export
+        aitrain_vision_runtime
         aitrain_worker_protocol
         aitrain_license
         aitrain_application
@@ -633,42 +646,36 @@ aitrain_copy_ncnn_runtime(aitrain_delivery_acceptance_ui_tests)
 aitrain_copy_tensorrt_runtime(aitrain_delivery_acceptance_ui_tests)
 aitrain_copy_qt_platform_runtime(aitrain_delivery_acceptance_ui_tests)
 
-find_package(Python3 COMPONENTS Interpreter QUIET)
+find_package(Python3 COMPONENTS Interpreter
+    ${AITRAIN_REQUIRE_PYTHON_TESTS_REQUIRED_QUIET})
+if(AITRAIN_REQUIRE_PYTHON_TESTS AND NOT Python3_Interpreter_FOUND)
+    message(FATAL_ERROR "AITRAIN_REQUIRE_PYTHON_TESTS=ON，但未找到 Python 解释器。")
+endif()
 if(Python3_Interpreter_FOUND)
-    add_test(NAME aitrain_yolo_telemetry_python_tests
-        COMMAND "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/test_yolo_telemetry.py" -q
-    )
-    set_tests_properties(aitrain_yolo_telemetry_python_tests PROPERTIES
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    )
-    add_test(NAME aitrain_smp_semantic_python_tests
-        COMMAND "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/test_smp_semantic_segmentation.py" -q
-    )
-    set_tests_properties(aitrain_smp_semantic_python_tests PROPERTIES
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    )
-    add_test(NAME aitrain_anomalib_adapter_python_tests
-        COMMAND "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/test_anomalib_adapter.py" -q
-    )
-    set_tests_properties(aitrain_anomalib_adapter_python_tests PROPERTIES
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    )
-    add_test(NAME aitrain_adapter_sdk_python_tests
-        COMMAND "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/test_adapter_sdk.py" -q
-    )
-    set_tests_properties(aitrain_adapter_sdk_python_tests PROPERTIES
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    )
-    add_test(NAME aitrain_paddleocr_python_tests
-        COMMAND "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/test_paddleocr.py" -q
-    )
-    set_tests_properties(aitrain_paddleocr_python_tests PROPERTIES
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    )
-    add_test(NAME aitrain_paddleocr_system_python_tests
-        COMMAND "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/test_paddleocr_system.py" -q
-    )
-    set_tests_properties(aitrain_paddleocr_system_python_tests PROPERTIES
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    )
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" -c "import pytest"
+        RESULT_VARIABLE AITRAIN_PYTEST_IMPORT_RESULT
+        OUTPUT_QUIET
+        ERROR_QUIET)
+    if(AITRAIN_REQUIRE_PYTHON_TESTS AND NOT AITRAIN_PYTEST_IMPORT_RESULT EQUAL 0)
+        message(FATAL_ERROR "AITRAIN_REQUIRE_PYTHON_TESTS=ON，但 Python 环境缺少 pytest。")
+    endif()
+endif()
+if(Python3_Interpreter_FOUND AND AITRAIN_PYTEST_IMPORT_RESULT EQUAL 0)
+    add_test(NAME aitrain_python_tests
+        COMMAND "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}" -q)
+    set_tests_properties(aitrain_python_tests PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    add_test(NAME aitrain_python_compileall
+        COMMAND "${Python3_EXECUTABLE}" -m compileall -q
+            "${CMAKE_SOURCE_DIR}/python_trainers")
+    set_tests_properties(aitrain_python_compileall PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    add_test(NAME aitrain_python_trainer_sync
+        COMMAND "${CMAKE_COMMAND}"
+            -DAITRAIN_PYTHON_TRAINERS_SOURCE=${CMAKE_SOURCE_DIR}/python_trainers
+            -DAITRAIN_PYTHON_TRAINERS_DESTINATION=${CMAKE_BINARY_DIR}/bin/python_trainers
+            -DAITRAIN_BUILD_ROOT=${CMAKE_BINARY_DIR}
+            -DAITRAIN_SYNC_SCRIPT=${CMAKE_SOURCE_DIR}/cmake/SyncPythonTrainers.cmake
+            -P ${CMAKE_SOURCE_DIR}/cmake/TestSyncPythonTrainers.cmake)
 endif()

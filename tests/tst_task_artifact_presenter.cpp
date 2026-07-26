@@ -33,7 +33,7 @@ void TaskArtifactPresenterTests::readsPersistedTaskArtifactsMetricsAndWorkflowOn
     const QString projectRoot = directory.filePath(QStringLiteral("project"));
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(projectRoot, &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(projectRoot, &error), qPrintable(error));
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     aitrain::TaskSnapshot task;
     QVERIFY2(workspace.startTask(taskId, QStringLiteral("yolo.detect"),
@@ -133,7 +133,7 @@ void TaskArtifactPresenterTests::readsCommittedArtifactPreviewByIdentity()
     QVERIFY(directory.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     aitrain::TaskSnapshot task;
     QVERIFY2(workspace.startTask(taskId, QStringLiteral("preview"), QStringLiteral("report"), &task, &error),
@@ -173,7 +173,7 @@ void TaskArtifactPresenterTests::readsCommittedArtifactPreviewAsynchronouslyWith
     QVERIFY(directory.isValid());
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     aitrain::TaskSnapshot task;
     QVERIFY2(workspace.startTask(taskId, QStringLiteral("preview_async"), QStringLiteral("report"),

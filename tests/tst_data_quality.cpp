@@ -132,7 +132,7 @@ void DataQualityTests::yoloDetectionProducesFourArtifactsAndEvidence()
     QVERIFY(writeBytes(QDir(root).filePath(QStringLiteral("labels/val/b.txt")), "0 0.5 0.5 0.5 0.5\n"));
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
     const auto snapshot = commitSnapshot(&workspace, root, QStringLiteral("yolo_detection"), &error);
     QVERIFY2(snapshot.snapshot.id.isValid(), qPrintable(error));
     const QByteArray originalLabel = QFile(QDir(root).filePath(QStringLiteral("labels/train/a.txt"))).exists()
@@ -209,7 +209,7 @@ void DataQualityTests::paddleOcrRecUsesStableIssueContract()
         "images/a.png\tabcabc\nimages/b.png\tab\n"));
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY(workspace.open(directory.filePath(QStringLiteral("project")), &error));
+    QVERIFY(workspace.createProject(directory.filePath(QStringLiteral("project")), &error));
     const auto snapshot = commitSnapshot(&workspace, root, QStringLiteral("paddleocr_rec"), &error);
     QVERIFY2(snapshot.snapshot.id.isValid(), qPrintable(error));
     const auto taskId = startQualityTask(&workspace, &error);
@@ -284,7 +284,7 @@ void DataQualityTests::remainingDriverFormatsUseStableConservativeRules()
 
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY2(workspace.open(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("project")), &error), qPrintable(error));
     const auto snapshot = commitSnapshot(&workspace, root, format, &error);
     QVERIFY2(snapshot.snapshot.id.isValid(), qPrintable(error));
     const auto taskId = startQualityTask(&workspace, &error);
@@ -324,7 +324,7 @@ void DataQualityTests::changedSnapshotSourceFailsWithEvidence()
     QVERIFY(writeBytes(QDir(root).filePath(QStringLiteral("labels/val/b.txt")), "0 0.5 0.5 0.5 0.5\n"));
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY(workspace.open(directory.filePath(QStringLiteral("project")), &error));
+    QVERIFY(workspace.createProject(directory.filePath(QStringLiteral("project")), &error));
     const auto snapshot = commitSnapshot(&workspace, root, QStringLiteral("yolo_detection"), &error);
     // 外部导入根在 Snapshot 提交后不再是业务输入；这里直接篡改 committed
     // Artifact，验证完整性门禁，而不是继续假设源目录变化会影响不可变快照。
@@ -353,7 +353,7 @@ void DataQualityTests::cancellationHasUniqueCanceledTerminalAndEvidence()
     QVERIFY(writeBytes(QDir(root).filePath(QStringLiteral("rec_gt.txt")), "images/a.png\ta\n"));
     aitrain::ProjectWorkspace workspace;
     QString error;
-    QVERIFY(workspace.open(directory.filePath(QStringLiteral("project")), &error));
+    QVERIFY(workspace.createProject(directory.filePath(QStringLiteral("project")), &error));
     const auto snapshot = commitSnapshot(&workspace, root, QStringLiteral("paddleocr_rec"), &error);
     const auto taskId = startQualityTask(&workspace, &error);
     aitrain::DataQualityWorkflowResult result;
