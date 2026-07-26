@@ -10,6 +10,8 @@
 #include <QTemporaryDir>
 #include <QTest>
 
+#include <algorithm>
+
 namespace {
 
 aitrain::TaskSnapshot makeTask()
@@ -91,6 +93,8 @@ class StorageTests : public QObject {
 private slots:
     void createAndTransitionTaskAtomically();
     void listsTasksAndWorkflowRunsForReadModels();
+    void paginatesTasksWithOpaqueKeysetCursor();
+    void paginatesTaskHistoryWithTypedKeysetCursors();
     void persistsCompleteTaskFailure();
     void rejectsInvalidCasAndRecoversInterruptedTask();
     void recoversCancelRequestedInterruptionAsCanceled();
@@ -158,16 +162,143 @@ void StorageTests::listsTasksAndWorkflowRunsForReadModels()
     const aitrain::WorkflowRunSnapshot workflow = createWorkflow(storage, older.id, &step, &error);
     QVERIFY2(workflow.id.isValid(), qPrintable(error));
 
-    const QVector<aitrain::TaskSnapshot> tasks = storage.tasks(10, &error);
+    const QVector<aitrain::TaskSnapshot> tasks =
+        storage.tasks(aitrain::PageRequest{10, {}}, &error).items;
     QCOMPARE(tasks.size(), 2);
     QCOMPARE(tasks.at(0).id, newer.id);
     QCOMPARE(tasks.at(1).id, older.id);
-    const QVector<aitrain::WorkflowRunSnapshot> workflows = storage.workflowRunsForTask(older.id, &error);
+    const QVector<aitrain::WorkflowRunSnapshot> workflows =
+        storage.workflowRunsForTask(older.id, {50, {}}, &error).items;
     QCOMPARE(workflows.size(), 1);
     QCOMPARE(workflows.first().id, workflow.id);
     QCOMPARE(workflows.first().taskId, older.id);
-    QVERIFY(storage.workflowRunsForTask(newer.id, &error).isEmpty());
+    QVERIFY(storage.workflowRunsForTask(newer.id, {50, {}}, &error).items.isEmpty());
     QVERIFY(error.isEmpty());
+}
+
+void StorageTests::paginatesTasksWithOpaqueKeysetCursor()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    aitrain::ProjectStore storage;
+    QString error;
+    QVERIFY2(storage.open(directory.filePath(QStringLiteral("project.sqlite")), &error),
+        qPrintable(error));
+
+    const QDateTime timestamp =
+        QDateTime::fromString(QStringLiteral("2026-07-26T08:00:00.000Z"), Qt::ISODateWithMs);
+    QVector<aitrain::TaskId> expected;
+    for (int index = 0; index < 5; ++index) {
+        aitrain::TaskSnapshot task = makeTask();
+        task.createdAt = timestamp;
+        task.updatedAt = timestamp;
+        QVERIFY2(storage.createTask(task, &error), qPrintable(error));
+        expected.append(task.id);
+    }
+    std::sort(expected.begin(), expected.end(), [](const auto& left, const auto& right) {
+        return left.toString() > right.toString();
+    });
+
+    const auto first = storage.tasks({2, {}}, &error);
+    QCOMPARE(first.items.size(), 2);
+    QVERIFY(first.hasMore);
+    QVERIFY(!first.nextCursor.isEmpty());
+    const auto second = storage.tasks({2, first.nextCursor}, &error);
+    QCOMPARE(second.items.size(), 2);
+    QVERIFY(second.hasMore);
+    const auto third = storage.tasks({2, second.nextCursor}, &error);
+    QCOMPARE(third.items.size(), 1);
+    QVERIFY(!third.hasMore);
+
+    QVector<aitrain::TaskId> actual;
+    for (const auto& task : first.items) actual.append(task.id);
+    for (const auto& task : second.items) actual.append(task.id);
+    for (const auto& task : third.items) actual.append(task.id);
+    QCOMPARE(actual, expected);
+
+    error.clear();
+    QVERIFY(storage.tasks({0, {}}, &error).items.isEmpty());
+    QCOMPARE(storage.lastErrorCode(), aitrain::ProjectErrorCode::InvalidPageCursor);
+    error.clear();
+    QVERIFY(storage.tasks({2, QStringLiteral("not-a-cursor")}, &error).items.isEmpty());
+    QCOMPARE(storage.lastErrorCode(), aitrain::ProjectErrorCode::InvalidPageCursor);
+}
+
+void StorageTests::paginatesTaskHistoryWithTypedKeysetCursors()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    aitrain::ProjectStore storage;
+    QString error;
+    QVERIFY2(storage.open(directory.filePath(QStringLiteral("project.sqlite")), &error),
+        qPrintable(error));
+
+    const aitrain::TaskSnapshot task = makeTask();
+    QVERIFY2(storage.createTask(task, &error), qPrintable(error));
+    const QDateTime base =
+        QDateTime::fromString(QStringLiteral("2026-07-26T09:00:00.000Z"), Qt::ISODateWithMs);
+
+    QVector<aitrain::ArtifactId> expectedArtifacts;
+    for (int index = 0; index < 5; ++index) {
+        const aitrain::ArtifactId artifactId = aitrain::ArtifactId::create();
+        QVERIFY2(storage.recordArtifact(artifactId, task.id, QStringLiteral("report"),
+            base.addMSecs(index), &error), qPrintable(error));
+        expectedArtifacts.append(artifactId);
+        QVERIFY2(storage.recordMetric(task.id, QStringLiteral("metric_%1").arg(index),
+            index, base.addMSecs(index), &error), qPrintable(error));
+
+        aitrain::WorkflowRunSnapshot workflow;
+        workflow.id = aitrain::WorkflowRunId::create();
+        workflow.taskId = task.id;
+        workflow.templateId = QStringLiteral("history_%1").arg(index);
+        workflow.terminalPolicy = aitrain::WorkflowTerminalPolicy::Immediate;
+        workflow.createdAt = base.addMSecs(index);
+        aitrain::WorkflowStepSnapshot step;
+        step.id = aitrain::WorkflowStepId::create();
+        step.workflowRunId = workflow.id;
+        step.ordinal = 0;
+        step.kind = QStringLiteral("Inspect");
+        step.backend = QStringLiteral("application");
+        QVERIFY2(storage.createWorkflowRun(workflow, {step}, &error), qPrintable(error));
+    }
+
+    const auto artifactFirst = storage.artifactsForTask(task.id, {2, {}}, &error);
+    const auto artifactSecond =
+        storage.artifactsForTask(task.id, {2, artifactFirst.nextCursor}, &error);
+    const auto artifactThird =
+        storage.artifactsForTask(task.id, {2, artifactSecond.nextCursor}, &error);
+    QVERIFY(artifactFirst.hasMore);
+    QVERIFY(artifactSecond.hasMore);
+    QVERIFY(!artifactThird.hasMore);
+    QVector<aitrain::ArtifactId> actualArtifacts;
+    for (const auto& item : artifactFirst.items) actualArtifacts.append(item.id);
+    for (const auto& item : artifactSecond.items) actualArtifacts.append(item.id);
+    for (const auto& item : artifactThird.items) actualArtifacts.append(item.id);
+    QCOMPARE(actualArtifacts, expectedArtifacts);
+
+    const auto metricFirst = storage.metricsForTask(task.id, {2, {}}, &error);
+    const auto metricSecond =
+        storage.metricsForTask(task.id, {2, metricFirst.nextCursor}, &error);
+    const auto metricThird =
+        storage.metricsForTask(task.id, {2, metricSecond.nextCursor}, &error);
+    QCOMPARE(metricFirst.items.size() + metricSecond.items.size() + metricThird.items.size(), 5);
+    QCOMPARE(metricFirst.items.first().name, QStringLiteral("metric_0"));
+    QCOMPARE(metricThird.items.last().name, QStringLiteral("metric_4"));
+
+    const auto workflowFirst = storage.workflowRunsForTask(task.id, {2, {}}, &error);
+    const auto workflowSecond =
+        storage.workflowRunsForTask(task.id, {2, workflowFirst.nextCursor}, &error);
+    const auto workflowThird =
+        storage.workflowRunsForTask(task.id, {2, workflowSecond.nextCursor}, &error);
+    QCOMPARE(workflowFirst.items.size() + workflowSecond.items.size()
+        + workflowThird.items.size(), 5);
+    QCOMPARE(workflowFirst.items.first().templateId, QStringLiteral("history_0"));
+    QCOMPARE(workflowThird.items.last().templateId, QStringLiteral("history_4"));
+
+    error.clear();
+    QVERIFY(storage.metricsForTask(task.id, {2, artifactFirst.nextCursor}, &error)
+        .items.isEmpty());
+    QCOMPARE(storage.lastErrorCode(), aitrain::ProjectErrorCode::InvalidPageCursor);
 }
 
 void StorageTests::persistsCompleteTaskFailure()
@@ -422,11 +553,12 @@ void StorageTests::listsRegisteredModelPackagesNewestFirst()
     newer.createdAt = QDateTime::currentDateTimeUtc();
     QVERIFY2(storage.registerModelPackage(newer, &error), qPrintable(error));
 
-    const QVector<aitrain::ModelPackageSnapshot> listed = storage.modelPackages(1, &error);
+    const QVector<aitrain::ModelPackageSnapshot> listed =
+        storage.modelPackages({1, {}}, &error).items;
     QCOMPARE(listed.size(), 1);
     QCOMPARE(listed.first().manifest.modelPackageId, newer.manifest.modelPackageId);
-    QVERIFY(storage.modelPackages(0, &error).isEmpty());
-    QVERIFY(error.contains(QStringLiteral("limit")));
+    QVERIFY(storage.modelPackages({0, {}}, &error).items.isEmpty());
+    QVERIFY(error.contains(QStringLiteral("InvalidPageCursor")));
 }
 
 void StorageTests::persistsWorkflowStepsWithArtifactAndRetryGuards()
@@ -732,7 +864,7 @@ void StorageTests::listsDatasetCatalogThroughVersionJoin()
     const auto newer = registerSnapshot(QLatin1Char('3'), 2);
     QVERIFY2(newer.id.isValid(), qPrintable(error));
 
-    const auto items = storage.datasets(10, &error);
+    const auto items = storage.datasets({10, {}}, &error).items;
     QVERIFY2(error.isEmpty(), qPrintable(error));
     QCOMPARE(items.size(), 1);
     QCOMPARE(items.first().datasetId, datasetId);

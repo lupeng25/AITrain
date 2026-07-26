@@ -4,7 +4,6 @@
 
 #include <QDir>
 #include <QCryptographicHash>
-#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
@@ -196,13 +195,14 @@ RuntimeOperationResult NcnnRuntimeAdapter::infer(const RuntimeModelLocation& mod
 {
     RuntimeOperationResult result = probe(model);
     if (result.status != RuntimeStatus::Available) return result;
+    const bool benchmarkOnly = request.value(QStringLiteral("_benchmarkOnly")).toBool(false);
     const QString imagePath = request.value(QStringLiteral("imagePath")).toString();
     const QString outputPath = QDir::cleanPath(request.value(QStringLiteral("outputPath")).toString());
     if (imagePath.isEmpty() || outputPath.isEmpty()) {
         return failed(RuntimeStatus::ArtifactIncompatible,
             QStringLiteral("NCNN  推理请求缺少 imagePath 或 outputPath。"));
     }
-    if (!QDir().mkpath(outputPath)) {
+    if (!benchmarkOnly && !QDir().mkpath(outputPath)) {
         return failed(RuntimeStatus::ArtifactIncompatible,
             QStringLiteral("无法创建  NCNN 推理输出目录：%1").arg(outputPath));
     }
@@ -217,17 +217,23 @@ RuntimeOperationResult NcnnRuntimeAdapter::infer(const RuntimeModelLocation& mod
         const QVector<aitrain::DetectionPrediction> values = aitrain::predictDetectionNcnnRuntime(
             paramPath, imagePath, options, runtimeOptions(model), &error);
         for (const aitrain::DetectionPrediction& value : values) predictions.append(aitrain::detectionPredictionToJson(value));
-        overlay = aitrain::renderDetectionPredictions(imagePath, values, &error);
+        if (!benchmarkOnly) overlay = aitrain::renderDetectionPredictions(imagePath, values, &error);
     } else {
         taskType = QStringLiteral("segmentation");
         const QVector<aitrain::SegmentationPrediction> values = aitrain::predictSegmentationNcnnRuntime(
             paramPath, imagePath, options, runtimeOptions(model), &error);
         for (const aitrain::SegmentationPrediction& value : values) predictions.append(aitrain::segmentationPredictionToJson(value));
-        overlay = aitrain::renderSegmentationPredictions(imagePath, values, &error);
+        if (!benchmarkOnly) overlay = aitrain::renderSegmentationPredictions(imagePath, values, &error);
     }
-    if (!error.isEmpty() || overlay.isNull()) {
+    if (!error.isEmpty() || (!benchmarkOnly && overlay.isNull())) {
         return failed(RuntimeStatus::ArtifactIncompatible,
             error.isEmpty() ? QStringLiteral(" NCNN 推理未生成可用 overlay。") : error);
+    }
+    result.details.insert(QStringLiteral("predictionCount"), predictions.size());
+    result.details.insert(QStringLiteral("taskType"), taskType);
+    result.details.insert(QStringLiteral("runtime"), runtimeRoute());
+    if (benchmarkOnly) {
+        return result;
     }
     const QString predictionsPath = QDir(outputPath).filePath(QStringLiteral("inference_predictions.json"));
     const QString overlayPath = QDir(outputPath).filePath(QStringLiteral("inference_overlay.png"));
@@ -241,20 +247,8 @@ RuntimeOperationResult NcnnRuntimeAdapter::infer(const RuntimeModelLocation& mod
         QFile::remove(overlayPath);
         return failed(RuntimeStatus::ArtifactIncompatible, error);
     }
-    result.details.insert(QStringLiteral("predictionCount"), predictions.size());
-    result.details.insert(QStringLiteral("taskType"), taskType);
-    result.details.insert(QStringLiteral("runtime"), runtimeRoute());
     result.details.insert(QStringLiteral("predictionsPath"), predictionsPath);
     result.details.insert(QStringLiteral("overlayPath"), overlayPath);
-    return result;
-}
-
-RuntimeOperationResult NcnnRuntimeAdapter::benchmark(const RuntimeModelLocation& model, const QJsonObject& request) const
-{
-    QElapsedTimer timer;
-    timer.start();
-    RuntimeOperationResult result = infer(model, request);
-    if (result.status == RuntimeStatus::Available) result.details.insert(QStringLiteral("elapsedMs"), static_cast<double>(timer.elapsed()));
     return result;
 }
 

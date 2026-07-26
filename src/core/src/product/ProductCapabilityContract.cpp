@@ -151,6 +151,20 @@ QString runtimeProductStateToString(RuntimeProductState state)
     return QStringLiteral("unsupported_by_product");
 }
 
+QString runtimeLocalReadinessToString(RuntimeLocalReadiness readiness)
+{
+    switch (readiness) {
+    case RuntimeLocalReadiness::Available: return QStringLiteral("available");
+    case RuntimeLocalReadiness::SdkMissing: return QStringLiteral("sdk_missing");
+    case RuntimeLocalReadiness::DependencyMissing: return QStringLiteral("dependency_missing");
+    case RuntimeLocalReadiness::HardwareUnsupported: return QStringLiteral("hardware_unsupported");
+    case RuntimeLocalReadiness::ExternalEvidenceRequired:
+        return QStringLiteral("external_evidence_required");
+    case RuntimeLocalReadiness::NotApplicable: return QStringLiteral("not_applicable");
+    }
+    return QStringLiteral("not_applicable");
+}
+
 const ProductCapabilityContract& ProductCapabilityContract::instance()
 {
     static const ProductCapabilityContract contract;

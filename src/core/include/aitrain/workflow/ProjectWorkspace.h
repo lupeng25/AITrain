@@ -9,6 +9,7 @@
 #include "aitrain/workflow/TaskExecutionHost.h"
 #include "aitrain/workflow/WorkflowRunner.h"
 #include "aitrain/core/Cancellation.h"
+#include "aitrain/artifact/VerifiedArtifactReader.h"
 
 #include <functional>
 #include <QByteArray>
@@ -32,16 +33,6 @@ struct RuntimeArtifactBundle final {
     ArtifactId artifactId;
     QString artifactPath;
     QHash<QString, QString> pathsByKind;
-};
-
-// GUI/Query 的只读 Artifact 预览结果。内容来自已提交文件并经过清单哈希复验，
-// 不向上层暴露 Artifact Store 物理路径。
-struct ArtifactFilePreview final {
-    QString relativePath;
-    QString sha256;
-    qint64 byteCount = 0;
-    QByteArray content;
-    bool truncated = false;
 };
 
 // 由当前线程根据已提交 Artifact 清单解析出的不可变文件读取来源。
@@ -579,12 +570,13 @@ public:
         QString* error = nullptr);
     // 训练调用点的过渡别名；通用 Runtime/Workflow 代码必须使用上面的语义中立 API。
     bool cleanupRuntimeStaging(const TaskId& taskId, QString* error = nullptr);
-    QVector<TaskSnapshot> tasks(int limit, QString* error = nullptr) const;
+    Page<TaskSnapshot> tasks(const PageRequest& request, QString* error = nullptr) const;
     bool task(const TaskId& taskId, TaskSnapshot* result, QString* error = nullptr) const;
     bool artifact(const ArtifactId& artifactId, ArtifactSnapshot* result, QString* error = nullptr) const;
-    QVector<ArtifactSnapshot> artifactsForTask(const TaskId& taskId, QString* error = nullptr) const;
-    QVector<DeliveryEvidenceCandidate> deliveryEvidenceCandidates(
-        int limit, QString* error = nullptr) const;
+    Page<ArtifactSnapshot> artifactsForTask(
+        const TaskId& taskId, const PageRequest& request, QString* error = nullptr) const;
+    Page<DeliveryEvidenceCandidate> deliveryEvidenceCandidates(
+        const PageRequest& request, QString* error = nullptr) const;
     bool readCommittedArtifactFile(const ArtifactId& artifactId,
         const QString& relativePath,
         ArtifactFilePreview* result,
@@ -608,11 +600,13 @@ public:
         ArtifactFilePreviewCallback callback,
         qint64 maxBytes = 512 * 1024,
         QString* error = nullptr) const;
-    QVector<MetricSnapshot> metricsForTask(const TaskId& taskId, QString* error = nullptr) const;
-    QVector<WorkflowRunSnapshot> workflowRunsForTask(const TaskId& taskId, QString* error = nullptr) const;
+    Page<MetricSnapshot> metricsForTask(
+        const TaskId& taskId, const PageRequest& request, QString* error = nullptr) const;
+    Page<WorkflowRunSnapshot> workflowRunsForTask(
+        const TaskId& taskId, const PageRequest& request, QString* error = nullptr) const;
     QVector<WorkflowStepSnapshot> workflowSteps(const WorkflowRunId& workflowRunId, QString* error = nullptr) const;
-    QVector<ModelPackageSnapshot> modelPackages(int limit, QString* error = nullptr) const;
-    QVector<DatasetCatalogItem> datasets(int limit, QString* error = nullptr) const;
+    Page<ModelPackageSnapshot> modelPackages(const PageRequest& request, QString* error = nullptr) const;
+    Page<DatasetCatalogItem> datasets(const PageRequest& request, QString* error = nullptr) const;
     bool projectSummary(ProjectSummarySnapshot* result, QString* error = nullptr) const;
     QString workspacePath() const;
 

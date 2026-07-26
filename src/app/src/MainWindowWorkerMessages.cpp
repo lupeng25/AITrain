@@ -133,13 +133,5 @@ void MainWindow::handleTaskViewStateChanged(const TaskViewState& state)
 
     appendLog(uiText("%1：%2：%3").arg(
         workflowName, state.status, state.terminalMessage));
-    activeTaskId_.clear();
-    activeWorkflowKind_.clear();
     updateTaskCancelButton();
-    updateRecentTasks();
-    updateSelectedTaskDetails();
-    updateProjectSummary();
-    updateDashboardSummary();
-    updateDeliveryAcceptanceSummary();
-    updateModelRegistry();
 }

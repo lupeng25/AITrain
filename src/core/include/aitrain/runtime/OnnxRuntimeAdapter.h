@@ -10,7 +10,6 @@ public:
     RuntimeOperationResult probe(const RuntimeModelLocation& model) const override;
     RuntimeOperationResult validateModel(const RuntimeModelLocation& model) const override;
     RuntimeOperationResult infer(const RuntimeModelLocation& model, const QJsonObject& request) const override;
-    RuntimeOperationResult benchmark(const RuntimeModelLocation& model, const QJsonObject& request) const override;
     RuntimeOperationResult deploymentValidate(const RuntimeModelLocation& model, const QJsonObject& request) const override;
 };
 

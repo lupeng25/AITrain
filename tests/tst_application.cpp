@@ -7,8 +7,10 @@
 #include "aitrain/workflow/ProjectWorkspace.h"
 #include "aitrain/workflow/ProjectQueryService.h"
 #include "aitrain/workflow/WorkflowRunner.h"
+#include "aitrain/artifact/VerifiedArtifactReader.h"
 
 #include <QDateTime>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -97,6 +99,7 @@ private slots:
     void importCancellationLeavesNoRegisteredPackageOrArtifact();
     void runtimeResolutionAcceptsOnlyRegisteredUntamperedModelPackages();
     void projectWorkspaceFirstStartCreatesStableLayout();
+    void verifiedArtifactReaderDistinguishesTooLargeAndIntegrityErrors();
     void projectWorkspaceSeparatesOpenCreateAndRebuild();
     void projectWorkspaceRecoveryClosesInterruptedStaging();
     void projectWorkspaceOwnsRuntimeTaskLifecycle();
@@ -120,6 +123,35 @@ private slots:
     void workflowTerminalRecoveryDoesNotLeaveSuccessorRunning();
     void workflowRunnerSequencesCommittedArtifactsAndStopsOnCancellation();
 };
+
+void ApplicationTests::verifiedArtifactReaderDistinguishesTooLargeAndIntegrityErrors()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QByteArray content("verified-artifact");
+    const QString path = directory.filePath(QStringLiteral("report.json"));
+    QVERIFY(writeFile(path, content));
+    const aitrain::ArtifactFileSnapshot expected{
+        QStringLiteral("report.json"),
+        QString::fromLatin1(QCryptographicHash::hash(
+            content, QCryptographicHash::Sha256).toHex()),
+        content.size()};
+    aitrain::VerifiedArtifactReader reader(directory.path());
+    aitrain::ArtifactFilePreview preview;
+    aitrain::ArtifactReadError readError = aitrain::ArtifactReadError::None;
+    QString error;
+    QVERIFY2(reader.preview(expected, 4, &preview, &readError, &error),
+        qPrintable(error));
+    QVERIFY(preview.truncated);
+    QCOMPARE(preview.content, QByteArray("veri"));
+
+    QVERIFY(!reader.preview(expected, 0, &preview, &readError, &error));
+    QCOMPARE(readError, aitrain::ArtifactReadError::TooLarge);
+    auto tampered = expected;
+    tampered.sha256 = QString(64, QLatin1Char('0'));
+    QVERIFY(!reader.preview(tampered, 4, &preview, &readError, &error));
+    QCOMPARE(readError, aitrain::ArtifactReadError::IntegrityMismatch);
+}
 
 void ApplicationTests::fakeWorkerSuccessfulRunPersistsTaskMetricsAndArtifacts()
 {
@@ -652,7 +684,7 @@ void ApplicationTests::importCancellationLeavesNoRegisteredPackageOrArtifact()
     QCOMPARE(stored.state, aitrain::TaskState::Canceled);
     QCOMPARE(stored.failure.code, aitrain::FailureCode::Canceled);
     QCOMPARE(storage.artifactCount(imported.task.id, &error), 0);
-    QCOMPARE(storage.modelPackages(10, &error).size(), 0);
+    QCOMPARE(storage.modelPackages({10, {}}, &error).items.size(), 0);
     const QDir stagingRoot(directory.filePath(QStringLiteral("store/.staging")));
     QCOMPARE(stagingRoot.entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(), 0);
 }
@@ -870,7 +902,8 @@ void ApplicationTests::projectQueryServiceReadsOnlyPersistedTaskState()
         QStringLiteral("training"), &started, &error), qPrintable(error));
 
     aitrain::ProjectQueryService queries(&workspace);
-    const QVector<aitrain::TaskSnapshot> tasks = queries.recentTasks(20, &error);
+    const QVector<aitrain::TaskSnapshot> tasks =
+        queries.recentTasks({20, {}}, &error).items;
     QCOMPARE(tasks.size(), 1);
     QCOMPARE(tasks.first().id, taskId);
     QCOMPARE(tasks.first().state, aitrain::TaskState::Running);
@@ -923,7 +956,8 @@ void ApplicationTests::externalAcceptanceEvidenceRequiresStrictSchemaAndStaysUnv
     QVERIFY2(workspace.finalizeTask(taskId, aitrain::TaskState::Succeeded, {}, &error), qPrintable(error));
 
     aitrain::ProjectQueryService queries(&workspace);
-    const QVector<aitrain::DeliveryEvidenceReadModel> evidence = queries.deliveryEvidence(20, &error);
+    const QVector<aitrain::DeliveryEvidenceReadModel> evidence =
+        queries.deliveryEvidence({20, {}}, &error).items;
     QVERIFY2(error.isEmpty(), qPrintable(error));
     QCOMPARE(evidence.size(), 1);
     QCOMPARE(evidence.first().evidenceKind, QStringLiteral("clean_windows"));
@@ -997,7 +1031,8 @@ void ApplicationTests::deliveryEvidenceLimitCountsEvidenceArtifacts()
     }
 
     aitrain::ProjectQueryService queries(&workspace);
-    const QVector<aitrain::DeliveryEvidenceReadModel> evidence = queries.deliveryEvidence(1, &error);
+    const QVector<aitrain::DeliveryEvidenceReadModel> evidence =
+        queries.deliveryEvidence({1, {}}, &error).items;
     QVERIFY2(error.isEmpty(), qPrintable(error));
     QCOMPARE(evidence.size(), 1);
     QCOMPARE(evidence.first().evidenceArtifactId, imported.evidenceArtifactId);
@@ -1027,7 +1062,8 @@ void ApplicationTests::deliveryEvidenceKeepsInvalidArtifactAsRow()
         qPrintable(error));
 
     aitrain::ProjectQueryService queries(&workspace);
-    const QVector<aitrain::DeliveryEvidenceReadModel> evidence = queries.deliveryEvidence(10, &error);
+    const QVector<aitrain::DeliveryEvidenceReadModel> evidence =
+        queries.deliveryEvidence({10, {}}, &error).items;
     QVERIFY2(error.isEmpty(), qPrintable(error));
     QCOMPARE(evidence.size(), 1);
     QVERIFY(!evidence.first().valid);
@@ -1072,12 +1108,12 @@ void ApplicationTests::deliveryEvidenceAsyncReadsAndValidatesOffUiThread()
     bool completed = false;
     bool callbackOnReceiverThread = false;
     QVector<aitrain::DeliveryEvidenceReadModel> records;
-    QVERIFY2(queries.deliveryEvidenceAsync(10, &receiver,
+    QVERIFY2(queries.deliveryEvidenceAsync({10, {}}, &receiver,
         [&receiver, &completed, &callbackOnReceiverThread, &records](bool success,
-            QVector<aitrain::DeliveryEvidenceReadModel> result, QString callbackError) {
+            aitrain::Page<aitrain::DeliveryEvidenceReadModel> result, QString callbackError) {
             QVERIFY2(success, qPrintable(callbackError));
             callbackOnReceiverThread = QThread::currentThread() == receiver.thread();
-            records = std::move(result);
+            records = std::move(result.items);
             completed = true;
         }, &error), qPrintable(error));
     QTRY_VERIFY_WITH_TIMEOUT(completed, 5000);
@@ -1432,7 +1468,8 @@ void ApplicationTests::projectWorkspaceRegistersDatasetSnapshotAndSequencesTrain
     aitrain::ProjectStore rejectionStorage;
     QVERIFY2(rejectionStorage.open(QDir(workspace.workspacePath()).filePath(QStringLiteral("project.sqlite")),
         &error), qPrintable(error));
-    const qsizetype artifactsBeforeMismatch = rejectionStorage.artifactsForTask(taskId, &error).size();
+    const qsizetype artifactsBeforeMismatch =
+        rejectionStorage.artifactsForTask(taskId, {50, {}}, &error).items.size();
     QVERIFY2(error.isEmpty(), qPrintable(error));
     QCOMPARE(artifactsBeforeMismatch, qsizetype(0));
     const auto rejectsMismatchWithoutArtifacts = [&](const aitrain::TrainingWorkflowRequest& rejectedRequest) {
@@ -1444,7 +1481,8 @@ void ApplicationTests::projectWorkspaceRegistersDatasetSnapshotAndSequencesTrain
             return false;
         }
         QString storageError;
-        const qsizetype artifactCount = rejectionStorage.artifactsForTask(taskId, &storageError).size();
+        const qsizetype artifactCount =
+            rejectionStorage.artifactsForTask(taskId, {50, {}}, &storageError).items.size();
         if (!storageError.isEmpty() || artifactCount != artifactsBeforeMismatch) {
             error = storageError.isEmpty()
                 ? QStringLiteral("拒绝错配输入后仍为 Task B 创建了 artifact")

@@ -3,7 +3,6 @@
 #include "aitrain/core/VisionModelRuntime.h"
 
 #include <QDir>
-#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
@@ -167,15 +166,6 @@ RuntimeOperationResult TensorRtRuntimeAdapter::infer(const RuntimeModelLocation&
     result.details.insert(QStringLiteral("runtime"), runtimeRoute());
     result.details.insert(QStringLiteral("predictionsPath"), predictionsPath);
     result.details.insert(QStringLiteral("overlayPath"), overlayPath);
-    return result;
-}
-
-RuntimeOperationResult TensorRtRuntimeAdapter::benchmark(const RuntimeModelLocation& model, const QJsonObject& request) const
-{
-    QElapsedTimer timer;
-    timer.start();
-    RuntimeOperationResult result = infer(model, request);
-    if (result.status == RuntimeStatus::Available) result.details.insert(QStringLiteral("elapsedMs"), static_cast<double>(timer.elapsed()));
     return result;
 }
 

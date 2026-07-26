@@ -33,10 +33,6 @@ aitrain::Failure workerFailure(const QString& message)
 
 void WorkerSession::createAnnotationSession(const wp::AnnotationSessionCreateCommand& command)
 {
-    if (running_ || annotationWorkspace_) {
-        fail(QStringLiteral("Worker 已有运行任务，不能并发创建标注会话。"));
-        return;
-    }
     const QString taskIdText = command.context.taskId.toString();
     const QString projectRoot = command.context.projectRoot.trimmed();
     const QString repairArtifactText = command.repairManifestArtifactId.trimmed();
@@ -45,36 +41,33 @@ void WorkerSession::createAnnotationSession(const wp::AnnotationSessionCreateCom
     const QJsonObject options = command.options;
     QString error;
     aitrain::ArtifactId repairArtifactId;
-    if (!aitrain::TaskId::parse(taskIdText, &annotationTaskId_, &error)
-        || annotationTaskId_ != controlTaskId_
+    const aitrain::TaskId taskId = command.context.taskId;
+    if (!taskId.isValid() || taskId != controlTaskId_
         || !aitrain::ArtifactId::parse(repairArtifactText, &repairArtifactId, &error)
         || projectRoot.isEmpty() || workingDirectory.isEmpty() || !QFileInfo(projectRoot).isDir()) {
-        annotationTaskId_ = {};
         fail(QStringLiteral("创建标注会话需要有效项目、Repair ArtifactId、独立工作目录和一致的 Protocol  TaskId。"));
         return;
     }
 
-    annotationWorkspace_ = std::make_unique<aitrain::ProjectWorkspace>();
-    if (!annotationWorkspace_->openForWorkerChild(projectRoot, &error)) {
-        annotationWorkspace_.reset();
-        annotationTaskId_ = {};
+    auto workspace = std::make_unique<aitrain::ProjectWorkspace>();
+    if (!workspace->openForWorkerChild(projectRoot, &error)) {
         fail(QStringLiteral("无法打开 Annotation Session  工作区：%1").arg(error));
         return;
     }
     aitrain::TaskSnapshot task;
-    if (!annotationWorkspace_->startTask(annotationTaskId_,
+    if (!workspace->startTask(taskId,
             QStringLiteral("dataset.annotation.session"), QStringLiteral("annotation_session_create"),
             &task, &error)) {
-        annotationWorkspace_.reset();
-        annotationTaskId_ = {};
         fail(QStringLiteral("无法创建 Annotation Session  根任务：%1").arg(error));
         return;
     }
+    if (!activeWorkflow_.bind(std::move(workspace), taskId, &error)) {
+        fail(QStringLiteral("无法绑定 Annotation Session 活动任务：%1").arg(error));
+        return;
+    }
+    auto* const activeWorkspace = activeWorkflow_.workspace();
 
     activeTaskId_ = taskIdText;
-    canceled_ = false;
-    running_ = true;
-    annotationRunning_ = true;
     send(wp::event::progress(), QJsonObject{{wp::field::taskId(), taskIdText},
         {QStringLiteral("percent"), 0},
         {wp::field::message(), QStringLiteral("Annotation Session  正在校验 Repair Artifact 并准备受控工作副本。")}});
@@ -85,22 +78,17 @@ void WorkerSession::createAnnotationSession(const wp::AnnotationSessionCreateCom
     request.toolParameters = toolSummary;
     if (!options.isEmpty()) request.toolParameters.insert(QStringLiteral("options"), options);
     aitrain::AnnotationSessionCreateResult result;
-    const bool executed = annotationWorkspace_->createAnnotationSession(annotationTaskId_, request,
+    const bool executed = activeWorkspace->createAnnotationSession(taskId, request,
         &result, &error, pollingCancellationCallback(0));
-    annotationRunning_ = false;
 
     if (!executed) {
         aitrain::TaskSnapshot stored;
-        if (annotationWorkspace_->task(annotationTaskId_, &stored, nullptr)
+        if (activeWorkspace->task(taskId, &stored, nullptr)
             && !aitrain::isTerminalTaskState(stored.state)) {
-            annotationWorkspace_->finalizeTask(annotationTaskId_, aitrain::TaskState::Failed,
+            activeWorkspace->finalizeTask(taskId, aitrain::TaskState::Failed,
                 workerFailure(error.isEmpty() ? QStringLiteral("Annotation Session  执行失败。") : error), nullptr);
         }
-        annotationWorkspace_.reset();
-        annotationTaskId_ = {};
-        running_ = false;
-        failWithDetails(QStringLiteral("Annotation Session  执行失败：%1").arg(error),
-            QStringLiteral("annotation_session_execution_failed"));
+        publishPersistedTerminal(taskId);
         return;
     }
 
@@ -112,28 +100,12 @@ void WorkerSession::createAnnotationSession(const wp::AnnotationSessionCreateCom
         {QStringLiteral("evidenceArtifactId"), result.evidenceArtifactId.toString()}};
     send(wp::event::annotationSession(), response);
 
-    const aitrain::TaskState terminalState = result.terminalState;
-    annotationWorkspace_.reset();
-    annotationTaskId_ = {};
-    running_ = false;
-    if (terminalState == aitrain::TaskState::Canceled) {
-        sendCanceledAndFinish(taskIdText, QStringLiteral("Annotation Session  已取消。"));
-    } else if (terminalState == aitrain::TaskState::Failed) {
-        failWithDetails(QStringLiteral("Annotation Session  创建失败。"),
-            QStringLiteral("annotation_session_failed"), response);
-    } else {
-        send(wp::event::completed(), QJsonObject{{wp::field::taskId(), taskIdText},
-            {wp::field::message(), QStringLiteral("Annotation Session  创建完成。")}});
-        finishSession();
-    }
+    publishPersistedTerminal(taskId,
+        QStringLiteral("Annotation Session  创建完成。"));
 }
 
 void WorkerSession::syncAnnotationSession(const wp::AnnotationSessionSyncCommand& command)
 {
-    if (running_ || annotationWorkspace_) {
-        fail(QStringLiteral("Worker 已有运行任务，不能并发同步标注会话。"));
-        return;
-    }
     const QString taskIdText = command.context.taskId.toString();
     const QString projectRoot = command.context.projectRoot.trimmed();
     const QString sessionArtifactText = command.sessionArtifactId.trimmed();
@@ -142,36 +114,33 @@ void WorkerSession::syncAnnotationSession(const wp::AnnotationSessionSyncCommand
     Q_UNUSED(options);
     QString error;
     aitrain::ArtifactId sessionArtifactId;
-    if (!aitrain::TaskId::parse(taskIdText, &annotationTaskId_, &error)
-        || annotationTaskId_ != controlTaskId_
+    const aitrain::TaskId taskId = command.context.taskId;
+    if (!taskId.isValid() || taskId != controlTaskId_
         || !aitrain::ArtifactId::parse(sessionArtifactText, &sessionArtifactId, &error)
         || projectRoot.isEmpty() || workingDirectory.isEmpty() || !QFileInfo(projectRoot).isDir()) {
-        annotationTaskId_ = {};
         fail(QStringLiteral("同步标注会话需要有效项目、Session ArtifactId、独立工作目录和一致的 Protocol  TaskId。"));
         return;
     }
 
-    annotationWorkspace_ = std::make_unique<aitrain::ProjectWorkspace>();
-    if (!annotationWorkspace_->openForWorkerChild(projectRoot, &error)) {
-        annotationWorkspace_.reset();
-        annotationTaskId_ = {};
+    auto workspace = std::make_unique<aitrain::ProjectWorkspace>();
+    if (!workspace->openForWorkerChild(projectRoot, &error)) {
         fail(QStringLiteral("无法打开 Annotation Sync  工作区：%1").arg(error));
         return;
     }
     aitrain::TaskSnapshot task;
-    if (!annotationWorkspace_->startTask(annotationTaskId_,
+    if (!workspace->startTask(taskId,
             QStringLiteral("dataset.annotation.sync"), QStringLiteral("annotation_session_sync"),
             &task, &error)) {
-        annotationWorkspace_.reset();
-        annotationTaskId_ = {};
         fail(QStringLiteral("无法创建 Annotation Sync  根任务：%1").arg(error));
         return;
     }
+    if (!activeWorkflow_.bind(std::move(workspace), taskId, &error)) {
+        fail(QStringLiteral("无法绑定 Annotation Sync 活动任务：%1").arg(error));
+        return;
+    }
+    auto* const activeWorkspace = activeWorkflow_.workspace();
 
     activeTaskId_ = taskIdText;
-    canceled_ = false;
-    running_ = true;
-    annotationRunning_ = true;
     send(wp::event::progress(), QJsonObject{{wp::field::taskId(), taskIdText},
         {QStringLiteral("percent"), 0},
         {wp::field::message(), QStringLiteral("Annotation Sync  正在重验基线、白名单、文件集合和哈希。")}});
@@ -180,22 +149,17 @@ void WorkerSession::syncAnnotationSession(const wp::AnnotationSessionSyncCommand
     request.sessionArtifactId = sessionArtifactId;
     request.workingDirectory = workingDirectory;
     aitrain::AnnotationSessionSyncResult result;
-    const bool executed = annotationWorkspace_->syncAnnotationSession(annotationTaskId_, request,
+    const bool executed = activeWorkspace->syncAnnotationSession(taskId, request,
         &result, &error, pollingCancellationCallback(0));
-    annotationRunning_ = false;
 
     if (!executed) {
         aitrain::TaskSnapshot stored;
-        if (annotationWorkspace_->task(annotationTaskId_, &stored, nullptr)
+        if (activeWorkspace->task(taskId, &stored, nullptr)
             && !aitrain::isTerminalTaskState(stored.state)) {
-            annotationWorkspace_->finalizeTask(annotationTaskId_, aitrain::TaskState::Failed,
+            activeWorkspace->finalizeTask(taskId, aitrain::TaskState::Failed,
                 workerFailure(error.isEmpty() ? QStringLiteral("Annotation Sync  执行失败。") : error), nullptr);
         }
-        annotationWorkspace_.reset();
-        annotationTaskId_ = {};
-        running_ = false;
-        failWithDetails(QStringLiteral("Annotation Sync  执行失败：%1").arg(error),
-            QStringLiteral("annotation_sync_execution_failed"));
+        publishPersistedTerminal(taskId);
         return;
     }
 
@@ -213,18 +177,5 @@ void WorkerSession::syncAnnotationSession(const wp::AnnotationSessionSyncCommand
         {QStringLiteral("newDatasetVersionCreated"), result.datasetSnapshot.id.isValid()}};
     send(wp::event::annotationSync(), response);
 
-    const aitrain::TaskState terminalState = result.terminalState;
-    annotationWorkspace_.reset();
-    annotationTaskId_ = {};
-    running_ = false;
-    if (terminalState == aitrain::TaskState::Canceled) {
-        sendCanceledAndFinish(taskIdText, QStringLiteral("Annotation Sync  已取消。"));
-    } else if (terminalState == aitrain::TaskState::Failed) {
-        failWithDetails(QStringLiteral("Annotation Sync  失败或存在冲突。"),
-            QStringLiteral("annotation_sync_failed"), response);
-    } else {
-        send(wp::event::completed(), QJsonObject{{wp::field::taskId(), taskIdText},
-            {wp::field::message(), QStringLiteral("Annotation Sync  完成。")}});
-        finishSession();
-    }
+    publishPersistedTerminal(taskId, QStringLiteral("Annotation Sync  完成。"));
 }

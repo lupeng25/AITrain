@@ -9,7 +9,6 @@
 #include <QJsonDocument>
 #include <QSaveFile>
 #include <QSet>
-#include <QTemporaryDir>
 
 #include <utility>
 
@@ -114,156 +113,64 @@ QString sampleKeyForTarget(const QString& target)
     return split + QLatin1Char('/') + QFileInfo(normalizedTargetBaseName(target)).completeBaseName();
 }
 
-bool isCopiedDatasetFile(const QString& format, const QString& target)
-{
-    const QString clean = QDir::cleanPath(target);
-    if (clean.startsWith(QStringLiteral("images/")) || clean.startsWith(QStringLiteral("labels/"))
-        || clean.startsWith(QStringLiteral("masks/"))) {
-        return true;
-    }
-    if (format == QStringLiteral("anomaly_folder")) {
-        return clean.startsWith(QStringLiteral("train/")) || clean.startsWith(QStringLiteral("val/"))
-            || clean.startsWith(QStringLiteral("test/"));
-    }
-    return format == QStringLiteral("paddleocr_rec") && clean == QStringLiteral("dict.txt");
-}
-
-struct SourceFile final {
-    QString relativePath;
-    QString fileName;
-    QString sha256;
-    qint64 bytes = 0;
-    bool used = false;
-};
-
-bool sourceRoleMatchesTarget(const QString& target, const QString& source)
-{
-    const QString cleanTarget = QDir::cleanPath(target);
-    const QString cleanSource = QDir::cleanPath(source);
-    const bool sourceIsMask = cleanSource.startsWith(QStringLiteral("masks/"))
-        || cleanSource.startsWith(QStringLiteral("ground_truth/"));
-    if (cleanTarget.startsWith(QStringLiteral("masks/"))) {
-        return sourceIsMask;
-    }
-    if (cleanTarget.startsWith(QStringLiteral("images/"))) {
-        return !sourceIsMask && !cleanSource.startsWith(QStringLiteral("labels/"));
-    }
-    if (cleanTarget.startsWith(QStringLiteral("labels/"))) {
-        return cleanSource.startsWith(QStringLiteral("labels/"));
-    }
-    if (cleanTarget == QStringLiteral("dict.txt")) {
-        return QFileInfo(cleanSource).fileName() == QStringLiteral("dict.txt");
-    }
-    if (cleanTarget.startsWith(QStringLiteral("train/")) || cleanTarget.startsWith(QStringLiteral("val/"))
-        || cleanTarget.startsWith(QStringLiteral("test/"))) {
-        return !sourceIsMask;
-    }
-    return true;
-}
-
-bool buildMaterializationEntries(const QString& sourceRoot,
-    const QString& plannedRoot,
-    const QString& format,
+bool buildPlannedEntries(const QString& sourceRoot,
+    const QJsonArray& plannedFiles,
     QJsonArray* entries,
     QString* error)
 {
-    QVector<SourceFile> sources;
-    QDirIterator sourceIterator(sourceRoot, QDir::Files | QDir::NoSymLinks, QDirIterator::Subdirectories);
-    while (sourceIterator.hasNext()) {
-        const QString path = sourceIterator.next();
-        const QString relative = QDir::cleanPath(QDir(sourceRoot).relativeFilePath(path));
-        QString sha256;
-        if (!safeRelativePath(relative) || !readAndHash(path, nullptr, &sha256, error)) {
-            return false;
-        }
-        const QFileInfo info(path);
-        sources.append({relative, info.fileName(), sha256, info.size(), false});
-    }
-
-    QStringList targets;
-    QDirIterator targetIterator(plannedRoot, QDir::Files | QDir::NoSymLinks, QDirIterator::Subdirectories);
-    while (targetIterator.hasNext()) {
-        const QString path = targetIterator.next();
-        const QString relative = QDir::cleanPath(QDir(plannedRoot).relativeFilePath(path));
-        if (relative != QStringLiteral("split_report.json")) {
-            targets.append(relative);
-        }
-    }
-    std::sort(targets.begin(), targets.end());
-    QSet<QString> targetSet;
-    QSet<QString> sourceSet;
-    for (const QString& target : targets) {
-        if (!safeRelativePath(target) || targetSet.contains(target)) {
+    QSet<QString> targets;
+    QSet<QString> sources;
+    for (const QJsonValue& value : plannedFiles) {
+        const QJsonObject planned = value.toObject();
+        const QString target = QDir::cleanPath(planned.value(QStringLiteral("targetRelativePath")).toString());
+        const QString sourcePath = planned.value(QStringLiteral("sourceAbsolutePath")).toString();
+        const bool hasInline = planned.contains(QStringLiteral("inlineBase64"));
+        if (!safeRelativePath(target) || targets.contains(target) || (sourcePath.isEmpty() == !hasInline)) {
             if (error) {
-                *error = QStringLiteral("dataset_split_target_conflict:%1").arg(target);
+                *error = QStringLiteral("dataset_split_plan_entry_invalid:%1").arg(target);
             }
             return false;
         }
-        targetSet.insert(target);
-        const QString plannedPath = QDir(plannedRoot).filePath(target);
-        QByteArray content;
-        QString sha256;
-        const bool copiedFile = isCopiedDatasetFile(format, target);
-        if (!readAndHash(plannedPath, copiedFile ? nullptr : &content, &sha256, error)) {
-            return false;
-        }
-        const qint64 byteCount = QFileInfo(plannedPath).size();
-        if (!copiedFile && byteCount > 64LL * 1024LL * 1024LL) {
-            if (error) {
-                *error = QStringLiteral("dataset_split_inline_file_too_large:%1").arg(target);
-            }
-            return false;
-        }
+        targets.insert(target);
         QJsonObject entry{
             {QStringLiteral("targetRelativePath"), target},
             {QStringLiteral("split"), splitFromTarget(target)},
-            {QStringLiteral("sampleKey"), sampleKeyForTarget(target)},
-            {QStringLiteral("bytes"), QString::number(byteCount)},
-            {QStringLiteral("sha256"), sha256}};
-        if (copiedFile) {
-            const QString expectedName = normalizedTargetBaseName(target);
-            int matchedIndex = -1;
-            for (int index = 0; index < sources.size(); ++index) {
-                const SourceFile& source = sources.at(index);
-                if (!source.used && sourceRoleMatchesTarget(target, source.relativePath)
-                    && source.fileName == expectedName && source.sha256 == sha256
-                    && source.bytes == byteCount) {
-                    matchedIndex = index;
-                    break;
-                }
-            }
-            if (matchedIndex < 0) {
-                for (int index = 0; index < sources.size(); ++index) {
-                    const SourceFile& source = sources.at(index);
-                    if (!source.used && sourceRoleMatchesTarget(target, source.relativePath)
-                        && source.sha256 == sha256 && source.bytes == byteCount) {
-                        if (matchedIndex >= 0) {
-                            matchedIndex = -2;
-                            break;
-                        }
-                        matchedIndex = index;
-                    }
-                }
-            }
-            if (matchedIndex < 0) {
+            {QStringLiteral("sampleKey"), sampleKeyForTarget(target)}};
+        QByteArray inlineContent;
+        QString sha256;
+        qint64 byteCount = 0;
+        if (!sourcePath.isEmpty()) {
+            const QString canonicalSource = QFileInfo(sourcePath).canonicalFilePath();
+            if (canonicalSource.isEmpty() || !pathInside(sourceRoot, canonicalSource)) {
                 if (error) {
-                    *error = QStringLiteral("dataset_split_source_pair_unresolved:%1").arg(target);
+                    *error = QStringLiteral("dataset_split_source_outside_root:%1").arg(sourcePath);
                 }
                 return false;
             }
-            SourceFile& source = sources[matchedIndex];
-            if (sourceSet.contains(source.relativePath)) {
-                if (error) {
-                    *error = QStringLiteral("dataset_split_source_leakage:%1").arg(source.relativePath);
-                }
+            const QString relative = QDir::cleanPath(QDir(sourceRoot).relativeFilePath(canonicalSource));
+            if (!safeRelativePath(relative) || sources.contains(relative)
+                || !readAndHash(canonicalSource, nullptr, &sha256, error)) {
                 return false;
             }
-            source.used = true;
-            sourceSet.insert(source.relativePath);
-            entry.insert(QStringLiteral("sourceRelativePath"), source.relativePath);
+            sources.insert(relative);
+            byteCount = QFileInfo(canonicalSource).size();
+            entry.insert(QStringLiteral("sourceRelativePath"), relative);
         } else {
-            entry.insert(QStringLiteral("inlineBase64"), QString::fromLatin1(content.toBase64()));
+            inlineContent = QByteArray::fromBase64(
+                planned.value(QStringLiteral("inlineBase64")).toString().toLatin1());
+            if (inlineContent.size() > 64 * 1024 * 1024) {
+                if (error) {
+                    *error = QStringLiteral("dataset_split_inline_file_too_large:%1").arg(target);
+                }
+                return false;
+            }
+            byteCount = inlineContent.size();
+            sha256 = QString::fromLatin1(
+                QCryptographicHash::hash(inlineContent, QCryptographicHash::Sha256).toHex());
+            entry.insert(QStringLiteral("inlineBase64"), QString::fromLatin1(inlineContent.toBase64()));
         }
+        entry.insert(QStringLiteral("bytes"), QString::number(byteCount));
+        entry.insert(QStringLiteral("sha256"), sha256);
         entries->append(entry);
     }
     return !entries->isEmpty();
@@ -291,21 +198,40 @@ bool calculateRootHash(const QString& root,
     QString* rootHash,
     QString* error)
 {
-    QTemporaryDir temporary;
-    if (!temporary.isValid()) {
-        if (error) {
-            *error = QStringLiteral("dataset_snapshot_temp_unavailable");
+    QStringList paths;
+    QDirIterator iterator(root, QDir::Files | QDir::NoSymLinks, QDirIterator::Subdirectories);
+    while (iterator.hasNext()) {
+        paths.append(iterator.next());
+    }
+    std::sort(paths.begin(), paths.end(), [&root](const QString& left, const QString& right) {
+        return QDir(root).relativeFilePath(left) < QDir(root).relativeFilePath(right);
+    });
+    QCryptographicHash aggregate(QCryptographicHash::Sha256);
+    aggregate.addData(format.toUtf8());
+    aggregate.addData("\0", 1);
+    aggregate.addData(driverId.toUtf8());
+    aggregate.addData("\0", 1);
+    aggregate.addData(driverVersion.toUtf8());
+    for (const QString& path : paths) {
+        if (canceled(context)) {
+            if (error) {
+                *error = QStringLiteral("dataset_snapshot_canceled");
+            }
+            return false;
         }
-        return false;
+        const QString relative = QDir::cleanPath(QDir(root).relativeFilePath(path));
+        QString sha256;
+        if (!safeRelativePath(relative) || !readAndHash(path, nullptr, &sha256, error)) {
+            return false;
+        }
+        aggregate.addData("\0", 1);
+        aggregate.addData(relative.toUtf8());
+        aggregate.addData("\0", 1);
+        aggregate.addData(QByteArray::number(QFileInfo(path).size()));
+        aggregate.addData("\0", 1);
+        aggregate.addData(sha256.toLatin1());
     }
-    DatasetSnapshotOptions options;
-    options.isCancellationRequested = context.isCancellationRequested;
-    DatasetSnapshotResult result;
-    if (!createDatasetSnapshot(root, temporary.filePath(QStringLiteral("manifest.json")),
-            format, driverId, driverVersion, options, &result, error)) {
-        return false;
-    }
-    *rootHash = result.rootHash;
+    *rootHash = QString::fromLatin1(aggregate.result().toHex());
     return true;
 }
 
@@ -487,14 +413,8 @@ bool ValidatedDatasetDriver::planSplit(const DatasetInspection& inspection,
     if (!normalizedOptions.contains(QStringLiteral("seed"))) {
         normalizedOptions.insert(QStringLiteral("seed"), 42);
     }
-    QTemporaryDir plannedOutput;
-    if (!plannedOutput.isValid()) {
-        if (error) {
-            *error = QStringLiteral("dataset_split_plan_temp_unavailable");
-        }
-        return false;
-    }
-    const aitrain::DatasetSplitResult split = splitter_(inspection.sourcePath, plannedOutput.path(), normalizedOptions);
+    normalizedOptions.insert(QStringLiteral("_planOnly"), true);
+    const aitrain::DatasetSplitResult split = splitter_(inspection.sourcePath, QString(), normalizedOptions);
     if (!split.ok) {
         if (error) {
             *error = QStringLiteral("dataset_split_plan_failed:%1").arg(split.errors.join(QStringLiteral(" | ")));
@@ -508,7 +428,7 @@ bool ValidatedDatasetDriver::planSplit(const DatasetInspection& inspection,
         return false;
     }
     QJsonArray entries;
-    if (!buildMaterializationEntries(inspection.sourcePath, plannedOutput.path(), format_, &entries, error)) {
+    if (!buildPlannedEntries(inspection.sourcePath, split.plannedFiles, &entries, error)) {
         return false;
     }
     if (format_.startsWith(QStringLiteral("yolo_"))) {
@@ -535,6 +455,7 @@ bool ValidatedDatasetDriver::planSplit(const DatasetInspection& inspection,
             }
         }
     }
+    normalizedOptions.remove(QStringLiteral("_planOnly"));
     QJsonObject manifest{
         {QStringLiteral("schemaVersion"), 2},
         {QStringLiteral("driverId"), id()},

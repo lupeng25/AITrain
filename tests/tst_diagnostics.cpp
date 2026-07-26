@@ -79,7 +79,8 @@ void DiagnosticsTests::coreSuccessCommitsFactsBundleAndEvidence()
     QVERIFY(result.diagnosticsArtifactId.isValid());
     QVERIFY(result.evidenceArtifactId.isValid());
 
-    const QVector<aitrain::ArtifactSnapshot> artifacts = workspace.artifactsForTask(taskId, &error);
+    const QVector<aitrain::ArtifactSnapshot> artifacts =
+        workspace.artifactsForTask(taskId, {50, {}}, &error).items;
     QStringList kinds;
     for (const auto& artifact : artifacts) kinds.append(artifact.kind);
     QVERIFY(kinds.contains(QStringLiteral("diagnostic_facts")));

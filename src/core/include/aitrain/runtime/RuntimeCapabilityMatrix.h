@@ -27,6 +27,7 @@ struct RuntimeCapability final {
     RuntimeCapabilityStatus status = RuntimeCapabilityStatus::UnsupportedByProduct;
     RuntimeExecutionAuthority executionAuthority = RuntimeExecutionAuthority::AitrainCpp;
     RuntimeProductState productState = RuntimeProductState::UnsupportedByProduct;
+    RuntimeLocalReadiness localReadiness = RuntimeLocalReadiness::NotApplicable;
     QString modelFamily;
     QString runtimeRoute;
     QString message;
@@ -36,12 +37,30 @@ struct RuntimeCapability final {
     QJsonObject toJson() const;
 };
 
+struct RuntimeReadinessSnapshot final {
+    QString runtimeRoute;
+    RuntimeLocalReadiness readiness = RuntimeLocalReadiness::NotApplicable;
+    QString message;
+};
+
+struct EnvironmentSnapshot final {
+    QVector<RuntimeReadinessSnapshot> runtimeReadiness;
+
+    static EnvironmentSnapshot capture();
+    RuntimeReadinessSnapshot readinessFor(const QString& runtimeRoute) const;
+};
+
 QString runtimeCapabilityStatusToString(RuntimeCapabilityStatus status);
 
 class RuntimeCapabilityMatrix final {
 public:
+    explicit RuntimeCapabilityMatrix(
+        EnvironmentSnapshot environment = EnvironmentSnapshot::capture());
     RuntimeCapability query(const RuntimeCapabilityQuery& query) const;
     QJsonObject toJson() const;
+
+private:
+    EnvironmentSnapshot environment_;
 };
 
 } // namespace aitrain

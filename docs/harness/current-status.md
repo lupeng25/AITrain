@@ -53,6 +53,9 @@
 ## Storage、Artifact 与 Evidence
 
 - `ProjectStore` 是跨聚合事务 façade；GUI 不直接访问 Store。
+- `ProjectDatabase` 是当前 Workspace/线程内唯一的 `QSqlDatabase` owner；Store 复用同一连接，不为查询重复创建连接。
+- 任务、任务 Artifact、指标、Workflow Run、数据集、模型包和交付证据目录统一使用版本化 base64url keyset cursor；页大小只接受 1–200，游标查询类型不匹配会返回 `InvalidPageCursor`。
+- Query Service 与各目录 Presenter 只接受 `PageRequest` 并返回/消费 `Page<T>`；Presenter 的“加载更多”沿 opaque cursor 追加，刷新第一页会重置旧游标。Evidence 构建会在只读查询序列中穷举所有 Artifact 与指标页，不以固定条数截断交付事实。
 - Schema 13 已建立任务、数据集、模型包、Artifact 文件、指标、Workflow Run、terminalization 和 outbox 的实际查询索引。
 - Evidence 的 `projectIdentity` 使用持久化 ProjectId，项目移动后身份不变。
 - 训练模型使用 `project_snapshot` 来源绑定；显式外部导入使用 `external_declared`，不伪造项目 Snapshot 血缘。
@@ -60,6 +63,7 @@
 - staging 到 committed 的同卷原子 rename 是提交线性化点。
 - rename 前失败可安全中止；rename 后只能完成原 completion 或进入 `PendingRecovery`，不能反转成业务失败。
 - 数据库已提交但 journal 清理失败仍是业务成功，只报告 `cleanupPending`。
+- committed 文件读取统一通过 `VerifiedArtifactReader`，集中核对相对路径、inventory、大小、SHA-256 与符号链接；证据超限明确返回 `TooLarge`。
 - discard 先把 committed 原子移动到 `.trash/<ArtifactId>`，再在事务中复核引用并删除目录记录；恢复会按数据库事实恢复或清理 trash。
 - terminalization 保持 `sealed → evidence_attached → closed`：
   - Evidence Artifact catalog 与 attach 同事务；
@@ -77,6 +81,8 @@
 
 COCO RLE 和其他组合明确返回不支持。转换输出只进入 Artifact staging，成功后形成 Dataset、Version 和 Snapshot 身份，不接受任意 committed 输出目录。
 
+Split 先生成只包含源相对路径、目标相对路径、partition、大小与 SHA-256 的不可变 `DatasetSplitPlan`；规划阶段不再创建临时输出目录。Materialize 前复核源根摘要，并按计划只复制一次。
+
 Resume/Checkpoint 裸路径入口已删除。未来若恢复，只能重新设计为基于 ArtifactId 或 ModelPackageId 的能力。
 
 机器码无法取得稳定种子时返回 typed unavailable；注册码界面阻止继续并显示原因，不使用 `unknown-machine` 回退。
@@ -84,7 +90,9 @@ Resume/Checkpoint 裸路径入口已删除。未来若恢复，只能重新设�
 ## Worker 与 Python
 
 - start/cancel 控制帧先完成 token、sequence、kind 和批次校验，再产生副作用。
+- Worker 使用独立的 `aitrain_worker_runtime` 与单个 `ActiveWorkflowContext` 管理任务种类、阶段、Workspace、根 TaskId、Worker Lease 和幂等取消；各 Workflow 不再保存重复的 running/workspace/taskId 状态。
 - 取消是幂等请求；Worker 不在 Core 持久化终态前发送业务终态。
+- Worker 业务终态统一从已持久化 `TaskSnapshot` 映射；终态写入或回读失败时退出并交给 Recovery，不发送猜测性 completed/failed/canceled。
 - Socket 断开只触发取消和进程退出，不伪造终态；项目恢复负责收口。
 - Environment Check 与 Training 共用 Python Profile resolver。
 - 解释器候选顺序固定为：
@@ -113,6 +121,9 @@ Resume/Checkpoint 裸路径入口已删除。未来若恢复，只能重新设�
 - GUI 只传 DatasetId、SnapshotId、ArtifactId、ModelPackageId 和 TaskId，不重新暴露 committed 物理路径。
 - Resume 控件、字段、翻译和文档入口已删除。
 - Runtime Delivery 只允许 Product Contract 判定为 `AitrainCpp + Supported` 且本机 `Available` 的路线；不会静默 fallback。
+- `TaskRuntimeController` 是唯一 `WorkerClient` owner，统一管理 `Idle → Starting → Running → CancelRequested → Finalizing/Recovering → Idle`；取消只使用一组 30 秒协作窗口和 2 秒强制退出窗口。
+- `WorkspaceReadModelCoordinator` 在单个 event-loop 内合并刷新域，并按任务、数据集/模型、选中任务、项目摘要、环境、交付证据的固定顺序执行。
+- Runtime benchmark 统一由 `RuntimeBenchmarkRunner` 执行，默认 warmup=3、iterations=20，并报告 setup、min、mean、p50、p95、p99、max、throughput 与 timingDefinition。
 - 英文 TS 不允许 `unfinished`；语言切换继续采用重启生效。
 
 ## 构建与发布
@@ -138,7 +149,7 @@ Resume/Checkpoint 裸路径入口已删除。未来若恢复，只能重新设�
 .\tools\package-smoke.ps1
 ```
 
-`harness-check.ps1`：34/34 CTest 通过，包含完整 Python pytest、compileall 和 trainer stale 同步测试。
+`harness-check.ps1`：35/35 CTest 通过，包含 Worker 活动上下文、完整 Python pytest、compileall 和 trainer stale 同步测试。
 
 `package-smoke.ps1`：Runtime 与 AcceptanceTools 使用全新 install prefix；包根 GUI 启动、Worker self-check、内置 Product Contract、Schema 13 首次创建和二次打开均通过。
 

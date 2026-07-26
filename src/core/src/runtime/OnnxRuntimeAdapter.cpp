@@ -3,7 +3,6 @@
 #include "aitrain/core/VisionModelRuntime.h"
 
 #include <QDir>
-#include <QElapsedTimer>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -123,10 +122,11 @@ RuntimeOperationResult OnnxRuntimeAdapter::infer(const RuntimeModelLocation& mod
     const QString modelPath = QDir(model.artifactDirectory).filePath(model.manifest.artifactEntryPath);
     const QString family = model.manifest.modelFamily;
     const QString decoder = model.manifest.decoder;
+    const bool benchmarkOnly = request.value(QStringLiteral("_benchmarkOnly")).toBool(false);
     QString imagePath;
     QString outputPath;
     if (!requestedImage(request, &imagePath, &result) || !requestedOutput(request, &outputPath, &result)) return result;
-    if (!QDir().mkpath(outputPath)) {
+    if (!benchmarkOnly && !QDir().mkpath(outputPath)) {
         return failed(RuntimeStatus::ArtifactIncompatible, QStringLiteral("无法创建  ONNX 推理输出目录：%1").arg(outputPath));
     }
     QString error;
@@ -140,34 +140,40 @@ RuntimeOperationResult OnnxRuntimeAdapter::infer(const RuntimeModelLocation& mod
         const QVector<aitrain::DetectionPrediction> values = aitrain::predictDetectionOnnxRuntime(
             modelPath, imagePath, model.manifest.classNames, options, &error);
         for (const aitrain::DetectionPrediction& value : values) predictions.append(aitrain::detectionPredictionToJson(value));
-        overlay = aitrain::renderDetectionPredictions(imagePath, values, &error);
+        if (!benchmarkOnly) overlay = aitrain::renderDetectionPredictions(imagePath, values, &error);
         predictionCount = values.size();
     } else if (family == QStringLiteral("yolo_segmentation")) {
         taskType = QStringLiteral("segmentation");
         const QVector<aitrain::SegmentationPrediction> values = aitrain::predictSegmentationOnnxRuntime(
             modelPath, imagePath, model.manifest.classNames, options, &error);
         for (const aitrain::SegmentationPrediction& value : values) predictions.append(aitrain::segmentationPredictionToJson(value));
-        overlay = aitrain::renderSegmentationPredictions(imagePath, values, &error);
+        if (!benchmarkOnly) overlay = aitrain::renderSegmentationPredictions(imagePath, values, &error);
         predictionCount = values.size();
     } else if (family == QStringLiteral("yolo_obb")) {
         taskType = QStringLiteral("obb_detection");
         const QVector<aitrain::ObbPrediction> values = aitrain::predictObbOnnxRuntime(
             modelPath, imagePath, model.manifest.classNames, options, &error);
         for (const aitrain::ObbPrediction& value : values) predictions.append(aitrain::obbPredictionToJson(value));
-        overlay = aitrain::renderObbPredictions(imagePath, values, &error);
+        if (!benchmarkOnly) overlay = aitrain::renderObbPredictions(imagePath, values, &error);
         predictionCount = values.size();
     } else {
         taskType = QStringLiteral("semantic_segmentation");
         const aitrain::SemanticSegmentationPrediction prediction = aitrain::predictSemanticSegmentationOnnxRuntime(modelPath, imagePath, &error);
         predictions.append(aitrain::semanticSegmentationPredictionToJson(prediction));
-        overlay = aitrain::renderSemanticSegmentationPrediction(imagePath, prediction, &error);
+        if (!benchmarkOnly) overlay = aitrain::renderSemanticSegmentationPrediction(imagePath, prediction, &error);
         for (auto it = prediction.pixelCounts.constBegin(); it != prediction.pixelCounts.constEnd(); ++it) {
             if (it.key() != QStringLiteral("0") && it.value().toDouble() > 0.0) ++predictionCount;
         }
     }
-    if (!error.isEmpty() || overlay.isNull()) {
+    if (!error.isEmpty() || (!benchmarkOnly && overlay.isNull())) {
         return failed(RuntimeStatus::ArtifactIncompatible,
             error.isEmpty() ? QStringLiteral(" ONNX 推理未生成可用 overlay。") : error);
+    }
+    result.details.insert(QStringLiteral("predictionCount"), predictionCount);
+    result.details.insert(QStringLiteral("taskType"), taskType);
+    result.details.insert(QStringLiteral("runtime"), runtimeRoute());
+    if (benchmarkOnly) {
+        return result;
     }
     const QString predictionsPath = QDir(outputPath).filePath(QStringLiteral("inference_predictions.json"));
     const QString overlayPath = QDir(outputPath).filePath(QStringLiteral("inference_overlay.png"));
@@ -186,20 +192,8 @@ RuntimeOperationResult OnnxRuntimeAdapter::infer(const RuntimeModelLocation& mod
         QFile::remove(overlayPath);
         return failed(RuntimeStatus::ArtifactIncompatible, error);
     }
-    result.details.insert(QStringLiteral("predictionCount"), predictionCount);
-    result.details.insert(QStringLiteral("taskType"), taskType);
-    result.details.insert(QStringLiteral("runtime"), runtimeRoute());
     result.details.insert(QStringLiteral("predictionsPath"), predictionsPath);
     result.details.insert(QStringLiteral("overlayPath"), overlayPath);
-    return result;
-}
-
-RuntimeOperationResult OnnxRuntimeAdapter::benchmark(const RuntimeModelLocation& model, const QJsonObject& request) const
-{
-    QElapsedTimer timer;
-    timer.start();
-    RuntimeOperationResult result = infer(model, request);
-    if (result.status == RuntimeStatus::Available) result.details.insert(QStringLiteral("elapsedMs"), static_cast<double>(timer.elapsed()));
     return result;
 }
 

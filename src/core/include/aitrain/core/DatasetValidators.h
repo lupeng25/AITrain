@@ -2,6 +2,7 @@
 
 #include "aitrain/core/DatasetValidation.h"
 
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QString>
 #include <QStringList>
@@ -16,6 +17,8 @@ struct DatasetSplitResult {
     QString outputPath;
     QStringList errors;
     QStringList warnings;
+    // 仅供 Dataset Driver 生成不可变 Split Plan；不暴露为产品输出。
+    QJsonArray plannedFiles;
     QJsonObject toJson() const;
 };
 

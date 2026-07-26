@@ -53,7 +53,7 @@ using namespace aitrain_app;
 void MainWindow::updateRecentTasks()
 {
     if (taskQueueTable_ && taskArtifactPresenter_ && workspace_.isOpen()) {
-        taskArtifactPresenter_->refresh(200);
+        taskArtifactPresenter_->refresh({100, {}});
         updateTaskTable();
     }
     const QVector<TaskListItem> tasks = taskArtifactPresenter_
@@ -118,7 +118,7 @@ void MainWindow::updateTaskTable()
 void MainWindow::updateDatasetList()
 {
     if (datasetCatalogPresenter_) {
-        datasetCatalogPresenter_->refresh(50);
+        datasetCatalogPresenter_->refresh({50, {}});
     }
     const QVector<DatasetCatalogListItem> datasets = datasetCatalogPresenter_
         ? datasetCatalogPresenter_->datasets() : QVector<DatasetCatalogListItem>{};
@@ -317,7 +317,7 @@ void MainWindow::updateModelRegistry()
         if (modelRegistrySummaryLabel_) modelRegistrySummaryLabel_->setText(uiText("请先打开项目。"));
         return;
     }
-    if (!modelRegistryPresenter_->refresh(200)) {
+    if (!modelRegistryPresenter_->refresh({50, {}})) {
         if (modelRegistrySummaryLabel_) {
             modelRegistrySummaryLabel_->setText(uiText("读取模型包目录失败：%1")
                 .arg(modelRegistryPresenter_->lastError()));

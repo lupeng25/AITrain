@@ -5,6 +5,8 @@
 
 #include <QJsonArray>
 
+#include <utility>
+
 namespace aitrain {
 namespace {
 
@@ -21,15 +23,21 @@ RuntimeCapability result(const RuntimeRouteContract* contract,
     const QStringList& limitations = {})
 {
     RuntimeStatus runtimeStatus = RuntimeStatus::RuntimeNotImplemented;
-    if (status == RuntimeCapabilityStatus::Supported
-        || status == RuntimeCapabilityStatus::RequiresExternalEvidence) {
+    RuntimeLocalReadiness localReadiness = RuntimeLocalReadiness::NotApplicable;
+    if (status == RuntimeCapabilityStatus::Supported) {
         runtimeStatus = RuntimeStatus::Available;
+        localReadiness = RuntimeLocalReadiness::Available;
     } else if (status == RuntimeCapabilityStatus::RequiresSdk) {
         runtimeStatus = RuntimeStatus::SdkMissing;
+        localReadiness = RuntimeLocalReadiness::SdkMissing;
     } else if (status == RuntimeCapabilityStatus::RequiresDependency) {
         runtimeStatus = RuntimeStatus::DependencyMissing;
+        localReadiness = RuntimeLocalReadiness::DependencyMissing;
     } else if (status == RuntimeCapabilityStatus::RequiresHardware) {
         runtimeStatus = RuntimeStatus::HardwareUnsupported;
+        localReadiness = RuntimeLocalReadiness::HardwareUnsupported;
+    } else if (status == RuntimeCapabilityStatus::RequiresExternalEvidence) {
+        localReadiness = RuntimeLocalReadiness::ExternalEvidenceRequired;
     }
     RuntimeCapability value;
     value.status = status;
@@ -39,6 +47,7 @@ RuntimeCapability result(const RuntimeRouteContract* contract,
     value.productState = contract
         ? contract->productState
         : RuntimeProductState::UnsupportedByProduct;
+    value.localReadiness = localReadiness;
     value.modelFamily = family;
     value.runtimeRoute = route;
     value.message = message;
@@ -68,9 +77,48 @@ QJsonObject RuntimeCapability::toJson() const
     return {{QStringLiteral("status"), runtimeCapabilityStatusToString(status)},
         {QStringLiteral("executionAuthority"), runtimeExecutionAuthorityToString(executionAuthority)},
         {QStringLiteral("productState"), runtimeProductStateToString(productState)},
+        {QStringLiteral("localReadiness"), runtimeLocalReadinessToString(localReadiness)},
         {QStringLiteral("modelFamily"), modelFamily}, {QStringLiteral("runtimeRoute"), runtimeRoute},
         {QStringLiteral("message"), message}, {QStringLiteral("limitations"), QJsonArray::fromStringList(limitations)},
         {QStringLiteral("runtimeStatus"), runtimeStatusToString(runtimeStatus)}};
+}
+
+EnvironmentSnapshot EnvironmentSnapshot::capture()
+{
+    EnvironmentSnapshot snapshot;
+    const bool onnxAvailable = isOnnxRuntimeInferenceAvailable();
+    snapshot.runtimeReadiness.append({
+        QStringLiteral("aitrain_onnxruntime"),
+        onnxAvailable
+            ? RuntimeLocalReadiness::Available
+            : RuntimeLocalReadiness::DependencyMissing,
+        onnxAvailable
+            ? QStringLiteral("ONNX Runtime 依赖可用。")
+            : QStringLiteral("当前构建缺少 ONNX Runtime 依赖。")});
+    const NcnnBackendStatus ncnn = ncnnBackendStatus();
+    snapshot.runtimeReadiness.append({
+        QStringLiteral("aitrain_ncnn"),
+        !ncnn.sdkAvailable ? RuntimeLocalReadiness::SdkMissing
+            : (ncnn.inferenceAvailable ? RuntimeLocalReadiness::Available
+                                       : RuntimeLocalReadiness::NotApplicable),
+        ncnn.message});
+    return snapshot;
+}
+
+RuntimeReadinessSnapshot EnvironmentSnapshot::readinessFor(
+    const QString& runtimeRoute) const
+{
+    const QString route = normalized(runtimeRoute);
+    for (const RuntimeReadinessSnapshot& readiness : runtimeReadiness) {
+        if (normalized(readiness.runtimeRoute) == route) return readiness;
+    }
+    return {route, RuntimeLocalReadiness::NotApplicable,
+        QStringLiteral("该 Runtime 路线不适用本机执行探测。")};
+}
+
+RuntimeCapabilityMatrix::RuntimeCapabilityMatrix(EnvironmentSnapshot environment)
+    : environment_(std::move(environment))
+{
 }
 
 RuntimeCapability RuntimeCapabilityMatrix::query(const RuntimeCapabilityQuery& request) const
@@ -109,23 +157,24 @@ RuntimeCapability RuntimeCapabilityMatrix::query(const RuntimeCapabilityQuery& r
             contract.limitations);
     }
     if (route == QStringLiteral("aitrain_onnxruntime")) {
-        if (!aitrain::isOnnxRuntimeInferenceAvailable()) {
+        const RuntimeReadinessSnapshot readiness = environment_.readinessFor(route);
+        if (readiness.readiness != RuntimeLocalReadiness::Available) {
             return result(&contract, RuntimeCapabilityStatus::RequiresDependency, family, route,
-                QStringLiteral("当前构建缺少 ONNX Runtime 依赖。"), contract.limitations);
+                readiness.message, contract.limitations);
         }
         return result(&contract, RuntimeCapabilityStatus::Supported, family, route,
             QStringLiteral("由 Manifest 指定 decoder 的 AITrain ONNX Runtime 路线可用。"),
             contract.limitations);
     }
     if (route == QStringLiteral("aitrain_ncnn")) {
-        const aitrain::NcnnBackendStatus ncnn = aitrain::ncnnBackendStatus();
-        if (!ncnn.sdkAvailable) {
+        const RuntimeReadinessSnapshot readiness = environment_.readinessFor(route);
+        if (readiness.readiness == RuntimeLocalReadiness::SdkMissing) {
             return result(&contract, RuntimeCapabilityStatus::RequiresSdk, family, route,
-                ncnn.message, contract.limitations);
+                readiness.message, contract.limitations);
         }
-        if (!ncnn.inferenceAvailable) {
+        if (readiness.readiness != RuntimeLocalReadiness::Available) {
             return result(&contract, RuntimeCapabilityStatus::RuntimeNotImplemented, family, route,
-                ncnn.message, contract.limitations);
+                readiness.message, contract.limitations);
         }
         return result(&contract, RuntimeCapabilityStatus::Supported, family, route,
             QStringLiteral("NCNN 运行时可用。"), contract.limitations);

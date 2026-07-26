@@ -22,12 +22,12 @@ DatasetCatalogPresenter::DatasetCatalogPresenter(
     setObjectName(QStringLiteral("DatasetCatalogPresenter"));
 }
 
-bool DatasetCatalogPresenter::refresh(int limit)
+bool DatasetCatalogPresenter::refresh(const aitrain::PageRequest& request)
 {
     QString error;
-    const QVector<aitrain::DatasetCatalogReadModel> models = queryService_
-        ? queryService_->datasetCatalog(limit, &error)
-        : QVector<aitrain::DatasetCatalogReadModel>();
+    const aitrain::Page<aitrain::DatasetCatalogReadModel> page = queryService_
+        ? queryService_->datasetCatalog(request, &error)
+        : aitrain::Page<aitrain::DatasetCatalogReadModel>();
     if (!queryService_ && error.isEmpty()) {
         error = QStringLiteral("数据集目录 Presenter 缺少项目查询服务。");
     }
@@ -40,8 +40,8 @@ bool DatasetCatalogPresenter::refresh(int limit)
     }
 
     QVector<DatasetCatalogListItem> rows;
-    rows.reserve(models.size());
-    for (const aitrain::DatasetCatalogReadModel& model : models) {
+    rows.reserve(page.items.size());
+    for (const aitrain::DatasetCatalogReadModel& model : page.items) {
         DatasetCatalogListItem row;
         row.datasetId = model.datasetId.toString();
         row.datasetFormat = model.datasetFormat;
@@ -56,16 +56,28 @@ bool DatasetCatalogPresenter::refresh(int limit)
         rows.append(row);
     }
 
-    datasets_ = rows;
+    if (request.after.isEmpty()) datasets_ = rows;
+    else datasets_ += rows;
+    nextCursor_ = page.nextCursor;
+    hasMore_ = page.hasMore;
     lastError_.clear();
     emit datasetsChanged();
     return true;
 }
 
+bool DatasetCatalogPresenter::loadMore()
+{
+    return hasMore_ && refresh({50, nextCursor_});
+}
+
+bool DatasetCatalogPresenter::hasMore() const { return hasMore_; }
+
 void DatasetCatalogPresenter::clear()
 {
     datasets_.clear();
     lastError_.clear();
+    nextCursor_.clear();
+    hasMore_ = false;
     emit datasetsChanged();
 }
 

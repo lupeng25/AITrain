@@ -1,7 +1,8 @@
 #include "MainWindow.h"
 
 #include "ApplicationEventRouter.h"
-#include "TaskExecutionController.h"
+#include "TaskRuntimeController.h"
+#include "WorkspaceReadModelCoordinator.h"
 
 #include "EvaluationReportView.h"
 #include "DiagnosticBundlePresenter.h"
@@ -126,8 +127,44 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     statusBar()->setVisible(false);
 
     workspaceRouter_ = new WorkspaceRouter(PageCount, this);
-    eventRouter_ = new ApplicationEventRouter(&worker_, this);
-    taskController_ = new TaskExecutionController(&worker_, this);
+    taskController_ = new TaskRuntimeController(this);
+    readModelCoordinator_ = new WorkspaceReadModelCoordinator(this);
+    eventRouter_ = new ApplicationEventRouter(&taskController_->workerClient(), this);
+    const auto currentGeneration = [this](quint64 generation) {
+        return generation == projectOpenGeneration_;
+    };
+    connect(readModelCoordinator_, &WorkspaceReadModelCoordinator::refreshTaskList,
+        this, [this, currentGeneration](quint64 generation) {
+            if (currentGeneration(generation)) updateRecentTasks();
+        });
+    connect(readModelCoordinator_, &WorkspaceReadModelCoordinator::refreshDatasetCatalog,
+        this, [this, currentGeneration](quint64 generation) {
+            if (currentGeneration(generation)) updateDatasetList();
+        });
+    connect(readModelCoordinator_, &WorkspaceReadModelCoordinator::refreshModelRegistry,
+        this, [this, currentGeneration](quint64 generation) {
+            if (currentGeneration(generation)) updateModelRegistry();
+        });
+    connect(readModelCoordinator_, &WorkspaceReadModelCoordinator::refreshSelectedTask,
+        this, [this, currentGeneration](quint64 generation) {
+            if (currentGeneration(generation)) updateSelectedTaskDetails();
+        });
+    connect(readModelCoordinator_, &WorkspaceReadModelCoordinator::refreshProjectSummary,
+        this, [this, currentGeneration](quint64 generation) {
+            if (!currentGeneration(generation)) return;
+            updateProjectSummary();
+            updateDashboardSummary();
+        });
+    connect(readModelCoordinator_, &WorkspaceReadModelCoordinator::refreshEnvironmentReport,
+        this, [this, currentGeneration](quint64 generation) {
+            if (!currentGeneration(generation)) return;
+            refreshEnvironmentReportView();
+            updateEnvironmentSummary();
+        });
+    connect(readModelCoordinator_, &WorkspaceReadModelCoordinator::refreshDeliveryEvidence,
+        this, [this, currentGeneration](quint64 generation) {
+            if (currentGeneration(generation)) updateDeliveryAcceptanceSummary();
+        });
     connect(sidebar_, &Sidebar::pageRequested, workspaceRouter_, &WorkspaceRouter::navigate);
     connect(workspaceRouter_, &WorkspaceRouter::pageRequested, this, &MainWindow::showPage);
     connect(eventRouter_, &ApplicationEventRouter::taskViewStateChanged,
@@ -143,12 +180,31 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
                 updateEnvironmentSummary();
                 updateDashboardSummary();
             }
-            updateRecentTasks();
-            updateSelectedTaskDetails();
-            updateProjectSummary();
-            updateDashboardSummary();
-            updateDeliveryAcceptanceSummary();
-            updateModelRegistry();
+            RefreshDomains domains = RefreshDomain::TaskList
+                | RefreshDomain::SelectedTask | RefreshDomain::ProjectSummary;
+            if (isEnvironmentTask) {
+                domains |= RefreshDomain::EnvironmentReport
+                    | RefreshDomain::DeliveryEvidence;
+            }
+            if (activeWorkflowKind_.contains(QStringLiteral("dataset"))
+                || activeWorkflowKind_.contains(QStringLiteral("annotation"))) {
+                domains |= RefreshDomain::DatasetCatalog
+                    | RefreshDomain::DeliveryEvidence;
+            }
+            if (activeWorkflowKind_.contains(QStringLiteral("training"))) {
+                domains |= RefreshDomain::ModelRegistry
+                    | RefreshDomain::DeliveryEvidence;
+            }
+            if (activeWorkflowKind_.contains(QStringLiteral("model_import"))) {
+                domains |= RefreshDomain::ModelRegistry;
+            }
+            if (activeWorkflowKind_.contains(QStringLiteral("runtime"))
+                || activeWorkflowKind_.contains(QStringLiteral("diagnostics"))
+                || activeWorkflowKind_.contains(QStringLiteral("evidence"))
+                || activeWorkflowKind_.contains(QStringLiteral("ocr"))) {
+                domains |= RefreshDomain::DeliveryEvidence;
+            }
+            readModelCoordinator_->invalidate(domains);
         });
     connect(environmentCheckPresenter_, &EnvironmentCheckPresenter::changed, this, [this]() {
         refreshEnvironmentReportView();
@@ -159,13 +215,13 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
         &MainWindow::renderDeliveryAcceptanceSummary);
     connect(deliveryEvidencePresenter_, &DeliveryEvidencePresenter::queryFailed, this,
         [this](const QString&) { renderDeliveryAcceptanceSummary(); });
-    connect(&worker_, &WorkerClient::logLine, this, &MainWindow::appendLog);
-    connect(&worker_, &WorkerClient::connected, this, [this]() {
+    connect(&workerClient(), &WorkerClient::logLine, this, &MainWindow::appendLog);
+    connect(&workerClient(), &WorkerClient::connected, this, [this]() {
         workerPill_->setStatus(tr("Worker 已连接"), StatusPill::Tone::Success);
         updateTaskCancelButton();
         updateHeaderState();
     });
-    connect(&worker_, &WorkerClient::workerLost, this,
+    connect(&workerClient(), &WorkerClient::workerLost, this,
         [this](const aitrain::TaskId& taskId) {
         if (!taskId.isValid() || !workspace_.isOpen()) return;
         QString recoveryError;
@@ -176,14 +232,12 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
         }
         // WorkerLost 事件已先清理瞬态投影；持久化恢复完成后立即刷新查询
         // 服务，避免任务列表继续显示 Running/CancelRequested。
-        updateRecentTasks();
-        updateSelectedTaskDetails();
-        updateProjectSummary();
-        updateDashboardSummary();
-        updateDeliveryAcceptanceSummary();
-        updateModelRegistry();
+        readModelCoordinator_->invalidate(RefreshDomain::TaskList
+            | RefreshDomain::SelectedTask | RefreshDomain::ProjectSummary
+            | RefreshDomain::DatasetCatalog | RefreshDomain::ModelRegistry
+            | RefreshDomain::EnvironmentReport | RefreshDomain::DeliveryEvidence);
     });
-    connect(&worker_, &WorkerClient::finished, this,
+    connect(&workerClient(), &WorkerClient::finished, this,
         [this](WorkerClient::WorkerTerminalStatus status, const QString& message) {
         const bool ok = status == WorkerClient::WorkerTerminalStatus::Succeeded;
         const bool canceled = status == WorkerClient::WorkerTerminalStatus::Canceled;
@@ -203,7 +257,9 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
         appendLog(ok ? tr("任务完成：%1").arg(message)
             : (canceled ? tr("任务已取消：%1").arg(message) : tr("任务失败：%1").arg(message)));
     });
-    connect(&worker_, &WorkerClient::idle, this, [this]() {
+    connect(&workerClient(), &WorkerClient::idle, this, [this]() {
+        activeTaskId_.clear();
+        activeWorkflowKind_.clear();
         updateTaskCancelButton();
         if (!closePending_) {
             return;
@@ -222,14 +278,19 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
-    if (worker_.isRunning()) {
+    if (taskController_->isRunning()) {
         closePending_ = true;
-        worker_.cancel();
+        taskController_->cancel();
         statusBar()->showMessage(uiText("正在异步取消当前任务，任务结束后关闭窗口。"), 5000);
         event->ignore();
         return;
     }
     QMainWindow::closeEvent(event);
+}
+
+WorkerClient& MainWindow::workerClient()
+{
+    return taskController_->workerClient();
 }
 
 void MainWindow::resizeEvent(QResizeEvent* event)

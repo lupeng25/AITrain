@@ -97,34 +97,12 @@ bool verifyArtifactFile(const QString& artifactPath,
     VerifiedWorkflowArtifactFile* result,
     QString* error)
 {
-    const QString absolutePath = QDir(artifactPath).filePath(expected.relativePath);
-    const QFileInfo info(absolutePath);
-    if (expected.relativePath.isEmpty() || QDir::isAbsolutePath(expected.relativePath)
-        || !isChildPath(artifactPath, absolutePath) || !info.exists() || !info.isFile() || info.isSymLink()
-        || info.size() != expected.byteCount) {
-        if (error) *error = QStringLiteral("已提交 Artifact 文件无效、越界或已被修改：%1").arg(expected.relativePath);
+    VerifiedArtifactFile verified;
+    if (!VerifiedArtifactReader(artifactPath).verify(expected, &verified, nullptr, error))
         return false;
-    }
-    QFile file(info.absoluteFilePath());
-    if (!file.open(QIODevice::ReadOnly)) {
-        if (error) *error = QStringLiteral("无法读取已提交 Artifact 文件：%1").arg(info.absoluteFilePath());
-        return false;
-    }
-    QCryptographicHash hash(QCryptographicHash::Sha256);
-    while (!file.atEnd()) {
-        const QByteArray block = file.read(1024 * 1024);
-        if (block.isEmpty() && file.error() != QFileDevice::NoError) {
-            if (error) *error = QStringLiteral("读取已提交 Artifact 文件失败：%1").arg(info.absoluteFilePath());
-            return false;
-        }
-        hash.addData(block);
-    }
-    if (QString::fromLatin1(hash.result().toHex()) != expected.sha256) {
-        if (error) *error = QStringLiteral("已提交 Artifact 文件 SHA-256 不匹配：%1").arg(expected.relativePath);
-        return false;
-    }
     if (result) {
-        *result = {expected.relativePath, info.absoluteFilePath(), expected.sha256, expected.byteCount};
+        *result = {verified.relativePath, verified.absolutePath,
+            verified.sha256, verified.byteCount};
     }
     return true;
 }
@@ -139,49 +117,8 @@ struct AsyncArtifactFileSource final {
 bool readAsyncArtifactFile(const AsyncArtifactFileSource& source,
     ArtifactFilePreview* result, QString* error)
 {
-    if (error) error->clear();
-    const QFileInfo info(source.absolutePath);
-    if (source.artifactRoot.isEmpty() || source.absolutePath.isEmpty()
-        || !isChildPath(source.artifactRoot, info.absoluteFilePath())
-        || !info.exists() || !info.isFile() || info.isSymLink()
-        || info.size() != source.expected.byteCount) {
-        if (error) *error = QStringLiteral("已提交 Artifact 文件无效、越界或已被修改。");
-        return false;
-    }
-
-    QFile file(info.absoluteFilePath());
-    if (!file.open(QIODevice::ReadOnly)) {
-        if (error) *error = QStringLiteral("无法读取已提交 Artifact 文件。");
-        return false;
-    }
-    QCryptographicHash hash(QCryptographicHash::Sha256);
-    QByteArray content;
-    if (source.maxBytes > 0) {
-        content.reserve(static_cast<int>(qMin<qint64>(source.maxBytes, source.expected.byteCount)));
-    }
-    while (!file.atEnd()) {
-        const QByteArray block = file.read(1024 * 1024);
-        if (block.isEmpty() && file.error() != QFileDevice::NoError) {
-            if (error) *error = QStringLiteral("读取已提交 Artifact 文件失败。");
-            return false;
-        }
-        hash.addData(block);
-        if (content.size() < source.maxBytes) {
-            const qint64 remaining = source.maxBytes - content.size();
-            content.append(block.left(static_cast<int>(qMin<qint64>(remaining, block.size()))));
-        }
-    }
-    if (QString::fromLatin1(hash.result().toHex()) != source.expected.sha256) {
-        if (error) *error = QStringLiteral("已提交 Artifact 文件 SHA-256 不匹配：%1")
-            .arg(source.expected.relativePath);
-        return false;
-    }
-    if (result) {
-        *result = {source.expected.relativePath, source.expected.sha256,
-            source.expected.byteCount, content,
-            source.expected.byteCount > source.maxBytes};
-    }
-    return true;
+    return VerifiedArtifactReader(source.artifactRoot)
+        .preview(source.expected, source.maxBytes, result, nullptr, error);
 }
 
 class ArtifactFilePreviewRunnable final : public QRunnable {
@@ -1298,8 +1235,15 @@ bool ProjectWorkspace::recoverAfterWorkerLoss(const TaskId& taskId, QString* err
                 ? QStringLiteral("如需继续，请重新发起该任务。")
                 : defaultFailureSuggestedAction(FailureCode::ProcessCrashed),
             QDateTime::currentDateTimeUtc()};
-        const QVector<WorkflowRunSnapshot> workflows = storage_.workflowRunsForTask(taskId, error);
-        if (error && !error->isEmpty()) return false;
+        QVector<WorkflowRunSnapshot> workflows;
+        QString workflowCursor;
+        do {
+            const Page<WorkflowRunSnapshot> page =
+                storage_.workflowRunsForTask(taskId, {50, workflowCursor}, error);
+            if (error && !error->isEmpty()) return false;
+            workflows += page.items;
+            workflowCursor = page.hasMore ? page.nextCursor : QString();
+        } while (!workflowCursor.isEmpty());
         for (const WorkflowRunSnapshot& workflow : workflows) {
             if (workflow.terminalPolicy == WorkflowTerminalPolicy::EvidenceRequired) continue;
             QVector<WorkflowStepSnapshot> steps = storage_.workflowSteps(workflow.id, error);
@@ -2408,8 +2352,15 @@ bool ProjectWorkspace::buildWorkflowEvidenceBundle(const WorkflowRunId& workflow
             return false;
         }
     }
-    const QVector<MetricSnapshot> metrics = storage_.metricsForTask(task.id, error);
-    if (error && !error->isEmpty()) return false;
+    QVector<MetricSnapshot> metrics;
+    QString metricCursor;
+    do {
+        const Page<MetricSnapshot> page =
+            storage_.metricsForTask(task.id, {100, metricCursor}, error);
+        if (error && !error->isEmpty()) return false;
+        metrics += page.items;
+        metricCursor = page.hasMore ? page.nextCursor : QString();
+    } while (!metricCursor.isEmpty());
 
     ProjectMetaSnapshot projectMeta;
     if (!storage_.projectMeta(&projectMeta, error)) return false;
@@ -2520,8 +2471,15 @@ bool ProjectWorkspace::buildWorkflowEvidenceBundle(const WorkflowRunId& workflow
         return true;
     };
 
-    const QVector<ArtifactSnapshot> taskArtifacts = storage_.artifactsForTask(task.id, error);
-    if (error && !error->isEmpty()) return false;
+    QVector<ArtifactSnapshot> taskArtifacts;
+    QString artifactCursor;
+    do {
+        const Page<ArtifactSnapshot> page =
+            storage_.artifactsForTask(task.id, {50, artifactCursor}, error);
+        if (error && !error->isEmpty()) return false;
+        taskArtifacts += page.items;
+        artifactCursor = page.hasMore ? page.nextCursor : QString();
+    } while (!artifactCursor.isEmpty());
     for (const ArtifactSnapshot& artifact : taskArtifacts) {
         if (!appendArtifact(artifact.id, QStringLiteral("task_artifact"), nullptr)) return false;
     }
@@ -2623,8 +2581,15 @@ bool ProjectWorkspace::commitEvidenceBundle(const EvidenceBundle& bundle,
     // 其他任务的 Artifact 或伪造的摘要写成交付证据。
     const QVector<WorkflowStepSnapshot> persistedSteps = storage_.workflowSteps(bundle.workflowRunId, error);
     if (error && !error->isEmpty()) return false;
-    const QVector<ArtifactSnapshot> rootArtifacts = storage_.artifactsForTask(persisted.id, error);
-    if (error && !error->isEmpty()) return false;
+    QVector<ArtifactSnapshot> rootArtifacts;
+    QString rootArtifactCursor;
+    do {
+        const Page<ArtifactSnapshot> page =
+            storage_.artifactsForTask(persisted.id, {50, rootArtifactCursor}, error);
+        if (error && !error->isEmpty()) return false;
+        rootArtifacts += page.items;
+        rootArtifactCursor = page.hasMore ? page.nextCursor : QString();
+    } while (!rootArtifactCursor.isEmpty());
     QSet<QString> allowedArtifactIds;
     QSet<QString> allowedProducerTaskIds{persisted.id.toString()};
     for (const ArtifactSnapshot& artifact : rootArtifacts) {
@@ -2825,22 +2790,23 @@ bool ProjectWorkspace::cleanupRuntimeStaging(const TaskId& taskId, QString* erro
     return true;
 }
 
-QVector<TaskSnapshot> ProjectWorkspace::tasks(int limit, QString* error) const
+Page<TaskSnapshot> ProjectWorkspace::tasks(const PageRequest& request, QString* error) const
 {
     if (!isOpen()) {
         if (error) *error = QStringLiteral(" 项目工作区未打开。");
         return {};
     }
-    return storage_.tasks(limit, error);
+    return storage_.tasks(request, error);
 }
 
-QVector<DatasetCatalogItem> ProjectWorkspace::datasets(int limit, QString* error) const
+Page<DatasetCatalogItem> ProjectWorkspace::datasets(
+    const PageRequest& request, QString* error) const
 {
     if (!isOpen()) {
         if (error) *error = QStringLiteral(" 项目工作区未打开。");
         return {};
     }
-    return storage_.datasets(limit, error);
+    return storage_.datasets(request, error);
 }
 
 bool ProjectWorkspace::task(const TaskId& taskId, TaskSnapshot* result, QString* error) const
@@ -2861,23 +2827,24 @@ bool ProjectWorkspace::artifact(const ArtifactId& artifactId, ArtifactSnapshot* 
     return storage_.artifact(artifactId, result, error);
 }
 
-QVector<ArtifactSnapshot> ProjectWorkspace::artifactsForTask(const TaskId& taskId, QString* error) const
+Page<ArtifactSnapshot> ProjectWorkspace::artifactsForTask(
+    const TaskId& taskId, const PageRequest& request, QString* error) const
 {
     if (!isOpen()) {
         if (error) *error = QStringLiteral(" 项目工作区未打开。");
         return {};
     }
-    return storage_.artifactsForTask(taskId, error);
+    return storage_.artifactsForTask(taskId, request, error);
 }
 
-QVector<DeliveryEvidenceCandidate> ProjectWorkspace::deliveryEvidenceCandidates(
-    int limit, QString* error) const
+Page<DeliveryEvidenceCandidate> ProjectWorkspace::deliveryEvidenceCandidates(
+    const PageRequest& request, QString* error) const
 {
     if (!isOpen()) {
         if (error) *error = QStringLiteral(" 项目工作区未打开。");
         return {};
     }
-    return storage_.deliveryEvidenceCandidates(limit, error);
+    return storage_.deliveryEvidenceCandidates(request, error);
 }
 
 bool ProjectWorkspace::readCommittedArtifactFile(const ArtifactId& artifactId,
@@ -3028,22 +2995,24 @@ bool ProjectWorkspace::readCommittedArtifactFileAsync(const ArtifactId& artifact
     return true;
 }
 
-QVector<MetricSnapshot> ProjectWorkspace::metricsForTask(const TaskId& taskId, QString* error) const
+Page<MetricSnapshot> ProjectWorkspace::metricsForTask(
+    const TaskId& taskId, const PageRequest& request, QString* error) const
 {
     if (!isOpen()) {
         if (error) *error = QStringLiteral(" 项目工作区未打开。");
         return {};
     }
-    return storage_.metricsForTask(taskId, error);
+    return storage_.metricsForTask(taskId, request, error);
 }
 
-QVector<WorkflowRunSnapshot> ProjectWorkspace::workflowRunsForTask(const TaskId& taskId, QString* error) const
+Page<WorkflowRunSnapshot> ProjectWorkspace::workflowRunsForTask(
+    const TaskId& taskId, const PageRequest& request, QString* error) const
 {
     if (!isOpen()) {
         if (error) *error = QStringLiteral(" 项目工作区未打开。");
         return {};
     }
-    return storage_.workflowRunsForTask(taskId, error);
+    return storage_.workflowRunsForTask(taskId, request, error);
 }
 
 QVector<WorkflowStepSnapshot> ProjectWorkspace::workflowSteps(const WorkflowRunId& workflowRunId, QString* error) const
@@ -3055,13 +3024,14 @@ QVector<WorkflowStepSnapshot> ProjectWorkspace::workflowSteps(const WorkflowRunI
     return storage_.workflowSteps(workflowRunId, error);
 }
 
-QVector<ModelPackageSnapshot> ProjectWorkspace::modelPackages(int limit, QString* error) const
+Page<ModelPackageSnapshot> ProjectWorkspace::modelPackages(
+    const PageRequest& request, QString* error) const
 {
     if (!isOpen()) {
         if (error) *error = QStringLiteral(" 项目工作区未打开。");
         return {};
     }
-    return storage_.modelPackages(limit, error);
+    return storage_.modelPackages(request, error);
 }
 
 bool ProjectWorkspace::projectSummary(ProjectSummarySnapshot* result, QString* error) const

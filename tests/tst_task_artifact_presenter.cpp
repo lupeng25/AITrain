@@ -8,6 +8,7 @@
 #include <QEventLoop>
 #include <QFile>
 #include <QHash>
+#include <QSet>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QThread>
@@ -23,6 +24,7 @@ private slots:
     void readsPersistedTaskArtifactsMetricsAndWorkflowOnly();
     void readsCommittedArtifactPreviewByIdentity();
     void readsCommittedArtifactPreviewAsynchronouslyWithMetadataSnapshot();
+    void appendsTaskPagesWithoutDuplicates();
     void invalidSelectionClearsReadModelWithoutPrivateAccess();
 };
 
@@ -125,6 +127,33 @@ void TaskArtifactPresenterTests::invalidSelectionClearsReadModelWithoutPrivateAc
     QCOMPARE(presenter.artifactCount(), 0);
     QCOMPARE(failureSpy.count(), 1);
     QVERIFY(!presenter.lastError().isEmpty());
+}
+
+void TaskArtifactPresenterTests::appendsTaskPagesWithoutDuplicates()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    aitrain::ProjectWorkspace workspace;
+    QString error;
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("project")), &error),
+        qPrintable(error));
+    for (int index = 0; index < 3; ++index) {
+        aitrain::TaskSnapshot task;
+        QVERIFY2(workspace.startTask(aitrain::TaskId::create(), QStringLiteral("diagnostic.%1").arg(index),
+            QStringLiteral("diagnostics"), &task, &error), qPrintable(error));
+    }
+
+    aitrain::ProjectQueryService query(&workspace);
+    TaskArtifactPresenter presenter(&query);
+    QVERIFY2(presenter.refresh({2, {}}), qPrintable(presenter.lastError()));
+    QCOMPARE(presenter.taskRows().size(), 2);
+    QVERIFY(presenter.hasMoreTasks());
+    QVERIFY2(presenter.loadMore(), qPrintable(presenter.lastError()));
+    QCOMPARE(presenter.taskRows().size(), 3);
+    QVERIFY(!presenter.hasMoreTasks());
+    QSet<QString> taskIds;
+    for (const TaskListItem& item : presenter.taskRows()) taskIds.insert(item.taskId);
+    QCOMPARE(taskIds.size(), 3);
 }
 
 void TaskArtifactPresenterTests::readsCommittedArtifactPreviewByIdentity()

@@ -41,9 +41,10 @@ class QToolButton;
 class QFrame;
 class QResizeEvent;
 class ApplicationEventRouter;
-class TaskExecutionController;
+class TaskRuntimeController;
 struct TaskViewState;
 class WorkspaceRouter;
+class WorkspaceReadModelCoordinator;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -196,10 +197,11 @@ private:
     QString activeWorkflowKind_;
     qint64 liveMetricSequence_ = 0;
     qint64 liveArtifactSequence_ = 0;
-    WorkerClient worker_;
     ApplicationEventRouter* eventRouter_ = nullptr;
-    TaskExecutionController* taskController_ = nullptr;
+    TaskRuntimeController* taskController_ = nullptr;
     WorkspaceRouter* workspaceRouter_ = nullptr;
+    WorkspaceReadModelCoordinator* readModelCoordinator_ = nullptr;
+    WorkerClient& workerClient();
     MainWindowState state_;
 
     QString currentProjectPath_;

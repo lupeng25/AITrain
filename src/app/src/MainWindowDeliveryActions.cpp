@@ -1,5 +1,5 @@
 #include "MainWindow.h"
-#include "TaskExecutionController.h"
+#include "TaskRuntimeController.h"
 
 #include "DatasetConversionUiModel.h"
 #include "EvaluationReportView.h"
@@ -207,7 +207,7 @@ void setFieldErrorLabel(QLabel* label, const QString& text)
 
 void MainWindow::validateDeploymentModelPackage()
 {
-    if (worker_.isRunning()) {
+    if (taskController_->isRunning()) {
         QMessageBox::warning(this, uiText("部署验证"), uiText("Worker 正在执行任务，稍后再运行交付工作流。"));
         return;
     }
@@ -272,7 +272,7 @@ void MainWindow::validateDeploymentModelPackage()
 }
 void MainWindow::importOcrOfficialReports()
 {
-    if (worker_.isRunning()) {
+    if (taskController_->isRunning()) {
         QMessageBox::warning(this, uiText("OCR 报告导入"), uiText("Worker 正在执行任务，稍后再导入。"));
         return;
     }
@@ -331,7 +331,7 @@ void MainWindow::importOcrOfficialReports()
 
 void MainWindow::runOcrAcceptanceWorkflow()
 {
-    if (worker_.isRunning()) {
+    if (taskController_->isRunning()) {
         QMessageBox::warning(this, uiText("OCR 验收"), uiText("Worker 正在执行任务，稍后再运行验收。"));
         return;
     }
@@ -382,7 +382,7 @@ void MainWindow::runOcrAcceptanceWorkflow()
 
 void MainWindow::collectDiagnosticsBundle()
 {
-    if (worker_.isRunning()) {
+    if (taskController_->isRunning()) {
         QMessageBox::warning(this, uiText("诊断包"), uiText("Worker 正在执行任务，稍后再生成诊断包。"));
         return;
     }

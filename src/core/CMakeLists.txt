@@ -1,5 +1,6 @@
 add_library(aitrain_domain STATIC
     include/aitrain/domain/DomainTypes.h
+    include/aitrain/domain/Pagination.h
     include/aitrain/domain/ArtifactMemberPath.h
     src/domain/DomainTypes.cpp
     src/domain/ArtifactMemberPath.cpp
@@ -44,7 +45,9 @@ target_compile_definitions(aitrain_protocol
 )
 
 add_library(aitrain_storage STATIC
+    include/aitrain/storage/ProjectDatabase.h
     include/aitrain/storage/ProjectStore.h
+    src/storage/ProjectDatabase.cpp
     src/storage/ProjectStore.cpp
 )
 
@@ -258,16 +261,20 @@ target_compile_definitions(aitrain_application
 
 add_library(aitrain_artifact STATIC
     include/aitrain/artifact/ArtifactStore.h
+    include/aitrain/artifact/VerifiedArtifactReader.h
     src/artifact/ArtifactStore.cpp
+    src/artifact/VerifiedArtifactReader.cpp
 )
 
 add_library(aitrain_model STATIC
     include/aitrain/model/ModelManifest.h
     include/aitrain/runtime/RuntimeAdapter.h
     include/aitrain/runtime/RuntimeInvocation.h
+    include/aitrain/runtime/RuntimeBenchmarkRunner.h
     src/model/ModelManifest.cpp
     src/runtime/RuntimeAdapter.cpp
     src/runtime/RuntimeInvocation.cpp
+    src/runtime/RuntimeBenchmarkRunner.cpp
 )
 target_include_directories(aitrain_model PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(aitrain_model PUBLIC aitrain_domain Qt${QT_VERSION_MAJOR}::Core)

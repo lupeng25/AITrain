@@ -64,7 +64,9 @@ public:
     explicit TaskArtifactPresenter(const aitrain::ProjectQueryService* queryService,
         QObject* parent = nullptr);
 
-    bool refresh(int limit = 200);
+    bool refresh(const aitrain::PageRequest& request = {100, {}});
+    bool loadMore();
+    bool hasMoreTasks() const;
     bool selectTask(const QString& taskId);
     bool previewArtifact(const QString& artifactId,
         const QString& relativePath,
@@ -99,4 +101,6 @@ private:
     QVector<TaskListItem> taskRows_;
     TaskArtifactDetails details_;
     QString lastError_;
+    QString nextTaskCursor_;
+    bool hasMoreTasks_ = false;
 };

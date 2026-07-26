@@ -35,7 +35,6 @@ public:
     virtual RuntimeOperationResult validateModel(const RuntimeModelLocation& model) const = 0;
     RuntimeOperationResult load(const RuntimeModelLocation& model) const { return validateModel(model); }
     virtual RuntimeOperationResult infer(const RuntimeModelLocation& model, const QJsonObject& request) const = 0;
-    virtual RuntimeOperationResult benchmark(const RuntimeModelLocation& model, const QJsonObject& request) const = 0;
     virtual RuntimeOperationResult deploymentValidate(const RuntimeModelLocation& model, const QJsonObject& request) const = 0;
 };
 

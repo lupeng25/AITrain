@@ -8,7 +8,7 @@ DeliveryEvidencePresenter::DeliveryEvidencePresenter(
     setObjectName(QStringLiteral("DeliveryEvidencePresenter"));
 }
 
-bool DeliveryEvidencePresenter::refresh(int limit)
+bool DeliveryEvidencePresenter::refresh(const aitrain::PageRequest& request)
 {
     ++refreshGeneration_;
     QString error;
@@ -17,7 +17,10 @@ bool DeliveryEvidencePresenter::refresh(int limit)
     }
     DeliveryEvidenceViewModel next;
     if (error.isEmpty()) {
-        next.records = queryService_->deliveryEvidence(limit, &error);
+        const auto page = queryService_->deliveryEvidence(request, &error);
+        next.records = request.after.isEmpty() ? page.items : viewModel_.records + page.items;
+        nextCursor_ = page.nextCursor;
+        hasMore_ = page.hasMore;
         next.available = error.isEmpty();
         for (const auto& record : next.records) {
             if (record.verified) ++next.verifiedCount;
@@ -36,7 +39,7 @@ bool DeliveryEvidencePresenter::refresh(int limit)
     return true;
 }
 
-bool DeliveryEvidencePresenter::refreshAsync(int limit)
+bool DeliveryEvidencePresenter::refreshAsync(const aitrain::PageRequest& request)
 {
     const quint64 generation = ++refreshGeneration_;
     QString error;
@@ -50,9 +53,10 @@ bool DeliveryEvidencePresenter::refreshAsync(int limit)
         return false;
     }
 
-    const bool scheduled = queryService_->deliveryEvidenceAsync(limit, this,
-        [this, generation](bool success,
-            QVector<aitrain::DeliveryEvidenceReadModel> records, QString callbackError) {
+    const bool append = !request.after.isEmpty();
+    const bool scheduled = queryService_->deliveryEvidenceAsync(request, this,
+        [this, generation, append](bool success,
+            aitrain::Page<aitrain::DeliveryEvidenceReadModel> page, QString callbackError) {
             if (generation != refreshGeneration_) return;
             if (!success) {
                 clear();
@@ -61,13 +65,15 @@ bool DeliveryEvidencePresenter::refreshAsync(int limit)
                 return;
             }
             DeliveryEvidenceViewModel next;
-            next.records = std::move(records);
+            next.records = append ? viewModel_.records + page.items : std::move(page.items);
             next.available = true;
             for (const auto& record : next.records) {
                 if (record.verified) ++next.verifiedCount;
                 else ++next.unverifiedCount;
             }
             viewModel_ = std::move(next);
+            nextCursor_ = page.nextCursor;
+            hasMore_ = page.hasMore;
             lastError_.clear();
             emit changed();
         }, &error);
@@ -80,11 +86,20 @@ bool DeliveryEvidencePresenter::refreshAsync(int limit)
     return true;
 }
 
+bool DeliveryEvidencePresenter::loadMoreAsync()
+{
+    return hasMore_ && refreshAsync({50, nextCursor_});
+}
+
+bool DeliveryEvidencePresenter::hasMore() const { return hasMore_; }
+
 void DeliveryEvidencePresenter::clear()
 {
     ++refreshGeneration_;
     viewModel_ = {};
     lastError_.clear();
+    nextCursor_.clear();
+    hasMore_ = false;
     emit changed();
 }
 

@@ -1,5 +1,5 @@
 #include "MainWindow.h"
-#include "TaskExecutionController.h"
+#include "TaskRuntimeController.h"
 
 #include "DatasetConversionUiModel.h"
 #include "EvaluationReportView.h"
@@ -386,7 +386,7 @@ QJsonObject yoloTrainingExportArgsFromUi(const QWidget* root, int imageSize)
 
 void MainWindow::startInference()
 {
-    if (worker_.isRunning()) {
+    if (taskController_->isRunning()) {
         QMessageBox::warning(this, uiText("推理"), uiText("Worker 正在执行任务，稍后再运行交付工作流。"));
         return;
     }
@@ -454,7 +454,7 @@ void MainWindow::startInference()
 
 void MainWindow::startTraining()
 {
-    if (worker_.isRunning()) {
+    if (taskController_->isRunning()) {
         QMessageBox::warning(this, uiText("训练"), uiText("Worker 正在执行任务；当前版本只允许一个活动任务。"));
         return;
     }
@@ -646,7 +646,7 @@ void MainWindow::startTraining()
 
 void MainWindow::importModelPackage()
 {
-    if (worker_.isRunning()) {
+    if (taskController_->isRunning()) {
         QMessageBox::warning(this, uiText("模型导入"), uiText("Worker 正在执行任务，稍后再导入模型。"));
         return;
     }

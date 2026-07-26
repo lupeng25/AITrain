@@ -27,7 +27,7 @@ WorkerClient::WorkerClient(QObject* parent)
             return;
         }
         process_.terminate();
-        QTimer::singleShot(1500, this, [this]() {
+        QTimer::singleShot(2000, this, [this]() {
             if (cancelRequested_ && process_.state() != QProcess::NotRunning) {
                 process_.kill();
             }
@@ -407,7 +407,7 @@ void WorkerClient::sendCancelTask()
         return;
     }
     if (process_.state() != QProcess::NotRunning) {
-        cancelTimer_.start(2000);
+        cancelTimer_.start(30000);
     }
 }
 

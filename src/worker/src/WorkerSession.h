@@ -2,6 +2,7 @@
 
 #include "aitrain/core/Cancellation.h"
 #include "aitrain/core/WorkerProtocol.h"
+#include "aitrain/worker/ActiveWorkflowContext.h"
 #include "aitrain/workflow/ProjectWorkspace.h"
 
 #include <QJsonArray>
@@ -64,15 +65,16 @@ private:
     void maybeFinishSessionAfterWrite();
     void fail(const QString& message);
     void failWithDetails(const QString& message, const QString& errorCode, const QJsonObject& details = {});
+    bool publishPersistedTerminal(const aitrain::TaskId& taskId,
+        const QString& completedMessage = QString());
 
     QLocalSocket socket_;
     QByteArray buffer_;
-    bool running_ = false;
-    bool canceled_ = false;
     QProcess pythonTrainerProcess_;
     bool interceptPythonTrainerMessages_ = false;
     bool finishingSession_ = false;
     bool startTaskReceived_ = false;
+    bool batchCancelPending_ = false;
     bool terminalEnvelopeSent_ = false;
     QTimer terminalDrainTimer_;
     QElapsedTimer terminalDrainElapsed_;
@@ -85,35 +87,10 @@ private:
     aitrain::TaskId controlTaskId_;
     QString controlToken_;
     aitrain::ProtocolSequenceTracker incomingSequenceTracker_;
+    aitrain::ActiveWorkflowContext activeWorkflow_;
     QString activeTaskId_;
     QString activeCommand_;
-    std::unique_ptr<aitrain::ProjectWorkspace> trainingWorkspace_;
-    aitrain::TaskId trainingWorkflowTaskId_;
     aitrain::WorkflowRunId trainingWorkflowRunId_;
     QString trainingWorkflowDeploymentSampleRelativePath_;
     aitrain::TrainingWorkflowAdapterConfig trainingWorkflowAdapterConfig_;
-    std::unique_ptr<aitrain::ProjectWorkspace> runtimeDeliveryWorkspace_;
-    aitrain::TaskId runtimeDeliveryTaskId_;
-    bool runtimeDeliveryRunning_ = false;
-    std::unique_ptr<aitrain::ProjectWorkspace> annotationWorkspace_;
-    aitrain::TaskId annotationTaskId_;
-    bool annotationRunning_ = false;
-    std::unique_ptr<aitrain::ProjectWorkspace> ocrAcceptanceWorkspace_;
-    aitrain::TaskId ocrAcceptanceTaskId_;
-    bool ocrAcceptanceRunning_ = false;
-    std::unique_ptr<aitrain::ProjectWorkspace> dataQualityWorkspace_;
-    aitrain::TaskId dataQualityTaskId_;
-    bool dataQualityRunning_ = false;
-    std::unique_ptr<aitrain::ProjectWorkspace> datasetConversionWorkspace_;
-    aitrain::TaskId datasetConversionTaskId_;
-    bool datasetConversionRunning_ = false;
-    std::unique_ptr<aitrain::ProjectWorkspace> datasetSnapshotImportWorkspace_;
-    aitrain::TaskId datasetSnapshotImportTaskId_;
-    bool datasetSnapshotImportRunning_ = false;
-    std::unique_ptr<aitrain::ProjectWorkspace> datasetSplitWorkspace_;
-    aitrain::TaskId datasetSplitTaskId_;
-    bool datasetSplitRunning_ = false;
-    std::unique_ptr<aitrain::ProjectWorkspace> diagnosticsWorkspace_;
-    aitrain::TaskId diagnosticsTaskId_;
-    bool diagnosticsRunning_ = false;
 };

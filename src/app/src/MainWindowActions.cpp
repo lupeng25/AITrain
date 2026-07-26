@@ -1,5 +1,6 @@
 #include "MainWindow.h"
-#include "TaskExecutionController.h"
+#include "TaskRuntimeController.h"
+#include "WorkspaceReadModelCoordinator.h"
 #include "EnvironmentCheckPresenter.h"
 
 #include "DatasetConversionUiModel.h"
@@ -51,7 +52,7 @@ using namespace aitrain_app;
 
 void MainWindow::createProject()
 {
-    if (worker_.isRunning()) {
+    if (taskController_->isRunning()) {
         QMessageBox::warning(this, uiText("项目"),
             uiText("Worker 正在执行任务，请等待任务终态后再切换项目。"));
         return;
@@ -133,6 +134,7 @@ void MainWindow::finishProjectOpen(const QString& projectName, const QString& pr
 
     currentProjectName_ = projectName;
     currentProjectPath_ = result.prepared.canonicalRoot;
+    readModelCoordinator_->setGeneration(generation);
     clearSelectedTaskDetails();
     state_.dataset = DatasetWorkbenchState();
     for (QLineEdit* field : {dataQualityDatasetIdEdit_, dataQualityDatasetVersionIdEdit_,
@@ -147,10 +149,9 @@ void MainWindow::finishProjectOpen(const QString& projectName, const QString& pr
         dashboardProjectValue_->setText(currentProjectName_);
     }
     updateHeaderState();
-    updateRecentTasks();
-    updateDatasetList();
-    updateModelRegistry();
-    updateDashboardSummary();
+    readModelCoordinator_->invalidate(RefreshDomain::TaskList
+        | RefreshDomain::DatasetCatalog | RefreshDomain::ModelRegistry
+        | RefreshDomain::ProjectSummary | RefreshDomain::DeliveryEvidence);
     updateSettingsSummary();
     refreshTrainingDefaults();
     statusBar()->showMessage(uiText("项目已打开：%1").arg(currentProjectName_), 5000);
@@ -158,7 +159,7 @@ void MainWindow::finishProjectOpen(const QString& projectName, const QString& pr
 
 void MainWindow::runEnvironmentCheck()
 {
-    if (worker_.isRunning()) {
+    if (taskController_->isRunning()) {
         QMessageBox::warning(this, uiText("环境自检"), uiText("Worker 正在执行任务，稍后再运行环境自检。"));
         return;
     }

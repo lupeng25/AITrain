@@ -89,6 +89,7 @@ void WorkerSession::readLines()
     // 产生 worker_failed，掩盖其后已经到达的重复消息或乱序序列错误。
     aitrain::ProtocolSequenceTracker preflightTracker = incomingSequenceTracker_;
     bool preflightStartReceived = startTaskReceived_;
+    bool preflightCancelSeen = false;
     QByteArray preflightBuffer = buffer_;
     int preflightNewline = preflightBuffer.indexOf('\n');
     while (preflightNewline >= 0) {
@@ -115,6 +116,7 @@ void WorkerSession::readLines()
                     "Protocol  command.cancel_task cannot precede command.start_task."));
                 return;
             }
+            preflightCancelSeen = true;
         } else if (envelope.kind == QStringLiteral("command.start_task")) {
             if (preflightStartReceived) {
                 rejectControlProtocol(QStringLiteral(
@@ -134,6 +136,7 @@ void WorkerSession::readLines()
         }
         preflightNewline = preflightBuffer.indexOf('\n');
     }
+    batchCancelPending_ = preflightCancelSeen;
 
     int newline = buffer_.indexOf('\n');
     while (newline >= 0) {
@@ -212,6 +215,43 @@ void WorkerSession::handleCommand(const wp::TaskCommand& command)
     activeTaskId_ = std::visit([](const auto& value) {
         return value.context.taskId.toString();
     }, command.payload);
+    const aitrain::TaskCommandKind commandKind = std::visit([](const auto& value) {
+        using T = std::decay_t<decltype(value)>;
+        if constexpr (std::is_same_v<T, wp::EnvironmentCheckCommand>)
+            return aitrain::TaskCommandKind::EnvironmentCheck;
+        else if constexpr (std::is_same_v<T, wp::DatasetSplitCommand>)
+            return aitrain::TaskCommandKind::DatasetSplit;
+        else if constexpr (std::is_same_v<T, wp::DatasetConversionCommand>)
+            return aitrain::TaskCommandKind::DatasetConversion;
+        else if constexpr (std::is_same_v<T, wp::DataQualityCommand>)
+            return aitrain::TaskCommandKind::DataQuality;
+        else if constexpr (std::is_same_v<T, wp::DiagnosticsCommand>)
+            return aitrain::TaskCommandKind::Diagnostics;
+        else if constexpr (std::is_same_v<T, wp::ExternalAcceptanceEvidenceImportCommand>)
+            return aitrain::TaskCommandKind::ExternalEvidenceImport;
+        else if constexpr (std::is_same_v<T, wp::AnnotationSessionCreateCommand>)
+            return aitrain::TaskCommandKind::AnnotationCreate;
+        else if constexpr (std::is_same_v<T, wp::AnnotationSessionSyncCommand>)
+            return aitrain::TaskCommandKind::AnnotationSync;
+        else if constexpr (std::is_same_v<T, wp::DatasetSnapshotImportCommand>)
+            return aitrain::TaskCommandKind::DatasetSnapshotImport;
+        else if constexpr (std::is_same_v<T, wp::OcrOfficialReportImportCommand>)
+            return aitrain::TaskCommandKind::OcrReportImport;
+        else if constexpr (std::is_same_v<T, wp::OcrAcceptanceCommand>)
+            return aitrain::TaskCommandKind::OcrAcceptance;
+        else if constexpr (std::is_same_v<T, wp::RuntimeDeliveryCommand>)
+            return aitrain::TaskCommandKind::RuntimeDelivery;
+        else if constexpr (std::is_same_v<T, wp::ModelImportCommand>)
+            return aitrain::TaskCommandKind::ModelImport;
+        else
+            return aitrain::TaskCommandKind::Training;
+    }, command.payload);
+    QString contextError;
+    if (!activeWorkflow_.begin(commandKind, &contextError)) {
+        failWithDetails(contextError, QStringLiteral("worker_busy"));
+        return;
+    }
+    if (batchCancelPending_) activeWorkflow_.requestCancel();
     std::visit([this](const auto& value) {
         using T = std::decay_t<decltype(value)>;
         if constexpr (std::is_same_v<T, wp::EnvironmentCheckCommand>) {
@@ -254,46 +294,29 @@ void WorkerSession::cancelCommand()
     if (requestCancellationForActiveWorkflow()) {
         return;
     }
-    running_ = false;
-    canceled_ = true;
     shutdownPythonTrainer(QStringLiteral("Canceled by user"), true);
     sendCanceledAndFinish(activeTaskId_, QStringLiteral("Canceled by user"));
 }
 
 bool WorkerSession::requestCancellationForActiveWorkflow()
 {
-    if (trainingWorkspace_ && trainingWorkflowTaskId_.isValid()) {
+    if (!activeWorkflow_.requestCancel()) {
+        return false;
+    }
+    if (activeWorkflow_.commandKind() == aitrain::TaskCommandKind::Training
+        && activeWorkflow_.workspace() && activeWorkflow_.taskId().isValid()) {
         cancelTrainingWorkflow();
         return true;
     }
-    if (runtimeDeliveryRunning_ && runtimeDeliveryWorkspace_
-        && runtimeDeliveryTaskId_.isValid()) {
-        // Runtime Delivery Core 在每个同步 Runtime 调用前后轮询该标记。
-        // 底层 ONNX Runtime 单次 infer 为同步调用，进入后不能中途抢占；
-        // 取消会在该次 infer 返回后收口，不能提前发送第二个终态。
-        canceled_ = true;
+    if (activeWorkflow_.workspace() && activeWorkflow_.taskId().isValid()) {
+        QString ignored;
+        activeWorkflow_.workspace()->requestTaskCancellation(activeWorkflow_.taskId(), &ignored);
         return true;
     }
-
-    const auto request = [this](aitrain::ProjectWorkspace* workspace,
-                                const aitrain::TaskId& taskId) {
-        if (!workspace || !taskId.isValid()) {
-            return false;
-        }
-        canceled_ = true;
-        QString ignored;
-        workspace->requestTaskCancellation(taskId, &ignored);
-        return true;
-    };
-    if (annotationRunning_ && request(annotationWorkspace_.get(), annotationTaskId_)) return true;
-    if (ocrAcceptanceRunning_ && request(ocrAcceptanceWorkspace_.get(), ocrAcceptanceTaskId_)) return true;
-    if (dataQualityRunning_ && request(dataQualityWorkspace_.get(), dataQualityTaskId_)) return true;
-    if (diagnosticsRunning_ && request(diagnosticsWorkspace_.get(), diagnosticsTaskId_)) return true;
-    if (datasetConversionRunning_ && request(datasetConversionWorkspace_.get(), datasetConversionTaskId_)) return true;
-    if (datasetSnapshotImportRunning_
-        && request(datasetSnapshotImportWorkspace_.get(), datasetSnapshotImportTaskId_)) return true;
-    if (datasetSplitRunning_ && request(datasetSplitWorkspace_.get(), datasetSplitTaskId_)) return true;
-    return false;
+    // start_task 与 cancel_task 同批到达时，任务尚未绑定 Workspace。
+    // Context 已记录取消意图，具体 Workflow 会在首个取消点完成持久化收口；
+    // 不得在这里抢先发布终态。
+    return true;
 }
 
 void WorkerSession::requestCancellationForTrackedWorkflows()
@@ -310,15 +333,7 @@ void WorkerSession::requestCancellationForTrackedWorkflows()
     // 断线是本地生命周期事件，不再根据各 handler 的 running 标记分叉；
     // 只要 workspace 已经绑定了任务身份，就统一发出取消请求。这样在
     // “startTask 成功、running 标记尚未置位”的窄窗口内也不会遗留活动任务。
-    request(trainingWorkspace_.get(), trainingWorkflowTaskId_);
-    request(runtimeDeliveryWorkspace_.get(), runtimeDeliveryTaskId_);
-    request(annotationWorkspace_.get(), annotationTaskId_);
-    request(ocrAcceptanceWorkspace_.get(), ocrAcceptanceTaskId_);
-    request(dataQualityWorkspace_.get(), dataQualityTaskId_);
-    request(diagnosticsWorkspace_.get(), diagnosticsTaskId_);
-    request(datasetConversionWorkspace_.get(), datasetConversionTaskId_);
-    request(datasetSnapshotImportWorkspace_.get(), datasetSnapshotImportTaskId_);
-    request(datasetSplitWorkspace_.get(), datasetSplitTaskId_);
+    request(activeWorkflow_.workspace(), activeWorkflow_.taskId());
 }
 
 void WorkerSession::handleSocketDisconnected()
@@ -330,8 +345,7 @@ void WorkerSession::handleSocketDisconnected()
         return;
     }
 
-    running_ = false;
-    canceled_ = true;
+    activeWorkflow_.requestCancel();
     requestCancellationForTrackedWorkflows();
     shutdownPythonTrainer(QStringLiteral("Worker client disconnected."), false);
     qApp->quit();
@@ -389,14 +403,14 @@ void WorkerSession::send(const QString& type, const QJsonObject& payload)
 aitrain::CancellationCallback WorkerSession::cancellationCallback()
 {
     return [this]() {
-        return canceled_;
+        return activeWorkflow_.cancellationRequested();
     };
 }
 
 aitrain::CancellationCallback WorkerSession::pollingCancellationCallback(int timeoutMs)
 {
     return [this, timeoutMs]() {
-        return canceled_ || pollPendingCancel(timeoutMs);
+        return activeWorkflow_.cancellationRequested() || pollPendingCancel(timeoutMs);
     };
 }
 
@@ -443,13 +457,14 @@ bool WorkerSession::pollPendingCancel(int timeoutMs)
             if (!acceptControlEnvelope(envelope)) {
                 return true;
             }
-            if (canceled_ || finishingSession_) {
+            if (activeWorkflow_.cancellationRequested() || finishingSession_) {
                 return true;
             }
         }
-    } while (QDateTime::currentMSecsSinceEpoch() < deadline && !canceled_);
+    } while (QDateTime::currentMSecsSinceEpoch() < deadline
+        && !activeWorkflow_.cancellationRequested());
 
-    return canceled_;
+    return activeWorkflow_.cancellationRequested();
 }
 
 void WorkerSession::shutdownPythonTrainer(const QString& reason, bool notifyClient)
@@ -485,8 +500,7 @@ void WorkerSession::sendCanceledAndFinish(const QString& taskId, const QString& 
     if (finishingSession_) {
         return;
     }
-    running_ = false;
-    canceled_ = true;
+    activeWorkflow_.markDurableTerminal();
 
     QJsonObject payload;
     payload.insert(wp::field::taskId(), taskId);
@@ -504,6 +518,7 @@ void WorkerSession::finishSession()
         return;
     }
     finishingSession_ = true;
+    activeWorkflow_.clear();
     activeTaskId_.clear();
     activeCommand_.clear();
     socket_.flush();
@@ -573,7 +588,6 @@ void WorkerSession::failWithDetails(const QString& message, const QString& error
     if (finishingSession_) {
         return;
     }
-    running_ = false;
     QJsonObject payload;
     payload.insert(wp::field::taskId(), activeTaskId_);
     payload.insert(wp::field::command(), activeCommand_);
@@ -586,4 +600,40 @@ void WorkerSession::failWithDetails(const QString& message, const QString& error
     }
     send(wp::event::failed(), payload);
     finishSession();
+}
+
+bool WorkerSession::publishPersistedTerminal(const aitrain::TaskId& taskId,
+    const QString& completedMessage)
+{
+    aitrain::ProjectWorkspace* workspace = activeWorkflow_.workspace();
+    aitrain::TaskSnapshot task;
+    QString error;
+    if (!workspace || !taskId.isValid()
+        || !workspace->task(taskId, &task, &error)
+        || !aitrain::isTerminalTaskState(task.state)) {
+        qCritical().noquote() << QStringLiteral(
+            "Worker terminal state cannot be read from SQLite: %1").arg(error);
+        finishSession();
+        return false;
+    }
+    activeWorkflow_.markDurableTerminal(nullptr);
+    const QString taskIdText = taskId.toString();
+    if (task.state == aitrain::TaskState::Succeeded) {
+        send(wp::event::completed(), QJsonObject{
+            {wp::field::taskId(), taskIdText},
+            {wp::field::message(), completedMessage.isEmpty()
+                ? QStringLiteral("task completed") : completedMessage}});
+        finishSession();
+        return true;
+    }
+    if (task.state == aitrain::TaskState::Canceled) {
+        sendCanceledAndFinish(taskIdText, task.failure.message);
+        return true;
+    }
+    failWithDetails(task.failure.message,
+        aitrain::failureCodeToString(task.failure.code),
+        QJsonObject{{wp::field::taskId(), taskIdText},
+            {QStringLiteral("failureCode"),
+                aitrain::failureCodeToString(task.failure.code)}});
+    return true;
 }

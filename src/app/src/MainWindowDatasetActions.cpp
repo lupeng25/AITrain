@@ -1,5 +1,5 @@
 #include "MainWindow.h"
-#include "TaskExecutionController.h"
+#include "TaskRuntimeController.h"
 
 #include "DatasetConversionUiModel.h"
 #include "EvaluationReportView.h"
@@ -435,10 +435,10 @@ void MainWindow::setDatasetConversionFormRunning(bool running)
 
 void MainWindow::cancelDatasetConversion()
 {
-    if (!worker_.isRunning()) {
+    if (!taskController_->isRunning()) {
         return;
     }
-    worker_.cancel();
+    taskController_->cancel();
     if (datasetConversionStatusLabel_) {
         datasetConversionStatusLabel_->setText(uiText("正在取消数据集转换。"));
     }
@@ -448,7 +448,7 @@ void MainWindow::cancelDatasetConversion()
 void MainWindow::startDatasetConversion()
 {
     clearDatasetConversionErrors();
-    if (worker_.isRunning() || currentProjectPath_.isEmpty() || !workspace_.isOpen()) {
+    if (taskController_->isRunning() || currentProjectPath_.isEmpty() || !workspace_.isOpen()) {
         if (datasetConversionStatusLabel_) datasetConversionStatusLabel_->setText(
             uiText("请先打开项目，并等待当前 Worker 任务结束。"));
         return;
@@ -524,7 +524,7 @@ void MainWindow::startDatasetConversion()
 
 void MainWindow::runDataQualityWorkflow()
 {
-    if (worker_.isRunning()) {
+    if (taskController_->isRunning()) {
         QMessageBox::warning(this, uiText("数据质量报告"), uiText("Worker 正在执行任务，稍后再生成数据质量报告。"));
         return;
     }
@@ -586,7 +586,7 @@ void MainWindow::runDataQualityWorkflow()
 
 void MainWindow::runDatasetSplitWorkflow()
 {
-    if (worker_.isRunning() || currentProjectPath_.isEmpty() || !workspace_.isOpen()) {
+    if (taskController_->isRunning() || currentProjectPath_.isEmpty() || !workspace_.isOpen()) {
         QMessageBox::warning(this, uiText("数据集划分"), uiText("Worker 正在执行任务，稍后再划分数据集。"));
         return;
     }
@@ -659,7 +659,7 @@ void MainWindow::openDatasetQualityReport()
 
 void MainWindow::createXAnyLabelingAnnotationSession()
 {
-    if (worker_.isRunning()) {
+    if (taskController_->isRunning()) {
         QMessageBox::warning(this, uiText("X-AnyLabeling 会话"), uiText("Worker 正在执行任务，稍后再准备标注会话。"));
         return;
     }
@@ -720,7 +720,7 @@ void MainWindow::createXAnyLabelingAnnotationSession()
 
 void MainWindow::syncXAnyLabelingAnnotationSession()
 {
-    if (worker_.isRunning()) {
+    if (taskController_->isRunning()) {
         QMessageBox::warning(this, uiText("X-AnyLabeling 同步"), uiText("Worker 正在执行任务，稍后再同步标注会话。"));
         return;
     }
@@ -974,7 +974,7 @@ void MainWindow::openSelectedReviewSample()
 
 void MainWindow::runDatasetSnapshotImportWorkflow()
 {
-    if (worker_.isRunning() || currentProjectPath_.isEmpty() || !workspace_.isOpen()) {
+    if (taskController_->isRunning() || currentProjectPath_.isEmpty() || !workspace_.isOpen()) {
         QMessageBox::warning(this, uiText("数据集快照"), uiText("Worker 正在执行任务，稍后再创建数据集快照。"));
         return;
     }

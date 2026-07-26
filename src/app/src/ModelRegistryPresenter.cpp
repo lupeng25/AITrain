@@ -22,12 +22,12 @@ ModelRegistryPresenter::ModelRegistryPresenter(
     setObjectName(QStringLiteral("ModelRegistryPresenter"));
 }
 
-bool ModelRegistryPresenter::refresh(int limit)
+bool ModelRegistryPresenter::refresh(const aitrain::PageRequest& request)
 {
     QString error;
-    const QVector<aitrain::ModelPackageReadModel> models = queryService_
-        ? queryService_->modelPackages(limit, &error)
-        : QVector<aitrain::ModelPackageReadModel>();
+    const aitrain::Page<aitrain::ModelPackageReadModel> page = queryService_
+        ? queryService_->modelPackages(request, &error)
+        : aitrain::Page<aitrain::ModelPackageReadModel>();
     if (!queryService_ && error.isEmpty()) {
         error = QStringLiteral("模型库 Presenter 缺少项目查询服务。");
     }
@@ -40,8 +40,8 @@ bool ModelRegistryPresenter::refresh(int limit)
     }
 
     QVector<ModelPackageListItem> rows;
-    rows.reserve(models.size());
-    for (const aitrain::ModelPackageReadModel& model : models) {
+    rows.reserve(page.items.size());
+    for (const aitrain::ModelPackageReadModel& model : page.items) {
         ModelPackageListItem row;
         row.modelPackageId = model.modelPackageId.toString();
         row.sourceTaskId = model.sourceTaskId.toString();
@@ -61,16 +61,28 @@ bool ModelRegistryPresenter::refresh(int limit)
         rows.append(row);
     }
 
-    modelPackages_ = rows;
+    if (request.after.isEmpty()) modelPackages_ = rows;
+    else modelPackages_ += rows;
+    nextCursor_ = page.nextCursor;
+    hasMore_ = page.hasMore;
     lastError_.clear();
     emit modelPackagesChanged();
     return true;
 }
 
+bool ModelRegistryPresenter::loadMore()
+{
+    return hasMore_ && refresh({50, nextCursor_});
+}
+
+bool ModelRegistryPresenter::hasMore() const { return hasMore_; }
+
 void ModelRegistryPresenter::clear()
 {
     modelPackages_.clear();
     lastError_.clear();
+    nextCursor_.clear();
+    hasMore_ = false;
     emit modelPackagesChanged();
 }
 

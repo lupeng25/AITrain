@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "TaskRuntimeController.h"
 
 #include "EvaluationReportView.h"
 #include "InfoPanel.h"
@@ -483,7 +484,8 @@ QWidget* MainWindow::buildTrainingPage()
     auto* startButton = primaryButton(QStringLiteral("启动训练"));
     auto* cancelButton = dangerButton(QStringLiteral("取消任务"));
     connect(startButton, &QPushButton::clicked, this, &MainWindow::startTraining);
-    connect(cancelButton, &QPushButton::clicked, &worker_, &WorkerClient::cancel);
+    connect(cancelButton, &QPushButton::clicked,
+        taskController_, &TaskRuntimeController::cancel);
 
     trainingDatasetSummaryLabel_->setObjectName(QStringLiteral("TrainingDatasetNote"));
     trainingRunSummaryLabel_->setObjectName(QStringLiteral("TrainingRunNote"));

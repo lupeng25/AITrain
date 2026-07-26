@@ -1,6 +1,8 @@
 #pragma once
 
 #include "aitrain/domain/DomainTypes.h"
+#include "aitrain/domain/Pagination.h"
+#include "aitrain/storage/ProjectDatabase.h"
 #include "aitrain/model/ModelManifest.h"
 
 #include <QDateTime>
@@ -337,14 +339,14 @@ public:
     bool datasetSnapshotForArtifact(const ArtifactId& artifactId,
         DatasetSnapshotRecord* result,
         QString* error = nullptr) const;
-    QVector<DatasetCatalogItem> datasets(int limit, QString* error = nullptr) const;
+    Page<DatasetCatalogItem> datasets(const PageRequest& request, QString* error = nullptr) const;
     bool artifactDiscardable(const ArtifactId& artifactId,
         bool* discardable,
         QString* error = nullptr) const;
     bool removeUnreferencedArtifact(const ArtifactId& artifactId, QString* error = nullptr);
     bool registerModelPackage(const ModelPackageSnapshot& modelPackage, QString* error = nullptr);
     bool modelPackage(const ModelPackageId& modelPackageId, ModelPackageSnapshot* result, QString* error = nullptr) const;
-    QVector<ModelPackageSnapshot> modelPackages(int limit, QString* error = nullptr) const;
+    Page<ModelPackageSnapshot> modelPackages(const PageRequest& request, QString* error = nullptr) const;
     bool projectSummary(ProjectSummarySnapshot* result, QString* error = nullptr) const;
     bool createWorkflowRun(const WorkflowRunSnapshot& workflow,
         const QVector<WorkflowStepSnapshot>& steps,
@@ -404,13 +406,16 @@ public:
     bool taskExists(const TaskId& taskId, bool* exists, QString* error = nullptr) const;
     bool artifactExists(const ArtifactId& artifactId, bool* exists, QString* error = nullptr) const;
     bool task(const TaskId& taskId, TaskSnapshot* result, QString* error = nullptr) const;
-    QVector<TaskSnapshot> tasks(int limit, QString* error = nullptr) const;
+    Page<TaskSnapshot> tasks(const PageRequest& request, QString* error = nullptr) const;
     bool artifact(const ArtifactId& artifactId, ArtifactSnapshot* result, QString* error = nullptr) const;
-    QVector<ArtifactSnapshot> artifactsForTask(const TaskId& taskId, QString* error = nullptr) const;
-    QVector<DeliveryEvidenceCandidate> deliveryEvidenceCandidates(
-        int limit, QString* error = nullptr) const;
-    QVector<MetricSnapshot> metricsForTask(const TaskId& taskId, QString* error = nullptr) const;
-    QVector<WorkflowRunSnapshot> workflowRunsForTask(const TaskId& taskId, QString* error = nullptr) const;
+    Page<ArtifactSnapshot> artifactsForTask(
+        const TaskId& taskId, const PageRequest& request, QString* error = nullptr) const;
+    Page<DeliveryEvidenceCandidate> deliveryEvidenceCandidates(
+        const PageRequest& request, QString* error = nullptr) const;
+    Page<MetricSnapshot> metricsForTask(
+        const TaskId& taskId, const PageRequest& request, QString* error = nullptr) const;
+    Page<WorkflowRunSnapshot> workflowRunsForTask(
+        const TaskId& taskId, const PageRequest& request, QString* error = nullptr) const;
     // Adapter 事件可在同一根任务的多个 Workflow 步骤中连续产生；返回最近一条
     // 外部协议事件的序号，排除由宿主单独分配的 task.state_changed 审计序号。
     bool lastProtocolSequence(const TaskId& taskId, quint64* result, QString* error = nullptr) const;
@@ -433,10 +438,10 @@ private:
         const QDateTime& occurredAt,
         QString* error);
 
-    QString connectionName_;
     QString artifactStoreRoot_;
-    QSqlDatabase db_;
-    ProjectErrorCode lastErrorCode_ = ProjectErrorCode::None;
+    ProjectDatabase database_;
+    QSqlDatabase& db_;
+    mutable ProjectErrorCode lastErrorCode_ = ProjectErrorCode::None;
 };
 
 } // namespace aitrain

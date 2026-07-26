@@ -31,11 +31,6 @@ public:
     {
         return writeOperation(request);
     }
-    aitrain::RuntimeOperationResult benchmark(
-        const aitrain::RuntimeModelLocation&, const QJsonObject& request) const override
-    {
-        return writeOperation(request);
-    }
     aitrain::RuntimeOperationResult deploymentValidate(
         const aitrain::RuntimeModelLocation&, const QJsonObject& request) const override
     {
@@ -259,7 +254,7 @@ void RuntimeDeliveryWorkflowTests::cancellationProducesOneTerminalStateAndEviden
     QCOMPARE(result.state, aitrain::WorkflowStepState::Canceled);
     QCOMPARE(result.failure.code, aitrain::FailureCode::Canceled);
     QVERIFY(evidenceHasAllFormats(result.evidence));
-    QCOMPARE(workspace.workflowRunsForTask(taskId, &error).size(), 1);
+    QCOMPARE(workspace.workflowRunsForTask(taskId, {50, {}}, &error).items.size(), 1);
     aitrain::TaskSnapshot stored;
     QVERIFY2(workspace.task(taskId, &stored, &error), qPrintable(error));
     QCOMPARE(stored.state, aitrain::TaskState::Canceled);
@@ -307,7 +302,7 @@ void RuntimeDeliveryWorkflowTests::sdkMissingProducesPreciseFailureAndEvidence()
     QCOMPARE(result.runtimeStatus, aitrain::RuntimeStatus::SdkMissing);
     QCOMPARE(result.failure.code, aitrain::FailureCode::SdkMissing);
     QVERIFY(evidenceHasAllFormats(result.evidence));
-    QCOMPARE(workspace.workflowRunsForTask(taskId, &error).size(), 1);
+    QCOMPARE(workspace.workflowRunsForTask(taskId, {50, {}}, &error).items.size(), 1);
     QFile evidenceFile(result.evidence.pathsByKind.value(QStringLiteral("evidence.json")));
     QVERIFY(evidenceFile.open(QIODevice::ReadOnly));
     const QJsonObject evidence = QJsonDocument::fromJson(evidenceFile.readAll()).object();

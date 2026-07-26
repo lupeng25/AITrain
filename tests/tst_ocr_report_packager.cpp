@@ -151,7 +151,7 @@ void OcrReportPackagerTests::packagesThreeVerifiedReportsAndSnapshotDerivedCount
     QVERIFY(result.recReportArtifactId.isValid());
     QVERIFY(result.systemReportArtifactId.isValid());
     QVERIFY(result.evidenceArtifactId.isValid());
-    QCOMPARE(workspace.artifactsForTask(taskId, &error).size(), 4);
+    QCOMPARE(workspace.artifactsForTask(taskId, {50, {}}, &error).items.size(), 4);
 
     QFile normalized(QDir(artifactRoot(workspace, result.detReportArtifactId))
         .filePath(QStringLiteral("report/paddleocr_official_det_report.json")));
@@ -177,7 +177,7 @@ void OcrReportPackagerTests::missingSystemAccuracyIsUnsupportedAndCommitsNothing
     QVERIFY(!workspace.importOcrOfficialReports(taskId, requestFor(fixture), &result, &error));
     QCOMPARE(result.failure.code, aitrain::FailureCode::BackendUnsupported);
     QVERIFY(result.failure.message.startsWith(QStringLiteral("ocr_report_import.system_accuracy_unsupported:")));
-    QCOMPARE(workspace.artifactsForTask(taskId, &error).size(), 0);
+    QCOMPARE(workspace.artifactsForTask(taskId, {50, {}}, &error).items.size(), 0);
 }
 
 void OcrReportPackagerTests::changedSnapshotSourceIsInvalidEvidenceAndCommitsNothing()
@@ -194,7 +194,7 @@ void OcrReportPackagerTests::changedSnapshotSourceIsInvalidEvidenceAndCommitsNot
     QVERIFY(!workspace.importOcrOfficialReports(taskId, requestFor(fixture), &result, &error));
     QCOMPARE(result.failure.code, aitrain::FailureCode::ArtifactIncompatible);
     QVERIFY(result.failure.message.startsWith(QStringLiteral("ocr_report_import.snapshot_invalid:")));
-    QCOMPARE(workspace.artifactsForTask(taskId, &error).size(), 0);
+    QCOMPARE(workspace.artifactsForTask(taskId, {50, {}}, &error).items.size(), 0);
 }
 
 void OcrReportPackagerTests::cancellationCommitsNothing()
@@ -208,7 +208,7 @@ void OcrReportPackagerTests::cancellationCommitsNothing()
     aitrain::OcrOfficialReportImportResult result;
     QVERIFY(!workspace.importOcrOfficialReports(taskId, requestFor(fixture), &result, &error, [] { return true; }));
     QCOMPARE(result.failure.code, aitrain::FailureCode::Canceled);
-    QCOMPARE(workspace.artifactsForTask(taskId, &error).size(), 0);
+    QCOMPARE(workspace.artifactsForTask(taskId, {50, {}}, &error).items.size(), 0);
 }
 
 QTEST_MAIN(OcrReportPackagerTests)

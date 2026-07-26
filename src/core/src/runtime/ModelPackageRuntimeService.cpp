@@ -24,7 +24,10 @@ bool ModelPackageRuntimeService::resolve(const ModelPackageId& modelPackageId,
     if (!storage_->modelPackage(modelPackageId, &modelPackage, error)) return false;
     const RuntimeCapability evaluated = matrix_.query({modelPackage.manifest.modelFamily, runtimeRoute});
     if (capability) *capability = evaluated;
-    if (evaluated.status != RuntimeCapabilityStatus::Supported) {
+    if (evaluated.executionAuthority != RuntimeExecutionAuthority::AitrainCpp
+        || evaluated.productState != RuntimeProductState::Supported
+        || evaluated.localReadiness != RuntimeLocalReadiness::Available
+        || evaluated.status != RuntimeCapabilityStatus::Supported) {
         if (error) *error = QStringLiteral("模型包不能进入目标运行时：%1").arg(evaluated.message);
         return false;
     }

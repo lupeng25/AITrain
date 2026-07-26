@@ -23,15 +23,13 @@
 #include <QStandardPaths>
 #include <QThread>
 
+#include <utility>
+
 using namespace worker_support;
 namespace wp = aitrain::worker_protocol;
 
 void WorkerSession::runEnvironmentCheckWorkflow(const wp::EnvironmentCheckCommand& command)
 {
-    if (running_) {
-        fail(QStringLiteral("Worker 已有运行任务，不能并发运行 Environment Check 。"));
-        return;
-    }
     const aitrain::TaskId taskId = command.context.taskId;
     const QString taskIdText = taskId.toString();
     const QString projectRoot = command.context.projectRoot.trimmed();
@@ -55,10 +53,13 @@ void WorkerSession::runEnvironmentCheckWorkflow(const wp::EnvironmentCheckComman
         fail(QStringLiteral("无法创建 Environment Check  根任务：%1").arg(error));
         return;
     }
+    if (!activeWorkflow_.bind(std::move(workspace), taskId, &error)) {
+        fail(QStringLiteral("无法绑定 Environment Check 活动任务：%1").arg(error));
+        return;
+    }
+    auto* const activeWorkspace = activeWorkflow_.workspace();
     activeTaskId_ = taskIdText;
-    canceled_ = false;
-    running_ = true;
-    const QString reportDir = workspace->runtimeStagingPath(taskId);
+    const QString reportDir = activeWorkspace->runtimeStagingPath(taskId);
     send(wp::event::progress(), QJsonObject{{wp::field::taskId(), taskIdText},
         {QStringLiteral("percent"), 5},
         {wp::field::message(), QStringLiteral("Environment Check  正在探测本机依赖。")}});
@@ -88,7 +89,7 @@ void WorkerSession::runEnvironmentCheckWorkflow(const wp::EnvironmentCheckComman
 
     const aitrain::WorkflowResult xAnyEnvironment =
         aitrain::inspectXAnyLabelingEnvironment(reportDir, {}, pollingCancellationCallback(20));
-    if (canceled_) {
+    if (activeWorkflow_.cancellationRequested()) {
         aitrain::EnvironmentCheckWorkflowRequest canceledRequest;
         canceledRequest.facts = QJsonObject{
             {QStringLiteral("checkedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
@@ -97,11 +98,9 @@ void WorkerSession::runEnvironmentCheckWorkflow(const wp::EnvironmentCheckComman
                 {QStringLiteral("title"), QStringLiteral("Canceled")},
                 {QStringLiteral("status"), QStringLiteral("warning")}}}}}};
         aitrain::EnvironmentCheckWorkflowResult canceledResult;
-        workspace->runEnvironmentCheckWorkflow(taskId, canceledRequest, &canceledResult,
+        activeWorkspace->runEnvironmentCheckWorkflow(taskId, canceledRequest, &canceledResult,
             &error, []() { return true; });
-        running_ = false;
-        sendCanceledAndFinish(taskIdText, xAnyEnvironment.error.isEmpty()
-            ? QStringLiteral("environment_check_canceled") : xAnyEnvironment.error);
+        publishPersistedTerminal(taskId);
         return;
     }
     const QJsonObject xAnyPayload = xAnyEnvironment.payload;
@@ -152,22 +151,20 @@ void WorkerSession::runEnvironmentCheckWorkflow(const wp::EnvironmentCheckComman
     aitrain::EnvironmentCheckWorkflowRequest request;
     request.facts = result;
     aitrain::EnvironmentCheckWorkflowResult workflowResult;
-    const bool executed = workspace->runEnvironmentCheckWorkflow(
+    const bool executed = activeWorkspace->runEnvironmentCheckWorkflow(
         taskId, request, &workflowResult, &error, pollingCancellationCallback(0));
     if (!executed) {
         aitrain::TaskSnapshot stored;
-        if (workspace->task(taskId, &stored, nullptr)
+        if (activeWorkspace->task(taskId, &stored, nullptr)
             && !aitrain::isTerminalTaskState(stored.state)) {
             aitrain::Failure failure;
             failure.code = aitrain::FailureCode::InternalError;
             failure.message = error.isEmpty() ? QStringLiteral("Environment Check  执行失败。") : error;
             failure.suggestedAction = QStringLiteral("检查  工作区和 Evidence 后重试。");
             failure.occurredAt = QDateTime::currentDateTimeUtc();
-            workspace->finalizeTask(taskId, aitrain::TaskState::Failed, failure, nullptr);
+            activeWorkspace->finalizeTask(taskId, aitrain::TaskState::Failed, failure, nullptr);
         }
-        running_ = false;
-        failWithDetails(QStringLiteral("Environment Check  执行失败：%1").arg(error),
-            QStringLiteral("environment_check_execution_failed"));
+        publishPersistedTerminal(taskId);
         return;
     }
     QJsonObject response{{wp::field::taskId(), taskIdText},
@@ -177,15 +174,6 @@ void WorkerSession::runEnvironmentCheckWorkflow(const wp::EnvironmentCheckComman
         {QStringLiteral("evidenceArtifactId"), workflowResult.evidenceArtifactId.toString()},
         {QStringLiteral("summary"), workflowResult.summary}};
     send(wp::event::environmentCheckWorkflow(), response);
-    running_ = false;
-    if (workflowResult.terminalState == aitrain::TaskState::Canceled) {
-        sendCanceledAndFinish(taskIdText, workflowResult.failure.message);
-    } else if (workflowResult.terminalState == aitrain::TaskState::Failed) {
-        failWithDetails(workflowResult.failure.message,
-            aitrain::failureCodeToString(workflowResult.failure.code), response);
-    } else {
-        send(wp::event::completed(), QJsonObject{{wp::field::taskId(), taskIdText},
-            {wp::field::message(), QStringLiteral("Environment Check  completed")}});
-        finishSession();
-    }
+    publishPersistedTerminal(taskId,
+        QStringLiteral("Environment Check  completed"));
 }

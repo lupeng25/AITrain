@@ -19,8 +19,10 @@ public:
         const aitrain::ProjectQueryService* queryService,
         QObject* parent = nullptr);
 
-    bool refresh(int limit = 64);
-    bool refreshAsync(int limit = 64);
+    bool refresh(const aitrain::PageRequest& request = {50, {}});
+    bool refreshAsync(const aitrain::PageRequest& request = {50, {}});
+    bool loadMoreAsync();
+    bool hasMore() const;
     void clear();
     const DeliveryEvidenceViewModel& viewModel() const;
     QString lastError() const;
@@ -34,4 +36,6 @@ private:
     DeliveryEvidenceViewModel viewModel_;
     QString lastError_;
     quint64 refreshGeneration_ = 0;
+    QString nextCursor_;
+    bool hasMore_ = false;
 };

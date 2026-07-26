@@ -143,10 +143,6 @@ bool validateTrainingParameters(const QJsonObject& parameters, QString* error)
 
 void WorkerSession::runTrainingWorkflow(const wp::TrainingCommand& command)
 {
-    if (running_ || trainingWorkspace_) {
-        fail(QStringLiteral("Worker 已有运行任务，不能并发启动  训练 Workflow。"));
-        return;
-    }
     const QString taskIdText = command.context.taskId.toString();
     const QString projectRoot = command.context.projectRoot.trimmed();
     const QString capabilityId = command.capabilityId.trimmed();
@@ -182,8 +178,9 @@ void WorkerSession::runTrainingWorkflow(const wp::TrainingCommand& command)
         fail(QStringLiteral("runTrainingWorkflow 请求与内置能力矩阵不一致：%1").arg(error));
         return;
     }
-    if (!aitrain::TaskId::parse(taskIdText, &trainingWorkflowTaskId_, &error)
-        || trainingWorkflowTaskId_ != controlTaskId_
+    aitrain::TaskId taskId;
+    if (!aitrain::TaskId::parse(taskIdText, &taskId, &error)
+        || taskId != controlTaskId_
         || !aitrain::DatasetId::parse(command.datasetId,
             &workflowRequest.datasetId, &error)
         || !aitrain::DatasetVersionId::parse(command.datasetVersionId,
@@ -192,12 +189,10 @@ void WorkerSession::runTrainingWorkflow(const wp::TrainingCommand& command)
             &workflowRequest.snapshotId, &error)
         || !aitrain::ArtifactId::parse(command.snapshotArtifactId,
             &workflowRequest.snapshotArtifactId, &error)) {
-        trainingWorkflowTaskId_ = {};
         fail(QStringLiteral("runTrainingWorkflow 要求控制任务一致且 Dataset/Version/Snapshot/Artifact 身份完整：%1").arg(error));
         return;
     }
     if (!validateTrainingParameters(parameters, &error)) {
-        trainingWorkflowTaskId_ = {};
         fail(QStringLiteral("runTrainingWorkflow 参数合同无效：%1").arg(error));
         return;
     }
@@ -216,10 +211,7 @@ void WorkerSession::runTrainingWorkflow(const wp::TrainingCommand& command)
         return;
     }
 
-    trainingWorkspace_ = std::make_unique<aitrain::ProjectWorkspace>();
     activeTaskId_ = taskIdText;
-    canceled_ = false;
-    running_ = true;
     trainingWorkflowDeploymentSampleRelativePath_ = deploymentSampleRelativePath.isEmpty()
         ? QString() : normalizedDeploymentSample;
     trainingWorkflowAdapterConfig_.pythonProgram = pythonProgram;
@@ -235,8 +227,8 @@ void WorkerSession::runTrainingWorkflow(const wp::TrainingCommand& command)
         parameters.value(QStringLiteral("cancellationGraceMs")).toInt(5000));
     send(wp::event::log(), QJsonObject{{wp::field::taskId(), taskIdText},
         {wp::field::message(), QStringLiteral(" 训练 Workflow：正在打开项目工作区。")} });
-    if (!trainingWorkspace_->openForWorkerChild(projectRoot, &error)) {
-        trainingWorkspace_.reset();
+    auto workspace = std::make_unique<aitrain::ProjectWorkspace>();
+    if (!workspace->openForWorkerChild(projectRoot, &error)) {
         fail(QStringLiteral("无法打开  项目工作区：%1").arg(error));
         return;
     }
@@ -244,11 +236,15 @@ void WorkerSession::runTrainingWorkflow(const wp::TrainingCommand& command)
         {wp::field::message(), QStringLiteral(" 训练 Workflow：项目工作区已打开，正在创建根任务。")} });
 
     aitrain::TaskSnapshot task;
-    if (!trainingWorkspace_->startTask(trainingWorkflowTaskId_, capabilityId, taskType, &task, &error)) {
-        trainingWorkspace_.reset();
+    if (!workspace->startTask(taskId, capabilityId, taskType, &task, &error)) {
         fail(QStringLiteral("无法创建  训练根任务：%1").arg(error));
         return;
     }
+    if (!activeWorkflow_.bind(std::move(workspace), taskId, &error)) {
+        fail(QStringLiteral("无法绑定训练任务上下文：%1").arg(error));
+        return;
+    }
+    aitrain::ProjectWorkspace* trainingWorkspace = activeWorkflow_.workspace();
     send(wp::event::log(), QJsonObject{{wp::field::taskId(), taskIdText},
         {wp::field::message(), QStringLiteral(" 训练 Workflow：根任务已创建。")} });
 
@@ -261,25 +257,21 @@ void WorkerSession::runTrainingWorkflow(const wp::TrainingCommand& command)
     workflowRequest.parameterSummary.insert(QStringLiteral("trainingBackend"), trainingBackend);
     workflowRequest.requireEvidenceBeforeTerminal = true;
     aitrain::TrainingWorkflowDispatch dispatch;
-    if (!trainingWorkspace_->beginTrainingWorkflow(trainingWorkflowTaskId_, workflowRequest, &dispatch, &error)) {
+    if (!trainingWorkspace->beginTrainingWorkflow(taskId, workflowRequest, &dispatch, &error)) {
         QString ignored;
-        trainingWorkspace_->finalizeTask(trainingWorkflowTaskId_, aitrain::TaskState::Failed,
+        trainingWorkspace->finalizeTask(taskId, aitrain::TaskState::Failed,
             workflowFailure(aitrain::FailureCode::InternalError,
                 QStringLiteral("无法创建  训练 Workflow：%1").arg(error)), &ignored);
-        trainingWorkspace_.reset();
-        failWithDetails(QStringLiteral("无法创建  训练 Workflow：%1").arg(error),
-            aitrain::failureCodeToString(aitrain::FailureCode::InternalError));
+        publishPersistedTerminal(taskId);
         return;
     }
     trainingWorkflowRunId_ = dispatch.workflowRunId;
     if (!dispatch.dispatch.hasStep || dispatch.dispatch.step.kind != QStringLiteral("Train")) {
         QString ignored;
-        trainingWorkspace_->finalizeTask(trainingWorkflowTaskId_, aitrain::TaskState::Failed,
+        trainingWorkspace->finalizeTask(taskId, aitrain::TaskState::Failed,
             workflowFailure(aitrain::FailureCode::InternalError,
                 QStringLiteral("Snapshot 身份校验后未能直接派发 Train。")), &ignored);
-        trainingWorkspace_.reset();
-        failWithDetails(QStringLiteral(" 训练 Workflow 未从已登记 Snapshot 直接进入 Train。"),
-            aitrain::failureCodeToString(aitrain::FailureCode::InternalError));
+        publishPersistedTerminal(taskId);
         return;
     }
     send(wp::event::progress(), QJsonObject{{wp::field::taskId(), taskIdText},
@@ -290,7 +282,8 @@ void WorkerSession::runTrainingWorkflow(const wp::TrainingCommand& command)
 
 void WorkerSession::dispatchTrainingWorkflow(const aitrain::TrainingWorkflowDispatch& dispatch)
 {
-    if (!trainingWorkspace_ || finishingSession_) {
+    aitrain::ProjectWorkspace* trainingWorkspace = activeWorkflow_.workspace();
+    if (!trainingWorkspace || finishingSession_) {
         return;
     }
     if (!dispatch.dispatch.hasStep) {
@@ -301,14 +294,14 @@ void WorkerSession::dispatchTrainingWorkflow(const aitrain::TrainingWorkflowDisp
     send(wp::event::log(), QJsonObject{{wp::field::taskId(), activeTaskId_},
         {wp::field::message(), QStringLiteral(" Workflow 开始步骤 %1：%2（%3）。")
             .arg(step.ordinal + 1).arg(step.kind, step.backend)}});
-    if (canceled_) {
+    if (activeWorkflow_.cancellationRequested()) {
         aitrain::TrainingWorkflowDispatch completed;
         QString error;
         const aitrain::WorkflowStepExecutionResult execution{
             aitrain::WorkflowStepState::Canceled, {},
             workflowFailure(aitrain::FailureCode::Canceled, QStringLiteral("用户取消  训练 Workflow。"))};
-        if (!trainingWorkspace_->completeTrainingWorkflowStep(dispatch.workflowRunId, step.id, execution, &completed, &error)) {
-            failWithDetails(QStringLiteral("无法收口已取消的  Workflow 步骤：%1").arg(error), QStringLiteral("workflow_cancel_failed"));
+        if (!trainingWorkspace->completeTrainingWorkflowStep(dispatch.workflowRunId, step.id, execution, &completed, &error)) {
+            publishPersistedTerminal(activeWorkflow_.taskId());
             return;
         }
         dispatchTrainingWorkflow(completed);
@@ -326,16 +319,17 @@ void WorkerSession::dispatchTrainingWorkflow(const aitrain::TrainingWorkflowDisp
     if (usesAdapter) {
         aitrain::TrainingWorkflowAdapterLaunch launch;
         QString error;
-        if (!trainingWorkspace_->prepareTrainingWorkflowAdapterLaunch(dispatch.workflowRunId, step.id,
+        if (!trainingWorkspace->prepareTrainingWorkflowAdapterLaunch(dispatch.workflowRunId, step.id,
                 trainingWorkflowAdapterConfig_, &launch, &error)
-            || !trainingWorkspace_->startTrainingWorkflowAdapterStep(dispatch.workflowRunId, step.id, launch.launch,
+            || !trainingWorkspace->startTrainingWorkflowAdapterStep(dispatch.workflowRunId, step.id, launch.launch,
                 [this](const aitrain::TrainingWorkflowDispatch& next) {
                     // 只有 Adapter 终态已经提交 Artifact、下一步骤已经引用该不可变
                     // Artifact 后，才向 GUI 暴露文件路径；禁止转发暂存区 candidate。
                     if (next.dispatch.hasStep) {
                         aitrain::VerifiedTrainingWorkflowInput committed;
                         QString resolutionError;
-                        if (trainingWorkspace_->resolveTrainingWorkflowStepInput(next.workflowRunId,
+                        if (activeWorkflow_.workspace()
+                            && activeWorkflow_.workspace()->resolveTrainingWorkflowStepInput(next.workflowRunId,
                                 next.dispatch.step.id, &committed, &resolutionError)) {
                             for (const aitrain::VerifiedWorkflowArtifactFile& file : committed.files) {
                                 const QString kind = file.relativePath.section(QLatin1Char('/'), 0, 0);
@@ -356,11 +350,10 @@ void WorkerSession::dispatchTrainingWorkflow(const aitrain::TrainingWorkflowDisp
                 aitrain::WorkflowStepState::Failed, {}, workflowFailure(aitrain::FailureCode::ProcessCrashed,
                     QStringLiteral("无法启动  训练 Workflow %1 Adapter：%2").arg(step.kind, error))};
             QString completionError;
-            if (trainingWorkspace_->completeTrainingWorkflowStep(dispatch.workflowRunId, step.id, execution, &completed, &completionError)) {
+            if (trainingWorkspace->completeTrainingWorkflowStep(dispatch.workflowRunId, step.id, execution, &completed, &completionError)) {
                 dispatchTrainingWorkflow(completed);
             } else {
-                failWithDetails(QStringLiteral(" Workflow Adapter 启动失败且无法收口步骤：%1；%2").arg(error, completionError),
-                    QStringLiteral("workflow_adapter_start_failed"));
+                publishPersistedTerminal(activeWorkflow_.taskId());
             }
         }
         return;
@@ -370,19 +363,20 @@ void WorkerSession::dispatchTrainingWorkflow(const aitrain::TrainingWorkflowDisp
 
 void WorkerSession::runTrainingWorkflowLocalStep(const aitrain::TrainingWorkflowDispatch& dispatch)
 {
-    if (!trainingWorkspace_ || !dispatch.dispatch.hasStep || finishingSession_) {
+    aitrain::ProjectWorkspace* trainingWorkspace = activeWorkflow_.workspace();
+    if (!trainingWorkspace || !dispatch.dispatch.hasStep || finishingSession_) {
         return;
     }
     const aitrain::WorkflowStepSnapshot& step = dispatch.dispatch.step;
     aitrain::WorkflowStepExecutionResult execution;
     QString error;
-    if (canceled_) {
+    if (activeWorkflow_.cancellationRequested()) {
         execution.state = aitrain::WorkflowStepState::Canceled;
         execution.failure = workflowFailure(aitrain::FailureCode::Canceled, QStringLiteral("用户取消  训练 Workflow。"));
     } else if (step.kind == QStringLiteral("DeploymentValidate")) {
         aitrain::TrainingDeploymentInvocation prepared;
         aitrain::RuntimeInvocation invocation;
-        if (!trainingWorkspace_->prepareTrainingWorkflowDeploymentInvocation(dispatch.workflowRunId, step.id,
+        if (!trainingWorkspace->prepareTrainingWorkflowDeploymentInvocation(dispatch.workflowRunId, step.id,
                 trainingWorkflowDeploymentSampleRelativePath_, &prepared, &error)
             || !aitrain::decodeRuntimeInvocation(prepared.invocation, &invocation, &error)) {
             execution.failure = workflowFailure(aitrain::FailureCode::ArtifactIncomplete,
@@ -392,7 +386,7 @@ void WorkerSession::runTrainingWorkflowLocalStep(const aitrain::TrainingWorkflow
             const aitrain::RuntimeOperationResult runtime = adapter.deploymentValidate(invocation.model,
                 QJsonObject{{QStringLiteral("imagePath"), invocation.imagePath}, {QStringLiteral("outputPath"), invocation.outputPath},
                     {QStringLiteral("options"), invocation.options}});
-            if (canceled_) {
+            if (activeWorkflow_.cancellationRequested()) {
                 execution.state = aitrain::WorkflowStepState::Canceled;
                 execution.failure = workflowFailure(aitrain::FailureCode::Canceled, QStringLiteral("用户在部署验证期间取消  训练 Workflow。"));
             } else if (runtime.status != aitrain::RuntimeStatus::Available) {
@@ -416,7 +410,7 @@ void WorkerSession::runTrainingWorkflowLocalStep(const aitrain::TrainingWorkflow
                     aitrain::RuntimeArtifactBundle bundle;
                     const QVector<aitrain::RuntimeArtifactCandidate> candidates{{QStringLiteral("deployment_validation_report"), reportPath},
                         {QStringLiteral("deployment_predictions"), predictionsPath}, {QStringLiteral("deployment_overlay"), overlayPath}};
-                    if (!trainingWorkspace_->commitRuntimeArtifacts(trainingWorkflowTaskId_, QStringLiteral("deployment_validation"),
+                    if (!trainingWorkspace->commitRuntimeArtifacts(activeWorkflow_.taskId(), QStringLiteral("deployment_validation"),
                             candidates, &bundle, &error)) {
                         execution.failure = workflowFailure(aitrain::FailureCode::ArtifactIncomplete,
                             QStringLiteral("无法提交  部署验证 Artifact：%1").arg(error));
@@ -426,7 +420,7 @@ void WorkerSession::runTrainingWorkflowLocalStep(const aitrain::TrainingWorkflow
                         for (auto it = bundle.pathsByKind.cbegin(); it != bundle.pathsByKind.cend(); ++it) {
                             send(wp::event::artifact(), QJsonObject{{wp::field::taskId(), activeTaskId_}, {QStringLiteral("kind"), it.key()},
                                 {QStringLiteral("artifactId"), bundle.artifactId.toString()},
-                                {QStringLiteral("relativePath"), QDir(QDir(trainingWorkspace_->workspacePath())
+                                {QStringLiteral("relativePath"), QDir(QDir(trainingWorkspace->workspacePath())
                                     .filePath(QStringLiteral("artifacts/committed/%1").arg(bundle.artifactId.toString())))
                                     .relativeFilePath(it.value())},
                                 {wp::field::message(), QStringLiteral(" 部署验证 Artifact。")}});
@@ -437,7 +431,7 @@ void WorkerSession::runTrainingWorkflowLocalStep(const aitrain::TrainingWorkflow
         }
     } else if (step.kind == QStringLiteral("RegisterModel")) {
         aitrain::TrainingModelRegistration registered;
-        if (!trainingWorkspace_->registerTrainingWorkflowModel(dispatch.workflowRunId, step.id, &registered, &error)) {
+        if (!trainingWorkspace->registerTrainingWorkflowModel(dispatch.workflowRunId, step.id, &registered, &error)) {
             execution.failure = workflowFailure(aitrain::FailureCode::ArtifactIncomplete,
                 QStringLiteral("无法登记官方 YOLO 模型包：%1").arg(error));
         } else {
@@ -450,7 +444,7 @@ void WorkerSession::runTrainingWorkflowLocalStep(const aitrain::TrainingWorkflow
         }
     } else if (step.kind == QStringLiteral("RenderDeliveryReport")) {
         aitrain::RuntimeArtifactBundle report;
-        if (!trainingWorkspace_->renderTrainingWorkflowDeliveryReport(dispatch.workflowRunId, step.id, &report, &error)) {
+        if (!trainingWorkspace->renderTrainingWorkflowDeliveryReport(dispatch.workflowRunId, step.id, &report, &error)) {
             execution.failure = workflowFailure(aitrain::FailureCode::InternalError,
                 QStringLiteral("无法渲染  训练交付报告：%1").arg(error));
         } else {
@@ -459,7 +453,7 @@ void WorkerSession::runTrainingWorkflowLocalStep(const aitrain::TrainingWorkflow
             for (auto it = report.pathsByKind.cbegin(); it != report.pathsByKind.cend(); ++it) {
                 send(wp::event::artifact(), QJsonObject{{wp::field::taskId(), activeTaskId_}, {QStringLiteral("kind"), it.key()},
                     {QStringLiteral("artifactId"), report.artifactId.toString()},
-                    {QStringLiteral("relativePath"), QDir(QDir(trainingWorkspace_->workspacePath())
+                    {QStringLiteral("relativePath"), QDir(QDir(trainingWorkspace->workspacePath())
                         .filePath(QStringLiteral("artifacts/committed/%1").arg(report.artifactId.toString())))
                         .relativeFilePath(it.value())},
                     {wp::field::message(), QStringLiteral(" 训练交付报告 Artifact。")}});
@@ -475,9 +469,8 @@ void WorkerSession::runTrainingWorkflowLocalStep(const aitrain::TrainingWorkflow
         execution.state = aitrain::WorkflowStepState::Failed;
     }
     aitrain::TrainingWorkflowDispatch completed;
-    if (!trainingWorkspace_->completeTrainingWorkflowStep(dispatch.workflowRunId, step.id, execution, &completed, &error)) {
-        failWithDetails(QStringLiteral("无法收口  Workflow 步骤 %1：%2").arg(step.kind, error),
-            QStringLiteral("workflow_step_complete_failed"));
+    if (!trainingWorkspace->completeTrainingWorkflowStep(dispatch.workflowRunId, step.id, execution, &completed, &error)) {
+        publishPersistedTerminal(activeWorkflow_.taskId());
         return;
     }
     dispatchTrainingWorkflow(completed);
@@ -512,10 +505,14 @@ void WorkerSession::forwardTrainingWorkflowAdapterEvent(const aitrain::ProtocolE
 
 void WorkerSession::cancelTrainingWorkflow()
 {
-    canceled_ = true;
+    activeWorkflow_.requestCancel();
+    aitrain::ProjectWorkspace* trainingWorkspace = activeWorkflow_.workspace();
+    if (!trainingWorkspace || !activeWorkflow_.taskId().isValid()) {
+        return;
+    }
     QString error;
-    if (!trainingWorkspace_->requestTaskCancellation(trainingWorkflowTaskId_, &error)) {
-        failWithDetails(QStringLiteral("无法请求取消  训练 Workflow：%1").arg(error), QStringLiteral("workflow_cancel_failed"));
+    if (!trainingWorkspace->requestTaskCancellation(activeWorkflow_.taskId(), &error)) {
+        publishPersistedTerminal(activeWorkflow_.taskId());
         return;
     }
     send(wp::event::log(), QJsonObject{{wp::field::taskId(), activeTaskId_},
@@ -530,11 +527,12 @@ void WorkerSession::finishTrainingWorkflow(const aitrain::TrainingWorkflowDispat
     const aitrain::WorkflowRunExecutionResult& result = dispatch.dispatch.result;
     bool evidenceCommitted = false;
     QString evidenceError;
-    if (trainingWorkspace_) {
+    aitrain::ProjectWorkspace* trainingWorkspace = activeWorkflow_.workspace();
+    if (trainingWorkspace) {
         aitrain::EvidenceBundle evidence;
         aitrain::EvidenceArtifactBundle committed;
-        if (trainingWorkspace_->buildWorkflowEvidenceBundle(dispatch.workflowRunId, &evidence, &evidenceError)
-            && trainingWorkspace_->commitEvidenceBundle(evidence, &committed, &evidenceError)) {
+        if (trainingWorkspace->buildWorkflowEvidenceBundle(dispatch.workflowRunId, &evidence, &evidenceError)
+            && trainingWorkspace->commitEvidenceBundle(evidence, &committed, &evidenceError)) {
             evidenceCommitted = true;
             send(wp::event::artifact(), QJsonObject{{wp::field::taskId(), activeTaskId_},
                 {QStringLiteral("kind"), QStringLiteral("evidence_bundle")},
@@ -546,43 +544,33 @@ void WorkerSession::finishTrainingWorkflow(const aitrain::TrainingWorkflowDispat
                 {wp::field::message(), QStringLiteral("Evidence Bundle 提交失败，根任务不会发布成功终态：%1").arg(evidenceError)}});
         }
     }
-    if (!evidenceCommitted && trainingWorkspace_) {
+    if (!evidenceCommitted && trainingWorkspace) {
         const aitrain::Failure failure = workflowFailure(aitrain::FailureCode::ArtifactIncomplete,
             QStringLiteral("Evidence Bundle 提交失败：%1").arg(evidenceError));
         QString recordError;
-        trainingWorkspace_->recordWorkflowEvidenceFailure(dispatch.workflowRunId, failure, &recordError);
+        trainingWorkspace->recordWorkflowEvidenceFailure(dispatch.workflowRunId, failure, &recordError);
         const QString message = recordError.isEmpty() ? failure.message
             : QStringLiteral("%1；记录 Evidence 失败尝试也失败：%2").arg(failure.message, recordError);
-        trainingWorkspace_.reset();
-        failWithDetails(message, aitrain::failureCodeToString(failure.code));
+        publishPersistedTerminal(activeWorkflow_.taskId());
         return;
     }
-    if (trainingWorkspace_) {
+    if (trainingWorkspace) {
         QString finalizationError;
-        if (!trainingWorkspace_->closeWorkflowTerminalization(dispatch.workflowRunId,
+        if (!trainingWorkspace->closeWorkflowTerminalization(dispatch.workflowRunId,
                 &finalizationError)) {
-            trainingWorkspace_.reset();
-            failWithDetails(QStringLiteral("Evidence 已提交，但根任务终态持久化失败：%1").arg(finalizationError),
-                QStringLiteral("terminal_persistence_failed"));
+            publishPersistedTerminal(activeWorkflow_.taskId());
             return;
         }
     }
-    if (result.state == aitrain::WorkflowStepState::Succeeded && trainingWorkspace_) {
+    if (result.state == aitrain::WorkflowStepState::Succeeded && trainingWorkspace) {
         send(wp::event::progress(), QJsonObject{{wp::field::taskId(), activeTaskId_}, {QStringLiteral("percent"), 100},
             {wp::field::message(), QStringLiteral(" 官方 YOLO 训练、评估、导出、部署验证、模型登记与交付报告已完成。")}});
-        running_ = false;
-        send(wp::event::completed(), QJsonObject{{wp::field::taskId(), activeTaskId_},
-            {wp::field::message(), QStringLiteral(" training workflow completed")}});
-        trainingWorkspace_.reset();
-        finishSession();
+        publishPersistedTerminal(activeWorkflow_.taskId(),
+            QStringLiteral(" training workflow completed"));
         return;
     }
     const QString message = result.failure.message.isEmpty()
         ? QStringLiteral(" 训练 Workflow 未成功完成。") : result.failure.message;
-    trainingWorkspace_.reset();
-    if (result.state == aitrain::WorkflowStepState::Canceled) {
-        sendCanceledAndFinish(activeTaskId_, message);
-    } else {
-        failWithDetails(message, aitrain::failureCodeToString(result.failure.code));
-    }
+    Q_UNUSED(message);
+    publishPersistedTerminal(activeWorkflow_.taskId());
 }

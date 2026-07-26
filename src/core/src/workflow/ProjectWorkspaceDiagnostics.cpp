@@ -290,7 +290,8 @@ bool ProjectWorkspace::runDiagnosticsWorkflow(const TaskId& taskId,
                 return {WorkflowStepState::Failed, {}, diagnosticsFailure(FailureCode::InternalError, executionError)};
             }
             QJsonArray taskFacts;
-            const QVector<TaskSnapshot> recentTasks = storage_.tasks(taskLimit, &executionError);
+            const QVector<TaskSnapshot> recentTasks =
+                storage_.tasks(PageRequest{taskLimit, {}}, &executionError).items;
             if (!executionError.isEmpty()) {
                 return {WorkflowStepState::Failed, {}, diagnosticsFailure(FailureCode::InternalError, executionError)};
             }
@@ -300,7 +301,8 @@ bool ProjectWorkspace::runDiagnosticsWorkflow(const TaskId& taskId,
                         QStringLiteral("diagnostics_canceled_between_storage_reads"))};
                 }
                 QJsonArray artifacts;
-                const QVector<ArtifactSnapshot> storedArtifacts = storage_.artifactsForTask(item.id, &executionError);
+                const QVector<ArtifactSnapshot> storedArtifacts =
+                    storage_.artifactsForTask(item.id, {200, {}}, &executionError).items;
                 if (!executionError.isEmpty()) {
                     return {WorkflowStepState::Failed, {}, diagnosticsFailure(FailureCode::InternalError, executionError)};
                 }
@@ -661,19 +663,23 @@ bool ProjectWorkspace::environmentCheckReportForTask(
         if (error) *error = QStringLiteral("读取 Environment Check  报告需要已打开工作区和有效任务。");
         return false;
     }
-    const QVector<ArtifactSnapshot> artifacts = storage_.artifactsForTask(taskId, error);
-    if (error && !error->isEmpty()) return false;
+    QVector<ArtifactSnapshot> artifacts;
+    QString cursor;
+    do {
+        const Page<ArtifactSnapshot> page =
+            storage_.artifactsForTask(taskId, {50, cursor}, error);
+        if (error && !error->isEmpty()) return false;
+        artifacts += page.items;
+        cursor = page.hasMore ? page.nextCursor : QString();
+    } while (!cursor.isEmpty());
     for (auto it = artifacts.crbegin(); it != artifacts.crend(); ++it) {
         if (it->kind != QStringLiteral("environment_profiles_report")) continue;
-        const QString root = artifactStore_->artifactPath(it->id);
-        if (!verifyArtifact(*it, root, error)) return false;
-        QFile file(QDir(root).filePath(QStringLiteral("environment_profiles_report.json")));
+        ArtifactFilePreview preview;
+        if (!readCommittedArtifactFile(*it,
+                QStringLiteral("environment_profiles_report.json"), &preview,
+                1024 * 1024, error)) return false;
         QJsonParseError parseError;
-        if (!file.open(QIODevice::ReadOnly)) {
-            if (error) *error = QStringLiteral("environment_check_report_unreadable");
-            return false;
-        }
-        const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+        const QJsonDocument document = QJsonDocument::fromJson(preview.content, &parseError);
         if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
             if (error) *error = QStringLiteral("environment_check_report_invalid");
             return false;

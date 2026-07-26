@@ -572,8 +572,10 @@ add_executable(aitrain_delivery_acceptance_ui_tests
     ../src/app/src/TaskArtifactPanel.cpp
     ../src/app/src/TaskArtifactPresenter.h
     ../src/app/src/TaskArtifactPresenter.cpp
-    ../src/app/src/TaskExecutionController.h
-    ../src/app/src/TaskExecutionController.cpp
+    ../src/app/src/TaskRuntimeController.h
+    ../src/app/src/TaskRuntimeController.cpp
+    ../src/app/src/WorkspaceReadModelCoordinator.h
+    ../src/app/src/WorkspaceReadModelCoordinator.cpp
     ../src/app/src/DeliveryEvidencePresenter.h
     ../src/app/src/DeliveryEvidencePresenter.cpp
     ../src/app/src/WorkerClient.h

@@ -377,6 +377,9 @@ void ModelManifestTests::runtimeMatrixSeparatesProductSdkAndEvidenceStates()
     QCOMPARE(obbNcnn.status, aitrain::RuntimeCapabilityStatus::UnsupportedByProduct);
     const aitrain::RuntimeCapability anomaly = matrix.query({QStringLiteral("anomaly_detection"), QStringLiteral("anomalib_python")});
     QCOMPARE(anomaly.status, aitrain::RuntimeCapabilityStatus::RequiresExternalEvidence);
+    QCOMPARE(anomaly.runtimeStatus, aitrain::RuntimeStatus::RuntimeNotImplemented);
+    QCOMPARE(anomaly.localReadiness,
+        aitrain::RuntimeLocalReadiness::ExternalEvidenceRequired);
     const aitrain::RuntimeCapability unsupported = matrix.query({QStringLiteral("ocr_recognition"), QStringLiteral("aitrain_onnxruntime")});
     QCOMPARE(unsupported.status, aitrain::RuntimeCapabilityStatus::UnsupportedByProduct);
     QVERIFY(!matrix.toJson().value(QStringLiteral("entries")).toArray().isEmpty());

@@ -1146,6 +1146,34 @@ bool validateSplitRatios(double trainRatio, double valRatio, double testRatio, D
     return true;
 }
 
+void planCopiedFile(DatasetSplitResult& result,
+    const QString& sourcePath,
+    const QString& targetRelativePath)
+{
+    result.plannedFiles.append(QJsonObject{
+        {QStringLiteral("sourceAbsolutePath"), QFileInfo(sourcePath).absoluteFilePath()},
+        {QStringLiteral("targetRelativePath"), QDir::cleanPath(targetRelativePath)}});
+}
+
+void planInlineFile(DatasetSplitResult& result,
+    const QString& targetRelativePath,
+    const QByteArray& content)
+{
+    result.plannedFiles.append(QJsonObject{
+        {QStringLiteral("targetRelativePath"), QDir::cleanPath(targetRelativePath)},
+        {QStringLiteral("inlineBase64"), QString::fromLatin1(content.toBase64())}});
+}
+
+QByteArray textRows(const QStringList& rows)
+{
+    QByteArray content;
+    for (const QString& row : rows) {
+        content.append(row.toUtf8());
+        content.append('\n');
+    }
+    return content;
+}
+
 DatasetSplitResult splitYoloDataset(const QString& datasetPath,
     const QString& outputPath,
     const QJsonObject& options,
@@ -1153,6 +1181,7 @@ DatasetSplitResult splitYoloDataset(const QString& datasetPath,
 {
     DatasetSplitResult result;
     result.outputPath = outputPath;
+    const bool planOnly = options.value(QStringLiteral("_planOnly")).toBool(false);
 
     DatasetValidationResult validation;
     if (kind == YoloAnnotationKind::Segmentation) {
@@ -1204,19 +1233,26 @@ DatasetSplitResult splitYoloDataset(const QString& datasetPath,
     calculateSplitCounts(samples.size(), trainRatio, valRatio, testRatio, &result.trainCount, &result.valCount, &result.testCount);
 
     const QDir outputRoot(outputPath);
-    QDir().mkpath(outputRoot.path());
-    for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
-        QDir().mkpath(outputRoot.filePath(QStringLiteral("images/%1").arg(split)));
-        QDir().mkpath(outputRoot.filePath(QStringLiteral("labels/%1").arg(split)));
+    if (!planOnly) {
+        QDir().mkpath(outputRoot.path());
+        for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
+            QDir().mkpath(outputRoot.filePath(QStringLiteral("images/%1").arg(split)));
+            QDir().mkpath(outputRoot.filePath(QStringLiteral("labels/%1").arg(split)));
+        }
     }
 
     for (int index = 0; index < samples.size(); ++index) {
         const QString split = splitNameForIndex(index, result.trainCount, result.valCount);
         const YoloSample& sample = samples.at(index);
-        const QString imageTarget = outputRoot.filePath(QStringLiteral("images/%1/%2").arg(split, sample.fileName));
-        const QString labelTarget = outputRoot.filePath(QStringLiteral("labels/%1/%2.txt").arg(split, sample.baseName));
-        copyFileReplacing(sample.imagePath, imageTarget, result.errors);
-        copyFileReplacing(sample.labelPath, labelTarget, result.errors);
+        const QString imageRelative = QStringLiteral("images/%1/%2").arg(split, sample.fileName);
+        const QString labelRelative = QStringLiteral("labels/%1/%2.txt").arg(split, sample.baseName);
+        if (planOnly) {
+            planCopiedFile(result, sample.imagePath, imageRelative);
+            planCopiedFile(result, sample.labelPath, labelRelative);
+        } else {
+            copyFileReplacing(sample.imagePath, outputRoot.filePath(imageRelative), result.errors);
+            copyFileReplacing(sample.labelPath, outputRoot.filePath(labelRelative), result.errors);
+        }
     }
 
     QString yamlError;
@@ -1224,7 +1260,21 @@ DatasetSplitResult splitYoloDataset(const QString& datasetPath,
     if (!yamlError.isEmpty()) {
         result.errors.append(yamlError);
     }
-    writeNormalizedYoloDataYaml(outputRoot.path(), sourceLayout, result.testCount > 0, &result.errors);
+    if (planOnly) {
+        QFile yamlFile(sourceLayout.yamlPath);
+        if (!yamlFile.open(QIODevice::ReadOnly)) {
+            result.errors.append(QStringLiteral("无法读取源 data.yaml。"));
+        } else {
+            QByteArray yaml = yamlFile.readAll();
+            yaml.append("\n# AITrain Split Plan\npath: .\ntrain: images/train\nval: images/val\n");
+            if (result.testCount > 0) {
+                yaml.append("test: images/test\n");
+            }
+            planInlineFile(result, QStringLiteral("data.yaml"), yaml);
+        }
+    } else {
+        writeNormalizedYoloDataYaml(outputRoot.path(), sourceLayout, result.testCount > 0, &result.errors);
+    }
 
     if (!result.errors.isEmpty()) {
         result.ok = false;
@@ -1239,11 +1289,13 @@ DatasetSplitResult splitYoloDataset(const QString& datasetPath,
     report.insert(QStringLiteral("trainRatio"), trainRatio);
     report.insert(QStringLiteral("valRatio"), valRatio);
     report.insert(QStringLiteral("testRatio"), testRatio);
-    QFile reportFile(outputRoot.filePath(QStringLiteral("split_report.json")));
-    if (reportFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        reportFile.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
-    } else {
-        result.warnings.append(QStringLiteral("无法写入 split_report.json。"));
+    if (!planOnly) {
+        QFile reportFile(outputRoot.filePath(QStringLiteral("split_report.json")));
+        if (reportFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            reportFile.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+        } else {
+            result.warnings.append(QStringLiteral("无法写入 split_report.json。"));
+        }
     }
 
     return result;
@@ -1706,6 +1758,7 @@ DatasetSplitResult splitSemanticSegmentationMaskDataset(const QString& datasetPa
 {
     DatasetSplitResult result;
     result.outputPath = outputPath;
+    const bool planOnly = options.value(QStringLiteral("_planOnly")).toBool(false);
 
     const DatasetValidationResult validation = validateSemanticSegmentationMaskDataset(datasetPath, options);
     if (!validation.ok) {
@@ -1737,21 +1790,33 @@ DatasetSplitResult splitSemanticSegmentationMaskDataset(const QString& datasetPa
     calculateSplitCounts(samples.size(), trainRatio, valRatio, testRatio, &result.trainCount, &result.valCount, &result.testCount);
 
     const QDir outputRoot(outputPath);
-    QDir().mkpath(outputRoot.path());
-    for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
-        QDir().mkpath(outputRoot.filePath(QStringLiteral("images/%1").arg(split)));
-        QDir().mkpath(outputRoot.filePath(QStringLiteral("masks/%1").arg(split)));
+    if (!planOnly) {
+        QDir().mkpath(outputRoot.path());
+        for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
+            QDir().mkpath(outputRoot.filePath(QStringLiteral("images/%1").arg(split)));
+            QDir().mkpath(outputRoot.filePath(QStringLiteral("masks/%1").arg(split)));
+        }
     }
 
     for (int index = 0; index < samples.size(); ++index) {
         const QString split = splitNameForIndex(index, result.trainCount, result.valCount);
         const SemanticMaskSample& sample = samples.at(index);
-        const QString imageTarget = outputRoot.filePath(QStringLiteral("images/%1/%2").arg(split, sample.fileName));
-        const QString maskTarget = outputRoot.filePath(QStringLiteral("masks/%1/%2.png").arg(split, sample.baseName));
-        copyFileReplacing(sample.imagePath, imageTarget, result.errors);
-        copyFileReplacing(sample.maskPath, maskTarget, result.errors);
+        const QString imageRelative = QStringLiteral("images/%1/%2").arg(split, sample.fileName);
+        const QString maskRelative = QStringLiteral("masks/%1/%2.png").arg(split, sample.baseName);
+        if (planOnly) {
+            planCopiedFile(result, sample.imagePath, imageRelative);
+            planCopiedFile(result, sample.maskPath, maskRelative);
+        } else {
+            copyFileReplacing(sample.imagePath, outputRoot.filePath(imageRelative), result.errors);
+            copyFileReplacing(sample.maskPath, outputRoot.filePath(maskRelative), result.errors);
+        }
     }
-    copyFileReplacing(QDir(datasetPath).filePath(QStringLiteral("classes.txt")), outputRoot.filePath(QStringLiteral("classes.txt")), result.errors);
+    const QString classesPath = QDir(datasetPath).filePath(QStringLiteral("classes.txt"));
+    if (planOnly) {
+        planCopiedFile(result, classesPath, QStringLiteral("classes.txt"));
+    } else {
+        copyFileReplacing(classesPath, outputRoot.filePath(QStringLiteral("classes.txt")), result.errors);
+    }
 
     if (!result.errors.isEmpty()) {
         result.ok = false;
@@ -1764,11 +1829,13 @@ DatasetSplitResult splitSemanticSegmentationMaskDataset(const QString& datasetPa
     report.insert(QStringLiteral("trainRatio"), trainRatio);
     report.insert(QStringLiteral("valRatio"), valRatio);
     report.insert(QStringLiteral("testRatio"), testRatio);
-    QFile reportFile(outputRoot.filePath(QStringLiteral("split_report.json")));
-    if (reportFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        reportFile.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
-    } else {
-        result.warnings.append(QStringLiteral("无法写入 split_report.json。"));
+    if (!planOnly) {
+        QFile reportFile(outputRoot.filePath(QStringLiteral("split_report.json")));
+        if (reportFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            reportFile.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+        } else {
+            result.warnings.append(QStringLiteral("无法写入 split_report.json。"));
+        }
     }
 
     return result;
@@ -1778,6 +1845,7 @@ DatasetSplitResult splitAnomalyFolderDataset(const QString& datasetPath, const Q
 {
     DatasetSplitResult result;
     result.outputPath = outputPath;
+    const bool planOnly = options.value(QStringLiteral("_planOnly")).toBool(false);
 
     const DatasetValidationResult validation = validateAnomalyFolderDataset(datasetPath, options);
     if (!validation.ok) {
@@ -1842,21 +1910,32 @@ DatasetSplitResult splitAnomalyFolderDataset(const QString& datasetPath, const Q
     result.testCount = normalTest + anomalyTest;
 
     const QDir outputRoot(outputPath);
-    QDir().mkpath(outputRoot.path());
-    for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
-        QDir().mkpath(outputRoot.filePath(QStringLiteral("%1/good").arg(split)));
-        QDir().mkpath(outputRoot.filePath(QStringLiteral("%1/anomaly").arg(split)));
-        QDir().mkpath(outputRoot.filePath(QStringLiteral("masks/%1/anomaly").arg(split)));
+    if (!planOnly) {
+        QDir().mkpath(outputRoot.path());
+        for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
+            QDir().mkpath(outputRoot.filePath(QStringLiteral("%1/good").arg(split)));
+            QDir().mkpath(outputRoot.filePath(QStringLiteral("%1/anomaly").arg(split)));
+            QDir().mkpath(outputRoot.filePath(QStringLiteral("masks/%1/anomaly").arg(split)));
+        }
     }
 
-    auto copyAnomalySample = [&outputRoot, &result](const AnomalySample& sample, const QString& split, int index) {
+    auto copyAnomalySample = [&outputRoot, &result, planOnly](const AnomalySample& sample, const QString& split, int index) {
         const QString label = sample.label == QStringLiteral("anomaly") ? QStringLiteral("anomaly") : QStringLiteral("good");
         const QString fileName = QStringLiteral("%1_%2").arg(index + 1, 5, 10, QLatin1Char('0')).arg(sample.fileName);
-        const QString imageTarget = outputRoot.filePath(QStringLiteral("%1/%2/%3").arg(split, label, fileName));
-        copyFileReplacing(sample.imagePath, imageTarget, result.errors);
+        const QString imageRelative = QStringLiteral("%1/%2/%3").arg(split, label, fileName);
+        if (planOnly) {
+            planCopiedFile(result, sample.imagePath, imageRelative);
+        } else {
+            copyFileReplacing(sample.imagePath, outputRoot.filePath(imageRelative), result.errors);
+        }
         if (label == QStringLiteral("anomaly") && !sample.maskPath.isEmpty()) {
-            const QString maskTarget = outputRoot.filePath(QStringLiteral("masks/%1/anomaly/%2.png").arg(split, QFileInfo(fileName).completeBaseName()));
-            copyFileReplacing(sample.maskPath, maskTarget, result.errors);
+            const QString maskRelative = QStringLiteral("masks/%1/anomaly/%2.png")
+                                             .arg(split, QFileInfo(fileName).completeBaseName());
+            if (planOnly) {
+                planCopiedFile(result, sample.maskPath, maskRelative);
+            } else {
+                copyFileReplacing(sample.maskPath, outputRoot.filePath(maskRelative), result.errors);
+            }
         }
     };
 
@@ -1880,11 +1959,13 @@ DatasetSplitResult splitAnomalyFolderDataset(const QString& datasetPath, const Q
     report.insert(QStringLiteral("testRatio"), testRatio);
     report.insert(QStringLiteral("normalCount"), normalSamples.size());
     report.insert(QStringLiteral("anomalyCount"), anomalySamples.size());
-    QFile reportFile(outputRoot.filePath(QStringLiteral("split_report.json")));
-    if (reportFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        reportFile.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
-    } else {
-        result.warnings.append(QStringLiteral("无法写入 split_report.json。"));
+    if (!planOnly) {
+        QFile reportFile(outputRoot.filePath(QStringLiteral("split_report.json")));
+        if (reportFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            reportFile.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+        } else {
+            result.warnings.append(QStringLiteral("无法写入 split_report.json。"));
+        }
     }
     return result;
 }
@@ -1893,6 +1974,7 @@ DatasetSplitResult splitPaddleOcrDetDataset(const QString& datasetPath, const QS
 {
     DatasetSplitResult result;
     result.outputPath = outputPath;
+    const bool planOnly = options.value(QStringLiteral("_planOnly")).toBool(false);
 
     const DatasetValidationResult validation = validatePaddleOcrDetDataset(datasetPath, options);
     if (!validation.ok) {
@@ -1928,9 +2010,11 @@ DatasetSplitResult splitPaddleOcrDetDataset(const QString& datasetPath, const QS
     calculateSplitCounts(samples.size(), trainRatio, valRatio, testRatio, &result.trainCount, &result.valCount, &result.testCount);
 
     const QDir outputRoot(outputPath);
-    QDir().mkpath(outputRoot.path());
-    for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
-        QDir().mkpath(outputRoot.filePath(QStringLiteral("images/%1").arg(split)));
+    if (!planOnly) {
+        QDir().mkpath(outputRoot.path());
+        for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
+            QDir().mkpath(outputRoot.filePath(QStringLiteral("images/%1").arg(split)));
+        }
     }
 
     QStringList allRows;
@@ -1945,8 +2029,11 @@ DatasetSplitResult splitPaddleOcrDetDataset(const QString& datasetPath, const QS
             fileName = QStringLiteral("sample_%1.png").arg(index + 1);
         }
         const QString targetRelative = QStringLiteral("images/%1/%2_%3").arg(split).arg(index + 1, 4, 10, QLatin1Char('0')).arg(fileName);
-        const QString targetPath = outputRoot.filePath(targetRelative);
-        copyFileReplacing(sample.imagePath, targetPath, result.errors);
+        if (planOnly) {
+            planCopiedFile(result, sample.imagePath, targetRelative);
+        } else {
+            copyFileReplacing(sample.imagePath, outputRoot.filePath(targetRelative), result.errors);
+        }
         const QString row = QStringLiteral("%1\t%2").arg(targetRelative, sample.labelJson);
         allRows.append(row);
         if (split == QStringLiteral("train")) {
@@ -1972,10 +2059,17 @@ DatasetSplitResult splitPaddleOcrDetDataset(const QString& datasetPath, const QS
             stream << row << '\n';
         }
     };
-    writeRows(outputRoot.filePath(QStringLiteral("det_gt.txt")), allRows);
-    writeRows(outputRoot.filePath(QStringLiteral("det_gt_train.txt")), trainRows);
-    writeRows(outputRoot.filePath(QStringLiteral("det_gt_val.txt")), valRows);
-    writeRows(outputRoot.filePath(QStringLiteral("det_gt_test.txt")), testRows);
+    if (planOnly) {
+        planInlineFile(result, QStringLiteral("det_gt.txt"), textRows(allRows));
+        planInlineFile(result, QStringLiteral("det_gt_train.txt"), textRows(trainRows));
+        planInlineFile(result, QStringLiteral("det_gt_val.txt"), textRows(valRows));
+        planInlineFile(result, QStringLiteral("det_gt_test.txt"), textRows(testRows));
+    } else {
+        writeRows(outputRoot.filePath(QStringLiteral("det_gt.txt")), allRows);
+        writeRows(outputRoot.filePath(QStringLiteral("det_gt_train.txt")), trainRows);
+        writeRows(outputRoot.filePath(QStringLiteral("det_gt_val.txt")), valRows);
+        writeRows(outputRoot.filePath(QStringLiteral("det_gt_test.txt")), testRows);
+    }
 
     QJsonObject report = result.toJson();
     report.insert(QStringLiteral("sourcePath"), datasetPath);
@@ -1984,11 +2078,13 @@ DatasetSplitResult splitPaddleOcrDetDataset(const QString& datasetPath, const QS
     report.insert(QStringLiteral("trainRatio"), trainRatio);
     report.insert(QStringLiteral("valRatio"), valRatio);
     report.insert(QStringLiteral("testRatio"), testRatio);
-    QFile reportFile(outputRoot.filePath(QStringLiteral("split_report.json")));
-    if (reportFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        reportFile.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
-    } else {
-        result.warnings.append(QStringLiteral("无法写入 split_report.json。"));
+    if (!planOnly) {
+        QFile reportFile(outputRoot.filePath(QStringLiteral("split_report.json")));
+        if (reportFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            reportFile.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+        } else {
+            result.warnings.append(QStringLiteral("无法写入 split_report.json。"));
+        }
     }
     if (!result.errors.isEmpty()) {
         result.ok = false;
@@ -2000,6 +2096,7 @@ DatasetSplitResult splitPaddleOcrRecDataset(const QString& datasetPath, const QS
 {
     DatasetSplitResult result;
     result.outputPath = outputPath;
+    const bool planOnly = options.value(QStringLiteral("_planOnly")).toBool(false);
 
     const DatasetValidationResult validation = validatePaddleOcrRecDataset(datasetPath, options);
     if (!validation.ok) {
@@ -2039,9 +2136,11 @@ DatasetSplitResult splitPaddleOcrRecDataset(const QString& datasetPath, const QS
     calculateSplitCounts(samples.size(), trainRatio, valRatio, testRatio, &result.trainCount, &result.valCount, &result.testCount);
 
     const QDir outputRoot(outputPath);
-    QDir().mkpath(outputRoot.path());
-    for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
-        QDir().mkpath(outputRoot.filePath(QStringLiteral("images/%1").arg(split)));
+    if (!planOnly) {
+        QDir().mkpath(outputRoot.path());
+        for (const QString& split : {QStringLiteral("train"), QStringLiteral("val"), QStringLiteral("test")}) {
+            QDir().mkpath(outputRoot.filePath(QStringLiteral("images/%1").arg(split)));
+        }
     }
 
     QStringList allRows;
@@ -2056,8 +2155,11 @@ DatasetSplitResult splitPaddleOcrRecDataset(const QString& datasetPath, const QS
             fileName = QStringLiteral("sample_%1.png").arg(index + 1);
         }
         const QString targetRelative = QStringLiteral("images/%1/%2_%3").arg(split).arg(index + 1, 4, 10, QLatin1Char('0')).arg(fileName);
-        const QString targetPath = outputRoot.filePath(targetRelative);
-        copyFileReplacing(sample.imagePath, targetPath, result.errors);
+        if (planOnly) {
+            planCopiedFile(result, sample.imagePath, targetRelative);
+        } else {
+            copyFileReplacing(sample.imagePath, outputRoot.filePath(targetRelative), result.errors);
+        }
         const QString row = QStringLiteral("%1\t%2").arg(targetRelative, sample.text);
         allRows.append(row);
         if (split == QStringLiteral("train")) {
@@ -2083,14 +2185,25 @@ DatasetSplitResult splitPaddleOcrRecDataset(const QString& datasetPath, const QS
             stream << row << '\n';
         }
     };
-    writeRows(outputRoot.filePath(QStringLiteral("rec_gt.txt")), allRows);
-    writeRows(outputRoot.filePath(QStringLiteral("rec_gt_train.txt")), trainRows);
-    writeRows(outputRoot.filePath(QStringLiteral("rec_gt_val.txt")), valRows);
-    writeRows(outputRoot.filePath(QStringLiteral("rec_gt_test.txt")), testRows);
+    if (planOnly) {
+        planInlineFile(result, QStringLiteral("rec_gt.txt"), textRows(allRows));
+        planInlineFile(result, QStringLiteral("rec_gt_train.txt"), textRows(trainRows));
+        planInlineFile(result, QStringLiteral("rec_gt_val.txt"), textRows(valRows));
+        planInlineFile(result, QStringLiteral("rec_gt_test.txt"), textRows(testRows));
+    } else {
+        writeRows(outputRoot.filePath(QStringLiteral("rec_gt.txt")), allRows);
+        writeRows(outputRoot.filePath(QStringLiteral("rec_gt_train.txt")), trainRows);
+        writeRows(outputRoot.filePath(QStringLiteral("rec_gt_val.txt")), valRows);
+        writeRows(outputRoot.filePath(QStringLiteral("rec_gt_test.txt")), testRows);
+    }
 
     const QString dictionaryPath = options.value(QStringLiteral("dictionaryFile")).toString(root.filePath(QStringLiteral("dict.txt")));
     if (QFileInfo::exists(dictionaryPath)) {
-        copyFileReplacing(dictionaryPath, outputRoot.filePath(QStringLiteral("dict.txt")), result.errors);
+        if (planOnly) {
+            planCopiedFile(result, dictionaryPath, QStringLiteral("dict.txt"));
+        } else {
+            copyFileReplacing(dictionaryPath, outputRoot.filePath(QStringLiteral("dict.txt")), result.errors);
+        }
     } else {
         result.warnings.append(QStringLiteral("未找到 OCR Rec 字典文件；split 输出不包含 dict.txt，将依赖训练参数或官方预置字典。"));
     }
@@ -2102,11 +2215,13 @@ DatasetSplitResult splitPaddleOcrRecDataset(const QString& datasetPath, const QS
     report.insert(QStringLiteral("trainRatio"), trainRatio);
     report.insert(QStringLiteral("valRatio"), valRatio);
     report.insert(QStringLiteral("testRatio"), testRatio);
-    QFile reportFile(outputRoot.filePath(QStringLiteral("split_report.json")));
-    if (reportFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        reportFile.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
-    } else {
-        result.warnings.append(QStringLiteral("无法写入 split_report.json。"));
+    if (!planOnly) {
+        QFile reportFile(outputRoot.filePath(QStringLiteral("split_report.json")));
+        if (reportFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            reportFile.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+        } else {
+            result.warnings.append(QStringLiteral("无法写入 split_report.json。"));
+        }
     }
     if (!result.errors.isEmpty()) {
         result.ok = false;

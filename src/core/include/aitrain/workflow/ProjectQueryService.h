@@ -71,7 +71,7 @@ struct DeliveryEvidenceReadModel final {
 };
 
 using DeliveryEvidenceCallback = std::function<void(
-    bool success, QVector<DeliveryEvidenceReadModel> records, QString error)>;
+    bool success, Page<DeliveryEvidenceReadModel> page, QString error)>;
 
 // 项目总览只读 DTO。底层 Snapshot 本身不包含裸 Artifact 路径或 legacy 数据。
 using ProjectSummaryReadModel = ProjectSummarySnapshot;
@@ -82,7 +82,8 @@ class ProjectQueryService final {
 public:
     explicit ProjectQueryService(const ProjectWorkspace* workspace);
 
-    QVector<TaskSnapshot> recentTasks(int limit, QString* error = nullptr) const;
+    Page<TaskSnapshot> recentTasks(
+        const PageRequest& request, QString* error = nullptr) const;
     bool taskDetails(const TaskId& taskId, TaskReadModel* result, QString* error = nullptr) const;
     bool artifactFilePreview(const ArtifactId& artifactId,
         const QString& relativePath,
@@ -95,14 +96,17 @@ public:
         ArtifactFilePreviewCallback callback,
         qint64 maxBytes = 512 * 1024,
         QString* error = nullptr) const;
-    QVector<DatasetCatalogReadModel> datasetCatalog(int limit, QString* error = nullptr) const;
-    QVector<ModelPackageReadModel> modelPackages(int limit, QString* error = nullptr) const;
+    Page<DatasetCatalogReadModel> datasetCatalog(
+        const PageRequest& request, QString* error = nullptr) const;
+    Page<ModelPackageReadModel> modelPackages(
+        const PageRequest& request, QString* error = nullptr) const;
     bool projectSummary(ProjectSummaryReadModel* result, QString* error = nullptr) const;
     bool environmentCheckReport(const TaskId& taskId, QJsonObject* result, QString* error = nullptr) const;
-    QVector<DeliveryEvidenceReadModel> deliveryEvidence(int limit, QString* error = nullptr) const;
+    Page<DeliveryEvidenceReadModel> deliveryEvidence(
+        const PageRequest& request, QString* error = nullptr) const;
     // 当前线程只读取候选 Task/Artifact 元数据；证据文件的读取、SHA-256
     // 复验和 JSON/schema 校验均在线程池执行，完成后回到 receiver 线程。
-    bool deliveryEvidenceAsync(int limit,
+    bool deliveryEvidenceAsync(const PageRequest& request,
         QObject* receiver,
         DeliveryEvidenceCallback callback,
         QString* error = nullptr) const;

@@ -96,8 +96,8 @@ bool issueHasStableFields(const QJsonObject& issue)
 bool hasQualityArtifact(const aitrain::ProjectWorkspace& workspace,
     const aitrain::TaskId& taskId, QString* error)
 {
-    const auto artifacts = workspace.artifactsForTask(taskId, error);
-    for (const auto& artifact : artifacts) {
+    const auto artifacts = workspace.artifactsForTask(taskId, {200, {}}, error);
+    for (const auto& artifact : artifacts.items) {
         if (artifact.kind.startsWith(QStringLiteral("dataset_snapshot_validation"))
             || artifact.kind.startsWith(QStringLiteral("dataset_quality_analysis"))
             || artifact.kind.startsWith(QStringLiteral("dataset_repair_manifest"))
@@ -364,8 +364,8 @@ void DataQualityTests::cancellationHasUniqueCanceledTerminalAndEvidence()
     QVERIFY(workspace.task(taskId, &task, &error));
     QCOMPARE(task.state, aitrain::TaskState::Canceled);
     QCOMPARE(task.failure.code, aitrain::FailureCode::Canceled);
-    const auto workflows = workspace.workflowRunsForTask(taskId, &error);
-    QCOMPARE(workflows.size(), 1);
+    const auto workflows = workspace.workflowRunsForTask(taskId, {50, {}}, &error);
+    QCOMPARE(workflows.items.size(), 1);
     QVERIFY(!hasQualityArtifact(workspace, taskId, &error));
 }
 

@@ -36,7 +36,9 @@ public:
         const aitrain::ProjectQueryService* queryService,
         QObject* parent = nullptr);
 
-    bool refresh(int limit = 200);
+    bool refresh(const aitrain::PageRequest& request = {50, {}});
+    bool loadMore();
+    bool hasMore() const;
     void clear();
 
     int modelPackageCount() const;
@@ -51,4 +53,6 @@ private:
     const aitrain::ProjectQueryService* queryService_ = nullptr;
     QVector<ModelPackageListItem> modelPackages_;
     QString lastError_;
+    QString nextCursor_;
+    bool hasMore_ = false;
 };

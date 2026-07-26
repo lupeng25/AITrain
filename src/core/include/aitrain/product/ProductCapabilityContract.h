@@ -19,6 +19,15 @@ enum class RuntimeProductState {
     UnsupportedByProduct
 };
 
+enum class RuntimeLocalReadiness {
+    Available,
+    SdkMissing,
+    DependencyMissing,
+    HardwareUnsupported,
+    ExternalEvidenceRequired,
+    NotApplicable
+};
+
 struct CapabilityContract final {
     QString id;
     QString displayName;
@@ -74,6 +83,7 @@ struct DatasetConversionRouteContract final {
 
 QString runtimeExecutionAuthorityToString(RuntimeExecutionAuthority authority);
 QString runtimeProductStateToString(RuntimeProductState state);
+QString runtimeLocalReadinessToString(RuntimeLocalReadiness readiness);
 
 class ProductCapabilityContract final {
 public:

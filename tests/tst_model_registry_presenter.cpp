@@ -141,7 +141,7 @@ void ModelRegistryPresenterTests::exposesNewestFirstIdentityLineageRuntimeAndLim
 
     aitrain::ProjectQueryService query(&workspace);
     ModelRegistryPresenter presenter(&query);
-    QVERIFY2(presenter.refresh(20), qPrintable(presenter.lastError()));
+    QVERIFY2(presenter.refresh({20, {}}), qPrintable(presenter.lastError()));
     QCOMPARE(presenter.modelPackageCount(), 2);
     const QVector<ModelPackageListItem>& rows = presenter.modelPackages();
     QCOMPARE(rows.first().modelPackageId, newer.manifest.modelPackageId.toString());

@@ -2,10 +2,7 @@
 
 #include "aitrain/workflow/EvidenceBundle.h"
 
-#include <QCryptographicHash>
 #include <QDir>
-#include <QFile>
-#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QPointer>
@@ -17,13 +14,6 @@
 
 namespace aitrain {
 namespace {
-
-bool isChildPath(const QString& parentPath, const QString& candidatePath)
-{
-    const QString parent = QDir::cleanPath(QDir(parentPath).absolutePath());
-    const QString candidate = QDir::cleanPath(QFileInfo(candidatePath).absoluteFilePath());
-    return candidate.startsWith(parent + QLatin1Char('/'), Qt::CaseInsensitive);
-}
 
 void appendInvalidEvidence(QVector<DeliveryEvidenceReadModel>* result,
     const DeliveryEvidenceCandidate& candidate, const QString& message)
@@ -158,39 +148,14 @@ bool readDeliveryEvidenceSource(const CommittedArtifactFileReadSource& source,
         if (error) *error = QStringLiteral("证据 Artifact 文件读取参数无效。");
         return false;
     }
-    const QFileInfo info(source.absolutePath);
-    if (!isChildPath(source.artifactRoot, info.absoluteFilePath())
-        || !info.exists() || !info.isFile() || info.isSymLink()
-        || info.size() != source.expected.byteCount) {
-        if (error) *error = QStringLiteral("证据 Artifact 文件无效、越界或已被修改。");
+    if (source.expected.byteCount > maxBytes) {
+        if (error) *error = QStringLiteral("TooLarge：证据 Artifact 文件超过读取上限。");
         return false;
     }
-    QFile file(info.absoluteFilePath());
-    if (!file.open(QIODevice::ReadOnly)) {
-        if (error) *error = QStringLiteral("无法读取证据 Artifact 文件。");
-        return false;
-    }
-    QCryptographicHash hash(QCryptographicHash::Sha256);
-    QByteArray preview;
-    preview.reserve(static_cast<int>(qMin<qint64>(maxBytes, source.expected.byteCount)));
-    while (!file.atEnd()) {
-        const QByteArray block = file.read(1024 * 1024);
-        if (block.isEmpty() && file.error() != QFileDevice::NoError) {
-            if (error) *error = QStringLiteral("读取证据 Artifact 文件失败。");
-            return false;
-        }
-        hash.addData(block);
-        if (preview.size() < maxBytes) {
-            const qint64 remaining = maxBytes - preview.size();
-            preview.append(block.left(static_cast<int>(qMin<qint64>(remaining, block.size()))));
-        }
-    }
-    if (QString::fromLatin1(hash.result().toHex()) != source.expected.sha256) {
-        if (error) *error = QStringLiteral("证据 Artifact 文件 SHA-256 不匹配：%1")
-            .arg(source.expected.relativePath);
-        return false;
-    }
-    *content = preview;
+    ArtifactFilePreview preview;
+    if (!VerifiedArtifactReader(source.artifactRoot).preview(
+            source.expected, maxBytes, &preview, nullptr, error)) return false;
+    *content = preview.content;
     return true;
 }
 
@@ -204,48 +169,57 @@ struct DeliveryEvidenceFileJob final {
 class DeliveryEvidenceRunnable final : public QRunnable {
 public:
     DeliveryEvidenceRunnable(QVector<DeliveryEvidenceFileJob> jobs,
+        QString nextCursor, bool hasMore,
         QObject* receiver, DeliveryEvidenceCallback callback)
-        : jobs_(std::move(jobs)), receiver_(receiver), callback_(std::move(callback))
+        : jobs_(std::move(jobs))
+        , nextCursor_(std::move(nextCursor))
+        , hasMore_(hasMore)
+        , receiver_(receiver)
+        , callback_(std::move(callback))
     {
         setAutoDelete(true);
     }
 
     void run() override
     {
-        QVector<DeliveryEvidenceReadModel> records;
-        records.reserve(jobs_.size());
+        Page<DeliveryEvidenceReadModel> page;
+        page.nextCursor = nextCursor_;
+        page.hasMore = hasMore_;
+        page.items.reserve(jobs_.size());
         for (const DeliveryEvidenceFileJob& job : jobs_) {
             if (!job.preparationError.isEmpty()) {
-                appendInvalidEvidence(&records, job.candidate, job.preparationError);
+                appendInvalidEvidence(&page.items, job.candidate, job.preparationError);
                 continue;
             }
             QByteArray content;
             QString rowError;
             if (!readDeliveryEvidenceSource(job.source, job.maxBytes, &content, &rowError)) {
-                appendInvalidEvidence(&records, job.candidate,
+                appendInvalidEvidence(&page.items, job.candidate,
                     QStringLiteral("证据 Artifact 文件无法读取或校验：%1").arg(rowError));
                 continue;
             }
             DeliveryEvidenceReadModel model;
             if (!parseDeliveryEvidenceJson(job.candidate, content, &model, &rowError)) {
-                appendInvalidEvidence(&records, job.candidate, rowError);
+                appendInvalidEvidence(&page.items, job.candidate, rowError);
                 continue;
             }
-            records.append(model);
+            page.items.append(model);
         }
 
         if (!receiver_ || !callback_) return;
         QPointer<QObject> receiver = receiver_;
         DeliveryEvidenceCallback callback = std::move(callback_);
         QTimer::singleShot(0, receiver.data(),
-            [receiver, callback = std::move(callback), records = std::move(records)]() mutable {
+            [receiver, callback = std::move(callback), page = std::move(page)]() mutable {
                 if (!receiver || !callback) return;
-                callback(true, std::move(records), {});
+                callback(true, std::move(page), {});
             });
     }
 
 private:
     QVector<DeliveryEvidenceFileJob> jobs_;
+    QString nextCursor_;
+    bool hasMore_ = false;
     QPointer<QObject> receiver_;
     DeliveryEvidenceCallback callback_;
 };
@@ -257,14 +231,15 @@ ProjectQueryService::ProjectQueryService(const ProjectWorkspace* workspace)
 {
 }
 
-QVector<TaskSnapshot> ProjectQueryService::recentTasks(int limit, QString* error) const
+Page<TaskSnapshot> ProjectQueryService::recentTasks(
+    const PageRequest& request, QString* error) const
 {
     if (error) error->clear();
     if (!workspace_ || !workspace_->isOpen()) {
         if (error) *error = QStringLiteral("项目查询服务需要已打开的  工作区。");
         return {};
     }
-    return workspace_->tasks(limit, error);
+    return workspace_->tasks(request, error);
 }
 
 bool ProjectQueryService::taskDetails(const TaskId& taskId, TaskReadModel* result, QString* error) const
@@ -277,12 +252,13 @@ bool ProjectQueryService::taskDetails(const TaskId& taskId, TaskReadModel* resul
 
     TaskReadModel model;
     if (!workspace_->task(taskId, &model.task, error)) return false;
-    model.artifacts = workspace_->artifactsForTask(taskId, error);
+    model.artifacts = workspace_->artifactsForTask(taskId, {50, {}}, error).items;
     if (error && !error->isEmpty()) return false;
-    model.metrics = workspace_->metricsForTask(taskId, error);
+    model.metrics = workspace_->metricsForTask(taskId, {100, {}}, error).items;
     if (error && !error->isEmpty()) return false;
 
-    const QVector<WorkflowRunSnapshot> runs = workspace_->workflowRunsForTask(taskId, error);
+    const QVector<WorkflowRunSnapshot> runs =
+        workspace_->workflowRunsForTask(taskId, {50, {}}, error).items;
     if (error && !error->isEmpty()) return false;
     for (const WorkflowRunSnapshot& run : runs) {
         WorkflowReadModel workflow;
@@ -325,8 +301,8 @@ bool ProjectQueryService::artifactFilePreviewAsync(const ArtifactId& artifactId,
         receiver, std::move(callback), maxBytes, error);
 }
 
-QVector<DatasetCatalogReadModel> ProjectQueryService::datasetCatalog(
-    int limit, QString* error) const
+Page<DatasetCatalogReadModel> ProjectQueryService::datasetCatalog(
+    const PageRequest& request, QString* error) const
 {
     if (error) error->clear();
     if (!workspace_ || !workspace_->isOpen()) {
@@ -334,12 +310,14 @@ QVector<DatasetCatalogReadModel> ProjectQueryService::datasetCatalog(
         return {};
     }
 
-    const QVector<DatasetCatalogItem> items = workspace_->datasets(limit, error);
+    const Page<DatasetCatalogItem> source = workspace_->datasets(request, error);
     if (error && !error->isEmpty()) return {};
 
-    QVector<DatasetCatalogReadModel> models;
-    models.reserve(items.size());
-    for (const DatasetCatalogItem& item : items) {
+    Page<DatasetCatalogReadModel> page;
+    page.nextCursor = source.nextCursor;
+    page.hasMore = source.hasMore;
+    page.items.reserve(source.items.size());
+    for (const DatasetCatalogItem& item : source.items) {
         DatasetCatalogReadModel model;
         model.datasetId = item.datasetId;
         model.datasetFormat = item.datasetFormat;
@@ -351,13 +329,13 @@ QVector<DatasetCatalogReadModel> ProjectQueryService::datasetCatalog(
         model.latestRootHash = item.latestRootHash;
         model.latestFileCount = item.latestFileCount;
         model.latestCreatedAt = item.latestCreatedAt;
-        models.append(model);
+        page.items.append(model);
     }
-    return models;
+    return page;
 }
 
-QVector<ModelPackageReadModel> ProjectQueryService::modelPackages(
-    int limit, QString* error) const
+Page<ModelPackageReadModel> ProjectQueryService::modelPackages(
+    const PageRequest& request, QString* error) const
 {
     if (error) error->clear();
     if (!workspace_ || !workspace_->isOpen()) {
@@ -365,12 +343,14 @@ QVector<ModelPackageReadModel> ProjectQueryService::modelPackages(
         return {};
     }
 
-    const QVector<ModelPackageSnapshot> snapshots = workspace_->modelPackages(limit, error);
+    const Page<ModelPackageSnapshot> source = workspace_->modelPackages(request, error);
     if (error && !error->isEmpty()) return {};
 
-    QVector<ModelPackageReadModel> models;
-    models.reserve(snapshots.size());
-    for (const ModelPackageSnapshot& snapshot : snapshots) {
+    Page<ModelPackageReadModel> page;
+    page.nextCursor = source.nextCursor;
+    page.hasMore = source.hasMore;
+    page.items.reserve(source.items.size());
+    for (const ModelPackageSnapshot& snapshot : source.items) {
         const ModelManifest& manifest = snapshot.manifest;
         ModelPackageReadModel model;
         model.modelPackageId = manifest.modelPackageId;
@@ -388,9 +368,9 @@ QVector<ModelPackageReadModel> ProjectQueryService::modelPackages(
         model.limitations = manifest.limitations;
         model.verified = manifest.verified;
         model.createdAt = snapshot.createdAt;
-        models.append(model);
+        page.items.append(model);
     }
-    return models;
+    return page;
 }
 
 bool ProjectQueryService::projectSummary(ProjectSummaryReadModel* result, QString* error) const
@@ -414,22 +394,24 @@ bool ProjectQueryService::environmentCheckReport(
     return workspace_->environmentCheckReportForTask(taskId, result, error);
 }
 
-QVector<DeliveryEvidenceReadModel> ProjectQueryService::deliveryEvidence(
-    int limit, QString* error) const
+Page<DeliveryEvidenceReadModel> ProjectQueryService::deliveryEvidence(
+    const PageRequest& request, QString* error) const
 {
     if (error) error->clear();
-    if (!workspace_ || !workspace_->isOpen() || limit <= 0) {
-        if (error) *error = QStringLiteral("查询交付证据需要已打开工作区和正数 limit。");
+    if (!workspace_ || !workspace_->isOpen()) {
+        if (error) *error = QStringLiteral("查询交付证据需要已打开工作区。");
         return {};
     }
 
-    const QVector<DeliveryEvidenceCandidate> candidates =
-        workspace_->deliveryEvidenceCandidates(limit, error);
+    const Page<DeliveryEvidenceCandidate> source =
+        workspace_->deliveryEvidenceCandidates(request, error);
     if (error && !error->isEmpty()) return {};
 
-    QVector<DeliveryEvidenceReadModel> result;
+    Page<DeliveryEvidenceReadModel> result;
+    result.nextCursor = source.nextCursor;
+    result.hasMore = source.hasMore;
 
-    for (const DeliveryEvidenceCandidate& candidate : candidates) {
+    for (const DeliveryEvidenceCandidate& candidate : source.items) {
         const ArtifactSnapshot& artifact = candidate.artifact;
         const QString requiredFile = artifact.kind == QStringLiteral("external_acceptance_evidence")
             ? QStringLiteral("acceptance.json") : QStringLiteral("evidence.json");
@@ -438,7 +420,7 @@ QVector<DeliveryEvidenceReadModel> ProjectQueryService::deliveryEvidence(
                 return file.relativePath == requiredFile;
             });
         if (fileIt == artifact.files.cend()) {
-            appendInvalidEvidence(&result, candidate, QStringLiteral("证据 Artifact 缺少 %1：%2")
+            appendInvalidEvidence(&result.items, candidate, QStringLiteral("证据 Artifact 缺少 %1：%2")
                 .arg(requiredFile, artifact.id.toString()));
             continue;
         }
@@ -449,22 +431,22 @@ QVector<DeliveryEvidenceReadModel> ProjectQueryService::deliveryEvidence(
             ? 1024 * 1024 : 512 * 1024;
         if (!workspace_->readCommittedArtifactFile(artifact, fileIt->relativePath,
                 &preview, maxBytes, &rowError)) {
-            appendInvalidEvidence(&result, candidate,
+            appendInvalidEvidence(&result.items, candidate,
                 QStringLiteral("证据 Artifact 文件无法读取或校验：%1")
                 .arg(rowError));
             continue;
         }
         DeliveryEvidenceReadModel model;
         if (!parseDeliveryEvidenceJson(candidate, preview.content, &model, &rowError)) {
-            appendInvalidEvidence(&result, candidate, rowError);
+            appendInvalidEvidence(&result.items, candidate, rowError);
             continue;
         }
-        result.append(model);
+        result.items.append(model);
     }
     return result;
 }
 
-bool ProjectQueryService::deliveryEvidenceAsync(int limit,
+bool ProjectQueryService::deliveryEvidenceAsync(const PageRequest& request,
     QObject* receiver, DeliveryEvidenceCallback callback, QString* error) const
 {
     if (error) error->clear();
@@ -472,20 +454,20 @@ bool ProjectQueryService::deliveryEvidenceAsync(int limit,
         if (error) *error = QStringLiteral("交付证据异步查询需要回调对象和回调函数。");
         return false;
     }
-    if (!workspace_ || !workspace_->isOpen() || limit <= 0) {
-        if (error) *error = QStringLiteral("查询交付证据需要已打开工作区和正数 limit。");
+    if (!workspace_ || !workspace_->isOpen()) {
+        if (error) *error = QStringLiteral("查询交付证据需要已打开工作区。");
         return false;
     }
 
     // 只在调用线程通过 ProjectStore 读取一次候选身份和文件清单；
     // 后续任务只捕获这些不可变快照和安全的文件读取来源。
-    const QVector<DeliveryEvidenceCandidate> candidates =
-        workspace_->deliveryEvidenceCandidates(limit, error);
+    const Page<DeliveryEvidenceCandidate> source =
+        workspace_->deliveryEvidenceCandidates(request, error);
     if (error && !error->isEmpty()) return false;
 
     QVector<DeliveryEvidenceFileJob> jobs;
-    jobs.reserve(candidates.size());
-    for (const DeliveryEvidenceCandidate& candidate : candidates) {
+    jobs.reserve(source.items.size());
+    for (const DeliveryEvidenceCandidate& candidate : source.items) {
         DeliveryEvidenceFileJob job;
         job.candidate = candidate;
         const QString requiredFile = candidate.artifact.kind
@@ -512,7 +494,8 @@ bool ProjectQueryService::deliveryEvidenceAsync(int limit,
     }
 
     QThreadPool::globalInstance()->start(new DeliveryEvidenceRunnable(
-        std::move(jobs), receiver, std::move(callback)));
+        std::move(jobs), source.nextCursor, source.hasMore,
+        receiver, std::move(callback)));
     return true;
 }
 

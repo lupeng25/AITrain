@@ -5,6 +5,8 @@
 
 #include <QJsonArray>
 
+#include <utility>
+
 namespace wp = aitrain::worker_protocol;
 
 void WorkerSession::importModel(const wp::ModelImportCommand& command)
@@ -33,17 +35,19 @@ void WorkerSession::importModel(const wp::ModelImportCommand& command)
         return;
     }
     activeTaskId_ = taskId;
-    canceled_ = false;
-    running_ = true;
     QJsonObject started;
     started.insert(wp::field::taskId(), taskId);
     started.insert(QStringLiteral("percent"), 0);
     started.insert(wp::field::message(), QStringLiteral(" 模型导入开始：正在复制并计算 SHA-256。"));
     send(wp::event::progress(), started);
 
-    aitrain::ProjectWorkspace workspace;
-    if (!workspace.openForWorkerChild(projectRoot, &error)) {
+    auto workspace = std::make_unique<aitrain::ProjectWorkspace>();
+    if (!workspace->openForWorkerChild(projectRoot, &error)) {
         fail(QStringLiteral("无法打开  项目工作区：%1").arg(error));
+        return;
+    }
+    if (!activeWorkflow_.bind(std::move(workspace), parsedTaskId, &error)) {
+        fail(QStringLiteral("无法绑定模型导入活动任务：%1").arg(error));
         return;
     }
     aitrain::ModelImportRequest request;
@@ -51,12 +55,9 @@ void WorkerSession::importModel(const wp::ModelImportCommand& command)
     request.sourceFilePath = sourceFilePath;
     request.manifest = manifest;
     aitrain::ModelImportResult result;
-    if (!workspace.importModel(request, &result, &error, pollingCancellationCallback(0))) {
-        if (canceled_) {
-            sendCanceledAndFinish(taskId, error.isEmpty() ? QStringLiteral("Canceled by user") : error);
-            return;
-        }
-        fail(QStringLiteral(" 模型导入失败：%1").arg(error));
+    if (!activeWorkflow_.workspace()->importModel(
+            request, &result, &error, pollingCancellationCallback(0))) {
+        publishPersistedTerminal(parsedTaskId);
         return;
     }
     QJsonObject response;
@@ -67,10 +68,6 @@ void WorkerSession::importModel(const wp::ModelImportCommand& command)
     response.insert(QStringLiteral("runtimeRoutes"), QJsonArray::fromStringList(result.modelPackage.manifest.runtimeRoutes));
     response.insert(wp::field::message(), QStringLiteral(" 模型导入完成，模型包已原子登记。"));
     send(wp::event::modelImport(), response);
-    QJsonObject completed;
-    completed.insert(wp::field::taskId(), taskId);
-    completed.insert(wp::field::message(), QStringLiteral(" model import completed"));
-    running_ = false;
-    send(wp::event::completed(), completed);
-    finishSession();
+    publishPersistedTerminal(parsedTaskId,
+        QStringLiteral(" model import completed"));
 }

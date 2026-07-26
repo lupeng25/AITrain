@@ -3,6 +3,7 @@
 #include "aitrain/runtime/NcnnRuntimeAdapter.h"
 #include "aitrain/runtime/OnnxRuntimeAdapter.h"
 #include "aitrain/runtime/TensorRtRuntimeAdapter.h"
+#include "aitrain/runtime/RuntimeBenchmarkRunner.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -13,7 +14,6 @@
 #include <QJsonDocument>
 #include <QSaveFile>
 
-#include <algorithm>
 #include <memory>
 
 namespace aitrain {
@@ -191,16 +191,6 @@ bool copyFileIntoStaging(const QString& sourcePath, const QString& destinationPa
     return true;
 }
 
-double percentile(const QVector<double>& sortedSamples, double fraction)
-{
-    if (sortedSamples.isEmpty()) return 0.0;
-    const double position = fraction * static_cast<double>(sortedSamples.size() - 1);
-    const int lower = static_cast<int>(position);
-    const int upper = qMin(lower + 1, sortedSamples.size() - 1);
-    const double weight = position - static_cast<double>(lower);
-    return sortedSamples.at(lower) * (1.0 - weight) + sortedSamples.at(upper) * weight;
-}
-
 } // namespace
 
 bool ProjectWorkspace::runRuntimeDeliveryWorkflow(const TaskId& taskId,
@@ -225,12 +215,13 @@ bool ProjectWorkspace::runRuntimeDeliveryWorkflow(const TaskId& taskId,
     ArtifactSnapshot sourceArtifact;
     DatasetSnapshotRecord sampleSnapshot;
     ArtifactSnapshot sampleArtifact;
-    if (!storage_.task(taskId, &task, error) || task.state != TaskState::Running
+    if (!storage_.task(taskId, &task, error)
+        || (task.state != TaskState::Running && task.state != TaskState::CancelRequested)
         || !storage_.modelPackage(request.modelPackageId, &modelPackage, error)
         || !storage_.artifact(modelPackage.sourceArtifactId, &sourceArtifact, error)
         || !storage_.datasetSnapshot(request.sampleSnapshotId, &sampleSnapshot, error)
         || !storage_.artifact(request.sampleSnapshotArtifactId, &sampleArtifact, error)) {
-        if (error && error->isEmpty()) *error = QStringLiteral("Runtime Delivery Workflow 只能使用运行中任务、已登记模型包和已登记 Dataset Snapshot Artifact。");
+        if (error && error->isEmpty()) *error = QStringLiteral("Runtime Delivery Workflow 只能使用活动任务、已登记模型包和已登记 Dataset Snapshot Artifact。");
         return false;
     }
     if (sampleSnapshot.datasetId != request.sampleDatasetId
@@ -451,59 +442,35 @@ bool ProjectWorkspace::runRuntimeDeliveryWorkflow(const TaskId& taskId,
                 double elapsedMs = 0.0;
                 QJsonObject benchmarkMeasurement;
                 if (step.kind == QStringLiteral("Benchmark")) {
-                    const int warmupIterations = qBound(0,
-                        request.options.value(QStringLiteral("benchmarkWarmup")).toInt(1), 5);
-                    const int measuredIterations = qBound(1,
-                        request.options.value(QStringLiteral("benchmarkIterations")).toInt(5), 20);
-                    for (int iteration = 0; iteration < warmupIterations; ++iteration) {
-                        if (aitrain::isCancellationRequested(stepCancellation)) {
-                            return canceledExecution(QStringLiteral("Runtime Benchmark 预热阶段收到取消请求，暂存产物不会提交。"));
-                        }
+                    const RuntimeBenchmarkOptions benchmarkOptions{
+                        request.options.value(QStringLiteral("benchmarkWarmup")).toInt(3),
+                        request.options.value(QStringLiteral("benchmarkIterations")).toInt(20)};
+                    const RuntimeBenchmarkResult benchmark = RuntimeBenchmarkRunner().run(
+                        *adapter, modelLocation,
+                        [&](bool warmup, int iteration) {
                         QJsonObject invocation;
                         invocation.insert(QStringLiteral("imagePath"), sampleWorkingPath);
                         invocation.insert(QStringLiteral("outputPath"), QDir(outputPath).filePath(
-                            QStringLiteral("warmup-%1").arg(iteration + 1)));
+                            QStringLiteral("%1-%2")
+                                .arg(warmup ? QStringLiteral("warmup")
+                                            : QStringLiteral("iteration"))
+                                .arg(iteration)));
                         invocation.insert(QStringLiteral("options"), request.options);
-                        operation = adapter->infer(modelLocation, invocation);
-                        observe(operation.status, operation.message);
-                        if (operation.status != RuntimeStatus::Available) {
-                            return failedExecution(runtimeFailure(operation.status, operation.message));
-                        }
+                        invocation.insert(QStringLiteral("_benchmarkOnly"), true);
+                        return invocation;
+                    }, benchmarkOptions, [&]() {
+                        return aitrain::isCancellationRequested(stepCancellation);
+                    });
+                    if (benchmark.canceled) {
+                        return canceledExecution(benchmark.lastOperation.message);
                     }
-                    QVector<double> samplesMs;
-                    QJsonArray sampleValues;
-                    samplesMs.reserve(measuredIterations);
-                    for (int iteration = 0; iteration < measuredIterations; ++iteration) {
-                        if (aitrain::isCancellationRequested(stepCancellation)) {
-                            return canceledExecution(QStringLiteral("Runtime Benchmark 采样阶段收到取消请求，暂存产物不会提交。"));
-                        }
-                        QJsonObject invocation;
-                        invocation.insert(QStringLiteral("imagePath"), sampleWorkingPath);
-                        invocation.insert(QStringLiteral("outputPath"), QDir(outputPath).filePath(
-                            QStringLiteral("iteration-%1").arg(iteration + 1)));
-                        invocation.insert(QStringLiteral("options"), request.options);
-                        QElapsedTimer sampleTimer;
-                        sampleTimer.start();
-                        operation = adapter->infer(modelLocation, invocation);
-                        const double sampleMs = operation.details.value(QStringLiteral("elapsedMs"))
-                                                    .toDouble(static_cast<double>(sampleTimer.elapsed()));
-                        observe(operation.status, operation.message);
-                        if (operation.status != RuntimeStatus::Available) {
-                            return failedExecution(runtimeFailure(operation.status, operation.message));
-                        }
-                        samplesMs.append(sampleMs);
-                        sampleValues.append(sampleMs);
+                    operation = benchmark.lastOperation;
+                    observe(operation.status, operation.message);
+                    if (operation.status != RuntimeStatus::Available) {
+                        return failedExecution(runtimeFailure(operation.status, operation.message));
                     }
-                    std::sort(samplesMs.begin(), samplesMs.end());
-                    elapsedMs = percentile(samplesMs, 0.50);
-                    benchmarkMeasurement.insert(QStringLiteral("benchmarkKind"), QStringLiteral("smoke_timing"));
-                    benchmarkMeasurement.insert(QStringLiteral("warmupIterations"), warmupIterations);
-                    benchmarkMeasurement.insert(QStringLiteral("measuredIterations"), measuredIterations);
-                    benchmarkMeasurement.insert(QStringLiteral("samplesMs"), sampleValues);
-                    benchmarkMeasurement.insert(QStringLiteral("minMs"), samplesMs.first());
-                    benchmarkMeasurement.insert(QStringLiteral("p50Ms"), elapsedMs);
-                    benchmarkMeasurement.insert(QStringLiteral("p95Ms"), percentile(samplesMs, 0.95));
-                    benchmarkMeasurement.insert(QStringLiteral("maxMs"), samplesMs.last());
+                    benchmarkMeasurement = benchmark.report;
+                    elapsedMs = benchmarkMeasurement.value(QStringLiteral("p50Ms")).toDouble();
                 } else {
                     QJsonObject invocation;
                     invocation.insert(QStringLiteral("imagePath"), sampleWorkingPath);
@@ -556,8 +523,12 @@ bool ProjectWorkspace::runRuntimeDeliveryWorkflow(const TaskId& taskId,
                 const QString bundleKind = step.kind == QStringLiteral("RunInferenceSmoke") ? QStringLiteral("runtime_inference_smoke")
                     : (step.kind == QStringLiteral("Benchmark") ? QStringLiteral("runtime_benchmark") : QStringLiteral("runtime_deployment_validation"));
                 QVector<RuntimeArtifactCandidate> candidates;
-                candidates.append(runtimeCandidate(QStringLiteral("predictions"), predictionsPath));
-                candidates.append(runtimeCandidate(QStringLiteral("overlay"), overlayPath));
+                if (!predictionsPath.isEmpty()) {
+                    candidates.append(runtimeCandidate(QStringLiteral("predictions"), predictionsPath));
+                }
+                if (!overlayPath.isEmpty()) {
+                    candidates.append(runtimeCandidate(QStringLiteral("overlay"), overlayPath));
+                }
                 candidates.append(runtimeCandidate(reportKind, operationReportPath));
                 if (!commitFiles(step, bundleKind, candidates, &output, &stepError)) {
                     return failedExecution({FailureCode::ArtifactIncomplete, currentError(&stepError, QStringLiteral("Runtime Artifact 提交失败。")),

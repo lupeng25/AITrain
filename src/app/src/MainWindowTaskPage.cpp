@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "TaskRuntimeController.h"
 
 #include "InfoPanel.h"
 #include "MainWindowSupport.h"
@@ -171,10 +172,10 @@ QWidget* MainWindow::buildTaskQueuePage()
 
 void MainWindow::cancelSelectedTask()
 {
-    if (!activeTaskId_.isEmpty() && worker_.isRunning()) {
+    if (!activeTaskId_.isEmpty() && taskController_->isRunning()) {
         // Worker/Core 是运行任务取消的唯一写入方；GUI 不再直接改写同一 Task
         // 的 CancelRequested，避免双写和 Worker/Core 状态竞态。
-        worker_.cancel();
+        taskController_->cancel();
         return;
     }
     QMessageBox::information(this, uiText("任务队列"),
@@ -186,7 +187,7 @@ void MainWindow::updateTaskCancelButton()
     if (!taskCancelButton_) {
         return;
     }
-    const bool canCancel = !activeTaskId_.isEmpty() && worker_.isRunning();
+    const bool canCancel = !activeTaskId_.isEmpty() && taskController_->isRunning();
     taskCancelButton_->setEnabled(canCancel);
     taskCancelButton_->setToolTip(canCancel
         ? uiText("取消当前 Worker 活动任务。")

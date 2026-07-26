@@ -2036,7 +2036,7 @@ private slots:
         QVERIFY2(storage.open(QDir(projectRoot).filePath(QStringLiteral(".aitrain/project.sqlite")), &error), qPrintable(error));
         aitrain::TaskId parsedTaskId;
         QVERIFY2(aitrain::TaskId::parse(taskId, &parsedTaskId, &error), qPrintable(error));
-        QCOMPARE(storage.artifactsForTask(parsedTaskId, &error).size(), 0);
+        QCOMPARE(storage.artifactsForTask(parsedTaskId, {50, {}}, &error).items.size(), 0);
     }
 
     void ocrAcceptanceWorkerRejectsPublicEvidenceWithOneTerminalAndEvidence()

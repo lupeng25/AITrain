@@ -62,8 +62,10 @@ add_executable(AITrainStudio WIN32
     src/TaskArtifactPanel.cpp
     src/TaskArtifactPresenter.h
     src/TaskArtifactPresenter.cpp
-    src/TaskExecutionController.h
-    src/TaskExecutionController.cpp
+    src/TaskRuntimeController.h
+    src/TaskRuntimeController.cpp
+    src/WorkspaceReadModelCoordinator.h
+    src/WorkspaceReadModelCoordinator.cpp
     src/WorkerClient.h
     src/WorkerClient.cpp
     src/WorkspaceRouter.h

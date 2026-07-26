@@ -29,10 +29,9 @@ bool ActiveWorkflowContext::bind(std::unique_ptr<ProjectWorkspace> workspace,
     }
     workspace_ = std::move(workspace);
     taskId_ = taskId;
-    if (cancellationRequested_) {
-        QString ignored;
-        workspace_->requestTaskCancellation(taskId_, &ignored);
-    }
+    // 绑定前的取消通过 Context phase 自动带入具体 Workflow 的首个取消点。
+    // 不能在这里抢先把根任务改成 CancelRequested，否则尚未创建的
+    // EvidenceRequired Workflow 会失去正常的取消与 Evidence 收口机会。
     return true;
 }
 

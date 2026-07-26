@@ -5,15 +5,13 @@
 #include <QDateTime>
 #include <QFileInfo>
 
+#include <utility>
+
 namespace wp = aitrain::worker_protocol;
 
 void WorkerSession::importExternalAcceptanceEvidence(
     const wp::ExternalAcceptanceEvidenceImportCommand& command)
 {
-    if (running_) {
-        fail(QStringLiteral("Worker 已有运行任务，不能并发导入外部验收证据。"));
-        return;
-    }
     const QString taskIdText = command.context.taskId.toString();
     const QString projectRoot = command.context.projectRoot.trimmed();
     const QString sourcePath = command.sourcePath.trimmed();
@@ -40,8 +38,11 @@ void WorkerSession::importExternalAcceptanceEvidence(
         fail(QStringLiteral("无法创建外部验收证据任务：%1").arg(error));
         return;
     }
-
-    running_ = true;
+    if (!activeWorkflow_.bind(std::move(workspace), externalTaskId, &error)) {
+        fail(QStringLiteral("无法绑定外部验收证据活动任务：%1").arg(error));
+        return;
+    }
+    auto* const activeWorkspace = activeWorkflow_.workspace();
     send(wp::event::progress(), QJsonObject{
         {wp::field::taskId(), taskIdText},
         {QStringLiteral("percent"), 10},
@@ -50,7 +51,7 @@ void WorkerSession::importExternalAcceptanceEvidence(
     aitrain::ExternalAcceptanceEvidenceImportRequest request;
     request.sourcePath = sourcePath;
     aitrain::ExternalAcceptanceEvidenceImportResult result;
-    const bool imported = workspace->importExternalAcceptanceEvidence(
+    const bool imported = activeWorkspace->importExternalAcceptanceEvidence(
         externalTaskId, request, &result, &error, pollingCancellationCallback(0));
     if (!imported) {
         aitrain::Failure failure;
@@ -58,20 +59,14 @@ void WorkerSession::importExternalAcceptanceEvidence(
         failure.message = error.isEmpty() ? QStringLiteral("外部验收证据校验失败。") : error;
         failure.suggestedAction = QStringLiteral("修正 evidence schema 后重新导入；外部证据不会自动被视为 verified。" );
         failure.occurredAt = QDateTime::currentDateTimeUtc();
-        workspace->finalizeTask(externalTaskId, aitrain::TaskState::Failed, failure, nullptr);
-        running_ = false;
-        failWithDetails(failure.message, QStringLiteral("external_acceptance_evidence_rejected"),
-            QJsonObject{{wp::field::taskId(), taskIdText}});
-        activeTaskId_.clear();
+        activeWorkspace->finalizeTask(externalTaskId, aitrain::TaskState::Failed, failure, nullptr);
+        publishPersistedTerminal(externalTaskId);
         return;
     }
 
     aitrain::Failure noFailure;
-    if (!workspace->finalizeTask(externalTaskId, aitrain::TaskState::Succeeded, noFailure, &error)) {
-        running_ = false;
-        failWithDetails(QStringLiteral("外部验收证据任务无法收口：%1").arg(error),
-            QStringLiteral("external_acceptance_evidence_finalize_failed"));
-        activeTaskId_.clear();
+    if (!activeWorkspace->finalizeTask(externalTaskId, aitrain::TaskState::Succeeded, noFailure, &error)) {
+        publishPersistedTerminal(externalTaskId);
         return;
     }
     send(wp::event::progress(), QJsonObject{
@@ -87,10 +82,6 @@ void WorkerSession::importExternalAcceptanceEvidence(
         {QStringLiteral("observedAt"), result.observedAt.toString(Qt::ISODateWithMs)},
         {QStringLiteral("summary"), result.summary},
         {wp::field::message(), QStringLiteral("外部验收证据已提交；仅记录事实，不自动通过验收。")}});
-    running_ = false;
-    send(wp::event::completed(), QJsonObject{
-        {wp::field::taskId(), taskIdText},
-        {wp::field::message(), QStringLiteral("外部验收证据导入完成。")}});
-    activeTaskId_.clear();
-    finishSession();
+    publishPersistedTerminal(externalTaskId,
+        QStringLiteral("外部验收证据导入完成。"));
 }

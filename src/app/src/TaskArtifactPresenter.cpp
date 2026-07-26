@@ -76,12 +76,12 @@ TaskArtifactPresenter::TaskArtifactPresenter(
     setObjectName(QStringLiteral("TaskArtifactPresenter"));
 }
 
-bool TaskArtifactPresenter::refresh(int limit)
+bool TaskArtifactPresenter::refresh(const aitrain::PageRequest& request)
 {
     QString error;
-    const QVector<aitrain::TaskSnapshot> tasks = queryService_
-        ? queryService_->recentTasks(limit, &error)
-        : QVector<aitrain::TaskSnapshot>();
+    const aitrain::Page<aitrain::TaskSnapshot> page = queryService_
+        ? queryService_->recentTasks(request, &error)
+        : aitrain::Page<aitrain::TaskSnapshot>();
     if (!error.isEmpty()) {
         taskRows_.clear();
         emit taskRowsChanged();
@@ -90,8 +90,8 @@ bool TaskArtifactPresenter::refresh(int limit)
     }
 
     QVector<TaskListItem> rows;
-    rows.reserve(tasks.size());
-    for (const aitrain::TaskSnapshot& task : tasks) {
+    rows.reserve(page.items.size());
+    for (const aitrain::TaskSnapshot& task : page.items) {
         TaskListItem row;
         row.taskId = task.id.toString();
         row.capabilityId = task.capabilityId;
@@ -102,10 +102,23 @@ bool TaskArtifactPresenter::refresh(int limit)
         row.message = task.failure.isFailure() ? task.failure.message : QString();
         rows.append(row);
     }
-    taskRows_ = rows;
+    if (request.after.isEmpty()) taskRows_ = rows;
+    else taskRows_ += rows;
+    nextTaskCursor_ = page.nextCursor;
+    hasMoreTasks_ = page.hasMore;
     lastError_.clear();
     emit taskRowsChanged();
     return true;
+}
+
+bool TaskArtifactPresenter::loadMore()
+{
+    return hasMoreTasks_ && refresh({100, nextTaskCursor_});
+}
+
+bool TaskArtifactPresenter::hasMoreTasks() const
+{
+    return hasMoreTasks_;
 }
 
 bool TaskArtifactPresenter::selectTask(const QString& taskIdText)

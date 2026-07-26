@@ -57,10 +57,6 @@ QJsonArray encodeSteps(const QVector<aitrain::WorkflowStepSnapshot>& values)
 
 void WorkerSession::runRuntimeDeliveryWorkflow(const wp::RuntimeDeliveryCommand& command)
 {
-    if (running_ || runtimeDeliveryWorkspace_) {
-        fail(QStringLiteral("Runtime Delivery Workflow 已在运行。"));
-        return;
-    }
     const QString taskIdText = command.context.taskId.toString();
     const QString projectRoot = command.context.projectRoot.trimmed();
     const QString modelPackageIdText = command.modelPackageId.trimmed();
@@ -72,8 +68,8 @@ void WorkerSession::runRuntimeDeliveryWorkflow(const wp::RuntimeDeliveryCommand&
     const QString sampleRelativePath = command.sampleRelativePath.trimmed();
     const QJsonObject options = command.options;
     QString error;
-    if (!aitrain::TaskId::parse(taskIdText, &runtimeDeliveryTaskId_, &error)
-        || runtimeDeliveryTaskId_ != controlTaskId_) {
+    const aitrain::TaskId taskId = command.context.taskId;
+    if (!taskId.isValid() || taskId != controlTaskId_) {
         fail(QStringLiteral("Runtime Delivery Workflow 的 taskId 无效或与 Protocol  控制身份不一致。"));
         return;
     }
@@ -93,24 +89,24 @@ void WorkerSession::runRuntimeDeliveryWorkflow(const wp::RuntimeDeliveryCommand&
         return;
     }
 
-    runtimeDeliveryWorkspace_ = std::make_unique<aitrain::ProjectWorkspace>();
-    if (!runtimeDeliveryWorkspace_->openForWorkerChild(projectRoot, &error)) {
-        runtimeDeliveryWorkspace_.reset();
+    auto workspace = std::make_unique<aitrain::ProjectWorkspace>();
+    if (!workspace->openForWorkerChild(projectRoot, &error)) {
         fail(QStringLiteral("无法打开 Runtime Delivery  工作区：%1").arg(error));
         return;
     }
     aitrain::TaskSnapshot task;
-    if (!runtimeDeliveryWorkspace_->startTask(runtimeDeliveryTaskId_,
+    if (!workspace->startTask(taskId,
             QStringLiteral("runtime.%1").arg(runtimeRoute), QStringLiteral("runtime_delivery"), &task, &error)) {
-        runtimeDeliveryWorkspace_.reset();
         fail(QStringLiteral("无法启动 Runtime Delivery  根任务：%1").arg(error));
         return;
     }
+    if (!activeWorkflow_.bind(std::move(workspace), taskId, &error)) {
+        fail(QStringLiteral("无法绑定 Runtime Delivery 活动任务：%1").arg(error));
+        return;
+    }
+    auto* const activeWorkspace = activeWorkflow_.workspace();
 
     activeTaskId_ = taskIdText;
-    canceled_ = false;
-    running_ = true;
-    runtimeDeliveryRunning_ = true;
     QJsonObject started;
     started.insert(wp::field::taskId(), taskIdText);
     started.insert(QStringLiteral("percent"), 0);
@@ -129,24 +125,20 @@ void WorkerSession::runRuntimeDeliveryWorkflow(const wp::RuntimeDeliveryCommand&
     request.runtimeRoute = runtimeRoute;
     request.options = options;
     aitrain::RuntimeDeliveryWorkflowResult result;
-    const bool executed = runtimeDeliveryWorkspace_->runRuntimeDeliveryWorkflow(
-        runtimeDeliveryTaskId_, request, &result, &error, pollingCancellationCallback(0));
-    runtimeDeliveryRunning_ = false;
+    const bool executed = activeWorkspace->runRuntimeDeliveryWorkflow(
+        taskId, request, &result, &error, pollingCancellationCallback(0));
 
     if (!executed) {
         aitrain::TaskSnapshot stored;
-        if (runtimeDeliveryWorkspace_->task(runtimeDeliveryTaskId_, &stored, nullptr)
+        if (activeWorkspace->task(taskId, &stored, nullptr)
             && !aitrain::isTerminalTaskState(stored.state)) {
             const aitrain::Failure failure{aitrain::FailureCode::InternalError,
                 error.isEmpty() ? QStringLiteral("Runtime Delivery Workflow 启动或持久化失败。") : error,
                 QStringLiteral("检查项目、模型包和 Artifact Store 后重试。"), QDateTime::currentDateTimeUtc()};
-            runtimeDeliveryWorkspace_->finalizeTask(runtimeDeliveryTaskId_,
+            activeWorkspace->finalizeTask(taskId,
                 aitrain::TaskState::Failed, failure, nullptr);
         }
-        runtimeDeliveryWorkspace_.reset();
-        runtimeDeliveryTaskId_ = {};
-        failWithDetails(QStringLiteral("Runtime Delivery Workflow 执行失败：%1").arg(error),
-            QStringLiteral("runtime_delivery_start_failed"));
+        publishPersistedTerminal(taskId);
         return;
     }
 
@@ -160,7 +152,7 @@ void WorkerSession::runRuntimeDeliveryWorkflow(const wp::RuntimeDeliveryCommand&
     response.insert(QStringLiteral("finalOutputArtifactId"), result.finalOutputArtifactId.toString());
     response.insert(QStringLiteral("evidenceArtifactId"), result.evidence.artifactId.toString());
     response.insert(QStringLiteral("steps"), encodeSteps(
-        runtimeDeliveryWorkspace_->workflowSteps(result.workflowRunId, nullptr)));
+        activeWorkspace->workflowSteps(result.workflowRunId, nullptr)));
     if (result.failure.isFailure()) {
         response.insert(QStringLiteral("failureCode"), aitrain::failureCodeToString(result.failure.code));
         response.insert(wp::field::message(), result.failure.message);
@@ -168,22 +160,6 @@ void WorkerSession::runRuntimeDeliveryWorkflow(const wp::RuntimeDeliveryCommand&
         response.insert(wp::field::message(), QStringLiteral("Runtime Delivery Workflow 完成。"));
     }
     send(wp::event::runtimeDeliveryWorkflow(), response);
-
-    runtimeDeliveryWorkspace_.reset();
-    runtimeDeliveryTaskId_ = {};
-    running_ = false;
-    if (result.state == aitrain::WorkflowStepState::Canceled) {
-        sendCanceledAndFinish(taskIdText, result.failure.message);
-        return;
-    }
-    if (result.state == aitrain::WorkflowStepState::Failed) {
-        failWithDetails(result.failure.message,
-            aitrain::failureCodeToString(result.failure.code), response);
-        return;
-    }
-    QJsonObject completed;
-    completed.insert(wp::field::taskId(), taskIdText);
-    completed.insert(wp::field::message(), QStringLiteral("Runtime Delivery Workflow completed"));
-    send(wp::event::completed(), completed);
-    finishSession();
+    publishPersistedTerminal(taskId,
+        QStringLiteral("Runtime Delivery Workflow completed"));
 }
