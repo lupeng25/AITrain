@@ -33,6 +33,12 @@ struct ProjectOpenProbeResult final {
     bool succeeded = false;
 };
 
+enum class ProjectSessionOperation {
+    Open,
+    Create,
+    Rebuild
+};
+
 using ProjectOpenProbeCallback = std::function<void(const ProjectOpenProbeResult&)>;
 
 QLabel* mutedLabel(const QString& text);
@@ -84,7 +90,8 @@ void detectDatasetFormatAsync(QObject* context, const QString& path,
 // 在 QThreadPool 中执行一次完整的候选工作区打开/恢复预检。主线程收到成功结果后
 // 仍需在 ProjectWorkspace 上执行激活；该 API 的目的在于把 schema 检查、Artifact
 // staging 恢复和 Evidence 恢复从用户点击处理函数移出，并提供可丢弃的状态机结果。
-void probeProjectOpenAsync(QObject* context, const QString& path,
+void probeProjectOpenAsync(QObject* context, ProjectSessionOperation operation,
+    const QString& path,
     ProjectOpenProbeCallback callback);
 QString formatJsonTextForPreview(const QByteArray& data);
 void addTaskTypeItems(QComboBox* combo, const QStringList& taskTypes);

@@ -263,11 +263,26 @@ bool ProjectWorkspace::runDatasetSnapshotImportWorkflow(const TaskId& taskId,
                 [](const ArtifactFileSnapshot& file) {
                     return file.relativePath == QStringLiteral("snapshot_import_plan.json");
                 });
-            const QString committedPlanPath = QDir(artifactStore_->artifactPath(planArtifactId)).filePath(
-                QStringLiteral("snapshot_import_plan.json"));
+            VerifiedArtifactDirectory planDirectory;
+            if (!artifactStore_->openVerified(
+                    storedPlan, &planDirectory, nullptr, &executionError)) {
+                return WorkflowStepExecutionResult{WorkflowStepState::Failed, {},
+                    importFailure(executionError)};
+            }
+            const auto verifiedPlanFile = std::find_if(
+                planDirectory.files.cbegin(), planDirectory.files.cend(),
+                [](const VerifiedArtifactFile& file) {
+                    return file.relativePath
+                        == QStringLiteral("snapshot_import_plan.json");
+                });
             QString actualPlanHash;
-            QFile committedPlanFile(committedPlanPath);
-            if (planFile == storedPlan.files.cend() || !hashFile(committedPlanPath, &actualPlanHash, &executionError)
+            QFile committedPlanFile(verifiedPlanFile
+                == planDirectory.files.cend()
+                    ? QString() : verifiedPlanFile->absolutePath);
+            if (planFile == storedPlan.files.cend()
+                || verifiedPlanFile == planDirectory.files.cend()
+                || !hashFile(verifiedPlanFile->absolutePath,
+                    &actualPlanHash, &executionError)
                 || actualPlanHash != planFile->sha256 || !committedPlanFile.open(QIODevice::ReadOnly)) {
                 return WorkflowStepExecutionResult{WorkflowStepState::Failed, {},
                     importFailure(executionError.isEmpty()

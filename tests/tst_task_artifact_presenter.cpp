@@ -1,4 +1,5 @@
 #include "TaskArtifactPresenter.h"
+#include "TaskArtifactTableModels.h"
 
 #include "aitrain/workflow/ProjectWorkspace.h"
 #include "aitrain/storage/ProjectStore.h"
@@ -25,6 +26,8 @@ private slots:
     void readsCommittedArtifactPreviewByIdentity();
     void readsCommittedArtifactPreviewAsynchronouslyWithMetadataSnapshot();
     void appendsTaskPagesWithoutDuplicates();
+    void loadsAdditionalArtifactAndMetricPages();
+    void tableModelsExposeStableRolesAndFiltering();
     void invalidSelectionClearsReadModelWithoutPrivateAccess();
 };
 
@@ -98,8 +101,12 @@ void TaskArtifactPresenterTests::readsPersistedTaskArtifactsMetricsAndWorkflowOn
     QCOMPARE(presenter.property("workflowStepCount").toInt(), 1);
     QHash<QString, ArtifactFileItem> deliveryArtifacts;
     for (const ArtifactFileItem& artifact : presenter.details().artifacts) {
-        deliveryArtifacts.insert(artifact.kind, artifact);
-        QVERIFY(!QDir::isAbsolutePath(artifact.relativePath));
+        QVERIFY2(presenter.selectArtifact(artifact.artifactId),
+            qPrintable(presenter.lastError()));
+        QCOMPARE(presenter.details().artifactFiles.size(), 1);
+        const ArtifactFileItem file = presenter.details().artifactFiles.constFirst();
+        deliveryArtifacts.insert(file.kind, file);
+        QVERIFY(!QDir::isAbsolutePath(file.relativePath));
     }
     QCOMPARE(deliveryArtifacts.value(QStringLiteral("training_delivery_report")).artifactId,
         trainingReportId.toString());
@@ -154,6 +161,124 @@ void TaskArtifactPresenterTests::appendsTaskPagesWithoutDuplicates()
     QSet<QString> taskIds;
     for (const TaskListItem& item : presenter.taskRows()) taskIds.insert(item.taskId);
     QCOMPARE(taskIds.size(), 3);
+}
+
+void TaskArtifactPresenterTests::tableModelsExposeStableRolesAndFiltering()
+{
+    TaskListItem running;
+    running.taskId = QStringLiteral("task-running");
+    running.capabilityId = QStringLiteral("yolo.detect");
+    running.taskType = QStringLiteral("training");
+    running.state = QStringLiteral("running");
+    running.stateLabel = QStringLiteral("运行中");
+    TaskListItem failed = running;
+    failed.taskId = QStringLiteral("task-failed");
+    failed.capabilityId = QStringLiteral("diagnostics");
+    failed.state = QStringLiteral("failed");
+    failed.stateLabel = QStringLiteral("失败");
+
+    TaskListTableModel tasks;
+    tasks.setRows({running, failed});
+    QCOMPARE(tasks.rowCount(), 2);
+    QCOMPARE(tasks.index(0, 0).data(TaskListTableModel::TaskIdRole).toString(),
+        running.taskId);
+    QCOMPARE(tasks.index(1, 0).data(TaskListTableModel::TaskStateRole).toString(),
+        failed.state);
+
+    TaskListFilterProxyModel filter;
+    filter.setSourceModel(&tasks);
+    filter.setTaskState(QStringLiteral("failed"));
+    QCOMPARE(filter.rowCount(), 1);
+    QCOMPARE(filter.index(0, 0).data(TaskListTableModel::TaskIdRole).toString(),
+        failed.taskId);
+    filter.setTaskState({});
+    filter.setQuery(QStringLiteral("yolo"));
+    QCOMPARE(filter.rowCount(), 1);
+
+    ArtifactFileTableModel artifacts;
+    artifacts.setRows({{QStringLiteral("artifact-id"), QStringLiteral("report"),
+        QStringLiteral("report.json"), QString(64, QLatin1Char('a')), 12,
+        QStringLiteral("2026-07-26 12:00:00")}});
+    QCOMPARE(artifacts.rowCount(), 1);
+    QCOMPARE(artifacts.index(0, 1)
+        .data(ArtifactFileTableModel::ArtifactIdRole).toString(),
+        QStringLiteral("artifact-id"));
+    ArtifactTableModel artifactCatalog;
+    artifactCatalog.setFiles({{QStringLiteral("artifact-id"), QStringLiteral("report"),
+        QStringLiteral("report.json"), QString(64, QLatin1Char('a')), 12,
+        QStringLiteral("2026-07-26 12:00:00")}});
+    QCOMPARE(artifactCatalog.rowCount(), 1);
+    QCOMPARE(artifactCatalog.index(0, 0)
+        .data(ArtifactTableModel::ArtifactIdRole).toString(),
+        QStringLiteral("artifact-id"));
+
+    MetricTableModel metrics;
+    metrics.setRows({{QStringLiteral("loss"), 0.25,
+        QStringLiteral("2026-07-26 12:00:00")}});
+    QCOMPARE(metrics.rowCount(), 1);
+    QCOMPARE(metrics.index(0, 1).data().toString(), QStringLiteral("0.25"));
+}
+
+void TaskArtifactPresenterTests::loadsAdditionalArtifactAndMetricPages()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    aitrain::ProjectWorkspace workspace;
+    QString error;
+    QVERIFY2(workspace.createProject(directory.filePath(QStringLiteral("project")), &error),
+        qPrintable(error));
+    const aitrain::TaskId taskId = aitrain::TaskId::create();
+    aitrain::TaskSnapshot task;
+    QVERIFY2(workspace.startTask(taskId, QStringLiteral("diagnostics"),
+        QStringLiteral("diagnostics"), &task, &error), qPrintable(error));
+
+    aitrain::ProjectStore storage;
+    QVERIFY2(storage.open(QDir(workspace.workspacePath())
+        .filePath(QStringLiteral("project.sqlite")), &error), qPrintable(error));
+    const QDateTime base = QDateTime::currentDateTimeUtc().addSecs(-10);
+    aitrain::ArtifactId fileArtifactId;
+    for (int index = 0; index < 51; ++index) {
+        const aitrain::ArtifactId artifactId = aitrain::ArtifactId::create();
+        if (index == 0) {
+            fileArtifactId = artifactId;
+            QVector<aitrain::ArtifactFileSnapshot> files;
+            for (int fileIndex = 0; fileIndex < 101; ++fileIndex) {
+                files.append({QStringLiteral("files/%1.json").arg(fileIndex, 3, 10,
+                    QLatin1Char('0')), QString(64, QLatin1Char('a')), fileIndex + 1});
+            }
+            QVERIFY2(storage.recordArtifactWithFiles(artifactId, taskId,
+                QStringLiteral("report_0"), files, base, &error), qPrintable(error));
+        } else {
+            QVERIFY2(storage.recordArtifact(artifactId, taskId,
+                QStringLiteral("report_%1").arg(index), base.addMSecs(index), &error),
+                qPrintable(error));
+        }
+    }
+    for (int index = 0; index < 101; ++index) {
+        QVERIFY2(storage.recordMetric(taskId, QStringLiteral("metric_%1").arg(index),
+            index, base.addMSecs(index), &error), qPrintable(error));
+    }
+
+    aitrain::ProjectQueryService query(&workspace);
+    TaskArtifactPresenter presenter(&query);
+    QVERIFY2(presenter.selectTask(taskId.toString()), qPrintable(presenter.lastError()));
+    QCOMPARE(presenter.artifactCount(), 50);
+    QCOMPARE(presenter.metricCount(), 100);
+    QVERIFY(presenter.hasMoreArtifacts());
+    QVERIFY(presenter.hasMoreMetrics());
+    QVERIFY2(presenter.loadMoreArtifacts(), qPrintable(presenter.lastError()));
+    QVERIFY2(presenter.loadMoreMetrics(), qPrintable(presenter.lastError()));
+    QCOMPARE(presenter.artifactCount(), 51);
+    QCOMPARE(presenter.metricCount(), 101);
+    QVERIFY(!presenter.hasMoreArtifacts());
+    QVERIFY(!presenter.hasMoreMetrics());
+    QVERIFY2(presenter.selectArtifact(fileArtifactId.toString()),
+        qPrintable(presenter.lastError()));
+    QCOMPARE(presenter.details().artifactFiles.size(), 100);
+    QVERIFY(presenter.hasMoreArtifactFiles());
+    QVERIFY2(presenter.loadMoreArtifactFiles(), qPrintable(presenter.lastError()));
+    QCOMPARE(presenter.details().artifactFiles.size(), 101);
+    QVERIFY(!presenter.hasMoreArtifactFiles());
 }
 
 void TaskArtifactPresenterTests::readsCommittedArtifactPreviewByIdentity()

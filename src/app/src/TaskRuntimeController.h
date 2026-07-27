@@ -28,6 +28,7 @@ public:
     bool isRunning() const;
     State state() const;
     const aitrain::TaskId& taskId() const;
+    const QString& workflowKind() const;
     WorkerClient& workerClient();
 
 signals:
@@ -42,6 +43,7 @@ private:
     WorkerClient worker_;
     State state_ = State::Idle;
     aitrain::TaskId taskId_;
+    QString workflowKind_;
 };
 
 Q_DECLARE_METATYPE(TaskRuntimeController::State)

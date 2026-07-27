@@ -1,6 +1,6 @@
 # AITrain Studio 当前状态
 
-更新时间：2026-07-26
+更新时间：2026-07-27
 
 本文只记录当前代码与产品边界。历史路线、旧阶段结论和已删除实现不属于当前实施依据；宽路线请查看 `docs/product-roadmap-local-training-platform.md`。
 
@@ -57,13 +57,14 @@
 - 任务、任务 Artifact、指标、Workflow Run、数据集、模型包和交付证据目录统一使用版本化 base64url keyset cursor；页大小只接受 1–200，游标查询类型不匹配会返回 `InvalidPageCursor`。
 - Query Service 与各目录 Presenter 只接受 `PageRequest` 并返回/消费 `Page<T>`；Presenter 的“加载更多”沿 opaque cursor 追加，刷新第一页会重置旧游标。Evidence 构建会在只读查询序列中穷举所有 Artifact 与指标页，不以固定条数截断交付事实。
 - Schema 13 已建立任务、数据集、模型包、Artifact 文件、指标、Workflow Run、terminalization 和 outbox 的实际查询索引。
+- Storage 八个要求的边界类均已落地并承接真实 SQL：`ProjectMetaRepository`、`TaskEventRepository`、`WorkflowRepository`、`WorkflowTerminalizationStore`、`ArtifactCatalogRepository`、`DatasetCatalogRepository`、`ModelCatalogRepository`、`ProjectReadRepository`。Repository 共用 `ProjectDatabase` 且不自行开启事务，跨表写事务仍由 `ProjectStore` Unit of Work 控制。
 - Evidence 的 `projectIdentity` 使用持久化 ProjectId，项目移动后身份不变。
 - 训练模型使用 `project_snapshot` 来源绑定；显式外部导入使用 `external_declared`，不伪造项目 Snapshot 血缘。
 - Artifact journal 为 v2，并在 rename 前冻结 inventory、SHA-256 和 completion action。
 - staging 到 committed 的同卷原子 rename 是提交线性化点。
 - rename 前失败可安全中止；rename 后只能完成原 completion 或进入 `PendingRecovery`，不能反转成业务失败。
 - 数据库已提交但 journal 清理失败仍是业务成功，只报告 `cleanupPending`。
-- committed 文件读取统一通过 `VerifiedArtifactReader`，集中核对相对路径、inventory、大小、SHA-256 与符号链接；证据超限明确返回 `TooLarge`。
+- committed 文件读取统一通过 `ArtifactStore::openVerified()` 与 `VerifiedArtifactReader`，集中核对相对路径、完整 inventory、大小、SHA-256 与符号链接；`artifactPath()` 已收为 Artifact 模块私有实现，上层不再构造或直接取得 committed 根目录。证据超限明确返回 `TooLarge`。
 - discard 先把 committed 原子移动到 `.trash/<ArtifactId>`，再在事务中复核引用并删除目录记录；恢复会按数据库事实恢复或清理 trash。
 - terminalization 保持 `sealed → evidence_attached → closed`：
   - Evidence Artifact catalog 与 attach 同事务；
@@ -117,12 +118,26 @@ Resume/Checkpoint 裸路径入口已删除。未来若恢复，只能重新设�
 
 - 主导航固定为九页：总览、项目、数据集、训练实验、任务与产物、模型库、部署验证、环境、系统设置。
 - 当前 Qt Widgets 工作台继续保持左侧栏、顶部状态栏和中央 `QStackedWidget`。
+- `MainWindow` 仅保留 App Shell、路由、会话/任务协调器、刷新协调器和九个页面指针；项目 Workspace/Query Service 由 `ProjectSessionController` 独占，活动 TaskId/Workflow kind 由 `TaskRuntimeController` 独占。
 - 长任务只通过 Worker 执行，训练逻辑不进入 MainWindow。
 - GUI 只传 DatasetId、SnapshotId、ArtifactId、ModelPackageId 和 TaskId，不重新暴露 committed 物理路径。
 - Resume 控件、字段、翻译和文档入口已删除。
 - Runtime Delivery 只允许 Product Contract 判定为 `AitrainCpp + Supported` 且本机 `Available` 的路线；不会静默 fallback。
 - `TaskRuntimeController` 是唯一 `WorkerClient` owner，统一管理 `Idle → Starting → Running → CancelRequested → Finalizing/Recovering → Idle`；取消只使用一组 30 秒协作窗口和 2 秒强制退出窗口。
 - `WorkspaceReadModelCoordinator` 在单个 event-loop 内合并刷新域，并按任务、数据集/模型、选中任务、项目摘要、环境、交付证据的固定顺序执行。
+- 任务、Artifact、Artifact 文件和指标分别由 `QAbstractTableModel` 提供；任务、Artifact、文件和指标使用独立 opaque cursor 与“加载更多”，Artifact 文件只在选择持久化 ArtifactId 后查询，预览继续异步校验。
+- “任务与产物”已拆为 `TaskArtifactPage + TaskArtifactPageController`：页面拥有视觉控件，Controller 拥有筛选、分页、选择与 Presenter 生命周期；`MainWindow` 不再持有该页的表格、筛选器、按钮或 Presenter。
+- Dashboard 已拆为 `DashboardWorkspacePage + DashboardPageController`；项目汇总和最近任务使用独立查询，其中最近任务固定读取 recent 10，不再复用任务中心的 100 条分页缓存。
+- `ProjectSessionController` 是 GUI 唯一的项目 prepare/activate 协调器；创建、打开、重建分别传入显式操作，打开缺失目录不会被推断成创建。再次打开当前 canonical root 只刷新 GUI generation，不重复取得 Owner Lease。
+- 项目页分别提供“创建项目”“打开项目”“重建项目”三个入口；重建必须经过明确确认，并提示会清除 `.aitrain` 中的元数据和已提交 Artifact、不会自动备份。
+- 项目页已拆为 `ProjectWorkspacePage + ProjectPageController`：页面拥有表单、摘要控件和破坏性操作确认，Controller 构造项目会话命令并拥有项目摘要 Presenter；`MainWindow` 不再保存项目表单或摘要控件。
+- 系统设置页已拆为 `SettingsWorkspacePage + SettingsPageController`：页面只拥有能力摘要、语言、默认目录和授权展示控件，Controller 负责产品能力合同投影与偏好持久化；顶部语言切换仅订阅同一 Controller，`MainWindow` 不再保存设置页业务控件。
+- 模型库已拆为 `ModelRegistryWorkspacePage + ModelRegistryPageController`：页面只保存导入表单和模型目录视觉状态，Controller 拥有 Presenter、Manifest 草稿校验、Worker 命令构造和持久化 ID 选择；部署页只接收 `ModelPackageId`，`MainWindow` 不再保存模型库表单、表格或导入状态。
+- 环境页的运行环境区域已拆为 `EnvironmentWorkspacePage + EnvironmentPageController`：页面渲染检查项与汇总，Controller 独占 Environment Presenter 和 Worker 命令；交付证据作为独立子页面嵌入，`MainWindow` 不再保存环境检查表格或状态控件。
+- Runtime Delivery 已拆为 `RuntimeDeliveryWorkspacePage + RuntimeDeliveryPageController`：推理和部署验证共享 `RuntimeDeliveryFormData` 与命令构造，路线严格按 Manifest 顺序与 Product Contract、单次环境快照求交；仅列出 `AitrainCpp + Supported + Available`，多路线不默认、失效不替换，启动前重新校验，Benchmark 默认 warmup=3、iterations=20。
+- 训练实验已拆为 `TrainingWorkspacePage + TrainingPageController`：页面拥有训练表单、运行监控、指标、日志和 Artifact 投影；Controller 拥有能力/任务/后端选择、Snapshot 四重身份绑定、训练命令构造及实时事件投影，`MainWindow` 不再保存训练表单或运行控件。
+- 数据集页已拆为 `DatasetWorkspacePage + DatasetPageController`：页面拥有导入、转换、质量、划分、快照、标注修复与样本复核视觉状态；Controller 独占目录 Presenter、持久化身份选择、后台格式探测、五类 Worker 命令和复核 Artifact 异步读取代际，`MainWindow` 不再保存数据集表单、表格或预览状态。
+- Worker 发布训练/部署 Artifact 事件时只消费 Core 返回的 `ArtifactId + relativePath`；活动源码不再拼接 `artifacts/committed/<id>`，运行产物 bundle 的成员路径也已改为明确的相对路径。
 - Runtime benchmark 统一由 `RuntimeBenchmarkRunner` 执行，默认 warmup=3、iterations=20，并报告 setup、min、mean、p50、p95、p99、max、throughput 与 timingDefinition。
 - 英文 TS 不允许 `unfinished`；语言切换继续采用重启生效。
 
@@ -140,7 +155,7 @@ Resume/Checkpoint 裸路径入口已删除。未来若恢复，只能重新设�
 
 ## 本地验证结果
 
-2026-07-26 当前工作树已通过：
+2026-07-27 当前工作树已通过：
 
 ```powershell
 .\tools\encoding-check.ps1

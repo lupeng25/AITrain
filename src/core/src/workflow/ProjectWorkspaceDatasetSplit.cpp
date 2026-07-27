@@ -314,11 +314,23 @@ bool ProjectWorkspace::runDatasetSplitWorkflow(const TaskId& taskId,
             context.isCancellationRequested = stepCancellation;
             DatasetInspection inspection;
     DatasetDriverValidationResult validation;
-            const QString sourceRoot = artifactStore_->artifactPath(sourceSnapshot.artifactId);
-            if (sourceRoot.isEmpty()
-                || !verifyArtifactInventory(sourceArtifact, sourceRoot, &executionError)
-                || !verifySnapshotManifest(sourceSnapshot, sourceArtifact, sourceRoot, &executionError)
-                || !driver->inspect(sourceRoot, sourceSnapshot.datasetFormat,
+            VerifiedArtifactDirectory sourceDirectory;
+            ArtifactReadError sourceReadError = ArtifactReadError::None;
+            if (!artifactStore_->openVerified(sourceArtifact,
+                    &sourceDirectory, &sourceReadError, &executionError)) {
+                if (sourceReadError == ArtifactReadError::IntegrityMismatch) {
+                    executionError =
+                        QStringLiteral("dataset_split_source_hash_mismatch");
+                }
+                return WorkflowStepExecutionResult{WorkflowStepState::Failed, {},
+                    splitFailure(executionError)};
+            }
+            if (!verifyArtifactInventory(sourceArtifact,
+                    sourceDirectory.absolutePath, &executionError)
+                || !verifySnapshotManifest(sourceSnapshot, sourceArtifact,
+                    sourceDirectory.absolutePath, &executionError)
+                || !driver->inspect(sourceDirectory.absolutePath,
+                    sourceSnapshot.datasetFormat,
                     &inspection, context, &executionError)
                 || !driver->validate(inspection, &validation, context, &executionError)
                 || !validation.valid
@@ -380,8 +392,20 @@ bool ProjectWorkspace::runDatasetSplitWorkflow(const TaskId& taskId,
                 return WorkflowStepExecutionResult{WorkflowStepState::Failed, {}, splitFailure(
                     QStringLiteral("dataset_split_plan_artifact_invalid"))};
             }
-            const QString planRoot = artifactStore_->artifactPath(planArtifactId);
-            const QString planPath = QDir(planRoot).filePath(QStringLiteral("dataset_split_plan.json"));
+            VerifiedArtifactDirectory planDirectory;
+            if (!artifactStore_->openVerified(
+                    planStored, &planDirectory, nullptr, &executionError)) {
+                return WorkflowStepExecutionResult{WorkflowStepState::Failed, {},
+                    splitFailure(executionError)};
+            }
+            const auto verifiedPlan = std::find_if(
+                planDirectory.files.cbegin(), planDirectory.files.cend(),
+                [](const VerifiedArtifactFile& file) {
+                    return file.relativePath
+                        == QStringLiteral("dataset_split_plan.json");
+                });
+            const QString planPath = verifiedPlan == planDirectory.files.cend()
+                ? QString() : verifiedPlan->absolutePath;
             QString planFileHash;
             QFile planFile(planPath);
             if (!hashFile(planPath, &planFileHash, &executionError)
@@ -401,8 +425,14 @@ bool ProjectWorkspace::runDatasetSplitWorkflow(const TaskId& taskId,
                 return WorkflowStepExecutionResult{WorkflowStepState::Failed, {}, splitFailure(
                     QStringLiteral("dataset_split_plan_tampered"))};
             }
+            VerifiedArtifactDirectory sourceDirectory;
+            if (!artifactStore_->openVerified(
+                    sourceArtifact, &sourceDirectory, nullptr, &executionError)) {
+                return WorkflowStepExecutionResult{WorkflowStepState::Failed, {},
+                    splitFailure(executionError)};
+            }
             driverPlan.format = sourceSnapshot.datasetFormat;
-            driverPlan.sourceRoot = artifactStore_->artifactPath(sourceSnapshot.artifactId);
+            driverPlan.sourceRoot = sourceDirectory.absolutePath;
             driverPlan.manifest = persistedPlan.value(QStringLiteral("driverPlan")).toObject();
             driverPlan.planHash = driverPlan.manifest.value(QStringLiteral("planHash")).toString();
             QString staging;
@@ -445,7 +475,6 @@ bool ProjectWorkspace::runDatasetSplitWorkflow(const TaskId& taskId,
             }
             if (!splitArtifactId.isValid()) splitArtifactId = step.inputArtifactId;
             ArtifactSnapshot splitStored;
-            const QString splitRoot = artifactStore_->artifactPath(splitArtifactId);
             ArtifactId snapshotArtifactId;
             QString staging;
             if (!storage_.artifact(splitArtifactId, &splitStored, &executionError)
@@ -453,6 +482,14 @@ bool ProjectWorkspace::runDatasetSplitWorkflow(const TaskId& taskId,
                 || !artifactStore_->begin(taskId, QStringLiteral("dataset_snapshot"),
                     &snapshotArtifactId, &staging, &executionError)) {
                 return WorkflowStepExecutionResult{WorkflowStepState::Failed, {}, splitFailure(executionError)};
+            }
+            VerifiedArtifactDirectory splitDirectory;
+            if (!artifactStore_->openVerified(
+                    splitStored, &splitDirectory, nullptr, &executionError)) {
+                QString ignored;
+                artifactStore_->abort(staging, &ignored);
+                return WorkflowStepExecutionResult{WorkflowStepState::Failed, {},
+                    splitFailure(executionError)};
             }
             const auto abort = [&]() { QString ignored; artifactStore_->abort(staging, &ignored); };
             DatasetOperationContext context;
@@ -463,7 +500,8 @@ bool ProjectWorkspace::runDatasetSplitWorkflow(const TaskId& taskId,
             snapshotOptions.isCancellationRequested = stepCancellation;
             DatasetSnapshotResult snapshotResult;
             const QString manifestPath = QDir(staging).filePath(QStringLiteral("dataset_snapshot.json"));
-            if (!copyPureSplitTree(splitStored, splitRoot, staging, stepCancellation, &executionError)
+            if (!copyPureSplitTree(splitStored, splitDirectory.absolutePath,
+                    staging, stepCancellation, &executionError)
                 || !driver->inspect(staging, sourceSnapshot.datasetFormat, &inspection, context, &executionError)
                 || !driver->validate(inspection, &validation, context, &executionError)
                 || !validation.valid

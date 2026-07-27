@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "SettingsPageController.h"
 
 #include "EvaluationReportView.h"
 #include "InfoPanel.h"
@@ -92,10 +93,10 @@ QWidget* MainWindow::buildTopBar()
     languageLayout->addWidget(topBarZhLanguageButton_);
     languageLayout->addWidget(topBarEnLanguageButton_);
     connect(topBarZhLanguageButton_, &QToolButton::clicked, this, [this]() {
-        storeLanguagePreference(QStringLiteral("zh_CN"));
+        settingsPageController_->setLanguageCode(QStringLiteral("zh_CN"));
     });
     connect(topBarEnLanguageButton_, &QToolButton::clicked, this, [this]() {
-        storeLanguagePreference(QStringLiteral("en_US"));
+        settingsPageController_->setLanguageCode(QStringLiteral("en_US"));
     });
 
     inspectorToggleButton_ = new QToolButton;

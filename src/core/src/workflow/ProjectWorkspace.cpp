@@ -92,17 +92,28 @@ bool writeArtifactFile(const QString& path, const QByteArray& contents, QString*
     return true;
 }
 
-bool verifyArtifactFile(const QString& artifactPath,
+bool verifyArtifactFile(const VerifiedArtifactDirectory& directory,
     const ArtifactFileSnapshot& expected,
     VerifiedWorkflowArtifactFile* result,
     QString* error)
 {
-    VerifiedArtifactFile verified;
-    if (!VerifiedArtifactReader(artifactPath).verify(expected, &verified, nullptr, error))
+    const auto it = std::find_if(directory.files.cbegin(),
+        directory.files.cend(), [&expected](const VerifiedArtifactFile& file) {
+            return file.relativePath == expected.relativePath
+                && file.sha256 == expected.sha256
+                && file.byteCount == expected.byteCount;
+        });
+    if (it == directory.files.cend()) {
+        if (error) {
+            *error = QStringLiteral(
+                "已验证 Artifact inventory 中缺少指定文件：%1")
+                .arg(expected.relativePath);
+        }
         return false;
+    }
     if (result) {
-        *result = {verified.relativePath, verified.absolutePath,
-            verified.sha256, verified.byteCount};
+        *result = {it->relativePath, it->absolutePath,
+            it->sha256, it->byteCount};
     }
     return true;
 }
@@ -332,18 +343,16 @@ bool resolveVerifiedArtifact(const ProjectStore& storage,
     }
     ArtifactSnapshot artifact;
     if (!storage.artifact(artifactId, &artifact, error)) return false;
-    const QString artifactPath = artifactStore->artifactPath(artifact.id);
-    if (!QFileInfo(artifactPath).isDir()) {
-        if (error) *error = QStringLiteral("已提交 Artifact 目录不存在：%1").arg(artifact.id.toString());
+    VerifiedArtifactDirectory directory;
+    if (!artifactStore->openVerified(artifact, &directory, nullptr, error)) {
         return false;
     }
     VerifiedTrainingWorkflowInput verified;
     verified.artifactId = artifact.id;
-    verified.artifactPath = artifactPath;
-    for (const ArtifactFileSnapshot& file : artifact.files) {
-        VerifiedWorkflowArtifactFile checked;
-        if (!verifyArtifactFile(artifactPath, file, &checked, error)) return false;
-        verified.files.append(checked);
+    verified.artifactPath = directory.absolutePath;
+    for (const VerifiedArtifactFile& file : directory.files) {
+        verified.files.append({file.relativePath, file.absolutePath,
+            file.sha256, file.byteCount});
     }
     if (verified.files.isEmpty()) {
         if (error) *error = QStringLiteral("已提交 Artifact 不包含可验证文件。");
@@ -968,6 +977,27 @@ bool ProjectWorkspace::prepareCreate(const QString& projectRoot,
     if (!candidate.createProject(projectRoot, error)) return false;
     ProjectMetaSnapshot projectMeta;
     if (!candidate.storage_.advanceOpenGeneration(&projectMeta, error)) return false;
+    prepared->canonicalRoot = candidate.canonicalRoot_;
+    prepared->projectMeta = projectMeta;
+    prepared->ownerLease = std::move(candidate.ownerLease_);
+    candidate.close();
+    return prepared->isValid();
+}
+
+bool ProjectWorkspace::prepareRebuild(const QString& projectRoot,
+    PreparedProjectSession* prepared, QString* error)
+{
+    if (prepared) *prepared = PreparedProjectSession();
+    if (!prepared) {
+        if (error) *error = QStringLiteral("准备重建项目会话需要输出票据。");
+        return false;
+    }
+    ProjectWorkspace candidate;
+    if (!candidate.rebuildProject(projectRoot, error)) return false;
+    ProjectMetaSnapshot projectMeta;
+    if (!candidate.storage_.advanceOpenGeneration(&projectMeta, error)) {
+        return false;
+    }
     prepared->canonicalRoot = candidate.canonicalRoot_;
     prepared->projectMeta = projectMeta;
     prepared->ownerLease = std::move(candidate.ownerLease_);
@@ -1737,18 +1767,15 @@ bool ProjectWorkspace::resolveTrainingWorkflowStepInput(const WorkflowRunId& wor
     }
     ArtifactSnapshot artifact;
     if (!storage_.artifact(stepIt->inputArtifactId, &artifact, error)) return false;
-    const QString artifactPath = artifactStore_->artifactPath(artifact.id);
-    if (!QFileInfo(artifactPath).isDir()) {
-        if (error) *error = QStringLiteral("已提交训练输入 Artifact 目录不存在：%1").arg(artifact.id.toString());
-        return false;
-    }
+    VerifiedArtifactDirectory directory;
+    if (!artifactStore_->openVerified(
+            artifact, &directory, nullptr, error)) return false;
     VerifiedTrainingWorkflowInput resolved;
     resolved.artifactId = artifact.id;
-    resolved.artifactPath = artifactPath;
-    for (const ArtifactFileSnapshot& file : artifact.files) {
-        VerifiedWorkflowArtifactFile verified;
-        if (!verifyArtifactFile(artifactPath, file, &verified, error)) return false;
-        resolved.files.append(verified);
+    resolved.artifactPath = directory.absolutePath;
+    for (const VerifiedArtifactFile& file : directory.files) {
+        resolved.files.append({file.relativePath, file.absolutePath,
+            file.sha256, file.byteCount});
     }
     if (resolved.files.isEmpty()) {
         if (error) *error = QStringLiteral("已提交训练输入 Artifact 不包含可验证文件。");
@@ -1802,12 +1829,18 @@ bool ProjectWorkspace::prepareTrainingWorkflowAdapterLaunch(const WorkflowRunId&
     const auto manifestIt = std::find_if(snapshotArtifact.files.cbegin(), snapshotArtifact.files.cend(),
         [](const ArtifactFileSnapshot& file) { return file.relativePath == QStringLiteral("dataset_snapshot.json"); });
     VerifiedWorkflowArtifactFile verifiedSnapshotManifest;
-    const QString snapshotArtifactPath = artifactStore_->artifactPath(snapshot.artifactId);
+    const auto verifiedManifestIt = std::find_if(snapshotInput.files.cbegin(),
+        snapshotInput.files.cend(), [](const VerifiedWorkflowArtifactFile& file) {
+            return file.relativePath == QStringLiteral("dataset_snapshot.json");
+        });
     if (manifestIt == snapshotArtifact.files.cend() || manifestIt->sha256 != snapshot.manifestSha256
-        || !verifyArtifactFile(snapshotArtifactPath, *manifestIt, &verifiedSnapshotManifest, error)) {
+        || verifiedManifestIt == snapshotInput.files.cend()
+        || verifiedManifestIt->sha256 != manifestIt->sha256
+        || verifiedManifestIt->byteCount != manifestIt->byteCount) {
         if (error && error->isEmpty()) *error = QStringLiteral("登记的数据集快照 Artifact 缺少可信 manifest。" );
         return false;
     }
+    verifiedSnapshotManifest = *verifiedManifestIt;
     VerifiedTrainingWorkflowInput input;
     if (!resolveTrainingWorkflowStepInput(workflowRunId, workflowStepId, &input, error)) return false;
     const VerifiedWorkflowArtifactFile* snapshotManifest = selectArtifactFile(input, {QStringLiteral("dataset_snapshot.json")});
@@ -1825,7 +1858,7 @@ bool ProjectWorkspace::prepareTrainingWorkflowAdapterLaunch(const WorkflowRunId&
     const QString snapshotStaging = QDir(outputRoot).filePath(QStringLiteral("snapshot-input"));
     QJsonObject request;
     request.insert(QStringLiteral("taskId"), workflow.taskId.toString());
-    request.insert(QStringLiteral("datasetPath"), artifactStore_->artifactPath(snapshot.artifactId));
+    request.insert(QStringLiteral("datasetPath"), snapshotInput.artifactPath);
     request.insert(QStringLiteral("datasetSnapshotManifest"), verifiedSnapshotManifest.absolutePath);
     request.insert(QStringLiteral("datasetSnapshotStagingPath"), snapshotStaging);
     request.insert(QStringLiteral("outputPath"), outputRoot);
@@ -2068,8 +2101,8 @@ bool ProjectWorkspace::registerTrainingWorkflowModel(const WorkflowRunId& workfl
     result->modelPackage = package;
     result->registrationArtifact.artifactId = registrationArtifactId;
     result->registrationArtifact.artifactPath = registrationArtifactPath;
-    result->registrationArtifact.pathsByKind.insert(QStringLiteral("model_manifest"),
-        QDir(registrationArtifactPath).filePath(QStringLiteral("model_manifest.json")));
+    result->registrationArtifact.relativePathsByKind.insert(
+        QStringLiteral("model_manifest"), QStringLiteral("model_manifest.json"));
     return true;
 }
 
@@ -2251,8 +2284,11 @@ bool ProjectWorkspace::renderTrainingWorkflowDeliveryReport(const WorkflowRunId&
     }
     result->artifactId = artifactId;
     result->artifactPath = artifactPath;
-    result->pathsByKind = {{QStringLiteral("delivery_report_json"), QDir(artifactPath).filePath(QStringLiteral("delivery_report.json"))},
-        {QStringLiteral("delivery_report_markdown"), QDir(artifactPath).filePath(QStringLiteral("delivery_report.md"))}};
+    result->relativePathsByKind = {
+        {QStringLiteral("delivery_report_json"),
+            QStringLiteral("delivery_report.json")},
+        {QStringLiteral("delivery_report_markdown"),
+            QStringLiteral("delivery_report.md")}};
     return true;
 }
 
@@ -2320,9 +2356,9 @@ bool ProjectWorkspace::commitRuntimeArtifacts(const TaskId& taskId,
     }
     result->artifactId = artifactId;
     result->artifactPath = artifactPath;
-    result->pathsByKind.clear();
+    result->relativePathsByKind.clear();
     for (auto it = relativePaths.cbegin(); it != relativePaths.cend(); ++it) {
-        result->pathsByKind.insert(it.key(), QDir(artifactPath).filePath(it.value()));
+        result->relativePathsByKind.insert(it.key(), it.value());
     }
     return true;
 }
@@ -2735,9 +2771,9 @@ bool ProjectWorkspace::commitEvidenceBundle(const EvidenceBundle& bundle,
     }
     result->artifactId = artifactId;
     result->artifactPath = artifactPath;
-    result->pathsByKind.clear();
+    result->relativePathsByKind.clear();
     for (const auto& file : files) {
-        result->pathsByKind.insert(file.first, QDir(artifactPath).filePath(file.first));
+        result->relativePathsByKind.insert(file.first, file.first);
     }
     return true;
 }
@@ -2827,6 +2863,16 @@ bool ProjectWorkspace::artifact(const ArtifactId& artifactId, ArtifactSnapshot* 
     return storage_.artifact(artifactId, result, error);
 }
 
+Page<ArtifactFileSnapshot> ProjectWorkspace::artifactFiles(
+    const ArtifactId& artifactId, const PageRequest& request, QString* error) const
+{
+    if (!isOpen()) {
+        if (error) *error = QStringLiteral(" 项目工作区未打开。");
+        return {};
+    }
+    return storage_.artifactFiles(artifactId, request, error);
+}
+
 Page<ArtifactSnapshot> ProjectWorkspace::artifactsForTask(
     const TaskId& taskId, const PageRequest& request, QString* error) const
 {
@@ -2892,11 +2938,19 @@ bool ProjectWorkspace::readCommittedArtifactFile(const ArtifactSnapshot& snapsho
         return false;
     }
 
-    VerifiedWorkflowArtifactFile verified;
-    if (!verifyArtifactFile(artifactStore_->artifactPath(snapshot.id), *fileIt, &verified, error)) {
+    VerifiedArtifactDirectory directory;
+    if (!artifactStore_->openVerified(
+            snapshot, &directory, nullptr, error)) return false;
+    const auto verifiedIt = std::find_if(directory.files.cbegin(),
+        directory.files.cend(), [&normalizedPath](const VerifiedArtifactFile& file) {
+            return QDir::cleanPath(QDir::fromNativeSeparators(
+                file.relativePath)) == normalizedPath;
+        });
+    if (verifiedIt == directory.files.cend()) {
+        if (error) *error = QStringLiteral("已验证 Artifact 中不存在请求的文件。");
         return false;
     }
-    QFile file(verified.absolutePath);
+    QFile file(verifiedIt->absolutePath);
     if (!file.open(QIODevice::ReadOnly)) {
         if (error) *error = QStringLiteral("无法读取已提交 Artifact 文件。");
         return false;
@@ -2906,7 +2960,7 @@ bool ProjectWorkspace::readCommittedArtifactFile(const ArtifactSnapshot& snapsho
         if (error) *error = QStringLiteral("读取已提交 Artifact 文件失败。");
         return false;
     }
-    *result = {verified.relativePath, verified.sha256, verified.byteCount,
+    *result = {verifiedIt->relativePath, verifiedIt->sha256, verifiedIt->byteCount,
         content.left(maxBytes), content.size() > maxBytes};
     return true;
 }
@@ -2941,18 +2995,20 @@ bool ProjectWorkspace::prepareCommittedArtifactFileRead(
         return false;
     }
 
-    const QString artifactRoot = artifactStore_->artifactPath(snapshot.id);
-    const QString absolutePath = QDir(artifactRoot).filePath(normalizedPath);
-    const QFileInfo info(absolutePath);
-    if (artifactRoot.isEmpty() || !isChildPath(artifactRoot, info.absoluteFilePath())
-        || !info.exists() || !info.isFile() || info.isSymLink()
-        || info.size() != fileIt->byteCount) {
-        if (error) *error = QStringLiteral("已提交 Artifact 文件无效、越界或已被修改。");
+    VerifiedArtifactDirectory directory;
+    if (!artifactStore_->openVerified(
+            snapshot, &directory, nullptr, error)) return false;
+    const auto verifiedIt = std::find_if(directory.files.cbegin(),
+        directory.files.cend(), [&normalizedPath](const VerifiedArtifactFile& file) {
+            return QDir::cleanPath(QDir::fromNativeSeparators(
+                file.relativePath)) == normalizedPath;
+        });
+    if (verifiedIt == directory.files.cend()) {
+        if (error) *error = QStringLiteral("已验证 Artifact 中不存在请求的文件。");
         return false;
     }
-
-    result->artifactRoot = QDir(artifactRoot).absolutePath();
-    result->absolutePath = info.absoluteFilePath();
+    result->artifactRoot = directory.absolutePath;
+    result->absolutePath = verifiedIt->absolutePath;
     result->expected = *fileIt;
     return true;
 }

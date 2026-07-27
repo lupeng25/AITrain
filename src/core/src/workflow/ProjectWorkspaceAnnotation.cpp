@@ -158,23 +158,23 @@ bool commitFiles(ArtifactStore* store, ProjectStore* storage, const TaskId& task
     return true;
 }
 
-QString artifactPath(ArtifactStore* store, const ArtifactId& id)
-{
-    return store->artifactPath(id);
-}
-
 bool readVerifiedArtifactJson(ProjectStore* storage, ArtifactStore* store,
     const ArtifactSnapshot& artifact, const QString& relativePath, QJsonObject* result,
     const aitrain::CancellationCallback& cancellation, QString* error)
 {
-    const auto declared = std::find_if(artifact.files.cbegin(), artifact.files.cend(), [&](const ArtifactFileSnapshot& file) {
-        return file.relativePath == relativePath;
+    VerifiedArtifactDirectory directory;
+    if (!store->openVerified(artifact, &directory, nullptr, error)) {
+        return false;
+    }
+    const auto declared = std::find_if(directory.files.cbegin(),
+        directory.files.cend(), [&](const VerifiedArtifactFile& file) {
+            return file.relativePath == relativePath;
     });
     QByteArray bytes;
     QString hash;
-    const QString path = QDir(artifactPath(store, artifact.id)).filePath(relativePath);
-    if (declared == artifact.files.cend()
-        || !readBytesAndHash(path, &bytes, &hash, cancellation, error)
+    if (declared == directory.files.cend()
+        || !readBytesAndHash(declared->absolutePath,
+            &bytes, &hash, cancellation, error)
         || hash != declared->sha256 || bytes.size() != declared->byteCount) {
         if (error && error->isEmpty()) *error = QStringLiteral("annotation.artifact_file_integrity_failed:%1").arg(relativePath);
         return false;
@@ -227,11 +227,10 @@ bool loadBaseline(ProjectStore* storage, ArtifactStore* store, const SnapshotId&
         if (error) *error = QStringLiteral("annotation.snapshot_file_count_mismatch");
         return false;
     }
-    const QString rootPath = store->artifactPath(record.artifactId);
-    if (rootPath.isEmpty()) {
-        if (error) *error = QStringLiteral("annotation.snapshot_artifact_path_invalid");
-        return false;
-    }
+    VerifiedArtifactDirectory directory;
+    if (!store->openVerified(
+            artifact, &directory, nullptr, error)) return false;
+    const QString rootPath = directory.absolutePath;
     if (verifySource) {
         const QDir root(rootPath);
         if (!root.exists()) {

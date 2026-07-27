@@ -417,12 +417,11 @@ void WorkerSession::runTrainingWorkflowLocalStep(const aitrain::TrainingWorkflow
                     } else {
                         execution.state = aitrain::WorkflowStepState::Succeeded;
                         execution.outputArtifactId = bundle.artifactId;
-                        for (auto it = bundle.pathsByKind.cbegin(); it != bundle.pathsByKind.cend(); ++it) {
+                        for (auto it = bundle.relativePathsByKind.cbegin();
+                             it != bundle.relativePathsByKind.cend(); ++it) {
                             send(wp::event::artifact(), QJsonObject{{wp::field::taskId(), activeTaskId_}, {QStringLiteral("kind"), it.key()},
                                 {QStringLiteral("artifactId"), bundle.artifactId.toString()},
-                                {QStringLiteral("relativePath"), QDir(QDir(trainingWorkspace->workspacePath())
-                                    .filePath(QStringLiteral("artifacts/committed/%1").arg(bundle.artifactId.toString())))
-                                    .relativeFilePath(it.value())},
+                                {QStringLiteral("relativePath"), it.value()},
                                 {wp::field::message(), QStringLiteral(" 部署验证 Artifact。")}});
                         }
                     }
@@ -450,12 +449,11 @@ void WorkerSession::runTrainingWorkflowLocalStep(const aitrain::TrainingWorkflow
         } else {
             execution.state = aitrain::WorkflowStepState::Succeeded;
             execution.outputArtifactId = report.artifactId;
-            for (auto it = report.pathsByKind.cbegin(); it != report.pathsByKind.cend(); ++it) {
+            for (auto it = report.relativePathsByKind.cbegin();
+                 it != report.relativePathsByKind.cend(); ++it) {
                 send(wp::event::artifact(), QJsonObject{{wp::field::taskId(), activeTaskId_}, {QStringLiteral("kind"), it.key()},
                     {QStringLiteral("artifactId"), report.artifactId.toString()},
-                    {QStringLiteral("relativePath"), QDir(QDir(trainingWorkspace->workspacePath())
-                        .filePath(QStringLiteral("artifacts/committed/%1").arg(report.artifactId.toString())))
-                        .relativeFilePath(it.value())},
+                    {QStringLiteral("relativePath"), it.value()},
                     {wp::field::message(), QStringLiteral(" 训练交付报告 Artifact。")}});
             }
         }

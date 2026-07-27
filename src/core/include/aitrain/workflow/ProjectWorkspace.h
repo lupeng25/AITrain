@@ -32,7 +32,8 @@ struct RuntimeArtifactCandidate final {
 struct RuntimeArtifactBundle final {
     ArtifactId artifactId;
     QString artifactPath;
-    QHash<QString, QString> pathsByKind;
+    // 对外事件只传播 ArtifactId + 相对成员路径，绝不重建 committed 根路径。
+    QHash<QString, QString> relativePathsByKind;
 };
 
 // 由当前线程根据已提交 Artifact 清单解析出的不可变文件读取来源。
@@ -52,7 +53,7 @@ using ArtifactFilePreviewCallback = std::function<void(
 struct EvidenceArtifactBundle final {
     ArtifactId artifactId;
     QString artifactPath;
-    QHash<QString, QString> pathsByKind;
+    QHash<QString, QString> relativePathsByKind;
 };
 
 struct DatasetSnapshotCommitRequest final {
@@ -420,6 +421,8 @@ public:
         PreparedProjectSession* prepared, QString* error = nullptr);
     static bool prepareCreate(const QString& projectRoot,
         PreparedProjectSession* prepared, QString* error = nullptr);
+    static bool prepareRebuild(const QString& projectRoot,
+        PreparedProjectSession* prepared, QString* error = nullptr);
     // 仅在 ProjectId + openGeneration 仍匹配时消费票据。
     bool openPrepared(PreparedProjectSession prepared,
         QString* error = nullptr);
@@ -573,6 +576,9 @@ public:
     Page<TaskSnapshot> tasks(const PageRequest& request, QString* error = nullptr) const;
     bool task(const TaskId& taskId, TaskSnapshot* result, QString* error = nullptr) const;
     bool artifact(const ArtifactId& artifactId, ArtifactSnapshot* result, QString* error = nullptr) const;
+    Page<ArtifactFileSnapshot> artifactFiles(
+        const ArtifactId& artifactId, const PageRequest& request,
+        QString* error = nullptr) const;
     Page<ArtifactSnapshot> artifactsForTask(
         const TaskId& taskId, const PageRequest& request, QString* error = nullptr) const;
     Page<DeliveryEvidenceCandidate> deliveryEvidenceCandidates(

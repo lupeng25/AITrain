@@ -8,9 +8,14 @@
 class EvaluationReportView;
 class QLabel;
 class QPlainTextEdit;
+class QPushButton;
 class QStackedWidget;
+class QTableView;
 class QTableWidget;
 class QTabWidget;
+class ArtifactFileTableModel;
+class ArtifactTableModel;
+class MetricTableModel;
 
 class TaskArtifactPanel : public QWidget {
     Q_OBJECT
@@ -33,9 +38,17 @@ private:
     void previewSelectedArtifact();
 
     QLabel* selectedTaskSummaryLabel_ = nullptr;
-    QTableWidget* artifactTable_ = nullptr;
-    QTableWidget* metricTable_ = nullptr;
+    QTableView* artifactTable_ = nullptr;
+    QTableView* artifactFileTable_ = nullptr;
+    QTableView* metricTable_ = nullptr;
     QTableWidget* exportTable_ = nullptr;
+    ArtifactTableModel* artifactModel_ = nullptr;
+    ArtifactFileTableModel* artifactFileModel_ = nullptr;
+    MetricTableModel* metricModel_ = nullptr;
+    QPushButton* artifactLoadMoreButton_ = nullptr;
+    QPushButton* artifactFileLoadMoreButton_ = nullptr;
+    QPushButton* metricLoadMoreButton_ = nullptr;
+    QPushButton* workflowLoadMoreButton_ = nullptr;
     QTabWidget* detailTabs_ = nullptr;
     QLabel* imagePreviewLabel_ = nullptr;
     QPlainTextEdit* previewText_ = nullptr;

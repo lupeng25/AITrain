@@ -5,18 +5,26 @@
 #include "WorkspaceReadModelCoordinator.h"
 
 #include "EvaluationReportView.h"
-#include "DiagnosticBundlePresenter.h"
-#include "DatasetCatalogPresenter.h"
-#include "DeliveryEvidencePresenter.h"
+#include "DatasetPageController.h"
+#include "DatasetPage.h"
+#include "DashboardPageController.h"
+#include "DeliveryEvidencePageController.h"
 #include "EnvironmentCheckPresenter.h"
+#include "EnvironmentPageController.h"
 #include "ApplicationSettingsService.h"
 #include "ModelRegistryPresenter.h"
+#include "ModelRegistryPageController.h"
 #include "InfoPanel.h"
 #include "LanguageSupport.h"
 #include "MainWindowSupport.h"
-#include "ProjectSummaryPresenter.h"
+#include "ProjectPageController.h"
+#include "ProjectSessionController.h"
+#include "SettingsPage.h"
+#include "SettingsPageController.h"
+#include "RuntimeDeliveryPageController.h"
+#include "TrainingPageController.h"
 #include "WorkspaceRouter.h"
-#include "TaskArtifactPresenter.h"
+#include "TaskArtifactPageController.h"
 #include "aitrain/core/CapabilityRegistry.h"
 #include "aitrain/core/VisionModelRuntime.h"
 
@@ -63,17 +71,18 @@ using namespace aitrain_app;
 
 MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry, QWidget* parent)
     : QMainWindow(parent)
-    , queryService_(&workspace_)
     , licenseOwner_(licenseOwner)
     , licenseExpiry_(licenseExpiry)
 {
-    projectSummaryPresenter_ = new ProjectSummaryPresenter(&queryService_, this);
-    taskArtifactPresenter_ = new TaskArtifactPresenter(&queryService_, this);
-    diagnosticBundlePresenter_ = new DiagnosticBundlePresenter(&queryService_, this);
-    environmentCheckPresenter_ = new EnvironmentCheckPresenter(&queryService_, this);
-    modelRegistryPresenter_ = new ModelRegistryPresenter(&queryService_, this);
-    datasetCatalogPresenter_ = new DatasetCatalogPresenter(&queryService_, this);
-    deliveryEvidencePresenter_ = new DeliveryEvidencePresenter(&queryService_, this);
+    settingsPageController_ = new SettingsPageController(defaultProjectPath(), this);
+    workspaceRouter_ = new WorkspaceRouter(PageCount, this);
+    taskController_ = new TaskRuntimeController(this);
+    projectSessionController_ = new ProjectSessionController(
+        taskController_, this);
+    const aitrain::ProjectQueryService* queryService =
+        projectSessionController_->queryService();
+    taskArtifactPageController_ = new TaskArtifactPageController(queryService, this);
+    dashboardPageController_ = new DashboardPageController(queryService, this);
     setWindowTitle(QStringLiteral("AITrain Studio"));
     setMinimumSize(1180, 760);
 
@@ -126,12 +135,93 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     statusBar()->showMessage(tr("就绪"));
     statusBar()->setVisible(false);
 
-    workspaceRouter_ = new WorkspaceRouter(PageCount, this);
-    taskController_ = new TaskRuntimeController(this);
+    datasetPageController_ = new DatasetPageController(
+        queryService, taskController_, this);
+    datasetPageController_->setWorkerExecutable(workerExecutablePath());
+    connect(datasetPageController_, &DatasetPageController::statusChanged,
+        this, [this](const QString& text) {
+            workerPill_->setStatus(text, StatusPill::Tone::Info);
+            statusBar()->showMessage(text, 3000);
+        });
+    connect(datasetPageController_, &DatasetPageController::selectionChanged,
+        this, [this]() {
+            updateTrainingSelectionSummary();
+            refreshTrainingDefaults();
+        });
+    connect(datasetPageController_, &DatasetPageController::repairLoopChanged,
+        this, &MainWindow::setDatasetRepairLoopRows);
+    deliveryEvidencePageController_ = new DeliveryEvidencePageController(
+        queryService, taskController_, this);
+    deliveryEvidencePageController_->setWorkerExecutable(
+        workerExecutablePath());
+    connect(deliveryEvidencePageController_,
+        &DeliveryEvidencePageController::statusChanged,
+        this, [this](const QString& text) {
+            workerPill_->setStatus(text, StatusPill::Tone::Info);
+            statusBar()->showMessage(text, 5000);
+        });
+    modelRegistryPageController_ = new ModelRegistryPageController(
+        queryService, taskController_, this);
+    environmentPageController_ = new EnvironmentPageController(
+        queryService, taskController_, this);
+    runtimeDeliveryPageController_ = new RuntimeDeliveryPageController(
+        taskController_, this);
+    trainingPageController_ = new TrainingPageController(
+        taskController_, this);
+    trainingPageController_->setWorkerExecutable(workerExecutablePath());
+    connect(trainingPageController_, &TrainingPageController::runStarted,
+        this, [this](const QString& taskId) {
+            workerPill_->setStatus(
+                tr("训练运行中"), StatusPill::Tone::Info);
+            appendLog(tr("任务已启动：%1").arg(taskId));
+            updateRecentTasks();
+        });
+    runtimeDeliveryPageController_->setWorkerExecutable(workerExecutablePath());
+    connect(runtimeDeliveryPageController_,
+        &RuntimeDeliveryPageController::runStarted, this, [this]() {
+            workerPill_->setStatus(
+                tr("Runtime Delivery 运行中"), StatusPill::Tone::Info);
+        });
+    environmentPageController_->setWorkerExecutable(workerExecutablePath());
+    connect(environmentPageController_, &EnvironmentPageController::runStarted,
+        this, [this]() {
+            workerPill_->setStatus(tr("环境自检中"), StatusPill::Tone::Info);
+        });
+    modelRegistryPageController_->setWorkerExecutable(workerExecutablePath());
+    connect(modelRegistryPageController_, &ModelRegistryPageController::packagesChanged,
+        this, &MainWindow::syncModelPackageCombos);
+    connect(modelRegistryPageController_, &ModelRegistryPageController::importStarted,
+        this, [this]() {
+            workerPill_->setStatus(tr("模型导入中"), StatusPill::Tone::Info);
+            updateTaskCancelButton();
+        });
+    connect(modelRegistryPageController_, &ModelRegistryPageController::runtimeModelRequested,
+        this, [this](const QString& modelPackageId) {
+            showPage(DeploymentPage, tr("Runtime Delivery"));
+            runtimeDeliveryPageController_
+                ->selectModelPackageForInference(modelPackageId);
+        });
+    projectPageController_ = new ProjectPageController(
+        queryService, projectSessionController_, this);
+    connect(settingsPageController_, &SettingsPageController::languageChanged,
+        this, [this](const QString&) { updateLanguageButtonState(); });
+    connect(settingsPageController_, &SettingsPageController::defaultProjectPathChanged,
+        this, [this](const QString& path) {
+            projectPageController_->setDefaultRoot(
+                QDir::toNativeSeparators(path), currentProjectPath().isEmpty());
+            statusBar()->showMessage(tr("默认项目目录已保存。"), 3000);
+        });
     readModelCoordinator_ = new WorkspaceReadModelCoordinator(this);
     eventRouter_ = new ApplicationEventRouter(&taskController_->workerClient(), this);
+    connect(projectPageController_, &ProjectPageController::sessionRequestAccepted,
+        this, [this]() {
+            // 项目切换会改变 Artifact 根目录；丢弃旧项目未返回的异步预览。
+            datasetPageController_->invalidateAsyncPreviews();
+        });
+    connect(projectSessionController_, &ProjectSessionController::activated,
+        this, &MainWindow::activateProjectUi);
     const auto currentGeneration = [this](quint64 generation) {
-        return generation == projectOpenGeneration_;
+        return generation == projectOpenGeneration();
     };
     connect(readModelCoordinator_, &WorkspaceReadModelCoordinator::refreshTaskList,
         this, [this, currentGeneration](quint64 generation) {
@@ -147,7 +237,7 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
         });
     connect(readModelCoordinator_, &WorkspaceReadModelCoordinator::refreshSelectedTask,
         this, [this, currentGeneration](quint64 generation) {
-            if (currentGeneration(generation)) updateSelectedTaskDetails();
+            if (currentGeneration(generation)) taskArtifactPageController_->refreshSelected();
         });
     connect(readModelCoordinator_, &WorkspaceReadModelCoordinator::refreshProjectSummary,
         this, [this, currentGeneration](quint64 generation) {
@@ -158,8 +248,10 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     connect(readModelCoordinator_, &WorkspaceReadModelCoordinator::refreshEnvironmentReport,
         this, [this, currentGeneration](quint64 generation) {
             if (!currentGeneration(generation)) return;
-            refreshEnvironmentReportView();
-            updateEnvironmentSummary();
+            if (taskController_->taskId().isValid()) {
+                environmentPageController_->selectTask(
+                    taskController_->taskId().toString());
+            }
         });
     connect(readModelCoordinator_, &WorkspaceReadModelCoordinator::refreshDeliveryEvidence,
         this, [this, currentGeneration](quint64 generation) {
@@ -171,13 +263,10 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
         this, &MainWindow::handleTaskViewStateChanged);
     connect(eventRouter_, &ApplicationEventRouter::taskFactsInvalidated, this,
         [this](const QString& taskId) {
-            const bool isEnvironmentTask = activeWorkflowKind_ == QStringLiteral("environment_check")
-                || (environmentCheckPresenter_
-                    && environmentCheckPresenter_->viewModel().taskId == taskId);
-            if (isEnvironmentTask && environmentCheckPresenter_
-                && environmentCheckPresenter_->selectTask(taskId)) {
-                refreshEnvironmentReportView();
-                updateEnvironmentSummary();
+            const QString workflowKind = taskController_->workflowKind();
+            const bool isEnvironmentTask = workflowKind == QStringLiteral("environment_check")
+                || environmentPageController_->selectedTaskId() == taskId;
+            if (isEnvironmentTask && environmentPageController_->selectTask(taskId)) {
                 updateDashboardSummary();
             }
             RefreshDomains domains = RefreshDomain::TaskList
@@ -186,35 +275,30 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
                 domains |= RefreshDomain::EnvironmentReport
                     | RefreshDomain::DeliveryEvidence;
             }
-            if (activeWorkflowKind_.contains(QStringLiteral("dataset"))
-                || activeWorkflowKind_.contains(QStringLiteral("annotation"))) {
+            if (workflowKind.contains(QStringLiteral("dataset"))
+                || workflowKind.contains(QStringLiteral("annotation"))) {
                 domains |= RefreshDomain::DatasetCatalog
                     | RefreshDomain::DeliveryEvidence;
             }
-            if (activeWorkflowKind_.contains(QStringLiteral("training"))) {
+            if (workflowKind.contains(QStringLiteral("training"))) {
                 domains |= RefreshDomain::ModelRegistry
                     | RefreshDomain::DeliveryEvidence;
             }
-            if (activeWorkflowKind_.contains(QStringLiteral("model_import"))) {
+            if (workflowKind.contains(QStringLiteral("model_import"))) {
                 domains |= RefreshDomain::ModelRegistry;
             }
-            if (activeWorkflowKind_.contains(QStringLiteral("runtime"))
-                || activeWorkflowKind_.contains(QStringLiteral("diagnostics"))
-                || activeWorkflowKind_.contains(QStringLiteral("evidence"))
-                || activeWorkflowKind_.contains(QStringLiteral("ocr"))) {
+            if (workflowKind.contains(QStringLiteral("runtime"))
+                || workflowKind.contains(QStringLiteral("diagnostics"))
+                || workflowKind.contains(QStringLiteral("evidence"))
+                || workflowKind.contains(QStringLiteral("ocr"))) {
                 domains |= RefreshDomain::DeliveryEvidence;
             }
             readModelCoordinator_->invalidate(domains);
         });
-    connect(environmentCheckPresenter_, &EnvironmentCheckPresenter::changed, this, [this]() {
-        refreshEnvironmentReportView();
-        updateEnvironmentSummary();
+    connect(environmentPageController_, &EnvironmentPageController::changed, this, [this]() {
+        runtimeDeliveryPageController_->refreshEnvironment();
         updateDashboardSummary();
     });
-    connect(deliveryEvidencePresenter_, &DeliveryEvidencePresenter::changed, this,
-        &MainWindow::renderDeliveryAcceptanceSummary);
-    connect(deliveryEvidencePresenter_, &DeliveryEvidencePresenter::queryFailed, this,
-        [this](const QString&) { renderDeliveryAcceptanceSummary(); });
     connect(&workerClient(), &WorkerClient::logLine, this, &MainWindow::appendLog);
     connect(&workerClient(), &WorkerClient::connected, this, [this]() {
         workerPill_->setStatus(tr("Worker 已连接"), StatusPill::Tone::Success);
@@ -223,9 +307,12 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     });
     connect(&workerClient(), &WorkerClient::workerLost, this,
         [this](const aitrain::TaskId& taskId) {
-        if (!taskId.isValid() || !workspace_.isOpen()) return;
+        if (!taskId.isValid() || !projectSessionController_
+            || !projectSessionController_->isOpen()) return;
         QString recoveryError;
-        if (!workspace_.recoverAfterWorkerLoss(taskId, &recoveryError)) {
+        if (!projectSessionController_->workspace()
+            || !projectSessionController_->workspace()->recoverAfterWorkerLoss(
+                taskId, &recoveryError)) {
             appendLog(uiText("Worker 异常退出后任务恢复失败：%1").arg(recoveryError));
             statusBar()->showMessage(uiText("任务恢复失败，请重新打开项目重试。"), 8000);
             return;
@@ -243,23 +330,13 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
         const bool canceled = status == WorkerClient::WorkerTerminalStatus::Canceled;
         workerPill_->setStatus(ok ? tr("任务完成") : (canceled ? tr("任务已取消") : tr("任务失败")),
             ok ? StatusPill::Tone::Success : (canceled ? StatusPill::Tone::Warning : StatusPill::Tone::Error));
-        if (modelImportInProgress_) {
-            modelImportInProgress_ = false;
-            if (modelImportResultLabel_) {
-                modelImportResultLabel_->setText(ok
-                    ? uiText(" 模型导入完成。")
-                    : uiText(" 模型导入失败：%1").arg(message));
-            }
-            updateModelRegistry();
-        }
+        modelRegistryPageController_->finishImport(ok, message);
         updateHeaderState();
         updateTaskCancelButton();
         appendLog(ok ? tr("任务完成：%1").arg(message)
             : (canceled ? tr("任务已取消：%1").arg(message) : tr("任务失败：%1").arg(message)));
     });
     connect(&workerClient(), &WorkerClient::idle, this, [this]() {
-        activeTaskId_.clear();
-        activeWorkflowKind_.clear();
         updateTaskCancelButton();
         if (!closePending_) {
             return;
@@ -268,7 +345,7 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
         QTimer::singleShot(0, this, [this]() { close(); });
     });
 
-    refreshBuiltInCapabilities();
+    updateHeaderState();
     showPage(TrainingPage, tr("训练实验"));
     updateHeaderState();
     updateResponsiveChrome();
@@ -347,30 +424,24 @@ QString MainWindow::defaultProjectPath() const
 
 QString MainWindow::configuredDefaultProjectPath() const
 {
-    ApplicationSettingsService settings;
-    const QString configured = settings.defaultProjectPath(defaultProjectPath()).trimmed();
-    if (configured.isEmpty()) {
-        return defaultProjectPath();
-    }
-    return QDir::cleanPath(QDir::fromNativeSeparators(configured));
+    return settingsPageController_
+        ? settingsPageController_->configuredDefaultProjectPath()
+        : defaultProjectPath();
 }
 
 void MainWindow::appendLog(const QString& text)
 {
-    if (logEdit_) {
-        QString line = text;
-        constexpr int maxLogLineChars = 8000;
-        if (line.size() > maxLogLineChars) {
-            line = line.left(maxLogLineChars) + QStringLiteral(" ... [log_truncated]");
-        }
-        logEdit_->append(QStringLiteral("[%1] %2").arg(QTime::currentTime().toString(QStringLiteral("HH:mm:ss")), line));
+    if (trainingPageController_) {
+        trainingPageController_->appendLog(text);
     }
 }
 
 void MainWindow::loadCapabilityCombos()
 {
-    const QString currentCapability = capabilityCombo_ ? capabilityCombo_->currentData().toString() : QString();
-    const QString previousDatasetFormat = datasetFormatCombo_ ? comboCurrentDataOrText(datasetFormatCombo_) : QString();
+    QComboBox* datasetFormatCombo = datasetPage_
+        ? datasetPage_->datasetFormatCombo : nullptr;
+    const QString previousDatasetFormat = datasetFormatCombo
+        ? comboCurrentDataOrText(datasetFormatCombo) : QString();
 
     QStringList formats;
     const QVector<aitrain::CapabilityDescriptor> capabilities =
@@ -383,46 +454,25 @@ void MainWindow::loadCapabilityCombos()
         }
     }
 
-    if (capabilityCombo_) {
-        bool capabilityItemsMatch = capabilityCombo_->count() == capabilities.size();
-        for (int index = 0; capabilityItemsMatch && index < capabilities.size(); ++index) {
-            if (capabilityCombo_->itemData(index).toString() != capabilities.at(index).id
-                || capabilityCombo_->itemText(index) != capabilities.at(index).displayName) {
-                capabilityItemsMatch = false;
-            }
-        }
-
-        if (!capabilityItemsMatch) {
-            const QSignalBlocker blocker(capabilityCombo_);
-            if (capabilityCombo_->count() > 0) {
-                capabilityCombo_->clear();
-            }
-            for (const aitrain::CapabilityDescriptor& capability : capabilities) {
-                capabilityCombo_->addItem(capability.displayName, capability.id);
-            }
-            if (!currentCapability.isEmpty()) {
-                const int index = capabilityCombo_->findData(currentCapability);
-                if (index >= 0) {
-                    capabilityCombo_->setCurrentIndex(index);
-                }
-            }
-        }
+    if (trainingPageController_) {
+        trainingPageController_->refreshCapabilities();
     }
-    if (datasetFormatCombo_) {
-        const QSignalBlocker blocker(datasetFormatCombo_);
-        if (datasetFormatCombo_->count() > 0) {
-            datasetFormatCombo_->clear();
+    if (datasetFormatCombo) {
+        const QSignalBlocker blocker(datasetFormatCombo);
+        if (datasetFormatCombo->count() > 0) {
+            datasetFormatCombo->clear();
         }
         for (const QString& format : formats) {
-            datasetFormatCombo_->addItem(datasetFormatLabel(format), format);
+            datasetFormatCombo->addItem(datasetFormatLabel(format), format);
         }
-        const int restoredIndex = previousDatasetFormat.isEmpty() ? -1 : datasetFormatCombo_->findData(previousDatasetFormat);
+        const int restoredIndex = previousDatasetFormat.isEmpty()
+            ? -1 : datasetFormatCombo->findData(previousDatasetFormat);
         if (restoredIndex >= 0) {
-            datasetFormatCombo_->setCurrentIndex(restoredIndex);
-        } else if (datasetFormatCombo_->count() > 0) {
-            datasetFormatCombo_->setCurrentIndex(0);
+            datasetFormatCombo->setCurrentIndex(restoredIndex);
+        } else if (datasetFormatCombo->count() > 0) {
+            datasetFormatCombo->setCurrentIndex(0);
         }
-        state_.dataset.currentFormat = currentDatasetFormat();
+        datasetPageController_->state().currentFormat = currentDatasetFormat();
     }
     if (stack_ && stack_->widget(TrainingPage)
         && stack_->widget(TrainingPage)->property("workspaceInitialized").toBool()) {
@@ -432,32 +482,33 @@ void MainWindow::loadCapabilityCombos()
 
 QString MainWindow::currentDatasetFormat() const
 {
-    return comboCurrentDataOrText(datasetFormatCombo_);
+    if (datasetPage_ && datasetPage_->datasetFormatCombo) {
+        return comboCurrentDataOrText(datasetPage_->datasetFormatCombo);
+    }
+    return datasetPageController_->state().currentFormat;
 }
 
 QString MainWindow::currentTaskType() const
 {
-    return comboCurrentDataOrText(taskTypeCombo_);
+    return trainingPageController_
+        ? trainingPageController_->currentTaskType() : QString();
 }
 
-QString MainWindow::currentTaskKindFilter() const
+QString MainWindow::currentProjectPath() const
 {
-    return taskKindFilterCombo_ ? taskKindFilterCombo_->currentData().toString() : QString();
+    return projectSessionController_
+        ? projectSessionController_->currentRoot() : QString();
 }
 
-QString MainWindow::currentTaskStateFilter() const
+QString MainWindow::currentProjectName() const
 {
-    return taskStateFilterCombo_ ? taskStateFilterCombo_->currentData().toString() : QString();
+    return projectSessionController_
+        ? projectSessionController_->currentDisplayName() : QString();
 }
 
-void MainWindow::storeLanguagePreference(const QString& languageCode)
+quint64 MainWindow::projectOpenGeneration() const
 {
-    const QString previous = aitrain_app::configuredLanguageCode();
-    aitrain_app::storeLanguageCode(languageCode);
-    updateLanguageButtonState();
-    if (previous != aitrain_app::configuredLanguageCode()) {
-        QMessageBox::information(this, uiText("界面语言"), uiText("语言设置已保存，重启 AITrain Studio 后生效。"));
-    }
+    return projectSessionController_ ? projectSessionController_->generation() : 0;
 }
 
 void MainWindow::updateLanguageButtonState()
@@ -472,29 +523,7 @@ void MainWindow::updateLanguageButtonState()
     };
     setChecked(topBarZhLanguageButton_, QStringLiteral("zh_CN"));
     setChecked(topBarEnLanguageButton_, QStringLiteral("en_US"));
-    setChecked(settingsZhLanguageButton_, QStringLiteral("zh_CN"));
-    setChecked(settingsEnLanguageButton_, QStringLiteral("en_US"));
-}
-
-void MainWindow::storeDefaultProjectPathPreference(const QString& path)
-{
-    const QString normalized = QDir::cleanPath(QDir::fromNativeSeparators(path.trimmed()));
-    if (normalized.isEmpty() || normalized == QStringLiteral(".")) {
-        QMessageBox::warning(this, uiText("默认项目目录"), uiText("目录不能为空。"));
-        return;
+    if (settingsPage_) {
+        settingsPage_->setLanguageCode(language);
     }
-
-    ApplicationSettingsService settings;
-    settings.setDefaultProjectPath(normalized);
-    const QString native = QDir::toNativeSeparators(normalized);
-    if (settingsDefaultProjectPathEdit_) {
-        settingsDefaultProjectPathEdit_->setText(native);
-    }
-    if (projectRootEdit_ && currentProjectPath_.isEmpty()) {
-        projectRootEdit_->setText(native);
-    }
-    if (settingsDefaultProjectPathStatusLabel_) {
-        settingsDefaultProjectPathStatusLabel_->setText(uiText("默认项目目录已保存。"));
-    }
-    statusBar()->showMessage(uiText("默认项目目录已保存。"), 3000);
 }

@@ -5,7 +5,6 @@
 #include "aitrain/runtime/TensorRtRuntimeAdapter.h"
 #include "aitrain/runtime/RuntimeBenchmarkRunner.h"
 
-#include <QCryptographicHash>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -90,25 +89,6 @@ bool writeJson(const QString& path, const QJsonObject& object, QString* error)
     return writeBytes(path, QJsonDocument(object).toJson(QJsonDocument::Indented), error);
 }
 
-QString fileSha256(const QString& path, QString* error)
-{
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
-        if (error) *error = QStringLiteral("无法读取推理样本：%1").arg(path);
-        return {};
-    }
-    QCryptographicHash hash(QCryptographicHash::Sha256);
-    while (!file.atEnd()) {
-        const QByteArray bytes = file.read(1024 * 1024);
-        if (bytes.isEmpty() && file.error() != QFile::NoError) {
-            if (error) *error = QStringLiteral("读取推理样本失败：%1").arg(path);
-            return {};
-        }
-        hash.addData(bytes);
-    }
-    return QString::fromLatin1(hash.result().toHex());
-}
-
 QJsonObject persistedRuntimeDetails(const RuntimeOperationResult& operation)
 {
     QJsonObject details = operation.details;
@@ -137,13 +117,6 @@ RuntimeArtifactCandidate runtimeCandidate(const QString& kind, const QString& so
     candidate.kind = kind;
     candidate.sourcePath = sourcePath;
     return candidate;
-}
-
-bool isChildPath(const QString& parentPath, const QString& candidatePath)
-{
-    const QString parent = QDir::cleanPath(QDir(parentPath).absolutePath());
-    const QString candidate = QDir::cleanPath(QFileInfo(candidatePath).absoluteFilePath());
-    return candidate.startsWith(parent + QLatin1Char('/'), Qt::CaseInsensitive);
 }
 
 QString normalizedArtifactRelativePath(const QString& value, QString* error)
@@ -248,27 +221,26 @@ bool ProjectWorkspace::runRuntimeDeliveryWorkflow(const TaskId& taskId,
             .arg(sampleRelativePath);
         return false;
     }
-    const QString sampleArtifactRoot = artifactStore_->artifactPath(sampleSnapshot.artifactId);
-    const QString sampleSourcePath = QDir(sampleArtifactRoot).filePath(sampleRelativePath);
-    const QFileInfo sample(sampleSourcePath);
-    if (!isChildPath(sampleArtifactRoot, sample.absoluteFilePath())
-        || !sample.exists() || !sample.isFile() || sample.isSymLink()
-        || sample.size() != expectedSample.byteCount) {
+    VerifiedArtifactDirectory sampleDirectory;
+    if (!artifactStore_->openVerified(
+            sampleArtifact, &sampleDirectory, nullptr, error)) return false;
+    const auto verifiedSample = std::find_if(sampleDirectory.files.cbegin(),
+        sampleDirectory.files.cend(),
+        [&sampleRelativePath](const VerifiedArtifactFile& file) {
+            return file.relativePath == sampleRelativePath;
+        });
+    if (verifiedSample == sampleDirectory.files.cend()) {
         if (error) *error = QStringLiteral("Runtime Delivery Workflow 样本文件越界、丢失或已被修改：%1")
             .arg(sampleRelativePath);
         return false;
     }
-    const QString sampleSha256 = fileSha256(sample.absoluteFilePath(), error);
-    if (sampleSha256.isEmpty()) return false;
-    if (sampleSha256 != expectedSample.sha256) {
-        if (error) *error = QStringLiteral("Runtime Delivery Workflow 样本 SHA-256 与 Snapshot Artifact 清单不一致：%1")
-            .arg(sampleRelativePath);
-        return false;
-    }
+    const QFileInfo sample(verifiedSample->absolutePath);
+    const QString sampleSha256 = verifiedSample->sha256;
     const QString stagingRoot = runtimeStagingPath(taskId);
     const QString sampleWorkingPath = QDir(stagingRoot).filePath(
         QStringLiteral("00-sample/%1").arg(sample.fileName()));
-    if (!copyFileIntoStaging(sample.absoluteFilePath(), sampleWorkingPath, error)) {
+    if (!copyFileIntoStaging(verifiedSample->absolutePath,
+            sampleWorkingPath, error)) {
         cleanupRuntimeStaging(taskId, nullptr);
         return false;
     }

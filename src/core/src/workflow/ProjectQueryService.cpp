@@ -252,23 +252,83 @@ bool ProjectQueryService::taskDetails(const TaskId& taskId, TaskReadModel* resul
 
     TaskReadModel model;
     if (!workspace_->task(taskId, &model.task, error)) return false;
-    model.artifacts = workspace_->artifactsForTask(taskId, {50, {}}, error).items;
+    const Page<ArtifactSnapshot> artifacts = taskArtifacts(taskId, {50, {}}, error);
     if (error && !error->isEmpty()) return false;
-    model.metrics = workspace_->metricsForTask(taskId, {100, {}}, error).items;
+    model.artifacts = artifacts.items;
+    model.artifactNextCursor = artifacts.nextCursor;
+    model.artifactsHasMore = artifacts.hasMore;
+    const Page<MetricSnapshot> metrics = taskMetrics(taskId, {100, {}}, error);
     if (error && !error->isEmpty()) return false;
+    model.metrics = metrics.items;
+    model.metricNextCursor = metrics.nextCursor;
+    model.metricsHasMore = metrics.hasMore;
+    const Page<WorkflowReadModel> workflows = taskWorkflows(taskId, {50, {}}, error);
+    if (error && !error->isEmpty()) return false;
+    model.workflows = workflows.items;
+    model.workflowNextCursor = workflows.nextCursor;
+    model.workflowsHasMore = workflows.hasMore;
+    *result = model;
+    return true;
+}
 
-    const QVector<WorkflowRunSnapshot> runs =
-        workspace_->workflowRunsForTask(taskId, {50, {}}, error).items;
-    if (error && !error->isEmpty()) return false;
-    for (const WorkflowRunSnapshot& run : runs) {
+Page<ArtifactSnapshot> ProjectQueryService::taskArtifacts(
+    const TaskId& taskId, const PageRequest& request, QString* error) const
+{
+    if (error) error->clear();
+    if (!workspace_ || !workspace_->isOpen() || !taskId.isValid()) {
+        if (error) *error = QStringLiteral("查询任务 Artifact 需要已打开工作区和有效任务 ID。");
+        return {};
+    }
+    Page<ArtifactSnapshot> page = workspace_->artifactsForTask(taskId, request, error);
+    if (error && !error->isEmpty()) return {};
+    for (ArtifactSnapshot& artifact : page.items) artifact.files.clear();
+    return page;
+}
+
+Page<ArtifactFileSnapshot> ProjectQueryService::artifactFiles(
+    const ArtifactId& artifactId, const PageRequest& request, QString* error) const
+{
+    if (error) error->clear();
+    if (!workspace_ || !workspace_->isOpen() || !artifactId.isValid()) {
+        if (error) *error = QStringLiteral("查询 Artifact 文件需要已打开工作区和有效 Artifact ID。");
+        return {};
+    }
+    return workspace_->artifactFiles(artifactId, request, error);
+}
+
+Page<MetricSnapshot> ProjectQueryService::taskMetrics(
+    const TaskId& taskId, const PageRequest& request, QString* error) const
+{
+    if (error) error->clear();
+    if (!workspace_ || !workspace_->isOpen() || !taskId.isValid()) {
+        if (error) *error = QStringLiteral("查询任务指标需要已打开工作区和有效任务 ID。");
+        return {};
+    }
+    return workspace_->metricsForTask(taskId, request, error);
+}
+
+Page<WorkflowReadModel> ProjectQueryService::taskWorkflows(
+    const TaskId& taskId, const PageRequest& request, QString* error) const
+{
+    Page<WorkflowReadModel> result;
+    if (error) error->clear();
+    if (!workspace_ || !workspace_->isOpen() || !taskId.isValid()) {
+        if (error) *error = QStringLiteral("查询任务 Workflow 需要已打开工作区和有效任务 ID。");
+        return result;
+    }
+    const Page<WorkflowRunSnapshot> runs =
+        workspace_->workflowRunsForTask(taskId, request, error);
+    if (error && !error->isEmpty()) return {};
+    result.nextCursor = runs.nextCursor;
+    result.hasMore = runs.hasMore;
+    for (const WorkflowRunSnapshot& run : runs.items) {
         WorkflowReadModel workflow;
         workflow.run = run;
         workflow.steps = workspace_->workflowSteps(run.id, error);
-        if (error && !error->isEmpty()) return false;
-        model.workflows.append(workflow);
+        if (error && !error->isEmpty()) return {};
+        result.items.append(workflow);
     }
-    *result = model;
-    return true;
+    return result;
 }
 
 bool ProjectQueryService::artifactFilePreview(const ArtifactId& artifactId,

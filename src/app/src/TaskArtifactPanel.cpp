@@ -2,11 +2,13 @@
 
 #include "EvaluationReportView.h"
 #include "MainWindowSupport.h"
+#include "TaskArtifactTableModels.h"
 
 #include <QAbstractItemView>
 #include <QByteArray>
 #include <QFrame>
 #include <QHeaderView>
+#include <QItemSelectionModel>
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QLabel>
@@ -14,12 +16,14 @@
 #include <QPixmap>
 #include <QPlainTextEdit>
 #include <QPointer>
+#include <QPushButton>
 #include <QScrollArea>
 #include <QSize>
 #include <QSizePolicy>
 #include <QStackedWidget>
 #include <QTableWidget>
 #include <QTableWidgetItem>
+#include <QTableView>
 #include <QTabWidget>
 #include <QVBoxLayout>
 
@@ -58,26 +62,54 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     selectedTaskSummaryLabel_->setMinimumHeight(40);
     selectedTaskSummaryLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
 
-    artifactTable_ = new QTableWidget(0, 4);
+    artifactTable_ = new QTableView;
     artifactTable_->setObjectName(QStringLiteral("TaskArtifactTable"));
-    artifactTable_->setHorizontalHeaderLabels(QStringList()
-        << QStringLiteral("产物类型") << QStringLiteral("包内相对路径")
-        << QStringLiteral("完整性") << QStringLiteral("提交时间"));
-    configureTable(artifactTable_);
+    artifactModel_ = new ArtifactTableModel(artifactTable_);
+    artifactTable_->setModel(artifactModel_);
+    artifactTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    artifactTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    artifactTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+    artifactTable_->verticalHeader()->setVisible(false);
     artifactTable_->setWordWrap(true);
     artifactTable_->setMinimumHeight(170);
     artifactTable_->verticalHeader()->setDefaultSectionSize(42);
     artifactTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    artifactTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    artifactTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     artifactTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
     artifactTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-    connect(artifactTable_, &QTableWidget::itemSelectionChanged, this, &TaskArtifactPanel::updatePreviewFromSelection);
+    connect(artifactTable_->selectionModel(), &QItemSelectionModel::selectionChanged,
+        this, [this]() {
+            if (!presenter_ || !artifactTable_->currentIndex().isValid()) return;
+            presenter_->selectArtifact(artifactTable_->currentIndex()
+                .data(ArtifactTableModel::ArtifactIdRole).toString());
+        });
 
-    metricTable_ = new QTableWidget(0, 4);
+    artifactFileTable_ = new QTableView;
+    artifactFileTable_->setObjectName(QStringLiteral("TaskArtifactFileTable"));
+    artifactFileModel_ = new ArtifactFileTableModel(artifactFileTable_);
+    artifactFileTable_->setModel(artifactFileModel_);
+    artifactFileTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    artifactFileTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    artifactFileTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+    artifactFileTable_->verticalHeader()->setVisible(false);
+    artifactFileTable_->setWordWrap(true);
+    artifactFileTable_->setMinimumHeight(170);
+    artifactFileTable_->verticalHeader()->setDefaultSectionSize(42);
+    artifactFileTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    artifactFileTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    artifactFileTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    artifactFileTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    connect(artifactFileTable_->selectionModel(), &QItemSelectionModel::selectionChanged,
+        this, [this]() { updatePreviewFromSelection(); });
+
+    metricTable_ = new QTableView;
     metricTable_->setObjectName(QStringLiteral("TaskMetricTable"));
-    metricTable_->setHorizontalHeaderLabels(QStringList()
-        << QStringLiteral("指标") << QStringLiteral("值") << QStringLiteral("发生时间") << QStringLiteral("来源"));
-    configureTable(metricTable_);
+    metricModel_ = new MetricTableModel(metricTable_);
+    metricTable_->setModel(metricModel_);
+    metricTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    metricTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    metricTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+    metricTable_->verticalHeader()->setVisible(false);
     metricTable_->setMinimumHeight(160);
     metricTable_->verticalHeader()->setDefaultSectionSize(38);
     metricTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
@@ -129,14 +161,43 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     auto* artifactTabLayout = new QVBoxLayout(artifactTab);
     artifactTabLayout->setContentsMargins(0, 0, 0, 0);
     artifactTabLayout->addWidget(artifactTable_);
+    artifactLoadMoreButton_ = new QPushButton(uiText("加载更多产物"));
+    artifactLoadMoreButton_->setObjectName(QStringLiteral("ArtifactLoadMoreButton"));
+    connect(artifactLoadMoreButton_, &QPushButton::clicked, this, [this]() {
+        if (presenter_) presenter_->loadMoreArtifacts();
+    });
+    artifactTabLayout->addWidget(artifactLoadMoreButton_, 0, Qt::AlignHCenter);
+    auto* artifactFileTab = new QWidget;
+    auto* artifactFileTabLayout = new QVBoxLayout(artifactFileTab);
+    artifactFileTabLayout->setContentsMargins(0, 0, 0, 0);
+    artifactFileTabLayout->addWidget(artifactFileTable_);
+    artifactFileLoadMoreButton_ = new QPushButton(uiText("加载更多文件"));
+    artifactFileLoadMoreButton_->setObjectName(QStringLiteral("ArtifactFileLoadMoreButton"));
+    connect(artifactFileLoadMoreButton_, &QPushButton::clicked, this, [this]() {
+        if (presenter_) presenter_->loadMoreArtifactFiles();
+    });
+    artifactFileTabLayout->addWidget(
+        artifactFileLoadMoreButton_, 0, Qt::AlignHCenter);
     auto* metricTab = new QWidget;
     auto* metricTabLayout = new QVBoxLayout(metricTab);
     metricTabLayout->setContentsMargins(0, 0, 0, 0);
     metricTabLayout->addWidget(metricTable_);
+    metricLoadMoreButton_ = new QPushButton(uiText("加载更多指标"));
+    metricLoadMoreButton_->setObjectName(QStringLiteral("MetricLoadMoreButton"));
+    connect(metricLoadMoreButton_, &QPushButton::clicked, this, [this]() {
+        if (presenter_) presenter_->loadMoreMetrics();
+    });
+    metricTabLayout->addWidget(metricLoadMoreButton_, 0, Qt::AlignHCenter);
     auto* exportTab = new QWidget;
     auto* exportTabLayout = new QVBoxLayout(exportTab);
     exportTabLayout->setContentsMargins(0, 0, 0, 0);
     exportTabLayout->addWidget(exportTable_);
+    workflowLoadMoreButton_ = new QPushButton(uiText("加载更多工作流"));
+    workflowLoadMoreButton_->setObjectName(QStringLiteral("WorkflowLoadMoreButton"));
+    connect(workflowLoadMoreButton_, &QPushButton::clicked, this, [this]() {
+        if (presenter_) presenter_->loadMoreWorkflows();
+    });
+    exportTabLayout->addWidget(workflowLoadMoreButton_, 0, Qt::AlignHCenter);
     auto* previewTab = new QWidget;
     auto* previewTabLayout = new QVBoxLayout(previewTab);
     previewTabLayout->setContentsMargins(0, 0, 0, 0);
@@ -145,6 +206,7 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     detailTabs_ = new QTabWidget;
     detailTabs_->setObjectName(QStringLiteral("TaskDetailTabs"));
     detailTabs_->addTab(artifactTab, uiText("产物"));
+    detailTabs_->addTab(artifactFileTab, uiText("文件"));
     detailTabs_->addTab(metricTab, uiText("指标"));
     detailTabs_->addTab(exportTab, uiText("工作流"));
     detailTabs_->addTab(previewTab, uiText("预览"));
@@ -167,8 +229,13 @@ void TaskArtifactPanel::setPresenter(TaskArtifactPresenter* presenter)
 void TaskArtifactPanel::clear()
 {
     setTaskSummary(uiText("请选择一个任务查看产物、指标和工作流。"));
-    clearTableWithPlaceholder(artifactTable_, uiText("暂无产物"));
-    clearTableWithPlaceholder(metricTable_, uiText("暂无指标"));
+    if (artifactModel_) artifactModel_->setFiles({});
+    if (artifactFileModel_) artifactFileModel_->setRows({});
+    if (metricModel_) metricModel_->setRows({});
+    if (artifactLoadMoreButton_) artifactLoadMoreButton_->setEnabled(false);
+    if (artifactFileLoadMoreButton_) artifactFileLoadMoreButton_->setEnabled(false);
+    if (metricLoadMoreButton_) metricLoadMoreButton_->setEnabled(false);
+    if (workflowLoadMoreButton_) workflowLoadMoreButton_->setEnabled(false);
     clearTableWithPlaceholder(exportTable_, uiText("暂无工作流步骤"));
     selectedArtifactId_.clear();
     selectedRelativePath_.clear();
@@ -185,37 +252,13 @@ void TaskArtifactPanel::setDetails(const TaskArtifactDetails& details)
     setTaskSummary(details.summary.isEmpty()
         ? uiText("请选择一个任务查看已提交产物、指标和工作流。") : details.summary);
 
-    artifactTable_->setRowCount(0);
-    for (const ArtifactFileItem& artifact : details.artifacts) {
-        const int row = artifactTable_->rowCount();
-        artifactTable_->insertRow(row);
-        artifactTable_->setItem(row, 0, new QTableWidgetItem(artifact.kind));
-        auto* relativePath = new QTableWidgetItem(artifact.relativePath.isEmpty()
-            ? QStringLiteral("（无文件清单）") : artifact.relativePath);
-        relativePath->setData(Qt::UserRole, artifact.relativePath);
-        relativePath->setData(Qt::UserRole + 1, artifact.artifactId);
-        relativePath->setData(Qt::UserRole + 2, artifact.byteCount);
-        artifactTable_->setItem(row, 1, relativePath);
-        artifactTable_->setItem(row, 2, new QTableWidgetItem(
-            QStringLiteral("SHA-256 %1 · %2 bytes")
-                .arg(artifact.sha256.isEmpty() ? QStringLiteral("--") : artifact.sha256)
-                .arg(artifact.byteCount)));
-        artifactTable_->setItem(row, 3, new QTableWidgetItem(artifact.createdAt));
-    }
-    if (details.artifacts.isEmpty()) {
-        clearTableWithPlaceholder(artifactTable_, uiText("暂无已提交产物"));
-    }
-
-    metricTable_->setRowCount(0);
-    for (const MetricItem& metric : details.metrics) {
-        const int row = metricTable_->rowCount();
-        metricTable_->insertRow(row);
-        metricTable_->setItem(row, 0, new QTableWidgetItem(metric.name));
-        metricTable_->setItem(row, 1, new QTableWidgetItem(QString::number(metric.value, 'g', 12)));
-        metricTable_->setItem(row, 2, new QTableWidgetItem(metric.occurredAt));
-        metricTable_->setItem(row, 3, new QTableWidgetItem(QStringLiteral("持久化事件")));
-    }
-    if (details.metrics.isEmpty()) clearTableWithPlaceholder(metricTable_, uiText("暂无指标"));
+    artifactModel_->setFiles(details.artifacts);
+    artifactFileModel_->setRows(details.artifactFiles);
+    metricModel_->setRows(details.metrics);
+    artifactLoadMoreButton_->setEnabled(presenter_ && presenter_->hasMoreArtifacts());
+    artifactFileLoadMoreButton_->setEnabled(
+        presenter_ && presenter_->hasMoreArtifactFiles());
+    metricLoadMoreButton_->setEnabled(presenter_ && presenter_->hasMoreMetrics());
 
     exportTable_->setRowCount(0);
     for (const WorkflowStepItem& step : details.workflowSteps) {
@@ -232,11 +275,12 @@ void TaskArtifactPanel::setDetails(const TaskArtifactDetails& details)
         exportTable_->setItem(row, 2, output);
     }
     if (details.workflowSteps.isEmpty()) clearTableWithPlaceholder(exportTable_, uiText("暂无工作流步骤"));
+    workflowLoadMoreButton_->setEnabled(presenter_ && presenter_->hasMoreWorkflows());
     previewSelectedArtifact();
 }
 
-int TaskArtifactPanel::artifactRowCount() const { return artifactTable_ ? artifactTable_->rowCount() : 0; }
-int TaskArtifactPanel::metricRowCount() const { return metricTable_ ? metricTable_->rowCount() : 0; }
+int TaskArtifactPanel::artifactRowCount() const { return artifactModel_ ? artifactModel_->rowCount() : 0; }
+int TaskArtifactPanel::metricRowCount() const { return metricModel_ ? metricModel_->rowCount() : 0; }
 int TaskArtifactPanel::workflowStepRowCount() const { return exportTable_ ? exportTable_->rowCount() : 0; }
 
 void TaskArtifactPanel::configureTable(QTableWidget* table) const
@@ -280,17 +324,19 @@ void TaskArtifactPanel::previewSelectedArtifact()
     selectedArtifactId_.clear();
     selectedRelativePath_.clear();
 
-    if (!detailTabs_ || detailTabs_->currentIndex() != 0
-        || !artifactTable_ || artifactTable_->selectedItems().isEmpty()) {
+    if (!detailTabs_ || detailTabs_->currentIndex() != 1
+        || !artifactFileTable_ || !artifactFileTable_->currentIndex().isValid()) {
         imagePreviewLabel_->setVisible(true);
         previewText_->setVisible(false);
         return;
     }
-    const int row = artifactTable_->selectedItems().first()->row();
-    auto* item = artifactTable_->item(row, 1);
-    selectedRelativePath_ = item ? item->data(Qt::UserRole).toString() : QString();
-    selectedArtifactId_ = item ? item->data(Qt::UserRole + 1).toString() : QString();
-    const qint64 byteCount = item ? item->data(Qt::UserRole + 2).toLongLong() : 0;
+    const QModelIndex selected = artifactFileTable_->currentIndex();
+    selectedRelativePath_ =
+        selected.data(ArtifactFileTableModel::RelativePathRole).toString();
+    selectedArtifactId_ =
+        selected.data(ArtifactFileTableModel::ArtifactIdRole).toString();
+    const qint64 byteCount =
+        selected.data(ArtifactFileTableModel::ByteCountRole).toLongLong();
     if (selectedArtifactId_.isEmpty() || selectedRelativePath_.isEmpty()) {
         imagePreviewLabel_->setVisible(true);
         previewText_->setVisible(false);

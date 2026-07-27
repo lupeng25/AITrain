@@ -408,6 +408,9 @@ public:
     bool task(const TaskId& taskId, TaskSnapshot* result, QString* error = nullptr) const;
     Page<TaskSnapshot> tasks(const PageRequest& request, QString* error = nullptr) const;
     bool artifact(const ArtifactId& artifactId, ArtifactSnapshot* result, QString* error = nullptr) const;
+    Page<ArtifactFileSnapshot> artifactFiles(
+        const ArtifactId& artifactId, const PageRequest& request,
+        QString* error = nullptr) const;
     Page<ArtifactSnapshot> artifactsForTask(
         const TaskId& taskId, const PageRequest& request, QString* error = nullptr) const;
     Page<DeliveryEvidenceCandidate> deliveryEvidenceCandidates(

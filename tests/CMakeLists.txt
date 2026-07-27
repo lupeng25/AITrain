@@ -248,6 +248,8 @@ set_tests_properties(aitrain_project_summary_query_tests PROPERTIES
 add_executable(aitrain_task_artifact_presenter_tests
     ../src/app/src/TaskArtifactPresenter.h
     ../src/app/src/TaskArtifactPresenter.cpp
+    ../src/app/src/TaskArtifactTableModels.h
+    ../src/app/src/TaskArtifactTableModels.cpp
     tst_task_artifact_presenter.cpp
 )
 target_include_directories(aitrain_task_artifact_presenter_tests
@@ -523,12 +525,28 @@ add_executable(aitrain_delivery_acceptance_ui_tests
     ../src/app/src/DiagnosticBundlePresenter.cpp
     ../src/app/src/EnvironmentCheckPresenter.h
     ../src/app/src/EnvironmentCheckPresenter.cpp
+    ../src/app/src/EnvironmentPage.h
+    ../src/app/src/EnvironmentPage.cpp
+    ../src/app/src/EnvironmentPageController.h
+    ../src/app/src/EnvironmentPageController.cpp
     ../src/app/src/ModelRegistryPresenter.h
     ../src/app/src/ModelRegistryPresenter.cpp
+    ../src/app/src/ModelRegistryPage.h
+    ../src/app/src/ModelRegistryPage.cpp
+    ../src/app/src/ModelRegistryPageController.h
+    ../src/app/src/ModelRegistryPageController.cpp
     ../src/app/src/DatasetConversionUiModel.h
     ../src/app/src/DatasetConversionUiModel.cpp
     ../src/app/src/DatasetCatalogPresenter.h
     ../src/app/src/DatasetCatalogPresenter.cpp
+    ../src/app/src/DashboardPage.h
+    ../src/app/src/DashboardPage.cpp
+    ../src/app/src/DashboardPageController.h
+    ../src/app/src/DashboardPageController.cpp
+    ../src/app/src/DatasetPage.h
+    ../src/app/src/DatasetPage.cpp
+    ../src/app/src/DatasetPageController.h
+    ../src/app/src/DatasetPageController.cpp
     ../src/app/src/EvaluationReportView.h
     ../src/app/src/EvaluationReportView.cpp
     ../src/app/src/InfoPanel.h
@@ -541,10 +559,9 @@ add_executable(aitrain_delivery_acceptance_ui_tests
     ../src/app/src/MainWindow.cpp
     ../src/app/src/MainWindowActions.cpp
     ../src/app/src/MainWindowDatasetActions.cpp
-    ../src/app/src/MainWindowDeliveryActions.cpp
     ../src/app/src/MainWindowDatasetPage.cpp
-    ../src/app/src/MainWindowDeliveryPages.cpp
-    ../src/app/src/MainWindowModelActions.cpp
+    ../src/app/src/MainWindowRuntimePage.cpp
+    ../src/app/src/MainWindowDeliveryEvidencePage.cpp
     ../src/app/src/MainWindowModelPages.cpp
     ../src/app/src/MainWindowPages.cpp
     ../src/app/src/MainWindowPreviews.cpp
@@ -562,22 +579,50 @@ add_executable(aitrain_delivery_acceptance_ui_tests
     ../src/app/src/MetricsWidget.cpp
     ../src/app/src/RegistrationDialog.h
     ../src/app/src/RegistrationDialog.cpp
+    ../src/app/src/RuntimeDeliveryPage.h
+    ../src/app/src/RuntimeDeliveryPage.cpp
+    ../src/app/src/RuntimeDeliveryPageController.h
+    ../src/app/src/RuntimeDeliveryPageController.cpp
     ../src/app/src/ProjectSummaryPresenter.h
     ../src/app/src/ProjectSummaryPresenter.cpp
+    ../src/app/src/ProjectSessionController.h
+    ../src/app/src/ProjectSessionController.cpp
+    ../src/app/src/ProjectPage.h
+    ../src/app/src/ProjectPage.cpp
+    ../src/app/src/ProjectPageController.h
+    ../src/app/src/ProjectPageController.cpp
+    ../src/app/src/SettingsPage.h
+    ../src/app/src/SettingsPage.cpp
+    ../src/app/src/SettingsPageController.h
+    ../src/app/src/SettingsPageController.cpp
     ../src/app/src/Sidebar.h
     ../src/app/src/Sidebar.cpp
     ../src/app/src/StatusPill.h
     ../src/app/src/StatusPill.cpp
     ../src/app/src/TaskArtifactPanel.h
     ../src/app/src/TaskArtifactPanel.cpp
+    ../src/app/src/TaskArtifactPage.h
+    ../src/app/src/TaskArtifactPage.cpp
+    ../src/app/src/TaskArtifactPageController.h
+    ../src/app/src/TaskArtifactPageController.cpp
+    ../src/app/src/TaskArtifactTableModels.h
+    ../src/app/src/TaskArtifactTableModels.cpp
     ../src/app/src/TaskArtifactPresenter.h
     ../src/app/src/TaskArtifactPresenter.cpp
     ../src/app/src/TaskRuntimeController.h
     ../src/app/src/TaskRuntimeController.cpp
+    ../src/app/src/TrainingPage.h
+    ../src/app/src/TrainingPage.cpp
+    ../src/app/src/TrainingPageController.h
+    ../src/app/src/TrainingPageController.cpp
     ../src/app/src/WorkspaceReadModelCoordinator.h
     ../src/app/src/WorkspaceReadModelCoordinator.cpp
     ../src/app/src/DeliveryEvidencePresenter.h
     ../src/app/src/DeliveryEvidencePresenter.cpp
+    ../src/app/src/DeliveryEvidencePage.h
+    ../src/app/src/DeliveryEvidencePage.cpp
+    ../src/app/src/DeliveryEvidencePageController.h
+    ../src/app/src/DeliveryEvidencePageController.cpp
     ../src/app/src/WorkerClient.h
     ../src/app/src/WorkerClient.cpp
     ../src/app/src/WorkspaceRouter.h

@@ -4,6 +4,7 @@
 
 #include <QByteArray>
 #include <QString>
+#include <QVector>
 
 namespace aitrain {
 
@@ -30,6 +31,12 @@ struct ArtifactFilePreview final {
     bool truncated = false;
 };
 
+struct VerifiedArtifactDirectory final {
+    ArtifactId artifactId;
+    QString absolutePath;
+    QVector<VerifiedArtifactFile> files;
+};
+
 class VerifiedArtifactReader final {
 public:
     explicit VerifiedArtifactReader(QString committedArtifactRoot);
@@ -41,6 +48,10 @@ public:
     bool preview(const ArtifactFileSnapshot& expected,
         qint64 maxBytes,
         ArtifactFilePreview* result,
+        ArtifactReadError* readError = nullptr,
+        QString* error = nullptr) const;
+    bool verifyInventory(const ArtifactSnapshot& artifact,
+        VerifiedArtifactDirectory* result,
         ArtifactReadError* readError = nullptr,
         QString* error = nullptr) const;
 

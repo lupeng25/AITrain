@@ -2,6 +2,7 @@
 
 #include <QDateTime>
 
+#include <algorithm>
 #include <utility>
 
 namespace {
@@ -147,13 +148,45 @@ bool TaskArtifactPresenter::selectTask(const QString& taskIdText)
             details.failureAction = failureCatalogAction(model.task.failure.code);
         }
     }
-    for (const aitrain::ArtifactSnapshot& artifact : model.artifacts) {
+    details_ = details;
+    appendArtifacts(model.artifacts);
+    appendMetrics(model.metrics);
+    appendWorkflows(model.workflows);
+    artifactCursor_ = model.artifactNextCursor;
+    metricCursor_ = model.metricNextCursor;
+    workflowCursor_ = model.workflowNextCursor;
+    hasMoreArtifacts_ = model.artifactsHasMore;
+    hasMoreMetrics_ = model.metricsHasMore;
+    hasMoreWorkflows_ = model.workflowsHasMore;
+
+    details_.summary = QStringLiteral(" 任务 %1：%2 / %3 / %4，%5 个已提交产物文件，%6 个指标点，%7 个工作流步骤")
+        .arg(details_.taskId.left(8),
+            model.task.taskType.isEmpty() ? QStringLiteral("未记录类型") : model.task.taskType,
+            model.task.capabilityId.isEmpty() ? QStringLiteral("未记录能力") : model.task.capabilityId,
+            taskStateLabel(model.task.state))
+        .arg(details_.artifacts.size())
+        .arg(details_.metrics.size())
+        .arg(details_.workflowSteps.size());
+    if (model.task.failure.isFailure()) {
+        details_.summary.append(QStringLiteral("\n失败代码：%1\n失败摘要：%2\n建议：%3")
+            .arg(details_.failureCode, model.task.failure.message, details_.failureAction));
+    }
+
+    lastError_.clear();
+    emit detailsChanged();
+    return true;
+}
+
+void TaskArtifactPresenter::appendArtifacts(
+    const QVector<aitrain::ArtifactSnapshot>& artifacts)
+{
+    for (const aitrain::ArtifactSnapshot& artifact : artifacts) {
         if (artifact.files.isEmpty()) {
             ArtifactFileItem row;
             row.artifactId = artifact.id.toString();
             row.kind = artifact.kind;
             row.createdAt = localTimeText(artifact.createdAt);
-            details.artifacts.append(row);
+            details_.artifacts.append(row);
             continue;
         }
         for (const aitrain::ArtifactFileSnapshot& file : artifact.files) {
@@ -164,38 +197,159 @@ bool TaskArtifactPresenter::selectTask(const QString& taskIdText)
             row.sha256 = file.sha256;
             row.byteCount = file.byteCount;
             row.createdAt = localTimeText(artifact.createdAt);
-            details.artifacts.append(row);
+            details_.artifacts.append(row);
         }
     }
-    for (const aitrain::MetricSnapshot& metric : model.metrics) {
-        details.metrics.append({metric.name, metric.value, localTimeText(metric.occurredAt)});
+}
+
+void TaskArtifactPresenter::appendMetrics(
+    const QVector<aitrain::MetricSnapshot>& metrics)
+{
+    for (const aitrain::MetricSnapshot& metric : metrics) {
+        details_.metrics.append({metric.name, metric.value, localTimeText(metric.occurredAt)});
     }
-    for (const aitrain::WorkflowReadModel& workflow : model.workflows) {
+}
+
+void TaskArtifactPresenter::appendArtifactFiles(
+    const aitrain::ArtifactId& artifactId,
+    const QVector<aitrain::ArtifactFileSnapshot>& files)
+{
+    const auto artifact = std::find_if(details_.artifacts.cbegin(), details_.artifacts.cend(),
+        [&artifactId](const ArtifactFileItem& item) {
+            return item.artifactId == artifactId.toString();
+        });
+    if (artifact == details_.artifacts.cend()) return;
+    for (const aitrain::ArtifactFileSnapshot& file : files) {
+        details_.artifactFiles.append({artifact->artifactId, artifact->kind,
+            file.relativePath, file.sha256, file.byteCount, artifact->createdAt});
+    }
+}
+
+void TaskArtifactPresenter::appendWorkflows(
+    const QVector<aitrain::WorkflowReadModel>& workflows)
+{
+    for (const aitrain::WorkflowReadModel& workflow : workflows) {
         for (const aitrain::WorkflowStepSnapshot& step : workflow.steps) {
-            details.workflowSteps.append({workflow.run.id.toString(), workflow.run.templateId,
+            details_.workflowSteps.append({workflow.run.id.toString(), workflow.run.templateId,
                 step.ordinal, step.kind, aitrain::workflowStepStateToString(step.state),
                 step.backend, step.outputArtifactId.toString()});
         }
     }
+}
 
-    details.summary = QStringLiteral(" 任务 %1：%2 / %3 / %4，%5 个已提交产物文件，%6 个指标点，%7 个工作流步骤")
-        .arg(details.taskId.left(8),
-            model.task.taskType.isEmpty() ? QStringLiteral("未记录类型") : model.task.taskType,
-            model.task.capabilityId.isEmpty() ? QStringLiteral("未记录能力") : model.task.capabilityId,
-            taskStateLabel(model.task.state))
-        .arg(details.artifacts.size())
-        .arg(details.metrics.size())
-        .arg(details.workflowSteps.size());
-    if (model.task.failure.isFailure()) {
-        details.summary.append(QStringLiteral("\n失败代码：%1\n失败摘要：%2\n建议：%3")
-            .arg(details.failureCode, model.task.failure.message, details.failureAction));
+bool TaskArtifactPresenter::loadMoreArtifacts()
+{
+    aitrain::TaskId taskId;
+    QString error;
+    if (!hasMoreArtifacts_ || !queryService_
+        || !aitrain::TaskId::parse(details_.taskId, &taskId, &error)) return false;
+    const auto page = queryService_->taskArtifacts(taskId, {50, artifactCursor_}, &error);
+    if (!error.isEmpty()) {
+        fail(error);
+        return false;
     }
-
-    details_ = details;
+    appendArtifacts(page.items);
+    artifactCursor_ = page.nextCursor;
+    hasMoreArtifacts_ = page.hasMore;
     lastError_.clear();
     emit detailsChanged();
     return true;
 }
+
+bool TaskArtifactPresenter::selectArtifact(const QString& artifactIdText)
+{
+    aitrain::ArtifactId artifactId;
+    QString error;
+    if (!queryService_ || !aitrain::ArtifactId::parse(artifactIdText, &artifactId, &error)) {
+        fail(error.isEmpty() ? QStringLiteral("Artifact 文件查询服务不可用。") : error);
+        return false;
+    }
+    const auto artifact = std::find_if(details_.artifacts.cbegin(), details_.artifacts.cend(),
+        [&artifactIdText](const ArtifactFileItem& item) {
+            return item.artifactId == artifactIdText;
+        });
+    if (artifact == details_.artifacts.cend()) {
+        fail(QStringLiteral("所选 Artifact 不属于当前任务页。"));
+        return false;
+    }
+    const auto page = queryService_->artifactFiles(artifactId, {100, {}}, &error);
+    if (!error.isEmpty()) {
+        fail(error);
+        return false;
+    }
+    details_.selectedArtifactId = artifactIdText;
+    details_.artifactFiles.clear();
+    appendArtifactFiles(artifactId, page.items);
+    artifactFileCursor_ = page.nextCursor;
+    hasMoreArtifactFiles_ = page.hasMore;
+    lastError_.clear();
+    emit detailsChanged();
+    return true;
+}
+
+bool TaskArtifactPresenter::loadMoreArtifactFiles()
+{
+    aitrain::ArtifactId artifactId;
+    QString error;
+    if (!hasMoreArtifactFiles_ || !queryService_
+        || !aitrain::ArtifactId::parse(
+            details_.selectedArtifactId, &artifactId, &error)) return false;
+    const auto page =
+        queryService_->artifactFiles(artifactId, {100, artifactFileCursor_}, &error);
+    if (!error.isEmpty()) {
+        fail(error);
+        return false;
+    }
+    appendArtifactFiles(artifactId, page.items);
+    artifactFileCursor_ = page.nextCursor;
+    hasMoreArtifactFiles_ = page.hasMore;
+    lastError_.clear();
+    emit detailsChanged();
+    return true;
+}
+
+bool TaskArtifactPresenter::loadMoreMetrics()
+{
+    aitrain::TaskId taskId;
+    QString error;
+    if (!hasMoreMetrics_ || !queryService_
+        || !aitrain::TaskId::parse(details_.taskId, &taskId, &error)) return false;
+    const auto page = queryService_->taskMetrics(taskId, {100, metricCursor_}, &error);
+    if (!error.isEmpty()) {
+        fail(error);
+        return false;
+    }
+    appendMetrics(page.items);
+    metricCursor_ = page.nextCursor;
+    hasMoreMetrics_ = page.hasMore;
+    lastError_.clear();
+    emit detailsChanged();
+    return true;
+}
+
+bool TaskArtifactPresenter::loadMoreWorkflows()
+{
+    aitrain::TaskId taskId;
+    QString error;
+    if (!hasMoreWorkflows_ || !queryService_
+        || !aitrain::TaskId::parse(details_.taskId, &taskId, &error)) return false;
+    const auto page = queryService_->taskWorkflows(taskId, {50, workflowCursor_}, &error);
+    if (!error.isEmpty()) {
+        fail(error);
+        return false;
+    }
+    appendWorkflows(page.items);
+    workflowCursor_ = page.nextCursor;
+    hasMoreWorkflows_ = page.hasMore;
+    lastError_.clear();
+    emit detailsChanged();
+    return true;
+}
+
+bool TaskArtifactPresenter::hasMoreArtifacts() const { return hasMoreArtifacts_; }
+bool TaskArtifactPresenter::hasMoreArtifactFiles() const { return hasMoreArtifactFiles_; }
+bool TaskArtifactPresenter::hasMoreMetrics() const { return hasMoreMetrics_; }
+bool TaskArtifactPresenter::hasMoreWorkflows() const { return hasMoreWorkflows_; }
 
 bool TaskArtifactPresenter::previewArtifact(const QString& artifactIdText,
     const QString& relativePath,
@@ -237,6 +391,14 @@ bool TaskArtifactPresenter::previewArtifactAsync(const QString& artifactIdText,
 void TaskArtifactPresenter::clearSelection()
 {
     details_ = TaskArtifactDetails();
+    artifactCursor_.clear();
+    artifactFileCursor_.clear();
+    metricCursor_.clear();
+    workflowCursor_.clear();
+    hasMoreArtifacts_ = false;
+    hasMoreArtifactFiles_ = false;
+    hasMoreMetrics_ = false;
+    hasMoreWorkflows_ = false;
     emit detailsChanged();
 }
 

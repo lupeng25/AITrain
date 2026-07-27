@@ -821,6 +821,14 @@ QString ArtifactStore::rootPath() const
     return rootPath_;
 }
 
+bool ArtifactStore::openVerified(const ArtifactSnapshot& artifact,
+    VerifiedArtifactDirectory* result, ArtifactReadError* readError,
+    QString* error) const
+{
+    return VerifiedArtifactReader(artifactPath(artifact.id))
+        .verifyInventory(artifact, result, readError, error);
+}
+
 QString ArtifactStore::artifactPath(const ArtifactId& artifactId) const
 {
     if (!artifactId.isValid()) return {};

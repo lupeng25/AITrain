@@ -1,4 +1,6 @@
 #include "MainWindow.h"
+#include "TrainingPage.h"
+#include "TrainingPageController.h"
 #include "TaskRuntimeController.h"
 
 #include "EvaluationReportView.h"
@@ -344,14 +346,10 @@ QWidget* buildAnomalyArgsPanel()
 }
 } // namespace
 
-QLabel* MainWindow::trainingLiveValueLabel(const QString& objectName) const
-{
-    return findChild<QLabel*>(objectName);
-}
-
 QWidget* MainWindow::buildTrainingPage()
 {
-    auto* page = new QWidget;
+    trainingPage_ = new TrainingWorkspacePage;
+    auto* page = trainingPage_;
     auto* layout = new QVBoxLayout(page);
     layout->setContentsMargins(18, 0, 18, 18);
     layout->setSpacing(12);
@@ -394,101 +392,62 @@ QWidget* MainWindow::buildTrainingPage()
     }
     layout->addWidget(flowRail);
 
-    capabilityCombo_ = new QComboBox;
-    taskTypeCombo_ = new QComboBox;
-    trainingBackendCombo_ = new QComboBox;
-    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("ultralytics_yolo_detect")), QStringLiteral("ultralytics_yolo_detect"));
-    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("ultralytics_yolo_segment")), QStringLiteral("ultralytics_yolo_segment"));
-    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("ultralytics_yolo_obb")), QStringLiteral("ultralytics_yolo_obb"));
-    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("smp_semantic_segmentation")), QStringLiteral("smp_semantic_segmentation"));
-    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("anomalib_patchcore")), QStringLiteral("anomalib_patchcore"));
-    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("anomalib_efficientad")), QStringLiteral("anomalib_efficientad"));
-    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("paddleocr_det_official")), QStringLiteral("paddleocr_det_official"));
-    trainingBackendCombo_->addItem(backendLabel(QStringLiteral("paddleocr_rec_official")), QStringLiteral("paddleocr_rec_official"));
-    modelPresetCombo_ = new QComboBox;
-    modelPresetCombo_->setEditable(true);
-    modelPresetCombo_->addItems(modelPresetItemsForBackend(trainingBackendCombo_->currentData().toString()));
-    epochsEdit_ = new QLineEdit(QStringLiteral("20"));
-    batchEdit_ = new QLineEdit(QStringLiteral("8"));
-    imageSizeEdit_ = new QLineEdit(QStringLiteral("640"));
-    gridSizeEdit_ = new QLineEdit(QStringLiteral("4"));
-    horizontalFlipCheck_ = new QCheckBox(QStringLiteral("水平翻转增强"));
-    colorJitterCheck_ = new QCheckBox(QStringLiteral("亮度扰动增强"));
-    connect(capabilityCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
-        taskTypeCombo_->clear();
-        const aitrain::CapabilityDescriptor capability =
-            aitrain::BuiltinCapabilityRegistry::instance().capability(capabilityCombo_->currentData().toString());
-        if (!capability.id.isEmpty()) {
-            addTaskTypeItems(taskTypeCombo_, capability.taskTypes);
-        }
-        refreshTrainingDefaults();
-    });
-    connect(taskTypeCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::refreshTrainingDefaults);
-    connect(trainingBackendCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
-        if (modelPresetCombo_ && trainingBackendCombo_) {
-            const QString backend = trainingBackendCombo_->currentData().toString();
-            {
-                QSignalBlocker block(modelPresetCombo_);
-                modelPresetCombo_->clear();
-                modelPresetCombo_->addItems(modelPresetItemsForBackend(backend));
-                modelPresetCombo_->setCurrentText(defaultModelForBackend(backend));
-            }
-        }
-        const QString normalized = trainingBackendCombo_ ? trainingBackendCombo_->currentData().toString().trimmed().toLower() : QString();
-        if (batchEdit_) {
-            const bool efficientAd = normalized == QStringLiteral("anomalib_efficientad");
-            if (efficientAd && batchEdit_->text().trimmed() != QStringLiteral("1")) {
-                QSignalBlocker block(batchEdit_);
-                batchEdit_->setText(QStringLiteral("1"));
-            }
-            batchEdit_->setEnabled(!efficientAd);
-            batchEdit_->setToolTip(efficientAd
-                ? uiText("Anomalib 2.5 EfficientAD 训练 batchSize 固定为 1。")
-                : QString());
-        }
-        if (auto* yoloPanel = findChild<QWidget*>(QStringLiteral("YoloOfficialArgsGroup"))) {
-            yoloPanel->setVisible(yoloPanel->property("advancedExpanded").toBool()
-                && normalized.startsWith(QStringLiteral("ultralytics_yolo")));
-        }
-        if (auto* smpPanel = findChild<QWidget*>(QStringLiteral("SmpSemanticArgsGroup"))) {
-            smpPanel->setVisible(smpPanel->property("advancedExpanded").toBool()
-                && normalized == QStringLiteral("smp_semantic_segmentation"));
-        }
-        if (auto* anomalyPanel = findChild<QWidget*>(QStringLiteral("AnomalyDetectionArgsGroup"))) {
-            anomalyPanel->setVisible(anomalyPanel->property("advancedExpanded").toBool()
-                && (normalized == QStringLiteral("anomalib_patchcore")
-                    || normalized == QStringLiteral("anomalib_efficientad")));
-        }
-        if (auto* caption = findChild<QLabel*>(QStringLiteral("TrainingLiveCaption_TrainingMapValue"))) {
-            caption->setText((normalized == QStringLiteral("anomalib_patchcore") || normalized == QStringLiteral("anomalib_efficientad"))
-                ? QStringLiteral("Score/F1")
-                : QStringLiteral("mAP"));
-        }
-        updateTrainingSelectionSummary();
-    });
-    connect(modelPresetCombo_, &QComboBox::currentTextChanged, this, &MainWindow::updateTrainingSelectionSummary);
-    connect(epochsEdit_, &QLineEdit::textChanged, this, &MainWindow::updateTrainingSelectionSummary);
-    connect(batchEdit_, &QLineEdit::textChanged, this, &MainWindow::updateTrainingSelectionSummary);
-    connect(imageSizeEdit_, &QLineEdit::textChanged, this, &MainWindow::updateTrainingSelectionSummary);
-    trainingDatasetSummaryLabel_ = inlineStatusLabel(QStringLiteral("当前数据集：未选择。请先在数据集页导入并通过校验。"));
-    trainingDatasetSummaryLabel_->setMinimumHeight(34);
-    trainingDatasetSummaryLabel_->setWordWrap(true);
-    allowLabelToShrink(trainingDatasetSummaryLabel_);
-    trainingBackendHintLabel_ = mutedLabel(QStringLiteral("生产训练仅使用官方后端：Ultralytics YOLO 或 PaddleOCR official adapter。"));
-    trainingBackendHintLabel_->setWordWrap(true);
-    allowLabelToShrink(trainingBackendHintLabel_);
-    trainingRunSummaryLabel_ = inlineStatusLabel(QStringLiteral("等待配置训练实验。"));
-    trainingRunSummaryLabel_->setMinimumHeight(42);
-    allowLabelToShrink(trainingRunSummaryLabel_);
+    auto* capabilityCombo = new QComboBox;
+    capabilityCombo->setObjectName(QStringLiteral("TrainingCapability"));
+    auto* taskTypeCombo = new QComboBox;
+    taskTypeCombo->setObjectName(QStringLiteral("TrainingTaskType"));
+    auto* trainingBackendCombo = new QComboBox;
+    trainingBackendCombo->setObjectName(QStringLiteral("TrainingBackend"));
+    for (const QString& backend : {
+             QStringLiteral("ultralytics_yolo_detect"),
+             QStringLiteral("ultralytics_yolo_segment"),
+             QStringLiteral("ultralytics_yolo_obb"),
+             QStringLiteral("smp_semantic_segmentation"),
+             QStringLiteral("anomalib_patchcore"),
+             QStringLiteral("anomalib_efficientad"),
+             QStringLiteral("paddleocr_det_official"),
+             QStringLiteral("paddleocr_rec_official")}) {
+        trainingBackendCombo->addItem(backendLabel(backend), backend);
+    }
+    auto* modelPresetCombo = new QComboBox;
+    modelPresetCombo->setObjectName(QStringLiteral("TrainingModelPreset"));
+    modelPresetCombo->setEditable(true);
+    auto* epochsEdit = new QLineEdit(QStringLiteral("20"));
+    epochsEdit->setObjectName(QStringLiteral("TrainingEpochs"));
+    auto* batchEdit = new QLineEdit(QStringLiteral("8"));
+    batchEdit->setObjectName(QStringLiteral("TrainingBatchSize"));
+    auto* imageSizeEdit = new QLineEdit(QStringLiteral("640"));
+    imageSizeEdit->setObjectName(QStringLiteral("TrainingImageSize"));
+    auto* gridSizeEdit = new QLineEdit(QStringLiteral("4"));
+    gridSizeEdit->setObjectName(QStringLiteral("TrainingGridSize"));
+    auto* horizontalFlipCheck = new QCheckBox(QStringLiteral("水平翻转增强"));
+    horizontalFlipCheck->setObjectName(QStringLiteral("TrainingHorizontalFlip"));
+    auto* colorJitterCheck = new QCheckBox(QStringLiteral("亮度扰动增强"));
+    colorJitterCheck->setObjectName(QStringLiteral("TrainingColorJitter"));
+    auto* trainingDatasetSummaryLabel = inlineStatusLabel(
+        QStringLiteral("当前数据集：未选择。请先在数据集页导入并通过校验。"));
+    trainingDatasetSummaryLabel->setMinimumHeight(34);
+    trainingDatasetSummaryLabel->setWordWrap(true);
+    allowLabelToShrink(trainingDatasetSummaryLabel);
+    auto* trainingBackendHintLabel = mutedLabel(
+        QStringLiteral("生产训练仅使用产品合同声明的官方后端。"));
+    trainingBackendHintLabel->setObjectName(QStringLiteral("TrainingBackendHint"));
+    trainingBackendHintLabel->setWordWrap(true);
+    allowLabelToShrink(trainingBackendHintLabel);
+    auto* trainingRunSummaryLabel =
+        inlineStatusLabel(QStringLiteral("等待配置训练实验。"));
+    trainingRunSummaryLabel->setMinimumHeight(42);
+    allowLabelToShrink(trainingRunSummaryLabel);
 
     auto* startButton = primaryButton(QStringLiteral("启动训练"));
     auto* cancelButton = dangerButton(QStringLiteral("取消任务"));
-    connect(startButton, &QPushButton::clicked, this, &MainWindow::startTraining);
+    connect(startButton, &QPushButton::clicked,
+        page, &TrainingWorkspacePage::startRequested);
     connect(cancelButton, &QPushButton::clicked,
-        taskController_, &TaskRuntimeController::cancel);
+        page, &TrainingWorkspacePage::cancelRequested);
 
-    trainingDatasetSummaryLabel_->setObjectName(QStringLiteral("TrainingDatasetNote"));
-    trainingRunSummaryLabel_->setObjectName(QStringLiteral("TrainingRunNote"));
+    trainingDatasetSummaryLabel->setObjectName(QStringLiteral("TrainingDatasetNote"));
+    trainingRunSummaryLabel->setObjectName(QStringLiteral("TrainingRunNote"));
 
     auto* headerPanel = new QFrame;
     headerPanel->setObjectName(QStringLiteral("TrainingRunHeader"));
@@ -526,19 +485,19 @@ QWidget* MainWindow::buildTrainingPage()
     setupPanel->setMinimumWidth(0);
     setupPanel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     setupPanel->bodyLayout()->addWidget(mutedLabel(uiText("实验参数快照")));
-    setupPanel->bodyLayout()->addWidget(trainingDatasetSummaryLabel_);
+    setupPanel->bodyLayout()->addWidget(trainingDatasetSummaryLabel);
     auto* form = new QFormLayout;
     form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     form->setRowWrapPolicy(QFormLayout::WrapLongRows);
     form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     form->setHorizontalSpacing(14);
     form->setVerticalSpacing(10);
-    form->addRow(QStringLiteral("任务类型"), taskTypeCombo_);
-    form->addRow(QStringLiteral("训练后端"), trainingBackendCombo_);
-    form->addRow(QStringLiteral("模型预设"), modelPresetCombo_);
-    form->addRow(QStringLiteral("Epochs"), epochsEdit_);
-    form->addRow(QStringLiteral("Batch Size"), batchEdit_);
-    form->addRow(QStringLiteral("Image Size"), imageSizeEdit_);
+    form->addRow(QStringLiteral("任务类型"), taskTypeCombo);
+    form->addRow(QStringLiteral("训练后端"), trainingBackendCombo);
+    form->addRow(QStringLiteral("模型预设"), modelPresetCombo);
+    form->addRow(QStringLiteral("Epochs"), epochsEdit);
+    form->addRow(QStringLiteral("Batch Size"), batchEdit);
+    form->addRow(QStringLiteral("Image Size"), imageSizeEdit);
     setupPanel->bodyLayout()->addLayout(form);
     auto* yoloOfficialArgsGroup = new QGroupBox(uiText("YOLO 官方高级参数"));
     yoloOfficialArgsGroup->setObjectName(QStringLiteral("YoloOfficialArgsGroup"));
@@ -561,13 +520,14 @@ QWidget* MainWindow::buildTrainingPage()
     anomalyArgsLayout->setSpacing(8);
     anomalyArgsLayout->addWidget(buildAnomalyArgsPanel());
     setupPanel->bodyLayout()->addWidget(anomalyArgsGroup);
-    const QString normalizedBackend = trainingBackendCombo_ ? trainingBackendCombo_->currentData().toString().trimmed().toLower() : QString();
+    const QString normalizedBackend =
+        trainingBackendCombo->currentData().toString().trimmed().toLower();
     yoloOfficialArgsGroup->setVisible(normalizedBackend.startsWith(QStringLiteral("ultralytics_yolo")));
     smpArgsGroup->setVisible(normalizedBackend == QStringLiteral("smp_semantic_segmentation"));
     anomalyArgsGroup->setVisible(normalizedBackend == QStringLiteral("anomalib_patchcore")
         || normalizedBackend == QStringLiteral("anomalib_efficientad"));
     setupPanel->bodyLayout()->addWidget(mutedLabel(QStringLiteral("当前模型能力说明")));
-    setupPanel->bodyLayout()->addWidget(trainingBackendHintLabel_);
+    setupPanel->bodyLayout()->addWidget(trainingBackendHintLabel);
 
     auto* advancedGroup = new QGroupBox(QStringLiteral("高级 / 诊断后端"));
     auto* advancedForm = new QFormLayout(advancedGroup);
@@ -575,14 +535,14 @@ QWidget* MainWindow::buildTrainingPage()
     advancedForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     advancedForm->setHorizontalSpacing(14);
     advancedForm->setVerticalSpacing(10);
-    advancedForm->addRow(QStringLiteral("内置能力"), capabilityCombo_);
-    advancedForm->addRow(QStringLiteral("Grid Size"), gridSizeEdit_);
+    advancedForm->addRow(QStringLiteral("内置能力"), capabilityCombo);
+    advancedForm->addRow(QStringLiteral("Grid Size"), gridSizeEdit);
     auto* augmentRow = new QWidget;
     auto* augmentLayout = new QHBoxLayout(augmentRow);
     augmentLayout->setContentsMargins(0, 0, 0, 0);
     augmentLayout->setSpacing(14);
-    augmentLayout->addWidget(horizontalFlipCheck_);
-    augmentLayout->addWidget(colorJitterCheck_);
+    augmentLayout->addWidget(horizontalFlipCheck);
+    augmentLayout->addWidget(colorJitterCheck);
     augmentLayout->addStretch();
     advancedForm->addRow(QStringLiteral("Augment"), augmentRow);
     auto* advancedToggleButton = new QPushButton(uiText("展开高级参数"));
@@ -598,13 +558,15 @@ QWidget* MainWindow::buildTrainingPage()
     anomalyArgsGroup->setProperty("advancedExpanded", false);
     advancedGroup->setVisible(false);
     connect(advancedToggleButton, &QPushButton::toggled, this,
-        [advancedToggleButton, advancedGroup, yoloOfficialArgsGroup, smpArgsGroup, anomalyArgsGroup, this](bool expanded) {
+        [advancedToggleButton, advancedGroup, yoloOfficialArgsGroup,
+            smpArgsGroup, anomalyArgsGroup, trainingBackendCombo](bool expanded) {
             advancedToggleButton->setText(expanded ? uiText("收起高级参数") : uiText("展开高级参数"));
             advancedGroup->setVisible(expanded);
             yoloOfficialArgsGroup->setProperty("advancedExpanded", expanded);
             smpArgsGroup->setProperty("advancedExpanded", expanded);
             anomalyArgsGroup->setProperty("advancedExpanded", expanded);
-            const QString backend = trainingBackendCombo_ ? trainingBackendCombo_->currentData().toString().trimmed().toLower() : QString();
+            const QString backend =
+                trainingBackendCombo->currentData().toString().trimmed().toLower();
             yoloOfficialArgsGroup->setVisible(expanded && backend.startsWith(QStringLiteral("ultralytics_yolo")));
             smpArgsGroup->setVisible(expanded && backend == QStringLiteral("smp_semantic_segmentation"));
             anomalyArgsGroup->setVisible(expanded && (backend == QStringLiteral("anomalib_patchcore")
@@ -619,22 +581,25 @@ QWidget* MainWindow::buildTrainingPage()
     setupScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setupScroll->setMinimumWidth(240);
     setupScroll->setMaximumWidth(280);
-    connect(editConfigButton, &QPushButton::clicked, this, [setupScroll, taskTypeCombo = taskTypeCombo_]() {
+    connect(editConfigButton, &QPushButton::clicked, this,
+        [setupScroll, taskTypeCombo]() {
         setupScroll->ensureWidgetVisible(taskTypeCombo);
         taskTypeCombo->setFocus();
     });
 
     auto* monitorPanel = new InfoPanel(uiText("训练监控"));
     monitorPanel->setMinimumWidth(0);
-    trainingPhaseLabel_ = inlineStatusLabel(uiText("阶段：等待启动"));
-    trainingPhaseLabel_->setObjectName(QStringLiteral("TrainingPhaseStatus"));
-    monitorPanel->bodyLayout()->addWidget(trainingPhaseLabel_);
+    auto* trainingPhaseLabel = inlineStatusLabel(uiText("阶段：等待启动"));
+    trainingPhaseLabel->setObjectName(QStringLiteral("TrainingPhaseStatus"));
+    monitorPanel->bodyLayout()->addWidget(trainingPhaseLabel);
 
     auto* liveGrid = new QGridLayout;
     liveGrid->setContentsMargins(0, 0, 0, 0);
     liveGrid->setHorizontalSpacing(8);
     liveGrid->setVerticalSpacing(0);
-    auto addLiveCard = [liveGrid](int row, int column, const QString& caption, const QString& valueObjectName, QLabel** valueLabel) {
+    auto addLiveCard = [liveGrid](int row, int column,
+                           const QString& caption,
+                           const QString& valueObjectName) {
         auto* frame = new QFrame;
         frame->setObjectName(QStringLiteral("TrainingLivePanel_%1").arg(valueObjectName));
         frame->setProperty("trainingLiveRole", QStringLiteral("panel"));
@@ -659,23 +624,23 @@ QWidget* MainWindow::buildTrainingPage()
         layout->addWidget(value);
         layout->addWidget(label);
         liveGrid->addWidget(frame, row, column);
-        *valueLabel = value;
     };
     for (int column = 0; column < 6; ++column) {
         liveGrid->setColumnStretch(column, 1);
     }
-    addLiveCard(0, 0, QStringLiteral("Epoch"), QStringLiteral("TrainingEpochValue"), &trainingEpochValueLabel_);
-    addLiveCard(0, 1, QStringLiteral("Batch"), QStringLiteral("TrainingBatchValue"), &trainingBatchValueLabel_);
-    addLiveCard(0, 2, QStringLiteral("ETA"), QStringLiteral("TrainingEtaValue"), &trainingEtaValueLabel_);
-    addLiveCard(0, 3, QStringLiteral("Device"), QStringLiteral("TrainingDeviceValue"), &trainingDeviceValueLabel_);
-    addLiveCard(0, 4, QStringLiteral("Loss"), QStringLiteral("TrainingLossValue"), &trainingLossValueLabel_);
-    addLiveCard(0, 5, QStringLiteral("mAP"), QStringLiteral("TrainingMapValue"), &trainingMapValueLabel_);
+    addLiveCard(0, 0, QStringLiteral("Epoch"), QStringLiteral("TrainingEpochValue"));
+    addLiveCard(0, 1, QStringLiteral("Batch"), QStringLiteral("TrainingBatchValue"));
+    addLiveCard(0, 2, QStringLiteral("ETA"), QStringLiteral("TrainingEtaValue"));
+    addLiveCard(0, 3, QStringLiteral("Device"), QStringLiteral("TrainingDeviceValue"));
+    addLiveCard(0, 4, QStringLiteral("Loss"), QStringLiteral("TrainingLossValue"));
+    addLiveCard(0, 5, QStringLiteral("mAP"), QStringLiteral("TrainingMapValue"));
     monitorPanel->bodyLayout()->addLayout(liveGrid);
 
-    progressBar_ = new QProgressBar;
-    progressBar_->setRange(0, 100);
-    progressBar_->setValue(0);
-    monitorPanel->bodyLayout()->addWidget(progressBar_);
+    auto* progressBar = new QProgressBar;
+    progressBar->setObjectName(QStringLiteral("TrainingProgress"));
+    progressBar->setRange(0, 100);
+    progressBar->setValue(0);
+    monitorPanel->bodyLayout()->addWidget(progressBar);
 
     auto* artifactPanel = new InfoPanel(QStringLiteral("任务与产物"));
     artifactPanel->setMinimumWidth(0);
@@ -685,42 +650,48 @@ QWidget* MainWindow::buildTrainingPage()
     allowLabelToShrink(artifactBoundaryLabel);
     artifactPanel->bodyLayout()->addWidget(artifactGuideLabel);
     artifactPanel->bodyLayout()->addWidget(artifactBoundaryLabel);
-    latestCheckpointLabel_ = mutedLabel(QStringLiteral("最新 checkpoint：暂无"));
-    latestOnnxLabel_ = mutedLabel(uiText("最新 ONNX：暂无"));
-    latestReportLabel_ = mutedLabel(uiText("训练报告：暂无"));
-    latestPreviewLabel_ = mutedLabel(QStringLiteral("最新预览：暂无"));
-    allowLabelToShrink(latestCheckpointLabel_);
-    allowLabelToShrink(latestOnnxLabel_);
-    allowLabelToShrink(latestReportLabel_);
-    allowLabelToShrink(latestPreviewLabel_);
-    latestPreviewImageLabel_ = new QLabel(QStringLiteral("暂无预览图"));
-    latestPreviewImageLabel_->setObjectName(QStringLiteral("MutedText"));
-    latestPreviewImageLabel_->setAlignment(Qt::AlignCenter);
-    latestPreviewImageLabel_->setMinimumHeight(120);
-    latestPreviewImageLabel_->setFrameShape(QFrame::StyledPanel);
-    latestPreviewImageLabel_->setScaledContents(false);
-    artifactPanel->bodyLayout()->addWidget(latestCheckpointLabel_);
-    artifactPanel->bodyLayout()->addWidget(latestOnnxLabel_);
-    artifactPanel->bodyLayout()->addWidget(latestReportLabel_);
-    artifactPanel->bodyLayout()->addWidget(latestPreviewLabel_);
-    artifactPanel->bodyLayout()->addWidget(latestPreviewImageLabel_);
+    auto* latestCheckpointLabel =
+        mutedLabel(QStringLiteral("最新 checkpoint：暂无"));
+    latestCheckpointLabel->setObjectName(
+        QStringLiteral("TrainingLatestCheckpoint"));
+    auto* latestOnnxLabel = mutedLabel(uiText("最新 ONNX：暂无"));
+    latestOnnxLabel->setObjectName(QStringLiteral("TrainingLatestOnnx"));
+    auto* latestReportLabel = mutedLabel(uiText("训练报告：暂无"));
+    latestReportLabel->setObjectName(QStringLiteral("TrainingLatestReport"));
+    auto* latestPreviewLabel = mutedLabel(QStringLiteral("最新预览：暂无"));
+    latestPreviewLabel->setObjectName(QStringLiteral("TrainingLatestPreview"));
+    allowLabelToShrink(latestCheckpointLabel);
+    allowLabelToShrink(latestOnnxLabel);
+    allowLabelToShrink(latestReportLabel);
+    allowLabelToShrink(latestPreviewLabel);
+    auto* latestPreviewImageLabel = new QLabel(QStringLiteral("暂无预览图"));
+    latestPreviewImageLabel->setObjectName(QStringLiteral("MutedText"));
+    latestPreviewImageLabel->setAlignment(Qt::AlignCenter);
+    latestPreviewImageLabel->setMinimumHeight(120);
+    latestPreviewImageLabel->setFrameShape(QFrame::StyledPanel);
+    latestPreviewImageLabel->setScaledContents(false);
+    artifactPanel->bodyLayout()->addWidget(latestCheckpointLabel);
+    artifactPanel->bodyLayout()->addWidget(latestOnnxLabel);
+    artifactPanel->bodyLayout()->addWidget(latestReportLabel);
+    artifactPanel->bodyLayout()->addWidget(latestPreviewLabel);
+    artifactPanel->bodyLayout()->addWidget(latestPreviewImageLabel);
     artifactPanel->bodyLayout()->addStretch();
 
     auto* logPanel = new InfoPanel(QStringLiteral("训练日志"));
     logPanel->setMinimumWidth(0);
-    logEdit_ = new QTextEdit;
-    logEdit_->setObjectName(QStringLiteral("LogView"));
-    logEdit_->setReadOnly(true);
-    logEdit_->setLineWrapMode(QTextEdit::WidgetWidth);
-    logEdit_->document()->setMaximumBlockCount(2000);
-    logEdit_->setMinimumWidth(0);
-    logEdit_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
-    logPanel->bodyLayout()->addWidget(logEdit_);
+    auto* logEdit = new QTextEdit;
+    logEdit->setObjectName(QStringLiteral("LogView"));
+    logEdit->setReadOnly(true);
+    logEdit->setLineWrapMode(QTextEdit::WidgetWidth);
+    logEdit->document()->setMaximumBlockCount(2000);
+    logEdit->setMinimumWidth(0);
+    logEdit->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
+    logPanel->bodyLayout()->addWidget(logEdit);
 
     auto* metricsPanel = new InfoPanel(uiText("指标曲线"));
     metricsPanel->setMinimumWidth(0);
-    metricsWidget_ = new MetricsWidget;
-    metricsPanel->bodyLayout()->addWidget(metricsWidget_, 1);
+    auto* metricsWidget = new MetricsWidget;
+    metricsPanel->bodyLayout()->addWidget(metricsWidget, 1);
 
     auto* detailTabs = new QTabWidget;
     detailTabs->setObjectName(QStringLiteral("TrainingDetailTabs"));
@@ -746,5 +717,6 @@ QWidget* MainWindow::buildTrainingPage()
 
     layout->addWidget(headerPanel);
     layout->addWidget(bodySplitter, 1);
+    trainingPageController_->attach(page);
     return page;
 }

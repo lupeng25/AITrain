@@ -276,6 +276,25 @@ void StorageTests::paginatesTaskHistoryWithTypedKeysetCursors()
     for (const auto& item : artifactThird.items) actualArtifacts.append(item.id);
     QCOMPARE(actualArtifacts, expectedArtifacts);
 
+    const aitrain::ArtifactId filesArtifactId = aitrain::ArtifactId::create();
+    QVector<aitrain::ArtifactFileSnapshot> files;
+    for (int index = 0; index < 5; ++index) {
+        files.append({QStringLiteral("files/%1.json").arg(index),
+            QString(64, QLatin1Char(static_cast<char>('a' + index))), index + 1});
+    }
+    QVERIFY2(storage.recordArtifactWithFiles(filesArtifactId, task.id,
+        QStringLiteral("file_inventory"), files, base.addSecs(1), &error),
+        qPrintable(error));
+    const auto fileFirst = storage.artifactFiles(filesArtifactId, {2, {}}, &error);
+    const auto fileSecond =
+        storage.artifactFiles(filesArtifactId, {2, fileFirst.nextCursor}, &error);
+    const auto fileThird =
+        storage.artifactFiles(filesArtifactId, {2, fileSecond.nextCursor}, &error);
+    QCOMPARE(fileFirst.items.size() + fileSecond.items.size() + fileThird.items.size(), 5);
+    QCOMPARE(fileFirst.items.first().relativePath, QStringLiteral("files/0.json"));
+    QCOMPARE(fileThird.items.last().relativePath, QStringLiteral("files/4.json"));
+    QVERIFY(!fileThird.hasMore);
+
     const auto metricFirst = storage.metricsForTask(task.id, {2, {}}, &error);
     const auto metricSecond =
         storage.metricsForTask(task.id, {2, metricFirst.nextCursor}, &error);
@@ -297,6 +316,10 @@ void StorageTests::paginatesTaskHistoryWithTypedKeysetCursors()
 
     error.clear();
     QVERIFY(storage.metricsForTask(task.id, {2, artifactFirst.nextCursor}, &error)
+        .items.isEmpty());
+    QCOMPARE(storage.lastErrorCode(), aitrain::ProjectErrorCode::InvalidPageCursor);
+    error.clear();
+    QVERIFY(storage.artifactFiles(filesArtifactId, {2, metricFirst.nextCursor}, &error)
         .items.isEmpty());
     QCOMPARE(storage.lastErrorCode(), aitrain::ProjectErrorCode::InvalidPageCursor);
 }

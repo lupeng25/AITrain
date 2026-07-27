@@ -18,6 +18,12 @@ struct TaskReadModel final {
     QVector<ArtifactSnapshot> artifacts;
     QVector<MetricSnapshot> metrics;
     QVector<WorkflowReadModel> workflows;
+    QString artifactNextCursor;
+    QString metricNextCursor;
+    QString workflowNextCursor;
+    bool artifactsHasMore = false;
+    bool metricsHasMore = false;
+    bool workflowsHasMore = false;
 };
 
 // 模型库 Presenter 的只读模型。只暴露已持久化身份、lineage 与模型合同摘要，
@@ -85,6 +91,14 @@ public:
     Page<TaskSnapshot> recentTasks(
         const PageRequest& request, QString* error = nullptr) const;
     bool taskDetails(const TaskId& taskId, TaskReadModel* result, QString* error = nullptr) const;
+    Page<ArtifactSnapshot> taskArtifacts(const TaskId& taskId,
+        const PageRequest& request, QString* error = nullptr) const;
+    Page<ArtifactFileSnapshot> artifactFiles(const ArtifactId& artifactId,
+        const PageRequest& request, QString* error = nullptr) const;
+    Page<MetricSnapshot> taskMetrics(const TaskId& taskId,
+        const PageRequest& request, QString* error = nullptr) const;
+    Page<WorkflowReadModel> taskWorkflows(const TaskId& taskId,
+        const PageRequest& request, QString* error = nullptr) const;
     bool artifactFilePreview(const ArtifactId& artifactId,
         const QString& relativePath,
         ArtifactFilePreview* result,

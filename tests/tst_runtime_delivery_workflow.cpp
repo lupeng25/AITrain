@@ -143,7 +143,8 @@ bool evidenceHasAllFormats(const aitrain::EvidenceArtifactBundle& evidence)
     const QStringList names{QStringLiteral("evidence.json"), QStringLiteral("evidence.md"),
         QStringLiteral("evidence.html"), QStringLiteral("model_card.json")};
     for (const QString& name : names) {
-        if (!QFileInfo::exists(evidence.pathsByKind.value(name))) return false;
+        if (!QFileInfo::exists(QDir(evidence.artifactPath).filePath(
+                evidence.relativePathsByKind.value(name)))) return false;
     }
     return true;
 }
@@ -210,7 +211,8 @@ void RuntimeDeliveryWorkflowTests::successCommitsSixChainedStepsAndFourEvidenceF
         QVERIFY(step.outputArtifactId.isValid());
         previous = step.outputArtifactId;
     }
-    QFile evidenceFile(result.evidence.pathsByKind.value(QStringLiteral("evidence.json")));
+    QFile evidenceFile(QDir(result.evidence.artifactPath).filePath(
+        result.evidence.relativePathsByKind.value(QStringLiteral("evidence.json"))));
     QVERIFY(evidenceFile.open(QIODevice::ReadOnly));
     const QJsonObject evidence = QJsonDocument::fromJson(evidenceFile.readAll()).object();
     QCOMPARE(evidence.value(QStringLiteral("benchmark")).toObject()
@@ -303,7 +305,8 @@ void RuntimeDeliveryWorkflowTests::sdkMissingProducesPreciseFailureAndEvidence()
     QCOMPARE(result.failure.code, aitrain::FailureCode::SdkMissing);
     QVERIFY(evidenceHasAllFormats(result.evidence));
     QCOMPARE(workspace.workflowRunsForTask(taskId, {50, {}}, &error).items.size(), 1);
-    QFile evidenceFile(result.evidence.pathsByKind.value(QStringLiteral("evidence.json")));
+    QFile evidenceFile(QDir(result.evidence.artifactPath).filePath(
+        result.evidence.relativePathsByKind.value(QStringLiteral("evidence.json"))));
     QVERIFY(evidenceFile.open(QIODevice::ReadOnly));
     const QJsonObject evidence = QJsonDocument::fromJson(evidenceFile.readAll()).object();
     QCOMPARE(evidence.value(QStringLiteral("runtimeStatus")).toObject()

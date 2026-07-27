@@ -3,14 +3,12 @@
 
 #include <QCryptographicHash>
 #include <QDir>
-#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QSaveFile>
-#include <QSet>
 
 #include <cmath>
 
@@ -142,40 +140,37 @@ bool resolveReport(ProjectStore* storage, const ArtifactStore* store,
         return false;
     }
 
-    const QString artifactRoot = store->artifactPath(contract.artifactId);
-    const QFileInfo rootInfo(artifactRoot);
-    if (!rootInfo.exists() || !rootInfo.isDir() || rootInfo.isSymLink()) {
-        *problem = failure(FailureCode::ArtifactIncomplete, QStringLiteral("ocr_acceptance.report_missing"),
-            QStringLiteral("%1 Artifact 目录不存在或不安全").arg(contract.component));
+    VerifiedArtifactDirectory directory;
+    ArtifactReadError readError = ArtifactReadError::None;
+    if (!store->openVerified(
+            artifact, &directory, &readError, &lookupError)) {
+        const bool integrityFailure =
+            readError == ArtifactReadError::IntegrityMismatch;
+        *problem = failure(
+            integrityFailure ? FailureCode::ArtifactIncompatible
+                             : FailureCode::ArtifactIncomplete,
+            integrityFailure
+                ? QStringLiteral("ocr_acceptance.report_tampered")
+                : QStringLiteral("ocr_acceptance.report_missing"),
+            QStringLiteral("%1 Artifact 读取校验失败：%2")
+                .arg(contract.component, lookupError));
         return false;
     }
 
     QHash<QString, QByteArray> contents;
     QHash<QString, QString> hashes;
-    QSet<QString> declaredPaths;
-    for (const ArtifactFileSnapshot& declared : artifact.files) {
+    for (const VerifiedArtifactFile& declared : directory.files) {
         if (!safeRelativePath(declared.relativePath)) {
             *problem = failure(FailureCode::ArtifactIncompatible, QStringLiteral("ocr_acceptance.artifact_path_invalid"),
                 QStringLiteral("%1 Artifact 包含不安全相对路径").arg(contract.component));
-            return false;
-        }
-        const QString absolutePath = QDir(artifactRoot).filePath(declared.relativePath);
-        const QFileInfo info(absolutePath);
-        const QString canonicalRoot = rootInfo.canonicalFilePath();
-        const QString canonicalFile = info.canonicalFilePath();
-        if (!info.exists() || !info.isFile() || info.isSymLink() || canonicalRoot.isEmpty()
-            || canonicalFile.isEmpty()
-            || (!canonicalFile.startsWith(canonicalRoot + QLatin1Char('/'), Qt::CaseInsensitive)
-                && !canonicalFile.startsWith(canonicalRoot + QLatin1Char('\\'), Qt::CaseInsensitive))) {
-            *problem = failure(FailureCode::ArtifactIncomplete, QStringLiteral("ocr_acceptance.report_missing"),
-                QStringLiteral("%1 Artifact 文件缺失：%2").arg(contract.component, declared.relativePath));
             return false;
         }
         QByteArray bytes;
         QString actualHash;
         qint64 actualBytes = 0;
         QString readError;
-        if (!readAndHashFile(absolutePath, &bytes, &actualHash, &actualBytes, &readError)
+        if (!readAndHashFile(declared.absolutePath, &bytes, &actualHash,
+                &actualBytes, &readError)
             || actualHash != declared.sha256 || actualBytes != declared.byteCount) {
             *problem = failure(FailureCode::ArtifactIncompatible, QStringLiteral("ocr_acceptance.report_tampered"),
                 QStringLiteral("%1 Artifact 文件哈希或长度与提交记录不一致：%2")
@@ -184,20 +179,6 @@ bool resolveReport(ProjectStore* storage, const ArtifactStore* store,
         }
         contents.insert(declared.relativePath, bytes);
         hashes.insert(declared.relativePath, actualHash);
-        declaredPaths.insert(QDir::fromNativeSeparators(declared.relativePath));
-    }
-    QSet<QString> actualPaths;
-    QDirIterator iterator(artifactRoot, QDir::Files, QDirIterator::Subdirectories);
-    while (iterator.hasNext()) {
-        const QString absolutePath = iterator.next();
-        const QString relativePath = QDir::fromNativeSeparators(QDir(artifactRoot).relativeFilePath(absolutePath));
-        if (relativePath == QStringLiteral("manifest.json")) continue;
-        actualPaths.insert(relativePath);
-    }
-    if (actualPaths != declaredPaths) {
-        *problem = failure(FailureCode::ArtifactIncompatible, QStringLiteral("ocr_acceptance.report_tampered"),
-            QStringLiteral("%1 Artifact 磁盘文件集合与提交记录不一致").arg(contract.component));
-        return false;
     }
     const QString lineagePath = QStringLiteral("lineage/official_report_lineage.json");
     if (!contents.contains(contract.reportFileName)

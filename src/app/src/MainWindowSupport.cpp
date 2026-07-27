@@ -57,8 +57,10 @@ private:
 class ProjectOpenProbeRunnable final : public QRunnable
 {
 public:
-    ProjectOpenProbeRunnable(QString path, ProjectOpenProbeCallback callback)
-        : path_(std::move(path)), callback_(std::move(callback))
+    ProjectOpenProbeRunnable(ProjectSessionOperation operation, QString path,
+        ProjectOpenProbeCallback callback)
+        : operation_(operation), path_(std::move(path)),
+          callback_(std::move(callback))
     {
         setAutoDelete(true);
     }
@@ -74,13 +76,20 @@ public:
             // ProjectStore 的 QSqlDatabase connectionName 也只在此线程使用，
             // 所有跨线程结果均为值类型凭证，不传递 Qt SQL 对象。
             QString error;
-            const QString databasePath = QDir(result.normalizedPath)
-                .filePath(QStringLiteral(".aitrain/project.sqlite"));
-            result.succeeded = QFileInfo::exists(databasePath)
-                ? aitrain::ProjectWorkspace::prepareOpen(
-                    result.normalizedPath, &result.prepared, &error)
-                : aitrain::ProjectWorkspace::prepareCreate(
+            switch (operation_) {
+            case ProjectSessionOperation::Open:
+                result.succeeded = aitrain::ProjectWorkspace::prepareOpen(
                     result.normalizedPath, &result.prepared, &error);
+                break;
+            case ProjectSessionOperation::Create:
+                result.succeeded = aitrain::ProjectWorkspace::prepareCreate(
+                    result.normalizedPath, &result.prepared, &error);
+                break;
+            case ProjectSessionOperation::Rebuild:
+                result.succeeded = aitrain::ProjectWorkspace::prepareRebuild(
+                    result.normalizedPath, &result.prepared, &error);
+                break;
+            }
             if (!result.succeeded) {
                 result.error = error.isEmpty()
                     ? QStringLiteral("候选项目工作区打开预检失败。") : error;
@@ -92,6 +101,7 @@ public:
     }
 
 private:
+    ProjectSessionOperation operation_;
     QString path_;
     ProjectOpenProbeCallback callback_;
 };
@@ -922,7 +932,8 @@ void detectDatasetFormatAsync(QObject* context, const QString& path,
         normalizedPath, std::move(completeOnContextThread)));
 }
 
-void probeProjectOpenAsync(QObject* context, const QString& path,
+void probeProjectOpenAsync(QObject* context, ProjectSessionOperation operation,
+    const QString& path,
     ProjectOpenProbeCallback callback)
 {
     if (!context || !callback) {
@@ -944,7 +955,7 @@ void probeProjectOpenAsync(QObject* context, const QString& path,
             }, Qt::QueuedConnection);
     };
     QThreadPool::globalInstance()->start(new ProjectOpenProbeRunnable(
-        normalizedPath, std::move(completeOnContextThread)));
+        operation, normalizedPath, std::move(completeOnContextThread)));
 }
 
 QString formatJsonTextForPreview(const QByteArray& data)

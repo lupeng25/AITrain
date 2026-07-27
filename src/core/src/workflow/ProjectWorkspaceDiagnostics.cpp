@@ -54,49 +54,6 @@ bool writeFile(const QString& path, const QByteArray& bytes, QString* error)
     return true;
 }
 
-bool hashFile(const QString& path, QString* hash, QString* error)
-{
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
-        if (error) *error = QStringLiteral("diagnostics_artifact_unreadable");
-        return false;
-    }
-    QCryptographicHash digest(QCryptographicHash::Sha256);
-    while (!file.atEnd()) {
-        const QByteArray bytes = file.read(1024 * 1024);
-        if (bytes.isEmpty() && file.error() != QFileDevice::NoError) {
-            if (error) *error = QStringLiteral("diagnostics_artifact_read_failed");
-            return false;
-        }
-        digest.addData(bytes);
-    }
-    *hash = QString::fromLatin1(digest.result().toHex());
-    return true;
-}
-
-bool verifyArtifact(const ArtifactSnapshot& artifact, const QString& root,
-    QString* error)
-{
-    if (artifact.files.isEmpty() || !QFileInfo(root).isDir()) {
-        if (error) *error = QStringLiteral("diagnostics_artifact_incomplete");
-        return false;
-    }
-    for (const ArtifactFileSnapshot& expected : artifact.files) {
-        const QString relative = QDir::cleanPath(expected.relativePath);
-        const QString path = QDir(root).filePath(relative);
-        const QFileInfo info(path);
-        QString actualHash;
-        if (relative.isEmpty() || relative == QStringLiteral("..")
-            || relative.startsWith(QStringLiteral("../")) || QDir::isAbsolutePath(relative)
-            || !info.isFile() || info.isSymLink() || info.size() != expected.byteCount
-            || !hashFile(path, &actualHash, error) || actualHash != expected.sha256) {
-            if (error && error->isEmpty()) *error = QStringLiteral("diagnostics_artifact_tampered");
-            return false;
-        }
-    }
-    return true;
-}
-
 bool commitFiles(ArtifactStore* store, ProjectStore* storage, const TaskId& taskId,
     const QString& kind, const QVector<QPair<QString, QByteArray>>& files,
     ArtifactId* result, QString* error, const aitrain::CancellationCallback& cancellation)
@@ -385,11 +342,19 @@ bool ProjectWorkspace::runDiagnosticsWorkflow(const TaskId& taskId,
                 return {WorkflowStepState::Failed, {}, diagnosticsFailure(FailureCode::ArtifactIncompatible,
                     executionError.isEmpty() ? QStringLiteral("diagnostics_facts_identity_mismatch") : executionError)};
             }
-            const QString factsRoot = artifactStore_->artifactPath(storedFacts.id);
-            if (!verifyArtifact(storedFacts, factsRoot, &executionError)) {
+            VerifiedArtifactDirectory factsDirectory;
+            if (!artifactStore_->openVerified(
+                    storedFacts, &factsDirectory, nullptr, &executionError)) {
                 return {WorkflowStepState::Failed, {}, diagnosticsFailure(FailureCode::ArtifactIncompatible, executionError)};
             }
-            QFile file(QDir(factsRoot).filePath(QStringLiteral("diagnostic_facts.json")));
+            const auto factsFile = std::find_if(
+                factsDirectory.files.cbegin(), factsDirectory.files.cend(),
+                [](const VerifiedArtifactFile& file) {
+                    return file.relativePath
+                        == QStringLiteral("diagnostic_facts.json");
+                });
+            QFile file(factsFile == factsDirectory.files.cend()
+                ? QString() : factsFile->absolutePath);
             QJsonParseError parseError;
             if (!file.open(QIODevice::ReadOnly)) {
                 return {WorkflowStepState::Failed, {}, diagnosticsFailure(FailureCode::ArtifactIncomplete,
@@ -558,12 +523,20 @@ bool ProjectWorkspace::runEnvironmentCheckWorkflow(const TaskId& taskId,
                 return {WorkflowStepState::Failed, {}, diagnosticsFailure(FailureCode::ArtifactIncompatible,
                     QStringLiteral("environment_check_facts_identity_mismatch"))};
             }
-            const QString root = artifactStore_->artifactPath(factsArtifact.id);
-            if (!verifyArtifact(factsArtifact, root, &executionError)) {
+            VerifiedArtifactDirectory factsDirectory;
+            if (!artifactStore_->openVerified(
+                    factsArtifact, &factsDirectory, nullptr, &executionError)) {
                 return {WorkflowStepState::Failed, {}, diagnosticsFailure(FailureCode::ArtifactIncompatible,
                     executionError)};
             }
-            QFile file(QDir(root).filePath(QStringLiteral("environment_facts.json")));
+            const auto factsFile = std::find_if(
+                factsDirectory.files.cbegin(), factsDirectory.files.cend(),
+                [](const VerifiedArtifactFile& file) {
+                    return file.relativePath
+                        == QStringLiteral("environment_facts.json");
+                });
+            QFile file(factsFile == factsDirectory.files.cend()
+                ? QString() : factsFile->absolutePath);
             QJsonParseError parseError;
             if (!file.open(QIODevice::ReadOnly)) {
                 return {WorkflowStepState::Failed, {}, diagnosticsFailure(FailureCode::ArtifactIncomplete,

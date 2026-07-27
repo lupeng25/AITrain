@@ -42,10 +42,12 @@ struct WorkflowStepItem final {
 
 struct TaskArtifactDetails final {
     QString taskId;
+    QString selectedArtifactId;
     QString summary;
     QString failureCode;
     QString failureAction;
     QVector<ArtifactFileItem> artifacts;
+    QVector<ArtifactFileItem> artifactFiles;
     QVector<MetricItem> metrics;
     QVector<WorkflowStepItem> workflowSteps;
 };
@@ -68,6 +70,15 @@ public:
     bool loadMore();
     bool hasMoreTasks() const;
     bool selectTask(const QString& taskId);
+    bool loadMoreArtifacts();
+    bool selectArtifact(const QString& artifactId);
+    bool loadMoreArtifactFiles();
+    bool loadMoreMetrics();
+    bool loadMoreWorkflows();
+    bool hasMoreArtifacts() const;
+    bool hasMoreArtifactFiles() const;
+    bool hasMoreMetrics() const;
+    bool hasMoreWorkflows() const;
     bool previewArtifact(const QString& artifactId,
         const QString& relativePath,
         aitrain::ArtifactFilePreview* result,
@@ -96,6 +107,11 @@ signals:
 
 private:
     void fail(const QString& error);
+    void appendArtifacts(const QVector<aitrain::ArtifactSnapshot>& artifacts);
+    void appendArtifactFiles(const aitrain::ArtifactId& artifactId,
+        const QVector<aitrain::ArtifactFileSnapshot>& files);
+    void appendMetrics(const QVector<aitrain::MetricSnapshot>& metrics);
+    void appendWorkflows(const QVector<aitrain::WorkflowReadModel>& workflows);
 
     const aitrain::ProjectQueryService* queryService_ = nullptr;
     QVector<TaskListItem> taskRows_;
@@ -103,4 +119,12 @@ private:
     QString lastError_;
     QString nextTaskCursor_;
     bool hasMoreTasks_ = false;
+    QString artifactCursor_;
+    QString artifactFileCursor_;
+    QString metricCursor_;
+    QString workflowCursor_;
+    bool hasMoreArtifacts_ = false;
+    bool hasMoreArtifactFiles_ = false;
+    bool hasMoreMetrics_ = false;
+    bool hasMoreWorkflows_ = false;
 };

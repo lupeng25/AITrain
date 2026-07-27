@@ -1,5 +1,7 @@
 #include "MainWindow.h"
 #include "ApplicationEventRouter.h"
+#include "DashboardPage.h"
+#include "DashboardPageController.h"
 #include "MainWindowSupport.h"
 #include "Sidebar.h"
 #include "TaskArtifactPanel.h"
@@ -7,6 +9,7 @@
 #include "WorkerClient.h"
 #include "WorkspaceRouter.h"
 #include "aitrain/core/WorkerProtocol.h"
+#include "aitrain/workflow/ProjectWorkspace.h"
 
 #include <QApplication>
 #include <QCoreApplication>
@@ -26,6 +29,7 @@
 #include <QStackedWidget>
 #include <QStringList>
 #include <QTabWidget>
+#include <QTableView>
 #include <QTableWidget>
 #include <QTest>
 #include <QThread>
@@ -58,12 +62,14 @@ private slots:
     void ocrAcceptanceUiUsesControlledImportAndArtifactOnlyAcceptance();
     void taskPageExposesReadOnlyObjects();
     void projectAndDashboardExposeSummaryPresenter();
+    void dashboardUsesIndependentRecentTenQuery();
     void uiPathBoundariesStayAtExplicitImportAndIdentityEdges();
     void repeatedNavigationDoesNotAccumulatePages();
     void reviewSamplePathsRejectExternalAndTraversalValues();
     void largeArtifactsRequireExplicitSelectionAndSkipSynchronousPreview();
     void datasetFormatProbeRunsOffUiThreadAndReturnsOnContextThread();
     void projectOpenProbeRunsRecoveryOffUiThreadAndReturnsPreparedToken();
+    void projectSessionOperationsDoNotInferCreateFromMissingPath();
     void projectOpenPreparedTokenRejectsMutationWithoutClosingCurrentWorkspace();
     void eventRouterUsesBoundedRollingWindowsAndEvictsTerminalTasks();
 
@@ -73,6 +79,40 @@ private:
     MainWindow* window_ = nullptr;
     QTranslator translator_;
 };
+
+void EnvironmentDeliveryEvidenceUiTests::dashboardUsesIndependentRecentTenQuery()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    aitrain::ProjectWorkspace workspace;
+    QString error;
+    QVERIFY2(workspace.createProject(
+        directory.filePath(QStringLiteral("dashboard-project")), &error),
+        qPrintable(error));
+    for (int index = 0; index < 12; ++index) {
+        aitrain::TaskSnapshot task;
+        QVERIFY2(workspace.startTask(aitrain::TaskId::create(),
+            QStringLiteral("dashboard.%1").arg(index),
+            QStringLiteral("diagnostics"), &task, &error), qPrintable(error));
+    }
+
+    aitrain::ProjectQueryService queryService(&workspace);
+    DashboardPageController controller(&queryService);
+    DashboardWorkspacePage page;
+    controller.attachPage(&page);
+    controller.setContext(true, QStringLiteral("dashboard-project"),
+        8, QStringLiteral("通过"), QStringLiteral("GPU 已检测"));
+    controller.refresh();
+
+    auto* recent = page.findChild<QTableWidget*>(
+        QStringLiteral("DashboardRecentTasks"));
+    auto* total = page.findChild<QLabel*>(
+        QStringLiteral("DashboardTaskSummary"));
+    QVERIFY(recent != nullptr);
+    QVERIFY(total != nullptr);
+    QCOMPARE(recent->rowCount(), 10);
+    QCOMPARE(total->text(), QStringLiteral("12"));
+}
 
 void EnvironmentDeliveryEvidenceUiTests::reviewSamplePathsRejectExternalAndTraversalValues()
 {
@@ -101,14 +141,18 @@ void EnvironmentDeliveryEvidenceUiTests::largeArtifactsRequireExplicitSelectionA
     artifact.relativePath = QStringLiteral("model.onnx");
     artifact.byteCount = 32LL * 1024LL * 1024LL;
     details.artifacts.append(artifact);
+    details.artifactFiles.append(artifact);
     panel.setDetails(details);
 
-    auto* table = panel.findChild<QTableWidget*>(QStringLiteral("TaskArtifactTable"));
+    auto* table = panel.findChild<QTableView*>(QStringLiteral("TaskArtifactFileTable"));
+    auto* tabs = panel.findChild<QTabWidget*>(QStringLiteral("TaskDetailTabs"));
     auto* preview = panel.findChild<QPlainTextEdit*>(QStringLiteral("ArtifactPreviewText"));
     QVERIFY(table != nullptr);
+    QVERIFY(tabs != nullptr);
     QVERIFY(preview != nullptr);
-    QVERIFY(table->selectedItems().isEmpty());
+    QVERIFY(!table->currentIndex().isValid());
 
+    tabs->setCurrentIndex(1);
     table->selectRow(0);
     QCoreApplication::processEvents();
     // 预览入口不再执行同步文件读取；没有绑定查询服务时只显示即时错误，
@@ -172,7 +216,8 @@ void EnvironmentDeliveryEvidenceUiTests::projectOpenProbeRunsRecoveryOffUiThread
     aitrain_app::ProjectOpenProbeResult result;
     QThread* callbackThread = nullptr;
     connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
-    aitrain_app::probeProjectOpenAsync(&context, directory.path(),
+    aitrain_app::probeProjectOpenAsync(&context,
+        aitrain_app::ProjectSessionOperation::Create, directory.path(),
         [&](const aitrain_app::ProjectOpenProbeResult& value) {
             result = value;
             callbackThread = QThread::currentThread();
@@ -190,6 +235,48 @@ void EnvironmentDeliveryEvidenceUiTests::projectOpenProbeRunsRecoveryOffUiThread
     QString error;
     QVERIFY2(workspace.openPrepared(result.prepared, &error), qPrintable(error));
     QVERIFY(workspace.isOpen());
+    workspace.close();
+}
+
+void EnvironmentDeliveryEvidenceUiTests::projectSessionOperationsDoNotInferCreateFromMissingPath()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString missingRoot = directory.filePath(QStringLiteral("missing-project"));
+    QVERIFY(!QFileInfo::exists(missingRoot));
+
+    const auto runProbe = [&](aitrain_app::ProjectSessionOperation operation) {
+        aitrain_app::ProjectOpenProbeResult result;
+        QEventLoop loop;
+        QTimer timeout;
+        timeout.setSingleShot(true);
+        timeout.setInterval(15000);
+        connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+        aitrain_app::probeProjectOpenAsync(&loop, operation, missingRoot,
+            [&](const aitrain_app::ProjectOpenProbeResult& value) {
+                result = value;
+                loop.quit();
+            });
+        timeout.start();
+        loop.exec();
+        return result;
+    };
+
+    const aitrain_app::ProjectOpenProbeResult openResult =
+        runProbe(aitrain_app::ProjectSessionOperation::Open);
+    QVERIFY(!openResult.succeeded);
+    QVERIFY(!QFileInfo::exists(missingRoot));
+
+    const aitrain_app::ProjectOpenProbeResult createResult =
+        runProbe(aitrain_app::ProjectSessionOperation::Create);
+    QVERIFY2(createResult.succeeded, qPrintable(createResult.error));
+    QVERIFY(createResult.prepared.isValid());
+    QVERIFY(QFileInfo::exists(
+        QDir(missingRoot).filePath(QStringLiteral(".aitrain/project.sqlite"))));
+
+    aitrain::ProjectWorkspace workspace;
+    QString error;
+    QVERIFY2(workspace.openPrepared(createResult.prepared, &error), qPrintable(error));
     workspace.close();
 }
 
@@ -443,9 +530,10 @@ void EnvironmentDeliveryEvidenceUiTests::taskPageExposesReadOnlyObjects()
     QVERIFY(presenter != nullptr);
     QVERIFY(presenter->property("taskCount").isValid());
     QVERIFY(presenter->property("selectedTaskId").isValid());
-    QVERIFY(window.findChild<QTableWidget*>(QStringLiteral("TaskQueueTable")) != nullptr);
-    QVERIFY(window.findChild<QTableWidget*>(QStringLiteral("TaskArtifactTable")) != nullptr);
-    QVERIFY(window.findChild<QTableWidget*>(QStringLiteral("TaskMetricTable")) != nullptr);
+    QVERIFY(window.findChild<QTableView*>(QStringLiteral("TaskQueueTable")) != nullptr);
+    QVERIFY(window.findChild<QTableView*>(QStringLiteral("TaskArtifactTable")) != nullptr);
+    QVERIFY(window.findChild<QTableView*>(QStringLiteral("TaskArtifactFileTable")) != nullptr);
+    QVERIFY(window.findChild<QTableView*>(QStringLiteral("TaskMetricTable")) != nullptr);
     QVERIFY(window.findChild<QTableWidget*>(QStringLiteral("TaskWorkflowTable")) != nullptr);
     auto* cancelButton = window.findChild<QPushButton*>(QStringLiteral("TaskCancelButton"));
     QVERIFY(cancelButton != nullptr);
@@ -456,7 +544,8 @@ void EnvironmentDeliveryEvidenceUiTests::taskPageExposesReadOnlyObjects()
     }
     auto* detailTabs = window.findChild<QTabWidget*>(QStringLiteral("TaskDetailTabs"));
     QVERIFY(detailTabs != nullptr);
-    QCOMPARE(detailTabs->tabText(2), QStringLiteral("工作流"));
+    QCOMPARE(detailTabs->tabText(1), QStringLiteral("文件"));
+    QCOMPARE(detailTabs->tabText(3), QStringLiteral("工作流"));
 }
 
 void EnvironmentDeliveryEvidenceUiTests::annotationSessionUiUsesArtifactBoundary()
@@ -654,6 +743,13 @@ void EnvironmentDeliveryEvidenceUiTests::projectAndDashboardExposeSummaryPresent
     QVERIFY(window.findChild<QLabel*>(QStringLiteral("ProjectDatasetSummary")) != nullptr);
     QVERIFY(window.findChild<QLabel*>(QStringLiteral("ProjectTaskSummary")) != nullptr);
     QVERIFY(window.findChild<QLabel*>(QStringLiteral("ProjectModelPackageSummary")) != nullptr);
+    QVERIFY(window.findChild<QPushButton*>(QStringLiteral("ProjectCreateButton")) != nullptr);
+    QVERIFY(window.findChild<QPushButton*>(QStringLiteral("ProjectOpenButton")) != nullptr);
+    QVERIFY(window.findChild<QPushButton*>(QStringLiteral("ProjectRebuildButton")) != nullptr);
+    const auto projectButtons = window.findChildren<QPushButton*>();
+    for (const QPushButton* button : projectButtons) {
+        QVERIFY(button->text() != QStringLiteral("创建 / 打开项目"));
+    }
 
     QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
         Q_ARG(int, MainWindow::TaskQueuePage), Q_ARG(QString, QStringLiteral("任务与产物"))));
@@ -848,6 +944,16 @@ void EnvironmentDeliveryEvidenceUiTests::runtimeDeliveryPagesExposeOneSixStepPro
         Q_ARG(int, MainWindow::DeploymentPage), Q_ARG(QString, QStringLiteral("部署验证"))));
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("DeploymentTabs"));
     QVERIFY(tabs != nullptr);
+    auto* deploymentRoute = tabs->findChild<QComboBox*>(
+        QStringLiteral("DeploymentRuntimeRouteCombo"));
+    auto* inferenceRoute = tabs->findChild<QComboBox*>(
+        QStringLiteral("InferenceRuntimeRouteCombo"));
+    QVERIFY(deploymentRoute != nullptr);
+    QVERIFY(inferenceRoute != nullptr);
+    QVERIFY(deploymentRoute->currentData().toString().isEmpty());
+    QVERIFY(inferenceRoute->currentData().toString().isEmpty());
+    QCOMPARE(tabs->findChildren<QLabel*>(
+        QStringLiteral("RuntimeRouteReasons")).size(), 2);
     int unifiedEntryCount = 0;
     for (QPushButton* button : tabs->findChildren<QPushButton*>()) {
         if (button->text() == QStringLiteral("运行完整 Runtime Delivery")) ++unifiedEntryCount;

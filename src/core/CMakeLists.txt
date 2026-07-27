@@ -45,10 +45,26 @@ target_compile_definitions(aitrain_protocol
 )
 
 add_library(aitrain_storage STATIC
+    include/aitrain/storage/ArtifactCatalogRepository.h
+    include/aitrain/storage/DatasetCatalogRepository.h
+    include/aitrain/storage/ModelCatalogRepository.h
     include/aitrain/storage/ProjectDatabase.h
+    include/aitrain/storage/ProjectMetaRepository.h
+    include/aitrain/storage/ProjectReadRepository.h
     include/aitrain/storage/ProjectStore.h
+    include/aitrain/storage/TaskEventRepository.h
+    include/aitrain/storage/WorkflowRepository.h
+    include/aitrain/storage/WorkflowTerminalizationStore.h
+    src/storage/ArtifactCatalogRepository.cpp
+    src/storage/DatasetCatalogRepository.cpp
+    src/storage/ModelCatalogRepository.cpp
     src/storage/ProjectDatabase.cpp
+    src/storage/ProjectMetaRepository.cpp
+    src/storage/ProjectReadRepository.cpp
     src/storage/ProjectStore.cpp
+    src/storage/TaskEventRepository.cpp
+    src/storage/WorkflowRepository.cpp
+    src/storage/WorkflowTerminalizationStore.cpp
 )
 
 add_library(aitrain_training_workflow_profile STATIC

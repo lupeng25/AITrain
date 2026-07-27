@@ -4,8 +4,10 @@
 
 #include <QCryptographicHash>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QSet>
 
 #include <utility>
 
@@ -122,6 +124,62 @@ bool VerifiedArtifactReader::preview(const ArtifactFileSnapshot& expected,
         result->content = file.read(maxBytes);
         result->truncated = expected.byteCount > maxBytes;
     }
+    return true;
+}
+
+bool VerifiedArtifactReader::verifyInventory(const ArtifactSnapshot& artifact,
+    VerifiedArtifactDirectory* result, ArtifactReadError* readError,
+    QString* error) const
+{
+    if (readError) *readError = ArtifactReadError::None;
+    if (error) error->clear();
+    if (!artifact.id.isValid() || artifact.files.isEmpty() || !result) {
+        fail(ArtifactReadError::InvalidMember,
+            QStringLiteral(
+                "读取 Artifact 需要有效身份、非空 inventory 和输出对象。"),
+            readError, error);
+        return false;
+    }
+    VerifiedArtifactDirectory verified;
+    verified.artifactId = artifact.id;
+    verified.absolutePath = committedArtifactRoot_;
+    QSet<QString> declaredPaths;
+    for (const ArtifactFileSnapshot& file : artifact.files) {
+        VerifiedArtifactFile member;
+        if (!verify(file, &member, readError, error)) return false;
+        declaredPaths.insert(QDir::fromNativeSeparators(member.relativePath));
+        verified.files.append(member);
+    }
+    QSet<QString> actualPaths;
+    QDirIterator iterator(committedArtifactRoot_,
+        QDir::Files | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+    const QDir root(committedArtifactRoot_);
+    while (iterator.hasNext()) {
+        const QString absolutePath = iterator.next();
+        const QFileInfo info(absolutePath);
+        const QString relativePath = QDir::fromNativeSeparators(
+            root.relativeFilePath(absolutePath));
+        if (info.isSymLink()) {
+            fail(ArtifactReadError::InvalidMember,
+                QStringLiteral(
+                    "已提交 Artifact inventory 包含符号链接：%1")
+                    .arg(relativePath),
+                readError, error);
+            return false;
+        }
+        // manifest.json 是 ArtifactStore 的内部提交清单，不属于业务 inventory。
+        if (relativePath != QStringLiteral("manifest.json")) {
+            actualPaths.insert(relativePath);
+        }
+    }
+    if (actualPaths != declaredPaths) {
+        fail(ArtifactReadError::IntegrityMismatch,
+            QStringLiteral(
+                "已提交 Artifact 磁盘文件集合与 catalog inventory 不一致。"),
+            readError, error);
+        return false;
+    }
+    *result = std::move(verified);
     return true;
 }
 

@@ -1,4 +1,12 @@
 #include "aitrain/storage/ProjectStore.h"
+#include "aitrain/storage/ArtifactCatalogRepository.h"
+#include "aitrain/storage/DatasetCatalogRepository.h"
+#include "aitrain/storage/ModelCatalogRepository.h"
+#include "aitrain/storage/ProjectMetaRepository.h"
+#include "aitrain/storage/ProjectReadRepository.h"
+#include "aitrain/storage/TaskEventRepository.h"
+#include "aitrain/storage/WorkflowRepository.h"
+#include "aitrain/storage/WorkflowTerminalizationStore.h"
 #include "aitrain/domain/ArtifactMemberPath.h"
 #include "aitrain/protocol/Protocol.h"
 #include "aitrain/protocol/ProtocolSanitizer.h"
@@ -24,62 +32,6 @@ constexpr qint64 kFirstHostStateEventSequence = 4000000000000000000LL;
 // durable Workflow terminal outbox 是本轮破坏性重构新增的持久化事实，
 // 因此显式提升 Storage schema，旧数据库不会被静默当作当前结构打开。
 constexpr int kStorageSchemaVersion = 13;
-constexpr int kPageCursorVersion = 1;
-
-struct PageCursor final {
-    QString timestamp;
-    QString id;
-};
-
-QString encodePageCursor(const QString& queryType, const PageCursor& cursor)
-{
-    const QJsonObject json{
-        {QStringLiteral("v"), kPageCursorVersion},
-        {QStringLiteral("q"), queryType},
-        {QStringLiteral("t"), cursor.timestamp},
-        {QStringLiteral("id"), cursor.id}
-    };
-    return QString::fromLatin1(QJsonDocument(json).toJson(QJsonDocument::Compact)
-        .toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals));
-}
-
-bool decodePageCursor(const QString& encoded, const QString& queryType,
-    PageCursor* result, QString* error)
-{
-    if (encoded.isEmpty()) {
-        if (result) *result = {};
-        return true;
-    }
-    const QByteArray decoded = QByteArray::fromBase64(encoded.toLatin1(),
-        QByteArray::Base64UrlEncoding);
-    QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(decoded, &parseError);
-    const QJsonObject json = document.object();
-    if (parseError.error != QJsonParseError::NoError || !document.isObject()
-        || json.value(QStringLiteral("v")).toInt() != kPageCursorVersion
-        || json.value(QStringLiteral("q")).toString() != queryType
-        || json.value(QStringLiteral("t")).toString().isEmpty()
-        || json.value(QStringLiteral("id")).toString().isEmpty()) {
-        if (error) *error = QStringLiteral("InvalidPageCursor：分页游标版本、查询类型或排序键无效。");
-        return false;
-    }
-    if (result) {
-        result->timestamp = json.value(QStringLiteral("t")).toString();
-        result->id = json.value(QStringLiteral("id")).toString();
-    }
-    return true;
-}
-
-bool validatePageRequest(const PageRequest& request, const QString& queryType,
-    PageCursor* cursor, QString* error)
-{
-    if (request.pageSize < 1 || request.pageSize > 200) {
-        if (error) *error = QStringLiteral("InvalidPageCursor：pageSize 必须在 1–200 之间。");
-        return false;
-    }
-    return decodePageCursor(request.after, queryType, cursor, error);
-}
-
 QString terminalPolicyText(WorkflowTerminalPolicy policy)
 {
     return policy == WorkflowTerminalPolicy::EvidenceRequired
@@ -133,20 +85,6 @@ QString modelSourceSnapshotBindingText(ModelSourceSnapshotBinding binding)
         : QStringLiteral("external_declared");
 }
 
-bool parseModelSourceSnapshotBinding(const QString& value,
-    ModelSourceSnapshotBinding* result)
-{
-    if (value == QStringLiteral("project_snapshot")) {
-        if (result) *result = ModelSourceSnapshotBinding::ProjectSnapshot;
-        return true;
-    }
-    if (value == QStringLiteral("external_declared")) {
-        if (result) *result = ModelSourceSnapshotBinding::ExternalDeclared;
-        return true;
-    }
-    return false;
-}
-
 QString sqlError(const QSqlQuery& query)
 {
     return query.lastError().text();
@@ -164,24 +102,6 @@ bool execute(QSqlDatabase database, const QString& statement, QString* error)
     return false;
 }
 
-bool scalarCount(QSqlDatabase database, const QString& statement, qint64* result, QString* error)
-{
-    QSqlQuery query(database);
-    if (!query.exec(statement) || !query.next()) {
-        if (error) *error = query.lastError().isValid()
-            ? sqlError(query) : QStringLiteral("项目汇总计数查询没有返回结果。");
-        return false;
-    }
-    bool ok = false;
-    const qint64 count = query.value(0).toLongLong(&ok);
-    if (!ok || count < 0) {
-        if (error) *error = QStringLiteral("项目汇总计数包含无效值。");
-        return false;
-    }
-    *result = count;
-    return true;
-}
-
 QString utcText(const QDateTime& value)
 {
     return value.toUTC().toString(Qt::ISODateWithMs);
@@ -190,6 +110,15 @@ QString utcText(const QDateTime& value)
 QString requiredText(const QString& value)
 {
     return value.isNull() ? QStringLiteral("") : value;
+}
+
+ProjectErrorCode pageErrorCode(const QString& error)
+{
+    if (error.startsWith(QStringLiteral("InvalidPageCursor"))) {
+        return ProjectErrorCode::InvalidPageCursor;
+    }
+    return error.isEmpty()
+        ? ProjectErrorCode::None : ProjectErrorCode::SqlError;
 }
 
 QDateTime parseUtc(const QString& value)
@@ -209,94 +138,6 @@ bool hasTable(QSqlDatabase database, const QString& tableName, QString* error)
         return false;
     }
     return query.next();
-}
-
-bool readProjectMeta(QSqlDatabase database, ProjectMetaSnapshot* result, QString* error)
-{
-    QSqlQuery query(database);
-    if (!query.exec(QStringLiteral(
-            "select project_id, schema_version, display_name, open_generation, "
-            "created_at, updated_at, last_opened_at from project_meta where singleton = 1"))
-        || !query.next()) {
-        if (error) {
-            *error = query.lastError().isValid()
-                ? sqlError(query)
-                : QStringLiteral("数据库缺少 project_meta 记录。");
-        }
-        return false;
-    }
-    ProjectMetaSnapshot parsed;
-    if (!ProjectId::parse(query.value(0).toString(), &parsed.projectId, error)) {
-        return false;
-    }
-    parsed.schemaVersion = query.value(1).toInt();
-    parsed.displayName = query.value(2).toString();
-    parsed.openGeneration = query.value(3).toLongLong();
-    parsed.createdAt = parseUtc(query.value(4).toString());
-    parsed.updatedAt = parseUtc(query.value(5).toString());
-    parsed.lastOpenedAt = parseUtc(query.value(6).toString());
-    if (parsed.schemaVersion != kStorageSchemaVersion) {
-        if (error) {
-            *error = QStringLiteral("SchemaRebuildRequired：项目数据库不是 Schema 13，请显式重建项目。");
-        }
-        return false;
-    }
-    if (parsed.displayName.trimmed().isEmpty() || parsed.openGeneration < 0
-        || !parsed.createdAt.isValid() || !parsed.updatedAt.isValid() || query.next()) {
-        if (error) *error = QStringLiteral("project_meta 记录损坏或不唯一。");
-        return false;
-    }
-    if (result) *result = parsed;
-    return true;
-}
-
-bool parseTask(QSqlQuery& query, TaskSnapshot* result, QString* error)
-{
-    TaskSnapshot parsed;
-    if (!TaskId::parse(query.value(0).toString(), &parsed.id, error)
-        || !RequestId::parse(query.value(1).toString(), &parsed.requestId, error)
-        || !taskStateFromString(query.value(2).toString(), &parsed.state)) {
-        if (error && error->isEmpty()) {
-            *error = QStringLiteral("任务记录包含无效状态。");
-        }
-        return false;
-    }
-    parsed.capabilityId = query.value(3).toString();
-    parsed.taskType = query.value(4).toString();
-    parsed.createdAt = parseUtc(query.value(5).toString());
-    parsed.updatedAt = parseUtc(query.value(6).toString());
-    if (!failureCodeFromString(query.value(7).toString(), &parsed.failure.code)) {
-        if (error) *error = QStringLiteral("任务记录包含未知 FailureCode。");
-        return false;
-    }
-    parsed.failure.message = query.value(8).toString();
-    parsed.failure.suggestedAction = query.value(9).toString();
-    parsed.failure.occurredAt = parseUtc(query.value(10).toString());
-    if (result) {
-        *result = parsed;
-    }
-    return true;
-}
-
-bool parseWorkflowRun(QSqlQuery& query, WorkflowRunSnapshot* result, QString* error)
-{
-    WorkflowRunSnapshot parsed;
-    if (!WorkflowRunId::parse(query.value(0).toString(), &parsed.id, error)
-        || !TaskId::parse(query.value(1).toString(), &parsed.taskId, error)) {
-        return false;
-    }
-    parsed.templateId = query.value(2).toString();
-    if (!parseTerminalPolicy(query.value(3).toString(), &parsed.terminalPolicy)) {
-        if (error) *error = QStringLiteral("工作流终态策略无效。");
-        return false;
-    }
-    parsed.createdAt = parseUtc(query.value(4).toString());
-    if (parsed.templateId.isEmpty() || !parsed.createdAt.isValid()) {
-        if (error) *error = QStringLiteral("工作流运行记录无效。");
-        return false;
-    }
-    if (result) *result = parsed;
-    return true;
 }
 
 bool parseTerminalization(QSqlQuery& query, WorkflowTerminalizationSnapshot* result, QString* error)
@@ -333,77 +174,6 @@ bool parseTerminalization(QSqlQuery& query, WorkflowTerminalizationSnapshot* res
     if (!isTerminalTaskState(parsed.terminalState) || !parsed.terminalAt.isValid()
         || !parsed.sealedAt.isValid() || parsed.evidenceAttemptCount < 0) {
         if (error) *error = QStringLiteral("工作流终态封存记录字段无效。");
-        return false;
-    }
-    if (result) *result = parsed;
-    return true;
-}
-
-bool parseWorkflowStep(QSqlQuery& query, WorkflowStepSnapshot* result, QString* error)
-{
-    WorkflowStepSnapshot parsed;
-    if (!WorkflowStepId::parse(query.value(0).toString(), &parsed.id, error)
-        || !WorkflowRunId::parse(query.value(1).toString(), &parsed.workflowRunId, error)
-        || !workflowStepStateFromString(query.value(4).toString(), &parsed.state)) {
-        if (error && error->isEmpty()) *error = QStringLiteral("工作流步骤记录包含无效状态或标识。");
-        return false;
-    }
-    parsed.ordinal = query.value(2).toInt();
-    parsed.kind = query.value(3).toString();
-    if (!query.value(5).toString().isEmpty()
-        && !ArtifactId::parse(query.value(5).toString(), &parsed.inputArtifactId, error)) return false;
-    if (!query.value(6).toString().isEmpty()
-        && !ArtifactId::parse(query.value(6).toString(), &parsed.outputArtifactId, error)) return false;
-    parsed.backend = query.value(7).toString();
-    QJsonParseError jsonError;
-    const QJsonDocument parameters = QJsonDocument::fromJson(query.value(8).toString().toUtf8(), &jsonError);
-    if (jsonError.error != QJsonParseError::NoError || !parameters.isObject()) {
-        if (error) *error = QStringLiteral("工作流步骤参数摘要不是对象 JSON。");
-        return false;
-    }
-    parsed.parameterSummary = parameters.object();
-    parsed.startedAt = parseUtc(query.value(9).toString());
-    parsed.finishedAt = parseUtc(query.value(10).toString());
-    if (!failureCodeFromString(query.value(11).toString(), &parsed.failure.code)) {
-        if (error) *error = QStringLiteral("工作流步骤记录包含未知 FailureCode。");
-        return false;
-    }
-    parsed.failure.message = query.value(12).toString();
-    parsed.failure.suggestedAction = query.value(13).toString();
-    parsed.failure.occurredAt = parseUtc(query.value(14).toString());
-    parsed.retryCount = query.value(15).toInt();
-    if (parsed.ordinal < 0 || parsed.kind.isEmpty() || parsed.backend.isEmpty() || parsed.retryCount < 0) {
-        if (error) *error = QStringLiteral("工作流步骤记录字段无效。");
-        return false;
-    }
-    if (result) *result = parsed;
-    return true;
-}
-
-bool parseDatasetSnapshot(QSqlQuery& query, DatasetSnapshotRecord* result, QString* error)
-{
-    DatasetSnapshotRecord parsed;
-    if (!DatasetId::parse(query.value(0).toString(), &parsed.datasetId, error)
-        || !DatasetVersionId::parse(query.value(1).toString(), &parsed.datasetVersionId, error)
-        || !SnapshotId::parse(query.value(2).toString(), &parsed.id, error)
-        || !TaskId::parse(query.value(3).toString(), &parsed.taskId, error)
-        || !ArtifactId::parse(query.value(4).toString(), &parsed.artifactId, error)) {
-        return false;
-    }
-    parsed.rootPath = query.value(5).toString();
-    parsed.datasetFormat = query.value(6).toString();
-    parsed.driverId = query.value(7).toString();
-    parsed.driverVersion = query.value(8).toString();
-    parsed.rootHash = query.value(9).toString();
-    parsed.manifestSha256 = query.value(10).toString();
-    parsed.fileCount = query.value(11).toLongLong();
-    parsed.totalBytes = query.value(12).toLongLong();
-    parsed.createdAt = parseUtc(query.value(13).toString());
-    if (parsed.rootPath.isEmpty() || parsed.datasetFormat.isEmpty() || parsed.driverId.isEmpty()
-        || parsed.driverVersion.isEmpty() || !isSha256Hex(parsed.rootHash)
-        || !isSha256Hex(parsed.manifestSha256) || parsed.fileCount < 0 || parsed.totalBytes < 0
-        || !parsed.createdAt.isValid()) {
-        if (error) *error = QStringLiteral("数据集快照记录字段无效。");
         return false;
     }
     if (result) *result = parsed;
@@ -529,7 +299,8 @@ bool ProjectStore::projectMeta(ProjectMetaSnapshot* result, QString* error) cons
         if (error) *error = QStringLiteral("读取 project_meta 需要已打开的 Storage 和输出对象。");
         return false;
     }
-    return readProjectMeta(db_, result, error);
+    ProjectMetaRepository repository(database_);
+    return repository.read(result, error);
 }
 
 bool ProjectStore::advanceOpenGeneration(ProjectMetaSnapshot* result, QString* error)
@@ -543,14 +314,13 @@ bool ProjectStore::advanceOpenGeneration(ProjectMetaSnapshot* result, QString* e
         if (error) *error = db_.lastError().text();
         return false;
     }
-    QSqlQuery query(db_);
-    query.prepare(QStringLiteral(
-        "update project_meta set open_generation = open_generation + 1, "
-        "last_opened_at = :now, updated_at = :now where singleton = 1"));
-    query.bindValue(QStringLiteral(":now"), utcText(now));
-    if (!query.exec() || query.numRowsAffected() != 1 || !db_.commit()) {
+    ProjectMetaRepository repository(database_);
+    QString repositoryError;
+    if (!repository.incrementOpenGeneration(now, &repositoryError)
+        || !db_.commit()) {
         if (error) {
-            *error = query.lastError().isValid() ? sqlError(query) : db_.lastError().text();
+            *error = !repositoryError.isEmpty()
+                ? repositoryError : db_.lastError().text();
         }
         db_.rollback();
         return false;
@@ -593,7 +363,9 @@ bool ProjectStore::initialize(QString* error)
         }
         return false;
     }
-    if (hasMeta && !readProjectMeta(db_, nullptr, error)) {
+    ProjectMetaSnapshot meta;
+    ProjectMetaRepository metaRepository(database_);
+    if (hasMeta && !metaRepository.read(&meta, error)) {
         lastErrorCode_ = error && error->contains(QStringLiteral("SchemaRebuildRequired"))
             ? ProjectErrorCode::SchemaRebuildRequired
             : ProjectErrorCode::ProjectMetaCorrupt;
@@ -2037,133 +1809,33 @@ bool ProjectStore::registerDatasetSnapshot(DatasetSnapshotRecord* snapshot, QStr
 
 bool ProjectStore::datasetSnapshot(const SnapshotId& snapshotId, DatasetSnapshotRecord* result, QString* error) const
 {
-    if (!snapshotId.isValid() || !result) {
-        if (error) *error = QStringLiteral("查询数据集快照需要有效 ID 和输出对象。");
-        return false;
-    }
-    QSqlQuery query(db_);
-    query.prepare(QStringLiteral("select datasets.id, dataset_versions.id, dataset_snapshots.id, dataset_snapshots.task_id, dataset_snapshots.artifact_id, dataset_snapshots.root_path, datasets.dataset_format, dataset_snapshots.driver_id, dataset_snapshots.driver_version, dataset_versions.root_hash, dataset_snapshots.manifest_sha256, dataset_snapshots.file_count, dataset_snapshots.total_bytes, dataset_snapshots.created_at from dataset_snapshots join dataset_versions on dataset_versions.id = dataset_snapshots.dataset_version_id join datasets on datasets.id = dataset_versions.dataset_id where dataset_snapshots.id = :id"));
-    query.bindValue(QStringLiteral(":id"), snapshotId.toString());
-    if (!query.exec() || !query.next()) {
-        if (error) *error = query.lastError().isValid() ? sqlError(query) : QStringLiteral("数据集快照不存在。");
-        return false;
-    }
-    return parseDatasetSnapshot(query, result, error);
+    return DatasetCatalogRepository(database_).snapshot(
+        snapshotId, result, error);
 }
 
 bool ProjectStore::datasetSnapshotForArtifact(const ArtifactId& artifactId,
     DatasetSnapshotRecord* result,
     QString* error) const
 {
-    if (!artifactId.isValid() || !result) {
-        if (error) *error = QStringLiteral("按 Artifact 查询数据集快照需要有效 ID 和输出对象。");
-        return false;
-    }
-    QSqlQuery query(db_);
-    query.prepare(QStringLiteral("select datasets.id, dataset_versions.id, dataset_snapshots.id, dataset_snapshots.task_id, dataset_snapshots.artifact_id, dataset_snapshots.root_path, datasets.dataset_format, dataset_snapshots.driver_id, dataset_snapshots.driver_version, dataset_versions.root_hash, dataset_snapshots.manifest_sha256, dataset_snapshots.file_count, dataset_snapshots.total_bytes, dataset_snapshots.created_at from dataset_snapshots join dataset_versions on dataset_versions.id = dataset_snapshots.dataset_version_id join datasets on datasets.id = dataset_versions.dataset_id where dataset_snapshots.artifact_id = :artifact_id"));
-    query.bindValue(QStringLiteral(":artifact_id"), artifactId.toString());
-    if (!query.exec() || !query.next()) {
-        if (error) *error = query.lastError().isValid() ? sqlError(query) : QStringLiteral("Artifact 未关联数据集快照。");
-        return false;
-    }
-    return parseDatasetSnapshot(query, result, error);
+    return DatasetCatalogRepository(database_).snapshotForArtifact(
+        artifactId, result, error);
 }
 
 Page<DatasetCatalogItem> ProjectStore::datasets(const PageRequest& request, QString* error) const
 {
-    Page<DatasetCatalogItem> page;
-    PageCursor cursor;
-    if (!validatePageRequest(request, QStringLiteral("datasets"), &cursor, error)) {
-        lastErrorCode_ = ProjectErrorCode::InvalidPageCursor;
-        return page;
-    }
-    lastErrorCode_ = ProjectErrorCode::None;
-    QSqlQuery query(db_);
-    QVector<PageCursor> rowCursors;
-    QString sql = QStringLiteral(
-        "with catalog as (select d.id, d.dataset_format, "
-        "(select count(*) from dataset_versions v where v.dataset_id = d.id), "
-        "(select count(*) from dataset_snapshots s "
-            "join dataset_versions version_count on version_count.id = s.dataset_version_id where version_count.dataset_id = d.id), "
-        "s.dataset_version_id, s.id snapshot_id, s.artifact_id, v.root_hash, s.file_count, s.created_at, "
-        "coalesce(s.created_at, d.created_at) sort_time "
-        "from datasets d "
-        "left join dataset_snapshots s on s.id = ("
-            "select s2.id from dataset_snapshots s2 "
-            "join dataset_versions latest_version on latest_version.id = s2.dataset_version_id "
-            "where latest_version.dataset_id = d.id "
-            "order by s2.created_at desc, s2.id desc limit 1) "
-        "left join dataset_versions v on v.id = s.dataset_version_id) "
-        "select * from catalog ");
-    if (!request.after.isEmpty()) {
-        sql += QStringLiteral(
-            "where (sort_time < :after_time "
-            "or (sort_time = :after_time and id < :after_id)) ");
-    }
-    sql += QStringLiteral("order by sort_time desc, id desc limit :limit");
-    query.prepare(sql);
-    if (!request.after.isEmpty()) {
-        query.bindValue(QStringLiteral(":after_time"), cursor.timestamp);
-        query.bindValue(QStringLiteral(":after_id"), cursor.id);
-    }
-    query.bindValue(QStringLiteral(":limit"), request.pageSize + 1);
-    if (!query.exec()) {
-        if (error) *error = sqlError(query);
-        return {};
-    }
-    while (query.next()) {
-        DatasetCatalogItem item;
-        if (!DatasetId::parse(query.value(0).toString(), &item.datasetId, error)) return {};
-        item.datasetFormat = query.value(1).toString();
-        item.versionCount = query.value(2).toLongLong();
-        item.snapshotCount = query.value(3).toLongLong();
-        if (!query.value(4).isNull()) {
-            if (!DatasetVersionId::parse(query.value(4).toString(), &item.latestVersionId, error)
-                || !SnapshotId::parse(query.value(5).toString(), &item.latestSnapshotId, error)
-                || !ArtifactId::parse(query.value(6).toString(), &item.latestArtifactId, error)) return {};
-            item.latestRootHash = query.value(7).toString();
-            item.latestFileCount = query.value(8).toLongLong();
-            item.latestCreatedAt = parseUtc(query.value(9).toString());
-        }
-        page.items.append(item);
-        rowCursors.append({query.value(10).toString(), item.datasetId.toString()});
-    }
-    if (page.items.size() > request.pageSize) {
-        page.hasMore = true;
-        page.items.removeLast();
-        rowCursors.removeLast();
-    }
-    if (page.hasMore && !page.items.isEmpty()) {
-        page.nextCursor = encodePageCursor(QStringLiteral("datasets"),
-            rowCursors.constLast());
-    }
-    return page;
+    QString repositoryError;
+    Page<DatasetCatalogItem> result =
+        DatasetCatalogRepository(database_).page(request, &repositoryError);
+    lastErrorCode_ = pageErrorCode(repositoryError);
+    if (error) *error = repositoryError;
+    return result;
 }
 
 bool ProjectStore::artifactDiscardable(
     const ArtifactId& artifactId, bool* discardable, QString* error) const
 {
-    if (!artifactId.isValid() || !discardable) {
-        if (error) *error = QStringLiteral("检查 Artifact 引用需要有效 ID 和输出对象。");
-        return false;
-    }
-    QSqlQuery dependencyQuery(db_);
-    dependencyQuery.prepare(QStringLiteral(
-        "select 1 from model_packages where source_artifact_id = :artifact_id "
-        "union all select 1 from evaluation_reports where artifact_id = :artifact_id "
-        "union all select 1 from dataset_snapshots where artifact_id = :artifact_id "
-        "union all select 1 from workflow_input_bindings where source_artifact_id = :artifact_id "
-        "union all select 1 from workflow_steps where input_artifact_id = :artifact_id or output_artifact_id = :artifact_id "
-        "union all select 1 from workflow_terminalizations where evidence_artifact_id = :artifact_id "
-        "union all select 1 from workflow_terminal_outbox where output_artifact_id = :artifact_id "
-        "limit 1"));
-    dependencyQuery.bindValue(QStringLiteral(":artifact_id"), artifactId.toString());
-    if (!dependencyQuery.exec()) {
-        if (error) *error = sqlError(dependencyQuery);
-        return false;
-    }
-    *discardable = !dependencyQuery.next();
-    return true;
+    return ArtifactCatalogRepository(database_).isDiscardable(
+        artifactId, discardable, error);
 }
 
 bool ProjectStore::removeUnreferencedArtifact(const ArtifactId& artifactId, QString* error)
@@ -2273,161 +1945,24 @@ bool ProjectStore::registerModelPackage(const ModelPackageSnapshot& modelPackage
 
 bool ProjectStore::modelPackage(const ModelPackageId& modelPackageId, ModelPackageSnapshot* result, QString* error) const
 {
-    if (!modelPackageId.isValid() || !result) {
-        if (error) *error = QStringLiteral("查询模型包需要有效 ID 和输出对象。");
-        return false;
-    }
-    QSqlQuery query(db_);
-    query.prepare(QStringLiteral(
-        "select source_artifact_id, manifest_json, created_at, source_snapshot_binding "
-        "from model_packages where id = :id"));
-    query.bindValue(QStringLiteral(":id"), modelPackageId.toString());
-    if (!query.exec() || !query.next()) {
-        if (error) *error = query.lastError().isValid() ? sqlError(query) : QStringLiteral("模型包不存在。");
-        return false;
-    }
-    ArtifactId sourceArtifactId;
-    if (!ArtifactId::parse(query.value(0).toString(), &sourceArtifactId, error)) return false;
-    QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(query.value(1).toString().toUtf8(), &parseError);
-    ModelManifest manifest;
-    if (parseError.error != QJsonParseError::NoError || !document.isObject() || !decodeModelManifest(document.object(), &manifest, error)) {
-        if (error && error->isEmpty()) *error = QStringLiteral("已登记模型包的 Manifest JSON 无效。");
-        return false;
-    }
-    if (manifest.modelPackageId != modelPackageId) {
-        if (error) *error = QStringLiteral("已登记模型包的主键与 Manifest 不一致。");
-        return false;
-    }
-    ModelSourceSnapshotBinding sourceSnapshotBinding;
-    if (!parseModelSourceSnapshotBinding(query.value(3).toString(),
-            &sourceSnapshotBinding)) {
-        if (error) *error = QStringLiteral("已登记模型包的 Snapshot 来源绑定无效。");
-        return false;
-    }
-    result->manifest = manifest;
-    result->sourceArtifactId = sourceArtifactId;
-    result->createdAt = parseUtc(query.value(2).toString());
-    result->sourceSnapshotBinding = sourceSnapshotBinding;
-    return true;
+    return ModelCatalogRepository(database_).read(
+        modelPackageId, result, error);
 }
 
 Page<ModelPackageSnapshot> ProjectStore::modelPackages(
     const PageRequest& request, QString* error) const
 {
-    Page<ModelPackageSnapshot> page;
-    PageCursor cursor;
-    if (!validatePageRequest(request, QStringLiteral("model_packages"), &cursor, error)) {
-        lastErrorCode_ = ProjectErrorCode::InvalidPageCursor;
-        return page;
-    }
-    lastErrorCode_ = ProjectErrorCode::None;
-    QSqlQuery query(db_);
-    QString sql = QStringLiteral("select id from model_packages ");
-    if (!request.after.isEmpty()) {
-        sql += QStringLiteral(
-            "where (created_at < :after_time "
-            "or (created_at = :after_time and id < :after_id)) ");
-    }
-    sql += QStringLiteral("order by created_at desc, id desc limit :limit");
-    query.prepare(sql);
-    if (!request.after.isEmpty()) {
-        query.bindValue(QStringLiteral(":after_time"), cursor.timestamp);
-        query.bindValue(QStringLiteral(":after_id"), cursor.id);
-    }
-    query.bindValue(QStringLiteral(":limit"), request.pageSize + 1);
-    if (!query.exec()) {
-        if (error) *error = sqlError(query);
-        return {};
-    }
-    while (query.next()) {
-        ModelPackageId id;
-        if (!ModelPackageId::parse(query.value(0).toString(), &id, error)) return {};
-        ModelPackageSnapshot item;
-        if (!modelPackage(id, &item, error)) return {};
-        page.items.append(item);
-    }
-    if (page.items.size() > request.pageSize) {
-        page.hasMore = true;
-        page.items.removeLast();
-    }
-    if (page.hasMore && !page.items.isEmpty()) {
-        const ModelPackageSnapshot& last = page.items.constLast();
-        page.nextCursor = encodePageCursor(QStringLiteral("model_packages"),
-            {last.createdAt.toUTC().toString(Qt::ISODateWithMs),
-                last.manifest.modelPackageId.toString()});
-    }
-    return page;
+    QString repositoryError;
+    Page<ModelPackageSnapshot> result =
+        ModelCatalogRepository(database_).page(request, &repositoryError);
+    lastErrorCode_ = pageErrorCode(repositoryError);
+    if (error) *error = repositoryError;
+    return result;
 }
 
 bool ProjectStore::projectSummary(ProjectSummarySnapshot* result, QString* error) const
 {
-    if (error) error->clear();
-    if (!isOpen() || !result) {
-        if (error) *error = QStringLiteral("查询项目汇总需要已打开的  Storage 和输出对象。");
-        return false;
-    }
-
-    ProjectSummarySnapshot summary;
-    QSqlQuery taskCounts(db_);
-    if (!taskCounts.exec(QStringLiteral("select state, count(*) from tasks group by state"))) {
-        if (error) *error = sqlError(taskCounts);
-        return false;
-    }
-    while (taskCounts.next()) {
-        TaskState state;
-        if (!taskStateFromString(taskCounts.value(0).toString(), &state)) {
-            if (error) *error = QStringLiteral("项目汇总遇到无效任务状态。");
-            return false;
-        }
-        bool ok = false;
-        const qint64 count = taskCounts.value(1).toLongLong(&ok);
-        if (!ok || count < 0) {
-            if (error) *error = QStringLiteral("项目汇总任务状态计数无效。");
-            return false;
-        }
-        switch (state) {
-        case TaskState::Created: summary.tasks.created = count; break;
-        case TaskState::Queued: summary.tasks.queued = count; break;
-        case TaskState::Starting: summary.tasks.starting = count; break;
-        case TaskState::Running: summary.tasks.running = count; break;
-        case TaskState::CancelRequested: summary.tasks.cancelRequested = count; break;
-        case TaskState::Succeeded: summary.tasks.succeeded = count; break;
-        case TaskState::Failed: summary.tasks.failed = count; break;
-        case TaskState::Canceled: summary.tasks.canceled = count; break;
-        }
-    }
-
-    if (!scalarCount(db_, QStringLiteral("select count(*) from artifacts"),
-            &summary.committedArtifactCount, error)
-        || !scalarCount(db_, QStringLiteral("select count(*) from datasets"),
-            &summary.datasetCount, error)
-        || !scalarCount(db_, QStringLiteral("select count(*) from dataset_versions"),
-            &summary.datasetVersionCount, error)
-        || !scalarCount(db_, QStringLiteral("select count(*) from dataset_snapshots"),
-            &summary.datasetSnapshotCount, error)
-        || !scalarCount(db_, QStringLiteral("select count(*) from model_packages"),
-            &summary.modelPackageCount, error)
-        || !scalarCount(db_, QStringLiteral("select count(*) from model_packages where verified = 1"),
-            &summary.verifiedModelPackageCount, error)
-        || !scalarCount(db_, QStringLiteral("select count(*) from workflow_runs"),
-            &summary.workflowRunCount, error)
-        || !scalarCount(db_, QStringLiteral("select count(*) from workflow_runs where terminal_policy = 'evidence_required'"),
-            &summary.evidenceRequiredWorkflowCount, error)
-        || !scalarCount(db_, QStringLiteral(
-                "select count(*) from workflow_terminalizations z "
-                "join artifacts a on a.id = z.evidence_artifact_id "
-                "where a.kind = 'evidence_bundle' and z.state in ('evidence_attached','closed')"),
-            &summary.evidenceAvailableWorkflowCount, error)
-        || !scalarCount(db_, QStringLiteral(
-                "select count(*) from workflow_terminalizations "
-                "where state = 'sealed' and evidence_artifact_id is null"),
-            &summary.evidencePendingWorkflowCount, error)) {
-        return false;
-    }
-
-    *result = summary;
-    return true;
+    return ProjectReadRepository(database_).summary(result, error);
 }
 
 bool ProjectStore::createWorkflowRun(const WorkflowRunSnapshot& workflow,
@@ -2618,18 +2153,8 @@ bool ProjectStore::createWorkflowRunInternal(const WorkflowRunSnapshot& workflow
 
 bool ProjectStore::workflowRun(const WorkflowRunId& workflowRunId, WorkflowRunSnapshot* result, QString* error) const
 {
-    if (!workflowRunId.isValid() || !result) {
-        if (error) *error = QStringLiteral("查询工作流运行需要有效 ID 和输出对象。");
-        return false;
-    }
-    QSqlQuery query(db_);
-    query.prepare(QStringLiteral("select id, task_id, template_id, terminal_policy, created_at from workflow_runs where id = :id"));
-    query.bindValue(QStringLiteral(":id"), workflowRunId.toString());
-    if (!query.exec() || !query.next()) {
-        if (error) *error = query.lastError().isValid() ? sqlError(query) : QStringLiteral("工作流运行不存在。");
-        return false;
-    }
-    return parseWorkflowRun(query, result, error);
+    return WorkflowRepository(database_).readRun(
+        workflowRunId, result, error);
 }
 
 bool ProjectStore::workflowInput(const WorkflowRunId& workflowRunId,
@@ -2637,73 +2162,13 @@ bool ProjectStore::workflowInput(const WorkflowRunId& workflowRunId,
     WorkflowInputBinding* result,
     QString* error) const
 {
-    if (!workflowRunId.isValid() || role.trimmed().isEmpty() || !result) {
-        if (error) *error = QStringLiteral("查询 Workflow 输入需要有效运行、角色和输出对象。");
-        return false;
-    }
-    QSqlQuery query(db_);
-    query.prepare(QStringLiteral(
-        "select workflow_run_id, role, source_artifact_id, source_task_id, source_artifact_kind, "
-        "coalesce(dataset_id, ''), coalesce(dataset_snapshot_id, ''), coalesce(dataset_version_id, ''), "
-        "coalesce(model_package_id, ''), manifest_sha256, root_hash, bound_at "
-        "from workflow_input_bindings where workflow_run_id = :workflow_run_id and role = :role"));
-    query.bindValue(QStringLiteral(":workflow_run_id"), workflowRunId.toString());
-    query.bindValue(QStringLiteral(":role"), role.trimmed());
-    if (!query.exec() || !query.next()) {
-        if (error) *error = query.lastError().isValid()
-            ? sqlError(query) : QStringLiteral("Workflow 输入绑定不存在。");
-        return false;
-    }
-    WorkflowInputBinding parsed;
-    if (!WorkflowRunId::parse(query.value(0).toString(), &parsed.workflowRunId, error)
-        || !ArtifactId::parse(query.value(2).toString(), &parsed.sourceArtifactId, error)
-        || !TaskId::parse(query.value(3).toString(), &parsed.sourceTaskId, error)) {
-        return false;
-    }
-    parsed.role = query.value(1).toString();
-    parsed.sourceArtifactKind = query.value(4).toString();
-    const QString datasetId = query.value(5).toString();
-    const QString snapshotId = query.value(6).toString();
-    const QString datasetVersionId = query.value(7).toString();
-    const QString modelPackageId = query.value(8).toString();
-    if ((!datasetId.isEmpty() && !DatasetId::parse(datasetId, &parsed.datasetId, error))
-        || (!snapshotId.isEmpty() && !SnapshotId::parse(snapshotId, &parsed.datasetSnapshotId, error))
-        || (!datasetVersionId.isEmpty() && !DatasetVersionId::parse(datasetVersionId, &parsed.datasetVersionId, error))
-        || (!modelPackageId.isEmpty() && !ModelPackageId::parse(modelPackageId, &parsed.modelPackageId, error))) {
-        return false;
-    }
-    parsed.manifestSha256 = query.value(9).toString();
-    parsed.rootHash = query.value(10).toString();
-    parsed.boundAt = parseUtc(query.value(11).toString());
-    if (parsed.workflowRunId != workflowRunId || parsed.role != role.trimmed()
-        || parsed.sourceArtifactKind.trimmed().isEmpty() || !parsed.boundAt.isValid()) {
-        if (error) *error = QStringLiteral("Workflow 输入绑定记录损坏。");
-        return false;
-    }
-    *result = parsed;
-    return true;
+    return WorkflowRepository(database_).readInput(
+        workflowRunId, role, result, error);
 }
 
 QVector<WorkflowStepSnapshot> ProjectStore::workflowSteps(const WorkflowRunId& workflowRunId, QString* error) const
 {
-    QVector<WorkflowStepSnapshot> results;
-    if (!workflowRunId.isValid()) {
-        if (error) *error = QStringLiteral("查询工作流步骤需要有效运行 ID。");
-        return results;
-    }
-    QSqlQuery query(db_);
-    query.prepare(QStringLiteral("select id, workflow_run_id, ordinal, kind, state, coalesce(input_artifact_id, ''), coalesce(output_artifact_id, ''), backend, parameter_summary_json, coalesce(started_at, ''), coalesce(finished_at, ''), failure_code, failure_details, failure_suggested_action, coalesce(failure_occurred_at, ''), retry_count from workflow_steps where workflow_run_id = :workflow_run_id order by ordinal asc"));
-    query.bindValue(QStringLiteral(":workflow_run_id"), workflowRunId.toString());
-    if (!query.exec()) {
-        if (error) *error = sqlError(query);
-        return {};
-    }
-    while (query.next()) {
-        WorkflowStepSnapshot step;
-        if (!parseWorkflowStep(query, &step, error)) return {};
-        results.append(step);
-    }
-    return results;
+    return WorkflowRepository(database_).steps(workflowRunId, error);
 }
 
 bool ProjectStore::bindWorkflowStepInput(const WorkflowStepId& workflowStepId,
@@ -3094,100 +2559,30 @@ bool ProjectStore::workflowTerminalization(const WorkflowRunId& workflowRunId,
     WorkflowTerminalizationSnapshot* result,
     QString* error) const
 {
-    if (!workflowRunId.isValid() || !result) {
-        if (error) *error = QStringLiteral("查询工作流终态封存需要有效 ID 和输出对象。");
-        return false;
-    }
-    QSqlQuery query(db_);
-    query.prepare(QStringLiteral("select workflow_run_id, task_id, state, terminal_state, failure_code, failure_details, failure_suggested_action, coalesce(failure_occurred_at,''), terminal_at, coalesce(evidence_artifact_id,''), evidence_attempt_count, last_evidence_failure_code, last_evidence_failure_details, last_evidence_failure_suggested_action, coalesce(last_evidence_failure_occurred_at,''), sealed_at, coalesce(evidence_attached_at,''), coalesce(closed_at,'') from workflow_terminalizations where workflow_run_id = :id"));
-    query.bindValue(QStringLiteral(":id"), workflowRunId.toString());
-    if (!query.exec() || !query.next()) {
-        if (error) *error = query.lastError().isValid() ? sqlError(query)
-            : QStringLiteral("工作流终态封存不存在。");
-        return false;
-    }
-    return parseTerminalization(query, result, error);
+    return WorkflowTerminalizationStore(database_).read(
+        workflowRunId, result, error);
 }
 
 bool ProjectStore::workflowTerminalizationExists(
     const WorkflowRunId& workflowRunId, bool* exists, QString* error) const
 {
-    if (!workflowRunId.isValid() || !exists) {
-        if (error) *error = QStringLiteral("检查工作流终态封存需要有效 ID 和输出对象。");
-        return false;
-    }
-    QSqlQuery query(db_);
-    query.prepare(QStringLiteral(
-        "select 1 from workflow_terminalizations where workflow_run_id = :id"));
-    query.bindValue(QStringLiteral(":id"), workflowRunId.toString());
-    if (!query.exec()) {
-        if (error) *error = sqlError(query);
-        return false;
-    }
-    *exists = query.next();
-    return true;
+    return WorkflowTerminalizationStore(database_).exists(
+        workflowRunId, exists, error);
 }
 
 QVector<WorkflowTerminalizationSnapshot> ProjectStore::pendingWorkflowTerminalizations(
     int limit,
     QString* error) const
 {
-    QVector<WorkflowTerminalizationSnapshot> results;
-    if (limit <= 0) {
-        if (error) *error = QStringLiteral("查询待恢复工作流终态需要正数 limit。");
-        return results;
-    }
-    QSqlQuery query(db_);
-    query.prepare(QStringLiteral("select workflow_run_id from workflow_terminalizations where state in ('sealed','evidence_attached') order by sealed_at asc, workflow_run_id asc limit :limit"));
-    query.bindValue(QStringLiteral(":limit"), limit);
-    if (!query.exec()) {
-        if (error) *error = sqlError(query);
-        return {};
-    }
-    QVector<WorkflowRunId> ids;
-    while (query.next()) {
-        WorkflowRunId id;
-        if (!WorkflowRunId::parse(query.value(0).toString(), &id, error)) return {};
-        ids.append(id);
-    }
-    query.finish();
-    for (const WorkflowRunId& id : ids) {
-        WorkflowTerminalizationSnapshot item;
-        if (!workflowTerminalization(id, &item, error)) return {};
-        results.append(item);
-    }
-    return results;
+    return WorkflowTerminalizationStore(database_).pending(limit, error);
 }
 
 QVector<WorkflowRunSnapshot> ProjectStore::pendingEvidenceRequiredWorkflows(
     int limit,
     QString* error) const
 {
-    QVector<WorkflowRunSnapshot> results;
-    if (limit <= 0) {
-        if (error) *error = QStringLiteral("查询待恢复 Evidence 门控工作流需要正数 limit。");
-        return results;
-    }
-    QSqlQuery query(db_);
-    query.prepare(QStringLiteral("select w.id from workflow_runs w join tasks t on t.id = w.task_id left join workflow_terminalizations z on z.workflow_run_id = w.id where w.terminal_policy = 'evidence_required' and t.state in ('queued','starting','running','cancel_requested') and (z.workflow_run_id is null or z.state <> 'closed') order by w.created_at asc, w.id asc limit :limit"));
-    query.bindValue(QStringLiteral(":limit"), limit);
-    if (!query.exec()) {
-        if (error) *error = sqlError(query);
-        return {};
-    }
-    QVector<WorkflowRunId> ids;
-    while (query.next()) {
-        WorkflowRunId id;
-        if (!WorkflowRunId::parse(query.value(0).toString(), &id, error)) return {};
-        ids.append(id);
-    }
-    query.finish();
-    for (const WorkflowRunId& id : ids) {
-        WorkflowRunSnapshot workflow;
-        if (!workflowRun(id, &workflow, error)) return {};
-        results.append(workflow);
-    }
-    return results;
+    return WorkflowTerminalizationStore(database_)
+        .pendingEvidenceRequired(limit, error);
 }
 
 bool ProjectStore::attachWorkflowTerminalizationEvidence(const WorkflowRunId& workflowRunId,
@@ -3387,471 +2782,112 @@ bool ProjectStore::closeWorkflowTerminalization(
 
 bool ProjectStore::artifact(const ArtifactId& artifactId, ArtifactSnapshot* result, QString* error) const
 {
-    if (!artifactId.isValid() || !result) {
-        if (error) *error = QStringLiteral("查询 Artifact 需要有效 ID 和输出对象。");
-        return false;
-    }
-    QSqlQuery artifactQuery(db_);
-    artifactQuery.prepare(QStringLiteral("select id, task_id, kind, created_at from artifacts where id = :id"));
-    artifactQuery.bindValue(QStringLiteral(":id"), artifactId.toString());
-    if (!artifactQuery.exec() || !artifactQuery.next()) {
-        if (error) *error = artifactQuery.lastError().isValid()
-                ? sqlError(artifactQuery) : QStringLiteral("Artifact 不存在。");
-        return false;
-    }
-    ArtifactSnapshot parsed;
-    if (!ArtifactId::parse(artifactQuery.value(0).toString(), &parsed.id, error)
-        || !TaskId::parse(artifactQuery.value(1).toString(), &parsed.taskId, error)) {
-        return false;
-    }
-    parsed.kind = artifactQuery.value(2).toString();
-    parsed.createdAt = parseUtc(artifactQuery.value(3).toString());
-    if (parsed.kind.trimmed().isEmpty() || !parsed.createdAt.isValid()) {
-        if (error) *error = QStringLiteral("Artifact 记录字段无效。");
-        return false;
-    }
+    return ArtifactCatalogRepository(database_).read(artifactId, result, error);
+}
 
-    QSqlQuery filesQuery(db_);
-    filesQuery.prepare(QStringLiteral("select relative_path, sha256, byte_count from artifact_files where artifact_id = :artifact_id order by relative_path asc"));
-    filesQuery.bindValue(QStringLiteral(":artifact_id"), artifactId.toString());
-    if (!filesQuery.exec()) {
-        if (error) *error = sqlError(filesQuery);
-        return false;
-    }
-    while (filesQuery.next()) {
-        ArtifactFileSnapshot file;
-        file.relativePath = filesQuery.value(0).toString();
-        file.sha256 = filesQuery.value(1).toString();
-        file.byteCount = filesQuery.value(2).toLongLong();
-        if (file.relativePath.isEmpty() || !isSha256Hex(file.sha256) || file.byteCount < 0) {
-            if (error) *error = QStringLiteral("Artifact 文件记录字段无效。");
-            return false;
-        }
-        parsed.files.append(file);
-    }
-    *result = parsed;
-    return true;
+Page<ArtifactFileSnapshot> ProjectStore::artifactFiles(
+    const ArtifactId& artifactId, const PageRequest& request, QString* error) const
+{
+    QString repositoryError;
+    Page<ArtifactFileSnapshot> result =
+        ArtifactCatalogRepository(database_).files(
+            artifactId, request, &repositoryError);
+    lastErrorCode_ = pageErrorCode(repositoryError);
+    if (error) *error = repositoryError;
+    return result;
 }
 
 Page<ArtifactSnapshot> ProjectStore::artifactsForTask(
     const TaskId& taskId, const PageRequest& request, QString* error) const
 {
-    Page<ArtifactSnapshot> page;
-    PageCursor cursor;
-    if (!taskId.isValid()) {
-        if (error) *error = QStringLiteral("查询任务 Artifact 需要有效任务 ID。");
-        return page;
-    }
-    if (!validatePageRequest(request, QStringLiteral("task_artifacts"), &cursor, error)) {
-        lastErrorCode_ = ProjectErrorCode::InvalidPageCursor;
-        return page;
-    }
-    QSqlQuery query(db_);
-    QString sql = QStringLiteral(
-        "select id, created_at from artifacts where task_id = :task_id ");
-    if (!request.after.isEmpty()) {
-        sql += QStringLiteral(
-            "and (created_at > :after_time "
-            "or (created_at = :after_time and id > :after_id)) ");
-    }
-    sql += QStringLiteral("order by created_at asc, id asc limit :limit");
-    query.prepare(sql);
-    query.bindValue(QStringLiteral(":task_id"), taskId.toString());
-    if (!request.after.isEmpty()) {
-        query.bindValue(QStringLiteral(":after_time"), cursor.timestamp);
-        query.bindValue(QStringLiteral(":after_id"), cursor.id);
-    }
-    query.bindValue(QStringLiteral(":limit"), request.pageSize + 1);
-    if (!query.exec()) {
-        if (error) *error = sqlError(query);
-        return {};
-    }
-    QVector<QPair<ArtifactId, QString>> artifactRows;
-    while (query.next()) {
-        ArtifactId artifactId;
-        if (!ArtifactId::parse(query.value(0).toString(), &artifactId, error)) return {};
-        artifactRows.append({artifactId, query.value(1).toString()});
-    }
-    query.finish();
-    if (artifactRows.size() > request.pageSize) {
-        page.hasMore = true;
-        artifactRows.removeLast();
-    }
-    for (const auto& row : artifactRows) {
-        ArtifactSnapshot snapshot;
-        if (!artifact(row.first, &snapshot, error)) return {};
-        page.items.append(snapshot);
-    }
-    if (page.hasMore && !artifactRows.isEmpty()) {
-        const auto& last = artifactRows.constLast();
-        page.nextCursor = encodePageCursor(
-            QStringLiteral("task_artifacts"), {last.second, last.first.toString()});
-    }
-    return page;
+    QString repositoryError;
+    Page<ArtifactSnapshot> result =
+        ArtifactCatalogRepository(database_).forTask(
+            taskId, request, &repositoryError);
+    lastErrorCode_ = pageErrorCode(repositoryError);
+    if (error) *error = repositoryError;
+    return result;
 }
 
 Page<DeliveryEvidenceCandidate> ProjectStore::deliveryEvidenceCandidates(
     const PageRequest& request, QString* error) const
 {
-    Page<DeliveryEvidenceCandidate> page;
-    PageCursor cursor;
-    if (!validatePageRequest(request, QStringLiteral("evidence"), &cursor, error)) {
-        lastErrorCode_ = ProjectErrorCode::InvalidPageCursor;
-        return page;
-    }
-
-    // 先按 Artifact 排序并限制证据条数，再展开文件清单；不能直接对展开后的
-    // 行使用 LIMIT，否则一个包含多个文件的 Artifact 会占用多个结果名额。
-    QSqlQuery query(db_);
-    QString sql = QStringLiteral(
-        "select t.id, t.request_id, t.state, t.capability_id, t.task_type, "
-        "t.created_at, t.updated_at, t.failure_code, t.failure_details, "
-        "t.failure_suggested_action, coalesce(t.failure_occurred_at, ''), "
-        "a.id, a.task_id, a.kind, a.created_at, f.relative_path, f.sha256, f.byte_count "
-        "from (select id, created_at from artifacts "
-        "where kind in ('evidence_bundle', 'external_acceptance_evidence') ");
-    if (!request.after.isEmpty()) {
-        sql += QStringLiteral(
-            "and (created_at < :after_time "
-            "or (created_at = :after_time and id < :after_id)) ");
-    }
-    sql += QStringLiteral(
-        "order by created_at desc, id desc limit :limit) selected "
-        "join artifacts a on a.id = selected.id "
-        "join tasks t on t.id = a.task_id "
-        "left join artifact_files f on f.artifact_id = a.id "
-        "order by selected.created_at desc, a.id desc, f.relative_path asc");
-    query.prepare(sql);
-    if (!request.after.isEmpty()) {
-        query.bindValue(QStringLiteral(":after_time"), cursor.timestamp);
-        query.bindValue(QStringLiteral(":after_id"), cursor.id);
-    }
-    query.bindValue(QStringLiteral(":limit"), request.pageSize + 1);
-    if (!query.exec()) {
-        if (error) *error = sqlError(query);
-        return {};
-    }
-
-    ArtifactId currentArtifactId;
-    while (query.next()) {
-        ArtifactId artifactId;
-        if (!ArtifactId::parse(query.value(11).toString(), &artifactId, error)) {
-            return {};
-        }
-        if (!currentArtifactId.isValid() || artifactId != currentArtifactId) {
-            DeliveryEvidenceCandidate candidate;
-            if (!parseTask(query, &candidate.task, error)
-                || !TaskId::parse(query.value(12).toString(), &candidate.artifact.taskId, error)
-                || candidate.task.id != candidate.artifact.taskId) {
-                if (error && error->isEmpty()) {
-                    *error = QStringLiteral("交付证据候选的任务身份不一致。");
-                }
-                return {};
-            }
-            candidate.artifact.id = artifactId;
-            candidate.artifact.kind = query.value(13).toString();
-            candidate.artifact.createdAt = parseUtc(query.value(14).toString());
-            if (candidate.artifact.kind.isEmpty() || !candidate.artifact.createdAt.isValid()) {
-                if (error) *error = QStringLiteral("交付证据候选 Artifact 记录无效。");
-                return {};
-            }
-            page.items.append(candidate);
-            currentArtifactId = artifactId;
-        }
-
-        if (!query.value(15).isNull()) {
-            ArtifactFileSnapshot file;
-            file.relativePath = query.value(15).toString();
-            file.sha256 = query.value(16).toString();
-            file.byteCount = query.value(17).toLongLong();
-            if (file.relativePath.isEmpty() || !isSha256Hex(file.sha256) || file.byteCount < 0) {
-                if (error) *error = QStringLiteral("交付证据 Artifact 文件记录无效。");
-                return {};
-            }
-            page.items.last().artifact.files.append(file);
-        }
-    }
-    if (page.items.size() > request.pageSize) {
-        page.hasMore = true;
-        page.items.removeLast();
-    }
-    if (page.hasMore && !page.items.isEmpty()) {
-        const ArtifactSnapshot& last = page.items.constLast().artifact;
-        page.nextCursor = encodePageCursor(QStringLiteral("evidence"),
-            {last.createdAt.toUTC().toString(Qt::ISODateWithMs), last.id.toString()});
-    }
-    return page;
+    QString repositoryError;
+    Page<DeliveryEvidenceCandidate> result =
+        ProjectReadRepository(database_).deliveryEvidence(
+            request, &repositoryError);
+    lastErrorCode_ = pageErrorCode(repositoryError);
+    if (error) *error = repositoryError;
+    return result;
 }
 
 Page<MetricSnapshot> ProjectStore::metricsForTask(
     const TaskId& taskId, const PageRequest& request, QString* error) const
 {
-    Page<MetricSnapshot> page;
-    PageCursor cursor;
-    if (!taskId.isValid()) {
-        if (error) *error = QStringLiteral("查询任务指标需要有效任务 ID。");
-        return page;
-    }
-    if (!validatePageRequest(request, QStringLiteral("task_metrics"), &cursor, error)) {
-        lastErrorCode_ = ProjectErrorCode::InvalidPageCursor;
-        return page;
-    }
-    QSqlQuery query(db_);
-    QString sql = QStringLiteral(
-        "select id, name, value, occurred_at from task_metrics where task_id = :task_id ");
-    if (!request.after.isEmpty()) {
-        sql += QStringLiteral(
-            "and (occurred_at > :after_time "
-            "or (occurred_at = :after_time and id > :after_id)) ");
-    }
-    sql += QStringLiteral("order by occurred_at asc, id asc limit :limit");
-    query.prepare(sql);
-    query.bindValue(QStringLiteral(":task_id"), taskId.toString());
-    if (!request.after.isEmpty()) {
-        query.bindValue(QStringLiteral(":after_time"), cursor.timestamp);
-        query.bindValue(QStringLiteral(":after_id"), cursor.id);
-    }
-    query.bindValue(QStringLiteral(":limit"), request.pageSize + 1);
-    if (!query.exec()) {
-        if (error) *error = sqlError(query);
-        return {};
-    }
-    QVector<PageCursor> rowCursors;
-    while (query.next()) {
-        MetricSnapshot metric;
-        metric.name = query.value(1).toString();
-        metric.value = query.value(2).toDouble();
-        metric.occurredAt = parseUtc(query.value(3).toString());
-        if (metric.name.trimmed().isEmpty() || !metric.occurredAt.isValid() || !std::isfinite(metric.value)) {
-            if (error) *error = QStringLiteral("任务指标记录字段无效。");
-            return {};
-        }
-        page.items.append(metric);
-        rowCursors.append({query.value(3).toString(), query.value(0).toString()});
-    }
-    if (page.items.size() > request.pageSize) {
-        page.hasMore = true;
-        page.items.removeLast();
-        rowCursors.removeLast();
-    }
-    if (page.hasMore && !rowCursors.isEmpty()) {
-        page.nextCursor = encodePageCursor(
-            QStringLiteral("task_metrics"), rowCursors.constLast());
-    }
-    return page;
+    QString repositoryError;
+    Page<MetricSnapshot> result = TaskEventRepository(database_).metrics(
+        taskId, request, &repositoryError);
+    lastErrorCode_ = pageErrorCode(repositoryError);
+    if (error) *error = repositoryError;
+    return result;
 }
 
 bool ProjectStore::taskExists(const TaskId& taskId, bool* exists, QString* error) const
 {
-    if (!taskId.isValid() || !exists) {
-        if (error) {
-            *error = QStringLiteral("查询任务存在性需要有效 ID 和输出对象。");
-        }
-        return false;
-    }
-    QSqlQuery query(db_);
-    query.prepare(QStringLiteral("select 1 from tasks where id = :id"));
-    query.bindValue(QStringLiteral(":id"), taskId.toString());
-    if (!query.exec()) {
-        if (error) {
-            *error = sqlError(query);
-        }
-        return false;
-    }
-    *exists = query.next();
-    return true;
+    return TaskEventRepository(database_).exists(taskId, exists, error);
 }
 
 bool ProjectStore::artifactExists(const ArtifactId& artifactId, bool* exists, QString* error) const
 {
-    if (!artifactId.isValid() || !exists) {
-        if (error) *error = QStringLiteral("查询 Artifact 存在性需要有效 ID 和输出对象。");
-        return false;
-    }
-    QSqlQuery query(db_);
-    query.prepare(QStringLiteral("select 1 from artifacts where id = :id"));
-    query.bindValue(QStringLiteral(":id"), artifactId.toString());
-    if (!query.exec()) {
-        if (error) *error = sqlError(query);
-        return false;
-    }
-    *exists = query.next();
-    return true;
+    return ArtifactCatalogRepository(database_).exists(
+        artifactId, exists, error);
 }
 
 bool ProjectStore::task(const TaskId& taskId, TaskSnapshot* result, QString* error) const
 {
-    if (!taskId.isValid() || !result) {
-        if (error) {
-            *error = QStringLiteral("查询任务需要有效 ID 和输出对象。");
-        }
-        return false;
-    }
-    QSqlQuery query(db_);
-    query.prepare(QStringLiteral("select id, request_id, state, capability_id, task_type, created_at, updated_at, failure_code, failure_details, failure_suggested_action, coalesce(failure_occurred_at, '') from tasks where id = :id"));
-    query.bindValue(QStringLiteral(":id"), taskId.toString());
-    if (!query.exec() || !query.next()) {
-        if (error) {
-            *error = query.lastError().isValid() ? sqlError(query) : QStringLiteral("任务不存在。");
-        }
-        return false;
-    }
-    return parseTask(query, result, error);
+    return TaskEventRepository(database_).read(taskId, result, error);
 }
 
 Page<TaskSnapshot> ProjectStore::tasks(const PageRequest& request, QString* error) const
 {
-    Page<TaskSnapshot> page;
-    PageCursor cursor;
-    if (!validatePageRequest(request, QStringLiteral("tasks"), &cursor, error)) {
-        lastErrorCode_ = ProjectErrorCode::InvalidPageCursor;
-        return page;
-    }
-    lastErrorCode_ = ProjectErrorCode::None;
-    QSqlQuery query(db_);
-    QString sql = QStringLiteral(
-        "select id, request_id, state, capability_id, task_type, created_at, "
-        "updated_at, failure_code, failure_details, failure_suggested_action, "
-        "coalesce(failure_occurred_at, '') from tasks ");
-    if (!request.after.isEmpty()) {
-        sql += QStringLiteral(
-            "where (updated_at < :after_time "
-            "or (updated_at = :after_time and id < :after_id)) ");
-    }
-    sql += QStringLiteral("order by updated_at desc, id desc limit :limit");
-    query.prepare(sql);
-    if (!request.after.isEmpty()) {
-        query.bindValue(QStringLiteral(":after_time"), cursor.timestamp);
-        query.bindValue(QStringLiteral(":after_id"), cursor.id);
-    }
-    query.bindValue(QStringLiteral(":limit"), request.pageSize + 1);
-    if (!query.exec()) {
-        if (error) *error = sqlError(query);
-        lastErrorCode_ = ProjectErrorCode::SqlError;
-        return page;
-    }
-    while (query.next()) {
-        TaskSnapshot snapshot;
-        if (!parseTask(query, &snapshot, error)) return {};
-        page.items.append(snapshot);
-    }
-    if (page.items.size() > request.pageSize) {
-        page.hasMore = true;
-        page.items.removeLast();
-    }
-    if (page.hasMore && !page.items.isEmpty()) {
-        const TaskSnapshot& last = page.items.constLast();
-        page.nextCursor = encodePageCursor(QStringLiteral("tasks"),
-            {last.updatedAt.toUTC().toString(Qt::ISODateWithMs), last.id.toString()});
-    }
-    return page;
+    QString repositoryError;
+    Page<TaskSnapshot> result =
+        TaskEventRepository(database_).page(request, &repositoryError);
+    lastErrorCode_ = pageErrorCode(repositoryError);
+    if (error) *error = repositoryError;
+    return result;
 }
 
 Page<WorkflowRunSnapshot> ProjectStore::workflowRunsForTask(
     const TaskId& taskId, const PageRequest& request, QString* error) const
 {
-    Page<WorkflowRunSnapshot> page;
-    PageCursor cursor;
-    if (!taskId.isValid()) {
-        if (error) *error = QStringLiteral("查询任务工作流需要有效任务 ID。");
-        return page;
-    }
-    if (!validatePageRequest(request, QStringLiteral("workflow_runs"), &cursor, error)) {
-        lastErrorCode_ = ProjectErrorCode::InvalidPageCursor;
-        return page;
-    }
-    QSqlQuery query(db_);
-    QString sql = QStringLiteral(
-        "select id, task_id, template_id, terminal_policy, created_at "
-        "from workflow_runs where task_id = :task_id ");
-    if (!request.after.isEmpty()) {
-        sql += QStringLiteral(
-            "and (created_at > :after_time "
-            "or (created_at = :after_time and id > :after_id)) ");
-    }
-    sql += QStringLiteral("order by created_at asc, id asc limit :limit");
-    query.prepare(sql);
-    query.bindValue(QStringLiteral(":task_id"), taskId.toString());
-    if (!request.after.isEmpty()) {
-        query.bindValue(QStringLiteral(":after_time"), cursor.timestamp);
-        query.bindValue(QStringLiteral(":after_id"), cursor.id);
-    }
-    query.bindValue(QStringLiteral(":limit"), request.pageSize + 1);
-    if (!query.exec()) {
-        if (error) *error = sqlError(query);
-        return {};
-    }
-    while (query.next()) {
-        WorkflowRunSnapshot snapshot;
-        if (!parseWorkflowRun(query, &snapshot, error)) return {};
-        page.items.append(snapshot);
-    }
-    if (page.items.size() > request.pageSize) {
-        page.hasMore = true;
-        page.items.removeLast();
-    }
-    if (page.hasMore && !page.items.isEmpty()) {
-        const auto& last = page.items.constLast();
-        page.nextCursor = encodePageCursor(QStringLiteral("workflow_runs"),
-            {last.createdAt.toUTC().toString(Qt::ISODateWithMs), last.id.toString()});
-    }
-    return page;
+    QString repositoryError;
+    Page<WorkflowRunSnapshot> result =
+        WorkflowRepository(database_).runsForTask(
+            taskId, request, &repositoryError);
+    lastErrorCode_ = pageErrorCode(repositoryError);
+    if (error) *error = repositoryError;
+    return result;
 }
 
 int ProjectStore::eventCount(const TaskId& taskId, QString* error) const
 {
-    QSqlQuery query(db_);
-    query.prepare(QStringLiteral("select count(*) from task_events where task_id = :task_id"));
-    query.bindValue(QStringLiteral(":task_id"), taskId.toString());
-    if (!query.exec() || !query.next()) {
-        if (error) {
-            *error = sqlError(query);
-        }
-        return -1;
-    }
-    return query.value(0).toInt();
+    return TaskEventRepository(database_).eventCount(taskId, error);
 }
 
 int ProjectStore::metricCount(const TaskId& taskId, QString* error) const
 {
-    QSqlQuery query(db_);
-    query.prepare(QStringLiteral("select count(*) from task_metrics where task_id = :task_id"));
-    query.bindValue(QStringLiteral(":task_id"), taskId.toString());
-    if (!query.exec() || !query.next()) {
-        if (error) {
-            *error = sqlError(query);
-        }
-        return -1;
-    }
-    return query.value(0).toInt();
+    return TaskEventRepository(database_).metricCount(taskId, error);
 }
 
 int ProjectStore::artifactCount(const TaskId& taskId, QString* error) const
 {
-    QSqlQuery query(db_);
-    query.prepare(QStringLiteral("select count(*) from artifacts where task_id = :task_id"));
-    query.bindValue(QStringLiteral(":task_id"), taskId.toString());
-    if (!query.exec() || !query.next()) {
-        if (error) {
-            *error = sqlError(query);
-        }
-        return -1;
-    }
-    return query.value(0).toInt();
+    return ArtifactCatalogRepository(database_).countForTask(taskId, error);
 }
 
 int ProjectStore::artifactFileCount(const ArtifactId& artifactId, QString* error) const
 {
-    QSqlQuery query(db_);
-    query.prepare(QStringLiteral("select count(*) from artifact_files where artifact_id = :artifact_id"));
-    query.bindValue(QStringLiteral(":artifact_id"), artifactId.toString());
-    if (!query.exec() || !query.next()) {
-        if (error) {
-            *error = sqlError(query);
-        }
-        return -1;
-    }
-    return query.value(0).toInt();
+    return ArtifactCatalogRepository(database_).fileCount(artifactId, error);
 }
 
 } // namespace aitrain

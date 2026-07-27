@@ -1,6 +1,7 @@
 #pragma once
 
 #include "aitrain/core/Cancellation.h"
+#include "aitrain/artifact/VerifiedArtifactReader.h"
 #include "aitrain/storage/ProjectStore.h"
 
 #include <functional>
@@ -84,11 +85,16 @@ public:
     ArtifactDiscardResult discardCommitted(
         const ArtifactId& artifactId, ProjectStore* storage, QString* error = nullptr);
     bool recoverStaging(ProjectStore* storage, QStringList* diagnostics, QString* error = nullptr);
+    bool openVerified(const ArtifactSnapshot& artifact,
+        VerifiedArtifactDirectory* result,
+        ArtifactReadError* readError = nullptr,
+        QString* error = nullptr) const;
 
     QString rootPath() const;
-    QString artifactPath(const ArtifactId& artifactId) const;
 
 private:
+    QString artifactPath(const ArtifactId& artifactId) const;
+
     QString rootPath_;
     ArtifactCommitFailureInjector failureInjector_;
 };

@@ -176,11 +176,19 @@ bool resolveSnapshot(ProjectStore* storage, const ArtifactStore* store,
         [](const ArtifactFileSnapshot& file) {
             return file.relativePath == QStringLiteral("dataset_snapshot.json");
         });
-    const QString artifactRoot = store->artifactPath(artifact.id);
+    VerifiedArtifactDirectory directory;
+    if (!store->openVerified(artifact, &directory, nullptr, error)) {
+        return false;
+    }
+    const auto verifiedManifest = std::find_if(directory.files.cbegin(),
+        directory.files.cend(), [](const VerifiedArtifactFile& file) {
+            return file.relativePath == QStringLiteral("dataset_snapshot.json");
+        });
     QByteArray manifestBytes;
     QString manifestHash;
     if (manifestFile == artifact.files.cend()
-        || !readFile(QDir(artifactRoot).filePath(QStringLiteral("dataset_snapshot.json")),
+        || verifiedManifest == directory.files.cend()
+        || !readFile(verifiedManifest->absolutePath,
             &manifestBytes, &manifestHash, cancellation, error)
         || manifestHash != manifestFile->sha256 || manifestHash != record.manifestSha256
         || manifestBytes.size() != manifestFile->byteCount) {
@@ -197,11 +205,7 @@ bool resolveSnapshot(ProjectStore* storage, const ArtifactStore* store,
         if (error && error->isEmpty()) *error = QStringLiteral("%1 Snapshot manifest 合同无效").arg(component);
         return false;
     }
-    const QString rootPath = store->artifactPath(record.artifactId);
-    if (rootPath.isEmpty()) {
-        if (error) *error = QStringLiteral("%1 Snapshot Artifact 路径无效").arg(component);
-        return false;
-    }
+    const QString rootPath = directory.absolutePath;
     const QDir root(rootPath);
     if (!root.exists()) {
         if (error) *error = QStringLiteral("%1 Snapshot 源 locator 当前不可用").arg(component);

@@ -1,8 +1,16 @@
 #include "MainWindow.h"
 
-#include "ProjectSummaryPresenter.h"
-#include "DeliveryEvidencePresenter.h"
+#include "DashboardPageController.h"
+#include "DatasetPageController.h"
+#include "DatasetPage.h"
+#include "ProjectPageController.h"
+#include "SettingsPageController.h"
+#include "RuntimeDeliveryPageController.h"
+#include "TrainingPageController.h"
+#include "DeliveryEvidencePageController.h"
 #include "EnvironmentCheckPresenter.h"
+#include "EnvironmentPageController.h"
+#include "ProjectSessionController.h"
 
 #include "EvaluationReportView.h"
 #include "InfoPanel.h"
@@ -80,7 +88,7 @@ void MainWindow::showPage(int pageIndex, const QString& title)
     }
     pageTitle_->setText(title);
     pageCaption_->setText(QStringLiteral("%1 / %2")
-        .arg(currentProjectName_.isEmpty() ? uiText("本地工作台") : currentProjectName_, title));
+        .arg(currentProjectName().isEmpty() ? uiText("本地工作台") : currentProjectName(), title));
     sidebar_->setCurrentIndex(pageIndex);
     if (pageIndex == TaskQueuePage) {
         updateRecentTasks();
@@ -89,67 +97,58 @@ void MainWindow::showPage(int pageIndex, const QString& title)
         updateModelRegistry();
     }
     if (pageIndex == DatasetPage) {
-        if (!state_.dataset.sampleReviewSamples.isEmpty()) {
-            refreshSampleReviewTable();
+        if (!datasetPageController_->state().sampleReviewSamples.isEmpty()) {
+            datasetPageController_->refreshSampleReview();
         }
     }
     if (pageIndex == EnvironmentPage) {
-        updateEnvironmentSummary();
         updateDeliveryAcceptanceSummary();
     }
     if (pageIndex == SystemSettingsPage) {
-        updateCapabilitySummary();
-        updateSettingsSummary();
+        settingsPageController_->refresh();
     }
 }
 
 void MainWindow::showDatasetTab(int tabIndex)
 {
     showPage(DatasetPage, uiText("数据集"));
-    if (datasetTabs_) {
-        datasetTabs_->setCurrentIndex(tabIndex);
+    if (datasetPage_ && datasetPage_->tabs) {
+        datasetPage_->tabs->setCurrentIndex(tabIndex);
     }
 }
 
 void MainWindow::showDeploymentTab(int tabIndex)
 {
     showPage(DeploymentPage, uiText("部署验证"));
-    if (deploymentTabs_) {
-        deploymentTabs_->setCurrentIndex(tabIndex);
-    }
+    runtimeDeliveryPageController_->showTab(tabIndex);
 }
 
 void MainWindow::showSystemSettingsTab(int tabIndex)
 {
     showPage(SystemSettingsPage, uiText("系统设置"));
-    if (systemSettingsTabs_) {
-        systemSettingsTabs_->setCurrentIndex(tabIndex);
-    }
+    settingsPageController_->showTab(tabIndex);
 }
 
 void MainWindow::updateHeaderState()
 {
     if (headerProjectLabel_) {
-        headerProjectLabel_->setText(currentProjectPath_.isEmpty()
+        headerProjectLabel_->setText(currentProjectPath().isEmpty()
             ? uiText("未打开项目")
-            : currentProjectName_);
+            : currentProjectName());
     }
     if (pageContextPill_) {
-        pageContextPill_->setStatus(currentProjectPath_.isEmpty() ? uiText("项目未打开") : uiText("项目已就绪"),
-            currentProjectPath_.isEmpty() ? StatusPill::Tone::Neutral : StatusPill::Tone::Success);
+        pageContextPill_->setStatus(currentProjectPath().isEmpty() ? uiText("项目未打开") : uiText("项目已就绪"),
+            currentProjectPath().isEmpty() ? StatusPill::Tone::Neutral : StatusPill::Tone::Success);
     }
     const int capabilityCount = aitrain::BuiltinCapabilityRegistry::instance().capabilities().size();
     if (capabilityPill_) {
         capabilityPill_->setStatus(uiText("内置能力 %1").arg(capabilityCount),
             capabilityCount > 0 ? StatusPill::Tone::Success : StatusPill::Tone::Warning);
     }
-    if (dashboardCapabilityValue_) {
-        dashboardCapabilityValue_->setText(QString::number(capabilityCount));
-    }
     if (inspectorProjectLabel_) {
-        inspectorProjectLabel_->setText(currentProjectPath_.isEmpty()
+        inspectorProjectLabel_->setText(currentProjectPath().isEmpty()
                 ? uiText("未打开项目")
-                : currentProjectName_);
+                : currentProjectName());
     }
     if (inspectorCapabilityLabel_) {
         inspectorCapabilityLabel_->setText(uiText("内置能力 %1 项").arg(capabilityCount));
@@ -160,7 +159,9 @@ void MainWindow::updateHeaderState()
     if (inspectorGpuLabel_) {
         inspectorGpuLabel_->setText(gpuPill_ ? gpuPill_->text() : uiText("GPU：等待环境检查"));
     }
-    updateCapabilitySummary();
+    if (settingsPage_) {
+        settingsPageController_->refreshCapabilities();
+    }
 }
 
 void MainWindow::ensureWorkspacePage(int pageIndex)
@@ -195,580 +196,96 @@ void MainWindow::ensureWorkspacePage(int pageIndex)
         refreshTrainingDefaults();
     }
     if (pageIndex == SystemSettingsPage) {
-        refreshBuiltInCapabilities();
+        settingsPageController_->refresh();
     }
 }
 
 void MainWindow::updateProjectSummary()
 {
-    const bool workspaceOpen = !currentProjectPath_.isEmpty() && workspace_.isOpen();
-    if (workspaceOpen) {
-        projectSummaryPresenter_->refresh();
-    } else {
-        projectSummaryPresenter_->clear();
-    }
-    const ProjectSummaryViewModel& summary = projectSummaryPresenter_->viewModel();
-    const bool hasProject = workspaceOpen && summary.available;
-    if (projectConsoleStatusLabel_) {
-        projectConsoleStatusLabel_->setText(hasProject
-            ? uiText("已打开：%1").arg(currentProjectName_)
-            : (workspaceOpen
-                    ? uiText(" 项目汇总读取失败：%1").arg(projectSummaryPresenter_->lastError())
-                    : uiText("未打开项目。")));
-    }
-    if (projectPathSummaryLabel_) {
-        projectPathSummaryLabel_->setText(hasProject
-            ? (currentProjectName_.isEmpty() ? uiText("已打开") : currentProjectName_)
-            : uiText("未打开"));
-        projectPathSummaryLabel_->setToolTip(QString());
-    }
-    if (projectSqliteSummaryLabel_) {
-        projectSqliteSummaryLabel_->setText(hasProject ? uiText(" 已连接") : uiText("未连接"));
-    }
-
-    if (projectDatasetSummaryLabel_) {
-        projectDatasetSummaryLabel_->setText(QString::number(summary.datasetCount));
-        projectDatasetSummaryLabel_->setToolTip(uiText("版本 %1，快照 %2")
-            .arg(summary.datasetVersionCount)
-            .arg(summary.datasetSnapshotCount));
-    }
-    if (projectTaskSummaryLabel_) {
-        projectTaskSummaryLabel_->setText(QString::number(summary.taskCount));
-        projectTaskSummaryLabel_->setToolTip(uiText("活动 %1，成功 %2，失败 %3，取消 %4")
-            .arg(summary.activeTaskCount)
-            .arg(summary.succeededTaskCount)
-            .arg(summary.failedTaskCount)
-            .arg(summary.canceledTaskCount));
-    }
-    if (projectExportSummaryLabel_) {
-        projectExportSummaryLabel_->setText(QString::number(summary.modelPackageCount));
-        projectExportSummaryLabel_->setToolTip(uiText("已校验模型包 %1；已提交产物 %2")
-            .arg(summary.verifiedModelPackageCount)
-            .arg(summary.committedArtifactCount));
-    }
-}
-
-void MainWindow::updateCapabilitySummary()
-{
-    const QVector<aitrain::CapabilityDescriptor> capabilities =
-        aitrain::BuiltinCapabilityRegistry::instance().capabilities();
-    QStringList datasetFormats;
-    QStringList exportFormats;
-    int gpuCapabilities = 0;
-    for (const aitrain::CapabilityDescriptor& capability : capabilities) {
-        datasetFormats.append(capability.datasetFormats);
-        for (const QString& backendId : capability.backendIds) {
-            const aitrain::BackendDescriptor backend =
-                aitrain::BuiltinCapabilityRegistry::instance().backend(backendId);
-            exportFormats.append(backend.exportFormats);
-            if (backend.devicePolicy == QStringLiteral("gpu_required")
-                || backend.devicePolicy == QStringLiteral("gpu_recommended")) {
-                ++gpuCapabilities;
-            }
-        }
-    }
-
-    if (capabilityConsoleStatusLabel_) {
-        capabilityConsoleStatusLabel_->setText(capabilities.isEmpty()
-            ? uiText("内置能力注册表为空。")
-            : uiText("已注册 %1 个内置能力。").arg(capabilities.size()));
-    }
-    if (capabilitySourceLabel_) {
-        capabilitySourceLabel_->setText(uiText("能力来源：编译期内置注册表"));
-        capabilitySourceLabel_->setToolTip(uiText("能力由编译期注册表提供。"));
-    }
-    if (capabilityCountSummaryLabel_) {
-        capabilityCountSummaryLabel_->setText(QString::number(capabilities.size()));
-    }
-    if (capabilityDatasetFormatSummaryLabel_) {
-        capabilityDatasetFormatSummaryLabel_->setText(QString::number(uniqueStringCount(datasetFormats)));
-        capabilityDatasetFormatSummaryLabel_->setToolTip(compactListSummary(datasetFormats, 12));
-    }
-    if (capabilityExportFormatSummaryLabel_) {
-        capabilityExportFormatSummaryLabel_->setText(QString::number(uniqueStringCount(exportFormats)));
-        capabilityExportFormatSummaryLabel_->setToolTip(compactListSummary(exportFormats, 12));
-    }
-    if (capabilityGpuSummaryLabel_) {
-        capabilityGpuSummaryLabel_->setText(QString::number(gpuCapabilities));
-    }
-}
-
-void MainWindow::updateEnvironmentSummary()
-{
-    int ok = 0;
-    int warning = 0;
-    int missing = 0;
-    int blocked = 0;
-    int unchecked = 0;
-    if (environmentTable_) {
-        for (int row = 0; row < environmentTable_->rowCount(); ++row) {
-            const QString state = environmentTable_->item(row, 1) ? environmentTable_->item(row, 1)->data(Qt::UserRole).toString() : QString();
-            if (state == QStringLiteral("ok")) {
-                ++ok;
-            } else if (state == QStringLiteral("hardware-blocked")) {
-                ++warning;
-                ++blocked;
-            } else if (state == QStringLiteral("warning")) {
-                ++warning;
-            } else if (state == QStringLiteral("missing")) {
-                ++missing;
-            } else {
-                ++unchecked;
-            }
-        }
-    }
-    if (environmentOkSummaryLabel_) {
-        environmentOkSummaryLabel_->setText(QString::number(ok));
-    }
-    if (environmentWarningSummaryLabel_) {
-        environmentWarningSummaryLabel_->setText(QString::number(warning));
-    }
-    if (environmentMissingSummaryLabel_) {
-        environmentMissingSummaryLabel_->setText(QString::number(missing));
-    }
-    if (environmentUncheckedSummaryLabel_) {
-        environmentUncheckedSummaryLabel_->setText(QString::number(unchecked));
-    }
-    if (environmentConsoleStatusLabel_) {
-        if (missing > 0) {
-            environmentConsoleStatusLabel_->setText(uiText("发现 %1 项缺失，相关能力会被阻塞。").arg(missing));
-        } else if (warning > 0) {
-            environmentConsoleStatusLabel_->setText(
-                blocked > 0
-                    ? uiText("发现 %1 项警告（其中 %2 项硬件受限），可继续但需要关注。").arg(warning).arg(blocked)
-                    : uiText("发现 %1 项警告，可继续但需要关注。").arg(warning));
-        } else if (unchecked > 0) {
-            environmentConsoleStatusLabel_->setText(uiText("尚有 %1 项未检测。").arg(unchecked));
-        } else {
-            environmentConsoleStatusLabel_->setText(uiText("环境自检通过。"));
-        }
-    }
-}
-
-void MainWindow::refreshEnvironmentReportView()
-{
-    if (!environmentTable_) {
-        return;
-    }
-
-    const QJsonObject report = environmentCheckPresenter_
-        ? environmentCheckPresenter_->viewModel().report : QJsonObject();
-    environmentTable_->setRowCount(0);
-
-    const auto addRow = [this](const QString& name, const QString& status,
-        const QString& message) {
-        const int row = environmentTable_->rowCount();
-        environmentTable_->insertRow(row);
-        auto* nameItem = new QTableWidgetItem(name);
-        auto* statusItem = new QTableWidgetItem(status == QStringLiteral("ok")
-                ? uiText("通过")
-                : status == QStringLiteral("missing")
-                    ? uiText("缺失")
-                    : status == QStringLiteral("hardware-blocked")
-                        ? uiText("硬件受限")
-                        : status == QStringLiteral("warning")
-                            ? uiText("警告") : uiText("未检测"));
-        statusItem->setData(Qt::UserRole, status);
-        auto* messageItem = new QTableWidgetItem(message.isEmpty()
-            ? uiText("未提供说明。") : message);
-        environmentTable_->setItem(row, 0, nameItem);
-        environmentTable_->setItem(row, 1, statusItem);
-        environmentTable_->setItem(row, 2, messageItem);
-    };
-
-    if (report.isEmpty()) {
-        const QStringList rows = {
-            QStringLiteral("NVIDIA Driver"), QStringLiteral("CUDA Runtime"),
-            QStringLiteral("cuDNN"), QStringLiteral("TensorRT"),
-            QStringLiteral("ONNX Runtime"), QStringLiteral("Qt Runtime Modules"),
-            QStringLiteral("内置能力"), QStringLiteral("Worker")};
-        for (const QString& name : rows) {
-            addRow(name, QStringLiteral("unchecked"), uiText("点击执行环境自检。"));
-        }
-        return;
-    }
-
-    for (const QJsonValue& value : report.value(QStringLiteral("checks")).toArray()) {
-        const QJsonObject check = value.toObject();
-        addRow(check.value(QStringLiteral("name")).toString(),
-            check.value(QStringLiteral("status")).toString(),
-            check.value(QStringLiteral("message")).toString());
-    }
-    const QJsonObject profiles = report.value(QStringLiteral("profiles")).toObject();
-    for (auto it = profiles.constBegin(); it != profiles.constEnd(); ++it) {
-        const QJsonObject profile = it.value().toObject();
-        QString message = profile.value(QStringLiteral("message")).toString();
-        if (message.isEmpty()) {
-            QStringList hints;
-            for (const QJsonValue& hint : profile.value(QStringLiteral("repairHints")).toArray()) {
-                hints.append(hint.toString());
-            }
-            message = hints.join(QStringLiteral("；"));
-        }
-        addRow(profile.value(QStringLiteral("title")).toString(it.key()),
-            profile.value(QStringLiteral("status")).toString(), message);
-    }
-}
-
-void MainWindow::updateSettingsSummary()
-{
-    if (settingsDefaultProjectPathEdit_) {
-        settingsDefaultProjectPathEdit_->setText(QDir::toNativeSeparators(configuredDefaultProjectPath()));
-    }
-    updateLanguageButtonState();
+    projectPageController_->setContext(
+        !currentProjectPath().isEmpty() && projectSessionController_
+            && projectSessionController_->isOpen(),
+        currentProjectName());
+    projectPageController_->refresh();
 }
 
 void MainWindow::updateDeliveryAcceptanceSummary()
 {
-    if (!deliveryAcceptanceTable_) {
-        return;
-    }
-    if (deliveryAcceptanceTable_->rowCount() == 0) {
-        const QStringList stages = {
-            uiText("本机 RC"),
-            uiText("Clean Windows"),
-            uiText("TensorRT"),
-            uiText("客户域 OCR"),
-            uiText("包体完整性"),
-            uiText("部署验证"),
-            uiText("诊断包")
-        };
-        for (const QString& stage : stages) {
-            const int row = deliveryAcceptanceTable_->rowCount();
-            deliveryAcceptanceTable_->insertRow(row);
-            deliveryAcceptanceTable_->setItem(row, 0, new QTableWidgetItem(stage));
-            deliveryAcceptanceTable_->setItem(row, 1, new QTableWidgetItem(QStringLiteral("not_run")));
-            deliveryAcceptanceTable_->setItem(row, 2, new QTableWidgetItem(QString()));
-            deliveryAcceptanceTable_->setItem(row, 3, new QTableWidgetItem(uiText("等待导入外部结果或运行对应 Worker/脚本。")));
-        }
-    }
-
-    if (deliveryEvidencePresenter_ && workspace_.isOpen()) {
-        // 候选元数据快照在当前线程完成，证据文件读取、哈希和 JSON 校验在线程池执行。
-        // changed() 到达后由 renderDeliveryAcceptanceSummary() 更新表格，避免阻塞 UI。
-        deliveryEvidencePresenter_->refreshAsync();
-    }
-    renderDeliveryAcceptanceSummary();
+    deliveryEvidencePageController_->refresh();
 }
-
-void MainWindow::renderDeliveryAcceptanceSummary()
-{
-    if (!deliveryAcceptanceTable_) {
-        return;
-    }
-    if (deliveryEvidencePresenter_) {
-        for (const auto& evidence : deliveryEvidencePresenter_->viewModel().records) {
-            QString stage = evidence.evidenceKind;
-            const QString normalized = evidence.evidenceKind.toLower();
-            if (normalized.contains(QStringLiteral("clean"))) stage = uiText("Clean Windows");
-            else if (normalized.contains(QStringLiteral("tensor"))) stage = uiText("TensorRT");
-            else if (normalized.contains(QStringLiteral("ocr"))) stage = uiText("客户域 OCR");
-            int row = -1;
-            for (int index = 0; index < deliveryAcceptanceTable_->rowCount(); ++index) {
-                if (deliveryAcceptanceTable_->item(index, 0)
-                    && deliveryAcceptanceTable_->item(index, 0)->text() == stage) {
-                    row = index;
-                    break;
-                }
-            }
-            if (row < 0) {
-                row = deliveryAcceptanceTable_->rowCount();
-                deliveryAcceptanceTable_->insertRow(row);
-                deliveryAcceptanceTable_->setItem(row, 0, new QTableWidgetItem(stage));
-            }
-            deliveryAcceptanceTable_->setItem(row, 1,
-                new QTableWidgetItem(evidence.verified ? QStringLiteral("passed") : QStringLiteral("collected")));
-            deliveryAcceptanceTable_->setItem(row, 2,
-                new QTableWidgetItem(evidence.evidenceArtifactId.toString()));
-            deliveryAcceptanceTable_->setItem(row, 3,
-                new QTableWidgetItem(evidence.limitations.join(QStringLiteral(" | "))));
-        }
-    }
-
-    int passed = 0;
-    int blocked = 0;
-    int hardwareBlocked = 0;
-    int notRun = 0;
-    int collected = 0;
-    for (int row = 0; row < deliveryAcceptanceTable_->rowCount(); ++row) {
-        const QString status = deliveryAcceptanceTable_->item(row, 1)
-            ? deliveryAcceptanceTable_->item(row, 1)->text()
-            : QString();
-        if (status == QStringLiteral("passed")) {
-            ++passed;
-        } else if (status == QStringLiteral("blocked") || status == QStringLiteral("failed")) {
-            ++blocked;
-        } else if (status == QStringLiteral("hardware-blocked")) {
-            ++hardwareBlocked;
-        } else if (status == QStringLiteral("collected") || status == QStringLiteral("imported")) {
-            ++collected;
-        } else {
-            ++notRun;
-        }
-    }
-    if (deliveryAcceptanceSummaryLabel_) {
-        deliveryAcceptanceSummaryLabel_->setText(uiText("验收状态：passed %1 / blocked %2 / hardware-blocked %3 / collected %4 / not-run %5")
-            .arg(passed)
-            .arg(blocked)
-            .arg(hardwareBlocked)
-            .arg(collected)
-            .arg(notRun));
-    }
-}
-
 void MainWindow::updateDashboardSummary()
 {
-    updateProjectSummary();
-    const ProjectSummaryViewModel& summary = projectSummaryPresenter_->viewModel();
-    const bool hasProject = !currentProjectPath_.isEmpty()
-        && workspace_.isOpen() && summary.available;
-    if (dashboardProjectValue_) {
-        dashboardProjectValue_->setText(hasProject ? currentProjectName_ : uiText("未打开"));
-    }
-    if (projectLabel_) {
-        projectLabel_->setText(hasProject
-            ? uiText("当前项目：%1（工作区已就绪）").arg(currentProjectName_.isEmpty()
-                ? uiText("已打开") : currentProjectName_)
-            : uiText("未打开项目。先创建或打开本地项目，后续数据集、任务和模型产物都会写入项目目录。"));
-    }
-
-    if (dashboardDatasetValue_) {
-        dashboardDatasetValue_->setText(hasProject
-            ? QStringLiteral("%1 / %2").arg(summary.datasetSnapshotCount).arg(summary.datasetCount)
-            : QStringLiteral("0"));
-        dashboardDatasetValue_->setToolTip(uiText("快照 / 数据集；版本 %1")
-            .arg(summary.datasetVersionCount));
-    }
-    if (dashboardTaskValue_) {
-        dashboardTaskValue_->setText(QString::number(summary.taskCount));
-        dashboardTaskValue_->setToolTip(uiText("活动任务 %1；成功 %2；失败 %3；取消 %4")
-            .arg(summary.activeTaskCount)
-            .arg(summary.succeededTaskCount)
-            .arg(summary.failedTaskCount)
-            .arg(summary.canceledTaskCount));
-    }
-    if (dashboardModelValue_) {
-        dashboardModelValue_->setText(hasProject
-            ? QStringLiteral("%1 / %2").arg(summary.verifiedModelPackageCount).arg(summary.modelPackageCount)
-            : QStringLiteral("0"));
-    }
-    if (dashboardCapabilityValue_) {
-        dashboardCapabilityValue_->setText(QString::number(aitrain::BuiltinCapabilityRegistry::instance().capabilities().size()));
-    }
-
     QString environmentText = uiText("待检测");
-    if (environmentTable_ && environmentTable_->rowCount() > 0) {
-        bool hasMissing = false;
-        bool hasWarning = false;
-        bool hasChecked = false;
-        for (int row = 0; row < environmentTable_->rowCount(); ++row) {
-            const QString state = environmentTable_->item(row, 1) ? environmentTable_->item(row, 1)->data(Qt::UserRole).toString() : QString();
-            hasChecked = hasChecked || !state.isEmpty();
-            hasMissing = hasMissing || state == QStringLiteral("missing");
-            hasWarning = hasWarning || state == QStringLiteral("warning") || state == QStringLiteral("hardware-blocked");
-        }
-        if (hasChecked) {
-            environmentText = hasMissing ? uiText("缺失")
-                : (hasWarning ? uiText("警告") : uiText("通过"));
-        }
+    bool hasMissing = false;
+    bool hasWarning = false;
+    bool hasChecked = false;
+    const QJsonObject environmentReport = environmentPageController_->report();
+    for (const QJsonValue& value
+         : environmentReport.value(QStringLiteral("checks")).toArray()) {
+        const QString status = value.toObject()
+            .value(QStringLiteral("status")).toString();
+        hasChecked = hasChecked || !status.isEmpty();
+        hasMissing = hasMissing || status == QStringLiteral("missing");
+        hasWarning = hasWarning || status == QStringLiteral("warning")
+            || status == QStringLiteral("hardware-blocked");
     }
-    if (dashboardEnvironmentValue_) {
-        dashboardEnvironmentValue_->setText(environmentText);
+    if (hasChecked) {
+        environmentText = hasMissing ? uiText("缺失")
+            : (hasWarning ? uiText("警告") : uiText("通过"));
     }
-    updateCapabilitySummary();
-    updateEnvironmentSummary();
-
-    if (dashboardNextStepLabel_) {
-        QString nextStep;
-        if (!hasProject) {
-            nextStep = uiText("先创建或打开一个本地项目。项目目录会集中保存数据集索引、任务历史、训练报告和模型产物。");
-        } else if (summary.datasetSnapshotCount == 0) {
-            nextStep = uiText("下一步：导入数据并创建数据集快照。训练工作流只消费已登记的不可变快照。");
-        } else if (summary.taskCount == 0) {
-            nextStep = uiText("下一步：进入训练实验，选择已登记的数据集快照并启动官方后端工作流。");
-        } else if (summary.modelPackageCount == 0) {
-            nextStep = uiText("下一步：在任务与产物中检查工作流产物，并完成模型包登记后进入部署验证。");
-        } else {
-            nextStep = uiText("项目已记录数据集快照、任务与模型包。可继续进入部署验证或追加实验。");
-        }
-        dashboardNextStepLabel_->setText(nextStep);
+    dashboardPageController_->setContext(
+        !currentProjectPath().isEmpty() && projectSessionController_
+            && projectSessionController_->isOpen(),
+        currentProjectName(),
+        aitrain::BuiltinCapabilityRegistry::instance().capabilities().size(),
+        environmentText,
+        gpuPill_ ? gpuPill_->text() : QString());
+    dashboardPageController_->refresh();
+    if (settingsPage_) {
+        settingsPageController_->refreshCapabilities();
     }
 }
 
 void MainWindow::updateTrainingSelectionSummary()
 {
-    const QString datasetPath = !state_.dataset.currentPath.isEmpty()
-        ? state_.dataset.currentPath
-        : QDir::fromNativeSeparators(datasetPathEdit_ ? datasetPathEdit_->text().trimmed() : QString());
-    const QString datasetFormat = !state_.dataset.currentFormat.isEmpty()
-        ? state_.dataset.currentFormat
-        : currentDatasetFormat();
-    const bool hasCommittedIdentity = state_.dataset.currentValid
-        && !state_.dataset.currentDatasetId.isEmpty()
-        && !state_.dataset.currentDatasetVersionId.isEmpty()
-        && !state_.dataset.currentSnapshotId.isEmpty()
-        && !state_.dataset.currentSnapshotArtifactId.isEmpty();
+    const QString datasetPath = datasetPageController_->state().currentPath;
+    const QString datasetFormat = datasetPageController_->state().currentFormat;
+    const bool hasCommittedIdentity = datasetPageController_->state().currentValid
+        && !datasetPageController_->state().currentDatasetId.isEmpty()
+        && !datasetPageController_->state().currentDatasetVersionId.isEmpty()
+        && !datasetPageController_->state().currentSnapshotId.isEmpty()
+        && !datasetPageController_->state().currentSnapshotArtifactId.isEmpty();
     const QString state = hasCommittedIdentity ? uiText("已提交快照")
-        : (state_.dataset.currentValid ? uiText("已校验") : uiText("待校验"));
-    const QString snapshotId = dataQualitySnapshotIdEdit_ ? dataQualitySnapshotIdEdit_->text().trimmed() : QString();
-    const QString snapshotArtifactId = dataQualitySnapshotArtifactIdEdit_ ? dataQualitySnapshotArtifactIdEdit_->text().trimmed() : QString();
+        : (datasetPageController_->state().currentValid ? uiText("已校验") : uiText("待校验"));
+    const QString snapshotId =
+        datasetPageController_->state().currentSnapshotId;
+    const QString snapshotArtifactId =
+        datasetPageController_->state().currentSnapshotArtifactId;
     QString snapshotText = snapshotId.isEmpty()
         ? uiText("快照：尚未选择 committed Snapshot 身份")
         : uiText("快照：%1 | Artifact %2").arg(snapshotId.left(12), snapshotArtifactId.left(12));
-    bool datasetReady = state_.dataset.currentValid
-        && (datasetPath.isEmpty() || state_.dataset.currentPath == datasetPath)
-        && state_.dataset.currentFormat == datasetFormat;
-    datasetReady = datasetReady && !snapshotId.isEmpty() && !snapshotArtifactId.isEmpty();
-
-    if (trainingDatasetSummaryLabel_) {
-        trainingDatasetSummaryLabel_->setText(hasCommittedIdentity
-            ? uiText("当前数据集：%1 | %2\nDataset %3 / Version %4\n%5")
-                .arg(datasetFormatLabel(datasetFormat), state,
-                    state_.dataset.currentDatasetId.left(12),
-                    state_.dataset.currentDatasetVersionId.left(12), snapshotText)
-            : (datasetPath.isEmpty()
-                ? uiText("当前数据集：未选择。请先选择已登记快照或导入外部数据集。")
-                : uiText("当前数据集：%1 | %2\n外部数据待创建并提交 Snapshot Artifact。\n%3")
-                    .arg(datasetFormatLabel(datasetFormat), state, snapshotText)));
-        trainingDatasetSummaryLabel_->setToolTip(hasCommittedIdentity
-            ? snapshotText
-            : (datasetPath.isEmpty() ? QString() : uiText("外部数据仅停留在导入边界，需先提交 Snapshot Artifact。\n%1").arg(snapshotText)));
-    }
-    if (datasetDetailLabel_) {
-        datasetDetailLabel_->setText(hasCommittedIdentity
+    if (datasetPage_ && datasetPage_->datasetDetailLabel) {
+        datasetPage_->datasetDetailLabel->setText(hasCommittedIdentity
             ? uiText("格式：%1 | 状态：%2 | Dataset：%3\n%4")
                 .arg(datasetFormatLabel(datasetFormat), state,
-                    state_.dataset.currentDatasetId.left(12), snapshotText)
+                    datasetPageController_->state().currentDatasetId.left(12), snapshotText)
             : (datasetPath.isEmpty()
                 ? uiText("选择已登记快照或导入数据集后显示格式、校验状态和最近报告。")
                 : uiText("格式：%1 | 状态：%2\n外部数据仅停留在导入边界，请先创建并提交 Snapshot Artifact。\n%3")
                     .arg(datasetFormatLabel(datasetFormat), state, snapshotText)));
     }
-    if (trainingBackendHintLabel_ && trainingBackendCombo_) {
-        trainingBackendHintLabel_->setText(trainingBackendDescription(trainingBackendCombo_->currentData().toString()));
-    }
-    const QString visibleBackend = trainingBackendCombo_
-        ? trainingBackendCombo_->currentData().toString().trimmed().toLower()
-        : QString();
-    if (auto* yoloPanel = findChild<QWidget*>(QStringLiteral("YoloOfficialArgsGroup"))) {
-        yoloPanel->setVisible(yoloPanel->property("advancedExpanded").toBool()
-            && visibleBackend.startsWith(QStringLiteral("ultralytics_yolo_")));
-    }
-    if (auto* smpPanel = findChild<QWidget*>(QStringLiteral("SmpSemanticArgsGroup"))) {
-        smpPanel->setVisible(smpPanel->property("advancedExpanded").toBool()
-            && visibleBackend == QStringLiteral("smp_semantic_segmentation"));
-    }
-    if (auto* anomalyPanel = findChild<QWidget*>(QStringLiteral("AnomalyDetectionArgsGroup"))) {
-        anomalyPanel->setVisible(anomalyPanel->property("advancedExpanded").toBool()
-            && (visibleBackend == QStringLiteral("anomalib_patchcore")
-                || visibleBackend == QStringLiteral("anomalib_efficientad")));
-    }
-    if (auto* caption = findChild<QLabel*>(QStringLiteral("TrainingLiveCaption_TrainingMapValue"))) {
-        caption->setText((visibleBackend == QStringLiteral("anomalib_patchcore") || visibleBackend == QStringLiteral("anomalib_efficientad"))
-            ? QStringLiteral("Score/F1")
-            : QStringLiteral("mAP"));
-    }
-    if (trainingRunSummaryLabel_) {
-        const QString backend = trainingBackendCombo_
-            ? trainingBackendCombo_->currentData().toString()
-            : defaultBackendForTask(currentTaskType());
-        const QString model = modelPresetCombo_ ? modelPresetCombo_->currentText().trimmed() : QString();
-        trainingRunSummaryLabel_->setText(uiText("运行摘要：%1 | 后端 %2 | 模型 %3 | epoch %4 / batch %5 / image %6")
-            .arg(taskTypeLabel(currentTaskType()),
-                backend.isEmpty() ? uiText("未选择") : backend,
-                model.isEmpty() ? uiText("默认") : model,
-                epochsEdit_ ? epochsEdit_->text() : QStringLiteral("-"),
-                batchEdit_ ? batchEdit_->text() : QStringLiteral("-"),
-                imageSizeEdit_ ? imageSizeEdit_->text() : QStringLiteral("-")));
-            trainingRunSummaryLabel_->setToolTip(uiText("训练只消费四重身份：Dataset %1 / Version %2 / Snapshot %3 / Artifact %4")
-            .arg(dataQualityDatasetIdEdit_ ? dataQualityDatasetIdEdit_->text().trimmed() : QString(),
-                dataQualityDatasetVersionIdEdit_ ? dataQualityDatasetVersionIdEdit_->text().trimmed() : QString(),
-                snapshotId,
-                snapshotArtifactId));
-    }
 }
 
 void MainWindow::refreshTrainingDefaults()
 {
-    if (!trainingBackendCombo_ || !modelPresetCombo_) {
-        updateTrainingSelectionSummary();
-        return;
-    }
-
-    const QString datasetFormat = !state_.dataset.currentFormat.isEmpty()
-        ? state_.dataset.currentFormat
-        : currentDatasetFormat();
-    QString preferredCapability;
-    QString preferredTask;
-    QString preferredBackend;
-
-    if (datasetFormat == QStringLiteral("yolo_detection")) {
-        preferredCapability = QStringLiteral("yolo");
-        preferredTask = QStringLiteral("detection");
-        preferredBackend = QStringLiteral("ultralytics_yolo_detect");
-    } else if (datasetFormat == QStringLiteral("yolo_segmentation")) {
-        preferredCapability = QStringLiteral("yolo");
-        preferredTask = QStringLiteral("segmentation");
-        preferredBackend = QStringLiteral("ultralytics_yolo_segment");
-    } else if (datasetFormat == QStringLiteral("yolo_obb")) {
-        preferredCapability = QStringLiteral("yolo");
-        preferredTask = QStringLiteral("obb_detection");
-        preferredBackend = QStringLiteral("ultralytics_yolo_obb");
-    } else if (datasetFormat == QStringLiteral("semantic_segmentation_mask")) {
-        preferredCapability = QStringLiteral("semantic_segmentation");
-        preferredTask = QStringLiteral("semantic_segmentation");
-        preferredBackend = QStringLiteral("smp_semantic_segmentation");
-    } else if (datasetFormat == QStringLiteral("anomaly_folder")) {
-        preferredCapability = QStringLiteral("anomaly_detection");
-        preferredTask = QStringLiteral("anomaly_detection");
-        preferredBackend = QStringLiteral("anomalib_patchcore");
-    } else if (datasetFormat == QStringLiteral("paddleocr_det")) {
-        preferredCapability = QStringLiteral("paddleocr");
-        preferredTask = QStringLiteral("ocr_detection");
-        preferredBackend = QStringLiteral("paddleocr_det_official");
-    } else if (datasetFormat == QStringLiteral("paddleocr_rec")) {
-        preferredCapability = QStringLiteral("paddleocr");
-        preferredTask = QStringLiteral("ocr_recognition");
-        preferredBackend = QStringLiteral("paddleocr_rec_official");
-    }
-
-    if (!preferredCapability.isEmpty() && capabilityCombo_) {
-        QSignalBlocker block(capabilityCombo_);
-        setComboCurrentData(capabilityCombo_, preferredCapability);
-    }
-
-    if (taskTypeCombo_) {
-        const QString currentTask = currentTaskType();
-        QSignalBlocker block(taskTypeCombo_);
-        taskTypeCombo_->clear();
-        const aitrain::CapabilityDescriptor capability = capabilityCombo_
-            ? aitrain::BuiltinCapabilityRegistry::instance().capability(capabilityCombo_->currentData().toString())
-            : aitrain::CapabilityDescriptor();
-        if (!capability.id.isEmpty()) {
-            addTaskTypeItems(taskTypeCombo_, capability.taskTypes);
-        }
-        const QString targetTask = preferredTask.isEmpty() ? currentTask : preferredTask;
-        const int taskIndex = taskTypeCombo_->findData(targetTask);
-        if (taskIndex >= 0) {
-            taskTypeCombo_->setCurrentIndex(taskIndex);
-        } else if (taskTypeCombo_->count() > 0) {
-            taskTypeCombo_->setCurrentIndex(0);
-        }
-    }
-
-    if (preferredBackend.isEmpty()) {
-        preferredBackend = defaultBackendForTask(currentTaskType());
-    }
-    {
-        QSignalBlocker block(trainingBackendCombo_);
-        setComboCurrentData(trainingBackendCombo_, preferredBackend);
-    }
-    const QString backend = trainingBackendCombo_->currentData().toString();
-    {
-        QSignalBlocker block(modelPresetCombo_);
-        modelPresetCombo_->clear();
-        modelPresetCombo_->addItems(modelPresetItemsForBackend(backend));
-        modelPresetCombo_->setCurrentText(defaultModelForBackend(backend));
+    TrainingDatasetBinding binding;
+    binding.datasetId = datasetPageController_->state().currentDatasetId;
+    binding.datasetVersionId = datasetPageController_->state().currentDatasetVersionId;
+    binding.snapshotId = datasetPageController_->state().currentSnapshotId;
+    binding.snapshotArtifactId = datasetPageController_->state().currentSnapshotArtifactId;
+    binding.datasetFormat = datasetPageController_->state().currentFormat;
+    if (trainingPageController_) {
+        trainingPageController_->setDatasetBinding(binding);
     }
     updateTrainingSelectionSummary();
 }

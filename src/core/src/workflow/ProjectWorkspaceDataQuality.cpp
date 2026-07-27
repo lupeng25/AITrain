@@ -90,15 +90,22 @@ bool loadVerifiedSnapshot(ProjectStore* storage, ArtifactStore* artifacts,
         if (error && error->isEmpty()) *error = QStringLiteral("quality.snapshot.artifact_invalid");
         return false;
     }
-    const QString artifactPath = artifacts->artifactPath(record.artifactId);
-    const QString manifestPath = QDir(artifactPath).filePath(QStringLiteral("dataset_snapshot.json"));
+    VerifiedArtifactDirectory directory;
+    if (!artifacts->openVerified(
+            artifact, &directory, nullptr, error)) return false;
     const auto manifestFile = std::find_if(artifact.files.cbegin(), artifact.files.cend(), [](const ArtifactFileSnapshot& file) {
         return file.relativePath == QStringLiteral("dataset_snapshot.json");
     });
+    const auto verifiedManifest = std::find_if(directory.files.cbegin(),
+        directory.files.cend(), [](const VerifiedArtifactFile& file) {
+            return file.relativePath == QStringLiteral("dataset_snapshot.json");
+        });
     QByteArray manifestBytes;
     QString manifestHash;
     if (manifestFile == artifact.files.cend()
-        || !readAndHash(manifestPath, &manifestBytes, &manifestHash, cancellation, error)
+        || verifiedManifest == directory.files.cend()
+        || !readAndHash(verifiedManifest->absolutePath,
+            &manifestBytes, &manifestHash, cancellation, error)
         || manifestHash != manifestFile->sha256 || manifestHash != record.manifestSha256
         || manifestBytes.size() != manifestFile->byteCount) {
         if (error && error->isEmpty()) *error = QStringLiteral("quality.snapshot.manifest_integrity_failed");
@@ -133,11 +140,7 @@ bool loadVerifiedSnapshot(ProjectStore* storage, ArtifactStore* artifacts,
     }
     // rootPath 仅作临时读取 locator；每个文件必须重新匹配 committed manifest。
     // Workflow 参数、问题清单和报告均不持久化该裸目录。
-    const QString rootPath = artifacts->artifactPath(record.artifactId);
-    if (rootPath.isEmpty()) {
-        if (error) *error = QStringLiteral("quality.snapshot.artifact_path_invalid");
-        return false;
-    }
+    const QString rootPath = directory.absolutePath;
     const QDir source(rootPath);
     if (!source.exists()) {
         if (error) *error = QStringLiteral("quality.snapshot.source_unavailable");

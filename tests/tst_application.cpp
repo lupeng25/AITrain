@@ -151,6 +151,19 @@ void ApplicationTests::verifiedArtifactReaderDistinguishesTooLargeAndIntegrityEr
     tampered.sha256 = QString(64, QLatin1Char('0'));
     QVERIFY(!reader.preview(tampered, 4, &preview, &readError, &error));
     QCOMPARE(readError, aitrain::ArtifactReadError::IntegrityMismatch);
+
+    aitrain::ArtifactSnapshot artifact;
+    artifact.id = aitrain::ArtifactId::create();
+    artifact.files.append(expected);
+    aitrain::VerifiedArtifactDirectory verifiedDirectory;
+    QVERIFY2(reader.verifyInventory(
+        artifact, &verifiedDirectory, &readError, &error), qPrintable(error));
+    QCOMPARE(verifiedDirectory.files.size(), 1);
+    QVERIFY(writeFile(directory.filePath(QStringLiteral("undeclared.bin")),
+        QByteArray("extra")));
+    QVERIFY(!reader.verifyInventory(
+        artifact, &verifiedDirectory, &readError, &error));
+    QCOMPARE(readError, aitrain::ArtifactReadError::IntegrityMismatch);
 }
 
 void ApplicationTests::fakeWorkerSuccessfulRunPersistsTaskMetricsAndArtifacts()
@@ -854,6 +867,17 @@ void ApplicationTests::projectWorkspaceSeparatesOpenCreateAndRebuild()
     QVERIFY2(rebuiltStore.projectMeta(&rebuiltMeta, &error), qPrintable(error));
     QCOMPARE(rebuiltMeta.schemaVersion, 13);
     QVERIFY(rebuiltMeta.projectId != firstMeta.projectId);
+    rebuiltStore.close();
+    workspace.close();
+
+    aitrain::PreparedProjectSession preparedRebuild;
+    QVERIFY2(aitrain::ProjectWorkspace::prepareRebuild(
+        projectRoot, &preparedRebuild, &error), qPrintable(error));
+    QVERIFY(preparedRebuild.isValid());
+    QVERIFY(preparedRebuild.projectMeta.projectId != rebuiltMeta.projectId);
+    aitrain::ProjectWorkspace activated;
+    QVERIFY2(activated.openPrepared(preparedRebuild, &error), qPrintable(error));
+    QVERIFY(activated.isOpen());
 }
 
 void ApplicationTests::projectWorkspaceRecoveryClosesInterruptedStaging()
@@ -1151,7 +1175,8 @@ void ApplicationTests::projectWorkspaceCommitsRuntimeArtifactsBeforeSuccess()
         &bundle,
         &error), qPrintable(error));
     QVERIFY(bundle.artifactId.isValid());
-    QVERIFY(QFileInfo::exists(bundle.pathsByKind.value(QStringLiteral("inference_predictions"))));
+    QVERIFY(QFileInfo::exists(QDir(bundle.artifactPath).filePath(
+        bundle.relativePathsByKind.value(QStringLiteral("inference_predictions")))));
     QVERIFY2(workspace.cleanupRuntimeStaging(taskId, &error), qPrintable(error));
     QVERIFY(!QFileInfo::exists(runtimeStaging));
     QVERIFY2(workspace.finalizeTask(taskId, aitrain::TaskState::Succeeded, {}, &error), qPrintable(error));
@@ -1566,9 +1591,12 @@ void ApplicationTests::projectWorkspaceRegistersDatasetSnapshotAndSequencesTrain
             aitrain::RuntimeArtifactBundle report;
             QVERIFY2(workspace.renderTrainingWorkflowDeliveryReport(workflow.workflowRunId, workflow.dispatch.step.id,
                 &report, &error), qPrintable(error));
-            const QString deliveryReportPath = report.pathsByKind.value(QStringLiteral("delivery_report_json"));
+            const QString deliveryReportPath = QDir(report.artifactPath).filePath(
+                report.relativePathsByKind.value(QStringLiteral("delivery_report_json")));
             QVERIFY(QFileInfo(deliveryReportPath).isFile());
-            QVERIFY(QFileInfo(report.pathsByKind.value(QStringLiteral("delivery_report_markdown"))).isFile());
+            QVERIFY(QFileInfo(QDir(report.artifactPath).filePath(
+                report.relativePathsByKind.value(
+                    QStringLiteral("delivery_report_markdown")))).isFile());
             QFile deliveryReportFile(deliveryReportPath);
             QVERIFY(deliveryReportFile.open(QIODevice::ReadOnly));
             const QJsonObject deliveryReport = QJsonDocument::fromJson(

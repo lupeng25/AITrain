@@ -11,14 +11,30 @@ add_executable(AITrainStudio WIN32
     src/DatasetConversionUiModel.cpp
     src/DatasetCatalogPresenter.h
     src/DatasetCatalogPresenter.cpp
+    src/DashboardPage.h
+    src/DashboardPage.cpp
+    src/DashboardPageController.h
+    src/DashboardPageController.cpp
+    src/DatasetPage.h
+    src/DatasetPage.cpp
+    src/DatasetPageController.h
+    src/DatasetPageController.cpp
     src/DeliveryEvidencePresenter.h
     src/DeliveryEvidencePresenter.cpp
+    src/DeliveryEvidencePage.h
+    src/DeliveryEvidencePage.cpp
+    src/DeliveryEvidencePageController.h
+    src/DeliveryEvidencePageController.cpp
     src/EvaluationReportView.h
     src/EvaluationReportView.cpp
     src/DiagnosticBundlePresenter.h
     src/DiagnosticBundlePresenter.cpp
     src/EnvironmentCheckPresenter.h
     src/EnvironmentCheckPresenter.cpp
+    src/EnvironmentPage.h
+    src/EnvironmentPage.cpp
+    src/EnvironmentPageController.h
+    src/EnvironmentPageController.cpp
     src/InfoPanel.h
     src/InfoPanel.cpp
     src/LanguageSupport.h
@@ -29,10 +45,9 @@ add_executable(AITrainStudio WIN32
     src/MainWindow.cpp
     src/MainWindowActions.cpp
     src/MainWindowDatasetActions.cpp
-    src/MainWindowDeliveryActions.cpp
     src/MainWindowDatasetPage.cpp
-    src/MainWindowDeliveryPages.cpp
-    src/MainWindowModelActions.cpp
+    src/MainWindowRuntimePage.cpp
+    src/MainWindowDeliveryEvidencePage.cpp
     src/MainWindowModelPages.cpp
     src/MainWindowPages.cpp
     src/MainWindowPreviews.cpp
@@ -50,20 +65,48 @@ add_executable(AITrainStudio WIN32
     src/MetricsWidget.cpp
     src/ModelRegistryPresenter.h
     src/ModelRegistryPresenter.cpp
+    src/ModelRegistryPage.h
+    src/ModelRegistryPage.cpp
+    src/ModelRegistryPageController.h
+    src/ModelRegistryPageController.cpp
     src/RegistrationDialog.h
     src/RegistrationDialog.cpp
+    src/RuntimeDeliveryPage.h
+    src/RuntimeDeliveryPage.cpp
+    src/RuntimeDeliveryPageController.h
+    src/RuntimeDeliveryPageController.cpp
     src/ProjectSummaryPresenter.h
     src/ProjectSummaryPresenter.cpp
+    src/ProjectSessionController.h
+    src/ProjectSessionController.cpp
+    src/ProjectPage.h
+    src/ProjectPage.cpp
+    src/ProjectPageController.h
+    src/ProjectPageController.cpp
+    src/SettingsPage.h
+    src/SettingsPage.cpp
+    src/SettingsPageController.h
+    src/SettingsPageController.cpp
     src/Sidebar.h
     src/Sidebar.cpp
     src/StatusPill.h
     src/StatusPill.cpp
     src/TaskArtifactPanel.h
     src/TaskArtifactPanel.cpp
+    src/TaskArtifactPage.h
+    src/TaskArtifactPage.cpp
+    src/TaskArtifactPageController.h
+    src/TaskArtifactPageController.cpp
+    src/TaskArtifactTableModels.h
+    src/TaskArtifactTableModels.cpp
     src/TaskArtifactPresenter.h
     src/TaskArtifactPresenter.cpp
     src/TaskRuntimeController.h
     src/TaskRuntimeController.cpp
+    src/TrainingPage.h
+    src/TrainingPage.cpp
+    src/TrainingPageController.h
+    src/TrainingPageController.cpp
     src/WorkspaceReadModelCoordinator.h
     src/WorkspaceReadModelCoordinator.cpp
     src/WorkerClient.h
