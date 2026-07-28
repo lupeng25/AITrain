@@ -3,10 +3,18 @@
 #include "aitrain/core/WorkerProtocol.h"
 
 #include <QFileInfo>
+#include <QSignalBlocker>
 #include <QTimer>
 #include <QUuid>
 
 namespace wp = aitrain::worker_protocol;
+
+namespace {
+
+constexpr int kDestructorTerminateWaitMs = 750;
+constexpr int kDestructorKillWaitMs = 1000;
+
+} // namespace
 
 WorkerClient::WorkerClient(QObject* parent)
     : QObject(parent)
@@ -57,12 +65,23 @@ WorkerClient::WorkerClient(QObject* parent)
 
 WorkerClient::~WorkerClient()
 {
+    cancelTimer_.stop();
+    connectionTimer_.stop();
+    terminalShutdownTimer_.stop();
     cleanupSocket();
     server_.close();
     if (process_.state() != QProcess::NotRunning) {
-        // QObject 析构阶段不能再进入嵌套事件循环等待 Worker。进程树的长期
-        // 回收由 Worker/ Job Object 负责；GUI 这里只做立即的最后兜底。
-        process_.kill();
+        // 终态事件可以早于 Worker 进程实际退出；析构时只调用异步 kill()
+        // 会让 QProcess 自身析构时留下“仍在运行”的警告，并可能遗留子进程。
+        // 这里不进入事件循环，只做两段有界 OS 进程等待：优先让收到断连的
+        // Worker 自行退出，超时后再强制回收。
+        QSignalBlocker blockProcessSignals(&process_);
+        process_.terminate();
+        if (!process_.waitForFinished(kDestructorTerminateWaitMs)
+            && process_.state() != QProcess::NotRunning) {
+            process_.kill();
+            process_.waitForFinished(kDestructorKillWaitMs);
+        }
     }
 }
 
