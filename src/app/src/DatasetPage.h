@@ -1,6 +1,6 @@
 #pragma once
 
-#include <QScrollArea>
+#include "WorkbenchWidgets.h"
 
 class QComboBox;
 class QLabel;
@@ -8,15 +8,17 @@ class QLineEdit;
 class QPlainTextEdit;
 class QProgressBar;
 class QPushButton;
-class QTabWidget;
 class QTableWidget;
 
-class DatasetWorkspacePage final : public QScrollArea
+class DatasetWorkspacePage final : public aitrain_app::WorkspaceViewHost
 {
     Q_OBJECT
 
 public:
+    enum View { Catalog, Detail, Import, Split, Conversion, Quality, Review, Annotation, Technical };
     explicit DatasetWorkspacePage(QWidget* parent = nullptr);
+    void setSelectionAvailable(bool available);
+    void showView(View view);
 
     template<class T>
     T* control(const QString& objectName) const
@@ -24,7 +26,15 @@ public:
         return findChild<T*>(objectName);
     }
 
-    QTabWidget* tabs = nullptr;
+    QLabel* catalogStatusLabel = nullptr;
+    aitrain_app::ImagePreviewLabel* sampleImageLabel = nullptr;
+    QLabel* sampleStatusLabel = nullptr;
+    QLabel* operationStatusLabel = nullptr;
+    QComboBox* snapshotCombo = nullptr;
+    QPushButton* previousPageButton = nullptr;
+    QPushButton* nextPageButton = nullptr;
+    QPushButton* sampleLoadMoreButton = nullptr;
+    QPushButton* snapshotLoadMoreButton = nullptr;
     QTableWidget* datasetListTable = nullptr;
     QLineEdit* datasetPathEdit = nullptr;
     QLabel* datasetProbeStatusLabel = nullptr;
@@ -75,4 +85,33 @@ public:
     QLineEdit* reviewSearchEdit = nullptr;
     QTableWidget* sampleReviewTable = nullptr;
     QLabel* sampleReviewSummaryLabel = nullptr;
+
+signals:
+    void importRequested();
+    void importVersionRequested();
+    void qualityRequested();
+    void splitRequested();
+    void conversionRequested();
+    void cancelRequested();
+    void browseDatasetRequested();
+    void browseConversionRequested();
+    void conversionSourceChanged();
+    void refreshRequested();
+    void nextPageRequested();
+    void previousPageRequested();
+    void trainRequested();
+    void snapshotChanged(int index);
+    void moreSnapshotsRequested();
+    void moreSamplesRequested();
+    void sampleSelected(int row);
+    void reportRequested(bool repairList);
+    void createAnnotationRequested();
+    void syncAnnotationRequested();
+    void chooseReviewRequested();
+    void loadReviewRequested();
+    void reviewFilterChanged();
+    void openReviewSampleRequested();
+
+private:
+    QList<QPushButton*> selectionActions_;
 };

@@ -1,5 +1,10 @@
 # AITrain Studio Acceptance Runbook
 
+## 当前图形入口（2026-09-12）
+
+本轮重设计后，验收报告从“模型 → 验收报告”进入，OCR 官方报告导入与 OCR 验收分别显示；诊断包从“环境与诊断 → 诊断包”进入。模型的推理、计时及部署检查统一通过“模型 → 验证与交付”运行。任务和产物仍从顶栏“任务记录”按登记身份追溯。下文历史步骤如引用“环境 → 交付证据”或两份部署表单，应按上述入口操作，验收合同与外部证据要求保持不变。
+
+
 本手册中的 Phase 记录保留历史验收证据。2026-07-16 破坏性重构后，旧 YOLO26/SMP/OBB/NCNN smoke 脚本、X-AnyLabeling 独立脚本以及 Worker 的裸路径和 `--*-smoke` CLI 均已删除，不得按历史命令执行。当前验收入口是 `tools\\harness-check.ps1`、`tools\\acceptance-smoke.ps1` 的 LocalBaseline/Package/PublicDatasets/CpuTrainingSmoke 模式，以及各  Workflow 的 QtTest；TensorRT、NCNN 和 OCR 只通过其 /官方适配器边界报告。
 
 ## Acceptance Modes

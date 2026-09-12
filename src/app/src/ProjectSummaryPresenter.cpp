@@ -1,3 +1,4 @@
+#include "WorkbenchTranslation.h"
 #include "ProjectSummaryPresenter.h"
 
 ProjectSummaryPresenter::ProjectSummaryPresenter(
@@ -16,7 +17,7 @@ bool ProjectSummaryPresenter::refresh()
     if (!queryService_ || !queryService_->projectSummary(&summary, &error)) {
         viewModel_ = ProjectSummaryViewModel();
         lastError_ = error.isEmpty()
-            ? QStringLiteral("无法读取项目汇总。")
+            ? aitrain_app::workbenchText(QStringLiteral("无法读取项目汇总。"))
             : error;
         emit summaryChanged();
         emit queryFailed(lastError_);

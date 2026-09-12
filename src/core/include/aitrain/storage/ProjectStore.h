@@ -130,11 +130,13 @@ struct DatasetSnapshotRecord final {
     qsizetype fileCount = 0;
     qint64 totalBytes = 0;
     QDateTime createdAt;
+    TaskId latestQualityTaskId;
 };
 
 // GUI 数据集目录只消费持久化身份与摘要，不暴露原始根目录或 Artifact 物理路径。
 struct DatasetCatalogItem final {
     DatasetId datasetId;
+    QString displayName;
     QString datasetFormat;
     qint64 versionCount = 0;
     qint64 snapshotCount = 0;
@@ -144,6 +146,8 @@ struct DatasetCatalogItem final {
     QString latestRootHash;
     qsizetype latestFileCount = 0;
     QDateTime latestCreatedAt;
+    TaskId latestSourceTaskId;
+    TaskId latestQualityTaskId;
 };
 
 enum class ModelSourceSnapshotBinding {
@@ -156,6 +160,8 @@ struct ModelPackageSnapshot final {
     ArtifactId sourceArtifactId;
     QDateTime createdAt;
     ModelSourceSnapshotBinding sourceSnapshotBinding = ModelSourceSnapshotBinding::ExternalDeclared;
+    TaskId latestValidationTaskId;
+    QString latestValidationState;
 };
 
 // Dashboard/Presenter 可安全消费的项目级聚合事实。这里仅包含  SQLite 中
@@ -339,14 +345,18 @@ public:
     bool datasetSnapshotForArtifact(const ArtifactId& artifactId,
         DatasetSnapshotRecord* result,
         QString* error = nullptr) const;
-    Page<DatasetCatalogItem> datasets(const PageRequest& request, QString* error = nullptr) const;
+    Page<DatasetCatalogItem> datasets(const PageRequest& request, QString* error = nullptr, const CatalogFilter& filter = {}) const;
+    Page<DatasetSnapshotRecord> datasetSnapshots(const DatasetId& datasetId,
+        const PageRequest& request, QString* error = nullptr) const;
+    Page<ArtifactSnapshot> artifactCatalog(const QStringList& kinds,
+        const PageRequest& request, QString* error = nullptr) const;
     bool artifactDiscardable(const ArtifactId& artifactId,
         bool* discardable,
         QString* error = nullptr) const;
     bool removeUnreferencedArtifact(const ArtifactId& artifactId, QString* error = nullptr);
     bool registerModelPackage(const ModelPackageSnapshot& modelPackage, QString* error = nullptr);
     bool modelPackage(const ModelPackageId& modelPackageId, ModelPackageSnapshot* result, QString* error = nullptr) const;
-    Page<ModelPackageSnapshot> modelPackages(const PageRequest& request, QString* error = nullptr) const;
+    Page<ModelPackageSnapshot> modelPackages(const PageRequest& request, QString* error = nullptr, const CatalogFilter& filter = {}) const;
     bool projectSummary(ProjectSummarySnapshot* result, QString* error = nullptr) const;
     bool createWorkflowRun(const WorkflowRunSnapshot& workflow,
         const QVector<WorkflowStepSnapshot>& steps,
@@ -406,7 +416,7 @@ public:
     bool taskExists(const TaskId& taskId, bool* exists, QString* error = nullptr) const;
     bool artifactExists(const ArtifactId& artifactId, bool* exists, QString* error = nullptr) const;
     bool task(const TaskId& taskId, TaskSnapshot* result, QString* error = nullptr) const;
-    Page<TaskSnapshot> tasks(const PageRequest& request, QString* error = nullptr) const;
+    Page<TaskSnapshot> tasks(const PageRequest& request, QString* error = nullptr, const CatalogFilter& filter = {}) const;
     bool artifact(const ArtifactId& artifactId, ArtifactSnapshot* result, QString* error = nullptr) const;
     Page<ArtifactFileSnapshot> artifactFiles(
         const ArtifactId& artifactId, const PageRequest& request,
@@ -414,7 +424,7 @@ public:
     Page<ArtifactSnapshot> artifactsForTask(
         const TaskId& taskId, const PageRequest& request, QString* error = nullptr) const;
     Page<DeliveryEvidenceCandidate> deliveryEvidenceCandidates(
-        const PageRequest& request, QString* error = nullptr) const;
+        const PageRequest& request, QString* error = nullptr, const CatalogFilter& filter = {}) const;
     Page<MetricSnapshot> metricsForTask(
         const TaskId& taskId, const PageRequest& request, QString* error = nullptr) const;
     Page<WorkflowRunSnapshot> workflowRunsForTask(

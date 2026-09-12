@@ -19,6 +19,11 @@ add_executable(AITrainStudio WIN32
     src/DatasetPage.cpp
     src/DatasetPageController.h
     src/DatasetPageController.cpp
+    src/DatasetPageControllerCatalog.cpp
+    src/DatasetPageControllerResults.cpp
+    src/WorkbenchWidgets.h
+    src/ProjectObjectSelectors.h
+    src/ProjectObjectSelectors.cpp
     src/DeliveryEvidencePresenter.h
     src/DeliveryEvidencePresenter.cpp
     src/DeliveryEvidencePage.h
@@ -105,6 +110,10 @@ add_executable(AITrainStudio WIN32
     src/TaskRuntimeController.cpp
     src/TrainingPage.h
     src/TrainingPage.cpp
+    src/TrainingPageLayout.cpp
+    src/TrainingParameterPanels.cpp
+    src/TrainingPageControllerHistory.cpp
+    src/TrainingPageControllerDraft.cpp
     src/TrainingPageController.h
     src/TrainingPageController.cpp
     src/WorkspaceReadModelCoordinator.h

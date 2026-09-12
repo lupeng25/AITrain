@@ -1,3 +1,4 @@
+#include "WorkbenchTranslation.h"
 #include "DeliveryEvidencePresenter.h"
 
 DeliveryEvidencePresenter::DeliveryEvidencePresenter(
@@ -13,11 +14,11 @@ bool DeliveryEvidencePresenter::refresh(const aitrain::PageRequest& request)
     ++refreshGeneration_;
     QString error;
     if (!queryService_) {
-        error = QStringLiteral("交付证据查询服务未初始化。");
+        error = aitrain_app::workbenchText(QStringLiteral("交付证据查询服务未初始化。"));
     }
     DeliveryEvidenceViewModel next;
     if (error.isEmpty()) {
-        const auto page = queryService_->deliveryEvidence(request, &error);
+        const auto page = queryService_->deliveryEvidence(request, &error, filter_);
         next.records = request.after.isEmpty() ? page.items : viewModel_.records + page.items;
         nextCursor_ = page.nextCursor;
         hasMore_ = page.hasMore;
@@ -44,7 +45,7 @@ bool DeliveryEvidencePresenter::refreshAsync(const aitrain::PageRequest& request
     const quint64 generation = ++refreshGeneration_;
     QString error;
     if (!queryService_) {
-        error = QStringLiteral("交付证据查询服务未初始化。");
+        error = aitrain_app::workbenchText(QStringLiteral("交付证据查询服务未初始化。"));
     }
     if (!error.isEmpty()) {
         clear();
@@ -76,7 +77,7 @@ bool DeliveryEvidencePresenter::refreshAsync(const aitrain::PageRequest& request
             hasMore_ = page.hasMore;
             lastError_.clear();
             emit changed();
-        }, &error);
+        }, &error, filter_);
     if (!scheduled) {
         clear();
         lastError_ = error;

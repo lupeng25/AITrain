@@ -1,17 +1,18 @@
 #pragma once
 
-#include <QScrollArea>
+#include "WorkbenchWidgets.h"
 
 class QComboBox;
 class QLabel;
 class QLineEdit;
 class QTableWidget;
 
-class DeliveryEvidenceWorkspacePage final : public QScrollArea
+class DeliveryEvidenceWorkspacePage final : public aitrain_app::WorkspaceViewHost
 {
     Q_OBJECT
 
 public:
+    enum View { Catalog, Import, Acceptance, Diagnostics };
     explicit DeliveryEvidenceWorkspacePage(QWidget* parent = nullptr);
 
     QLabel* acceptanceSummaryLabel = nullptr;
@@ -37,4 +38,19 @@ public:
     QLineEdit* ocrMinSystemAccEdit = nullptr;
     QLabel* ocrStatusLabel = nullptr;
     QLabel* diagnosticsStatusLabel = nullptr;
+    QLabel* snapshotLabels[3] = {};
+    QLabel* reportLabels[3] = {};
+    QPushButton* moreButton = nullptr;
+signals:
+    void browseRequested(QLineEdit* target);
+    void bindSnapshotRequested(int index);
+    void selectReportRequested(int index);
+    void refreshRequested();
+    void moreRequested();
+    void importOcrRequested();
+    void acceptanceRequested();
+    void diagnosticsRequested();
+    void externalImportRequested();
+    void openSelectedRequested();
+    void openTaskRequested(const QString& taskId);
 };

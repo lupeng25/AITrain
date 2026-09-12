@@ -2,16 +2,25 @@
 
 #include <QApplication>
 #include <QFont>
+#include <QPalette>
+#include <QSettings>
+#include <QRegularExpression>
 
 namespace AppStyle {
 
-void apply(QApplication& app)
+QString configuredTheme()
+{
+    return QSettings().value(QStringLiteral("settings/theme"), QStringLiteral("light")).toString() == QStringLiteral("dark")
+        ? QStringLiteral("dark") : QStringLiteral("light");
+}
+
+void apply(QApplication& app, const QString& theme)
 {
     QFont font(QStringLiteral("Microsoft YaHei UI"));
-    font.setPointSize(9);
+    font.setPointSize(10);
     app.setFont(font);
 
-    app.setStyleSheet(QStringLiteral(R"(
+    QString sheet = QStringLiteral(R"(
         QMainWindow {
             background: #F4F6F8;
         }
@@ -19,7 +28,7 @@ void apply(QApplication& app)
         QWidget {
             color: #111827;
             font-family: "Microsoft YaHei UI";
-            font-size: 9pt;
+            font-size: 10pt;
         }
 
         QScrollBar:vertical {
@@ -985,7 +994,102 @@ void apply(QApplication& app)
             font-family: "Consolas";
             font-size: 9pt;
         }
-    )"));
+        /* 三工作区界面：中性导航与统一表格，覆盖历史检查器布局样式。 */
+        QFrame#Sidebar { background: #EEF1F5; border-right: 1px solid #DCE1E9; }
+        QLabel#BrandTitle { color: #172235; font-size: 10pt; font-weight: 500; }
+        QLabel#BrandSubtitle, QLabel#SidebarSection { color: #5B6575; }
+        QPushButton#SidebarButton, QPushButton#SidebarToolButton {
+            color: #273447; background: transparent; border: none;
+            font-size: 10pt;
+            border-radius: 6px; text-align: left; padding: 8px 10px; min-height: 28px;
+        }
+        QPushButton#SidebarButton:hover, QPushButton#SidebarToolButton:hover { background: #E2E8F2; color: #172235; }
+        QPushButton#SidebarButton:checked { background: #E0EAFE; color: #245EDB; border: none; padding-left: 10px; }
+        QPushButton[primaryAction="true"] { background: #245EDB; color: white; border: 1px solid #245EDB; }
+        QPushButton[primaryAction="true"]:hover { background: #1D4FC0; }
+        QPushButton[primaryAction="true"]:disabled { background: #DBE1EA; color: #758095; border-color: #DBE1EA; }
+        QLabel#WorkspaceModeTitle { color: #172235; font-size: 11pt; font-weight: 500; }
+        QLabel#TrainingDatasetNote, QLabel#TrainingRunNote { font-size: 9pt; }
+        QLabel#PageTitle { font-size: 16pt; font-weight: 500; }
+        QTableView { background: #FFFFFF; color: #172235; border: 1px solid #DCE1E9; border-radius: 5px; selection-background-color: #E7EFFF; selection-color: #172235; }
+        QTableView::item { padding: 7px 9px; border-bottom: 1px solid #EDF0F5; }
+        QHeaderView::section { background: #F7F8FA; color: #5B6575; border: none; border-bottom: 1px solid #DCE1E9; padding: 9px; }
+        QLabel#DatasetSampleImage { background: #E9EDF3; border: 1px solid #DCE1E9; border-radius: 6px; }
+        QStatusBar { background: #FFFFFF; border-top: 1px solid #DCE1E9; min-height: 30px; }
+        QStatusBar::item { border: none; }
+        QToolButton#ProjectMenuButton { background: white; border: 1px solid #C9D3E2; border-radius: 5px; padding: 7px 12px; min-height: 22px; }
+        QListWidget { background: white; border: 1px solid #DCE1E9; border-radius: 5px; outline: 0; }
+        QListWidget::item { padding: 9px 10px; min-height: 20px; color: #273447; }
+        QListWidget::item:selected { color: #245EDB; background: #E7EFFF; }
+        QPushButton#ActivityTaskButton { border: none; color: #245EDB; background: transparent; padding: 2px 10px; min-height: 24px; }
+    )");
+    const bool dark = (theme.isEmpty() ? configuredTheme() : theme) == QStringLiteral("dark");
+    QPalette palette;
+    const QColor window(dark ? QStringLiteral("#171d27") : QStringLiteral("#f4f6f8"));
+    const QColor surface(dark ? QStringLiteral("#202836") : QStringLiteral("#ffffff"));
+    const QColor text(dark ? QStringLiteral("#e4eaf3") : QStringLiteral("#172235"));
+    const QColor muted(dark ? QStringLiteral("#aab7ca") : QStringLiteral("#5b6575"));
+    palette.setColor(QPalette::Window, window);
+    palette.setColor(QPalette::Base, surface);
+    palette.setColor(QPalette::AlternateBase, dark ? QColor(QStringLiteral("#252f3e")) : QColor(QStringLiteral("#f7f8fa")));
+    palette.setColor(QPalette::Button, surface);
+    palette.setColor(QPalette::WindowText, text);
+    palette.setColor(QPalette::Text, text);
+    palette.setColor(QPalette::ButtonText, text);
+    palette.setColor(QPalette::ToolTipBase, surface);
+    palette.setColor(QPalette::ToolTipText, text);
+    palette.setColor(QPalette::Highlight, dark ? QColor(QStringLiteral("#304c78")) : QColor(QStringLiteral("#e7efff")));
+    palette.setColor(QPalette::HighlightedText, text);
+    palette.setColor(QPalette::Mid, dark ? QColor(QStringLiteral("#425066")) : QColor(QStringLiteral("#dce1e9")));
+    palette.setColor(QPalette::Disabled, QPalette::Text, muted);
+    palette.setColor(QPalette::Disabled, QPalette::WindowText, muted);
+    palette.setColor(QPalette::Disabled, QPalette::ButtonText, muted);
+    if (dark) {
+        // 按声明角色映射现有浅色样式，避免将按钮白字与白色面板混为一类。
+        const QRegularExpression declaration(QStringLiteral("([a-z-]+)\\s*:[^;{}]+"));
+        const QRegularExpression color(QStringLiteral("#[0-9A-Fa-f]{6}|\\bwhite\\b"));
+        auto matches = declaration.globalMatch(sheet);
+        QVector<QPair<int, QPair<int, QString>>> replacements;
+        while (matches.hasNext()) {
+            const auto match = matches.next(); const QString role = match.captured(1);
+            QString value = match.captured(); auto colors = color.globalMatch(value);
+            QVector<QPair<int, QPair<int, QString>>> mapped;
+            while (colors.hasNext()) {
+                const auto item = colors.next(); const QColor source(item.captured()); QColor target = source;
+                if (role.contains(QStringLiteral("background"))) {
+                    if (source.lightnessF() > 0.92) target = surface;
+                    else if (source.lightnessF() > 0.72) target = QColor(QStringLiteral("#29384e"));
+                    else if (source.saturationF() < 0.35) target = QColor(QStringLiteral("#37465a"));
+                } else if (role.startsWith(QStringLiteral("border"))) {
+                    if (source.lightnessF() > 0.65 || source.saturationF() < 0.4) target = QColor(QStringLiteral("#425066"));
+                } else if (role.endsWith(QStringLiteral("color"))) {
+                    if (source.lightnessF() < 0.25) target = text;
+                    else if (source.saturationF() < 0.4) target = source.lightnessF() > 0.85 ? text : muted;
+                    else target = QColor::fromHslF(source.hslHueF(), 0.8, 0.74);
+                }
+                mapped.prepend({item.capturedStart(), {item.capturedLength(), target.name()}});
+            }
+            for (const auto& item : mapped) value.replace(item.first, item.second.first, item.second.second);
+            replacements.prepend({match.capturedStart(), {match.capturedLength(), value}});
+        }
+        for (const auto& item : replacements) sheet.replace(item.first, item.second.first, item.second.second);
+    }
+    app.setPalette(palette);
+    sheet += QStringLiteral(R"(
+        QMenu { background: palette(window); color: palette(window-text); }
+        QMenu::item:selected { background: palette(highlight); }
+        QToolTip { background: palette(tool-tip-base); color: palette(tool-tip-text); border: 1px solid palette(mid); padding: 5px; }
+        QLabel#StatusPill[tone="0"] { background: %1; color: %2; }
+        QLabel#StatusPill[tone="1"] { background: %3; color: %4; }
+        QLabel#StatusPill[tone="2"] { background: %5; color: %6; }
+        QLabel#StatusPill[tone="3"] { background: %7; color: %8; }
+        QLabel#StatusPill[tone="4"] { background: %9; color: %10; }
+    )").arg(dark ? QStringLiteral("#29384e") : QStringLiteral("#eef2f7"), dark ? QStringLiteral("#c0cadd") : QStringLiteral("#4b5563"),
+        dark ? QStringLiteral("#183d30") : QStringLiteral("#e8f7ea"), dark ? QStringLiteral("#95e0ad") : QStringLiteral("#166534"),
+        dark ? QStringLiteral("#49371c") : QStringLiteral("#fff7e6"), dark ? QStringLiteral("#f7d18c") : QStringLiteral("#9a5b00"),
+        dark ? QStringLiteral("#4d262f") : QStringLiteral("#fdecec"), dark ? QStringLiteral("#ffabb3") : QStringLiteral("#b91c1c"),
+        dark ? QStringLiteral("#233c62") : QStringLiteral("#eaf1ff")).arg(dark ? QStringLiteral("#a6c7ff") : QStringLiteral("#1d4ed8"));
+    app.setStyleSheet(sheet);
 }
 
 } // namespace AppStyle

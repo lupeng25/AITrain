@@ -8,6 +8,8 @@
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QVariant>
+#include <QJsonArray>
+#include <QJsonDocument>
 
 namespace aitrain {
 namespace {
@@ -300,6 +302,58 @@ Page<ArtifactSnapshot> ArtifactCatalogRepository::forTask(
         result.nextCursor = storage_internal::encodePageCursor(
             QStringLiteral("task_artifacts"),
             {last.second, last.first.toString()});
+    }
+    return result;
+}
+
+Page<ArtifactSnapshot> ArtifactCatalogRepository::catalog(const QStringList& kinds,
+    const PageRequest& request, QString* error) const
+{
+    using storage_internal::PageCursor;
+    QStringList normalized = kinds;
+    normalized.removeDuplicates();
+    normalized.sort();
+    const QString type = QStringLiteral("artifact_catalog/") + QString::fromUtf8(
+        QJsonDocument(QJsonArray::fromStringList(normalized)).toJson(QJsonDocument::Compact));
+    PageCursor cursor;
+    if (error) error->clear();
+    if (!database_.isOpen()
+        || !storage_internal::validatePageRequest(request, type, &cursor, error)) {
+        if (error && error->isEmpty()) *error = QStringLiteral("查询产物目录需要已打开的项目。");
+        return {};
+    }
+    QString sql = QStringLiteral("select id, task_id, kind, created_at from artifacts where 1 = 1 ");
+    QStringList placeholders;
+    for (int index = 0; index < normalized.size(); ++index)
+        placeholders.append(QStringLiteral(":kind%1").arg(index));
+    if (!placeholders.isEmpty()) sql += QStringLiteral("and kind in (%1) ").arg(placeholders.join(QLatin1Char(',')));
+    if (!request.after.isEmpty()) sql += QStringLiteral("and (created_at < :time or (created_at = :time and id < :id)) ");
+    sql += QStringLiteral("order by created_at desc, id desc limit :limit");
+    QSqlQuery query(database_.connection());
+    query.prepare(sql);
+    for (int index = 0; index < normalized.size(); ++index) query.bindValue(placeholders.at(index), normalized.at(index));
+    query.bindValue(QStringLiteral(":limit"), request.pageSize + 1);
+    if (!request.after.isEmpty()) {
+        query.bindValue(QStringLiteral(":time"), cursor.timestamp);
+        query.bindValue(QStringLiteral(":id"), cursor.id);
+    }
+    if (!query.exec()) { if (error) *error = query.lastError().text(); return {}; }
+    Page<ArtifactSnapshot> result;
+    QVector<PageCursor> cursors;
+    while (query.next()) {
+        ArtifactSnapshot item;
+        if (!ArtifactId::parse(query.value(0).toString(), &item.id, error)
+            || !TaskId::parse(query.value(1).toString(), &item.taskId, error)) return {};
+        item.kind = query.value(2).toString();
+        item.createdAt = parseUtc(query.value(3).toString());
+        result.items.append(item);
+        cursors.append({query.value(3).toString(), item.id.toString()});
+    }
+    if (result.items.size() > request.pageSize) {
+        result.hasMore = true;
+        result.items.removeLast();
+        cursors.removeLast();
+        result.nextCursor = storage_internal::encodePageCursor(type, cursors.constLast());
     }
     return result;
 }

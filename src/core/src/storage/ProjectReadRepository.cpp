@@ -163,14 +163,15 @@ bool ProjectReadRepository::summary(ProjectSummarySnapshot* result,
 }
 
 Page<DeliveryEvidenceCandidate> ProjectReadRepository::deliveryEvidence(
-    const PageRequest& request, QString* error) const
+    const PageRequest& request, QString* error, const CatalogFilter& filter) const
 {
     using storage_internal::PageCursor;
     Page<DeliveryEvidenceCandidate> result;
     PageCursor cursor;
+    const QString queryType = storage_internal::catalogQueryType(QStringLiteral("evidence"), filter);
     if (!database_.isOpen()
         || !storage_internal::validatePageRequest(
-            request, QStringLiteral("evidence"), &cursor, error)) {
+            request, queryType, &cursor, error)) {
         if (error && error->isEmpty()) {
             *error = QStringLiteral(
                 "查询交付证据需要已打开的数据库。");
@@ -189,6 +190,12 @@ Page<DeliveryEvidenceCandidate> ProjectReadRepository::deliveryEvidence(
         "from (select id, created_at from artifacts "
         "where kind in ('evidence_bundle', "
             "'external_acceptance_evidence') ");
+    sql += storage_internal::catalogKindClause(filter, QStringLiteral("kind"));
+    if (!filter.text.trimmed().isEmpty()) sql += QStringLiteral(
+        "and (instr(lower(id || ' ' || kind || ' ' || created_at), :search) > 0 "
+        "or exists(select 1 from tasks search_task where search_task.id = artifacts.task_id and instr(lower(search_task.id || ' ' || search_task.task_type || ' ' || search_task.capability_id), :search) > 0) "
+        "or exists(select 1 from artifact_files search_file where search_file.artifact_id = artifacts.id and instr(lower(search_file.relative_path), :search) > 0)) ");
+    if (!filter.state.isEmpty()) sql += QStringLiteral("and exists(select 1 from tasks state_task where state_task.id = artifacts.task_id and state_task.state = :state) ");
     if (!request.after.isEmpty()) {
         sql += QStringLiteral(
             "and (created_at < :after_time "
@@ -202,6 +209,7 @@ Page<DeliveryEvidenceCandidate> ProjectReadRepository::deliveryEvidence(
         "order by selected.created_at desc, a.id desc, "
             "f.relative_path asc");
     query.prepare(sql);
+    storage_internal::bindCatalogFilter(query, filter);
     if (!request.after.isEmpty()) {
         query.bindValue(QStringLiteral(":after_time"), cursor.timestamp);
         query.bindValue(QStringLiteral(":after_id"), cursor.id);
@@ -271,7 +279,7 @@ Page<DeliveryEvidenceCandidate> ProjectReadRepository::deliveryEvidence(
         const ArtifactSnapshot& last =
             result.items.constLast().artifact;
         result.nextCursor = storage_internal::encodePageCursor(
-            QStringLiteral("evidence"),
+            queryType,
             {last.createdAt.toUTC().toString(Qt::ISODateWithMs),
                 last.id.toString()});
     }

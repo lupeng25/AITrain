@@ -7,9 +7,20 @@
 #include <QFileInfo>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QProgressBar>
 #include <QTime>
 #include <QTextEdit>
+
+void TrainingWorkspacePage::keyPressEvent(QKeyEvent* event)
+{
+    if (event->key() == Qt::Key_Escape && views->currentIndex() == Advanced) {
+        emit cancelAdvancedRequested();
+        event->accept();
+        return;
+    }
+    WorkspaceViewHost::keyPressEvent(event);
+}
 
 namespace {
 
@@ -34,9 +45,10 @@ int integerValue(const QWidget* page, const char* name)
 } // namespace
 
 TrainingWorkspacePage::TrainingWorkspacePage(QWidget* parent)
-    : QWidget(parent)
+    : WorkspaceViewHost(parent)
 {
     setObjectName(QStringLiteral("TrainingWorkspacePage"));
+    buildLayout();
 }
 
 TrainingFormData TrainingWorkspacePage::formData() const
@@ -49,7 +61,7 @@ TrainingFormData TrainingWorkspacePage::formData() const
     result.epochs = integerValue(this, "TrainingEpochs");
     result.batchSize = integerValue(this, "TrainingBatchSize");
     result.imageSize = integerValue(this, "TrainingImageSize");
-    result.gridSize = integerValue(this, "TrainingGridSize");
+    result.gridSize = 4;
     if (const auto* check =
             findChild<QCheckBox*>(QStringLiteral("TrainingHorizontalFlip"))) {
         result.horizontalFlip = check->isChecked();
@@ -105,8 +117,7 @@ void TrainingWorkspacePage::setBackendPanels(const QString& backendId)
     const auto setPanel = [this, &backend](
                               const QString& name, bool matches) {
         if (auto* panel = findChild<QWidget*>(name)) {
-            panel->setVisible(
-                panel->property("advancedExpanded").toBool() && matches);
+            panel->setVisible(matches);
         }
     };
     setPanel(QStringLiteral("YoloOfficialArgsGroup"),
@@ -115,6 +126,22 @@ void TrainingWorkspacePage::setBackendPanels(const QString& backendId)
         backend == QStringLiteral("smp_semantic_segmentation"));
     setPanel(QStringLiteral("AnomalyDetectionArgsGroup"),
         backend.startsWith(QStringLiteral("anomalib_")));
+    setPanel(QStringLiteral("OcrOfficialArgsGroup"), backend.startsWith(QStringLiteral("paddleocr_")));
+    const auto groupVisibility = [this](const QString& panelName, int index, bool visible) {
+        auto* panel = findChild<QWidget*>(panelName);
+        auto* groups = panel ? panel->findChild<QListWidget*>() : nullptr;
+        if (!groups || index >= groups->count()) return;
+        groups->item(index)->setHidden(!visible);
+        if (!visible && groups->currentRow() == index) groups->setCurrentRow(0);
+    };
+    groupVisibility(QStringLiteral("YoloOfficialArgsGroup"), 3, backend == QStringLiteral("ultralytics_yolo_segment"));
+    groupVisibility(QStringLiteral("AnomalyDetectionArgsGroup"), 1, backend == QStringLiteral("anomalib_patchcore"));
+    groupVisibility(QStringLiteral("AnomalyDetectionArgsGroup"), 2, backend == QStringLiteral("anomalib_efficientad"));
+    if (auto* devices = findChild<QStackedWidget*>(QStringLiteral("TrainingDeviceStack"))) {
+        devices->setCurrentIndex(backend.startsWith(QStringLiteral("ultralytics_")) ? 0
+            : backend.startsWith(QStringLiteral("smp_")) ? 1
+            : backend.startsWith(QStringLiteral("anomalib_")) ? 2 : 3);
+    }
     if (auto* caption = findChild<QLabel*>(
             QStringLiteral("TrainingLiveCaption_TrainingMapValue"))) {
         caption->setText(backend.startsWith(QStringLiteral("anomalib_"))
@@ -193,8 +220,14 @@ void TrainingWorkspacePage::appendLog(const QString& text)
             line = line.left(maxLogLineChars)
                 + QStringLiteral(" ... [log_truncated]");
         }
-        log->append(QStringLiteral("[%1] %2").arg(
-            QTime::currentTime().toString(QStringLiteral("HH:mm:ss")), line));
+        const QString entry = QStringLiteral("[%1] %2").arg(
+            QTime::currentTime().toString(QStringLiteral("HH:mm:ss")), line);
+        log->moveCursor(QTextCursor::End);
+        log->insertPlainText(entry + QLatin1Char('\n'));
+        if (auto* latest = findChild<QTextEdit*>(QStringLiteral("TrainingLatestLog"))) {
+            latest->moveCursor(QTextCursor::End);
+            latest->insertPlainText(entry + QLatin1Char('\n'));
+        }
     }
 }
 
@@ -207,6 +240,7 @@ void TrainingWorkspacePage::resetRuntimeProjection()
     if (auto* log = findChild<QTextEdit*>(QStringLiteral("LogView"))) {
         log->clear();
     }
+    if (auto* log = findChild<QTextEdit*>(QStringLiteral("TrainingLatestLog"))) log->clear();
     if (auto* metrics = findChild<MetricsWidget*>()) {
         metrics->clear();
     }

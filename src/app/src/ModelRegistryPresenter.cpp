@@ -1,3 +1,4 @@
+#include "WorkbenchTranslation.h"
 #include "ModelRegistryPresenter.h"
 
 #include <QDateTime>
@@ -26,10 +27,10 @@ bool ModelRegistryPresenter::refresh(const aitrain::PageRequest& request)
 {
     QString error;
     const aitrain::Page<aitrain::ModelPackageReadModel> page = queryService_
-        ? queryService_->modelPackages(request, &error)
+        ? queryService_->modelPackages(request, &error, filter_)
         : aitrain::Page<aitrain::ModelPackageReadModel>();
     if (!queryService_ && error.isEmpty()) {
-        error = QStringLiteral("模型库 Presenter 缺少项目查询服务。");
+        error = aitrain_app::workbenchText(QStringLiteral("模型库 Presenter 缺少项目查询服务。"));
     }
     if (!error.isEmpty()) {
         modelPackages_.clear();
@@ -44,6 +45,8 @@ bool ModelRegistryPresenter::refresh(const aitrain::PageRequest& request)
     for (const aitrain::ModelPackageReadModel& model : page.items) {
         ModelPackageListItem row;
         row.modelPackageId = model.modelPackageId.toString();
+        row.latestValidationTaskId = model.latestValidationTaskId.toString();
+        row.latestValidationState = model.latestValidationState;
         row.sourceTaskId = model.sourceTaskId.toString();
         row.sourceSnapshotId = model.sourceSnapshotId.toString();
         row.sourceArtifactId = model.sourceArtifactId.toString();

@@ -89,6 +89,7 @@ class ModelRegistryPresenterTests final : public QObject {
     Q_OBJECT
 
 private slots:
+    void searchesOlderModelsAcrossTheCatalog();
     void emptyProjectHasEmptyModelRegistry();
     void exposesNewestFirstIdentityLineageRuntimeAndLimitationsWithoutPaths();
     void missingQueryServiceFailsAndClearsRows();
@@ -182,6 +183,23 @@ void ModelRegistryPresenterTests::missingQueryServiceFailsAndClearsRows()
     QCOMPARE(presenter.modelPackageCount(), 0);
     QVERIFY(!presenter.lastError().isEmpty());
     QCOMPARE(failed.count(), 1);
+}
+
+void ModelRegistryPresenterTests::searchesOlderModelsAcrossTheCatalog()
+{
+    QTemporaryDir directory; aitrain::ProjectWorkspace workspace; QString error;
+    const QString root = directory.filePath(QStringLiteral("models")); QVERIFY(workspace.createProject(root, &error));
+    aitrain::ProjectStore storage; QVERIFY(storage.open(databasePath(root), &error)); const auto task = createTask(&storage, &error);
+    for (int i = 0; i < 60; ++i) {
+        const auto package = registerPackage(&storage, task, QDateTime::currentDateTimeUtc().addSecs(i),
+            i < 2 ? QStringLiteral("specific_%_family") : QStringLiteral("general_family"), {QStringLiteral("aitrain_onnxruntime")}, {}, QStringLiteral("model.onnx"), &error);
+        QVERIFY2(package.manifest.modelPackageId.isValid(), qPrintable(error));
+    }
+    aitrain::ProjectQueryService query(&workspace); ModelRegistryPresenter presenter(&query);
+    presenter.setCatalogFilter({QStringLiteral("specific_%_"), {}, {}}); QVERIFY2(presenter.refresh({1, {}}), qPrintable(presenter.lastError()));
+    QCOMPARE(presenter.modelPackageCount(), 1); QVERIFY(presenter.hasMore()); QVERIFY(presenter.loadMore()); QCOMPARE(presenter.modelPackageCount(), 2);
+    const auto first = query.modelPackages({1, {}}, &error, {QStringLiteral("specific"), {}, {}});
+    query.modelPackages({1, first.nextCursor}, &error, {QStringLiteral("general"), {}, {}}); QVERIFY(error.contains(QStringLiteral("InvalidPageCursor")));
 }
 
 QTEST_GUILESS_MAIN(ModelRegistryPresenterTests)

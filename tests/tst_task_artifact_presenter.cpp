@@ -22,6 +22,7 @@ class TaskArtifactPresenterTests : public QObject {
     Q_OBJECT
 
 private slots:
+    void searchesAllTaskMetadataBeforePaging();
     void readsPersistedTaskArtifactsMetricsAndWorkflowOnly();
     void readsCommittedArtifactPreviewByIdentity();
     void readsCommittedArtifactPreviewAsynchronouslyWithMetadataSnapshot();
@@ -386,6 +387,37 @@ void TaskArtifactPresenterTests::readsCommittedArtifactPreviewAsynchronouslyWith
     QCOMPARE(result.byteCount, qint64(content.size()));
     QCOMPARE(result.content, content.left(1024));
     QVERIFY(result.truncated);
+
+    // 文件完整性失败必须由后台回调报告，不能在 GUI 发起读取时同步哈希整个产物。
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    content[0] = char(content[0] + 1);
+    QCOMPARE(file.write(content), content.size()); file.close();
+    callbackCalled = false; callbackSuccess = true; callbackError.clear();
+    QVERIFY2(query.artifactFilePreviewAsync(artifactId, QStringLiteral("large.bin"), &receiver,
+        [&](bool success, aitrain::ArtifactFilePreview, QString readError) {
+            callbackCalled = true; callbackSuccess = success; callbackError = readError;
+            callbackOnCallingThread = QThread::currentThread() == callingThread;
+            loop.quit();
+        }, 1024, &error), qPrintable(error));
+    timeout.start(); loop.exec();
+    QVERIFY(callbackCalled); QVERIFY(!callbackSuccess); QVERIFY(callbackOnCallingThread);
+    QVERIFY(callbackError.contains(QStringLiteral("SHA-256")));
+}
+
+void TaskArtifactPresenterTests::searchesAllTaskMetadataBeforePaging()
+{
+    QTemporaryDir directory; aitrain::ProjectWorkspace workspace; QString error;
+    QVERIFY(workspace.createProject(directory.filePath(QStringLiteral("tasks")), &error));
+    for (int i = 0; i < 65; ++i) {
+        aitrain::TaskSnapshot task;
+        QVERIFY(workspace.startTask(aitrain::TaskId::create(), QStringLiteral("fixture"), i < 2 ? QStringLiteral("needle_%_") : QStringLiteral("general"), &task, &error));
+    }
+    aitrain::ProjectQueryService query(&workspace);
+    const aitrain::CatalogFilter filter{QStringLiteral("needle_%_"), {QStringLiteral("needle_%_")}, QStringLiteral("running")};
+    const auto page = query.recentTasks({1, {}}, &error, filter); QVERIFY2(error.isEmpty(), qPrintable(error)); QCOMPARE(page.items.size(), 1); QVERIFY(page.hasMore);
+    const auto next = query.recentTasks({1, page.nextCursor}, &error, filter); QCOMPARE(next.items.size(), 1); QVERIFY(next.items.first().id != page.items.first().id);
+    query.recentTasks({1, page.nextCursor}, &error, {}); QVERIFY(error.contains(QStringLiteral("InvalidPageCursor")));
+    TaskArtifactPresenter presenter(&query); presenter.setCatalogFilter(filter); QVERIFY(presenter.refresh()); QCOMPARE(presenter.taskCount(), 2);
 }
 
 QTEST_MAIN(TaskArtifactPresenterTests)

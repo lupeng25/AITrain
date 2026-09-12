@@ -22,6 +22,7 @@ struct ArtifactFileItem final {
     QString sha256;
     qint64 byteCount = 0;
     QString createdAt;
+    int knownFileCount = -1;
 };
 
 struct MetricItem final {
@@ -66,6 +67,7 @@ public:
     explicit TaskArtifactPresenter(const aitrain::ProjectQueryService* queryService,
         QObject* parent = nullptr);
 
+    void setCatalogFilter(const aitrain::CatalogFilter& filter) { filter_ = filter; }
     bool refresh(const aitrain::PageRequest& request = {100, {}});
     bool loadMore();
     bool hasMoreTasks() const;
@@ -107,6 +109,7 @@ signals:
 
 private:
     void fail(const QString& error);
+    void updateSelectedInventorySummary();
     void appendArtifacts(const QVector<aitrain::ArtifactSnapshot>& artifacts);
     void appendArtifactFiles(const aitrain::ArtifactId& artifactId,
         const QVector<aitrain::ArtifactFileSnapshot>& files);
@@ -116,6 +119,7 @@ private:
     const aitrain::ProjectQueryService* queryService_ = nullptr;
     QVector<TaskListItem> taskRows_;
     TaskArtifactDetails details_;
+    aitrain::CatalogFilter filter_;
     QString lastError_;
     QString nextTaskCursor_;
     bool hasMoreTasks_ = false;

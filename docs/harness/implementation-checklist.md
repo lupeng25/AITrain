@@ -1,5 +1,19 @@
 # 实施检查清单
 
+## 本轮界面迁移完成记录（2026-09-12）
+
+- 三个日常入口、单层业务视图、数据版本与报告选择、历史训练配置复用及结果定位已迁移。
+- 数据重开、两图像样本计数、质量终态、图片预览与产物清单读取状态已通过回归。
+- 高级参数取消、Escape 返回、八后端入口与导航草稿保持已通过回归。
+- 全量 Harness 35/35 组通过；原生 UI 回归 33 项通过；缩放验证的原生/离屏范围见 `../design/ui-workbench-implementation.md`。
+
+## 追加收尾完成记录（2026-09-12）
+
+- 全项目目录搜索及过滤游标隔离通过；覆盖首屏之外的数据、模型、任务与证据。
+- 设置支持浅/深主题即时切换和持久化；英文静态文案、长导航及分类换行通过检查。
+- 草稿跨进程、延迟建页、项目切换、重建、失效绑定、损坏格式及确认丢弃通过回归。
+- 最终 Harness 35/35 组通过；最终缩放与英文补验、历史失败纠正见 `../design/ui-workbench-closeout.md`。
+
 ## 稳定化基线
 
 - 新项目必须使用 Schema 13 单行 `project_meta`；Schema 12 只读识别后返回 `SchemaRebuildRequired`。
@@ -60,22 +74,9 @@ git -c core.quotepath=false ls-files | Select-String -Pattern 'AITrainStudio'
 
 如果改动涉及当前项目状态、交付证据/验收、客户域 OCR、部署验证或样本复核，需要同步检查 `docs/harness/current-status.md`、`docs/harness/project-context.md`、`docs/acceptance-runbook.md`、`docs/product-roadmap-local-training-platform.md` 和 `docs/user-guide.md` 是否一致。
 
-如果修改 UI 布局，还需要至少执行一次非全屏 walkthrough：
+如果修改 UI 布局，还需运行 `aitrain_delivery_acceptance_ui_tests` 的 `workbenchViewsFitStandardWindows` 用例，检查 1280×820、1366×768 窗口中各业务模式的可见按钮边界。设置 `AITRAIN_CAPTURE_UI_DIR` 可输出窗口截图，并逐页检查字体、长文本、空态和主要操作。
 
-```powershell
-$pages = @('总览','项目','数据集','训练实验','任务与产物','模型库','部署验证','环境','系统设置')
-C:\Users\73200\.codex\skills\qt-gui-walkthrough\scripts\qt_walkthrough.ps1 `
-  -AppPath .\build-vscode\bin\AITrainStudio.exe `
-  -WorkingDirectory .\build-vscode\bin `
-  -OutDir .\.deps\UI-Walkthrough\manual `
-  -PageNames $pages `
-  -Width 1280 `
-  -Height 820
-```
-
-涉及 `数据集 > 质量与复核`、`模型库 > 评估报告`、`部署验证 > 部署验证 / 推理验证`、`系统设置 > 内置能力 / 应用设置` 与 `环境 > 交付证据` 时，应增加定向 QtTest 或手工验收记录。
-
-验收重点：关键操作按钮不能被非全屏首屏裁切；长路径、长状态文本和表格不能造成横向溢出；允许页面纵向滚动。
+应增加数据重新打开、目录分页、训练草稿与高级参数取消、任务终态和对应报告定位的定向回归。业务页面不使用整页滚动；长表、日志及报告在自身区域滚动。UI 验证不能替代硬件或客户域精度验收。
 
 ## 回答用户前
 

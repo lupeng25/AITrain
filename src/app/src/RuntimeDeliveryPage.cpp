@@ -1,268 +1,76 @@
+#include "WorkbenchTranslation.h"
 #include "RuntimeDeliveryPage.h"
-
-#include "InfoPanel.h"
 #include "MainWindowSupport.h"
-
 #include <QComboBox>
-#include <QDir>
+#include <QDateTime>
 #include <QFormLayout>
-#include <QFrame>
-#include <QGridLayout>
-#include <QHBoxLayout>
-#include <QLabel>
-#include <QLineEdit>
-#include <QPushButton>
-#include <QScrollArea>
 #include <QSignalBlocker>
-#include <QTabWidget>
-#include <QVBoxLayout>
-
 using namespace aitrain_app;
 
-RuntimeDeliveryWorkspacePage::RuntimeDeliveryWorkspacePage(QWidget* parent)
-    : QWidget(parent)
+RuntimeDeliveryWorkspacePage::RuntimeDeliveryWorkspacePage(QWidget* parent) : WorkspaceViewHost(parent)
 {
-    auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(18, 0, 18, 18);
-    layout->setSpacing(16);
-    layout->addWidget(createWorkbenchHeader(
-        QStringLiteral("RUNTIME DELIVERY"),
-        tr("Runtime Delivery"),
-        tr("基于已登记模型包、产品合同和当前环境运行推理、Benchmark 与部署验证。"),
-        nullptr,
-        QStringList() << QStringLiteral("ONNX Runtime")
-                      << QStringLiteral("NCNN")
-                      << QStringLiteral("TensorRT")
-                      << tr("六步交付")));
-    tabs_ = new QTabWidget;
-    tabs_->setObjectName(QStringLiteral("DeploymentTabs"));
-    tabs_->addTab(buildForm(RuntimeDeliveryMode::DeploymentValidation),
-        tr("部署验证"));
-    tabs_->addTab(buildForm(RuntimeDeliveryMode::InferenceValidation),
-        tr("推理验证"));
-    layout->addWidget(tabs_, 1);
+    setObjectName(QStringLiteral("RuntimeDeliveryWorkspacePage"));
+    auto* form = addMode(aitrain_app::workbenchText(QStringLiteral("验证与交付")));
+    model_ = new QComboBox; model_->setObjectName(QStringLiteral("DeploymentModelPackageCombo"));
+    route_ = new QComboBox; route_->setObjectName(QStringLiteral("DeploymentRuntimeRouteCombo"));
+    auto* fields = new QFormLayout; fields->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    fields->addRow(aitrain_app::workbenchText(QStringLiteral("模型")), model_); fields->addRow(aitrain_app::workbenchText(QStringLiteral("运行路线")), route_); form->addLayout(fields);
+    auto* sampleRow = new QHBoxLayout; sample_ = workbenchHint(aitrain_app::workbenchText(QStringLiteral("尚未选择验证样本。")));
+    auto* choose = workbenchButton(aitrain_app::workbenchText(QStringLiteral("选择数据版本与样本")), QStringLiteral("DeliverySelectSample")); sampleRow->addWidget(sample_, 1); sampleRow->addWidget(choose); form->addLayout(sampleRow);
+    reasons_ = workbenchHint(); reasons_->setObjectName(QStringLiteral("RuntimeRouteReasons")); form->addWidget(reasons_);
+    form->addWidget(workbenchHint(aitrain_app::workbenchText(QStringLiteral("将执行模型校验、样本推理、计时和部署检查，并生成交付报告。样本计时用于本次检查，不代表性能 SLA。"))));
+    form->addStretch(); auto* run = workbenchButton(aitrain_app::workbenchText(QStringLiteral("开始验证与交付")), QStringLiteral("RuntimeDeliveryStart"), true); form->addWidget(run, 0, Qt::AlignRight);
+    connect(choose, &QPushButton::clicked, this, &RuntimeDeliveryWorkspacePage::selectSampleRequested);
+    connect(run, &QPushButton::clicked, this, [this]() { emit runRequested(RuntimeDeliveryMode::DeploymentValidation); });
+    connect(model_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
+        binding_.modelPackageId = model_->currentData().toString();
+        emit modelSelectionChanged(RuntimeDeliveryMode::DeploymentValidation, binding_.modelPackageId);
+    });
+    auto* result = addMode(aitrain_app::workbenchText(QStringLiteral("验证结果")));
+    resultSummary = workbenchHint(aitrain_app::workbenchText(QStringLiteral("尚未运行。"))); resultSummary->setObjectName(QStringLiteral("DeploymentResultSummary")); result->addWidget(resultSummary);
+    overlay = new ImagePreviewLabel; overlay->setText(aitrain_app::workbenchText(QStringLiteral("尚无已提交的可视化结果。"))); overlay->setObjectName(QStringLiteral("InferenceOverlayCanvas")); result->addWidget(overlay, 1);
+    auto* actions = new QHBoxLayout; taskButton = workbenchButton(aitrain_app::workbenchText(QStringLiteral("任务详情与产物"))); reportButton = workbenchButton(aitrain_app::workbenchText(QStringLiteral("打开交付报告")), {}, true);
+    actions->addWidget(taskButton); actions->addStretch(); actions->addWidget(reportButton); result->addLayout(actions);
+    taskButton->setEnabled(false); reportButton->setEnabled(false);
+    connect(taskButton, &QPushButton::clicked, this, &RuntimeDeliveryWorkspacePage::taskRequested);
+    connect(reportButton, &QPushButton::clicked, this, &RuntimeDeliveryWorkspacePage::reportRequested);
+    setMode(0);
 }
-
-QWidget* RuntimeDeliveryWorkspacePage::buildForm(RuntimeDeliveryMode mode)
+RuntimeDeliveryFormData RuntimeDeliveryWorkspacePage::formData(RuntimeDeliveryMode) const
 {
-    FormControls& form = controls(mode);
-    auto* scroll = new QScrollArea;
-    scroll->setWidgetResizable(true);
-    scroll->setFrameShape(QFrame::NoFrame);
-    auto* content = new QWidget;
-    auto* layout = new QVBoxLayout(content);
-    layout->setContentsMargins(0, 12, 0, 0);
-    layout->setSpacing(16);
-
-    auto* setup = new InfoPanel(mode == RuntimeDeliveryMode::DeploymentValidation
-        ? tr("模型包部署验证") : tr("推理验证输入"));
-    form.model = new QComboBox;
-    form.model->setObjectName(mode == RuntimeDeliveryMode::DeploymentValidation
-        ? QStringLiteral("DeploymentModelPackageCombo")
-        : QStringLiteral("InferenceModelPackageCombo"));
-    form.route = new QComboBox;
-    form.route->setObjectName(mode == RuntimeDeliveryMode::DeploymentValidation
-        ? QStringLiteral("DeploymentRuntimeRouteCombo")
-        : QStringLiteral("InferenceRuntimeRouteCombo"));
-    form.model->addItem(tr("请先打开项目并导入已验证模型包"), QString());
-    form.route->addItem(tr("请先选择模型包"), QString());
-    form.datasetId = new QLineEdit;
-    form.datasetVersionId = new QLineEdit;
-    form.snapshotId = new QLineEdit;
-    form.snapshotArtifactId = new QLineEdit;
-    form.relativePath = new QLineEdit;
-    form.datasetId->setPlaceholderText(QStringLiteral("DatasetId"));
-    form.datasetVersionId->setPlaceholderText(QStringLiteral("DatasetVersionId"));
-    form.snapshotId->setPlaceholderText(QStringLiteral("SnapshotId"));
-    form.snapshotArtifactId->setPlaceholderText(QStringLiteral("Snapshot ArtifactId"));
-    form.relativePath->setPlaceholderText(
-        tr("样本在 Snapshot Artifact 内的相对路径，例如 images/0001.png"));
-    auto* fields = new QFormLayout;
-    fields->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-    fields->addRow(tr("已验证模型包"), form.model);
-    fields->addRow(tr("Runtime 路线"), form.route);
-    fields->addRow(tr("样本 DatasetId"), form.datasetId);
-    fields->addRow(tr("样本 VersionId"), form.datasetVersionId);
-    fields->addRow(tr("样本 SnapshotId"), form.snapshotId);
-    fields->addRow(tr("样本 ArtifactId"), form.snapshotArtifactId);
-    fields->addRow(tr("样本相对路径"), form.relativePath);
-    setup->bodyLayout()->addLayout(fields);
-    form.reasons = mutedLabel(tr(
-        "选择模型包后会按 Manifest 路线顺序显示产品状态和本机可用性。"));
-    form.reasons->setObjectName(QStringLiteral("RuntimeRouteReasons"));
-    allowLabelToShrink(form.reasons);
-    setup->bodyLayout()->addWidget(form.reasons);
-    setup->bodyLayout()->addWidget(emptyStateLabel(tr(
-        "只接受持久化 ModelPackageId 与已提交 Snapshot Artifact 内的相对路径；"
-        "不会接受裸模型、engine、checkpoint 或样本文件路径，也不会自动切换 Runtime 路线。")));
-    auto* runButton = primaryButton(tr("运行完整 Runtime Delivery"));
-    connect(runButton, &QPushButton::clicked, this,
-        [this, mode]() { emit runRequested(mode); });
-    auto* actions = new QFrame;
-    actions->setObjectName(QStringLiteral("ActionStrip"));
-    auto* actionLayout = new QHBoxLayout(actions);
-    actionLayout->addStretch();
-    actionLayout->addWidget(runButton);
-    setup->bodyLayout()->addWidget(actions);
-
-    auto* flow = new InfoPanel(tr("Runtime Delivery 六步链路"));
-    auto* flowGrid = new QGridLayout;
-    const QStringList titles = {
-        tr("解析模型包"), tr("校验 Manifest"), tr("推理 Smoke"),
-        tr("Benchmark"), tr("部署验证"), tr("交付报告")};
-    const QStringList captions = {
-        tr("只接受 ModelPackageId 与已提交 Artifact"),
-        tr("校验路线、decoder、哈希与依赖"),
-        tr("执行用户明确选择的 Runtime 路线"),
-        tr("固定样本 smoke timing，非性能 SLA"),
-        tr("提交预测、overlay 与验证报告"),
-        tr("生成终态 Evidence 与 Model Card")};
-    for (int index = 0; index < titles.size(); ++index) {
-        flowGrid->addWidget(createInferenceStep(
-            QString::number(index + 1), titles.at(index), captions.at(index)),
-            index / 2, index % 2);
-    }
-    flow->bodyLayout()->addLayout(flowGrid);
-
-    auto* result = new InfoPanel(tr("运行状态"));
-    form.result = inlineStatusLabel(
-        tr("尚未运行 Runtime Delivery 六步工作流。"));
-    form.result->setObjectName(mode == RuntimeDeliveryMode::InferenceValidation
-        ? QStringLiteral("InferenceResultSummary")
-        : QStringLiteral("DeploymentResultSummary"));
-    result->bodyLayout()->addWidget(form.result);
-    if (mode == RuntimeDeliveryMode::InferenceValidation) {
-        form.overlay = new QLabel(tr("暂无 overlay\n运行推理后显示可视化产物。"));
-        form.overlay->setObjectName(QStringLiteral("InferenceOverlayCanvas"));
-        form.overlay->setAlignment(Qt::AlignCenter);
-        form.overlay->setMinimumHeight(260);
-        result->bodyLayout()->addWidget(form.overlay);
-    }
-    connect(form.model,
-        static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
-        this, [this, mode](int) {
-            emit modelSelectionChanged(mode, selectedModelPackageId(mode));
-        });
-
-    layout->addWidget(setup);
-    layout->addWidget(flow);
-    layout->addWidget(result, 1);
-    scroll->setWidget(content);
-    return scroll;
+    auto data = binding_; data.modelPackageId = model_->currentData().toString(); data.runtimeRoute = route_->currentData().toString(); return data;
 }
-
-RuntimeDeliveryWorkspacePage::FormControls&
-RuntimeDeliveryWorkspacePage::controls(RuntimeDeliveryMode mode)
+QString RuntimeDeliveryWorkspacePage::selectedModelPackageId(RuntimeDeliveryMode) const { return model_->currentData().toString(); }
+void RuntimeDeliveryWorkspacePage::setModelPackages(const QVector<ModelPackageListItem>& packages)
 {
-    return mode == RuntimeDeliveryMode::DeploymentValidation
-        ? deployment_ : inference_;
+    const QString previous = binding_.modelPackageId; const QSignalBlocker blocker(model_);
+    model_->clear(); model_->addItem(aitrain_app::workbenchText(QStringLiteral("请选择已登记模型")), QString());
+    for (const auto& item : packages) model_->addItem(QStringLiteral("%1 · %2 · %3").arg(taskTypeLabel(item.taskType), item.artifactFormat, item.createdAt), item.modelPackageId);
+    const int index = model_->findData(previous); model_->setCurrentIndex(index < 0 ? 0 : index);
 }
-
-const RuntimeDeliveryWorkspacePage::FormControls&
-RuntimeDeliveryWorkspacePage::controls(RuntimeDeliveryMode mode) const
+void RuntimeDeliveryWorkspacePage::setRouteEvaluation(RuntimeDeliveryMode, const QStringList& routes, const QStringList& reasons)
 {
-    return mode == RuntimeDeliveryMode::DeploymentValidation
-        ? deployment_ : inference_;
+    const QString previous = route_->currentData().toString(); const QSignalBlocker blocker(route_); route_->clear();
+    route_->addItem(routes.isEmpty() ? aitrain_app::workbenchText(QStringLiteral("当前无可执行路线")) : aitrain_app::workbenchText(QStringLiteral("请选择运行路线")), QString());
+    for (const QString& route : routes) route_->addItem(route, route);
+    const int index = route_->findData(previous); route_->setCurrentIndex(index >= 0 ? index : routes.size() == 1 ? 1 : 0);
+    reasons_->setText(reasons.isEmpty() ? aitrain_app::workbenchText(QStringLiteral("选择模型后显示本机运行条件。")) : reasons.join(QLatin1Char('\n')));
 }
-
-RuntimeDeliveryFormData RuntimeDeliveryWorkspacePage::formData(
-    RuntimeDeliveryMode mode) const
+void RuntimeDeliveryWorkspacePage::setDatasetSelection(const DatasetSelection& selected)
 {
-    const FormControls& form = controls(mode);
-    RuntimeDeliveryFormData result;
-    result.modelPackageId = form.model->currentData().toString().trimmed();
-    result.runtimeRoute = form.route->currentData().toString().trimmed();
-    result.sampleDatasetId = form.datasetId->text().trimmed();
-    result.sampleDatasetVersionId = form.datasetVersionId->text().trimmed();
-    result.sampleSnapshotId = form.snapshotId->text().trimmed();
-    result.sampleSnapshotArtifactId = form.snapshotArtifactId->text().trimmed();
-    result.sampleRelativePath =
-        QDir::fromNativeSeparators(form.relativePath->text().trimmed());
-    return result;
+    binding_.sampleDatasetId = selected.snapshot.datasetId.toString(); binding_.sampleDatasetVersionId = selected.snapshot.datasetVersionId.toString();
+    binding_.sampleSnapshotId = selected.snapshot.snapshotId.toString(); binding_.sampleSnapshotArtifactId = selected.snapshot.artifactId.toString();
+    binding_.sampleRelativePath = selected.sampleRelativePath;
+    sample_->setText(QStringLiteral("%1\n%2").arg(selected.displayName, selected.sampleRelativePath));
 }
-
-QString RuntimeDeliveryWorkspacePage::selectedModelPackageId(
-    RuntimeDeliveryMode mode) const
+void RuntimeDeliveryWorkspacePage::clearContext()
 {
-    return controls(mode).model->currentData().toString();
+    binding_ = {}; sample_->setText(aitrain_app::workbenchText(QStringLiteral("尚未选择验证样本。"))); resultSummary->setText(aitrain_app::workbenchText(QStringLiteral("尚未运行。")));
+    overlay->setText(aitrain_app::workbenchText(QStringLiteral("尚无已提交的可视化结果。"))); reportButton->setEnabled(false); taskButton->setEnabled(false); setMode(0);
 }
-
-void RuntimeDeliveryWorkspacePage::setModelPackages(
-    const QVector<ModelPackageListItem>& packages)
+void RuntimeDeliveryWorkspacePage::setRunning(RuntimeDeliveryMode)
 {
-    for (RuntimeDeliveryMode mode : {
-             RuntimeDeliveryMode::DeploymentValidation,
-             RuntimeDeliveryMode::InferenceValidation}) {
-        QComboBox* combo = controls(mode).model;
-        const QString previous = combo->currentData().toString();
-        const QSignalBlocker blocker(combo);
-        combo->clear();
-        combo->addItem(tr("请选择已验证模型包"), QString());
-        for (const ModelPackageListItem& package : packages) {
-            combo->addItem(QStringLiteral("%1 · %2 · %3")
-                    .arg(package.modelFamily, package.taskType,
-                        package.modelPackageId.left(8)),
-                package.modelPackageId);
-        }
-        const int restored = combo->findData(previous);
-        combo->setCurrentIndex(restored >= 0 ? restored : 0);
-        if (restored < 0) {
-            setRouteEvaluation(mode, {}, {});
-        }
-    }
+    resultSummary->setText(aitrain_app::workbenchText(QStringLiteral("任务已提交，等待验证结果。"))); overlay->setText(aitrain_app::workbenchText(QStringLiteral("正在验证，等待已提交的可视化结果。"))); reportButton->setEnabled(false); taskButton->setEnabled(true); setMode(1);
 }
-
-void RuntimeDeliveryWorkspacePage::setRouteEvaluation(
-    RuntimeDeliveryMode mode, const QStringList& availableRoutes,
-    const QStringList& reasons)
-{
-    QComboBox* route = controls(mode).route;
-    const QString previous = route->currentData().toString();
-    const QSignalBlocker blocker(route);
-    route->clear();
-    if (availableRoutes.isEmpty()) {
-        route->addItem(tr("无可执行路线"), QString());
-    } else {
-        route->addItem(tr("请选择 Runtime 路线"), QString());
-        for (const QString& value : availableRoutes) {
-            route->addItem(value, value);
-        }
-        if (availableRoutes.size() == 1) {
-            route->setCurrentIndex(1);
-        } else {
-            const int restored = route->findData(previous);
-            route->setCurrentIndex(restored >= 0 ? restored : 0);
-        }
-    }
-    controls(mode).reasons->setText(reasons.isEmpty()
-        ? tr("没有可显示的路线诊断。")
-        : reasons.join(QStringLiteral("\n")));
-}
-
-void RuntimeDeliveryWorkspacePage::setRunning(RuntimeDeliveryMode mode)
-{
-    controls(mode).result->setText(tr(
-        "Runtime Delivery 已派发：等待六步状态与最终 Evidence。"
-        "底层同步 infer 返回前不能中途抢占。"));
-    if (controls(mode).overlay) {
-        setInferenceOverlayText(controls(mode).overlay, tr(
-            "Runtime Delivery 运行中\n"
-            "最终预测与 overlay 请在“任务与产物”中查看已提交 Artifact。"));
-    }
-}
-
-void RuntimeDeliveryWorkspacePage::selectModelPackageForInference(
-    const QString& modelPackageId)
-{
-    const int index = inference_.model->findData(modelPackageId);
-    if (index >= 0) {
-        inference_.model->setCurrentIndex(index);
-    }
-}
-
-void RuntimeDeliveryWorkspacePage::showTab(int tabIndex)
-{
-    if (tabs_ && tabIndex >= 0 && tabIndex < tabs_->count()) {
-        tabs_->setCurrentIndex(tabIndex);
-    }
-}
+void RuntimeDeliveryWorkspacePage::selectModelPackageForInference(const QString& id) { const int index = model_->findData(id); if (index >= 0) model_->setCurrentIndex(index); setMode(0); }
+void RuntimeDeliveryWorkspacePage::showTab(int) { setMode(0); }

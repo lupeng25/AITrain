@@ -130,14 +130,15 @@ int TaskEventRepository::countForTask(const QString& table,
 }
 
 Page<TaskSnapshot> TaskEventRepository::page(
-    const PageRequest& request, QString* error) const
+    const PageRequest& request, QString* error, const CatalogFilter& filter) const
 {
     using storage_internal::PageCursor;
     Page<TaskSnapshot> result;
     PageCursor cursor;
+    const QString queryType = storage_internal::catalogQueryType(QStringLiteral("tasks"), filter);
     if (!database_.isOpen()
         || !storage_internal::validatePageRequest(
-            request, QStringLiteral("tasks"), &cursor, error)) {
+            request, queryType, &cursor, error)) {
         if (error && error->isEmpty()) {
             *error = QStringLiteral("查询任务目录需要已打开的数据库。");
         }
@@ -148,15 +149,22 @@ Page<TaskSnapshot> TaskEventRepository::page(
         "select id, request_id, state, capability_id, task_type, created_at, "
         "updated_at, failure_code, failure_details, "
         "failure_suggested_action, coalesce(failure_occurred_at, '') "
-        "from tasks ");
+        "from tasks where 1=1 ");
+    sql += storage_internal::catalogKindClause(filter, QStringLiteral("task_type"));
+    if (!filter.state.isEmpty()) sql += QStringLiteral("and state = :state ");
+    if (!filter.text.trimmed().isEmpty()) sql += QStringLiteral(
+        "and (instr(lower(task_type || ' ' || capability_id || ' ' || id || ' ' || updated_at || ' ' || failure_details), :search) > 0 "
+        "or exists(select 1 from workflow_runs search_run join workflow_steps search_step on search_step.workflow_run_id = search_run.id "
+        "where search_run.task_id = tasks.id and (instr(lower(search_step.backend), :search) > 0 or instr(lower(search_step.parameter_summary_json), :search) > 0))) ");
     if (!request.after.isEmpty()) {
         sql += QStringLiteral(
-            "where (updated_at < :after_time "
+            "and (updated_at < :after_time "
             "or (updated_at = :after_time and id < :after_id)) ");
     }
     sql += QStringLiteral(
         "order by updated_at desc, id desc limit :limit");
     query.prepare(sql);
+    storage_internal::bindCatalogFilter(query, filter);
     if (!request.after.isEmpty()) {
         query.bindValue(QStringLiteral(":after_time"), cursor.timestamp);
         query.bindValue(QStringLiteral(":after_id"), cursor.id);
@@ -178,7 +186,7 @@ Page<TaskSnapshot> TaskEventRepository::page(
     if (result.hasMore && !result.items.isEmpty()) {
         const TaskSnapshot& last = result.items.constLast();
         result.nextCursor = storage_internal::encodePageCursor(
-            QStringLiteral("tasks"),
+            queryType,
             {last.updatedAt.toUTC().toString(Qt::ISODateWithMs),
                 last.id.toString()});
     }

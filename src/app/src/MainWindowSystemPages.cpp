@@ -1,8 +1,10 @@
+#include "WorkbenchTranslation.h"
 #include "MainWindow.h"
 
 #include "EvaluationReportView.h"
 #include "EnvironmentPage.h"
 #include "EnvironmentPageController.h"
+#include "DeliveryEvidencePage.h"
 #include "InfoPanel.h"
 #include "MainWindowSupport.h"
 #include "SettingsPage.h"
@@ -58,7 +60,11 @@ QWidget* MainWindow::buildSystemSettingsPage()
 QWidget* MainWindow::buildEnvironmentPage()
 {
     environmentPage_ = new EnvironmentWorkspacePage(
-        buildDeliveryEvidencePanel(), this);
+        nullptr, this);
+    connect(environmentPage_, &EnvironmentWorkspacePage::diagnosticsRequested, this, [this]() {
+        showPage(EvidencePage, aitrain_app::workbenchText(QStringLiteral("诊断包")));
+        deliveryEvidencePage_->setMode(DeliveryEvidenceWorkspacePage::Diagnostics);
+    });
     environmentPageController_->attach(environmentPage_);
     return environmentPage_;
 }

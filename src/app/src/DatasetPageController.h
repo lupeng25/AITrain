@@ -2,6 +2,7 @@
 
 #include "MainWindowState.h"
 #include "aitrain/domain/DomainTypes.h"
+#include "aitrain/workflow/ProjectQueryService.h"
 
 #include <QObject>
 #include <QStringList>
@@ -10,6 +11,7 @@
 class DatasetWorkspacePage;
 class TaskRuntimeController;
 class DatasetCatalogPresenter;
+struct TaskViewState;
 namespace aitrain {
 class ProjectQueryService;
 }
@@ -31,6 +33,8 @@ public:
     void invalidateAsyncPreviews();
     void setProjectContext(bool projectOpen, const QString& projectRoot);
     void setWorkerExecutable(const QString& executable);
+    void applyTaskViewState(const TaskViewState& state);
+    void openQualityReport(bool repairList);
 
 public slots:
     void startConversion();
@@ -50,6 +54,10 @@ public slots:
     void loadSampleReview();
     void refreshSampleReview();
     void openSelectedReviewSample();
+    void loadSnapshots(bool append = false);
+    void selectSnapshot(int index);
+    void loadSamples(bool append = false);
+    void previewSample(int row);
 
 signals:
     void taskStarted(const QString& taskId, const QString& workflowKind);
@@ -68,6 +76,10 @@ private:
     QJsonArray filteredSampleReviewRows() const;
     void appendConversionLog(const QString& text);
     void setConversionError(const QString& text);
+    void renderCatalog();
+    void selectCatalogRow();
+    void loadQualityReport(const QString& taskId);
+    void renderQualityReport(const QJsonObject& report);
 
     TaskRuntimeController* taskRuntime_ = nullptr;
     const aitrain::ProjectQueryService* queryService_ = nullptr;
@@ -76,7 +88,20 @@ private:
     DatasetWorkbenchState state_;
     bool projectOpen_ = false;
     QString projectRoot_;
+    QString catalogSearch_;
     QString workerExecutable_;
     quint64 formatProbeGeneration_ = 0;
     quint64 sampleReviewGeneration_ = 0;
+    quint64 previewGeneration_ = 0;
+    quint64 qualityGeneration_ = 0;
+    QVector<QString> catalogCursors_{QString()};
+    QVector<aitrain::DatasetSnapshotReadModel> snapshots_;
+    QString snapshotCursor_;
+    QString sampleCursor_;
+    QString activeTaskId_;
+    QString activeKind_;
+    QString activeSnapshotId_;
+    QString pendingTargetId_;
+    QString selectAfterRefresh_;
+    QHash<QString, qint64> sampleCounts_;
 };

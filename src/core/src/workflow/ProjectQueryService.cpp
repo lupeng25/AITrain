@@ -232,14 +232,14 @@ ProjectQueryService::ProjectQueryService(const ProjectWorkspace* workspace)
 }
 
 Page<TaskSnapshot> ProjectQueryService::recentTasks(
-    const PageRequest& request, QString* error) const
+    const PageRequest& request, QString* error, const CatalogFilter& filter) const
 {
     if (error) error->clear();
     if (!workspace_ || !workspace_->isOpen()) {
         if (error) *error = QStringLiteral("项目查询服务需要已打开的  工作区。");
         return {};
     }
-    return workspace_->tasks(request, error);
+    return workspace_->tasks(request, error, filter);
 }
 
 bool ProjectQueryService::taskDetails(const TaskId& taskId, TaskReadModel* result, QString* error) const
@@ -283,6 +283,12 @@ Page<ArtifactSnapshot> ProjectQueryService::taskArtifacts(
     if (error && !error->isEmpty()) return {};
     for (ArtifactSnapshot& artifact : page.items) artifact.files.clear();
     return page;
+}
+
+QString ProjectQueryService::projectIdentity(QString* error) const
+{
+    if (!workspace_) return {};
+    return workspace_->projectIdentity(error);
 }
 
 Page<ArtifactFileSnapshot> ProjectQueryService::artifactFiles(
@@ -362,7 +368,7 @@ bool ProjectQueryService::artifactFilePreviewAsync(const ArtifactId& artifactId,
 }
 
 Page<DatasetCatalogReadModel> ProjectQueryService::datasetCatalog(
-    const PageRequest& request, QString* error) const
+    const PageRequest& request, QString* error, const CatalogFilter& filter) const
 {
     if (error) error->clear();
     if (!workspace_ || !workspace_->isOpen()) {
@@ -370,7 +376,7 @@ Page<DatasetCatalogReadModel> ProjectQueryService::datasetCatalog(
         return {};
     }
 
-    const Page<DatasetCatalogItem> source = workspace_->datasets(request, error);
+    const Page<DatasetCatalogItem> source = workspace_->datasets(request, error, filter);
     if (error && !error->isEmpty()) return {};
 
     Page<DatasetCatalogReadModel> page;
@@ -380,6 +386,7 @@ Page<DatasetCatalogReadModel> ProjectQueryService::datasetCatalog(
     for (const DatasetCatalogItem& item : source.items) {
         DatasetCatalogReadModel model;
         model.datasetId = item.datasetId;
+        model.displayName = item.displayName;
         model.datasetFormat = item.datasetFormat;
         model.versionCount = item.versionCount;
         model.snapshotCount = item.snapshotCount;
@@ -389,13 +396,46 @@ Page<DatasetCatalogReadModel> ProjectQueryService::datasetCatalog(
         model.latestRootHash = item.latestRootHash;
         model.latestFileCount = item.latestFileCount;
         model.latestCreatedAt = item.latestCreatedAt;
+        model.latestSourceTaskId = item.latestSourceTaskId;
+        model.latestQualityTaskId = item.latestQualityTaskId;
         page.items.append(model);
     }
     return page;
 }
 
-Page<ModelPackageReadModel> ProjectQueryService::modelPackages(
+Page<DatasetSnapshotReadModel> ProjectQueryService::datasetSnapshots(
+    const DatasetId& datasetId, const PageRequest& request, QString* error) const
+{
+    if (error) error->clear();
+    if (!workspace_ || !workspace_->isOpen()) {
+        if (error) *error = QStringLiteral("查询数据版本需要已打开的项目。");
+        return {};
+    }
+    const auto source = workspace_->datasetSnapshots(datasetId, request, error);
+    Page<DatasetSnapshotReadModel> result;
+    result.nextCursor = source.nextCursor;
+    result.hasMore = source.hasMore;
+    for (const auto& snapshot : source.items) {
+        result.items.append({snapshot.datasetId, snapshot.datasetVersionId, snapshot.id,
+            snapshot.artifactId, snapshot.taskId, snapshot.datasetFormat, snapshot.createdAt,
+            snapshot.fileCount, snapshot.latestQualityTaskId});
+    }
+    return result;
+}
+
+Page<ArtifactSnapshot> ProjectQueryService::artifactCatalog(const QStringList& kinds,
     const PageRequest& request, QString* error) const
+{
+    if (error) error->clear();
+    if (!workspace_ || !workspace_->isOpen()) {
+        if (error) *error = QStringLiteral("查询报告与会话需要已打开的项目。");
+        return {};
+    }
+    return workspace_->artifactCatalog(kinds, request, error);
+}
+
+Page<ModelPackageReadModel> ProjectQueryService::modelPackages(
+    const PageRequest& request, QString* error, const CatalogFilter& filter) const
 {
     if (error) error->clear();
     if (!workspace_ || !workspace_->isOpen()) {
@@ -403,7 +443,7 @@ Page<ModelPackageReadModel> ProjectQueryService::modelPackages(
         return {};
     }
 
-    const Page<ModelPackageSnapshot> source = workspace_->modelPackages(request, error);
+    const Page<ModelPackageSnapshot> source = workspace_->modelPackages(request, error, filter);
     if (error && !error->isEmpty()) return {};
 
     Page<ModelPackageReadModel> page;
@@ -414,6 +454,8 @@ Page<ModelPackageReadModel> ProjectQueryService::modelPackages(
         const ModelManifest& manifest = snapshot.manifest;
         ModelPackageReadModel model;
         model.modelPackageId = manifest.modelPackageId;
+        model.latestValidationTaskId = snapshot.latestValidationTaskId;
+        model.latestValidationState = snapshot.latestValidationState;
         model.sourceTaskId = manifest.sourceTaskId;
         model.sourceSnapshotId = manifest.sourceSnapshotId;
         model.sourceArtifactId = snapshot.sourceArtifactId;
@@ -455,7 +497,7 @@ bool ProjectQueryService::environmentCheckReport(
 }
 
 Page<DeliveryEvidenceReadModel> ProjectQueryService::deliveryEvidence(
-    const PageRequest& request, QString* error) const
+    const PageRequest& request, QString* error, const CatalogFilter& filter) const
 {
     if (error) error->clear();
     if (!workspace_ || !workspace_->isOpen()) {
@@ -464,7 +506,7 @@ Page<DeliveryEvidenceReadModel> ProjectQueryService::deliveryEvidence(
     }
 
     const Page<DeliveryEvidenceCandidate> source =
-        workspace_->deliveryEvidenceCandidates(request, error);
+        workspace_->deliveryEvidenceCandidates(request, error, filter);
     if (error && !error->isEmpty()) return {};
 
     Page<DeliveryEvidenceReadModel> result;
@@ -507,7 +549,7 @@ Page<DeliveryEvidenceReadModel> ProjectQueryService::deliveryEvidence(
 }
 
 bool ProjectQueryService::deliveryEvidenceAsync(const PageRequest& request,
-    QObject* receiver, DeliveryEvidenceCallback callback, QString* error) const
+    QObject* receiver, DeliveryEvidenceCallback callback, QString* error, const CatalogFilter& filter) const
 {
     if (error) error->clear();
     if (!receiver || !callback) {
@@ -522,7 +564,7 @@ bool ProjectQueryService::deliveryEvidenceAsync(const PageRequest& request,
     // 只在调用线程通过 ProjectStore 读取一次候选身份和文件清单；
     // 后续任务只捕获这些不可变快照和安全的文件读取来源。
     const Page<DeliveryEvidenceCandidate> source =
-        workspace_->deliveryEvidenceCandidates(request, error);
+        workspace_->deliveryEvidenceCandidates(request, error, filter);
     if (error && !error->isEmpty()) return false;
 
     QVector<DeliveryEvidenceFileJob> jobs;

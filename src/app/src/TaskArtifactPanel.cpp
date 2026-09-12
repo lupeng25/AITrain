@@ -1,3 +1,4 @@
+#include "WorkbenchTranslation.h"
 #include "TaskArtifactPanel.h"
 
 #include "EvaluationReportView.h"
@@ -24,7 +25,8 @@
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QTableView>
-#include <QTabWidget>
+#include <QComboBox>
+#include <QSignalBlocker>
 #include <QVBoxLayout>
 
 #include <utility>
@@ -57,8 +59,9 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
 
-    selectedTaskSummaryLabel_ = inlineStatusLabel(QStringLiteral("请选择一个任务查看产物、指标和工作流。"));
+    selectedTaskSummaryLabel_ = inlineStatusLabel(aitrain_app::workbenchText(QStringLiteral("请选择一个任务查看产物、指标和工作流。")));
     selectedTaskSummaryLabel_->setObjectName(QStringLiteral("TaskDetailSummary"));
+    selectedTaskSummaryLabel_->setTextFormat(Qt::PlainText);
     selectedTaskSummaryLabel_->setMinimumHeight(40);
     selectedTaskSummaryLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
 
@@ -77,7 +80,7 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     artifactTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     artifactTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
     artifactTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-    connect(artifactTable_->selectionModel(), &QItemSelectionModel::selectionChanged,
+    connect(artifactTable_->selectionModel(), &QItemSelectionModel::currentChanged,
         this, [this]() {
             if (!presenter_ || !artifactTable_->currentIndex().isValid()) return;
             presenter_->selectArtifact(artifactTable_->currentIndex()
@@ -99,7 +102,7 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     artifactFileTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     artifactFileTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
     artifactFileTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-    connect(artifactFileTable_->selectionModel(), &QItemSelectionModel::selectionChanged,
+    connect(artifactFileTable_->selectionModel(), &QItemSelectionModel::currentChanged,
         this, [this]() { updatePreviewFromSelection(); });
 
     metricTable_ = new QTableView;
@@ -120,7 +123,7 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     exportTable_ = new QTableWidget(0, 3);
     exportTable_->setObjectName(QStringLiteral("TaskWorkflowTable"));
     exportTable_->setHorizontalHeaderLabels(QStringList()
-        << QStringLiteral("步骤") << QStringLiteral("状态 / 后端") << QStringLiteral("输出 Artifact"));
+        << aitrain_app::workbenchText(QStringLiteral("步骤")) << aitrain_app::workbenchText(QStringLiteral("状态 / 后端")) << aitrain_app::workbenchText(QStringLiteral("输出 Artifact")));
     configureTable(exportTable_);
     exportTable_->setWordWrap(true);
     exportTable_->setMinimumHeight(160);
@@ -130,7 +133,7 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     exportTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     connect(exportTable_, &QTableWidget::itemSelectionChanged, this, &TaskArtifactPanel::updatePreviewFromSelection);
 
-    imagePreviewLabel_ = new QLabel(QStringLiteral("暂无产物预览"));
+    imagePreviewLabel_ = new QLabel(aitrain_app::workbenchText(QStringLiteral("暂无产物预览")));
     imagePreviewLabel_->setObjectName(QStringLiteral("ArtifactPreviewCanvas"));
     imagePreviewLabel_->setAlignment(Qt::AlignCenter);
     imagePreviewLabel_->setMinimumHeight(160);
@@ -139,7 +142,7 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     previewText_->setObjectName(QStringLiteral("ArtifactPreviewText"));
     previewText_->setReadOnly(true);
     previewText_->setMinimumHeight(120);
-    previewText_->setPlainText(QStringLiteral("选择一个已提交文件后显示摘要。"));
+    previewText_->setPlainText(aitrain_app::workbenchText(QStringLiteral("选择一个已提交文件后显示摘要。")));
     auto* defaultPreview = new QWidget;
     auto* defaultLayout = new QVBoxLayout(defaultPreview);
     defaultLayout->setContentsMargins(0, 0, 0, 0);
@@ -203,15 +206,21 @@ TaskArtifactPanel::TaskArtifactPanel(QWidget* parent)
     previewTabLayout->setContentsMargins(0, 0, 0, 0);
     previewTabLayout->addWidget(previewStack_);
 
-    detailTabs_ = new QTabWidget;
-    detailTabs_->setObjectName(QStringLiteral("TaskDetailTabs"));
-    detailTabs_->addTab(artifactTab, uiText("产物"));
-    detailTabs_->addTab(artifactFileTab, uiText("文件"));
-    detailTabs_->addTab(metricTab, uiText("指标"));
-    detailTabs_->addTab(exportTab, uiText("工作流"));
-    detailTabs_->addTab(previewTab, uiText("预览"));
-    connect(detailTabs_, &QTabWidget::currentChanged, this, &TaskArtifactPanel::updatePreviewFromSelection);
-    detailTabs_->setMinimumHeight(300);
+    detailTabs_ = new QStackedWidget;
+    detailTabs_->setObjectName(QStringLiteral("TaskDetailViews"));
+    detailTabs_->addWidget(artifactTab); detailTabs_->addWidget(artifactFileTab); detailTabs_->addWidget(metricTab); detailTabs_->addWidget(exportTab); detailTabs_->addWidget(previewTab);
+    auto* section = new QComboBox; section->setObjectName(QStringLiteral("TaskDetailSection"));
+    section->addItems({aitrain_app::workbenchText(QStringLiteral("产物目录")), aitrain_app::workbenchText(QStringLiteral("选中产物的文件")), aitrain_app::workbenchText(QStringLiteral("指标")), aitrain_app::workbenchText(QStringLiteral("工作流")), aitrain_app::workbenchText(QStringLiteral("文件预览"))});
+    layout->addWidget(section, 0, Qt::AlignLeft);
+    connect(section, QOverload<int>::of(&QComboBox::currentIndexChanged), detailTabs_, &QStackedWidget::setCurrentIndex);
+    connect(detailTabs_, &QStackedWidget::currentChanged, section, &QComboBox::setCurrentIndex);
+    connect(detailTabs_, &QStackedWidget::currentChanged, this, &TaskArtifactPanel::updatePreviewFromSelection);
+    auto* filesButton = new QPushButton(aitrain_app::workbenchText(QStringLiteral("查看选中产物的文件"))); artifactTabLayout->addWidget(filesButton, 0, Qt::AlignLeft);
+    connect(filesButton, &QPushButton::clicked, this, [this]() { if (artifactTable_->currentIndex().isValid()) detailTabs_->setCurrentIndex(1); });
+    auto* previewButton = new QPushButton(aitrain_app::workbenchText(QStringLiteral("预览选中文件"))); artifactFileTabLayout->addWidget(previewButton, 0, Qt::AlignLeft);
+    connect(previewButton, &QPushButton::clicked, this, [this]() { if (artifactFileTable_->currentIndex().isValid()) detailTabs_->setCurrentIndex(4); });
+    connect(artifactTable_, &QTableView::doubleClicked, this, [this](const QModelIndex&) { detailTabs_->setCurrentIndex(1); });
+    connect(artifactFileTable_, &QTableView::doubleClicked, this, [this](const QModelIndex&) { detailTabs_->setCurrentIndex(4); });
     detailTabs_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     previewStack_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
@@ -252,8 +261,13 @@ void TaskArtifactPanel::setDetails(const TaskArtifactDetails& details)
     setTaskSummary(details.summary.isEmpty()
         ? uiText("请选择一个任务查看已提交产物、指标和工作流。") : details.summary);
 
+    const QString previousFile = artifactFileTable_->currentIndex().data(ArtifactFileTableModel::RelativePathRole).toString();
+    const QSignalBlocker artifactBlocker(artifactTable_->selectionModel());
+    const QSignalBlocker fileBlocker(artifactFileTable_->selectionModel());
     artifactModel_->setFiles(details.artifacts);
     artifactFileModel_->setRows(details.artifactFiles);
+    for (int row = 0; row < artifactModel_->rowCount(); ++row) if (artifactModel_->index(row, 0).data(ArtifactTableModel::ArtifactIdRole).toString() == details.selectedArtifactId) artifactTable_->selectRow(row);
+    for (int row = 0; row < artifactFileModel_->rowCount(); ++row) if (artifactFileModel_->index(row, 0).data(ArtifactFileTableModel::RelativePathRole).toString() == previousFile) artifactFileTable_->selectRow(row);
     metricModel_->setRows(details.metrics);
     artifactLoadMoreButton_->setEnabled(presenter_ && presenter_->hasMoreArtifacts());
     artifactFileLoadMoreButton_->setEnabled(
@@ -324,7 +338,7 @@ void TaskArtifactPanel::previewSelectedArtifact()
     selectedArtifactId_.clear();
     selectedRelativePath_.clear();
 
-    if (!detailTabs_ || detailTabs_->currentIndex() != 1
+    if (!detailTabs_ || detailTabs_->currentIndex() != 4
         || !artifactFileTable_ || !artifactFileTable_->currentIndex().isValid()) {
         imagePreviewLabel_->setVisible(true);
         previewText_->setVisible(false);
@@ -379,7 +393,7 @@ void TaskArtifactPanel::previewSelectedArtifact()
                     [panel, reportView, artifactId](const QString& relativePath,
                         EvaluationReportView::ArtifactPreviewCallback callback) {
                         if (!panel || !reportView || !panel->presenter_) {
-                            callback(false, {}, QStringLiteral("Artifact 预览查询服务不可用。"));
+                            callback(false, {}, aitrain_app::workbenchText(QStringLiteral("Artifact 预览查询服务不可用。")));
                             return;
                         }
                         QString requestError;
@@ -418,7 +432,7 @@ void TaskArtifactPanel::previewSelectedArtifact()
             if (textLike) {
                 QString text = suffix == QStringLiteral("json")
                     ? formatArtifactJsonText(preview.content) : QString::fromUtf8(preview.content);
-                if (preview.truncated) text.append(QStringLiteral("\n\n[文件超过 4MB，仅显示前部内容]"));
+                if (preview.truncated) text.append(aitrain_app::workbenchText(QStringLiteral("\n\n[文件超过 4MB，仅显示前部内容]")));
                 self->previewText_->setPlainText(text);
                 return;
             }

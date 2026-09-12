@@ -3,7 +3,8 @@
 #include "MainWindowSupport.h"
 #include "ProjectSummaryPresenter.h"
 
-#include <QScrollArea>
+#include "WorkbenchWidgets.h"
+#include <QVariant>
 
 class QLabel;
 class QLineEdit;
@@ -17,7 +18,7 @@ struct ProjectPageViewModel final {
 };
 
 // 项目页只拥有视觉控件和破坏性操作确认，不直接访问 Workspace 或 Store。
-class ProjectWorkspacePage final : public QScrollArea {
+class ProjectWorkspacePage final : public aitrain_app::WorkspaceViewHost {
     Q_OBJECT
 
 public:
@@ -31,6 +32,7 @@ public:
     void setStatus(const QString& status);
     void render(const ProjectPageViewModel& viewModel);
     void showOperationError(const QString& message);
+    void setRecentProjects(const QVariantList& projects);
 
 signals:
     void operationRequested(aitrain_app::ProjectSessionOperation operation);
@@ -50,4 +52,5 @@ private:
     QPushButton* openButton_ = nullptr;
     QPushButton* rebuildButton_ = nullptr;
     QPushButton* browseButton_ = nullptr;
+    QTableWidget* recentTable_ = nullptr;
 };

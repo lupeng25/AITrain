@@ -1,6 +1,8 @@
+#include "WorkbenchTranslation.h"
 #include "EnvironmentPage.h"
 
 #include "InfoPanel.h"
+#include "WorkbenchWidgets.h"
 #include "MainWindowSupport.h"
 
 #include <QAbstractItemView>
@@ -31,73 +33,20 @@ EnvironmentWorkspacePage::EnvironmentWorkspacePage(
     QWidget* deliveryEvidencePage, QWidget* parent)
     : QWidget(parent)
 {
-    auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(18, 0, 18, 18);
-    layout->setSpacing(16);
-    auto* runButton = primaryButton(tr("执行环境自检"));
-    connect(runButton, &QPushButton::clicked,
-        this, &EnvironmentWorkspacePage::runRequested);
-
-    auto* toolbar = new QFrame;
-    toolbar->setObjectName(QStringLiteral("WorkspaceToolbar"));
-    auto* toolbarLayout = new QHBoxLayout(toolbar);
-    auto* contextLabel = new QLabel(tr("运行时与交付证据"));
-    contextLabel->setObjectName(QStringLiteral("WorkspaceToolbarTitle"));
-    statusLabel_ = inlineStatusLabel(tr("尚未执行环境自检。"));
-    statusLabel_->setObjectName(QStringLiteral("WorkspaceToolbarStatus"));
-    allowLabelToShrink(statusLabel_);
-    toolbarLayout->addWidget(contextLabel);
-    toolbarLayout->addWidget(statusLabel_, 1);
-    toolbarLayout->addWidget(runButton);
-
-    auto* summary = new QFrame;
-    summary->setObjectName(QStringLiteral("ActionStrip"));
-    auto* summaryLayout = new QGridLayout(summary);
-    auto* okCard = createCompactSummaryCard(
-        tr("通过"), QStringLiteral("0"), tr("可用依赖"));
-    auto* warningCard = createCompactSummaryCard(
-        tr("警告"), QStringLiteral("0"), tr("可继续但需关注"));
-    auto* missingCard = createCompactSummaryCard(
-        tr("缺失"), QStringLiteral("0"), tr("会阻塞相关能力"));
-    auto* uncheckedCard = createCompactSummaryCard(
-        tr("未检测"), QStringLiteral("0"), tr("等待 Worker 自检"));
-    okLabel_ = metricValue(okCard);
-    warningLabel_ = metricValue(warningCard);
-    missingLabel_ = metricValue(missingCard);
-    uncheckedLabel_ = metricValue(uncheckedCard);
-    summaryLayout->addWidget(okCard, 0, 0);
-    summaryLayout->addWidget(warningCard, 0, 1);
-    summaryLayout->addWidget(missingCard, 0, 2);
-    summaryLayout->addWidget(uncheckedCard, 0, 3);
-
-    auto* panel = new InfoPanel(tr("检查明细"));
-    table_ = new QTableWidget(0, 3);
-    table_->setObjectName(QStringLiteral("EnvironmentTable"));
-    table_->setHorizontalHeaderLabels(
-        QStringList() << tr("检查项") << tr("状态") << tr("说明"));
-    table_->setAlternatingRowColors(true);
-    table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    table_->setSelectionBehavior(QAbstractItemView::SelectRows);
-    table_->verticalHeader()->setVisible(false);
-    table_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    table_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    table_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
-    panel->bodyLayout()->addWidget(mutedLabel(tr(
-        "状态来自 Worker 已提交的 Environment Check 报告；未提交外部硬件验收证据不会被视为通过。")));
-    panel->bodyLayout()->addWidget(table_);
-
-    auto* runtimeTab = new QWidget;
-    auto* runtimeLayout = new QVBoxLayout(runtimeTab);
-    runtimeLayout->setContentsMargins(0, 0, 0, 0);
-    runtimeLayout->setSpacing(16);
-    runtimeLayout->addWidget(summary);
-    runtimeLayout->addWidget(panel, 1);
-    auto* tabs = new QTabWidget;
-    tabs->setObjectName(QStringLiteral("EnvironmentTabs"));
-    tabs->addTab(runtimeTab, tr("运行环境"));
-    tabs->addTab(deliveryEvidencePage, tr("交付证据"));
-    layout->addWidget(toolbar);
-    layout->addWidget(tabs, 1);
+    if (deliveryEvidencePage) { deliveryEvidencePage->setParent(this); deliveryEvidencePage->hide(); }
+    auto* layout = new QVBoxLayout(this); layout->setContentsMargins(20, 0, 20, 20); layout->setSpacing(12);
+    auto* actions = new QHBoxLayout;
+    statusLabel_ = workbenchHint(aitrain_app::workbenchText(QStringLiteral("尚未执行环境自检。"))); statusLabel_->setObjectName(QStringLiteral("WorkspaceToolbarStatus"));
+    auto* diagnostics = workbenchButton(aitrain_app::workbenchText(QStringLiteral("诊断包"))); auto* run = workbenchButton(aitrain_app::workbenchText(QStringLiteral("检查环境")), QStringLiteral("EnvironmentRun"), true);
+    actions->addWidget(statusLabel_, 1); actions->addWidget(diagnostics); actions->addWidget(run); layout->addLayout(actions);
+    connect(run, &QPushButton::clicked, this, &EnvironmentWorkspacePage::runRequested);
+    connect(diagnostics, &QPushButton::clicked, this, &EnvironmentWorkspacePage::diagnosticsRequested);
+    auto* summary = new QHBoxLayout;
+    const auto addSummary = [summary](const QString& caption) { summary->addWidget(new QLabel(caption)); auto* value = new QLabel(aitrain_app::workbenchText(QStringLiteral("待检查"))); summary->addWidget(value); summary->addSpacing(20); return value; };
+    okLabel_ = addSummary(aitrain_app::workbenchText(QStringLiteral("通过"))); warningLabel_ = addSummary(aitrain_app::workbenchText(QStringLiteral("警告"))); missingLabel_ = addSummary(aitrain_app::workbenchText(QStringLiteral("缺失"))); uncheckedLabel_ = addSummary(aitrain_app::workbenchText(QStringLiteral("未检查"))); summary->addStretch(); layout->addLayout(summary);
+    table_ = workbenchTable({aitrain_app::workbenchText(QStringLiteral("检查项 / 能力")), aitrain_app::workbenchText(QStringLiteral("状态")), aitrain_app::workbenchText(QStringLiteral("说明与处理建议"))}); table_->setObjectName(QStringLiteral("EnvironmentTable"));
+    table_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents); table_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    layout->addWidget(table_, 1); layout->addWidget(workbenchHint(aitrain_app::workbenchText(QStringLiteral("结果来自最近一次已提交的环境检查；修改环境配置后请重新检查。"))));
     renderReport({});
 }
 

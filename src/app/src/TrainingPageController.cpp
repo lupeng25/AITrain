@@ -1,9 +1,13 @@
+#include "WorkbenchTranslation.h"
 #include "TrainingPageController.h"
 
 #include "MainWindowSupport.h"
 #include "ApplicationEventRouter.h"
 #include "TaskRuntimeController.h"
 #include "TrainingPage.h"
+#include "TaskArtifactPresenter.h"
+#include "aitrain/product/ProductCapabilityContract.h"
+#include <QLabel>
 #include "aitrain/core/CapabilityRegistry.h"
 #include "aitrain/core/WorkerProtocol.h"
 #include "aitrain/workflow/TrainingWorkflowProfile.h"
@@ -16,6 +20,7 @@
 #include <QMessageBox>
 #include <QSet>
 #include <QSignalBlocker>
+#include <QTimer>
 
 using namespace aitrain_app;
 
@@ -24,7 +29,7 @@ namespace {
 QJsonValue typedArgument(const QString& key, const QString& text)
 {
     const QString value = text.trimmed();
-    if (value.isEmpty() || value == QStringLiteral("默认")) {
+    if (value.isEmpty() || value == aitrain_app::workbenchText(QStringLiteral("默认"))) {
         return {};
     }
     const QString lower = value.toLower();
@@ -115,6 +120,16 @@ void TrainingPageController::attach(TrainingWorkspacePage* page)
         this, &TrainingPageController::start);
     connect(page_, &TrainingWorkspacePage::cancelRequested,
         taskRuntime_, &TaskRuntimeController::cancel);
+    connect(taskRuntime_, &TaskRuntimeController::stateChanged, this, [this](TaskRuntimeController::State state) {
+        if (state == TaskRuntimeController::State::CancelRequested && selectedTaskId_ == activeTaskId_) {
+            page_->cancelTaskButton->setEnabled(false); page_->cancelTaskButton->setText(aitrain_app::workbenchText(QStringLiteral("正在取消")));
+            page_->setPhase(aitrain_app::workbenchText(QStringLiteral("已请求取消，等待 Worker 返回终态。")));
+        }
+    });
+    connect(page_, &TrainingWorkspacePage::logRequested, this, [this]() {
+        if (selectedTaskId_ == activeTaskId_) page_->setMode(TrainingWorkspacePage::FullLog, TrainingWorkspacePage::Monitor);
+        else if (!selectedTaskId_.isEmpty()) emit page_->openTaskRequested(selectedTaskId_);
+    });
     auto* capability = page_->findChild<QComboBox*>(
         QStringLiteral("TrainingCapability"));
     auto* taskType = page_->findChild<QComboBox*>(
@@ -123,32 +138,25 @@ void TrainingPageController::attach(TrainingWorkspacePage* page)
         QStringLiteral("TrainingBackend"));
     auto* model = page_->findChild<QComboBox*>(
         QStringLiteral("TrainingModelPreset"));
-    connect(capability, QOverload<int>::of(&QComboBox::currentIndexChanged),
-        this, [this]() {
-            refreshTaskTypes();
-            refreshDefaults();
-        });
-    connect(taskType, QOverload<int>::of(&QComboBox::currentIndexChanged),
-        this, &TrainingPageController::refreshDefaults);
     connect(backend, QOverload<int>::of(&QComboBox::currentIndexChanged),
-        this, [this]() {
-            refreshModelPresets();
-            const QString backendId = page_->formData().backendId;
-            if (auto* batch = page_->findChild<QLineEdit*>(
-                    QStringLiteral("TrainingBatchSize"))) {
-                const bool fixedBatch = backendId
-                    == QStringLiteral("anomalib_efficientad");
-                if (fixedBatch) {
-                    const QSignalBlocker blocker(batch);
-                    batch->setText(QStringLiteral("1"));
-                }
-                batch->setEnabled(!fixedBatch);
-                batch->setToolTip(fixedBatch
-                    ? tr("Anomalib 2.5 EfficientAD 训练 batchSize 固定为 1。")
-                    : QString());
-            }
-            refreshSummary();
-        });
+        this, &TrainingPageController::synchronizeBackend);
+    connect(page_, &TrainingWorkspacePage::selectDatasetRequested, this, &TrainingPageController::chooseDataset);
+    bindCatalogSearch(page_->findChild<QLineEdit*>(QStringLiteral("TrainingHistorySearch")), this, [this](const QString& text) {
+        historySearch_ = text; refreshHistory();
+    });
+    connect(page_, &TrainingWorkspacePage::refreshHistoryRequested, this, &TrainingPageController::refreshHistory);
+    connect(page_, &TrainingWorkspacePage::historyRequested, this, &TrainingPageController::openHistory);
+    connect(page_, &TrainingWorkspacePage::moreHistoryRequested, this, [this]() {
+        if (history_) { history_->loadMore(); renderHistory(); }
+    });
+    connect(page_, &TrainingWorkspacePage::currentTaskRequested, this, [this]() {
+        if (!selectedTaskId_.isEmpty()) emit page_->openTaskRequested(selectedTaskId_);
+    });
+    connect(page_, &TrainingWorkspacePage::advancedRequested, this, &TrainingPageController::editAdvanced);
+    connect(page_, &TrainingWorkspacePage::cancelAdvancedRequested, this, &TrainingPageController::cancelAdvanced);
+    connect(page_, &TrainingWorkspacePage::applyAdvancedRequested, this, [this]() {
+        if (validateParameters()) { advancedBackup_.clear(); page_->setMode(TrainingWorkspacePage::Configuration); scheduleDraftSave(); }
+    });
     connect(model, &QComboBox::currentTextChanged,
         this, &TrainingPageController::refreshSummary);
     for (const QString& name : {
@@ -158,14 +166,40 @@ void TrainingPageController::attach(TrainingWorkspacePage* page)
         connect(page_->findChild<QLineEdit*>(name), &QLineEdit::textChanged,
             this, &TrainingPageController::refreshSummary);
     }
+    connect(page_, &TrainingWorkspacePage::configurationRequested, this, &TrainingPageController::showHistoricalConfiguration);
+    connect(page_, &TrainingWorkspacePage::copyConfigurationRequested, this, &TrainingPageController::copyHistoricalConfiguration);
     refreshCapabilities();
+    connect(page_, &TrainingWorkspacePage::modelsRequested, this, [this]() { if (!resultModelId_.isEmpty()) emit page_->modelRequested(resultModelId_); });
+    captureParameterDefaults();
+    initializeDraftPersistence();
+    if (!draftProjectId_.isEmpty()) {
+        restoringDraft_ = true;
+        restoreDraft();
+        restoringDraft_ = false;
+    }
+    refreshHistory();
 }
 
 void TrainingPageController::setProjectContext(
     bool projectOpen, const QString& projectRoot)
 {
+    const QString nextId = projectOpen && queryService_ ? queryService_->projectIdentity() : QString();
+    const bool changed = projectRoot_ != projectRoot || draftProjectId_ != nextId;
+    if (changed) { saveDraft(); restoringDraft_ = true; if (draftTimer_) draftTimer_->stop(); }
     projectOpen_ = projectOpen;
     projectRoot_ = projectRoot;
+    if (page_) {
+        page_->findChild<QPushButton*>(QStringLiteral("TrainingSaveDraft"))->setEnabled(projectOpen && !nextId.isEmpty());
+        page_->findChild<QPushButton*>(QStringLiteral("TrainingDiscardDraft"))->setEnabled(projectOpen && !nextId.isEmpty());
+    }
+    if (changed) {
+        binding_ = {}; selectedTaskId_.clear(); activeTaskId_.clear(); resultModelId_.clear(); historyConfigurations_.clear();
+        if (page_) { page_->modelsButton->setEnabled(false); page_->resetRuntimeProjection(); page_->setMode(TrainingWorkspacePage::Catalog); }
+        draftProjectId_ = nextId; advancedBackup_.clear(); historySearch_.clear();
+        if (page_) { const QSignalBlocker blocker(page_->findChild<QLineEdit*>(QStringLiteral("TrainingHistorySearch"))); page_->findChild<QLineEdit*>(QStringLiteral("TrainingHistorySearch"))->clear(); }
+        resetDraftControls(); refreshDefaults(); refreshHistory(); restoreDraft();
+        restoringDraft_ = false; draftDirty_ = false;
+    }
 }
 
 void TrainingPageController::setWorkerExecutable(const QString& executable)
@@ -176,8 +210,12 @@ void TrainingPageController::setWorkerExecutable(const QString& executable)
 void TrainingPageController::setDatasetBinding(
     const TrainingDatasetBinding& binding)
 {
+    if (!advancedBackup_.isEmpty()) cancelAdvanced();
+    const bool formatChanged = binding_.datasetFormat != binding.datasetFormat;
     binding_ = binding;
-    refreshDefaults();
+    if (formatChanged || modelPresetBackend_.isEmpty()) refreshDefaults();
+    else refreshSummary();
+    scheduleDraftSave();
 }
 
 void TrainingPageController::refreshCapabilities()
@@ -196,7 +234,7 @@ void TrainingPageController::refreshCapabilities()
     const QSignalBlocker blocker(combo);
     combo->clear();
     for (const auto& capability : capabilities) {
-        combo->addItem(capability.displayName, capability.id);
+        combo->addItem(aitrain_app::workbenchText(capability.displayName), capability.id);
     }
     const int previousIndex = combo->findData(previous);
     if (previousIndex >= 0) {
@@ -252,6 +290,8 @@ void TrainingPageController::refreshModelPresets()
         return;
     }
     const QString backendId = backend->currentData().toString();
+    if (modelPresetBackend_ == backendId && model->count() > 0) return;
+    modelPresetBackend_ = backendId;
     const QSignalBlocker blocker(model);
     model->clear();
     model->addItems(modelPresetItemsForBackend(backendId));
@@ -260,63 +300,39 @@ void TrainingPageController::refreshModelPresets()
 
 void TrainingPageController::refreshDefaults()
 {
-    if (!page_) {
-        return;
-    }
-    QString capabilityId;
-    QString taskTypeId;
-    QString backendId;
-    const QString format = binding_.datasetFormat;
-    if (format == QStringLiteral("yolo_detection")) {
-        capabilityId = QStringLiteral("yolo");
-        taskTypeId = QStringLiteral("detection");
-        backendId = QStringLiteral("ultralytics_yolo_detect");
-    } else if (format == QStringLiteral("yolo_segmentation")) {
-        capabilityId = QStringLiteral("yolo");
-        taskTypeId = QStringLiteral("segmentation");
-        backendId = QStringLiteral("ultralytics_yolo_segment");
-    } else if (format == QStringLiteral("yolo_obb")) {
-        capabilityId = QStringLiteral("yolo");
-        taskTypeId = QStringLiteral("obb_detection");
-        backendId = QStringLiteral("ultralytics_yolo_obb");
-    } else if (format == QStringLiteral("semantic_segmentation_mask")) {
-        capabilityId = QStringLiteral("semantic_segmentation");
-        taskTypeId = QStringLiteral("semantic_segmentation");
-        backendId = QStringLiteral("smp_semantic_segmentation");
-    } else if (format == QStringLiteral("anomaly_folder")) {
-        capabilityId = QStringLiteral("anomaly_detection");
-        taskTypeId = QStringLiteral("anomaly_detection");
-        backendId = QStringLiteral("anomalib_patchcore");
-    } else if (format == QStringLiteral("paddleocr_det")) {
-        capabilityId = QStringLiteral("paddleocr");
-        taskTypeId = QStringLiteral("ocr_detection");
-        backendId = QStringLiteral("paddleocr_det_official");
-    } else if (format == QStringLiteral("paddleocr_rec")) {
-        capabilityId = QStringLiteral("paddleocr");
-        taskTypeId = QStringLiteral("ocr_recognition");
-        backendId = QStringLiteral("paddleocr_rec_official");
-    }
-    auto* capability = page_->findChild<QComboBox*>(
-        QStringLiteral("TrainingCapability"));
-    auto* backend = page_->findChild<QComboBox*>(
-        QStringLiteral("TrainingBackend"));
-    if (!capability || !backend) {
-        refreshSummary();
-        return;
-    }
-    if (!capabilityId.isEmpty()) {
-        const QSignalBlocker blocker(capability);
-        setComboCurrentData(capability, capabilityId);
-    }
-    refreshTaskTypes(taskTypeId);
-    if (backendId.isEmpty()) {
-        backendId = defaultBackendForTask(currentTaskType());
-    }
+    if (!page_) return;
+    auto* backend = page_->findChild<QComboBox*>(QStringLiteral("TrainingBackend"));
+    const QString previous = backend->currentData().toString();
     {
         const QSignalBlocker blocker(backend);
-        setComboCurrentData(backend, backendId);
+        backend->clear();
+        for (const auto& item : aitrain::ProductCapabilityContract::instance().trainingBackends()) {
+            if (binding_.datasetFormat.isEmpty() || item.datasetFormat == binding_.datasetFormat)
+                backend->addItem(aitrain_app::workbenchText(item.displayName), item.id);
+        }
+        const int index = backend->findData(previous);
+        if (index >= 0) backend->setCurrentIndex(index);
+    }
+    synchronizeBackend();
+}
+
+void TrainingPageController::synchronizeBackend()
+{
+    if (!page_) return;
+    const QString backendId = page_->formData().backendId;
+    aitrain::TrainingBackendContract contract;
+    if (aitrain::ProductCapabilityContract::instance().resolveTrainingBackend(backendId, &contract)) {
+        auto* capability = page_->findChild<QComboBox*>(QStringLiteral("TrainingCapability"));
+        const QSignalBlocker blocker(capability);
+        setComboCurrentData(capability, contract.capabilityId);
+        refreshTaskTypes(contract.taskType);
     }
     refreshModelPresets();
+    auto* batch = page_->findChild<QLineEdit*>(QStringLiteral("TrainingBatchSize"));
+    const bool fixed = backendId == QStringLiteral("anomalib_efficientad");
+    if (fixed) batch->setText(QStringLiteral("1"));
+    batch->setEnabled(!fixed);
+    batch->setToolTip(fixed ? aitrain_app::workbenchText(QStringLiteral("EfficientAD 官方后端批次固定为 1。")) : QString());
     refreshSummary();
 }
 
@@ -331,19 +347,19 @@ void TrainingPageController::refreshSummary()
         && !binding_.snapshotId.isEmpty()
         && !binding_.snapshotArtifactId.isEmpty();
     page_->setDatasetSummary(ready
-        ? tr("当前数据集：%1 | 已提交快照\nDataset %2 / Version %3\n快照：%4 | Artifact %5")
-              .arg(datasetFormatLabel(binding_.datasetFormat),
-                  binding_.datasetId.left(12),
-                  binding_.datasetVersionId.left(12),
-                  binding_.snapshotId.left(12),
-                  binding_.snapshotArtifactId.left(12))
-        : tr("当前数据集：未选择。请先在数据集页选择完整的已提交快照身份。"));
+        ? aitrain_app::workbenchText(QStringLiteral("%1 · %2 · 已提交快照")).arg(binding_.displayName.isEmpty()
+                ? aitrain_app::workbenchText(QStringLiteral("所选数据集")) : binding_.displayName, datasetFormatLabel(binding_.datasetFormat))
+        : aitrain_app::workbenchText(QStringLiteral("尚未选择数据版本。")));
     page_->setDatasetSummaryToolTip(ready
         ? tr("训练只消费持久化身份：Dataset %1 / Version %2 / Snapshot %3 / Artifact %4")
               .arg(binding_.datasetId, binding_.datasetVersionId,
                   binding_.snapshotId, binding_.snapshotArtifactId)
         : QString());
     page_->setBackendSummary(trainingBackendDescription(form.backendId));
+    if (auto* sample = page_->findChild<QLabel*>(QStringLiteral("TrainingSampleNote")))
+        sample->setText(binding_.deploymentSampleRelativePath.isEmpty()
+            ? aitrain_app::workbenchText(QStringLiteral("交付检查样本：尚未选择（YOLO / SMP 训练必须选择）"))
+            : aitrain_app::workbenchText(QStringLiteral("交付检查样本：%1")).arg(binding_.deploymentSampleRelativePath));
     page_->setBackendPanels(form.backendId);
     page_->setRunSummary(
         tr("运行摘要：%1 | 后端 %2 | 模型 %3 | epoch %4 / batch %5 / image %6")
@@ -359,7 +375,8 @@ void TrainingPageController::refreshSummary()
 
 void TrainingPageController::appendLog(const QString& text)
 {
-    if (page_) {
+    if (page_ && !activeTaskId_.isEmpty() && selectedTaskId_ == activeTaskId_
+        && taskRuntime_->taskId().toString() == activeTaskId_) {
         page_->appendLog(text);
     }
 }
@@ -369,11 +386,15 @@ void TrainingPageController::applyTaskViewState(const TaskViewState& state)
     if (!page_) {
         return;
     }
+    if (state.terminal) refreshHistory();
+    if (state.taskId != selectedTaskId_) return;
+    page_->cancelTaskButton->setEnabled(!state.terminal && state.status != QStringLiteral("cancel_requested"));
+    page_->cancelTaskButton->setText(state.status == QStringLiteral("cancel_requested") ? aitrain_app::workbenchText(QStringLiteral("正在取消")) : aitrain_app::workbenchText(QStringLiteral("取消任务")));
     page_->setProgress(state.progress);
     if (!state.terminal) {
-        page_->setPhase(tr(
-            "阶段：校验快照 -> 训练 -> 评估 -> 导出 -> 部署验证 -> 登记模型 -> 交付报告 | 当前：Worker 运行中（%1%）")
-            .arg(state.progress));
+        page_->setPhase(state.status == QStringLiteral("cancel_requested")
+            ? aitrain_app::workbenchText(QStringLiteral("已请求取消，等待 Worker 返回终态。"))
+            : aitrain_app::workbenchText(QStringLiteral("训练运行中 · %1% · 阶段明细见任务记录")).arg(state.progress));
     }
     const qint64 metricCount =
         qMax<qint64>(0, state.metricSequence - liveMetricSequence_);
@@ -421,6 +442,7 @@ void TrainingPageController::applyTaskViewState(const TaskViewState& state)
     }
     liveArtifactSequence_ = state.artifactSequence;
     if (state.terminal) {
+        refreshResultModel();
         page_->setPhase(state.status == QStringLiteral("succeeded")
             ? tr("训练 Workflow 已完成；持久化事实已刷新。")
             : tr("训练 Workflow 已终止：%1").arg(state.status));
@@ -459,11 +481,11 @@ QJsonObject TrainingPageController::collectExportArguments() const
     const bool int8 = result.value(QStringLiteral("int8")).toBool();
     result.insert(QStringLiteral("format"), int8
         ? QStringLiteral("tensorrt") : QStringLiteral("onnx"));
-    const auto* deviceControl = page_->findChild<QComboBox*>(
+    const auto* deviceControl = page_->findChild<QLineEdit*>(
         QStringLiteral("YoloTrainArg_device"));
     QString device = deviceControl
         ? controlValue(deviceControl).trimmed() : QString();
-    if (device.isEmpty() || device == QStringLiteral("默认")) {
+    if (device.isEmpty() || device == aitrain_app::workbenchText(QStringLiteral("默认"))) {
         device = QStringLiteral("cpu");
     }
     result.insert(QStringLiteral("device"), device);
@@ -477,6 +499,7 @@ void TrainingPageController::start()
             tr("Worker 正在执行任务，请先等待或取消当前任务。"));
         return;
     }
+    if (!validateParameters()) return;
     const TrainingFormData form = page_->formData();
     aitrain::DatasetId datasetId;
     aitrain::DatasetVersionId versionId;
@@ -499,6 +522,10 @@ void TrainingPageController::start()
             form.capabilityId, form.taskType, binding_.datasetFormat,
             form.backendId, &error)) {
         QMessageBox::warning(page_, tr("训练"), error);
+        return;
+    }
+    if ((form.backendId.startsWith(QStringLiteral("ultralytics_")) || form.backendId.startsWith(QStringLiteral("smp_"))) && binding_.deploymentSampleRelativePath.isEmpty()) {
+        page_->findChild<QLabel*>(QStringLiteral("TrainingFormError"))->setText(aitrain_app::workbenchText(QStringLiteral("请先选择同一数据版本中的交付检查样本。")));
         return;
     }
     aitrain::TrainingWorkflowProfile workflow;
@@ -527,6 +554,9 @@ void TrainingPageController::start()
     if (form.backendId.startsWith(QStringLiteral("ultralytics_yolo_"))) {
         QJsonObject args =
             collectArguments(QStringLiteral("YoloTrainArg_"));
+        if (form.backendId != QStringLiteral("ultralytics_yolo_segment")) {
+            args.remove(QStringLiteral("copy_paste_mode")); args.remove(QStringLiteral("overlap_mask")); args.remove(QStringLiteral("mask_ratio"));
+        }
         parameters.insert(QStringLiteral("seed"),
             args.value(QStringLiteral("seed")).toInt(42));
         if (form.horizontalFlip && !args.contains(QStringLiteral("fliplr"))) {
@@ -577,13 +607,22 @@ void TrainingPageController::start()
     command.capabilityId = form.capabilityId;
     command.taskType = form.taskType;
     command.trainingBackend = form.backendId;
+    command.deploymentSampleRelativePath = binding_.deploymentSampleRelativePath;
     command.parameters = parameters;
     if (!taskRuntime_->start(workerExecutable_,
             aitrain::worker_protocol::TaskCommand{command}, &error)) {
         QMessageBox::critical(page_, QStringLiteral("Worker"), error);
         return;
     }
+    activeTaskId_ = taskId.toString();
+    selectedTaskId_ = activeTaskId_;
     page_->resetRuntimeProjection();
+    page_->setMode(TrainingWorkspacePage::Monitor);
+    resultModelId_.clear(); page_->modelsButton->setEnabled(false);
+    page_->setLiveValue(QStringLiteral("TrainingMonitorContext"), QStringLiteral("%1 · %2").arg(binding_.displayName, form.modelPreset));
+    page_->cancelTaskButton->setEnabled(true);
+    page_->setPhase(aitrain_app::workbenchText(QStringLiteral("任务已提交，等待 Worker。")));
+    refreshHistory();
     liveMetricSequence_ = 0;
     liveArtifactSequence_ = 0;
     emit taskStarted(taskId.toString(), QStringLiteral("training"));

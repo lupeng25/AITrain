@@ -1,3 +1,4 @@
+#include "WorkbenchTranslation.h"
 #include "DatasetPageController.h"
 
 #include "DatasetPage.h"
@@ -5,6 +6,8 @@
 #include "DatasetCatalogPresenter.h"
 #include "MainWindowSupport.h"
 #include "TaskRuntimeController.h"
+#include "ApplicationEventRouter.h"
+#include "ProjectObjectSelectors.h"
 #include "aitrain/core/WorkerProtocol.h"
 #include "aitrain/workflow/ProjectQueryService.h"
 
@@ -27,6 +30,9 @@
 #include <QSignalBlocker>
 #include <QTableWidget>
 #include <QTableWidgetItem>
+#include <QBuffer>
+#include <QImageReader>
+#include <QPixmap>
 
 using namespace aitrain_app;
 
@@ -164,78 +170,77 @@ DatasetPageController::DatasetPageController(
     , queryService_(queryService)
 {
     catalogPresenter_ = new DatasetCatalogPresenter(queryService, this);
+    connect(this, &DatasetPageController::taskStarted, this,
+        [this](const QString& taskId, const QString& kind) {
+            activeTaskId_ = taskId;
+            activeKind_ = kind;
+            activeSnapshotId_ = state_.currentSnapshotId;
+        });
 }
 
 void DatasetPageController::attach(DatasetWorkspacePage* page)
 {
+    if (page_ == page) return;
+    if (page_) disconnect(page_, nullptr, this, nullptr);
     page_ = page;
     connect(page_->datasetListTable, &QTableWidget::itemSelectionChanged,
-        this, [this]() {
-            if (!page_ || page_->datasetListTable->selectedItems().isEmpty()) {
-                return;
-            }
-            const int row =
-                page_->datasetListTable->selectedItems().first()->row();
-            const auto value = [this, row](int column, int role) {
-                QTableWidgetItem* item =
-                    page_->datasetListTable->item(row, column);
-                return item ? item->data(role).toString() : QString();
-            };
-            const QString datasetId = value(0, Qt::UserRole);
-            if (datasetId.isEmpty()) return;
-            const QString format = value(1, Qt::UserRole);
-            const QString snapshotId = value(2, Qt::UserRole);
-            const QString artifactId = value(4, Qt::UserRole);
-            const QString versionId = value(4, Qt::UserRole + 1);
-            page_->datasetPathEdit->clear();
-            const int formatIndex =
-                page_->datasetFormatCombo->findData(format);
-            if (formatIndex >= 0) {
-                page_->datasetFormatCombo->setCurrentIndex(formatIndex);
-            }
-            state_.currentPath.clear();
-            state_.currentFormat = format;
-            state_.currentDatasetId = datasetId;
-            state_.currentDatasetVersionId = versionId;
-            state_.currentSnapshotId = snapshotId;
-            state_.currentSnapshotArtifactId = artifactId;
-            state_.currentValid = !versionId.isEmpty()
-                && !snapshotId.isEmpty() && !artifactId.isEmpty();
-            for (QLineEdit* edit : {
-                     page_->dataQualityDatasetIdEdit,
-                     page_->splitSourceDatasetIdEdit}) {
-                edit->setText(datasetId);
-            }
-            for (QLineEdit* edit : {
-                     page_->dataQualityDatasetVersionIdEdit,
-                     page_->splitSourceDatasetVersionIdEdit}) {
-                edit->setText(versionId);
-            }
-            for (QLineEdit* edit : {
-                     page_->dataQualitySnapshotIdEdit,
-                     page_->splitSourceSnapshotIdEdit}) {
-                edit->setText(snapshotId);
-            }
-            for (QLineEdit* edit : {
-                     page_->dataQualitySnapshotArtifactIdEdit,
-                     page_->splitSourceSnapshotArtifactIdEdit}) {
-                edit->setText(artifactId);
-            }
-            emit selectionChanged();
-        });
+        this, &DatasetPageController::selectCatalogRow);
+    connect(page_, &DatasetWorkspacePage::importRequested, this, &DatasetPageController::runSnapshotImport);
+    connect(page_, &DatasetWorkspacePage::qualityRequested, this, &DatasetPageController::runDataQuality);
+    connect(page_, &DatasetWorkspacePage::splitRequested, this, &DatasetPageController::runSplit);
+    connect(page_, &DatasetWorkspacePage::conversionRequested, this, &DatasetPageController::startConversion);
+    connect(page_, &DatasetWorkspacePage::cancelRequested, this, &DatasetPageController::cancelConversion);
+    connect(page_, &DatasetWorkspacePage::browseDatasetRequested, this, &DatasetPageController::browseDataset);
+    connect(page_, &DatasetWorkspacePage::browseConversionRequested, this, &DatasetPageController::browseConversionInput);
+    connect(page_, &DatasetWorkspacePage::conversionSourceChanged, this, &DatasetPageController::updateConversionTargets);
+    connect(page_, &DatasetWorkspacePage::createAnnotationRequested, this, &DatasetPageController::createAnnotationSession);
+    connect(page_, &DatasetWorkspacePage::syncAnnotationRequested, this, &DatasetPageController::syncAnnotationSession);
+    connect(page_, &DatasetWorkspacePage::chooseReviewRequested, this, &DatasetPageController::browseSampleReview);
+    connect(page_, &DatasetWorkspacePage::loadReviewRequested, this, &DatasetPageController::loadSampleReview);
+    connect(page_, &DatasetWorkspacePage::reviewFilterChanged, this, &DatasetPageController::refreshSampleReview);
+    connect(page_, &DatasetWorkspacePage::openReviewSampleRequested, this, &DatasetPageController::openSelectedReviewSample);
+    connect(page_, &DatasetWorkspacePage::sampleSelected, this, &DatasetPageController::previewSample);
+    connect(page_->views, &QStackedWidget::currentChanged, this, [this](int mode) {
+        if (mode == DatasetWorkspacePage::Detail) previewSample(page_->datasetPreviewTable->currentRow());
+    });
+    connect(page_, &DatasetWorkspacePage::snapshotChanged, this, &DatasetPageController::selectSnapshot);
+    connect(page_, &DatasetWorkspacePage::moreSnapshotsRequested, this, [this]() { loadSnapshots(true); });
+    connect(page_, &DatasetWorkspacePage::moreSamplesRequested, this, [this]() { loadSamples(true); });
+    bindCatalogSearch(page_->findChild<QLineEdit*>(QStringLiteral("DatasetCatalogSearch")), this, [this](const QString& text) {
+        catalogSearch_ = text; catalogPresenter_->setCatalogFilter({text, {}, {}});
+        catalogCursors_ = {QString()}; refreshCatalog();
+    });
+    connect(page_, &DatasetWorkspacePage::refreshRequested, this, [this]() { catalogCursors_ = {QString()}; refreshCatalog(); });
+    connect(page_, &DatasetWorkspacePage::nextPageRequested, this, [this]() {
+        if (catalogPresenter_->hasMore()) { catalogCursors_.append(catalogPresenter_->nextCursor()); refreshCatalog(); }
+    });
+    connect(page_, &DatasetWorkspacePage::previousPageRequested, this, [this]() {
+        if (catalogCursors_.size() > 1) { catalogCursors_.removeLast(); refreshCatalog(); }
+    });
+    connect(page_, &DatasetWorkspacePage::importVersionRequested, this, [this]() {
+        if (!state_.currentValid) return;
+        page_->datasetSnapshotTargetDatasetIdEdit->setText(state_.currentDatasetId);
+        page_->datasetSnapshotTargetDatasetNameEdit->setText(state_.currentDisplayName);
+        page_->datasetSnapshotTargetDatasetNameEdit->setReadOnly(true);
+        page_->datasetFormatCombo->setEnabled(false);
+        const QSignalBlocker blocker(page_->datasetFormatCombo);
+        setComboCurrentData(page_->datasetFormatCombo, state_.currentFormat);
+        page_->showView(DatasetWorkspacePage::Import);
+    });
+    connect(page_->control<QPushButton>(QStringLiteral("OpenDatasetImportButton")), &QPushButton::clicked, this, [this]() {
+        page_->datasetSnapshotTargetDatasetIdEdit->clear();
+        page_->datasetSnapshotTargetDatasetNameEdit->setReadOnly(false);
+        page_->datasetFormatCombo->setEnabled(true);
+        page_->operationStatusLabel->clear();
+    });
     connect(page_->datasetFormatCombo,
         QOverload<int>::of(&QComboBox::currentIndexChanged),
         this, [this]() {
-            state_.currentFormat =
-                comboCurrentDataOrText(page_->datasetFormatCombo);
-            state_.currentDatasetId.clear();
-            state_.currentDatasetVersionId.clear();
-            state_.currentSnapshotId.clear();
-            state_.currentSnapshotArtifactId.clear();
-            state_.currentValid = false;
+            // 导入表单的格式属于草稿，不改写正在浏览或用于训练的快照身份。
             refreshConversionDefaults();
-            emit selectionChanged();
         });
+    updateConversionTargets();
+    refreshCatalog();
 }
 
 DatasetWorkbenchState& DatasetPageController::state()
@@ -251,7 +256,25 @@ const DatasetWorkbenchState& DatasetPageController::state() const
 void DatasetPageController::reset()
 {
     state_ = DatasetWorkbenchState();
+    catalogCursors_ = {QString()};
+    snapshots_.clear();
+    snapshotCursor_.clear();
+    sampleCursor_.clear();
+    activeTaskId_.clear();
+    activeKind_.clear();
+    pendingTargetId_.clear();
+    selectAfterRefresh_.clear();
+    sampleCounts_.clear();
+    catalogPresenter_->clear();
     invalidateAsyncPreviews();
+    if (page_) {
+        page_->showView(DatasetWorkspacePage::Catalog);
+        page_->setSelectionAvailable(false);
+        page_->snapshotCombo->clear();
+        page_->datasetPreviewTable->setRowCount(0);
+        page_->validationIssuesTable->setRowCount(0);
+        page_->validationSummaryLabel->setText(aitrain_app::workbenchText(QStringLiteral("尚未检查所选快照。")));
+    }
 }
 
 void DatasetPageController::invalidateAsyncPreviews()
@@ -260,11 +283,17 @@ void DatasetPageController::invalidateAsyncPreviews()
     if (sampleReviewGeneration_ == 0) ++sampleReviewGeneration_;
     ++formatProbeGeneration_;
     if (formatProbeGeneration_ == 0) ++formatProbeGeneration_;
+    ++previewGeneration_;
+    ++qualityGeneration_;
 }
 
 void DatasetPageController::setProjectContext(
     bool projectOpen, const QString& projectRoot)
 {
+    if (projectRoot_ != projectRoot) {
+        catalogSearch_.clear(); catalogPresenter_->setCatalogFilter({}); catalogCursors_ = {QString()};
+        if (page_) { const QSignalBlocker blocker(page_->findChild<QLineEdit*>(QStringLiteral("DatasetCatalogSearch"))); page_->findChild<QLineEdit*>(QStringLiteral("DatasetCatalogSearch"))->clear(); }
+    }
     projectOpen_ = projectOpen;
     projectRoot_ = projectRoot;
 }
@@ -298,7 +327,7 @@ void DatasetPageController::appendConversionLog(const QString& text)
 {
     if (!page_ || !page_->datasetConversionLog || text.isEmpty()) return;
     if (page_->datasetConversionLog->toPlainText().trimmed()
-        == QStringLiteral("等待转换。")) {
+        == aitrain_app::workbenchText(QStringLiteral("等待转换。"))) {
         page_->datasetConversionLog->clear();
     }
     page_->datasetConversionLog->appendPlainText(text);
@@ -338,6 +367,7 @@ void DatasetPageController::startConversion()
     const QString sourcePath = normalizedDatasetConversionPath(
         page_->datasetConversionInputEdit
             ? page_->datasetConversionInputEdit->text() : QString());
+    page_->datasetConversionTargetDatasetIdEdit->setText(aitrain::DatasetId::create().toString());
     const QString targetDatasetId =
         page_->datasetConversionTargetDatasetIdEdit
             ? page_->datasetConversionTargetDatasetIdEdit->text().trimmed()
@@ -354,7 +384,7 @@ void DatasetPageController::startConversion()
         || !aitrain::DatasetId::parse(
             targetDatasetId, &parsedDatasetId, &error)) {
         page_->datasetConversionStatusLabel->setText(
-            tr("请填写存在的外部源、源/目标格式、有效目标 DatasetId 和审计名称。"));
+            aitrain_app::workbenchText(QStringLiteral("请选择存在的来源、受支持的目标格式，并填写新数据集名称。")));
         setConversionError(QFileInfo::exists(sourcePath)
             ? QString() : tr("外部源路径不存在。"));
         return;
@@ -379,6 +409,7 @@ void DatasetPageController::startConversion()
     command.options = QJsonObject{
         {QStringLiteral("copyImages"), true},
         {QStringLiteral("maxIssues"), 200}};
+    pendingTargetId_ = targetDatasetId;
     if (!taskRuntime_->start(workerExecutable_,
             aitrain::worker_protocol::TaskCommand{command}, &error)) {
         setConversionRunning(false);
@@ -401,13 +432,10 @@ void DatasetPageController::runDataQuality()
             tr("请先打开项目，并等待当前 Worker 任务结束。"));
         return;
     }
-    const QString datasetId = page_->dataQualityDatasetIdEdit->text().trimmed();
-    const QString versionId =
-        page_->dataQualityDatasetVersionIdEdit->text().trimmed();
-    const QString snapshotId =
-        page_->dataQualitySnapshotIdEdit->text().trimmed();
-    const QString artifactId =
-        page_->dataQualitySnapshotArtifactIdEdit->text().trimmed();
+    const QString datasetId = state_.currentDatasetId;
+    const QString versionId = state_.currentDatasetVersionId;
+    const QString snapshotId = state_.currentSnapshotId;
+    const QString artifactId = state_.currentSnapshotArtifactId;
     aitrain::DatasetId parsedDatasetId;
     aitrain::DatasetVersionId parsedVersionId;
     aitrain::SnapshotId parsedSnapshotId;
@@ -421,14 +449,15 @@ void DatasetPageController::runDataQuality()
         || !aitrain::ArtifactId::parse(
             artifactId, &parsedArtifactId, &error)) {
         QMessageBox::warning(page_, tr("数据质量报告"),
-            tr("请填写同一条快照记录的 DatasetId、DatasetVersionId、SnapshotId 和 ArtifactId。"));
+            aitrain_app::workbenchText(QStringLiteral("请先选择一份已提交的数据版本。")));
         return;
     }
     page_->validationIssuesTable->setRowCount(0);
     page_->validationSummaryLabel->setText(
-        tr("Data Quality 正在校验已登记快照。"));
+        aitrain_app::workbenchText(QStringLiteral("正在检查所选数据版本的质量…")));
+    page_->showView(DatasetWorkspacePage::Quality);
     page_->validationOutput->setPlainText(
-        tr("结果将以 ArtifactId 返回，文件请在“任务与产物”查看。"));
+        aitrain_app::workbenchText(QStringLiteral("检查完成后将在此显示结果与报告。")));
     const aitrain::TaskId taskId = aitrain::TaskId::create();
     aitrain::worker_protocol::DataQualityCommand command;
     command.context.taskId = taskId;
@@ -461,14 +490,11 @@ void DatasetPageController::runSplit()
             tr("请先打开项目，并等待当前 Worker 任务结束。"));
         return;
     }
-    const QString datasetId =
-        page_->splitSourceDatasetIdEdit->text().trimmed();
-    const QString versionId =
-        page_->splitSourceDatasetVersionIdEdit->text().trimmed();
-    const QString snapshotId =
-        page_->splitSourceSnapshotIdEdit->text().trimmed();
-    const QString artifactId =
-        page_->splitSourceSnapshotArtifactIdEdit->text().trimmed();
+    const QString datasetId = state_.currentDatasetId;
+    const QString versionId = state_.currentDatasetVersionId;
+    const QString snapshotId = state_.currentSnapshotId;
+    const QString artifactId = state_.currentSnapshotArtifactId;
+    page_->splitTargetDatasetIdEdit->setText(aitrain::DatasetId::create().toString());
     const QString targetId =
         page_->splitTargetDatasetIdEdit->text().trimmed();
     const QString targetName =
@@ -489,7 +515,17 @@ void DatasetPageController::runSplit()
         || !aitrain::DatasetId::parse(targetId, &parsedTargetId, &error)
         || targetName.isEmpty()) {
         QMessageBox::warning(page_, tr("数据集划分"),
-            tr("请填写同一源快照的四重 ID、有效目标 DatasetId 和审计名称。"));
+            aitrain_app::workbenchText(QStringLiteral("请选择已提交的数据版本，并填写新数据集名称。")));
+        return;
+    }
+    bool trainOk = false, valOk = false, testOk = false, seedOk = false;
+    const double trainRatio = page_->splitTrainRatioEdit->text().toDouble(&trainOk);
+    const double valRatio = page_->splitValRatioEdit->text().toDouble(&valOk);
+    const double testRatio = page_->splitTestRatioEdit->text().toDouble(&testOk);
+    page_->splitSeedEdit->text().toInt(&seedOk);
+    if (!trainOk || !valOk || !testOk || !seedOk || trainRatio <= 0.0 || valRatio < 0.0 || testRatio < 0.0
+        || qAbs(trainRatio + valRatio + testRatio - 1.0) > 0.000001) {
+        QMessageBox::warning(page_, aitrain_app::workbenchText(QStringLiteral("划分比例")), aitrain_app::workbenchText(QStringLiteral("训练比例必须大于 0，验证/测试比例不得为负，三项之和必须为 1；随机种子应为整数。")));
         return;
     }
     aitrain::worker_protocol::DatasetSplitCommand command;
@@ -512,6 +548,7 @@ void DatasetPageController::runSplit()
         {QStringLiteral("seed"), page_->splitSeedEdit->text().toInt()},
         {QStringLiteral("maxIssues"), 200},
         {QStringLiteral("allowEmptyLabels"), false}};
+    pendingTargetId_ = targetId;
     if (!taskRuntime_->start(workerExecutable_,
             aitrain::worker_protocol::TaskCommand{command}, &error)) {
         QMessageBox::critical(page_, tr("数据集划分"), error);
@@ -533,8 +570,9 @@ void DatasetPageController::runSnapshotImport()
         comboCurrentDataOrText(page_->datasetFormatCombo);
     const QString path = QDir::fromNativeSeparators(
         page_->datasetPathEdit->text().trimmed());
-    const QString targetId =
-        page_->datasetSnapshotTargetDatasetIdEdit->text().trimmed();
+    if (page_->datasetSnapshotTargetDatasetIdEdit->text().isEmpty())
+        page_->datasetSnapshotTargetDatasetIdEdit->setText(aitrain::DatasetId::create().toString());
+    const QString targetId = page_->datasetSnapshotTargetDatasetIdEdit->text().trimmed();
     const QString targetName =
         page_->datasetSnapshotTargetDatasetNameEdit->text().trimmed();
     aitrain::DatasetId parsedTargetId;
@@ -544,7 +582,7 @@ void DatasetPageController::runSnapshotImport()
         || !aitrain::DatasetId::parse(
             targetId, &parsedTargetId, &error)) {
         QMessageBox::warning(page_, tr("数据集快照"),
-            tr("请填写存在的外部源、格式、有效目标 DatasetId 和审计名称。"));
+            aitrain_app::workbenchText(QStringLiteral("请选择存在的来源目录和格式，并填写数据集名称。")));
         return;
     }
     const aitrain::TaskId taskId = aitrain::TaskId::create();
@@ -556,6 +594,7 @@ void DatasetPageController::runSnapshotImport()
     command.targetDatasetId = targetId;
     command.targetDatasetName = targetName;
     command.options = QJsonObject{{QStringLiteral("maxFiles"), 20000}};
+    pendingTargetId_ = targetId;
     if (!taskRuntime_->start(workerExecutable_,
             aitrain::worker_protocol::TaskCommand{command}, &error)) {
         QMessageBox::critical(page_, tr("数据集快照"), error);
@@ -563,53 +602,15 @@ void DatasetPageController::runSnapshotImport()
     }
     emit taskStarted(
         taskId.toString(), QStringLiteral("dataset_snapshot_import"));
+    page_->operationStatusLabel->setText(aitrain_app::workbenchText(QStringLiteral("正在导入，完成后会选中新数据版本。")));
     emit statusChanged(tr("数据集快照创建中"));
 }
 
 void DatasetPageController::refreshCatalog()
 {
-    catalogPresenter_->refresh({50, {}});
-    if (!page_ || !page_->datasetListTable) return;
-    QTableWidget* table = page_->datasetListTable;
-    table->setRowCount(0);
-    const QVector<DatasetCatalogListItem>& datasets =
-        catalogPresenter_->datasets();
-    if (datasets.isEmpty()) {
-        table->insertRow(0);
-        table->setItem(
-            0, 0, new QTableWidgetItem(tr("暂无数据集记录")));
-        for (int column = 1; column < table->columnCount(); ++column) {
-            table->setItem(0, column, new QTableWidgetItem(QString()));
-        }
-        return;
-    }
-    for (const DatasetCatalogListItem& dataset : datasets) {
-        const int row = table->rowCount();
-        table->insertRow(row);
-        auto* name = new QTableWidgetItem(dataset.datasetId.left(12));
-        name->setData(Qt::UserRole, dataset.datasetId);
-        table->setItem(row, 0, name);
-        auto* format =
-            new QTableWidgetItem(datasetFormatLabel(dataset.datasetFormat));
-        format->setData(Qt::UserRole, dataset.datasetFormat);
-        table->setItem(row, 1, format);
-        auto* status = new QTableWidgetItem(
-            dataset.latestSnapshotId.isEmpty()
-                ? tr("尚无快照") : tr("已提交快照"));
-        status->setData(Qt::UserRole, dataset.latestSnapshotId);
-        table->setItem(row, 2, status);
-        table->setItem(row, 3,
-            new QTableWidgetItem(QString::number(dataset.latestFileCount)));
-        auto* identity =
-            new QTableWidgetItem(dataset.latestSnapshotId);
-        identity->setData(Qt::UserRole, dataset.latestArtifactId);
-        identity->setData(Qt::UserRole + 1, dataset.latestVersionId);
-        identity->setToolTip(
-            tr("Version %1\nArtifact %2\nRoot hash %3")
-                .arg(dataset.latestVersionId, dataset.latestArtifactId,
-                    dataset.latestRootHash));
-        table->setItem(row, 4, identity);
-    }
+    catalogPresenter_->clear();
+    if (projectOpen_) catalogPresenter_->refresh({50, catalogCursors_.constLast()});
+    renderCatalog();
 }
 
 void DatasetPageController::browseDataset()
@@ -619,28 +620,10 @@ void DatasetPageController::browseDataset()
         page_, tr("选择数据集目录"));
     if (directory.isEmpty()) return;
     page_->datasetPathEdit->setText(QDir::toNativeSeparators(directory));
-    state_.currentPath = directory;
-    state_.currentFormat =
-        comboCurrentDataOrText(page_->datasetFormatCombo);
-    state_.currentDatasetId.clear();
-    state_.currentDatasetVersionId.clear();
-    state_.currentSnapshotId.clear();
-    state_.currentSnapshotArtifactId.clear();
-    state_.currentValid = false;
-    for (QLineEdit* edit : {
-             page_->dataQualityDatasetIdEdit,
-             page_->dataQualityDatasetVersionIdEdit,
-             page_->dataQualitySnapshotIdEdit,
-             page_->dataQualitySnapshotArtifactIdEdit,
-             page_->splitSourceDatasetIdEdit,
-             page_->splitSourceDatasetVersionIdEdit,
-             page_->splitSourceSnapshotIdEdit,
-             page_->splitSourceSnapshotArtifactIdEdit}) {
-        edit->clear();
-    }
+    if (page_->datasetSnapshotTargetDatasetNameEdit->text().trimmed().isEmpty())
+        page_->datasetSnapshotTargetDatasetNameEdit->setText(QFileInfo(directory).fileName());
     startFormatProbe(directory, false);
     refreshConversionDefaults();
-    emit selectionChanged();
 }
 
 void DatasetPageController::updateConversionTargets()
@@ -778,11 +761,9 @@ void DatasetPageController::applyFormatProbe(
     const int index = page_->datasetFormatCombo->findData(format);
     if (index >= 0) {
         page_->datasetFormatCombo->setCurrentIndex(index);
-        state_.currentFormat = format;
         status->setText(
             tr("后台探测完成：%1。Worker 将在校验前重新验证。")
                 .arg(datasetFormatLabel(format)));
-        emit selectionChanged();
     } else {
         status->setText(
             tr("后台探测未识别格式；请手动选择，Worker 将执行完整校验。"));
@@ -798,9 +779,10 @@ void DatasetPageController::createAnnotationSession()
         return;
     }
     bool accepted = false;
-    const QString repairText = QInputDialog::getText(page_,
-        tr("修复清单"), tr("输入 Data Quality 产生的 Repair ArtifactId："),
-        QLineEdit::Normal, QString(), &accepted).trimmed();
+    const QString repairText = state_.latestRepairArtifactId.isEmpty()
+        ? selectProjectArtifact(page_, queryService_, {QStringLiteral("dataset_repair_manifest")}, aitrain_app::workbenchText(QStringLiteral("选择修复清单")))
+        : state_.latestRepairArtifactId;
+    accepted = !repairText.isEmpty();
     aitrain::ArtifactId repairId;
     QString error;
     if (!accepted
@@ -859,10 +841,9 @@ void DatasetPageController::syncAnnotationSession()
         return;
     }
     bool accepted = false;
-    const QString sessionText = QInputDialog::getText(page_,
-        tr("标注会话"), tr("输入 Session ArtifactId："),
-        QLineEdit::Normal, state_.latestAnnotationSessionArtifactId,
-        &accepted).trimmed();
+    const QString sessionText = selectProjectArtifact(page_, queryService_,
+        {QStringLiteral("annotation_session")}, aitrain_app::workbenchText(QStringLiteral("选择标注会话")));
+    accepted = !sessionText.isEmpty();
     aitrain::ArtifactId sessionId;
     QString error;
     if (!accepted
@@ -911,12 +892,10 @@ void DatasetPageController::syncAnnotationSession()
 void DatasetPageController::browseSampleReview()
 {
     if (!page_) return;
-    bool accepted = false;
-    const QString artifactText = QInputDialog::getText(page_,
-        tr("选择复核 Artifact"), tr("输入已提交的质量/复核 ArtifactId："),
-        QLineEdit::Normal, state_.sampleReviewArtifactId,
-        &accepted).trimmed();
-    if (!accepted) return;
+    const QString artifactText = selectProjectArtifact(page_, queryService_,
+        {QStringLiteral("dataset_quality_report"), QStringLiteral("dataset_quality_analysis"),
+            QStringLiteral("dataset_repair_manifest")}, aitrain_app::workbenchText(QStringLiteral("选择复核报告")));
+    if (artifactText.isEmpty()) return;
     page_->reviewSamplePathEdit->setText(artifactText);
     loadSampleReview();
 }

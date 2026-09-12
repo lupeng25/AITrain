@@ -1,15 +1,42 @@
 #include "MainWindow.h"
+#include "AppStyle.h"
+#include "ApplicationSettingsService.h"
+#include "WorkbenchTranslation.h"
+#include "SettingsPage.h"
+#include "SettingsPageController.h"
+#include "StatusPill.h"
+#include <QProcess>
+#include <QRegularExpression>
+#include <QMessageBox>
+#include <QAbstractItemModel>
+#include <QJsonDocument>
+#include <QListWidget>
+#include <QScrollBar>
 #include "ApplicationEventRouter.h"
 #include "DashboardPage.h"
 #include "DashboardPageController.h"
 #include "MainWindowSupport.h"
+#include "ProjectSessionController.h"
 #include "Sidebar.h"
+#include "DatasetPage.h"
+#include "DatasetPageController.h"
+#include "TrainingPage.h"
+#include "TrainingPageController.h"
+#include "RuntimeDeliveryPage.h"
+#include "DeliveryEvidencePage.h"
+#include "TaskArtifactTableModels.h"
+#include "TaskRuntimeController.h"
+#include "ModelRegistryPage.h"
+#include "aitrain/product/ProductCapabilityContract.h"
 #include "TaskArtifactPanel.h"
+#include "TaskArtifactPage.h"
+#include "TaskArtifactPageController.h"
 #include "TaskArtifactPresenter.h"
 #include "WorkerClient.h"
 #include "WorkspaceRouter.h"
 #include "aitrain/core/WorkerProtocol.h"
 #include "aitrain/workflow/ProjectWorkspace.h"
+#include "aitrain/workflow/TrainingWorkflowProfile.h"
 
 #include <QApplication>
 #include <QCoreApplication>
@@ -19,6 +46,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFrame>
+#include <QImage>
+#include <QScrollArea>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMetaObject>
@@ -46,9 +75,9 @@ class EnvironmentDeliveryEvidenceUiTests : public QObject {
 private slots:
     void initTestCase();
     void cleanupTestCase();
-    void mainNavigationUsesNineWorkspaceEntries();
-    void embeddedWorkspaceTabsExist();
-    void switchingToEnvironmentShowsDeliveryEvidenceTab();
+    void mainNavigationUsesThreeDailyEntries();
+    void businessPagesUseSingleModeViews();
+    void evidenceHasIndependentModelToolEntry();
     void environmentPageUsesRuntimeReportRows();
     void clickingSidebarEnvironmentSwitchesPageWithoutDeliveryEntry();
     void capabilityPanelEnglishTranslationIsComplete();
@@ -72,6 +101,13 @@ private slots:
     void projectSessionOperationsDoNotInferCreateFromMissingPath();
     void projectOpenPreparedTokenRejectsMutationWithoutClosingCurrentWorkspace();
     void eventRouterUsesBoundedRollingWindowsAndEvictsTerminalTasks();
+    void trainingDraftKeepsBackendAndModelAcrossNavigation();
+    void advancedCancelRestoresDraftAndAllOfficialBackendsRemain();
+    void unloadedArtifactInventoryIsNotReportedAsZero();
+    void reopenedDatasetShowsNameSamplesAndQualityResult();
+    void workbenchViewsFitStandardWindows();
+    void draftPersistenceAcrossProcessesAndInvalidBindings();
+    void englishAndDarkWorkbenchAreComplete();
 
 private:
     QString previousLanguage_;
@@ -145,14 +181,14 @@ void EnvironmentDeliveryEvidenceUiTests::largeArtifactsRequireExplicitSelectionA
     panel.setDetails(details);
 
     auto* table = panel.findChild<QTableView*>(QStringLiteral("TaskArtifactFileTable"));
-    auto* tabs = panel.findChild<QTabWidget*>(QStringLiteral("TaskDetailTabs"));
+    auto* tabs = panel.findChild<QStackedWidget*>(QStringLiteral("TaskDetailViews"));
     auto* preview = panel.findChild<QPlainTextEdit*>(QStringLiteral("ArtifactPreviewText"));
     QVERIFY(table != nullptr);
     QVERIFY(tabs != nullptr);
     QVERIFY(preview != nullptr);
     QVERIFY(!table->currentIndex().isValid());
 
-    tabs->setCurrentIndex(1);
+    tabs->setCurrentIndex(4);
     table->selectRow(0);
     QCoreApplication::processEvents();
     // 预览入口不再执行同步文件读取；没有绑定查询服务时只显示即时错误，
@@ -361,7 +397,13 @@ void EnvironmentDeliveryEvidenceUiTests::eventRouterUsesBoundedRollingWindowsAnd
 
 void EnvironmentDeliveryEvidenceUiTests::initTestCase()
 {
+    const QString isolatedSettings = qEnvironmentVariable("AITRAIN_DRAFT_TEST_ROOT");
+    if (!isolatedSettings.isEmpty()) {
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, isolatedSettings);
+    }
     QApplication::setStyle(QStringLiteral("Fusion"));
+    AppStyle::apply(*qApp, QStringLiteral("light"));
     QCoreApplication::setOrganizationName(QStringLiteral("AITrainTests"));
     QCoreApplication::setApplicationName(QStringLiteral("DeliveryAcceptanceUiTests"));
     QSettings settings;
@@ -444,80 +486,27 @@ void EnvironmentDeliveryEvidenceUiTests::cleanupTestCase()
     }
 }
 
-void EnvironmentDeliveryEvidenceUiTests::mainNavigationUsesNineWorkspaceEntries()
+void EnvironmentDeliveryEvidenceUiTests::mainNavigationUsesThreeDailyEntries()
 {
-    MainWindow& window = *window_;
-
+    auto* sidebar = window_->findChild<Sidebar*>(QStringLiteral("Sidebar"));
+    QVERIFY(sidebar);
     QStringList labels;
-    auto* sidebar = window.findChild<Sidebar*>(QStringLiteral("WorkspaceSidebar"));
-    QVERIFY(sidebar != nullptr);
-    const auto sidebarButtons = sidebar->findChildren<QPushButton*>();
-    for (QPushButton* button : sidebarButtons) {
-        if (button->objectName() == QStringLiteral("SidebarButton")) {
-            const QString fullText = button->property("fullText").toString();
-            labels << (fullText.isEmpty() ? button->text() : fullText);
-        }
-    }
-
-    QCOMPARE(labels.size(), 9);
-    QCOMPARE(labels, QStringList()
-        << QStringLiteral("总览")
-        << QStringLiteral("项目")
-        << QStringLiteral("数据集")
-        << QStringLiteral("训练实验")
-        << QStringLiteral("任务与产物")
-        << QStringLiteral("模型库")
-        << QStringLiteral("部署验证")
-        << QStringLiteral("环境")
-        << QStringLiteral("系统设置"));
-
-    const QStringList removedEntries = {
-        QStringLiteral("样本复核"),
-        QStringLiteral("评估报告"),
-        QStringLiteral("模型导出"),
-        QStringLiteral("推理验证"),
-        QStringLiteral("设置"),
-        QStringLiteral("交付验收")
-    };
-    for (const QString& entry : removedEntries) {
-        QVERIFY(!labels.contains(entry));
-    }
+    for (auto* button : sidebar->findChildren<QPushButton*>()) if (button->objectName() == QStringLiteral("SidebarButton")) labels << button->property("fullText").toString();
+    QCOMPARE(labels, QStringList({QStringLiteral("数据集"), QStringLiteral("训练"), QStringLiteral("模型")}));
+    QVERIFY(window_->findChild<QPushButton*>(QStringLiteral("GlobalTaskButton")));
+    QVERIFY(window_->findChild<QWidget*>(QStringLiteral("InspectorPanel")) == nullptr);
 }
 
-void EnvironmentDeliveryEvidenceUiTests::embeddedWorkspaceTabsExist()
+void EnvironmentDeliveryEvidenceUiTests::businessPagesUseSingleModeViews()
 {
-    MainWindow& window = *window_;
-
-    QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
-        Q_ARG(int, MainWindow::DatasetPage), Q_ARG(QString, QStringLiteral("数据集"))));
-    auto* datasetTabs = window.findChild<QTabWidget*>(QStringLiteral("DatasetTabs"));
-    QVERIFY(datasetTabs != nullptr);
-    QCOMPARE(datasetTabs->count(), 2);
-    QCOMPARE(datasetTabs->tabText(0), QStringLiteral("数据集准备"));
-    QCOMPARE(datasetTabs->tabText(1), QStringLiteral("质量与复核"));
-
-    QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
-        Q_ARG(int, MainWindow::ModelRegistryPage), Q_ARG(QString, QStringLiteral("模型库"))));
-    auto* modelTabs = window.findChild<QTabWidget*>(QStringLiteral("ModelWorkspaceTabs"));
-    QVERIFY(modelTabs != nullptr);
-    QCOMPARE(modelTabs->count(), 1);
-    QCOMPARE(modelTabs->tabText(0), QStringLiteral(" 模型包"));
-
-    QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
-        Q_ARG(int, MainWindow::DeploymentPage), Q_ARG(QString, QStringLiteral("部署验证"))));
-    auto* deploymentTabs = window.findChild<QTabWidget*>(QStringLiteral("DeploymentTabs"));
-    QVERIFY(deploymentTabs != nullptr);
-    QCOMPARE(deploymentTabs->count(), 2);
-        QCOMPARE(deploymentTabs->tabText(0), QStringLiteral("部署验证"));
-    QCOMPARE(deploymentTabs->tabText(1), QStringLiteral("推理验证"));
-
-    QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
-        Q_ARG(int, MainWindow::SystemSettingsPage), Q_ARG(QString, QStringLiteral("系统设置"))));
-    auto* settingsTabs = window.findChild<QTabWidget*>(QStringLiteral("SystemSettingsTabs"));
-    QVERIFY(settingsTabs != nullptr);
-    QCOMPARE(settingsTabs->count(), 2);
-    QCOMPARE(settingsTabs->tabText(0), QStringLiteral("内置能力"));
-    QCOMPARE(settingsTabs->tabText(1), QStringLiteral("应用设置"));
+    for (int index : {MainWindow::DatasetPage, MainWindow::TrainingPage, MainWindow::ModelRegistryPage, MainWindow::DeploymentPage, MainWindow::EvidencePage}) {
+        QVERIFY(QMetaObject::invokeMethod(window_, "showPage", Qt::DirectConnection, Q_ARG(int, index), Q_ARG(QString, QStringLiteral("工作区"))));
+        auto* stack = window_->findChild<QStackedWidget*>(QStringLiteral("WorkspaceStack"));
+        auto* page = stack->currentWidget();
+        QVERIFY(page->findChildren<QTabWidget*>().isEmpty());
+        QVERIFY(page->findChild<QStackedWidget*>(QStringLiteral("WorkspaceModeStack")));
+        QVERIFY(qobject_cast<QScrollArea*>(page) == nullptr);
+    }
 }
 
 void EnvironmentDeliveryEvidenceUiTests::taskPageExposesReadOnlyObjects()
@@ -542,10 +531,9 @@ void EnvironmentDeliveryEvidenceUiTests::taskPageExposesReadOnlyObjects()
         QVERIFY2(button->text() != QStringLiteral("复现实验"),
             "任务页不得重新引入未接线的复现实验入口");
     }
-    auto* detailTabs = window.findChild<QTabWidget*>(QStringLiteral("TaskDetailTabs"));
-    QVERIFY(detailTabs != nullptr);
-    QCOMPARE(detailTabs->tabText(1), QStringLiteral("文件"));
-    QCOMPARE(detailTabs->tabText(3), QStringLiteral("工作流"));
+    auto* detailViews = window.findChild<QStackedWidget*>(QStringLiteral("TaskDetailViews"));
+    QVERIFY(detailViews);
+    QCOMPARE(detailViews->count(), 5);
 }
 
 void EnvironmentDeliveryEvidenceUiTests::annotationSessionUiUsesArtifactBoundary()
@@ -691,7 +679,7 @@ void EnvironmentDeliveryEvidenceUiTests::ocrAcceptanceUiUsesControlledImportAndA
 {
     MainWindow& window = *window_;
     QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
-        Q_ARG(int, MainWindow::EnvironmentPage), Q_ARG(QString, QStringLiteral("环境"))));
+        Q_ARG(int, MainWindow::EvidencePage), Q_ARG(QString, QStringLiteral("环境"))));
     QVERIFY(window.findChild<QPushButton*>(QStringLiteral("ImportOcrOfficialReportsButton")) != nullptr);
     QVERIFY(window.findChild<QPushButton*>(QStringLiteral("RunOcrAcceptanceWorkflowButton")) != nullptr);
     QVERIFY(window.findChild<QLineEdit*>(QStringLiteral("OcrDetRawReportPath")) != nullptr);
@@ -760,91 +748,29 @@ void EnvironmentDeliveryEvidenceUiTests::projectAndDashboardExposeSummaryPresent
     }
 }
 
-void EnvironmentDeliveryEvidenceUiTests::switchingToEnvironmentShowsDeliveryEvidenceTab()
+void EnvironmentDeliveryEvidenceUiTests::evidenceHasIndependentModelToolEntry()
 {
-    MainWindow& window = *window_;
-
-    const bool invoked = QMetaObject::invokeMethod(
-        &window,
-        "showPage",
-        Qt::DirectConnection,
-        Q_ARG(int, MainWindow::EnvironmentPage),
-        Q_ARG(QString, QStringLiteral("环境")));
-    QVERIFY(invoked);
-
-    auto* stack = window.findChild<QStackedWidget*>(QStringLiteral("WorkspaceStack"));
-    auto* pageTitle = window.findChild<QLabel*>(QStringLiteral("PageTitle"));
-    QVERIFY(stack != nullptr);
-    QVERIFY(pageTitle != nullptr);
-    QCOMPARE(stack->currentIndex(), static_cast<int>(MainWindow::EnvironmentPage));
-    auto* router = window.findChild<WorkspaceRouter*>(QStringLiteral("WorkspaceRouter"));
-    QVERIFY(router != nullptr);
-    QCOMPARE(router->currentPageIndex(), static_cast<int>(MainWindow::EnvironmentPage));
-    QCOMPARE(router->currentTitle(), QStringLiteral("环境"));
-    QCOMPARE(pageTitle->text(), QStringLiteral("环境"));
-    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("EnvironmentTabs"));
-    QVERIFY(tabs != nullptr);
-    QCOMPARE(tabs->count(), 2);
-    QCOMPARE(tabs->tabText(0), QStringLiteral("运行环境"));
-    QCOMPARE(tabs->tabText(1), QStringLiteral("交付证据"));
-
-    tabs->setCurrentIndex(1);
-    QCoreApplication::processEvents();
-
-    auto* table = window.findChild<QTableWidget*>(QStringLiteral("DeliveryAcceptanceTable"));
-    auto* summary = window.findChild<QLabel*>(QStringLiteral("DeliveryAcceptanceSummary"));
-    QVERIFY(table != nullptr);
-    QCOMPARE(table->rowCount(), 7);
-    QVERIFY(summary != nullptr);
-    QVERIFY(summary->text().contains(QStringLiteral("not-run 7")));
+    QVERIFY(QMetaObject::invokeMethod(window_, "showPage", Qt::DirectConnection, Q_ARG(int, MainWindow::EnvironmentPage), Q_ARG(QString, QStringLiteral("环境"))));
+    auto* stack = window_->findChild<QStackedWidget*>(QStringLiteral("WorkspaceStack"));
+    QVERIFY(stack->currentWidget()->findChild<DeliveryEvidenceWorkspacePage*>() == nullptr);
+    QVERIFY(stack->currentWidget()->findChild<QTableWidget*>(QStringLiteral("EnvironmentTable")));
+    QVERIFY(QMetaObject::invokeMethod(window_, "showPage", Qt::DirectConnection, Q_ARG(int, MainWindow::EvidencePage), Q_ARG(QString, QStringLiteral("验收报告"))));
+    auto* evidence = window_->findChild<DeliveryEvidenceWorkspacePage*>();
+    QVERIFY(evidence);
+    QCOMPARE(evidence->acceptanceTable->rowCount(), 0);
+    QVERIFY(!evidence->acceptanceSummaryLabel->text().contains(QStringLiteral("通过")));
 }
 
 void EnvironmentDeliveryEvidenceUiTests::clickingSidebarEnvironmentSwitchesPageWithoutDeliveryEntry()
 {
-    MainWindow& window = *window_;
-    window.resize(1280, 820);
-    window.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&window));
-
-    auto* sidebar = window.findChild<Sidebar*>(QStringLiteral("WorkspaceSidebar"));
-    QVERIFY(sidebar != nullptr);
-    const auto sidebarButtons = sidebar->findChildren<QPushButton*>();
-    for (QPushButton* button : sidebarButtons) {
-        QVERIFY(button->text() != QStringLiteral("交付验收"));
-        QVERIFY(button->text() != QStringLiteral("样本复核"));
-        QVERIFY(button->text() != QStringLiteral("评估报告"));
-        QVERIFY(button->text() != QStringLiteral("模型导出"));
-        QVERIFY(button->text() != QStringLiteral("推理验证"));
-        QVERIFY(button->text() != QStringLiteral("设置"));
-    }
-
-    QPushButton* environmentButton = nullptr;
-    for (QPushButton* button : sidebarButtons) {
-        if (button->property("fullText").toString() == QStringLiteral("环境")) {
-            environmentButton = button;
-            break;
-        }
-    }
-    QVERIFY(environmentButton != nullptr);
-    QVERIFY(environmentButton->isVisible());
-
-    environmentButton->click();
-    QCoreApplication::processEvents();
-
-    auto* stack = window.findChild<QStackedWidget*>(QStringLiteral("WorkspaceStack"));
-    auto* pageTitle = window.findChild<QLabel*>(QStringLiteral("PageTitle"));
-    QVERIFY(stack != nullptr);
-    QVERIFY(pageTitle != nullptr);
-    QCOMPARE(stack->currentIndex(), static_cast<int>(MainWindow::EnvironmentPage));
-    QCOMPARE(pageTitle->text(), QStringLiteral("环境"));
-    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("EnvironmentTabs"));
-    QVERIFY(tabs != nullptr);
-    auto* table = window.findChild<QTableWidget*>(QStringLiteral("DeliveryAcceptanceTable"));
-    auto* summary = window.findChild<QLabel*>(QStringLiteral("DeliveryAcceptanceSummary"));
-    QVERIFY(table != nullptr);
-    QVERIFY(summary != nullptr);
-    QCOMPARE(table->rowCount(), 7);
-    QVERIFY(summary->text().contains(QStringLiteral("not-run 7")));
+    window_->resize(1280, 820); window_->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window_));
+    auto* sidebar = window_->findChild<Sidebar*>(QStringLiteral("Sidebar")); QVERIFY(sidebar);
+    QPushButton* environment = nullptr;
+    for (auto* button : sidebar->findChildren<QPushButton*>()) if (button->text().contains(QStringLiteral("环境"))) environment = button;
+    QVERIFY(environment); QVERIFY(environment->isVisible()); environment->click();
+    QCOMPARE(window_->findChild<QStackedWidget*>(QStringLiteral("WorkspaceStack"))->currentIndex(), int(MainWindow::EnvironmentPage));
+    QVERIFY(window_->findChild<QTabWidget*>(QStringLiteral("EnvironmentTabs")) == nullptr);
 }
 
 void EnvironmentDeliveryEvidenceUiTests::environmentPageUsesRuntimeReportRows()
@@ -897,6 +823,7 @@ void EnvironmentDeliveryEvidenceUiTests::capabilityPanelEnglishTranslationIsComp
     }
     aitrain_app::storeLanguageCode(QStringLiteral("zh_CN"));
 
+    qApp->removeTranslator(&translator_);
     QCOMPARE(actual, expected);
 }
 
@@ -939,37 +866,13 @@ void EnvironmentDeliveryEvidenceUiTests::workerStartFailureIsReportedAsynchronou
 
 void EnvironmentDeliveryEvidenceUiTests::runtimeDeliveryPagesExposeOneSixStepProductEntry()
 {
-    MainWindow& window = *window_;
-    QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection,
-        Q_ARG(int, MainWindow::DeploymentPage), Q_ARG(QString, QStringLiteral("部署验证"))));
-    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("DeploymentTabs"));
-    QVERIFY(tabs != nullptr);
-    auto* deploymentRoute = tabs->findChild<QComboBox*>(
-        QStringLiteral("DeploymentRuntimeRouteCombo"));
-    auto* inferenceRoute = tabs->findChild<QComboBox*>(
-        QStringLiteral("InferenceRuntimeRouteCombo"));
-    QVERIFY(deploymentRoute != nullptr);
-    QVERIFY(inferenceRoute != nullptr);
-    QVERIFY(deploymentRoute->currentData().toString().isEmpty());
-    QVERIFY(inferenceRoute->currentData().toString().isEmpty());
-    QCOMPARE(tabs->findChildren<QLabel*>(
-        QStringLiteral("RuntimeRouteReasons")).size(), 2);
-    int unifiedEntryCount = 0;
-    for (QPushButton* button : tabs->findChildren<QPushButton*>()) {
-        if (button->text() == QStringLiteral("运行完整 Runtime Delivery")) ++unifiedEntryCount;
-        QVERIFY(button->text() != QStringLiteral("开始推理"));
-        QVERIFY(button->text() != QStringLiteral("开始部署验证"));
-        QVERIFY(button->text() != QStringLiteral("选择输出目录"));
-    }
-    QCOMPARE(unifiedEntryCount, 2);
-    bool sixStepTextVisible = false;
-    for (QLabel* label : tabs->findChildren<QLabel*>()) {
-        if (label->text().contains(QStringLiteral("Runtime Delivery 六步"))) {
-            sixStepTextVisible = true;
-            break;
-        }
-    }
-    QVERIFY(sixStepTextVisible);
+    QVERIFY(QMetaObject::invokeMethod(window_, "showPage", Qt::DirectConnection, Q_ARG(int, MainWindow::DeploymentPage), Q_ARG(QString, QStringLiteral("验证与交付"))));
+    auto* page = window_->findChild<RuntimeDeliveryWorkspacePage*>(); QVERIFY(page);
+    QCOMPARE(page->findChildren<QPushButton*>(QStringLiteral("RuntimeDeliveryStart")).size(), 1);
+    QVERIFY(page->findChild<QPushButton*>(QStringLiteral("DeliverySelectSample")));
+    QVERIFY(page->findChildren<QLineEdit*>().isEmpty());
+    QVERIFY(page->formData(RuntimeDeliveryMode::DeploymentValidation).sampleSnapshotId.isEmpty());
+    QVERIFY(page->selectedModelPackageId(RuntimeDeliveryMode::DeploymentValidation).isEmpty());
 }
 
 void EnvironmentDeliveryEvidenceUiTests::uiPathBoundariesStayAtExplicitImportAndIdentityEdges()
@@ -1023,6 +926,330 @@ void EnvironmentDeliveryEvidenceUiTests::repeatedNavigationDoesNotAccumulatePage
     }
     QCOMPARE(stack->count(), initialCount);
     QCOMPARE(stack->currentIndex(), pages.last());
+}
+
+void EnvironmentDeliveryEvidenceUiTests::trainingDraftKeepsBackendAndModelAcrossNavigation()
+{
+    QVERIFY(QMetaObject::invokeMethod(window_, "showPage", Qt::DirectConnection, Q_ARG(int, MainWindow::TrainingPage), Q_ARG(QString, QStringLiteral("训练"))));
+    auto* controller = window_->findChild<TrainingPageController*>(); auto* page = window_->findChild<TrainingWorkspacePage*>(); QVERIFY(controller); QVERIFY(page);
+    TrainingDatasetBinding binding; binding.datasetFormat = QStringLiteral("anomaly_folder"); controller->setDatasetBinding(binding);
+    auto* backend = page->findChild<QComboBox*>(QStringLiteral("TrainingBackend")); backend->setCurrentIndex(backend->findData(QStringLiteral("anomalib_efficientad")));
+    auto* model = page->findChild<QComboBox*>(QStringLiteral("TrainingModelPreset")); model->setCurrentText(QStringLiteral("draft-model"));
+    auto* epoch = page->findChild<QLineEdit*>(QStringLiteral("TrainingEpochs")); epoch->setText(QStringLiteral("37"));
+    page->setMode(TrainingWorkspacePage::Configuration);
+    for (int index : {MainWindow::DatasetPage, MainWindow::TaskQueuePage, MainWindow::ModelRegistryPage, MainWindow::TrainingPage}) QVERIFY(QMetaObject::invokeMethod(window_, "showPage", Qt::DirectConnection, Q_ARG(int, index), Q_ARG(QString, QStringLiteral("工作区"))));
+    QCOMPARE(backend->currentData().toString(), QStringLiteral("anomalib_efficientad")); QCOMPARE(model->currentText(), QStringLiteral("draft-model")); QCOMPARE(epoch->text(), QStringLiteral("37"));
+    QCOMPARE(page->views->currentIndex(), int(TrainingWorkspacePage::Configuration));
+}
+
+void EnvironmentDeliveryEvidenceUiTests::advancedCancelRestoresDraftAndAllOfficialBackendsRemain()
+{
+    TaskRuntimeController runtime; TrainingPageController controller(&runtime); TrainingWorkspacePage page; controller.attach(&page);
+    auto* backends = page.findChild<QComboBox*>(QStringLiteral("TrainingBackend")); QCOMPARE(backends->count(), 8);
+    for (const auto& item : aitrain::ProductCapabilityContract::instance().trainingBackends()) {
+        TrainingDatasetBinding binding; binding.datasetFormat = item.datasetFormat; controller.setDatasetBinding(binding);
+        const int index = backends->findData(item.id); QVERIFY(index >= 0); backends->setCurrentIndex(index); QCOMPARE(page.formData().taskType, item.taskType); QCOMPARE(page.formData().capabilityId, item.capabilityId);
+    }
+    TrainingDatasetBinding binding; binding.datasetFormat = QStringLiteral("yolo_detection"); controller.setDatasetBinding(binding);
+    auto* lr = page.findChild<QLineEdit*>(QStringLiteral("YoloTrainArg_lr0")); QVERIFY(lr); lr->setText(QStringLiteral("0.012"));
+    QVERIFY(QMetaObject::invokeMethod(&page, "advancedRequested", Qt::DirectConnection)); lr->setText(QStringLiteral("0.2"));
+    QVERIFY(QMetaObject::invokeMethod(&page, "cancelAdvancedRequested", Qt::DirectConnection)); QCOMPARE(lr->text(), QStringLiteral("0.012"));
+    page.resize(1000, 700); page.show();
+    QVERIFY(QMetaObject::invokeMethod(&page, "advancedRequested", Qt::DirectConnection)); lr->setText(QStringLiteral("0.3"));
+    QTest::keyClick(lr, Qt::Key_Escape);
+    QCOMPARE(page.views->currentIndex(), int(TrainingWorkspacePage::Configuration)); QCOMPARE(lr->text(), QStringLiteral("0.012"));
+    QTest::keyClick(&page, Qt::Key_Escape); QCOMPARE(page.views->currentIndex(), int(TrainingWorkspacePage::Catalog));
+}
+
+void EnvironmentDeliveryEvidenceUiTests::unloadedArtifactInventoryIsNotReportedAsZero()
+{
+    ArtifactTableModel model; ArtifactFileItem item; item.artifactId = aitrain::ArtifactId::create().toString(); item.kind = QStringLiteral("dataset_quality_report");
+    model.setFiles({item}); QCOMPARE(model.rowCount(), 1);
+    QCOMPARE(model.data(model.index(0, 2), Qt::DisplayRole).toString(), QStringLiteral("文件清单尚未读取"));
+}
+
+void EnvironmentDeliveryEvidenceUiTests::reopenedDatasetShowsNameSamplesAndQualityResult()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    const QString source = directory.filePath(QStringLiteral("source"));
+    const auto write = [](const QString& path, const QByteArray& text) { QDir().mkpath(QFileInfo(path).absolutePath()); QFile file(path); return file.open(QIODevice::WriteOnly) && file.write(text) == text.size(); };
+    QVERIFY(write(QDir(source).filePath(QStringLiteral("data.yaml")), QByteArray("path: .\ntrain: images/train\nval: images/val\nnames: [item]\n")));
+    QImage image(64, 64, QImage::Format_RGB32); image.fill(Qt::green);
+    for (const QString& split : {QStringLiteral("train"), QStringLiteral("val")}) {
+        const QString file = QDir(source).filePath(QStringLiteral("images/%1/sample.png").arg(split)); QDir().mkpath(QFileInfo(file).absolutePath()); QVERIFY(image.save(file));
+        QVERIFY(write(QDir(source).filePath(QStringLiteral("labels/%1/sample.txt").arg(split)), QByteArray("0 0.5 0.5 0.25 0.25\n")));
+    }
+    const QString root = directory.filePath(QStringLiteral("project")); aitrain::ProjectWorkspace workspace; QString error;
+    QVERIFY2(workspace.createProject(root, &error), qPrintable(error));
+    aitrain::TaskSnapshot task; const auto importId = aitrain::TaskId::create();
+    QVERIFY2(workspace.startTask(importId, QStringLiteral("dataset.snapshot.import"), QStringLiteral("dataset_snapshot_import"), &task, &error), qPrintable(error));
+    aitrain::DatasetSnapshotImportWorkflowRequest request; request.sourcePath = source; request.sourceFormat = QStringLiteral("yolo_detection"); request.targetDatasetId = aitrain::DatasetId::create(); request.targetDatasetName = QStringLiteral("表面缺陷样本");
+    aitrain::DatasetSnapshotImportWorkflowResult imported;
+    QVERIFY2(workspace.runDatasetSnapshotImportWorkflow(importId, request, &imported, &error), qPrintable(error));
+    QCOMPARE(imported.terminalState, aitrain::TaskState::Succeeded);
+    workspace.close(); QVERIFY2(workspace.open(root, &error), qPrintable(error));
+    aitrain::ProjectQueryService query(&workspace); TaskRuntimeController runtime; DatasetPageController controller(&query, &runtime);
+    controller.setProjectContext(true, root); DatasetWorkspacePage page; controller.attach(&page);
+    QCOMPARE(page.datasetListTable->rowCount(), 1); QCOMPARE(page.datasetListTable->item(0, 0)->text(), request.targetDatasetName);
+    QCOMPARE(controller.state().currentSnapshotId, imported.datasetSnapshot.id.toString());
+    QCOMPARE(page.datasetPreviewTable->rowCount(), 2); QCOMPARE(page.datasetListTable->item(0, 3)->text(), QStringLiteral("2"));
+    QVERIFY(!controller.state().currentSampleRelativePath.isEmpty());
+    page.resize(1000, 600); page.show(); page.showView(DatasetWorkspacePage::Detail);
+    controller.previewSample(0);
+    QTRY_VERIFY2_WITH_TIMEOUT(page.sampleImageLabel->pixmap() && !page.sampleImageLabel->pixmap()->isNull(),
+        qPrintable(QStringLiteral("图像预览：%1；区域 %2 x %3").arg(page.sampleImageLabel->text()).arg(page.sampleImageLabel->width()).arg(page.sampleImageLabel->height())), 10000);
+    const auto qualityId = aitrain::TaskId::create();
+    QVERIFY2(workspace.startTask(qualityId, QStringLiteral("dataset.quality"), QStringLiteral("data_quality"), &task, &error), qPrintable(error));
+    QVERIFY(QMetaObject::invokeMethod(&controller, "taskStarted", Qt::DirectConnection, Q_ARG(QString, qualityId.toString()), Q_ARG(QString, QStringLiteral("data_quality"))));
+    aitrain::DataQualityWorkflowRequest quality; quality.snapshotId = imported.datasetSnapshot.id; quality.datasetId = imported.datasetSnapshot.datasetId; quality.datasetVersionId = imported.datasetSnapshot.datasetVersionId; quality.snapshotArtifactId = imported.datasetSnapshot.artifactId;
+    aitrain::DataQualityWorkflowResult checked; QVERIFY2(workspace.runDataQualityWorkflow(qualityId, quality, &checked, &error), qPrintable(error));
+    TaskViewState state; state.taskId = qualityId.toString(); state.status = QStringLiteral("succeeded"); state.terminal = true; controller.applyTaskViewState(state);
+    QTRY_VERIFY_WITH_TIMEOUT(page.validationSummaryLabel->text().contains(QStringLiteral("质量检查完成")), 10000);
+    QVERIFY(!controller.state().latestQualityArtifactId.isEmpty()); QVERIFY(!page.validationSummaryLabel->text().contains(QStringLiteral("等待")));
+    TaskArtifactPage taskPage; TaskArtifactPageController taskController(&query); taskController.attachPage(&taskPage); taskController.openTask(qualityId.toString());
+    auto* artifacts = taskPage.findChild<QTableView*>(QStringLiteral("TaskArtifactTable"));
+    QVERIFY(artifacts && artifacts->model()->rowCount() > 0); artifacts->selectRow(0);
+    auto* files = taskPage.findChild<QTableView*>(QStringLiteral("TaskArtifactFileTable"));
+    QVERIFY(files && files->model()->rowCount() > 0); files->selectRow(0);
+    const QString member = taskPage.selectedArtifactMember(); QVERIFY(!member.isEmpty());
+    QVERIFY(taskController.refreshSelected()); QCOMPARE(taskPage.selectedArtifactMember(), member);
+    QVERIFY(artifacts->model()->index(0, 2).data().toString().startsWith(QStringLiteral("已读取")));
+    // 从已登记的训练工作流恢复草稿，不启动 Worker，也不创建 Resume 请求。
+    const auto trainingId = aitrain::TaskId::create();
+    QVERIFY2(workspace.startTask(trainingId, QStringLiteral("yolo"), QStringLiteral("detection"), &task, &error), qPrintable(error));
+    aitrain::TrainingWorkflowProfile profile;
+    QVERIFY(aitrain::resolveTrainingWorkflowProfile(QStringLiteral("ultralytics_yolo_detect"), &profile, &error));
+    aitrain::TrainingWorkflowRequest trainingRequest;
+    trainingRequest.templateId = profile.templateId; trainingRequest.datasetId = imported.datasetSnapshot.datasetId; trainingRequest.datasetVersionId = imported.datasetSnapshot.datasetVersionId;
+    trainingRequest.snapshotId = imported.datasetSnapshot.id; trainingRequest.snapshotArtifactId = imported.datasetSnapshot.artifactId;
+    trainingRequest.trainingBackend = profile.trainingBackend; trainingRequest.evaluationBackend = profile.evaluationBackend; trainingRequest.exportBackend = profile.exportBackend; trainingRequest.deploymentBackend = profile.deploymentBackend;
+    trainingRequest.parameterSummary = {{QStringLiteral("epochs"), 7}, {QStringLiteral("batchSize"), 2}, {QStringLiteral("imageSize"), 320}, {QStringLiteral("modelPreset"), QStringLiteral("yolov8s.pt")},
+        {QStringLiteral("ultralyticsTrainArgs"), QJsonObject{{QStringLiteral("seed"), 17}, {QStringLiteral("lr0"), 0.002}}}};
+    aitrain::TrainingWorkflowDispatch dispatch;
+    QVERIFY2(workspace.beginTrainingWorkflow(trainingId, trainingRequest, &dispatch, &error), qPrintable(error));
+    TrainingPageController trainingController(&runtime); trainingController.setQueryService(&query); trainingController.setProjectContext(true, root);
+    TrainingWorkspacePage trainingPage; trainingController.attach(&trainingPage);
+    QCOMPARE(trainingPage.historyTable->rowCount(), 1);
+    QVERIFY(QMetaObject::invokeMethod(&trainingPage, "historyRequested", Qt::DirectConnection, Q_ARG(QString, trainingId.toString())));
+    QVERIFY(!trainingPage.modelsButton->isEnabled());
+    QVERIFY(QMetaObject::invokeMethod(&trainingPage, "copyConfigurationRequested", Qt::DirectConnection));
+    QCOMPARE(trainingPage.views->currentIndex(), int(TrainingWorkspacePage::Configuration));
+    QCOMPARE(trainingPage.formData().modelPreset, QStringLiteral("yolov8s.pt")); QCOMPARE(trainingPage.formData().epochs, 7);
+    QCOMPARE(trainingPage.formData().batchSize, 2); QCOMPARE(trainingPage.formData().imageSize, 320);
+    QCOMPARE(trainingPage.findChild<QLineEdit*>(QStringLiteral("YoloTrainArg_lr0"))->text(), QStringLiteral("0.002"));
+    QCOMPARE(trainingPage.findChild<QLineEdit*>(QStringLiteral("YoloTrainArg_seed"))->text(), QStringLiteral("17"));
+    QVERIFY(!runtime.isRunning());
+
+    const auto versions = query.datasetSnapshots(imported.datasetSnapshot.datasetId, {1, {}}, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error)); QCOMPARE(versions.items.size(), 1); QCOMPARE(versions.items.first().latestQualityTaskId, qualityId);
+
+    // 通过产品的 Session 入口重新打开磁盘项目，验证延迟建页和顶层导航也能恢复数据。
+    workspace.close();
+    MainWindow reopened(QStringLiteral("test-license"), QStringLiteral("2099-12-31"));
+    reopened.setAttribute(Qt::WA_ShowWithoutActivating, true); reopened.resize(1280, 820); reopened.show();
+    auto* session = reopened.findChild<ProjectSessionController*>(); QVERIFY(session);
+    QSignalSpy failures(session, &ProjectSessionController::failed);
+    QVERIFY2(session->request(aitrain_app::ProjectSessionOperation::Open, QStringLiteral("project"), root, &error), qPrintable(error));
+    QTRY_VERIFY_WITH_TIMEOUT(!session->isBusy(), 15000);
+    QVERIFY2(session->isOpen(), failures.isEmpty() ? "项目未打开" : qPrintable(failures.first().first().toString()));
+    auto* realPage = reopened.findChild<DatasetWorkspacePage*>(); QVERIFY(realPage);
+    QCOMPARE(realPage->datasetListTable->rowCount(), 1);
+    QCOMPARE(realPage->datasetListTable->item(0, 0)->text(), request.targetDatasetName);
+    realPage->showView(DatasetWorkspacePage::Detail);
+    QTRY_VERIFY_WITH_TIMEOUT(realPage->sampleImageLabel->pixmap() && !realPage->sampleImageLabel->pixmap()->isNull(), 10000);
+    const QString capture = qEnvironmentVariable("AITRAIN_CAPTURE_UI_DIR");
+    if (!capture.isEmpty()) {
+        QDir().mkpath(capture);
+        QVERIFY(reopened.grab().save(QDir(capture).filePath(QStringLiteral("真实项目-样本预览.png"))));
+        QVERIFY(QMetaObject::invokeMethod(&reopened, "showPage", Qt::DirectConnection, Q_ARG(int, MainWindow::TrainingPage), Q_ARG(QString, QStringLiteral("训练"))));
+        auto* realTraining = reopened.findChild<TrainingWorkspacePage*>(); QVERIFY(realTraining);
+        QVERIFY(QMetaObject::invokeMethod(realTraining, "historyRequested", Qt::DirectConnection, Q_ARG(QString, trainingId.toString())));
+        QVERIFY(QMetaObject::invokeMethod(realTraining, "copyConfigurationRequested", Qt::DirectConnection));
+        QCoreApplication::processEvents();
+        QVERIFY(reopened.grab().save(QDir(capture).filePath(QStringLiteral("真实项目-历史配置草稿.png"))));
+    }
+}
+
+void EnvironmentDeliveryEvidenceUiTests::workbenchViewsFitStandardWindows()
+{
+    MainWindow window(QStringLiteral("test-license"), QStringLiteral("2099-12-31"));
+    window.setAttribute(Qt::WA_ShowWithoutActivating, true); window.show();
+    const QString output = qEnvironmentVariable("AITRAIN_CAPTURE_UI_DIR");
+    if (!output.isEmpty()) QDir().mkpath(output);
+    const QStringList titles = {QStringLiteral("项目概况"), QStringLiteral("项目"), QStringLiteral("数据集"), QStringLiteral("训练"), QStringLiteral("任务记录"), QStringLiteral("模型"), QStringLiteral("验证与交付"), QStringLiteral("环境与诊断"), QStringLiteral("设置"), QStringLiteral("验收报告")};
+    const QList<QSize> sizes = qEnvironmentVariableIntValue("AITRAIN_TEST_MINIMUM_WINDOW")
+        ? QList<QSize>{QSize(1024, 700)} : QList<QSize>{QSize(1280, 820), QSize(1366, 768), QSize(1024, 700)};
+    for (const QSize& size : sizes) {
+        window.resize(size);
+        for (int index = 0; index < MainWindow::PageCount; ++index) {
+            QVERIFY(QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection, Q_ARG(int, index), Q_ARG(QString, titles.at(index))));
+            auto* stack = window.findChild<QStackedWidget*>(QStringLiteral("WorkspaceStack")); QWidget* page = stack->currentWidget();
+            auto* host = dynamic_cast<aitrain_app::WorkspaceViewHost*>(page);
+            const int modes = host ? host->views->count() : 1;
+            for (int mode = 0; mode < modes; ++mode) {
+                if (host) host->setMode(mode);
+                QCoreApplication::processEvents();
+                QCOMPARE(window.size(), size);
+                for (auto* button : page->findChildren<QPushButton*>()) {
+                    if (!button->isVisibleTo(page)) continue;
+                    const QRect bounds(button->mapTo(&window, QPoint()), button->size());
+                    QVERIFY2(window.rect().contains(bounds), qPrintable(QStringLiteral("按钮超出窗口：page %1 / mode %2 / %3 / %4,%5 %6x%7").arg(index).arg(mode).arg(button->text()).arg(bounds.x()).arg(bounds.y()).arg(bounds.width()).arg(bounds.height())));
+                }
+                if (!output.isEmpty()) QVERIFY(window.grab().save(QDir(output).filePath(QStringLiteral("%1x%2-page%3-mode%4.png").arg(size.width()).arg(size.height()).arg(index).arg(mode))));
+            }
+        }
+    }
+}
+
+void EnvironmentDeliveryEvidenceUiTests::draftPersistenceAcrossProcessesAndInvalidBindings()
+{
+    const QString phase = qEnvironmentVariable("AITRAIN_DRAFT_TEST_PHASE");
+    if (phase.isEmpty()) {
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        for (const QString& mode : {QStringLiteral("write"), QStringLiteral("read")}) {
+            QProcess child; auto environment = QProcessEnvironment::systemEnvironment();
+            environment.insert(QStringLiteral("AITRAIN_DRAFT_TEST_ROOT"), directory.path());
+            environment.insert(QStringLiteral("AITRAIN_DRAFT_TEST_PHASE"), mode); child.setProcessEnvironment(environment);
+            const QString log = directory.filePath(mode + QStringLiteral(".txt"));
+            child.start(QCoreApplication::applicationFilePath(), {QStringLiteral("draftPersistenceAcrossProcessesAndInvalidBindings"), QStringLiteral("-platform"), QStringLiteral("offscreen"), QStringLiteral("-o"), log + QStringLiteral(",txt")});
+            QTRY_VERIFY_WITH_TIMEOUT(child.state() == QProcess::NotRunning, 60000);
+            QFile output(log); output.open(QIODevice::ReadOnly);
+            QVERIFY2(child.exitStatus() == QProcess::NormalExit && child.exitCode() == 0, output.readAll().constData());
+        }
+        return;
+    }
+    const QString base = qEnvironmentVariable("AITRAIN_DRAFT_TEST_ROOT"), root = QDir(base).filePath(QStringLiteral("project"));
+    aitrain::ProjectWorkspace workspace; QString error;
+    aitrain::ProjectQueryService query(&workspace); TaskRuntimeController runtime;
+    TrainingPageController controller(&runtime); TrainingWorkspacePage page; controller.setQueryService(&query); controller.attach(&page);
+    auto* epoch = page.findChild<QLineEdit*>(QStringLiteral("TrainingEpochs"));
+    auto* model = page.findChild<QComboBox*>(QStringLiteral("TrainingModelPreset"));
+    auto* lr = page.findChild<QLineEdit*>(QStringLiteral("YoloTrainArg_lr0"));
+    auto* status = page.findChild<QLabel*>(QStringLiteral("TrainingDraftStatus"));
+    auto* save = page.findChild<QPushButton*>(QStringLiteral("TrainingSaveDraft"));
+    aitrain_app::ApplicationSettingsService settings;
+    if (phase == QStringLiteral("write")) {
+        QVERIFY2(workspace.createProject(root, &error), qPrintable(error));
+        aitrain::ProjectStore store; QVERIFY(store.open(QDir(root).filePath(QStringLiteral(".aitrain/project.sqlite")), &error));
+        store.setArtifactStoreRoot(QDir(root).filePath(QStringLiteral(".aitrain/artifacts")));
+        aitrain::TaskSnapshot task; task.id = aitrain::TaskId::create(); task.requestId = aitrain::RequestId::create(); task.capabilityId = QStringLiteral("dataset"); task.taskType = QStringLiteral("dataset_snapshot"); QVERIFY(store.createTask(task, &error));
+        const auto artifact = aitrain::ArtifactId::create();
+        QVERIFY2(store.recordArtifactWithFiles(artifact, task.id, QStringLiteral("dataset_snapshot"),
+            {{QStringLiteral("dataset_snapshot.json"), QString(64, QLatin1Char('a')), 2}, {QStringLiteral("images/a.png"), QString(64, QLatin1Char('b')), 10}}, QDateTime::currentDateTimeUtc(), &error), qPrintable(error));
+        aitrain::DatasetSnapshotRecord snapshot; snapshot.id = aitrain::SnapshotId::create(); snapshot.datasetId = aitrain::DatasetId::create(); snapshot.taskId = task.id; snapshot.artifactId = artifact;
+        snapshot.rootPath = QDir(root).filePath(QStringLiteral(".aitrain/artifacts/committed/%1").arg(artifact.toString())); snapshot.datasetFormat = QStringLiteral("yolo_detection"); snapshot.driverId = snapshot.datasetFormat; snapshot.driverVersion = QStringLiteral("2.0"); snapshot.rootHash = QString(64, QLatin1Char('b')); snapshot.manifestSha256 = QString(64, QLatin1Char('a')); snapshot.fileCount = 2; snapshot.totalBytes = 12; snapshot.createdAt = QDateTime::currentDateTimeUtc();
+        QVERIFY2(store.registerDatasetSnapshot(&snapshot, &error), qPrintable(error));
+        controller.setProjectContext(true, root);
+        TrainingDatasetBinding binding; binding.datasetId = snapshot.datasetId.toString(); binding.datasetVersionId = snapshot.datasetVersionId.toString(); binding.snapshotId = snapshot.id.toString(); binding.snapshotArtifactId = artifact.toString(); binding.datasetFormat = snapshot.datasetFormat; binding.displayName = QStringLiteral("中文用户数据"); binding.deploymentSampleRelativePath = QStringLiteral("images/a.png"); controller.setDatasetBinding(binding);
+        epoch->setText(QStringLiteral("37")); model->setCurrentText(QStringLiteral("yolov8s.pt")); lr->setText(QStringLiteral("0.012"));
+        QTRY_VERIFY_WITH_TIMEOUT(status->text().contains(QStringLiteral("已保存")), 3000);
+        QMetaObject::invokeMethod(&page, "advancedRequested", Qt::DirectConnection); lr->setText(QStringLiteral("0.2")); save->click();
+        QJsonObject draft; QVERIFY(settings.readTrainingDraft(query.projectIdentity(), &draft, &error));
+        QCOMPARE(draft.value(QStringLiteral("controls")).toObject().value(QStringLiteral("YoloTrainArg_lr0")).toString(), QStringLiteral("0.012"));
+        return;
+    }
+    QVERIFY2(workspace.open(root, &error), qPrintable(error)); controller.setProjectContext(true, root);
+    QCOMPARE(epoch->text(), QStringLiteral("37")); QCOMPARE(model->currentText(), QStringLiteral("yolov8s.pt")); QCOMPARE(lr->text(), QStringLiteral("0.012"));
+    QVERIFY(page.findChild<QLabel*>(QStringLiteral("TrainingDatasetNote"))->text().contains(QStringLiteral("已提交快照")));
+    QVERIFY(page.findChild<QLabel*>(QStringLiteral("TrainingSampleNote"))->text().contains(QStringLiteral("images/a.png")));
+    QCOMPARE(runtime.state(), TaskRuntimeController::State::Idle);
+    const QString id = query.projectIdentity(); QJsonObject valid; QVERIFY(settings.readTrainingDraft(id, &valid, &error));
+    {
+        TrainingPageController delayed(&runtime); delayed.setQueryService(&query); delayed.setProjectContext(true, root);
+        TrainingWorkspacePage delayedPage; delayed.attach(&delayedPage);
+        QCOMPARE(delayedPage.findChild<QLineEdit*>(QStringLiteral("TrainingEpochs"))->text(), QStringLiteral("37"));
+        QVERIFY(delayedPage.findChild<QLabel*>(QStringLiteral("TrainingSampleNote"))->text().contains(QStringLiteral("images/a.png")));
+    }
+    // 不同项目隔离；返回原项目恢复其草稿。
+    controller.setProjectContext(false, {}); workspace.close();
+    const QString other = QDir(base).filePath(QStringLiteral("other")); QVERIFY(workspace.createProject(other, &error)); controller.setProjectContext(true, other); QCOMPARE(epoch->text(), QStringLiteral("20"));
+    controller.setProjectContext(false, {}); workspace.close(); QVERIFY(workspace.open(root, &error)); controller.setProjectContext(true, root); QCOMPARE(epoch->text(), QStringLiteral("37"));
+    controller.setProjectContext(false, {});
+    QJsonObject missingSample = valid; missingSample.insert(QStringLiteral("sample"), QStringLiteral("images/deleted.png")); QVERIFY(settings.saveTrainingDraft(id, missingSample));
+    controller.setProjectContext(true, root); QVERIFY(status->text().contains(QStringLiteral("样本已失效")));
+    controller.setProjectContext(false, {});
+    QJsonObject missingSnapshot = valid; missingSnapshot.insert(QStringLiteral("datasetSnapshotId"), aitrain::SnapshotId::create().toString()); QVERIFY(settings.saveTrainingDraft(id, missingSnapshot));
+    controller.setProjectContext(true, root); QCOMPARE(epoch->text(), QStringLiteral("37")); QVERIFY(status->text().contains(QStringLiteral("数据版本已失效")));
+    QVERIFY(page.findChild<QLabel*>(QStringLiteral("TrainingDatasetNote"))->text().contains(QStringLiteral("尚未选择")));
+    controller.setProjectContext(false, {});
+    QSettings raw; QJsonObject invalid = valid; invalid.insert(QStringLiteral("version"), 999); raw.setValue(QStringLiteral("trainingDrafts/") + id, QJsonDocument(invalid).toJson()); raw.sync();
+    controller.setProjectContext(true, root); QCOMPARE(epoch->text(), QStringLiteral("20")); QVERIFY(status->text().contains(QStringLiteral("格式无效")));
+    // 显式丢弃后不会因退出再次写入旧草稿。
+    epoch->setText(QStringLiteral("81")); save->click();
+    page.resize(1024, 700); page.show(); QTest::qWait(10);
+    QTimer::singleShot(100, []() { for (auto* widget : QApplication::topLevelWidgets()) if (widget->objectName() == QStringLiteral("TrainingDiscardConfirmation")) widget->findChild<QPushButton*>(QStringLiteral("TrainingConfirmDiscard"))->click(); });
+    page.findChild<QPushButton*>(QStringLiteral("TrainingDiscardDraft"))->click();
+    QCOMPARE(epoch->text(), QStringLiteral("20")); QJsonObject discarded; QVERIFY(!settings.readTrainingDraft(id, &discarded, &error));
+    controller.setProjectContext(false, {});
+    QJsonObject badBackend = valid; auto badControls = badBackend.value(QStringLiteral("controls")).toObject();
+    badControls.insert(QStringLiteral("TrainingBackend"), QStringLiteral("removed_backend")); badBackend.insert(QStringLiteral("controls"), badControls);
+    QVERIFY(settings.saveTrainingDraft(id, badBackend)); controller.setProjectContext(true, root);
+    QVERIFY(status->text().contains(QStringLiteral("当前合同不匹配")));
+    controller.setProjectContext(false, {}); QVERIFY(settings.saveTrainingDraft(id, valid)); workspace.close();
+    QVERIFY2(workspace.rebuildProject(root, &error), qPrintable(error));
+    QVERIFY(query.projectIdentity() != id); controller.setProjectContext(true, root);
+    QCOMPARE(epoch->text(), QStringLiteral("20"));
+}
+
+void EnvironmentDeliveryEvidenceUiTests::englishAndDarkWorkbenchAreComplete()
+{
+    QSettings preferences;
+    struct RestorePreferences {
+        QVariant theme = QSettings().value(QStringLiteral("settings/theme"));
+        QString language = aitrain_app::configuredLanguageCode();
+        ~RestorePreferences() {
+            QSettings settings;
+            if (theme.isValid()) settings.setValue(QStringLiteral("settings/theme"), theme); else settings.remove(QStringLiteral("settings/theme"));
+            aitrain_app::storeLanguageCode(language); AppStyle::apply(*qApp, QStringLiteral("light"));
+        }
+    } restore;
+    aitrain_app::storeLanguageCode(QStringLiteral("en_US"));
+    QTranslator english; QVERIFY(aitrain_app::loadTranslator(*qApp, &english, QStringLiteral("en_US")));
+    const QRegularExpression chinese(QStringLiteral("[\\x{4e00}-\\x{9fff}]"));
+    QStringList untranslated;
+    for (const QString& theme : {QStringLiteral("light"), QStringLiteral("dark")}) {
+        // 通过产品设置入口切换，验证持久化及即时生效。
+        SettingsWorkspacePage settingsPage({}, {}); SettingsPageController settingsController(QStringLiteral(".")); settingsController.attach(&settingsPage);
+        auto* themeControl = settingsPage.findChild<QComboBox*>(QStringLiteral("SettingsTheme"));
+        const int selected = themeControl->findData(theme);
+        themeControl->setCurrentIndex(1 - selected);
+        themeControl->setCurrentIndex(selected);
+        QCOMPARE(AppStyle::configuredTheme(), theme);
+        QCOMPARE(qApp->palette().color(QPalette::Window).lightness() < 128, theme == QStringLiteral("dark"));
+        AppStyle::apply(*qApp);
+        QCOMPARE(AppStyle::configuredTheme(), theme);
+        QCOMPARE(qApp->palette().color(QPalette::Window).lightness() < 128, theme == QStringLiteral("dark"));
+        MainWindow window(QStringLiteral("test-license"), QStringLiteral("2099-12-31")); window.setAttribute(Qt::WA_ShowWithoutActivating, true); window.show();
+        const QList<QSize> sizes = qEnvironmentVariableIntValue("AITRAIN_TEST_MINIMUM_WINDOW") ? QList<QSize>{QSize(1024, 700)} : QList<QSize>{QSize(1280, 820), QSize(1366, 768), QSize(1024, 700)};
+        for (const auto& size : sizes) { window.resize(size);
+            for (int index = 0; index < MainWindow::PageCount; ++index) {
+                QMetaObject::invokeMethod(&window, "showPage", Qt::DirectConnection, Q_ARG(int, index), Q_ARG(QString, QStringLiteral("Workspace")));
+                QWidget* page = window.findChild<QStackedWidget*>(QStringLiteral("WorkspaceStack"))->currentWidget();
+                auto* host = dynamic_cast<aitrain_app::WorkspaceViewHost*>(page);
+                for (int mode = 0; mode < (host ? host->views->count() : 1); ++mode) {
+                    if (host) host->setMode(mode); QCoreApplication::processEvents(); QCOMPARE(window.size(), size);
+                    const auto check = [&](const QString& text) { if (text != QStringLiteral("中") && text != QStringLiteral("中文") && chinese.match(text).hasMatch()) untranslated.append(text); };
+                    for (auto* label : page->findChildren<QLabel*>()) if (label->isVisibleTo(page)) check(label->text());
+                    for (auto* button : page->findChildren<QAbstractButton*>()) if (button->isVisibleTo(page)) {
+                        check(button->text()); const QRect bounds(button->mapTo(&window, QPoint()), button->size());
+                        QVERIFY2(window.rect().contains(bounds), qPrintable(QStringLiteral("English button outside window: %1 / %2 / %3").arg(index).arg(mode).arg(button->text())));
+                    }
+                    for (auto* combo : page->findChildren<QComboBox*>()) if (combo->isVisibleTo(page)) for (int item=0;item<combo->count();++item) check(combo->itemText(item));
+                    for (auto* list : page->findChildren<QListWidget*>()) if (list->isVisibleTo(page)) {
+                        QCOMPARE(list->horizontalScrollBar()->maximum(), 0);
+                        for (int item = 0; item < list->count(); ++item) check(list->item(item)->text());
+                    }
+                    const QString output = qEnvironmentVariable("AITRAIN_CAPTURE_UI_DIR");
+                    if (!output.isEmpty()) { QDir().mkpath(output); QVERIFY(window.grab().save(QDir(output).filePath(QStringLiteral("en-%1-%2x%3-page%4-mode%5.png").arg(theme).arg(size.width()).arg(size.height()).arg(index).arg(mode)))); }
+                }
+            }
+        }
+        // 已创建控件随主题切换，成功/警告仍由不同文字和颜色表达。
+        StatusPill pill; pill.setStatus(QStringLiteral("Ready"), StatusPill::Tone::Success); pill.show(); QCoreApplication::processEvents();
+        QCOMPARE(pill.property("tone").toInt(), int(StatusPill::Tone::Success));
+    }
+    qApp->removeTranslator(&english); AppStyle::apply(*qApp, QStringLiteral("light"));
+    untranslated.removeDuplicates(); QVERIFY2(untranslated.isEmpty(), qPrintable(untranslated.join(QLatin1Char('\n'))));
 }
 
 QTEST_MAIN(EnvironmentDeliveryEvidenceUiTests)

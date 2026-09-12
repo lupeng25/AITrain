@@ -1,3 +1,4 @@
+#include "WorkbenchTranslation.h"
 #include "MainWindow.h"
 
 #include "ApplicationEventRouter.h"
@@ -84,7 +85,7 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     taskArtifactPageController_ = new TaskArtifactPageController(queryService, this);
     dashboardPageController_ = new DashboardPageController(queryService, this);
     setWindowTitle(QStringLiteral("AITrain Studio"));
-    setMinimumSize(1180, 760);
+    setMinimumSize(1024, 700);
 
     auto* central = new QWidget(this);
     auto* rootLayout = new QHBoxLayout(central);
@@ -92,20 +93,12 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     rootLayout->setSpacing(0);
 
     sidebar_ = new Sidebar;
-    sidebar_->setObjectName(QStringLiteral("WorkspaceSidebar"));
-    sidebar_->addSection(tr("工作台"));
-    sidebar_->addItem(tr("总览"), DashboardPage);
-    sidebar_->addItem(tr("项目"), ProjectPage);
-    sidebar_->addSection(tr("数据与训练"));
-    sidebar_->addItem(tr("数据集"), DatasetPage);
-    sidebar_->addItem(tr("训练实验"), TrainingPage);
-    sidebar_->addItem(tr("任务与产物"), TaskQueuePage);
-    sidebar_->addSection(uiText("模型与部署"));
-    sidebar_->addItem(tr("模型库"), ModelRegistryPage);
-    sidebar_->addItem(uiText("部署验证"), DeploymentPage);
-    sidebar_->addSection(tr("系统"));
-    sidebar_->addItem(tr("环境"), EnvironmentPage);
-    sidebar_->addItem(uiText("系统设置"), SystemSettingsPage);
+    sidebar_->addSection(aitrain_app::workbenchText(QStringLiteral("工作区")));
+    sidebar_->addItem(aitrain_app::workbenchText(QStringLiteral("数据集")), DatasetPage);
+    sidebar_->addItem(aitrain_app::workbenchText(QStringLiteral("训练")), TrainingPage);
+    sidebar_->addItem(aitrain_app::workbenchText(QStringLiteral("模型")), ModelRegistryPage);
+    sidebar_->addToolItem(aitrain_app::workbenchText(QStringLiteral("环境与诊断")), EnvironmentPage);
+    sidebar_->addToolItem(aitrain_app::workbenchText(QStringLiteral("设置")), SystemSettingsPage);
     rootLayout->addWidget(sidebar_);
 
     auto* content = new QWidget;
@@ -128,12 +121,24 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     contentLayout->addWidget(stack_, 1);
 
     rootLayout->addWidget(content, 1);
-    inspector_ = qobject_cast<QFrame*>(buildInspector());
-    rootLayout->addWidget(inspector_);
     setCentralWidget(central);
 
-    statusBar()->showMessage(tr("就绪"));
-    statusBar()->setVisible(false);
+    statusBar()->setSizeGripEnabled(false);
+    statusBar()->addPermanentWidget(workerPill_);
+    auto* taskRecordButton = new QPushButton(aitrain_app::workbenchText(QStringLiteral("任务记录")));
+    taskRecordButton->setObjectName(QStringLiteral("ActivityTaskButton"));
+    connect(taskRecordButton, &QPushButton::clicked, this, [this]() {
+        showPage(TaskQueuePage, aitrain_app::workbenchText(QStringLiteral("任务记录")));
+        if (taskController_->taskId().isValid()) taskArtifactPageController_->openTask(taskController_->taskId().toString());
+    });
+    statusBar()->addPermanentWidget(taskRecordButton);
+    auto* hideActivity = new QPushButton(aitrain_app::workbenchText(QStringLiteral("收起")));
+    statusBar()->addPermanentWidget(hideActivity);
+    connect(hideActivity, &QPushButton::clicked, this, [this]() { statusBar()->hide(); });
+    connect(taskController_, &TaskRuntimeController::stateChanged, this, [this](TaskRuntimeController::State state) {
+        if (state != TaskRuntimeController::State::Idle) statusBar()->show();
+    });
+    statusBar()->hide();
 
     datasetPageController_ = new DatasetPageController(
         queryService, taskController_, this);
@@ -146,7 +151,6 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     connect(datasetPageController_, &DatasetPageController::selectionChanged,
         this, [this]() {
             updateTrainingSelectionSummary();
-            refreshTrainingDefaults();
         });
     connect(datasetPageController_, &DatasetPageController::repairLoopChanged,
         this, &MainWindow::setDatasetRepairLoopRows);
@@ -168,6 +172,7 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
         taskController_, this);
     trainingPageController_ = new TrainingPageController(
         taskController_, this);
+    trainingPageController_->setQueryService(queryService);
     trainingPageController_->setWorkerExecutable(workerExecutablePath());
     connect(trainingPageController_, &TrainingPageController::runStarted,
         this, [this](const QString& taskId) {
@@ -177,6 +182,7 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
             updateRecentTasks();
         });
     runtimeDeliveryPageController_->setWorkerExecutable(workerExecutablePath());
+    runtimeDeliveryPageController_->setQueryService(queryService);
     connect(runtimeDeliveryPageController_,
         &RuntimeDeliveryPageController::runStarted, this, [this]() {
             workerPill_->setStatus(
@@ -346,7 +352,7 @@ MainWindow::MainWindow(const QString& licenseOwner, const QString& licenseExpiry
     });
 
     updateHeaderState();
-    showPage(TrainingPage, tr("训练实验"));
+    showPage(ProjectPage, aitrain_app::workbenchText(QStringLiteral("项目")));
     updateHeaderState();
     updateResponsiveChrome();
     updateDashboardSummary();
@@ -378,20 +384,9 @@ void MainWindow::resizeEvent(QResizeEvent* event)
 
 void MainWindow::updateResponsiveChrome()
 {
-    const int width = this->width();
     if (sidebar_) {
-        const bool compact = width < 1366;
-        sidebar_->setCompact(compact);
-        sidebar_->setFixedWidth(compact ? 72 : (width >= 1600 ? 216 : 200));
-    }
-    if (inspectorToggleButton_ && !inspectorUserOverride_) {
-        applyingResponsiveChrome_ = true;
-        inspectorToggleButton_->setChecked(width >= 1366);
-        applyingResponsiveChrome_ = false;
-    }
-    if (inspector_) {
-        inspector_->setVisible(!inspectorToggleButton_ || inspectorToggleButton_->isChecked());
-        inspector_->setFixedWidth(width >= 1600 ? 304 : 272);
+        sidebar_->setCompact(false);
+        sidebar_->setFixedWidth(width() < 1180 ? 176 : 192);
     }
 }
 
@@ -476,7 +471,7 @@ void MainWindow::loadCapabilityCombos()
     }
     if (stack_ && stack_->widget(TrainingPage)
         && stack_->widget(TrainingPage)->property("workspaceInitialized").toBool()) {
-        refreshTrainingDefaults();
+        trainingPageController_->refreshCapabilities();
     }
 }
 

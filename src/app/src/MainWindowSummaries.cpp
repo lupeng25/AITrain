@@ -1,3 +1,4 @@
+#include "WorkbenchTranslation.h"
 #include "MainWindow.h"
 
 #include "DashboardPageController.h"
@@ -78,18 +79,22 @@ QString MainWindow::pageCaption(int pageIndex) const
 
 void MainWindow::showPage(int pageIndex, const QString& title)
 {
+    if (pageIndex < 0 || pageIndex >= PageCount) return;
     ensureWorkspacePage(pageIndex);
     stack_->setCurrentIndex(pageIndex);
     if (workspaceRouter_) {
         workspaceRouter_->synchronize(pageIndex, title);
     }
-    if (pageIndex == TrainingPage) {
-        loadCapabilityCombos();
+    const bool workspace = pageIndex == DatasetPage || pageIndex == TrainingPage
+        || pageIndex == ModelRegistryPage;
+    if (workspace) lastWorkspacePage_ = pageIndex;
+    if (returnToWorkspaceButton_) {
+        returnToWorkspaceButton_->setVisible(!workspace && !currentProjectPath().isEmpty());
     }
     pageTitle_->setText(title);
     pageCaption_->setText(QStringLiteral("%1 / %2")
         .arg(currentProjectName().isEmpty() ? uiText("本地工作台") : currentProjectName(), title));
-    sidebar_->setCurrentIndex(pageIndex);
+    sidebar_->setCurrentIndex(pageIndex == DeploymentPage ? ModelRegistryPage : pageIndex);
     if (pageIndex == TaskQueuePage) {
         updateRecentTasks();
     }
@@ -97,11 +102,12 @@ void MainWindow::showPage(int pageIndex, const QString& title)
         updateModelRegistry();
     }
     if (pageIndex == DatasetPage) {
+        datasetPageController_->refreshCatalog();
         if (!datasetPageController_->state().sampleReviewSamples.isEmpty()) {
             datasetPageController_->refreshSampleReview();
         }
     }
-    if (pageIndex == EnvironmentPage) {
+    if (pageIndex == EvidencePage) {
         updateDeliveryAcceptanceSummary();
     }
     if (pageIndex == SystemSettingsPage) {
@@ -112,9 +118,8 @@ void MainWindow::showPage(int pageIndex, const QString& title)
 void MainWindow::showDatasetTab(int tabIndex)
 {
     showPage(DatasetPage, uiText("数据集"));
-    if (datasetPage_ && datasetPage_->tabs) {
-        datasetPage_->tabs->setCurrentIndex(tabIndex);
-    }
+    if (datasetPage_) datasetPage_->showView(tabIndex == 1
+        ? DatasetWorkspacePage::Review : DatasetWorkspacePage::Catalog);
 }
 
 void MainWindow::showDeploymentTab(int tabIndex)
@@ -135,6 +140,7 @@ void MainWindow::updateHeaderState()
         headerProjectLabel_->setText(currentProjectPath().isEmpty()
             ? uiText("未打开项目")
             : currentProjectName());
+        headerProjectLabel_->setToolTip(currentProjectName());
     }
     if (pageContextPill_) {
         pageContextPill_->setStatus(currentProjectPath().isEmpty() ? uiText("项目未打开") : uiText("项目已就绪"),
@@ -144,20 +150,6 @@ void MainWindow::updateHeaderState()
     if (capabilityPill_) {
         capabilityPill_->setStatus(uiText("内置能力 %1").arg(capabilityCount),
             capabilityCount > 0 ? StatusPill::Tone::Success : StatusPill::Tone::Warning);
-    }
-    if (inspectorProjectLabel_) {
-        inspectorProjectLabel_->setText(currentProjectPath().isEmpty()
-                ? uiText("未打开项目")
-                : currentProjectName());
-    }
-    if (inspectorCapabilityLabel_) {
-        inspectorCapabilityLabel_->setText(uiText("内置能力 %1 项").arg(capabilityCount));
-    }
-    if (inspectorWorkerLabel_) {
-        inspectorWorkerLabel_->setText(workerPill_ ? workerPill_->text() : uiText("Worker：等待连接"));
-    }
-    if (inspectorGpuLabel_) {
-        inspectorGpuLabel_->setText(gpuPill_ ? gpuPill_->text() : uiText("GPU：等待环境检查"));
     }
     if (settingsPage_) {
         settingsPageController_->refreshCapabilities();
@@ -184,6 +176,7 @@ void MainWindow::ensureWorkspacePage(int pageIndex)
     case DeploymentPage: page = buildDeploymentPage(); break;
     case EnvironmentPage: page = buildEnvironmentPage(); break;
     case SystemSettingsPage: page = buildSystemSettingsPage(); break;
+    case EvidencePage: page = buildDeliveryEvidencePanel(); break;
     default: return;
     }
 
@@ -192,9 +185,6 @@ void MainWindow::ensureWorkspacePage(int pageIndex)
     delete placeholder;
     stack_->insertWidget(pageIndex, page);
 
-    if (pageIndex == TrainingPage) {
-        refreshTrainingDefaults();
-    }
     if (pageIndex == SystemSettingsPage) {
         settingsPageController_->refresh();
     }
@@ -233,6 +223,15 @@ void MainWindow::updateDashboardSummary()
         environmentText = hasMissing ? uiText("缺失")
             : (hasWarning ? uiText("警告") : uiText("通过"));
     }
+    if (gpuPill_) {
+        gpuPill_->setStatus(hasChecked
+                ? (hasMissing ? aitrain_app::workbenchText(QStringLiteral("环境有缺失项"))
+                    : (hasWarning ? aitrain_app::workbenchText(QStringLiteral("环境有警告")) : aitrain_app::workbenchText(QStringLiteral("环境已检查"))))
+                : aitrain_app::workbenchText(QStringLiteral("环境待检查")),
+            !hasChecked ? StatusPill::Tone::Neutral
+                : (hasMissing || hasWarning ? StatusPill::Tone::Warning : StatusPill::Tone::Success));
+        gpuPill_->setToolTip(aitrain_app::workbenchText(QStringLiteral("打开环境与诊断查看各后端的设备和依赖检查结果。")));
+    }
     dashboardPageController_->setContext(
         !currentProjectPath().isEmpty() && projectSessionController_
             && projectSessionController_->isOpen(),
@@ -248,31 +247,17 @@ void MainWindow::updateDashboardSummary()
 
 void MainWindow::updateTrainingSelectionSummary()
 {
-    const QString datasetPath = datasetPageController_->state().currentPath;
     const QString datasetFormat = datasetPageController_->state().currentFormat;
     const bool hasCommittedIdentity = datasetPageController_->state().currentValid
         && !datasetPageController_->state().currentDatasetId.isEmpty()
         && !datasetPageController_->state().currentDatasetVersionId.isEmpty()
         && !datasetPageController_->state().currentSnapshotId.isEmpty()
         && !datasetPageController_->state().currentSnapshotArtifactId.isEmpty();
-    const QString state = hasCommittedIdentity ? uiText("已提交快照")
-        : (datasetPageController_->state().currentValid ? uiText("已校验") : uiText("待校验"));
-    const QString snapshotId =
-        datasetPageController_->state().currentSnapshotId;
-    const QString snapshotArtifactId =
-        datasetPageController_->state().currentSnapshotArtifactId;
-    QString snapshotText = snapshotId.isEmpty()
-        ? uiText("快照：尚未选择 committed Snapshot 身份")
-        : uiText("快照：%1 | Artifact %2").arg(snapshotId.left(12), snapshotArtifactId.left(12));
     if (datasetPage_ && datasetPage_->datasetDetailLabel) {
         datasetPage_->datasetDetailLabel->setText(hasCommittedIdentity
-            ? uiText("格式：%1 | 状态：%2 | Dataset：%3\n%4")
-                .arg(datasetFormatLabel(datasetFormat), state,
-                    datasetPageController_->state().currentDatasetId.left(12), snapshotText)
-            : (datasetPath.isEmpty()
-                ? uiText("选择已登记快照或导入数据集后显示格式、校验状态和最近报告。")
-                : uiText("格式：%1 | 状态：%2\n外部数据仅停留在导入边界，请先创建并提交 Snapshot Artifact。\n%3")
-                    .arg(datasetFormatLabel(datasetFormat), state, snapshotText)));
+            ? aitrain_app::workbenchText(QStringLiteral("%1 · %2 · 已提交快照"))
+                .arg(datasetPageController_->state().currentDisplayName, datasetFormatLabel(datasetFormat))
+            : aitrain_app::workbenchText(QStringLiteral("选择或导入数据后查看样本与版本。")));
     }
 }
 
@@ -284,6 +269,8 @@ void MainWindow::refreshTrainingDefaults()
     binding.snapshotId = datasetPageController_->state().currentSnapshotId;
     binding.snapshotArtifactId = datasetPageController_->state().currentSnapshotArtifactId;
     binding.datasetFormat = datasetPageController_->state().currentFormat;
+    binding.displayName = datasetPageController_->state().currentDisplayName;
+    binding.deploymentSampleRelativePath = datasetPageController_->state().currentSampleRelativePath;
     if (trainingPageController_) {
         trainingPageController_->setDatasetBinding(binding);
     }

@@ -50,8 +50,13 @@ bool ModelCatalogRepository::read(const ModelPackageId& modelPackageId,
     }
     QSqlQuery query(database_.connection());
     query.prepare(QStringLiteral(
-        "select source_artifact_id, manifest_json, created_at, "
-        "source_snapshot_binding from model_packages where id = :id"));
+        "select m.source_artifact_id, m.manifest_json, m.created_at, "
+        "m.source_snapshot_binding, validation.id, validation.state "
+        "from model_packages m left join tasks validation on validation.id = ("
+        " select w.task_id from workflow_input_bindings b "
+        " join workflow_runs w on w.id = b.workflow_run_id "
+        " where b.model_package_id = m.id and w.template_id = 'runtime-delivery' "
+        " order by w.created_at desc, w.id desc limit 1) where m.id = :id"));
     query.bindValue(QStringLiteral(":id"), modelPackageId.toString());
     if (!query.exec() || !query.next()) {
         if (error) {
@@ -91,18 +96,23 @@ bool ModelCatalogRepository::read(const ModelPackageId& modelPackageId,
     result->sourceArtifactId = sourceArtifactId;
     result->createdAt = parseUtc(query.value(2).toString());
     result->sourceSnapshotBinding = binding;
+    result->latestValidationTaskId = {};
+    const QString validationTask = query.value(4).toString();
+    if (!validationTask.isEmpty() && !TaskId::parse(validationTask, &result->latestValidationTaskId, error)) return false;
+    result->latestValidationState = query.value(5).toString();
     return true;
 }
 
 Page<ModelPackageSnapshot> ModelCatalogRepository::page(
-    const PageRequest& request, QString* error) const
+    const PageRequest& request, QString* error, const CatalogFilter& filter) const
 {
     using storage_internal::PageCursor;
     Page<ModelPackageSnapshot> result;
     PageCursor cursor;
+    const QString queryType = storage_internal::catalogQueryType(QStringLiteral("model_packages"), filter);
     if (!database_.isOpen()
         || !storage_internal::validatePageRequest(request,
-            QStringLiteral("model_packages"), &cursor, error)) {
+            queryType, &cursor, error)) {
         if (error && error->isEmpty()) {
             *error = QStringLiteral("查询模型包目录需要已打开的数据库。");
         }
@@ -110,15 +120,19 @@ Page<ModelPackageSnapshot> ModelCatalogRepository::page(
     }
 
     QSqlQuery query(database_.connection());
-    QString sql = QStringLiteral("select id from model_packages ");
+    QString sql = QStringLiteral("select id from model_packages where 1=1 ");
+    sql += storage_internal::catalogKindClause(filter, QStringLiteral("task_type"));
+    if (!filter.text.trimmed().isEmpty()) sql += QStringLiteral(
+        "and instr(lower(model_family || ' ' || task_type || ' ' || source_backend || ' ' || id || ' ' || created_at), :search) > 0 ");
     if (!request.after.isEmpty()) {
         sql += QStringLiteral(
-            "where (created_at < :after_time "
+            "and (created_at < :after_time "
             "or (created_at = :after_time and id < :after_id)) ");
     }
     sql += QStringLiteral(
         "order by created_at desc, id desc limit :limit");
     query.prepare(sql);
+    storage_internal::bindCatalogFilter(query, filter);
     if (!request.after.isEmpty()) {
         query.bindValue(QStringLiteral(":after_time"), cursor.timestamp);
         query.bindValue(QStringLiteral(":after_id"), cursor.id);
@@ -145,7 +159,7 @@ Page<ModelPackageSnapshot> ModelCatalogRepository::page(
     if (result.hasMore && !result.items.isEmpty()) {
         const ModelPackageSnapshot& last = result.items.constLast();
         result.nextCursor = storage_internal::encodePageCursor(
-            QStringLiteral("model_packages"),
+            queryType,
             {last.createdAt.toUTC().toString(Qt::ISODateWithMs),
                 last.manifest.modelPackageId.toString()});
     }

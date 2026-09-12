@@ -2,7 +2,7 @@
 
 #include "TaskArtifactPresenter.h"
 
-#include <QScrollArea>
+#include "WorkbenchWidgets.h"
 
 class QComboBox;
 class QLineEdit;
@@ -14,12 +14,13 @@ class TaskListTableModel;
 
 // “任务与产物”页面只拥有视觉控件和表格模型。查询、分页、选择与
 // 命令协调由 TaskArtifactPageController 负责。
-class TaskArtifactPage final : public QScrollArea {
+class TaskArtifactPage final : public aitrain_app::WorkspaceViewHost {
     Q_OBJECT
 
 public:
     explicit TaskArtifactPage(QWidget* parent = nullptr);
 
+    void showTaskDetails() { setMode(1); }
     void setPresenter(TaskArtifactPresenter* presenter);
     void setRows(const QVector<TaskListItem>& rows, bool hasMore);
     void setDetails(const TaskArtifactDetails& details);
@@ -28,6 +29,8 @@ public:
     void applyFilter(const QString& taskKind, const QString& taskState,
         const QString& query);
     QString selectedTaskId() const;
+    QString selectedArtifactMember() const;
+    void restoreArtifactMember(const QString& member);
 
 signals:
     void refreshRequested();

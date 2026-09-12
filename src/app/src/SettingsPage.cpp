@@ -1,3 +1,4 @@
+#include "WorkbenchTranslation.h"
 #include "SettingsPage.h"
 
 #include "InfoPanel.h"
@@ -5,6 +6,7 @@
 
 #include <QAbstractItemView>
 #include <QDir>
+#include <QComboBox>
 #include <QFormLayout>
 #include <QFrame>
 #include <QGridLayout>
@@ -15,7 +17,8 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSignalBlocker>
-#include <QTabWidget>
+#include <QStackedWidget>
+#include <QListWidget>
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QToolButton>
@@ -48,19 +51,19 @@ SettingsWorkspacePage::SettingsWorkspacePage(const QString& licenseOwner,
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(18, 0, 18, 18);
     layout->setSpacing(16);
-    layout->addWidget(createWorkbenchHeader(
-        QStringLiteral("SYSTEM SETTINGS"),
-        tr("系统设置"),
-        tr("管理内置能力、界面语言、默认目录和授权状态。"),
-        nullptr,
-        QStringList() << tr("内置能力") << tr("偏好设置")));
+    auto* body = new QHBoxLayout;
+    auto* categories = new QListWidget; categories->addItems({aitrain_app::workbenchText(QStringLiteral("内置能力")), aitrain_app::workbenchText(QStringLiteral("应用偏好与许可"))}); categories->setFixedWidth(150);
+    categories->setWordWrap(true);
+    categories->setResizeMode(QListView::Adjust);
+    categories->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    for (int row = 0; row < categories->count(); ++row) categories->item(row)->setToolTip(categories->item(row)->text());
+    tabs_ = new QStackedWidget; tabs_->setObjectName(QStringLiteral("SettingsViews"));
+    tabs_->addWidget(buildCapabilitiesPanel()); tabs_->addWidget(buildApplicationSettingsPanel(licenseOwner, licenseExpiry));
+    body->addWidget(categories); body->addWidget(tabs_, 1); layout->addLayout(body, 1);
+    connect(categories, &QListWidget::currentRowChanged, tabs_, &QStackedWidget::setCurrentIndex);
+    connect(tabs_, &QStackedWidget::currentChanged, categories, QOverload<int>::of(&QListWidget::setCurrentRow));
+    categories->setCurrentRow(1);
 
-    tabs_ = new QTabWidget;
-    tabs_->setObjectName(QStringLiteral("SystemSettingsTabs"));
-    tabs_->addTab(buildCapabilitiesPanel(), tr("内置能力"));
-    tabs_->addTab(buildApplicationSettingsPanel(licenseOwner, licenseExpiry),
-        tr("应用设置"));
-    layout->addWidget(tabs_, 1);
 }
 
 QWidget* SettingsWorkspacePage::buildCapabilitiesPanel()
@@ -142,11 +145,8 @@ QWidget* SettingsWorkspacePage::buildCapabilitiesPanel()
 QWidget* SettingsWorkspacePage::buildApplicationSettingsPanel(
     const QString& licenseOwner, const QString& licenseExpiry)
 {
-    auto* page = new QScrollArea;
-    page->setWidgetResizable(true);
-    page->setFrameShape(QFrame::NoFrame);
-    auto* content = new QWidget;
-    auto* layout = new QVBoxLayout(content);
+    auto* page = new QWidget;
+    auto* layout = new QVBoxLayout(page);
     layout->setContentsMargins(0, 12, 0, 0);
     layout->setSpacing(16);
 
@@ -182,6 +182,13 @@ QWidget* SettingsWorkspacePage::buildApplicationSettingsPanel(
     connect(enLanguageButton_, &QToolButton::clicked, this,
         [this]() { emit languageRequested(QStringLiteral("en_US")); });
     languagePanel->bodyLayout()->addWidget(languageRow);
+    auto* themeRow = new QHBoxLayout;
+    themeRow->addWidget(new QLabel(tr("外观主题")));
+    auto* theme = new QComboBox; theme->setObjectName(QStringLiteral("SettingsTheme"));
+    theme->addItem(tr("浅色"), QStringLiteral("light")); theme->addItem(tr("深色"), QStringLiteral("dark"));
+    themeRow->addWidget(theme); themeRow->addWidget(mutedLabel(tr("立即生效，重启后保留。")), 1);
+    languagePanel->bodyLayout()->addLayout(themeRow);
+    connect(theme, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, theme]() { emit themeRequested(theme->currentData().toString()); });
 
     auto* projectPathPanel = new InfoPanel(tr("默认项目目录"));
     auto* projectPathForm = new QFormLayout;
@@ -258,10 +265,10 @@ QWidget* SettingsWorkspacePage::buildApplicationSettingsPanel(
     layout->addWidget(languagePanel);
     layout->addWidget(projectPathPanel);
     layout->addWidget(licensePanel);
-    layout->addWidget(entryPanel);
-    layout->addWidget(boundaryPanel);
+    delete entryPanel;
+    delete boundaryPanel;
     layout->addStretch();
-    page->setWidget(content);
+
     return page;
 }
 
@@ -311,7 +318,7 @@ void SettingsWorkspacePage::setCapabilities(
         const int row = capabilityTable_->rowCount();
         capabilityTable_->insertRow(row);
         capabilityTable_->setItem(row, 0, new QTableWidgetItem(capability.id));
-        capabilityTable_->setItem(row, 1, new QTableWidgetItem(capability.displayName));
+        capabilityTable_->setItem(row, 1, new QTableWidgetItem(aitrain_app::workbenchText(capability.displayName)));
         capabilityTable_->setItem(row, 2, new QTableWidgetItem(tr("内置")));
         capabilityTable_->setItem(row, 3, new QTableWidgetItem(capability.taskTypes));
         capabilityTable_->setItem(row, 4, new QTableWidgetItem(capability.datasetFormats));
@@ -336,4 +343,10 @@ void SettingsWorkspacePage::showTab(int tabIndex)
     if (tabs_ && tabIndex >= 0 && tabIndex < tabs_->count()) {
         tabs_->setCurrentIndex(tabIndex);
     }
+}
+
+void SettingsWorkspacePage::setThemeCode(const QString& theme)
+{
+    auto* combo = findChild<QComboBox*>(QStringLiteral("SettingsTheme"));
+    const QSignalBlocker blocker(combo); combo->setCurrentIndex(qMax(0, combo->findData(theme)));
 }

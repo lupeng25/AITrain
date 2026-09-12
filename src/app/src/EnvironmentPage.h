@@ -19,6 +19,7 @@ public:
 
 signals:
     void runRequested();
+    void diagnosticsRequested();
 
 private:
     void updateSummary();

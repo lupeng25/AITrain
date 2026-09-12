@@ -4,6 +4,9 @@
 
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
+#include <QSqlQuery>
+#include <QVariant>
 #include <QString>
 
 namespace aitrain::storage_internal {
@@ -14,6 +17,33 @@ struct PageCursor final {
     QString timestamp;
     QString id;
 };
+
+inline QString catalogQueryType(const QString& type, const CatalogFilter& filter)
+{
+    if (filter.text.trimmed().isEmpty() && filter.kinds.isEmpty() && filter.state.isEmpty()) return type;
+    auto kinds = filter.kinds; kinds.removeDuplicates(); kinds.sort();
+    return type + QLatin1Char('/') + QString::fromUtf8(QJsonDocument(QJsonObject{
+        {QStringLiteral("text"), filter.text.trimmed()},
+        {QStringLiteral("kinds"), QJsonArray::fromStringList(kinds)},
+        {QStringLiteral("state"), filter.state}}).toJson(QJsonDocument::Compact));
+}
+
+inline QString catalogKindClause(const CatalogFilter& filter, const QString& column)
+{
+    if (filter.kinds.isEmpty()) return {};
+    QStringList parameters;
+    for (int i = 0; i < filter.kinds.size(); ++i) parameters.append(QStringLiteral(":kind_%1").arg(i));
+    return QStringLiteral(" and %1 in (%2) ").arg(column, parameters.join(QLatin1Char(',')));
+}
+
+inline void bindCatalogFilter(QSqlQuery& query, const CatalogFilter& filter)
+{
+    if (!filter.text.trimmed().isEmpty()) {
+        query.bindValue(QStringLiteral(":search"), filter.text.trimmed().toLower());
+    }
+    for (int i = 0; i < filter.kinds.size(); ++i) query.bindValue(QStringLiteral(":kind_%1").arg(i), filter.kinds.at(i));
+    if (!filter.state.isEmpty()) query.bindValue(QStringLiteral(":state"), filter.state);
+}
 
 inline QString encodePageCursor(
     const QString& queryType, const PageCursor& cursor)

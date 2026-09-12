@@ -7,6 +7,7 @@ class DiagnosticBundlePresenter;
 class DeliveryEvidenceWorkspacePage;
 class QLineEdit;
 class TaskRuntimeController;
+struct TaskViewState;
 namespace aitrain { class ProjectQueryService; }
 
 class DeliveryEvidencePageController final : public QObject
@@ -23,6 +24,7 @@ public:
     void setWorkerExecutable(const QString& executable);
     void browseReport(QLineEdit* target);
     void refresh();
+    void applyTaskViewState(const TaskViewState& state);
 
 public slots:
     void importOcrOfficialReports();
@@ -36,6 +38,8 @@ signals:
 
 private:
     void render();
+    void bindSnapshot(int index);
+    void selectReport(int index);
 
     DeliveryEvidenceWorkspacePage* page_ = nullptr;
     DeliveryEvidencePresenter* presenter_ = nullptr;
@@ -44,4 +48,6 @@ private:
     bool projectOpen_ = false;
     QString projectRoot_;
     QString workerExecutable_;
+    const aitrain::ProjectQueryService* queryService_ = nullptr;
+    QString activeTaskId_;
 };

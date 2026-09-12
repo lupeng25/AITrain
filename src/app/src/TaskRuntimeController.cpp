@@ -1,3 +1,4 @@
+#include "WorkbenchTranslation.h"
 #include "TaskRuntimeController.h"
 
 #include "WorkerClient.h"
@@ -90,7 +91,7 @@ bool TaskRuntimeController::start(const QString& workerProgram,
     QString* error)
 {
     if (state_ != State::Idle) {
-        if (error) *error = QStringLiteral("TaskRuntimeController 当前不是 Idle。");
+        if (error) *error = aitrain_app::workbenchText(QStringLiteral("TaskRuntimeController 当前不是 Idle。"));
         return false;
     }
     taskId_ = std::visit([](const auto& value) { return value.context.taskId; },

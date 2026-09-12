@@ -193,6 +193,11 @@ void RuntimeDeliveryWorkflowTests::successCommitsSixChainedStepsAndFourEvidenceF
     QCOMPARE(result.state, aitrain::WorkflowStepState::Succeeded);
     QCOMPARE(result.runtimeStatus, aitrain::RuntimeStatus::Available);
     QVERIFY(evidenceHasAllFormats(result.evidence));
+    const auto packages = workspace.modelPackages({50, {}}, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(packages.items.size(), 1);
+    QCOMPARE(packages.items.first().latestValidationTaskId, taskId);
+    QVERIFY(!packages.items.first().latestValidationState.isEmpty());
     const auto steps = workspace.workflowSteps(result.workflowRunId, &error);
     QCOMPARE(steps.size(), 6);
     aitrain::ProjectStore lineageStorage;

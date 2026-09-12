@@ -10,6 +10,8 @@
 #include <QWidget>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
+#include <QResizeEvent>
+#include <QTimer>
 
 Sidebar::Sidebar(QWidget* parent)
     : QFrame(parent)
@@ -38,6 +40,8 @@ Sidebar::Sidebar(QWidget* parent)
     brandTitle_->setObjectName(QStringLiteral("BrandTitle"));
     brandSubtitle_ = new QLabel(tr("本地训练工作台"));
     brandSubtitle_->setObjectName(QStringLiteral("BrandSubtitle"));
+    brandSubtitle_->setProperty("fullText", brandSubtitle_->text());
+    brandSubtitle_->setMinimumWidth(0);
     brandTextLayout->addWidget(brandTitle_);
     brandTextLayout->addWidget(brandSubtitle_);
     brandLayout->addWidget(brandIcon);
@@ -50,20 +54,9 @@ Sidebar::Sidebar(QWidget* parent)
     layout->addLayout(itemsLayout_);
     layout->addStretch();
 
-    auto* footer = new QFrame;
-    footer->setObjectName(QStringLiteral("SidebarFooter"));
-    auto* footerLayout = new QHBoxLayout(footer);
-    footerLayout->setContentsMargins(0, 8, 0, 0);
-    footerLayout->setSpacing(9);
-    auto* avatar = new QLabel(QStringLiteral("LM"));
-    avatar->setObjectName(QStringLiteral("SidebarAvatar"));
-    avatar->setAlignment(Qt::AlignCenter);
-    avatar->setFixedSize(30, 30);
-    userText_ = new QLabel(QStringLiteral("Local Admin\n工作站 · 在线"));
-    userText_->setObjectName(QStringLiteral("SidebarUserText"));
-    footerLayout->addWidget(avatar);
-    footerLayout->addWidget(userText_, 1);
-    layout->addWidget(footer);
+    toolsLayout_ = new QVBoxLayout;
+    toolsLayout_->setSpacing(4);
+    layout->addLayout(toolsLayout_);
 
     buttons_.setExclusive(true);
 }
@@ -113,8 +106,23 @@ void Sidebar::addSection(const QString& text)
     itemsLayout_->addWidget(label);
 }
 
+void Sidebar::addToolItem(const QString& text, int pageIndex)
+{
+    auto* button = new QPushButton(text);
+    button->setObjectName(QStringLiteral("SidebarToolButton"));
+    button->setProperty("fullText", text);
+    button->setToolTip(text);
+    button->setProperty("workspaceTool", true);
+    button->setCursor(Qt::PointingHandCursor);
+    connect(button, &QPushButton::clicked, this, [this, pageIndex, text]() {
+        emit pageRequested(pageIndex, text);
+    });
+    toolsLayout_->addWidget(button);
+}
+
 void Sidebar::setCompact(bool compact)
 {
+    compact_ = compact;
     setFixedWidth(compact ? 72 : width() >= 210 ? width() : 200);
     if (brandTitle_) brandTitle_->setVisible(!compact);
     if (brandSubtitle_) brandSubtitle_->setVisible(!compact);
@@ -131,6 +139,25 @@ void Sidebar::setCompact(bool compact)
     if (auto* root = qobject_cast<QVBoxLayout*>(layout())) {
         root->setContentsMargins(compact ? 10 : 16, 14, compact ? 10 : 16, 12);
     }
+}
+
+void Sidebar::resizeEvent(QResizeEvent* event)
+{
+    QFrame::resizeEvent(event);
+    QTimer::singleShot(0, this, [this]() {
+        for (auto* button : findChildren<QPushButton*>()) {
+            const QString full = button->property("fullText").toString();
+            if (full.isEmpty()) continue;
+            const QString visible = compact_ ? (button->icon().isNull() ? full.left(1) : QString())
+                : button->fontMetrics().elidedText(full, Qt::ElideRight, qMax(1, button->width() - 28 - (button->icon().isNull() ? 0 : 23)));
+            button->setText(visible); button->setToolTip(full); button->setAccessibleName(full);
+        }
+        if (brandSubtitle_) {
+            const QString full = brandSubtitle_->property("fullText").toString();
+            brandSubtitle_->setText(brandSubtitle_->fontMetrics().elidedText(full, Qt::ElideRight, brandSubtitle_->width()));
+            brandSubtitle_->setToolTip(full);
+        }
+    });
 }
 
 void Sidebar::setCurrentIndex(int pageIndex)

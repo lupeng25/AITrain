@@ -1,3 +1,4 @@
+#include "WorkbenchTranslation.h"
 #include "TaskArtifactPresenter.h"
 
 #include <QDateTime>
@@ -17,53 +18,53 @@ QString localTimeText(const QDateTime& value)
 QString taskStateLabel(aitrain::TaskState state)
 {
     switch (state) {
-    case aitrain::TaskState::Created: return QStringLiteral("已创建");
-    case aitrain::TaskState::Queued: return QStringLiteral("排队中");
-    case aitrain::TaskState::Starting: return QStringLiteral("启动中");
-    case aitrain::TaskState::Running: return QStringLiteral("运行中");
-    case aitrain::TaskState::CancelRequested: return QStringLiteral("取消中");
-    case aitrain::TaskState::Succeeded: return QStringLiteral("已完成");
-    case aitrain::TaskState::Failed: return QStringLiteral("失败");
-    case aitrain::TaskState::Canceled: return QStringLiteral("已取消");
+    case aitrain::TaskState::Created: return aitrain_app::workbenchText(QStringLiteral("已创建"));
+    case aitrain::TaskState::Queued: return aitrain_app::workbenchText(QStringLiteral("排队中"));
+    case aitrain::TaskState::Starting: return aitrain_app::workbenchText(QStringLiteral("启动中"));
+    case aitrain::TaskState::Running: return aitrain_app::workbenchText(QStringLiteral("运行中"));
+    case aitrain::TaskState::CancelRequested: return aitrain_app::workbenchText(QStringLiteral("取消中"));
+    case aitrain::TaskState::Succeeded: return aitrain_app::workbenchText(QStringLiteral("已完成"));
+    case aitrain::TaskState::Failed: return aitrain_app::workbenchText(QStringLiteral("失败"));
+    case aitrain::TaskState::Canceled: return aitrain_app::workbenchText(QStringLiteral("已取消"));
     }
-    return QStringLiteral("未知");
+    return aitrain_app::workbenchText(QStringLiteral("未知"));
 }
 
 QString failureCatalogAction(aitrain::FailureCode code)
 {
     switch (code) {
     case aitrain::FailureCode::Canceled:
-        return QStringLiteral("任务已取消；如需重试，请重新派发同一 Workflow。");
+        return aitrain_app::workbenchText(QStringLiteral("任务已取消；如需重试，请重新派发同一 Workflow。"));
     case aitrain::FailureCode::InvalidRequest:
-        return QStringLiteral("检查请求中的登记 ID、格式和结构化参数。");
+        return aitrain_app::workbenchText(QStringLiteral("检查请求中的登记 ID、格式和结构化参数。"));
     case aitrain::FailureCode::InvalidDataset:
-        return QStringLiteral("返回数据集页重新校验已登记 Snapshot。");
+        return aitrain_app::workbenchText(QStringLiteral("返回数据集页重新校验已登记 Snapshot。"));
     case aitrain::FailureCode::ArtifactIncomplete:
-        return QStringLiteral("在任务与产物页核对 committed Artifact 清单和哈希。");
+        return aitrain_app::workbenchText(QStringLiteral("在任务与产物页核对 committed Artifact 清单和哈希。"));
     case aitrain::FailureCode::BackendUnsupported:
-        return QStringLiteral("检查内置能力矩阵和当前 Profile 的后端边界。");
+        return aitrain_app::workbenchText(QStringLiteral("检查内置能力矩阵和当前 Profile 的后端边界。"));
     case aitrain::FailureCode::RuntimeNotImplemented:
-        return QStringLiteral("切换到产品支持的 runtime 路由；当前能力尚未实现。");
+        return aitrain_app::workbenchText(QStringLiteral("切换到产品支持的 runtime 路由；当前能力尚未实现。"));
     case aitrain::FailureCode::DependencyMissing:
-        return QStringLiteral("进入环境页补齐缺失依赖后重试。");
+        return aitrain_app::workbenchText(QStringLiteral("进入环境页补齐缺失依赖后重试。"));
     case aitrain::FailureCode::SdkMissing:
-        return QStringLiteral("安装并启用目标 SDK，再重新执行部署验证。");
+        return aitrain_app::workbenchText(QStringLiteral("安装并启用目标 SDK，再重新执行部署验证。"));
     case aitrain::FailureCode::HardwareUnsupported:
-        return QStringLiteral("当前硬件不在产品支持矩阵内，不能将结果标记为通过。");
+        return aitrain_app::workbenchText(QStringLiteral("当前硬件不在产品支持矩阵内，不能将结果标记为通过。"));
     case aitrain::FailureCode::ArtifactIncompatible:
-        return QStringLiteral("重新导入带完整 Manifest、入口和哈希的模型包。");
+        return aitrain_app::workbenchText(QStringLiteral("重新导入带完整 Manifest、入口和哈希的模型包。"));
     case aitrain::FailureCode::ProcessCrashed:
-        return QStringLiteral("查看诊断 Artifact 和官方日志，确认 Worker/Python 进程退出原因。");
+        return aitrain_app::workbenchText(QStringLiteral("查看诊断 Artifact 和官方日志，确认 Worker/Python 进程退出原因。"));
     case aitrain::FailureCode::ProtocolViolation:
-        return QStringLiteral("检查 Worker 控制面令牌、任务身份和序列号，不要重放旧帧。");
+        return aitrain_app::workbenchText(QStringLiteral("检查 Worker 控制面令牌、任务身份和序列号，不要重放旧帧。"));
     case aitrain::FailureCode::Timeout:
-        return QStringLiteral("检查环境和输入规模；长任务应通过 Worker 重新派发。");
+        return aitrain_app::workbenchText(QStringLiteral("检查环境和输入规模；长任务应通过 Worker 重新派发。"));
     case aitrain::FailureCode::InternalError:
-        return QStringLiteral("保留 Evidence 和诊断 Artifact，修复后重新运行 Workflow。");
+        return aitrain_app::workbenchText(QStringLiteral("保留 Evidence 和诊断 Artifact，修复后重新运行 Workflow。"));
     case aitrain::FailureCode::None:
         return QString();
     }
-    return QStringLiteral("查看任务 Evidence 和诊断 Artifact。");
+    return aitrain_app::workbenchText(QStringLiteral("查看任务 Evidence 和诊断 Artifact。"));
 }
 
 } // namespace
@@ -81,7 +82,7 @@ bool TaskArtifactPresenter::refresh(const aitrain::PageRequest& request)
 {
     QString error;
     const aitrain::Page<aitrain::TaskSnapshot> page = queryService_
-        ? queryService_->recentTasks(request, &error)
+        ? queryService_->recentTasks(request, &error, filter_)
         : aitrain::Page<aitrain::TaskSnapshot>();
     if (!error.isEmpty()) {
         taskRows_.clear();
@@ -135,7 +136,7 @@ bool TaskArtifactPresenter::selectTask(const QString& taskIdText)
     aitrain::TaskReadModel model;
     if (!queryService_ || !queryService_->taskDetails(taskId, &model, &error)) {
         clearSelection();
-        fail(error.isEmpty() ? QStringLiteral("无法读取任务详情。") : error);
+        fail(error.isEmpty() ? aitrain_app::workbenchText(QStringLiteral("无法读取任务详情。")) : error);
         return false;
     }
 
@@ -159,16 +160,16 @@ bool TaskArtifactPresenter::selectTask(const QString& taskIdText)
     hasMoreMetrics_ = model.metricsHasMore;
     hasMoreWorkflows_ = model.workflowsHasMore;
 
-    details_.summary = QStringLiteral(" 任务 %1：%2 / %3 / %4，%5 个已提交产物文件，%6 个指标点，%7 个工作流步骤")
-        .arg(details_.taskId.left(8),
-            model.task.taskType.isEmpty() ? QStringLiteral("未记录类型") : model.task.taskType,
-            model.task.capabilityId.isEmpty() ? QStringLiteral("未记录能力") : model.task.capabilityId,
+    details_.summary = aitrain_app::workbenchText(QStringLiteral("%1 / %3（%2），已载入 %4 条产物记录，%5 个指标点，%6 个工作流步骤"))
+        .arg(
+            model.task.taskType.isEmpty() ? aitrain_app::workbenchText(QStringLiteral("未记录类型")) : model.task.taskType,
+            model.task.capabilityId.isEmpty() ? aitrain_app::workbenchText(QStringLiteral("未记录能力")) : model.task.capabilityId,
             taskStateLabel(model.task.state))
         .arg(details_.artifacts.size())
         .arg(details_.metrics.size())
         .arg(details_.workflowSteps.size());
     if (model.task.failure.isFailure()) {
-        details_.summary.append(QStringLiteral("\n失败代码：%1\n失败摘要：%2\n建议：%3")
+        details_.summary.append(aitrain_app::workbenchText(QStringLiteral("\n失败代码：%1\n失败摘要：%2\n建议：%3"))
             .arg(details_.failureCode, model.task.failure.message, details_.failureAction));
     }
 
@@ -261,7 +262,7 @@ bool TaskArtifactPresenter::selectArtifact(const QString& artifactIdText)
     aitrain::ArtifactId artifactId;
     QString error;
     if (!queryService_ || !aitrain::ArtifactId::parse(artifactIdText, &artifactId, &error)) {
-        fail(error.isEmpty() ? QStringLiteral("Artifact 文件查询服务不可用。") : error);
+        fail(error.isEmpty() ? aitrain_app::workbenchText(QStringLiteral("Artifact 文件查询服务不可用。")) : error);
         return false;
     }
     const auto artifact = std::find_if(details_.artifacts.cbegin(), details_.artifacts.cend(),
@@ -269,7 +270,7 @@ bool TaskArtifactPresenter::selectArtifact(const QString& artifactIdText)
             return item.artifactId == artifactIdText;
         });
     if (artifact == details_.artifacts.cend()) {
-        fail(QStringLiteral("所选 Artifact 不属于当前任务页。"));
+        fail(aitrain_app::workbenchText(QStringLiteral("所选 Artifact 不属于当前任务页。")));
         return false;
     }
     const auto page = queryService_->artifactFiles(artifactId, {100, {}}, &error);
@@ -282,6 +283,7 @@ bool TaskArtifactPresenter::selectArtifact(const QString& artifactIdText)
     appendArtifactFiles(artifactId, page.items);
     artifactFileCursor_ = page.nextCursor;
     hasMoreArtifactFiles_ = page.hasMore;
+    updateSelectedInventorySummary();
     lastError_.clear();
     emit detailsChanged();
     return true;
@@ -303,6 +305,7 @@ bool TaskArtifactPresenter::loadMoreArtifactFiles()
     appendArtifactFiles(artifactId, page.items);
     artifactFileCursor_ = page.nextCursor;
     hasMoreArtifactFiles_ = page.hasMore;
+    updateSelectedInventorySummary();
     lastError_.clear();
     emit detailsChanged();
     return true;
@@ -362,7 +365,7 @@ bool TaskArtifactPresenter::previewArtifact(const QString& artifactIdText,
         return false;
     }
     if (!queryService_) {
-        if (error) *error = QStringLiteral("Artifact 预览查询服务不可用。");
+        if (error) *error = aitrain_app::workbenchText(QStringLiteral("Artifact 预览查询服务不可用。"));
         return false;
     }
     return queryService_->artifactFilePreview(artifactId, relativePath, result, 512 * 1024, error);
@@ -381,7 +384,7 @@ bool TaskArtifactPresenter::previewArtifactAsync(const QString& artifactIdText,
         return false;
     }
     if (!queryService_) {
-        if (error) *error = QStringLiteral("Artifact 异步预览查询服务不可用。");
+        if (error) *error = aitrain_app::workbenchText(QStringLiteral("Artifact 异步预览查询服务不可用。"));
         return false;
     }
     return queryService_->artifactFilePreviewAsync(artifactId, relativePath,
@@ -415,4 +418,13 @@ void TaskArtifactPresenter::fail(const QString& error)
 {
     lastError_ = error;
     emit queryFailed(error);
+}
+
+void TaskArtifactPresenter::updateSelectedInventorySummary()
+{
+    qint64 bytes = 0;
+    for (const auto& file : details_.artifactFiles) bytes += file.byteCount;
+    for (auto& artifact : details_.artifacts) if (artifact.artifactId == details_.selectedArtifactId && artifact.relativePath.isEmpty()) {
+        artifact.knownFileCount = details_.artifactFiles.size(); artifact.byteCount = bytes;
+    }
 }

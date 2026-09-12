@@ -1,3 +1,4 @@
+#include "WorkbenchTranslation.h"
 #include "MainWindow.h"
 #include "TaskRuntimeController.h"
 #include "DatasetPageController.h"
@@ -63,6 +64,11 @@ void MainWindow::activateProjectUi(const QString& projectName,
     const QString& canonicalRoot, quint64 generation)
 {
     Q_UNUSED(projectName)
+    // 同一路径重开或重建也属于新的项目代次，清理旧对象身份与异步读取。
+    modelRegistryPageController_->setProjectContext(false, {});
+    runtimeDeliveryPageController_->setProjectContext(false, {});
+    trainingPageController_->setProjectContext(false, {});
+    deliveryEvidencePageController_->setProjectContext(false, {});
     modelRegistryPageController_->setProjectContext(true, canonicalRoot);
     environmentPageController_->setProjectContext(true, canonicalRoot);
     runtimeDeliveryPageController_->setProjectContext(true, canonicalRoot);
@@ -93,6 +99,6 @@ void MainWindow::activateProjectUi(const QString& projectName,
     if (settingsPageController_) {
         settingsPageController_->refresh();
     }
-    refreshTrainingDefaults();
+    showPage(DatasetPage, aitrain_app::workbenchText(QStringLiteral("数据集")));
     statusBar()->showMessage(uiText("项目已打开：%1").arg(currentProjectName()), 5000);
 }

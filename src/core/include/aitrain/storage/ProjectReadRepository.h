@@ -1,5 +1,7 @@
 #pragma once
 
+#include "aitrain/domain/Pagination.h"
+
 #include <QString>
 
 namespace aitrain {
@@ -18,7 +20,7 @@ public:
     bool summary(ProjectSummarySnapshot* result,
         QString* error = nullptr) const;
     Page<DeliveryEvidenceCandidate> deliveryEvidence(
-        const PageRequest& request, QString* error = nullptr) const;
+        const PageRequest& request, QString* error = nullptr, const CatalogFilter& filter = {}) const;
 
 private:
     const ProjectDatabase& database_;

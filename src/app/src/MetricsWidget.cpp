@@ -76,13 +76,13 @@ void MetricsWidget::paintEvent(QPaintEvent* event)
 
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
-    painter.fillRect(rect(), QColor(250, 251, 252));
+    painter.fillRect(rect(), palette().color(QPalette::Window));
 
     if (series_.isEmpty()) {
         const QRect plot = rect().adjusted(12, 12, -12, -12);
-        painter.setPen(QColor(210, 216, 222));
+        painter.setPen(palette().color(QPalette::Mid));
         painter.drawRect(plot);
-        painter.setPen(QColor(130, 136, 142));
+        painter.setPen(palette().color(QPalette::Disabled, QPalette::Text));
         painter.drawText(plot, Qt::AlignCenter, QStringLiteral("No metric data"));
         return;
     }
@@ -114,8 +114,8 @@ void MetricsWidget::paintEvent(QPaintEvent* event)
         const QStringList names = groups.value(group);
         const QRect panel(content.left(), content.top() + groupIndex * (panelHeight + panelGap), content.width(), panelHeight);
 
-        painter.setPen(QColor(210, 216, 222));
-        painter.setBrush(QColor(255, 255, 255));
+        painter.setPen(palette().color(QPalette::Mid));
+        painter.setBrush(palette().color(QPalette::Base));
         painter.drawRect(panel);
 
         const QRect inner = panel.adjusted(10, 8, -10, -8);
@@ -132,7 +132,7 @@ void MetricsWidget::paintEvent(QPaintEvent* event)
         QFont titleFont = painter.font();
         titleFont.setBold(true);
         painter.setFont(titleFont);
-        painter.setPen(QColor(55, 65, 81));
+        painter.setPen(palette().color(QPalette::Text));
         painter.drawText(QRect(inner.left(), inner.top(), titleWidth, 18),
             Qt::AlignLeft | Qt::AlignVCenter,
             labelForGroup(group));
@@ -190,16 +190,16 @@ void MetricsWidget::paintEvent(QPaintEvent* event)
         }
 
         painter.setBrush(Qt::NoBrush);
-        painter.setPen(QColor(222, 227, 233));
+        painter.setPen(palette().color(QPalette::Mid));
         painter.drawRect(plot);
         for (int gridLine = 1; gridLine < 3; ++gridLine) {
             const int y = plot.top() + gridLine * plot.height() / 3;
-            painter.setPen(QColor(235, 239, 244));
+            painter.setPen(palette().color(QPalette::AlternateBase));
             painter.drawLine(plot.left(), y, plot.right(), y);
         }
 
         painter.setFont(legendFont);
-        painter.setPen(QColor(107, 114, 128));
+        painter.setPen(palette().color(QPalette::Disabled, QPalette::Text));
         painter.drawText(QRect(inner.left(), plot.top() - 2, 36, 14),
             Qt::AlignRight | Qt::AlignVCenter,
             QString::number(maxValue, 'g', 3));
@@ -227,7 +227,7 @@ void MetricsWidget::paintEvent(QPaintEvent* event)
             }
             painter.drawPath(path);
             painter.setBrush(color);
-            painter.setPen(QPen(QColor(255, 255, 255), 1.0));
+            painter.setPen(QPen(palette().color(QPalette::Base), 1.0));
             for (const QPointF& point : points) {
                 painter.drawEllipse(point, 3.5, 3.5);
             }

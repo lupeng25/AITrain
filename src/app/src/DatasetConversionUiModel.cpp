@@ -1,3 +1,4 @@
+#include "WorkbenchTranslation.h"
 #include "DatasetConversionUiModel.h"
 #include "aitrain/product/ProductCapabilityContract.h"
 
@@ -92,7 +93,7 @@ DatasetConversionValidation validateDatasetConversionForm(const DatasetConversio
 {
     DatasetConversionValidation validation;
     if (form.workerRunning) {
-        validation.summary = QStringLiteral("Worker 正在执行任务，稍后再转换数据集。");
+        validation.summary = aitrain_app::workbenchText(QStringLiteral("Worker 正在执行任务，稍后再转换数据集。"));
         validation.messages.append(validation.summary);
         return validation;
     }
@@ -101,37 +102,37 @@ DatasetConversionValidation validateDatasetConversionForm(const DatasetConversio
     const QString targetFormat = form.targetFormat.trimmed();
 
     if (sourceFormat.isEmpty()) {
-        validation.sourceFormatError = QStringLiteral("请选择源格式。");
+        validation.sourceFormatError = aitrain_app::workbenchText(QStringLiteral("请选择源格式。"));
     } else if (!supportedDatasetConversionSourceFormats().contains(sourceFormat)) {
-        validation.sourceFormatError = QStringLiteral("当前不支持该源格式。");
+        validation.sourceFormatError = aitrain_app::workbenchText(QStringLiteral("当前不支持该源格式。"));
     }
 
     if (targetFormat.isEmpty()) {
-        validation.targetFormatError = QStringLiteral("请选择目标格式。");
+        validation.targetFormatError = aitrain_app::workbenchText(QStringLiteral("请选择目标格式。"));
     } else if (!sourceFormat.isEmpty()
         && !isSupportedDatasetConversionPair(sourceFormat, targetFormat)) {
-        validation.targetFormatError = QStringLiteral("当前源格式不支持转换到该目标格式。");
+        validation.targetFormatError = aitrain_app::workbenchText(QStringLiteral("当前源格式不支持转换到该目标格式。"));
     }
 
     QString normalizedInputPath;
     if (form.inputPath.trimmed().isEmpty()) {
-        validation.inputPathError = QStringLiteral("请选择输入路径。");
+        validation.inputPathError = aitrain_app::workbenchText(QStringLiteral("请选择输入路径。"));
     } else {
         normalizedInputPath = normalizedDatasetConversionPath(form.inputPath);
         const QFileInfo inputInfo(normalizedInputPath);
         if (!inputInfo.exists()) {
-            validation.inputPathError = QStringLiteral("输入路径不存在。");
+            validation.inputPathError = aitrain_app::workbenchText(QStringLiteral("输入路径不存在。"));
         } else if (sourceFormat == QStringLiteral("coco_json")) {
             if (!inputInfo.isFile() || inputInfo.suffix().compare(QStringLiteral("json"), Qt::CaseInsensitive) != 0) {
-                validation.inputPathError = QStringLiteral("COCO 输入路径必须是 JSON 文件。");
+                validation.inputPathError = aitrain_app::workbenchText(QStringLiteral("COCO 输入路径必须是 JSON 文件。"));
             }
         } else if (sourceFormat == QStringLiteral("voc_xml")) {
             if (!inputInfo.isDir()
                 && !(inputInfo.isFile() && inputInfo.suffix().compare(QStringLiteral("xml"), Qt::CaseInsensitive) == 0)) {
-                validation.inputPathError = QStringLiteral("VOC 输入路径必须是 XML 文件或目录。");
+                validation.inputPathError = aitrain_app::workbenchText(QStringLiteral("VOC 输入路径必须是 XML 文件或目录。"));
             }
         } else if (!inputInfo.isDir()) {
-            validation.inputPathError = QStringLiteral("输入路径必须是目录。");
+            validation.inputPathError = aitrain_app::workbenchText(QStringLiteral("输入路径必须是目录。"));
         }
     }
 
@@ -141,9 +142,9 @@ DatasetConversionValidation validateDatasetConversionForm(const DatasetConversio
 
     validation.ok = validation.messages.isEmpty();
     if (validation.ok) {
-        validation.summary = QStringLiteral("可以开始转换。");
+        validation.summary = aitrain_app::workbenchText(QStringLiteral("可以开始转换。"));
     } else {
-        validation.summary = QStringLiteral("请修正 %1 个字段后再转换。").arg(errorFieldCount(validation));
+        validation.summary = aitrain_app::workbenchText(QStringLiteral("请修正 %1 个字段后再转换。")).arg(errorFieldCount(validation));
     }
     return validation;
 }

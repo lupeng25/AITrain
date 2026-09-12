@@ -2,6 +2,8 @@
 #include "TaskRuntimeController.h"
 #include "EnvironmentPageController.h"
 #include "TrainingPageController.h"
+#include "RuntimeDeliveryPageController.h"
+#include "DeliveryEvidencePageController.h"
 #include "DatasetPage.h"
 #include "DatasetPageController.h"
 
@@ -19,6 +21,9 @@ void MainWindow::handleTaskViewStateChanged(const TaskViewState& state)
     }
 
     const QString workflowKind = taskController_->workflowKind();
+    datasetPageController_->applyTaskViewState(state);
+    runtimeDeliveryPageController_->applyTaskViewState(state);
+    deliveryEvidencePageController_->applyTaskViewState(state);
     if (workflowKind == QStringLiteral("training")) {
         trainingPageController_->applyTaskViewState(state);
     }

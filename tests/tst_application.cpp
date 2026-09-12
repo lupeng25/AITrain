@@ -1060,6 +1060,23 @@ void ApplicationTests::deliveryEvidenceLimitCountsEvidenceArtifacts()
     QVERIFY2(error.isEmpty(), qPrintable(error));
     QCOMPARE(evidence.size(), 1);
     QCOMPARE(evidence.first().evidenceArtifactId, imported.evidenceArtifactId);
+    // 目录搜索先覆盖完整 Artifact 集合，再分页，旧证据不能被首屏截断。
+    for (int index = 0; index < 55; ++index) {
+        const auto newer = aitrain::TaskId::create();
+        QVERIFY2(workspace.startTask(newer, QStringLiteral("delivery.noise"), QStringLiteral("external_acceptance_evidence"), &task, &error), qPrintable(error));
+        aitrain::ExternalAcceptanceEvidenceImportResult result;
+        QVERIFY2(workspace.importExternalAcceptanceEvidence(newer, {sourcePath}, &result, &error), qPrintable(error));
+        QVERIFY2(workspace.finalizeTask(newer, aitrain::TaskState::Succeeded, {}, &error), qPrintable(error));
+    }
+    const auto firstPage = queries.deliveryEvidence({50, {}}, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error)); QCOMPARE(firstPage.items.size(), 50);
+    for (const auto& row : firstPage.items) QVERIFY(row.evidenceArtifactId != imported.evidenceArtifactId);
+    const auto found = queries.deliveryEvidence({1, {}}, &error, {evidenceTaskId.toString(), {}, QStringLiteral("succeeded")});
+    QVERIFY2(error.isEmpty(), qPrintable(error)); QCOMPARE(found.items.size(), 1);
+    QCOMPARE(found.items.first().evidenceArtifactId, imported.evidenceArtifactId);
+    QVERIFY(queries.deliveryEvidence({1, {}}, &error, {QStringLiteral("不存在"), {}, {}}).items.isEmpty());
+    queries.deliveryEvidence({50, firstPage.nextCursor}, &error, {evidenceTaskId.toString(), {}, {}});
+    QVERIFY(error.contains(QStringLiteral("InvalidPageCursor")));
 }
 
 void ApplicationTests::deliveryEvidenceKeepsInvalidArtifactAsRow()

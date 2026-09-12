@@ -12,7 +12,7 @@ class QPushButton;
 class QStackedWidget;
 class QTableView;
 class QTableWidget;
-class QTabWidget;
+class QComboBox;
 class ArtifactFileTableModel;
 class ArtifactTableModel;
 class MetricTableModel;
@@ -49,7 +49,7 @@ private:
     QPushButton* artifactFileLoadMoreButton_ = nullptr;
     QPushButton* metricLoadMoreButton_ = nullptr;
     QPushButton* workflowLoadMoreButton_ = nullptr;
-    QTabWidget* detailTabs_ = nullptr;
+    QStackedWidget* detailTabs_ = nullptr;
     QLabel* imagePreviewLabel_ = nullptr;
     QPlainTextEdit* previewText_ = nullptr;
     QStackedWidget* previewStack_ = nullptr;

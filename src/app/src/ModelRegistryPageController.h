@@ -20,6 +20,7 @@ public:
     void setProjectContext(bool projectOpen, const QString& projectRoot);
     void setWorkerExecutable(const QString& executable);
     void refresh();
+    void selectPackage(const QString& id);
     void finishImport(bool succeeded, const QString& message);
     const QVector<ModelPackageListItem>& packages() const;
 
@@ -30,11 +31,14 @@ signals:
     void importStarted();
 
 private:
+    void openLatestValidation(const QString& taskId);
+    void editManifest();
     void render();
     void browseSource();
     void browseManifest();
     void importModel();
 
+    const aitrain::ProjectQueryService* queryService_ = nullptr;
     ModelRegistryPresenter presenter_;
     TaskRuntimeController* taskRuntime_ = nullptr;
     ModelRegistryWorkspacePage* page_ = nullptr;
@@ -42,4 +46,7 @@ private:
     bool importInProgress_ = false;
     QString projectRoot_;
     QString workerExecutable_;
+    QString importTaskId_;
+    QJsonObject editedManifest_;
+    QString editedManifestPath_;
 };

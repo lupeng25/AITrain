@@ -7,6 +7,8 @@
 struct DatasetWorkbenchState {
     QString currentPath;
     QString currentFormat;
+    QString currentDisplayName;
+    QString currentSampleRelativePath;
     QString currentDatasetId;
     QString currentDatasetVersionId;
     QString currentSnapshotId;
@@ -16,6 +18,9 @@ struct DatasetWorkbenchState {
     QString latestAnnotationSyncReportArtifactId;
     QString sampleReviewArtifactId;
     QString annotationWorkingDirectory;
+    QString latestQualityTaskId;
+    QString latestQualityArtifactId;
+    QString latestRepairArtifactId;
     bool currentValid = false;
     QJsonArray sampleReviewSamples;
 };

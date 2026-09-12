@@ -10,6 +10,8 @@
 // 来源追溯只使用  Task/Snapshot/Artifact 身份。
 struct ModelPackageListItem final {
     QString modelPackageId;
+    QString latestValidationTaskId;
+    QString latestValidationState;
     QString sourceTaskId;
     QString sourceSnapshotId;
     QString sourceArtifactId;
@@ -36,6 +38,7 @@ public:
         const aitrain::ProjectQueryService* queryService,
         QObject* parent = nullptr);
 
+    void setCatalogFilter(const aitrain::CatalogFilter& filter) { filter_ = filter; }
     bool refresh(const aitrain::PageRequest& request = {50, {}});
     bool loadMore();
     bool hasMore() const;
@@ -52,6 +55,7 @@ signals:
 private:
     const aitrain::ProjectQueryService* queryService_ = nullptr;
     QVector<ModelPackageListItem> modelPackages_;
+    aitrain::CatalogFilter filter_;
     QString lastError_;
     QString nextCursor_;
     bool hasMore_ = false;

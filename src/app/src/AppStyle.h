@@ -1,10 +1,12 @@
 #pragma once
 
+#include <QString>
 class QApplication;
 
 namespace AppStyle {
 
-void apply(QApplication& app);
+QString configuredTheme();
+void apply(QApplication& app, const QString& theme = QString());
 
 }
 

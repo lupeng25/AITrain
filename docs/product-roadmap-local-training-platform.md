@@ -1,5 +1,10 @@
 # AITrain Studio 后续功能规划与实现方案（本地交付版）
 
+## 本轮界面实施说明（2026-09-12）
+
+已完成用户批准方案中的本轮工作台迁移：三个日常入口，单层目录/详情/操作视图，宽训练配置与分组高级参数，项目对象选择器及任务结果回显。本轮 Harness 35/35 组通过。此项替代旧九入口布局，未扩展算法、部署支持或外部验收结论。全项目搜索、浅/深主题、跨重启草稿与英文静态文案也已完成。首轮实施见 `docs/design/ui-workbench-implementation.md`，最终收尾和复跑证据见 `docs/design/ui-workbench-closeout.md`。
+
+
 日期：2026-06-21
 
 定位：Windows + Qt Widgets + Worker 的本地视觉训练平台。

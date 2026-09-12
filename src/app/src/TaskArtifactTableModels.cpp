@@ -1,4 +1,5 @@
 #include "TaskArtifactTableModels.h"
+#include "WorkbenchLabels.h"
 
 #include <QHash>
 #include <QStringList>
@@ -29,10 +30,10 @@ QVariant TaskListTableModel::data(const QModelIndex& index, int role) const
     if (role == TaskStateRole) return row.state;
     if (role != Qt::DisplayRole && role != Qt::ToolTipRole) return {};
     switch (index.column()) {
-    case 0: return row.taskId.left(8);
+    case 0: return aitrain_app::taskDisplayName(row.taskType);
     case 1: return tr("任务");
     case 2: return row.capabilityId;
-    case 3: return row.taskType;
+    case 3: return aitrain_app::taskDisplayName(row.taskType);
     case 4: return row.stateLabel;
     case 5: return row.updatedAt;
     case 6: return row.message;
@@ -172,9 +173,9 @@ QVariant ArtifactTableModel::data(const QModelIndex& index, int role) const
     if (role == ArtifactIdRole) return row.artifactId;
     if (role != Qt::DisplayRole && role != Qt::ToolTipRole) return {};
     switch (index.column()) {
-    case 0: return row.artifactId.left(8);
+    case 0: return aitrain_app::artifactDisplayName(row.kind);
     case 1: return row.kind;
-    case 2: return tr("%1 个文件 / %2 bytes").arg(row.fileCount).arg(row.byteCount);
+    case 2: return !row.inventoryRead ? tr("文件清单尚未读取") : tr("已读取 %1 个文件 / %2 bytes").arg(row.fileCount).arg(row.byteCount);
     case 3: return row.createdAt;
     default: return {};
     }
@@ -207,7 +208,8 @@ void ArtifactTableModel::setFiles(const QVector<ArtifactFileItem>& files)
             existing = indexes.constFind(file.artifactId);
         }
         Row& row = rows_[existing.value()];
-        if (!file.relativePath.isEmpty()) ++row.fileCount;
+        if (!file.relativePath.isEmpty()) { ++row.fileCount; row.inventoryRead = true; }
+        else if (file.knownFileCount >= 0) { row.fileCount = file.knownFileCount; row.inventoryRead = true; }
         row.byteCount += file.byteCount;
     }
     endResetModel();

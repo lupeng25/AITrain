@@ -1,3 +1,4 @@
+#include "WorkbenchTranslation.h"
 #include "MainWindowSupport.h"
 
 #include "aitrain/core/CapabilityRegistry.h"
@@ -70,7 +71,7 @@ public:
         ProjectOpenProbeResult result;
         result.normalizedPath = QDir::cleanPath(QDir::fromNativeSeparators(path_.trimmed()));
         if (result.normalizedPath.isEmpty()) {
-            result.error = QStringLiteral("打开项目工作区需要项目根目录。");
+            result.error = aitrain_app::workbenchText(QStringLiteral("打开项目工作区需要项目根目录。"));
         } else {
             // ProjectWorkspace 在本 Runnable 所在线程中构造、打开和销毁。其
             // ProjectStore 的 QSqlDatabase connectionName 也只在此线程使用，
@@ -92,7 +93,7 @@ public:
             }
             if (!result.succeeded) {
                 result.error = error.isEmpty()
-                    ? QStringLiteral("候选项目工作区打开预检失败。") : error;
+                    ? aitrain_app::workbenchText(QStringLiteral("候选项目工作区打开预检失败。")) : error;
             }
         }
         if (callback_) {

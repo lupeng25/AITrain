@@ -573,16 +573,17 @@ public:
         QString* error = nullptr);
     // 训练调用点的过渡别名；通用 Runtime/Workflow 代码必须使用上面的语义中立 API。
     bool cleanupRuntimeStaging(const TaskId& taskId, QString* error = nullptr);
-    Page<TaskSnapshot> tasks(const PageRequest& request, QString* error = nullptr) const;
+    Page<TaskSnapshot> tasks(const PageRequest& request, QString* error = nullptr, const CatalogFilter& filter = {}) const;
     bool task(const TaskId& taskId, TaskSnapshot* result, QString* error = nullptr) const;
     bool artifact(const ArtifactId& artifactId, ArtifactSnapshot* result, QString* error = nullptr) const;
+    QString projectIdentity(QString* error = nullptr) const;
     Page<ArtifactFileSnapshot> artifactFiles(
         const ArtifactId& artifactId, const PageRequest& request,
         QString* error = nullptr) const;
     Page<ArtifactSnapshot> artifactsForTask(
         const TaskId& taskId, const PageRequest& request, QString* error = nullptr) const;
     Page<DeliveryEvidenceCandidate> deliveryEvidenceCandidates(
-        const PageRequest& request, QString* error = nullptr) const;
+        const PageRequest& request, QString* error = nullptr, const CatalogFilter& filter = {}) const;
     bool readCommittedArtifactFile(const ArtifactId& artifactId,
         const QString& relativePath,
         ArtifactFilePreview* result,
@@ -611,8 +612,12 @@ public:
     Page<WorkflowRunSnapshot> workflowRunsForTask(
         const TaskId& taskId, const PageRequest& request, QString* error = nullptr) const;
     QVector<WorkflowStepSnapshot> workflowSteps(const WorkflowRunId& workflowRunId, QString* error = nullptr) const;
-    Page<ModelPackageSnapshot> modelPackages(const PageRequest& request, QString* error = nullptr) const;
-    Page<DatasetCatalogItem> datasets(const PageRequest& request, QString* error = nullptr) const;
+    Page<ModelPackageSnapshot> modelPackages(const PageRequest& request, QString* error = nullptr, const CatalogFilter& filter = {}) const;
+    Page<DatasetCatalogItem> datasets(const PageRequest& request, QString* error = nullptr, const CatalogFilter& filter = {}) const;
+    Page<DatasetSnapshotRecord> datasetSnapshots(const DatasetId& datasetId,
+        const PageRequest& request, QString* error = nullptr) const;
+    Page<ArtifactSnapshot> artifactCatalog(const QStringList& kinds,
+        const PageRequest& request, QString* error = nullptr) const;
     bool projectSummary(ProjectSummarySnapshot* result, QString* error = nullptr) const;
     QString workspacePath() const;
 

@@ -119,8 +119,8 @@ bool verifyArtifactFile(const VerifiedArtifactDirectory& directory,
 }
 
 struct AsyncArtifactFileSource final {
-    QString artifactRoot;
-    QString absolutePath;
+    QString storeRoot;
+    ArtifactSnapshot artifact;
     ArtifactFileSnapshot expected;
     qint64 maxBytes = 0;
 };
@@ -128,7 +128,9 @@ struct AsyncArtifactFileSource final {
 bool readAsyncArtifactFile(const AsyncArtifactFileSource& source,
     ArtifactFilePreview* result, QString* error)
 {
-    return VerifiedArtifactReader(source.artifactRoot)
+    VerifiedArtifactDirectory verified;
+    if (!ArtifactStore(source.storeRoot).openVerified(source.artifact, &verified, nullptr, error)) return false;
+    return VerifiedArtifactReader(verified.absolutePath)
         .preview(source.expected, source.maxBytes, result, nullptr, error);
 }
 
@@ -2826,23 +2828,35 @@ bool ProjectWorkspace::cleanupRuntimeStaging(const TaskId& taskId, QString* erro
     return true;
 }
 
-Page<TaskSnapshot> ProjectWorkspace::tasks(const PageRequest& request, QString* error) const
+Page<TaskSnapshot> ProjectWorkspace::tasks(const PageRequest& request, QString* error, const CatalogFilter& filter) const
 {
     if (!isOpen()) {
         if (error) *error = QStringLiteral(" 项目工作区未打开。");
         return {};
     }
-    return storage_.tasks(request, error);
+    return storage_.tasks(request, error, filter);
+}
+
+Page<DatasetSnapshotRecord> ProjectWorkspace::datasetSnapshots(const DatasetId& datasetId,
+    const PageRequest& request, QString* error) const
+{
+    return storage_.datasetSnapshots(datasetId, request, error);
+}
+
+Page<ArtifactSnapshot> ProjectWorkspace::artifactCatalog(const QStringList& kinds,
+    const PageRequest& request, QString* error) const
+{
+    return storage_.artifactCatalog(kinds, request, error);
 }
 
 Page<DatasetCatalogItem> ProjectWorkspace::datasets(
-    const PageRequest& request, QString* error) const
+    const PageRequest& request, QString* error, const CatalogFilter& filter) const
 {
     if (!isOpen()) {
         if (error) *error = QStringLiteral(" 项目工作区未打开。");
         return {};
     }
-    return storage_.datasets(request, error);
+    return storage_.datasets(request, error, filter);
 }
 
 bool ProjectWorkspace::task(const TaskId& taskId, TaskSnapshot* result, QString* error) const
@@ -2861,6 +2875,12 @@ bool ProjectWorkspace::artifact(const ArtifactId& artifactId, ArtifactSnapshot* 
         return false;
     }
     return storage_.artifact(artifactId, result, error);
+}
+
+QString ProjectWorkspace::projectIdentity(QString* error) const
+{
+    ProjectMetaSnapshot meta;
+    return storage_.projectMeta(&meta, error) ? meta.projectId.toString() : QString();
 }
 
 Page<ArtifactFileSnapshot> ProjectWorkspace::artifactFiles(
@@ -2884,13 +2904,13 @@ Page<ArtifactSnapshot> ProjectWorkspace::artifactsForTask(
 }
 
 Page<DeliveryEvidenceCandidate> ProjectWorkspace::deliveryEvidenceCandidates(
-    const PageRequest& request, QString* error) const
+    const PageRequest& request, QString* error, const CatalogFilter& filter) const
 {
     if (!isOpen()) {
         if (error) *error = QStringLiteral(" 项目工作区未打开。");
         return {};
     }
-    return storage_.deliveryEvidenceCandidates(request, error);
+    return storage_.deliveryEvidenceCandidates(request, error, filter);
 }
 
 bool ProjectWorkspace::readCommittedArtifactFile(const ArtifactId& artifactId,
@@ -3038,13 +3058,24 @@ bool ProjectWorkspace::readCommittedArtifactFileAsync(const ArtifactId& artifact
     // 之后投递的 QRunnable 不再捕获 workspace、ProjectStore 或 QSqlDatabase。
     ArtifactSnapshot snapshot;
     if (!storage_.artifact(artifactId, &snapshot, error)) return false;
-    CommittedArtifactFileReadSource prepared;
-    if (!prepareCommittedArtifactFileRead(snapshot, relativePath, &prepared, error)) return false;
+    const QString normalized = QDir::cleanPath(QDir::fromNativeSeparators(relativePath.trimmed()));
+    if (normalized.isEmpty() || normalized == QStringLiteral(".") || QDir::isAbsolutePath(normalized)
+        || normalized == QStringLiteral("..") || normalized.startsWith(QStringLiteral("../"))) {
+        if (error) *error = QStringLiteral("Artifact 预览相对路径无效。");
+        return false;
+    }
+    const auto member = std::find_if(snapshot.files.cbegin(), snapshot.files.cend(),
+        [&normalized](const ArtifactFileSnapshot& file) { return QDir::cleanPath(QDir::fromNativeSeparators(file.relativePath)) == normalized; });
+    if (member == snapshot.files.cend()) {
+        if (error) *error = QStringLiteral("Artifact 清单中不存在请求的文件。");
+        return false;
+    }
 
     AsyncArtifactFileSource source;
-    source.artifactRoot = prepared.artifactRoot;
-    source.absolutePath = prepared.absolutePath;
-    source.expected = prepared.expected;
+    // UI 线程只复制已登记元数据。完整清单与成员哈希校验都在 Runnable 中完成。
+    source.storeRoot = artifactStore_->rootPath();
+    source.artifact = snapshot;
+    source.expected = *member;
     source.maxBytes = maxBytes;
     QThreadPool::globalInstance()->start(new ArtifactFilePreviewRunnable(
         std::move(source), receiver, std::move(callback)));
@@ -3081,13 +3112,13 @@ QVector<WorkflowStepSnapshot> ProjectWorkspace::workflowSteps(const WorkflowRunI
 }
 
 Page<ModelPackageSnapshot> ProjectWorkspace::modelPackages(
-    const PageRequest& request, QString* error) const
+    const PageRequest& request, QString* error, const CatalogFilter& filter) const
 {
     if (!isOpen()) {
         if (error) *error = QStringLiteral(" 项目工作区未打开。");
         return {};
     }
-    return storage_.modelPackages(request, error);
+    return storage_.modelPackages(request, error, filter);
 }
 
 bool ProjectWorkspace::projectSummary(ProjectSummarySnapshot* result, QString* error) const

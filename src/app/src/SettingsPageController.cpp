@@ -1,6 +1,9 @@
 #include "SettingsPageController.h"
 
 #include "LanguageSupport.h"
+#include "AppStyle.h"
+#include <QApplication>
+#include <QSettings>
 #include "MainWindowSupport.h"
 #include "SettingsPage.h"
 #include "aitrain/core/CapabilityRegistry.h"
@@ -21,6 +24,10 @@ SettingsPageController::SettingsPageController(QString defaultProjectPath,
 void SettingsPageController::attach(SettingsWorkspacePage* page)
 {
     page_ = page;
+    connect(page_, &SettingsWorkspacePage::themeRequested, this, [](const QString& theme) {
+        QSettings settings; settings.setValue(QStringLiteral("settings/theme"), theme); settings.sync();
+        AppStyle::apply(*qApp, theme);
+    });
     connect(page_, &SettingsWorkspacePage::refreshCapabilitiesRequested,
         this, &SettingsPageController::refreshCapabilities);
     connect(page_, &SettingsWorkspacePage::languageRequested,
@@ -47,6 +54,7 @@ void SettingsPageController::refresh()
     }
     page_->setDefaultProjectPathText(configuredDefaultProjectPath());
     page_->setLanguageCode(configuredLanguageCode());
+    page_->setThemeCode(AppStyle::configuredTheme());
     refreshCapabilities();
 }
 

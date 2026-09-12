@@ -5,7 +5,7 @@
 
 class QLabel;
 class QLineEdit;
-class QTabWidget;
+class QStackedWidget;
 class QTableWidget;
 class QToolButton;
 
@@ -39,6 +39,7 @@ public:
     QString defaultProjectPathText() const;
     void setDefaultProjectPathText(const QString& path);
     void setDefaultProjectPathStatus(const QString& status);
+    void setThemeCode(const QString& theme);
     void setLanguageCode(const QString& languageCode);
     void setCapabilities(const QVector<SettingsCapabilityRow>& rows,
         const SettingsCapabilitySummary& summary);
@@ -46,6 +47,7 @@ public:
 
 signals:
     void refreshCapabilitiesRequested();
+    void themeRequested(const QString& theme);
     void languageRequested(const QString& languageCode);
     void browseDefaultProjectPathRequested();
     void saveDefaultProjectPathRequested();
@@ -59,7 +61,7 @@ private:
     QWidget* buildApplicationSettingsPanel(
         const QString& licenseOwner, const QString& licenseExpiry);
 
-    QTabWidget* tabs_ = nullptr;
+    QStackedWidget* tabs_ = nullptr;
     QToolButton* zhLanguageButton_ = nullptr;
     QToolButton* enLanguageButton_ = nullptr;
     QLineEdit* defaultProjectPathEdit_ = nullptr;

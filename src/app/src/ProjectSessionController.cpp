@@ -1,3 +1,4 @@
+#include "WorkbenchTranslation.h"
 #include "ProjectSessionController.h"
 
 #include "TaskRuntimeController.h"
@@ -27,19 +28,19 @@ bool ProjectSessionController::request(
         if (!canonical.isEmpty()) root = QDir::cleanPath(canonical);
     }
     if (!taskRuntime_) {
-        if (error) *error = QStringLiteral("项目 Session Controller 未初始化。");
+        if (error) *error = aitrain_app::workbenchText(QStringLiteral("项目 Session Controller 未初始化。"));
         return false;
     }
     if (taskRuntime_->isRunning()) {
-        if (error) *error = QStringLiteral("ProjectBusy：Worker 正在执行任务。");
+        if (error) *error = aitrain_app::workbenchText(QStringLiteral("ProjectBusy：Worker 正在执行任务。"));
         return false;
     }
     if (busy_) {
-        if (error) *error = QStringLiteral("项目打开操作正在进行。");
+        if (error) *error = aitrain_app::workbenchText(QStringLiteral("项目打开操作正在进行。"));
         return false;
     }
     if (name.isEmpty() || root.isEmpty()) {
-        if (error) *error = QStringLiteral("项目名称和目录不能为空。");
+        if (error) *error = aitrain_app::workbenchText(QStringLiteral("项目名称和目录不能为空。"));
         return false;
     }
 
@@ -102,13 +103,13 @@ void ProjectSessionController::finish(
     setBusy(false);
     if (!result.succeeded || !result.prepared.isValid()) {
         emit failed(result.error.isEmpty()
-            ? QStringLiteral("候选项目工作区预检失败。") : result.error);
+            ? aitrain_app::workbenchText(QStringLiteral("候选项目工作区预检失败。")) : result.error);
         return;
     }
     QString error;
     if (!workspace_.openPrepared(result.prepared, &error)) {
         emit failed(error.isEmpty()
-            ? QStringLiteral("项目打开凭证已失效，需要重新尝试。") : error);
+            ? aitrain_app::workbenchText(QStringLiteral("项目打开凭证已失效，需要重新尝试。")) : error);
         return;
     }
     currentRoot_ = result.prepared.canonicalRoot;

@@ -19,6 +19,7 @@ public:
         const aitrain::ProjectQueryService* queryService,
         QObject* parent = nullptr);
 
+    void setCatalogFilter(const aitrain::CatalogFilter& filter) { filter_ = filter; }
     bool refresh(const aitrain::PageRequest& request = {50, {}});
     bool refreshAsync(const aitrain::PageRequest& request = {50, {}});
     bool loadMoreAsync();
@@ -34,6 +35,7 @@ signals:
 private:
     const aitrain::ProjectQueryService* queryService_ = nullptr;
     DeliveryEvidenceViewModel viewModel_;
+    aitrain::CatalogFilter filter_;
     QString lastError_;
     quint64 refreshGeneration_ = 0;
     QString nextCursor_;

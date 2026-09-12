@@ -1,4 +1,5 @@
 #include "LanguageSupport.h"
+#include "WorkbenchTranslation.h"
 
 #include "ApplicationSettingsService.h"
 
@@ -88,12 +89,12 @@ bool loadTranslator(QApplication& app, QTranslator* translator, const QString& l
 
 QString translateText(const char* context, const QString& text)
 {
-    if (text.isEmpty() || configuredLanguageCode() == QStringLiteral("zh_CN")) {
+    if (text.isEmpty()) {
         return text;
     }
     const QByteArray source = text.toUtf8();
     const QString translated = QCoreApplication::translate(context, source.constData());
-    return translated == text ? text : translated;
+    return translated == text ? workbenchText(text) : translated;
 }
 
 } // namespace aitrain_app

@@ -1821,11 +1821,31 @@ bool ProjectStore::datasetSnapshotForArtifact(const ArtifactId& artifactId,
         artifactId, result, error);
 }
 
-Page<DatasetCatalogItem> ProjectStore::datasets(const PageRequest& request, QString* error) const
+Page<DatasetSnapshotRecord> ProjectStore::datasetSnapshots(const DatasetId& datasetId,
+    const PageRequest& request, QString* error) const
+{
+    QString repositoryError;
+    auto result = DatasetCatalogRepository(database_).versions(datasetId, request, &repositoryError);
+    lastErrorCode_ = pageErrorCode(repositoryError);
+    if (error) *error = repositoryError;
+    return result;
+}
+
+Page<ArtifactSnapshot> ProjectStore::artifactCatalog(const QStringList& kinds,
+    const PageRequest& request, QString* error) const
+{
+    QString repositoryError;
+    auto result = ArtifactCatalogRepository(database_).catalog(kinds, request, &repositoryError);
+    lastErrorCode_ = pageErrorCode(repositoryError);
+    if (error) *error = repositoryError;
+    return result;
+}
+
+Page<DatasetCatalogItem> ProjectStore::datasets(const PageRequest& request, QString* error, const CatalogFilter& filter) const
 {
     QString repositoryError;
     Page<DatasetCatalogItem> result =
-        DatasetCatalogRepository(database_).page(request, &repositoryError);
+        DatasetCatalogRepository(database_).page(request, &repositoryError, filter);
     lastErrorCode_ = pageErrorCode(repositoryError);
     if (error) *error = repositoryError;
     return result;
@@ -1950,11 +1970,11 @@ bool ProjectStore::modelPackage(const ModelPackageId& modelPackageId, ModelPacka
 }
 
 Page<ModelPackageSnapshot> ProjectStore::modelPackages(
-    const PageRequest& request, QString* error) const
+    const PageRequest& request, QString* error, const CatalogFilter& filter) const
 {
     QString repositoryError;
     Page<ModelPackageSnapshot> result =
-        ModelCatalogRepository(database_).page(request, &repositoryError);
+        ModelCatalogRepository(database_).page(request, &repositoryError, filter);
     lastErrorCode_ = pageErrorCode(repositoryError);
     if (error) *error = repositoryError;
     return result;
@@ -2810,12 +2830,12 @@ Page<ArtifactSnapshot> ProjectStore::artifactsForTask(
 }
 
 Page<DeliveryEvidenceCandidate> ProjectStore::deliveryEvidenceCandidates(
-    const PageRequest& request, QString* error) const
+    const PageRequest& request, QString* error, const CatalogFilter& filter) const
 {
     QString repositoryError;
     Page<DeliveryEvidenceCandidate> result =
         ProjectReadRepository(database_).deliveryEvidence(
-            request, &repositoryError);
+            request, &repositoryError, filter);
     lastErrorCode_ = pageErrorCode(repositoryError);
     if (error) *error = repositoryError;
     return result;
@@ -2848,11 +2868,11 @@ bool ProjectStore::task(const TaskId& taskId, TaskSnapshot* result, QString* err
     return TaskEventRepository(database_).read(taskId, result, error);
 }
 
-Page<TaskSnapshot> ProjectStore::tasks(const PageRequest& request, QString* error) const
+Page<TaskSnapshot> ProjectStore::tasks(const PageRequest& request, QString* error, const CatalogFilter& filter) const
 {
     QString repositoryError;
     Page<TaskSnapshot> result =
-        TaskEventRepository(database_).page(request, &repositoryError);
+        TaskEventRepository(database_).page(request, &repositoryError, filter);
     lastErrorCode_ = pageErrorCode(repositoryError);
     if (error) *error = repositoryError;
     return result;

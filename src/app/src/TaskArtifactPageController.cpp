@@ -1,6 +1,7 @@
 #include "TaskArtifactPageController.h"
 
 #include "TaskArtifactPage.h"
+#include <QSignalBlocker>
 
 TaskArtifactPageController::TaskArtifactPageController(
     const aitrain::ProjectQueryService* queryService, QObject* parent)
@@ -36,7 +37,8 @@ void TaskArtifactPageController::attachPage(TaskArtifactPage* page)
             taskKindFilter_ = taskKind;
             taskStateFilter_ = taskState;
             query_ = query;
-            if (page_) page_->applyFilter(taskKindFilter_, taskStateFilter_, query_);
+            presenter_->setCatalogFilter({query_, taskKindFilter_.isEmpty() ? QStringList{} : QStringList{taskKindFilter_}, taskStateFilter_});
+            refresh();
         });
     connect(page_, &TaskArtifactPage::selectedTaskChanged,
         this, &TaskArtifactPageController::selectTask);
@@ -61,7 +63,19 @@ bool TaskArtifactPageController::refreshSelected()
         clearSelection();
         return false;
     }
-    return presenter_->selectTask(taskId);
+    const QString artifact = presenter_->details().selectedArtifactId;
+    const QString member = page_ ? page_->selectedArtifactMember() : QString();
+    const int loadedFiles = presenter_->details().artifactFiles.size();
+    const int loadedArtifacts = presenter_->details().artifacts.size();
+    const bool ok = presenter_->selectTask(taskId);
+    while (ok && presenter_->hasMoreArtifacts() && presenter_->details().artifacts.size() < loadedArtifacts)
+        if (!presenter_->loadMoreArtifacts()) break;
+    if (ok && !artifact.isEmpty() && presenter_->selectArtifact(artifact)) {
+        while (presenter_->hasMoreArtifactFiles() && presenter_->details().artifactFiles.size() < loadedFiles)
+            if (!presenter_->loadMoreArtifactFiles()) break;
+        if (page_) page_->restoreArtifactMember(member);
+    }
+    return ok;
 }
 
 void TaskArtifactPageController::clearSelection()
@@ -77,7 +91,7 @@ const QVector<TaskListItem>& TaskArtifactPageController::taskRows() const
 
 QString TaskArtifactPageController::selectedTaskId() const
 {
-    return page_ ? page_->selectedTaskId() : presenter_->selectedTaskId();
+    return presenter_->selectedTaskId();
 }
 
 void TaskArtifactPageController::setCancelable(bool cancelable)
@@ -89,6 +103,7 @@ void TaskArtifactPageController::setCancelable(bool cancelable)
 void TaskArtifactPageController::renderRows()
 {
     if (page_) {
+        const QSignalBlocker blocker(page_);
         page_->setRows(presenter_->taskRows(), presenter_->hasMoreTasks());
     }
 }
@@ -100,4 +115,10 @@ void TaskArtifactPageController::selectTask(const QString& taskId)
         return;
     }
     presenter_->selectTask(taskId);
+}
+
+void TaskArtifactPageController::openTask(const QString& taskId)
+{
+    selectTask(taskId);
+    if (page_ && !presenter_->selectedTaskId().isEmpty()) page_->showTaskDetails();
 }

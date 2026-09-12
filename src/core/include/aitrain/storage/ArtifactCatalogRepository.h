@@ -3,6 +3,7 @@
 #include "aitrain/domain/DomainTypes.h"
 
 #include <QString>
+#include <QStringList>
 
 namespace aitrain {
 
@@ -30,6 +31,8 @@ public:
     Page<ArtifactFileSnapshot> files(const ArtifactId& artifactId,
         const PageRequest& request, QString* error = nullptr) const;
     Page<ArtifactSnapshot> forTask(const TaskId& taskId,
+        const PageRequest& request, QString* error = nullptr) const;
+    Page<ArtifactSnapshot> catalog(const QStringList& kinds,
         const PageRequest& request, QString* error = nullptr) const;
 
 private:

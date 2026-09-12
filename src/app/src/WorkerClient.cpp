@@ -1,3 +1,4 @@
+#include "WorkbenchTranslation.h"
 #include "WorkerClient.h"
 
 #include "aitrain/core/WorkerProtocol.h"
@@ -128,7 +129,7 @@ bool WorkerClient::startWorkerCommand(const QString& workerProgram,
         [](const auto& value) { return value.context.taskId; }, command.payload);
     if (!requestedTaskId.isValid()) {
         if (error) {
-            *error = QStringLiteral("TaskCommand context.taskId 必须是有效 UUID。");
+            *error = aitrain_app::workbenchText(QStringLiteral("TaskCommand context.taskId 必须是有效 UUID。"));
         }
         return false;
     }
@@ -351,7 +352,7 @@ void WorkerClient::finalizeWorkerExit()
         finishedEmitted_ = true;
         const aitrain::TaskId lostTaskId = activeTaskId_;
         const QString message = cancelRequested_
-            ? QStringLiteral("Worker 在取消请求后退出，未收到正式终态。")
+            ? aitrain_app::workbenchText(QStringLiteral("Worker 在取消请求后退出，未收到正式终态。"))
             : (pendingExitCode_ < 0
                 ? QStringLiteral("Worker failed to start: %1").arg(process_.errorString())
                 : (pendingExitStatus_ != QProcess::NormalExit || pendingExitCode_ != 0)

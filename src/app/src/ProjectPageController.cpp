@@ -1,6 +1,7 @@
 #include "ProjectPageController.h"
 
 #include "ProjectSessionController.h"
+#include <QSettings>
 
 ProjectPageController::ProjectPageController(
     const aitrain::ProjectQueryService* queryService,
@@ -26,7 +27,14 @@ ProjectPageController::ProjectPageController(
             if (page_) page_->showOperationError(message);
         });
     connect(sessionController_, &ProjectSessionController::activated,
-        this, [this](const QString& name, const QString&, quint64) {
+        this, [this](const QString& name, const QString& root, quint64) {
+            QSettings settings;
+            QVariantList recent = settings.value(QStringLiteral("workbench/recentProjects")).toList();
+            for (int i = recent.size() - 1; i >= 0; --i) if (recent[i].toMap().value(QStringLiteral("root")).toString() == root) recent.removeAt(i);
+            recent.prepend(QVariantMap{{QStringLiteral("name"), name}, {QStringLiteral("root"), root}});
+            while (recent.size() > 12) recent.removeLast();
+            settings.setValue(QStringLiteral("workbench/recentProjects"), recent);
+            if (page_) page_->setRecentProjects(recent);
             setContext(true, name);
             refresh();
         });
@@ -35,6 +43,7 @@ ProjectPageController::ProjectPageController(
 void ProjectPageController::attachPage(ProjectWorkspacePage* page)
 {
     page_ = page;
+    page_->setRecentProjects(QSettings().value(QStringLiteral("workbench/recentProjects")).toList());
     connect(page_, &ProjectWorkspacePage::operationRequested,
         this, &ProjectPageController::request);
     page_->setBusy(sessionController_->isBusy());

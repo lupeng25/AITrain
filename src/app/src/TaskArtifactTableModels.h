@@ -93,6 +93,7 @@ private:
         QString kind;
         QString createdAt;
         int fileCount = 0;
+        bool inventoryRead = false;
         qint64 byteCount = 0;
     };
     QVector<Row> rows_;

@@ -1,3 +1,4 @@
+#include "WorkbenchTranslation.h"
 #include "DatasetCatalogPresenter.h"
 
 #include <QDateTime>
@@ -26,10 +27,10 @@ bool DatasetCatalogPresenter::refresh(const aitrain::PageRequest& request)
 {
     QString error;
     const aitrain::Page<aitrain::DatasetCatalogReadModel> page = queryService_
-        ? queryService_->datasetCatalog(request, &error)
+        ? queryService_->datasetCatalog(request, &error, filter_)
         : aitrain::Page<aitrain::DatasetCatalogReadModel>();
     if (!queryService_ && error.isEmpty()) {
-        error = QStringLiteral("数据集目录 Presenter 缺少项目查询服务。");
+        error = aitrain_app::workbenchText(QStringLiteral("数据集目录 Presenter 缺少项目查询服务。"));
     }
     if (!error.isEmpty()) {
         datasets_.clear();
@@ -44,6 +45,9 @@ bool DatasetCatalogPresenter::refresh(const aitrain::PageRequest& request)
     for (const aitrain::DatasetCatalogReadModel& model : page.items) {
         DatasetCatalogListItem row;
         row.datasetId = model.datasetId.toString();
+        row.displayName = model.displayName.isEmpty()
+            ? aitrain_app::workbenchText(QStringLiteral("数据集 · %1")).arg(model.latestCreatedAt.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")))
+            : model.displayName;
         row.datasetFormat = model.datasetFormat;
         row.versionCount = model.versionCount;
         row.snapshotCount = model.snapshotCount;
@@ -53,6 +57,8 @@ bool DatasetCatalogPresenter::refresh(const aitrain::PageRequest& request)
         row.latestRootHash = model.latestRootHash;
         row.latestFileCount = model.latestFileCount;
         row.latestCreatedAt = localTimeText(model.latestCreatedAt);
+        row.latestSourceTaskId = model.latestSourceTaskId.toString();
+        row.latestQualityTaskId = model.latestQualityTaskId.toString();
         rows.append(row);
     }
 

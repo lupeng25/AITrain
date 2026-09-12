@@ -24,6 +24,7 @@ public:
     const QVector<TaskListItem>& taskRows() const;
     QString selectedTaskId() const;
     void setCancelable(bool cancelable);
+    void openTask(const QString& taskId);
 
 signals:
     void cancelRequested();

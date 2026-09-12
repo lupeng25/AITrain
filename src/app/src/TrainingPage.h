@@ -1,7 +1,7 @@
 #pragma once
 
 #include <QJsonObject>
-#include <QWidget>
+#include "WorkbenchWidgets.h"
 
 class QLabel;
 struct TaskArtifactView;
@@ -23,12 +23,19 @@ struct TrainingFormData final
     QJsonObject exportArguments;
 };
 
-class TrainingWorkspacePage final : public QWidget
+class TrainingWorkspacePage final : public aitrain_app::WorkspaceViewHost
 {
     Q_OBJECT
 
 public:
+    enum View { Catalog, Configuration, Monitor, Advanced, FullLog, Artifacts };
     explicit TrainingWorkspacePage(QWidget* parent = nullptr);
+    void buildLayout();
+    QTableWidget* historyTable = nullptr;
+    QLabel* historyStatus = nullptr;
+    QPushButton* moreHistory = nullptr;
+    QPushButton* cancelTaskButton = nullptr;
+    QPushButton* modelsButton = nullptr;
 
     TrainingFormData formData() const;
     void setDatasetSummary(const QString& text);
@@ -46,7 +53,24 @@ public:
     void appendLog(const QString& text);
     void resetRuntimeProjection();
 
+protected:
+    void keyPressEvent(QKeyEvent* event) override;
+
 signals:
+    void selectDatasetRequested();
+    void refreshHistoryRequested();
+    void moreHistoryRequested();
+    void historyRequested(const QString& taskId);
+    void advancedRequested();
+    void applyAdvancedRequested();
+    void cancelAdvancedRequested();
+    void openTaskRequested(const QString& taskId);
+    void currentTaskRequested();
+    void logRequested();
+    void configurationRequested();
+    void copyConfigurationRequested();
+    void modelsRequested();
+    void modelRequested(const QString& modelPackageId);
     void startRequested();
     void cancelRequested();
 };

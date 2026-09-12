@@ -1,3 +1,4 @@
+#include "WorkbenchTranslation.h"
 #include "ProjectPage.h"
 
 #include "InfoPanel.h"
@@ -17,149 +18,47 @@
 
 using namespace aitrain_app;
 
-ProjectWorkspacePage::ProjectWorkspacePage(
-    const QString& defaultRoot, QWidget* parent)
-    : QScrollArea(parent)
+ProjectWorkspacePage::ProjectWorkspacePage(const QString& defaultRoot, QWidget* parent)
+    : WorkspaceViewHost(parent)
 {
-    setWidgetResizable(true);
-    setFrameShape(QFrame::NoFrame);
+    auto* home = addMode(aitrain_app::workbenchText(QStringLiteral("最近项目")));
+    statusLabel_ = workbenchHint(aitrain_app::workbenchText(QStringLiteral("打开或创建项目开始工作。"))); statusLabel_->setObjectName(QStringLiteral("WorkspaceToolbarStatus")); static_cast<QVBoxLayout*>(layout())->addWidget(statusLabel_);
+    recentTable_ = workbenchTable({aitrain_app::workbenchText(QStringLiteral("项目")), aitrain_app::workbenchText(QStringLiteral("位置"))}); recentTable_->setObjectName(QStringLiteral("RecentProjectsTable")); home->addWidget(recentTable_, 1);
+    auto* actions = new QHBoxLayout; auto* recent = workbenchButton(aitrain_app::workbenchText(QStringLiteral("打开选中项目")));
+    auto* choose = workbenchButton(aitrain_app::workbenchText(QStringLiteral("打开其他项目"))); auto* create = workbenchButton(aitrain_app::workbenchText(QStringLiteral("新建项目")), {}, true);
+    actions->addWidget(recent); actions->addWidget(choose); actions->addStretch(); actions->addWidget(create); home->addLayout(actions);
+    const auto openRecent = [this]() { const auto* item = recentTable_->item(recentTable_->currentRow(), 0); if (!item) return; setProjectRoot(item->data(Qt::UserRole).toString()); emit operationRequested(ProjectSessionOperation::Open); };
+    connect(recent, &QPushButton::clicked, this, openRecent); connect(recentTable_, &QTableWidget::cellDoubleClicked, this, [openRecent](int, int) { openRecent(); });
+    connect(create, &QPushButton::clicked, this, [this]() { setMode(1); });
+    connect(choose, &QPushButton::clicked, this, [this]() { const QString directory = QFileDialog::getExistingDirectory(this, aitrain_app::workbenchText(QStringLiteral("打开项目"))); if (!directory.isEmpty()) { setProjectRoot(directory); emit operationRequested(ProjectSessionOperation::Open); } });
+    auto* manageButton = workbenchButton(aitrain_app::workbenchText(QStringLiteral("项目管理"))); toolbar->addWidget(manageButton); connect(manageButton, &QPushButton::clicked, this, [this]() { setMode(1); });
+    auto* manage = addMode(aitrain_app::workbenchText(QStringLiteral("新建与管理项目")));
+    projectNameEdit_ = new QLineEdit(aitrain_app::workbenchText(QStringLiteral("本地训练项目"))); projectNameEdit_->setObjectName(QStringLiteral("ProjectNameEdit"));
+    projectRootEdit_ = new QLineEdit(QDir::toNativeSeparators(defaultRoot)); projectRootEdit_->setObjectName(QStringLiteral("ProjectRootEdit"));
+    auto* fields = new QFormLayout; fields->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow); fields->addRow(aitrain_app::workbenchText(QStringLiteral("项目名称")), projectNameEdit_);
+    auto* row = new QWidget; auto* rowLayout = new QHBoxLayout(row); rowLayout->setContentsMargins(0, 0, 0, 0); rowLayout->addWidget(projectRootEdit_, 1); browseButton_ = workbenchButton(aitrain_app::workbenchText(QStringLiteral("选择目录"))); rowLayout->addWidget(browseButton_); fields->addRow(aitrain_app::workbenchText(QStringLiteral("项目位置")), row); manage->addLayout(fields);
+    auto* summary = new QFormLayout;
+    pathSummaryLabel_ = workbenchHint(); sqliteSummaryLabel_ = workbenchHint(); datasetSummaryLabel_ = workbenchHint(); taskSummaryLabel_ = workbenchHint(); modelSummaryLabel_ = workbenchHint();
+    datasetSummaryLabel_->setObjectName(QStringLiteral("ProjectDatasetSummary")); taskSummaryLabel_->setObjectName(QStringLiteral("ProjectTaskSummary")); modelSummaryLabel_->setObjectName(QStringLiteral("ProjectModelPackageSummary"));
+    summary->addRow(aitrain_app::workbenchText(QStringLiteral("当前项目")), pathSummaryLabel_); summary->addRow(aitrain_app::workbenchText(QStringLiteral("元数据")), sqliteSummaryLabel_); summary->addRow(aitrain_app::workbenchText(QStringLiteral("数据集")), datasetSummaryLabel_); summary->addRow(aitrain_app::workbenchText(QStringLiteral("任务")), taskSummaryLabel_); summary->addRow(aitrain_app::workbenchText(QStringLiteral("模型")), modelSummaryLabel_); manage->addLayout(summary); manage->addStretch();
+    auto* manageActions = new QHBoxLayout; createButton_ = workbenchButton(aitrain_app::workbenchText(QStringLiteral("创建项目")), QStringLiteral("ProjectCreateButton"), true); openButton_ = workbenchButton(aitrain_app::workbenchText(QStringLiteral("打开此目录")), QStringLiteral("ProjectOpenButton")); rebuildButton_ = workbenchButton(aitrain_app::workbenchText(QStringLiteral("重建项目…")), QStringLiteral("ProjectRebuildButton"));
+    manageActions->addWidget(rebuildButton_); manageActions->addStretch(); manageActions->addWidget(openButton_); manageActions->addWidget(createButton_); manage->addLayout(manageActions);
+    for (auto* button : {recent, choose, create, manageButton, createButton_, openButton_, rebuildButton_}) button->setProperty("projectSessionAction", true);
+    connect(browseButton_, &QPushButton::clicked, this, [this]() { const QString directory = QFileDialog::getExistingDirectory(this, aitrain_app::workbenchText(QStringLiteral("选择项目目录"))); if (!directory.isEmpty()) setProjectRoot(directory); });
+    connect(createButton_, &QPushButton::clicked, this, [this]() { emit operationRequested(ProjectSessionOperation::Create); });
+    connect(openButton_, &QPushButton::clicked, this, [this]() { emit operationRequested(ProjectSessionOperation::Open); });
+    connect(rebuildButton_, &QPushButton::clicked, this, &ProjectWorkspacePage::requestRebuild);
+    setMode(0);
+}
 
-    auto* content = new QWidget;
-    auto* layout = new QVBoxLayout(content);
-    layout->setContentsMargins(18, 0, 18, 18);
-    layout->setSpacing(16);
-
-    createButton_ = primaryButton(tr("创建项目"));
-    openButton_ = new QPushButton(tr("打开项目"));
-    rebuildButton_ = dangerButton(tr("重建项目"));
-    createButton_->setObjectName(QStringLiteral("ProjectCreateButton"));
-    openButton_->setObjectName(QStringLiteral("ProjectOpenButton"));
-    rebuildButton_->setObjectName(QStringLiteral("ProjectRebuildButton"));
-    for (QPushButton* button : {createButton_, openButton_, rebuildButton_}) {
-        button->setProperty("projectSessionAction", true);
+void ProjectWorkspacePage::setRecentProjects(const QVariantList& projects)
+{
+    recentTable_->setRowCount(0);
+    for (const auto& value : projects) {
+        const auto item = value.toMap(); const int row = recentTable_->rowCount(); recentTable_->insertRow(row);
+        auto* name = new QTableWidgetItem(item.value(QStringLiteral("name")).toString()); name->setData(Qt::UserRole, item.value(QStringLiteral("root"))); recentTable_->setItem(row, 0, name);
+        auto* path = new QTableWidgetItem(QDir::toNativeSeparators(item.value(QStringLiteral("root")).toString())); path->setToolTip(path->text()); recentTable_->setItem(row, 1, path);
     }
-
-    auto* headerPanel = new QFrame;
-    headerPanel->setObjectName(QStringLiteral("WorkspaceToolbar"));
-    auto* headerLayout = new QHBoxLayout(headerPanel);
-    headerLayout->setContentsMargins(14, 10, 14, 10);
-    headerLayout->setSpacing(12);
-    auto* contextLabel = new QLabel(tr("本地项目与元数据"));
-    contextLabel->setObjectName(QStringLiteral("WorkspaceToolbarTitle"));
-    statusLabel_ = inlineStatusLabel(tr("未打开项目。"));
-    statusLabel_->setObjectName(QStringLiteral("WorkspaceToolbarStatus"));
-    auto* policyStatus = inlineStatusLabel(
-        tr("工作区由 .aitrain 管理，产物和元数据通过登记身份访问。"));
-    policyStatus->setObjectName(QStringLiteral("WorkspaceToolbarMeta"));
-    allowLabelToShrink(statusLabel_);
-    allowLabelToShrink(policyStatus);
-    headerLayout->addWidget(contextLabel);
-    headerLayout->addWidget(statusLabel_);
-    headerLayout->addWidget(policyStatus, 1);
-    headerLayout->addWidget(createButton_);
-    headerLayout->addWidget(openButton_);
-    headerLayout->addWidget(rebuildButton_);
-
-    auto* formPanel = new InfoPanel(tr("项目设置"));
-    auto* form = new QFormLayout;
-    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-    form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    form->setFormAlignment(Qt::AlignTop);
-    form->setHorizontalSpacing(14);
-    form->setVerticalSpacing(10);
-    projectNameEdit_ = new QLineEdit(tr("本地训练项目"));
-    projectNameEdit_->setObjectName(QStringLiteral("ProjectNameEdit"));
-    projectRootEdit_ = new QLineEdit(QDir::toNativeSeparators(defaultRoot));
-    projectRootEdit_->setObjectName(QStringLiteral("ProjectRootEdit"));
-    browseButton_ = new QPushButton(tr("选择目录"));
-
-    auto* pathRow = new QWidget;
-    auto* pathLayout = new QHBoxLayout(pathRow);
-    pathLayout->setContentsMargins(0, 0, 0, 0);
-    pathLayout->addWidget(projectRootEdit_);
-    pathLayout->addWidget(browseButton_);
-    form->addRow(tr("项目名称"), projectNameEdit_);
-    form->addRow(tr("项目目录"), pathRow);
-    formPanel->bodyLayout()->addLayout(form);
-    auto* actionStrip = new QFrame;
-    actionStrip->setObjectName(QStringLiteral("ActionStrip"));
-    auto* actionLayout = new QGridLayout(actionStrip);
-    actionLayout->setContentsMargins(10, 8, 10, 8);
-    auto* actionHint = mutedLabel(
-        tr("打开项目后，项目摘要只读取 .aitrain/project.sqlite 中已持久化的事实。"));
-    allowLabelToShrink(actionHint);
-    actionLayout->addWidget(actionHint, 0, 0);
-    formPanel->bodyLayout()->addWidget(actionStrip);
-    formPanel->bodyLayout()->addStretch();
-
-    auto* summaryPanel = new InfoPanel(tr("项目摘要"));
-    auto* summaryGrid = new QGridLayout;
-    summaryGrid->setHorizontalSpacing(10);
-    summaryGrid->setVerticalSpacing(10);
-    auto* pathCard = createCompactSummaryCard(
-        tr("当前项目"), tr("未打开"), tr("项目登记身份"));
-    pathSummaryLabel_ = pathCard->findChild<QLabel*>(
-        QStringLiteral("CompactMetricValue"));
-    auto* sqliteCard = createCompactSummaryCard(
-        QStringLiteral("SQLite"), tr("未连接"), tr("项目元数据状态"));
-    sqliteSummaryLabel_ = sqliteCard->findChild<QLabel*>(
-        QStringLiteral("CompactMetricValue"));
-    auto* datasetCard = createCompactSummaryCard(
-        tr("数据集"), QStringLiteral("0"), tr("已登记数据集"));
-    datasetSummaryLabel_ = datasetCard->findChild<QLabel*>(
-        QStringLiteral("CompactMetricValue"));
-    datasetSummaryLabel_->setObjectName(QStringLiteral("ProjectDatasetSummary"));
-    auto* taskCard = createCompactSummaryCard(
-        tr("任务"), QStringLiteral("0"), tr("训练、校验、导出、推理"));
-    taskSummaryLabel_ = taskCard->findChild<QLabel*>(
-        QStringLiteral("CompactMetricValue"));
-    taskSummaryLabel_->setObjectName(QStringLiteral("ProjectTaskSummary"));
-    auto* modelCard = createCompactSummaryCard(
-        tr("模型包"), QStringLiteral("0"), tr("已登记模型包"));
-    modelSummaryLabel_ = modelCard->findChild<QLabel*>(
-        QStringLiteral("CompactMetricValue"));
-    modelSummaryLabel_->setObjectName(
-        QStringLiteral("ProjectModelPackageSummary"));
-    summaryGrid->addWidget(pathCard, 0, 0, 1, 2);
-    summaryGrid->addWidget(sqliteCard, 0, 2);
-    summaryGrid->addWidget(datasetCard, 1, 0);
-    summaryGrid->addWidget(taskCard, 1, 1);
-    summaryGrid->addWidget(modelCard, 1, 2);
-    for (int column = 0; column < 3; ++column) {
-        summaryGrid->setColumnStretch(column, 1);
-    }
-    summaryPanel->bodyLayout()->addLayout(summaryGrid);
-
-    auto* structurePanel = new InfoPanel(tr("标准目录结构"));
-    auto* structure = new QPlainTextEdit;
-    structure->setReadOnly(true);
-    structure->setMaximumHeight(170);
-    structure->setPlainText(QStringLiteral(
-        ".aitrain/\n  artifacts/\n    committed/\n    .staging/\n  project.sqlite"));
-    structurePanel->bodyLayout()->addWidget(structure);
-    structurePanel->bodyLayout()->addWidget(mutedLabel(
-        tr("项目页只负责项目会话；训练、导出和推理仍通过 Worker 执行，GUI 不打开或复制物理产物路径。")));
-    summaryPanel->bodyLayout()->addWidget(structurePanel);
-
-    layout->addWidget(headerPanel);
-    layout->addWidget(formPanel);
-    layout->addWidget(summaryPanel);
-    layout->addStretch();
-    setWidget(content);
-
-    connect(browseButton_, &QPushButton::clicked, this, [this]() {
-        const QString directory = QFileDialog::getExistingDirectory(
-            this, tr("选择项目目录"));
-        if (!directory.isEmpty()) setProjectRoot(directory);
-    });
-    connect(createButton_, &QPushButton::clicked, this, [this]() {
-        emit operationRequested(ProjectSessionOperation::Create);
-    });
-    connect(openButton_, &QPushButton::clicked, this, [this]() {
-        emit operationRequested(ProjectSessionOperation::Open);
-    });
-    connect(rebuildButton_, &QPushButton::clicked,
-        this, &ProjectWorkspacePage::requestRebuild);
 }
 
 QString ProjectWorkspacePage::projectName() const
@@ -183,6 +82,7 @@ void ProjectWorkspacePage::setBusy(bool busy)
              browseButton_}) {
         button->setEnabled(!busy);
     }
+    for (auto* button : findChildren<QPushButton*>()) if (button->property("projectSessionAction").toBool()) button->setEnabled(!busy);
     projectNameEdit_->setEnabled(!busy);
     projectRootEdit_->setEnabled(!busy);
 }

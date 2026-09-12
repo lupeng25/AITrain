@@ -72,6 +72,7 @@ public:
         DeploymentPage,
         EnvironmentPage,
         SystemSettingsPage,
+        EvidencePage,
         PageCount
     };
 
@@ -93,11 +94,9 @@ private slots:
 private:
     QWidget* buildTopBar();
     QWidget* buildPageHeading();
-    QWidget* buildInspector();
     QWidget* buildDashboardPage();
     QWidget* buildProjectPage();
     QWidget* buildDatasetPage();
-    QWidget* buildSampleReviewPanel();
     QWidget* buildTrainingPage();
     QWidget* buildTaskQueuePage();
     QWidget* buildModelRegistryPage();
@@ -160,7 +159,6 @@ private:
     WorkspaceReadModelCoordinator* readModelCoordinator_ = nullptr;
     WorkerClient& workerClient();
     Sidebar* sidebar_ = nullptr;
-    QFrame* inspector_ = nullptr;
     QStackedWidget* stack_ = nullptr;
     QLabel* pageTitle_ = nullptr;
     QLabel* pageCaption_ = nullptr;
@@ -171,17 +169,12 @@ private:
     StatusPill* licensePill_ = nullptr;
     QToolButton* topBarZhLanguageButton_ = nullptr;
     QToolButton* topBarEnLanguageButton_ = nullptr;
-    QToolButton* inspectorToggleButton_ = nullptr;
-    bool inspectorUserOverride_ = false;
-    bool applyingResponsiveChrome_ = false;
+    QPushButton* returnToWorkspaceButton_ = nullptr;
+    int lastWorkspacePage_ = DatasetPage;
     bool closePending_ = false;
     StatusPill* pageContextPill_ = nullptr;
     QString licenseOwner_;
     QString licenseExpiry_;
-    QLabel* inspectorProjectLabel_ = nullptr;
-    QLabel* inspectorCapabilityLabel_ = nullptr;
-    QLabel* inspectorWorkerLabel_ = nullptr;
-    QLabel* inspectorGpuLabel_ = nullptr;
 
     DashboardWorkspacePage* dashboardPage_ = nullptr;
     ProjectWorkspacePage* projectPage_ = nullptr;

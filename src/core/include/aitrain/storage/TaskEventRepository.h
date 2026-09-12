@@ -1,5 +1,7 @@
 #pragma once
 
+#include "aitrain/domain/Pagination.h"
+
 #include "aitrain/domain/DomainTypes.h"
 
 #include <QString>
@@ -25,7 +27,7 @@ public:
     int eventCount(const TaskId& taskId, QString* error = nullptr) const;
     int metricCount(const TaskId& taskId, QString* error = nullptr) const;
     Page<TaskSnapshot> page(
-        const PageRequest& request, QString* error = nullptr) const;
+        const PageRequest& request, QString* error = nullptr, const CatalogFilter& filter = {}) const;
     Page<MetricSnapshot> metrics(const TaskId& taskId,
         const PageRequest& request, QString* error = nullptr) const;
 

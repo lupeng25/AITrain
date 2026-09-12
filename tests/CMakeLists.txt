@@ -515,6 +515,7 @@ set_tests_properties(aitrain_annotation_session_tests PROPERTIES
 )
 
 add_executable(aitrain_delivery_acceptance_ui_tests
+    ../src/app/resources/app.qrc
     ../src/app/src/AppStyle.h
     ../src/app/src/AppStyle.cpp
     ../src/app/src/ApplicationEventRouter.h
@@ -547,6 +548,11 @@ add_executable(aitrain_delivery_acceptance_ui_tests
     ../src/app/src/DatasetPage.cpp
     ../src/app/src/DatasetPageController.h
     ../src/app/src/DatasetPageController.cpp
+    ../src/app/src/DatasetPageControllerCatalog.cpp
+    ../src/app/src/DatasetPageControllerResults.cpp
+    ../src/app/src/WorkbenchWidgets.h
+    ../src/app/src/ProjectObjectSelectors.h
+    ../src/app/src/ProjectObjectSelectors.cpp
     ../src/app/src/EvaluationReportView.h
     ../src/app/src/EvaluationReportView.cpp
     ../src/app/src/InfoPanel.h
@@ -613,6 +619,10 @@ add_executable(aitrain_delivery_acceptance_ui_tests
     ../src/app/src/TaskRuntimeController.cpp
     ../src/app/src/TrainingPage.h
     ../src/app/src/TrainingPage.cpp
+    ../src/app/src/TrainingPageLayout.cpp
+    ../src/app/src/TrainingParameterPanels.cpp
+    ../src/app/src/TrainingPageControllerHistory.cpp
+    ../src/app/src/TrainingPageControllerDraft.cpp
     ../src/app/src/TrainingPageController.h
     ../src/app/src/TrainingPageController.cpp
     ../src/app/src/WorkspaceReadModelCoordinator.h

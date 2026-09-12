@@ -1,5 +1,7 @@
 #pragma once
 
+#include "aitrain/domain/Pagination.h"
+
 #include "aitrain/domain/DomainTypes.h"
 
 #include <QString>
@@ -22,7 +24,9 @@ public:
     bool snapshotForArtifact(const ArtifactId& artifactId,
         DatasetSnapshotRecord* result, QString* error = nullptr) const;
     Page<DatasetCatalogItem> page(const PageRequest& request,
-        QString* error = nullptr) const;
+        QString* error = nullptr, const CatalogFilter& filter = {}) const;
+    Page<DatasetSnapshotRecord> versions(const DatasetId& datasetId,
+        const PageRequest& request, QString* error = nullptr) const;
 
 private:
     bool executeSnapshotQuery(const QString& whereColumn, const QString& id,
